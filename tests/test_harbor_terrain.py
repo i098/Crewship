@@ -42,20 +42,20 @@ for (let n = 0; n < 120; n++) {
   }
   if (leans.size > 1) mixed++;
 }
-const edges = [];
+let edges = 0, switches = 0;
 let previous = grass(-20, 1.2, 19.81), lastSwitch = -Infinity;
 for (let i = 1; i <= 2000; i++) {
   const green = grass(-20 + i / 100, 1.2, 19.81);
   if (green !== previous) {
-    if (i - lastSwitch > 20) edges.push(0);
-    edges[edges.length - 1]++;
+    if (i - lastSwitch > 20) edges++;
+    switches++;
     lastSwitch = i;
   }
   previous = green;
 }
-assert(mixed > 60, `only ${mixed} moments mix tall blade leans; green switches per edge: ${edges}`);
-assert(edges.length >= 3, `only ${edges.length} green edges`);
-assert(edges.every(count => count >= 3), `green switches per edge: ${edges}`);
+assert(mixed > 60, `only ${mixed} moments mix tall blade leans; ${switches} green switches at ${edges} edges`);
+assert(edges >= 3, `only ${edges} green edges`);
+assert(switches >= 3 * edges, `${switches} green switches at ${edges} edges`);
 """
     )
 

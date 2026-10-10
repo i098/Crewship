@@ -321,24 +321,24 @@ function dirt(x, z, d, w) {
   if (Math.abs(d / w - 0.55) < 0.07 + 0.06 * tint(x, z)) return r < 0.45 ? "o " : "o.";
   return r < 0.5 ? "o:" : r < 0.8 ? "o;" : "o'";
 }
-// Small round flowers and stones, at most one in each half-metre cell.
+// Small round flowers and speckled earth with irregular edges, at most one patch in each half-metre cell.
 function flower(x, z) {
   const cx = Math.floor(x * 2), cz = Math.floor(z * 2), h = latticeBits(cx, cz) / 4294967296, fx = x * 2 - cx - 0.5, fz = z * 2 - cz - 0.5;
   if (h < 0.025 && fx * fx + fz * fz < 0.0324) return ["r*", "b*", "s*"][Math.floor(h * 120)];
   if (h >= 0.025 && h < 0.13) {
-    const dx = fx + 0.2 - h * 3, dz = fz + 0.2 - (latticeBits(cz, cx) / 4294967296) * 0.4;
-    if (dx * dx * 1.6 + dz * dz < 0.025 + h * 0.2) return h < 0.08 ? "t_" : "G'";
+    const dx = fx + 0.2 - h * 3, dz = fz + 0.2 - (latticeBits(cz, cx) / 4294967296) * 0.4, r = (specks(x, z) >>> 20) / 4096;
+    if (dx * dx * 1.6 + dz * dz < (0.025 + h * 0.2) * (0.6 + 0.8 * r)) return h < 0.08 ? r < 0.5 ? "n," : r < 0.8 ? "n." : "n_" : "G'";
   }
   return null;
 }
 // A smooth tint about 30 cm across: it shifts each green's boundary and the wheel ruts a little, so patches blend
 // with a ragged edge, without breaking every text run into single cells.
 const tint = (x, z) => noise(x * 3.1 + 17.3, z * 3.1 - 5.9);
-// Grass in three greens that drift over a few metres, paler up the hills and darker in the hollows.
-// Each green dithers into the next over a few centimetres; shadeLitSolid draws blades swaying in the wind.
+// Grass in three greens that drift over a few metres, mostly the middle green, paler up hills and darker in hollows.
+// Each green dithers into the next over a few centimetres; shadeLitSolid draws mostly short marks with sparse tall blades.
 function grass(x, y, z) {
   const v = 0.75 * noise(x * 0.55, z * 0.55) + 0.25 * tint(x, z) + (y - 1.2) * 0.07 + (((specks(x, z) >>> 8) & 63) / 63 - 0.5) * 0.08;
-  return v < 0.4 ? "M'" : v < 0.62 ? "g'" : "G'";
+  return v < 0.3 ? "M'" : v < 0.72 ? "g'" : "G'";
 }
 // The island is one height field: a plateau at 1.2 m whose edges slope down through sand beaches into the sea
 // all the way round, with a wobbly coastline, and a steep stone harbour wall only where the dock needs deep water.
@@ -2667,11 +2667,11 @@ function shadeLand(c, odd, t, dx, dy, dz) {
   }
 }
 const GRAIN = { _: 1.35, "=": 1.3, "*": 1.5, "~": 1.25, "+": 1.1, "-": 1.1, ".": 1, ",": 0.85, ":": 0.7, ";": 0.8, '"': 0.9, "'": 0.95, "`": 0.9, " ": 1 };
-// Ground marks keep their glyph and the least brightness returned here, which decreases in fog: road dirt (the
-// only ground in "o"), foam and paving joints. Other textures return 0 and shade like the rest of their surface.
+// Ground marks keep their glyph and the least brightness returned here, which decreases in fog: road dirt,
+// muted tan earth at grass brightness, foam and paving joints. Other textures shade like the rest of their surface.
 function markFloor(s, tex) {
   if (s !== TERRAIN || !tex) return 0;
-  return tex[0] === "o" ? 0.28 : tex === "k~" ? 0.5 : tex === "s|" || tex === "s-" || tex === "s=" ? 0.35 : 0;
+  return tex[0] === "n" ? 0.04 : tex[0] === "o" ? 0.28 : tex === "k~" ? 0.5 : tex === "s|" || tex === "s-" || tex === "s=" ? 0.35 : 0;
 }
 function textureColor(s, tex, b, fog, warm) {
   if (s.tex === fountainWater) return tex[0] + tier(Math.max(0.34, b), 0);
@@ -2760,16 +2760,16 @@ function groundLight(s, lit, warm, nx, ny, nz) {
   const facing = nx * MOON[0] + ny * MOON[1] + nz * MOON[2] - MOON[1];
   return lit * (warm + (1 - warm) * 1.5 * Math.max(0.5, Math.min(2, 1 + 3.2 * facing)));
 }
-// A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island.
-// Speck bits dither the lean blade by blade, and the blades thin out as the ground turns from the light.
+// Grass uses mostly short marks, fewer gaps and sparse tall blades that lean left or right in the island's gusts.
+// Speck bits dither the lean blade by blade; shade increases gaps and reduces tall blades.
 function blade(x, z, odd, b) {
   const bits = specks(x, z);
   const t = swayTime(), h = ((bits >>> 20) & 63) / 64, lit = smooth((b - 0.03) / 0.1);
   const gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3) + ((bits & 63) / 63 - 0.5) * 1.6;
-  const sparse = 0.18 + 0.25 * (1 - lit), tall = sparse + 0.37 * (0.6 + 0.4 * lit), short = 1 - tall;
+  const sparse = 0.06 + 0.3 * (1 - lit), tall = sparse + 0.16 * (0.6 + 0.4 * lit), short = 1 - tall;
   if (h < sparse) return odd ? " " : ",";
   if (h < tall) return gust > 0.6 ? "/" : gust < -0.6 ? "\\" : "|";
-  return h < tall + short * 0.55 ? "'" : h < tall + short * 0.85 ? '"' : ";";
+  return h < tall + short * 0.5 ? "'" : h < tall + short * 0.85 ? "," : '"';
 }
 // Colour level (0 to 7) for a brightness, warmed when lamplight dominates.
 const tier = (b, warm) => (warm > 0.55 && b > 0.2 ? "w" : "") + Math.min(7, Math.floor(b * 9));
