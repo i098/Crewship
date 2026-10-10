@@ -631,8 +631,8 @@ shipLantern(SX, 2.63, 10, true);
 const SAILS = [];
 function squareSail(z, top, width, drop) {
   const c = Math.cos(0.6), s = Math.sin(0.6), belly = 0.45 * width * WIND.strength * (WIND.z * c - WIND.x * s);
-  // The corners hang drop - 0.1 below the yard, and the foot sags 13% lower between them. The deepest canvas stands
-  // 1.13 bellies out, and up to 10% more as the sail breathes.
+  // The corners sit at 87% of the centre's drop below the cloth's head.
+  // The deepest canvas stands 1.13 bellies out, and up to 10% more as the sail breathes.
   const sag = 0.13, bow = 0.08, v1 = (drop - 0.1) / (1 - sag), deep = 1.25 * belly;
   beam(ship, [SX - (width + 0.2) * c, top, z - (width + 0.2) * s],
     [SX + (width + 0.2) * c, top, z + (width + 0.2) * s],
