@@ -438,17 +438,52 @@ for (const x of [-4, 12]) {
 box(world, -0.55, 1.2, 21.4, -0.45, 2.2, 21.5, "t", { spot: "mailbox", post: true });
 box(world, -0.8, 2.2, 21.2, -0.2, 2.7, 21.7, "r", { spot: "mailbox" });
 
-// Plaza fountain: an octagonal stone basin, a raised rim, and four falling streams.
-// Water changes texture with the existing clock; reduced motion freezes that clock.
+// Plaza fountain: an octagonal stone basin filled nearly to its raised rim, a pedestal, an upper bowl full to its lip,
+// and a nozzle. The water in the air is not geometry but droplets on ballistic arcs (see drawFountain); rings spread
+// where they land, over a gentle swell. POOL is the basin's water surface and BOWL the upper bowl's, with its radius.
+const POOL = { x: 5, z: 24.6, y: 1.95 }, BOWL = { y: 2.76, r: 0.44 };
+// A jet from a nozzle r metres from the axis at height y, toward azimuth a, with horizontal and vertical launch
+// speeds h and v in m/s, that falls into the water surface at height floor.
+function jet(r, y, a, h, v, floor) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return { x: POOL.x + r * c, y, z: POOL.z + r * s, c, s, h, v, floor };
+}
+// A crown of six streams climbs half a metre from the central nozzle and falls back into the upper bowl; six spouts
+// on the pedestal arc out into the middle of the pool.
+const JETS = [0, 1, 2, 3, 4, 5].flatMap((i) => [jet(0, 2.85, (i + 0.25) * Math.PI / 3, 0.4, 3.2, BOWL.y),
+  jet(0.32, 2.2, (i + 0.75) * Math.PI / 3, 0.87, 1.8, POOL.y)]);
+// Each jet launches JET_RATE droplets a second under real gravity, with launch speeds scattered by up to SPREAD. At
+// the top of its arc the stream breaks up: each droplet then drifts sideways at up to BREAKUP m/s, and away from the
+// axis at up to half that. Splash drops fall back within SPLASH_TIME seconds; rings reach RIPPLE metres from a landing.
+const GRAVITY = 9.81, JET_RATE = 120, SPREAD = 0.03, BREAKUP = 0.1, SPLASH_TIME = 0.3, RIPPLE = 0.3;
+// Seconds from a launch at height y0 with upward speed vy until the droplet falls to the height floor.
+const flightTime = (y0, vy, floor) => (vy + Math.sqrt(vy * vy + 2 * GRAVITY * (y0 - floor))) / GRAVITY;
+// Where each jet lands without scatter (x, z and the water height), and how long its droplets and splashes last.
+const LANDING = Float64Array.from(JETS.flatMap(({ x, y, z, c, s, h, v, floor }) => {
+  const reach = h * flightTime(y, v, floor);
+  return [x + c * reach, z + s * reach, floor];
+}));
+const JET_LIFE = JETS.map(({ y, v, floor }) => flightTime(y, v * (1 + SPREAD), floor) + SPLASH_TIME);
+// The water moves on a 24 Hz clock, so droplets update and the fountain's cells repaint at most 24 times a second.
+// Reduced motion freezes the clock and keeps one still frame of the same water.
+const waterTime = () => Math.floor(T * 24) / 24;
+// The pool and the bowl: dark water with rings spreading from each landing point on that surface, over a gentle swell
+// that drifts across it.
 function fountainWater(x, y, z) {
-  if (y > 1.75) return Math.sin(y * 14 - T * 5) > 0.7 ? "m:" : "w|";
-  const ripple = Math.sin(Math.hypot(x - 5, z - 24.6) * 16 - T * 3);
-  return ripple > 0.65 ? "m~" : "w.";
+  const now = waterTime();
+  let wave = 0.3 * Math.sin(x * 4.3 + now * 0.9) * Math.sin(z * 3.7 - now * 0.7);
+  for (let j = 0; j < LANDING.length; j += 3) {
+    const dx = x - LANDING[j], dz = z - LANDING[j + 1], d2 = dx * dx + dz * dz;
+    if (d2 < RIPPLE * RIPPLE && Math.abs(y - LANDING[j + 2]) < 0.05) {
+      wave = Math.max(wave, (1 - Math.sqrt(d2) / RIPPLE) * Math.sin(Math.sqrt(d2) * 40 - now * 9));
+    }
+  }
+  return wave > 0.45 ? "m~" : wave > 0.2 ? "w-" : "d.";
 }
 function fountain() {
   const basin = column(world, 5, 24.6, 1.5, 1.5, 1.2, 1.64, "s",
     { tex: (x, y, z, nx, ny) => ny < 0.5 && y < 1.38 ? "-" : null });
-  column(world, 5, 24.6, 1.29, 1.29, 1.64, 1.7, "w",
+  column(world, 5, 24.6, 1.29, 1.29, 1.64, POOL.y, "w",
     { solid: false, dim: 2.4, tex: fountainWater });
   for (let i = 0; i < 8; i++) {
     const a = i * Math.PI / 4, b = (i + 1) * Math.PI / 4;
@@ -459,17 +494,112 @@ function fountain() {
   column(world, 5, 24.6, 0.4, 0.24, 1.7, 2.55, "s",
     { tex: (x, y) => Math.abs(y - 1.95) < 0.06 || Math.abs(y - 2.4) < 0.04 ? "-" : null });
   column(world, 5, 24.6, 0.24, 0.5, 2.55, 2.75, "t");
-  column(world, 5, 24.6, 0.065, 0.04, 2.75, 3.35, "m", { solid: false, dim: 2.4, tex: fountainWater });
-  for (let i = 0; i < 4; i++) {
-    const a = i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
-    const crest = [5 + c * 0.48, 3.1, 24.6 + s * 0.48];
-    beam(world, [5, 3.35, 24.6], crest, "m", { dim: 2.4, tex: fountainWater }, 0.04);
-    beam(world, crest, [5 + c * 0.95, 1.73, 24.6 + s * 0.95], "m",
-      { dim: 2.4, tex: fountainWater }, 0.04);
-  }
+  column(world, 5, 24.6, BOWL.r, BOWL.r, 2.75, BOWL.y, "w", { solid: false, dim: 2.4, tex: fountainWater });
+  column(world, 5, 24.6, 0.06, 0.045, 2.75, 2.85, "t");
   return basin;
 }
 const fountainBasin = fountain();
+// A random number in [0, 1) for water particle k and salt n. Integer mixing keeps its cost flat as k grows with the
+// clock; the Math.sin hash slows down for large arguments.
+function waterRandom(k, n) {
+  let h = Math.imul(k, 0x9e3779b1) ^ Math.imul(n + 1, 0x85ebca77);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+}
+// Droplet k of jet j, in `drop`: launch point and velocity, its drift after the breakup, the breakup time (the top of
+// its arc), its flight time to the water, three random numbers for its thinning, spray and splash, and the height of
+// the water it falls into. The same j and k give the same droplet on every frame.
+const drop = new Float64Array(14);
+function launchDrop(j, k) {
+  const J = JETS[j], n = j * 8, h = J.h * (1 + SPREAD * (2 * waterRandom(k, n) - 1));
+  const v = J.v * (1 + SPREAD * (2 * waterRandom(k, n + 1) - 1));
+  const side = BREAKUP * (2 * waterRandom(k, n + 2) - 1), out = 0.5 * BREAKUP * waterRandom(k, n + 3);
+  drop[0] = J.x; drop[1] = J.y; drop[2] = J.z; drop[3] = h * J.c; drop[4] = v; drop[5] = h * J.s;
+  drop[6] = out * J.c - side * J.s; drop[7] = out * J.s + side * J.c; drop[8] = v / GRAVITY;
+  drop[9] = flightTime(J.y, v, J.floor);
+  drop[10] = waterRandom(k, n + 4); drop[11] = waterRandom(k, n + 5); drop[12] = waterRandom(k, n + 6); drop[13] = J.floor;
+  return drop;
+}
+// Where the droplet in `drop` is t seconds after launch, in DP.
+const DP = [0, 0, 0];
+function dropAt(t) {
+  const late = Math.max(0, t - drop[8]);
+  DP[0] = drop[0] + drop[3] * t + drop[6] * late;
+  DP[1] = drop[1] + (drop[4] - 0.5 * GRAVITY * t) * t;
+  DP[2] = drop[2] + drop[5] * t + drop[7] * late;
+  return DP;
+}
+// The water particles of the current water tick: x, y, z, glyph and colour level each. A droplet adds at most two
+// particles, and the mist three per jet.
+const WATER_GLYPHS = [":", "'", ".", ",", "`"];
+const PARTS = new Float32Array(5 * (3 * JETS.length + 2 * JET_LIFE.reduce((n, life) => n + Math.ceil(life * JET_RATE) + 1, 0)));
+let parts = 0, partsTime = NaN;
+function addPart(x, y, z, glyph, level) {
+  PARTS[parts] = x; PARTS[parts + 1] = y; PARTS[parts + 2] = z; PARTS[parts + 3] = glyph; PARTS[parts + 4] = level;
+  parts += 5;
+}
+// Droplet k, t seconds after launch: a ':' while it climbs in an unbroken stream, a "'" as it turns over, then "'" or
+// ',' as the stream breaks up and falls. Up to 30% of the droplets drop out over the last 30% of the fall, and a
+// quarter of the rest shed a fine spray drop.
+function flyingDrop(k, t) {
+  const f = t / drop[9], vy = drop[4] - GRAVITY * t;
+  if (drop[10] < f - 0.7) return;
+  dropAt(t);
+  addPart(DP[0], DP[1], DP[2], vy > 1 ? 0 : vy > -1.5 || k & 1 ? 1 : 3, f < 0.9 ? 5 : 4);
+  if (f < 0.75 || (k & 3) !== 1) return;
+  const a = 6.283 * drop[11], s = (f - 0.75) * 0.25;
+  addPart(DP[0] + Math.cos(a) * s, DP[1] + s, DP[2] + Math.sin(a) * s, 2, 3);
+}
+// Every other landed droplet throws up a splash drop that glints as it leaps and falls back within SPLASH_TIME.
+function splashDrop(k, t) {
+  const up = 0.7 + 0.7 * drop[12], y = (up - 0.5 * GRAVITY * t) * t;
+  if (!(k & 1) || y <= 0) return;
+  dropAt(drop[9]);
+  const a = 6.283 * drop[11], out = 0.25 * drop[10] * t, rising = up > GRAVITY * t;
+  addPart(DP[0] + Math.cos(a) * out, drop[13] + y, DP[2] + Math.sin(a) * out, rising ? 1 : 2, rising ? 7 : 5);
+}
+// Faint mist hangs where the streams land: motes rise slowly and drift downwind for 1.4 s, then fade.
+function mist(now) {
+  for (let j = 0; j < JETS.length; j++) {
+    for (let n = 0; n < 3; n++) {
+      const m = j * 3 + n, phase = now * 0.5 + waterRandom(m, 100), cycle = Math.floor(phase), life = phase - cycle;
+      if (life > 0.7) continue;
+      const a = 6.283 * waterRandom(cycle, 101 + m), r = 0.08 * waterRandom(cycle, 141 + m), drift = 0.08 * life;
+      addPart(LANDING[3 * j] + Math.cos(a) * r + WIND.x * drift, LANDING[3 * j + 2] + 0.04 + 0.3 * life,
+        LANDING[3 * j + 1] + Math.sin(a) * r + WIND.z * drift, life < 0.35 ? 2 : 4, 2);
+    }
+  }
+}
+// The particles at the water clock: each jet's droplets in flight, splashes of the landed ones, and the mist.
+function updateWater(now) {
+  parts = 0;
+  for (let j = 0; j < JETS.length; j++) {
+    for (let k = Math.ceil((now - JET_LIFE[j]) * JET_RATE); k <= now * JET_RATE; k++) {
+      const age = now - k / JET_RATE;
+      if (age < launchDrop(j, k)[9]) flyingDrop(k, age); else splashDrop(k, age - drop[9]);
+    }
+  }
+  mist(now);
+}
+// Puts a particle into the depth buffer like the rigging: a moonlit water glyph whose colour level fades with distance.
+const WP = [0, 0, 0], WATER_TONES = Array.from({ length: 8 }, (_, i) => "m" + i);
+function waterDot(x, y, z, ch, level) {
+  viewPoint(x, y, z, WP);
+  if (WP[2] > 0.3) ropeCell(Math.floor(WP[0]), Math.floor(WP[1]), WP[2], ch, WATER_TONES[Math.round(level * Math.exp(-WP[2] * 0.016))]);
+}
+// The space above the basin that the water reaches, within a metre of the axis; nothing is drawn while it is out of view.
+const WATER_BOX = [POOL.x - 1, POOL.y, POOL.z - 1, POOL.x + 1, 3.5, POOL.z + 1];
+function drawFountain() {
+  rect[0] = rect[2] = Infinity; rect[1] = rect[3] = -Infinity;
+  const behind = viewCorners(WATER_BOX, false);
+  if (behind === 8) return;
+  if (behind) growClipped();
+  if (rect[1] < 0 || rect[0] >= cols || rect[3] < 0 || rect[2] >= rows) return;
+  const now = waterTime();
+  if (now !== partsTime) { partsTime = now; updateWater(now); }
+  for (let o = 0; o < parts; o += 5) waterDot(PARTS[o], PARTS[o + 1], PARTS[o + 2], WATER_GLYPHS[PARTS[o + 3]], PARTS[o + 4]);
+}
 // Landscaping: hedges round the plaza, round trees, lamps along the avenue, a fence on the quay front.
 const plazaHedges = [];
 for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.4, 27.6, 28.4], [6.6, 7.8, 27.6, 28.4]]) {
@@ -1785,6 +1915,7 @@ function render() {
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   if (!interior) {
     drawGrass();
+    drawFountain();
     drawRigging();
     drawPennants();
     gulls();
