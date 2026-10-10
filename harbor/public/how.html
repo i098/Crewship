@@ -34,7 +34,9 @@
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
-  The ship's hatch, ladder and hatch lantern cast shadows as one group with one bounding box; the hatch's own surfaces and its lantern use no shadow rays.
+  Only hatch parts above the deck form the grouped shadow caster, with one bounding box.
+  The hatch boards and ladder receive light without shadow rays.
+  The hatch lantern emits light without shadow rays.
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
