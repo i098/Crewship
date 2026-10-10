@@ -1062,7 +1062,7 @@ function buildCabin() {
     tex: (x, y, z) => (Math.abs(z - 1.12) < 0.03 || Math.abs(z - 1.48) < 0.03 ? "t" : Math.abs(y - 0.38) < 0.015 ? "-" : null) });
 }
 buildCabin();
-// Each room's door is at its origin and the room runs along +z. `door` is the outside threshold [x, z, the direction
+// The house and cabin doors are at their room origins; these rooms run along +z. `door` is the outside threshold [x, z, the direction
 // you walk along z to enter]; `exit` puts you back outside [x, z, yaw], facing away from the door. `lights` light the
 // room without shadow rays: x, y, z, intensity and reach of each (the house's table lamp and hearth fire, the cabin's
 // hanging lantern).
