@@ -20,7 +20,7 @@ The island has staggered plaza paving, scattered stones and grass tufts, varied 
 Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
 The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.
 The layers are at different heights, so they move at different speeds when you walk.
-With reduced motion, the clouds stay still.
+With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
 A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.

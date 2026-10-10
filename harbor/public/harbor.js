@@ -2062,14 +2062,14 @@ const CLOUD_LAYERS = [{ base: 260, spacing: 650, speed: 5 }, { base: 480, spacin
 // in band lengths. The seed picks a layout with clouds over the opening view.
 const CLOUDS = new Float32Array(160 * 25), CLOUD_SEED = 2;
 let cloudCount = 0;
-// Sky texels of 1°, azimuth by elevation, keep the cloud density and moonlit rim of their direction. SKY_ROW holds this
-// frame's tenth of a second for each elevation row, offset so the rows take turns. ROW_CLOUDS lists the clouds that can
-// reach each row, and ROW_BINS marks the 5° azimuth bins they can reach; sky cells elsewhere skip the buffer.
+// Sky texels of 1°, azimuth by elevation, keep the cloud density and moonlit rim of their direction.
+// SKY_ROW holds each row's refresh key. ROW_CLOUDS lists the clouds that can reach each row.
+// ROW_BINS marks the 5° azimuth bins they can reach; sky cells elsewhere skip the buffer.
 const SKY_W = 360, SKY_H = 90, SKY = new Float32Array(SKY_W * SKY_H * 2), SKY_STEP = new Int32Array(SKY_W * SKY_H).fill(-1);
 const SKY_ROW = new Int32Array(SKY_H), ROW_CLOUDS = new Uint8Array(SKY_H * 160), ROW_COUNT = new Uint8Array(SKY_H);
 const ROW_BINS = new Uint8Array(SKY_H * 72);
 let cloudFrame = -1;
-// Once per frame: each row's step for `tenths` (the wall clock in tenths of a second), and the clouds in reach.
+// Negative render keys differ from time steps and the initial -1, so reduced-motion frames cannot retain stale camera views.
 function gatherClouds(tenths) {
   if (reduced.matches) SKY_ROW.fill(--cloudFrame);
   else for (let j = 0; j < SKY_H; j++) SKY_ROW[j] = Math.floor(tenths + j * 0.618 % 1);
