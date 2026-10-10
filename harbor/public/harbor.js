@@ -845,7 +845,7 @@ function movePlayer(x, z, here) {
 }
 // The table lamp and the hearth fire light the room without shadow rays: x, y, z, intensity and reach of each.
 const ROOM_LIGHTS = [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2];
-// Light reaching a room surface at (x, y, z) with normal n: a dim fill plus the room lights, all lamplight.
+// The room fill, lamp, and fire share the same warm colour.
 function roomLight(x, y, z, nx, ny, nz) {
   let warm = 0.28;
   for (let k = 0; k < ROOM_LIGHTS.length; k += 5) {
@@ -866,7 +866,7 @@ function castRoom(c, i, odd, dx, dy, dz) {
   } else if (hitS) shadeRoom(c, odd, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
-// Shades a room surface like the lit solids outside: lamplight, a contact shadow toward the floor, and fog. The room
+// Shades a room surface like the lit solids outside: warm light, a contact shadow toward the floor, and fog. The room
 // has no ship, terrain or blinking lights, and it builds no arrays or strings per cell, so furnished frames stay cheap.
 function shadeRoom(c, odd, dx, dy, dz) {
   const s = hitS, k = hitK, t = hitT;
@@ -878,7 +878,7 @@ function shadeRoom(c, odd, dx, dy, dz) {
     const warm = roomLight(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * y), fog = Math.exp(-t * 0.016);
     const b = (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog);
-    // Lamplight warms the colour of every bright surface except the blue bed.
+    // Keep the bed, chart water, and blue book spines blue under warm room light.
     cls = CLASS[mat][(mat !== "b" && warm / lit > 0.55 && b > 0.2 ? 8 : 0) + Math.min(7, Math.floor(b * 9))];
     ch = glyph(b, odd);
   }
