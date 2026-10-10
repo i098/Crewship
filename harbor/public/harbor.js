@@ -633,9 +633,10 @@ function squareSail(z, top, width, drop) {
   return sail;
 }
 // Seams between the cloths and reef bands, each about one cell (`cell` metres) wide, in the sail's own (u, v): they
-// follow the canvas as it fills, so they bunch and bow where it curves away.
+// follow the canvas as it fills, so they bunch and bow where it curves away. Farther off, where cells grow past a
+// quarter metre, the lines would cover much of the canvas, so they are left out.
 function sailTexture(u, v, cell) {
-  return (u + 100) % 1.25 < cell * 0.6 || (v + 0.4) % 1.6 < cell * 1.2 ? "-" : null;
+  return cell < 0.25 && ((u + 100) % 1.25 < cell * 0.6 || (v + 0.4) % 1.6 < cell * 1.2) ? "-" : null;
 }
 const RIGGING = [], CLEWS = [];
 function shipMast(z, foot, height, width) {
@@ -2221,7 +2222,7 @@ function paintShipCloth(c, odd, dx, dy, dz) {
     ch = tex ? "@" : light > 0.6 ? "█" : light > 0.35 ? "▓" : "▒"; cls = tex ? "s6" : "p";
   } else {
     const flat = s.fill * Math.exp(-t * 0.016);
-    ch = glyph(flat * (0.7 + 0.5 * light) * (tex ? 0.65 : 1), odd); cls = "s" + tier(flat, 0);
+    ch = glyph(flat * (0.75 + 0.5 * light) * (tex ? 0.65 : 1), odd); cls = "s" + tier(flat, 0);
   }
   put(c, ch, cls, s.id * 16 + (along > 0 ? 13 : 14), t);
   SP[c] = s.spot;
