@@ -51,6 +51,20 @@ With reduced motion, the sails stay full but do not move.
 The sails keep a pale canvas tone at night.
 Outboard lanterns make the gun ports visible.
 
+A square hatch forward of the hold has a raised wooden coaming and a lantern on a post at its aft corner.
+Its ladder goes down a dark well to the gun deck.
+Walk onto the hatch to climb down to the foot of the ladder, facing aft.
+Each gun port has a cannon on a wooden carriage with four round wheels.
+The dark, tapered barrel runs from a rounded breech out through the port to a ring at the muzzle.
+A rack of stacked round shot stands beside each gun.
+Dark cross-beams carry the deck planks overhead, and the floor planks show their seams.
+Lanterns hang between the beams beside the walkway and cast pools of dim warm light.
+The open ports show the moonlit sea.
+Walk into the ladder to climb back up beside the hatch, facing aft.
+Keyboard and touch movement share the house door's transition: release the movement keys and touch pad after a crossing to move again.
+The guns, shot racks, and main mast block walking, and the map stays hidden below deck.
+Map walks go around the open hatch.
+
 The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.
 Its basin blocks walking, and a blue `O` marks it on the mini map.
 The fountain marker leaves map labels and selected point markers clear.
@@ -130,7 +144,7 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check also fails if the first 30 slow exterior frames change the grid, cell size, field of view, or canvas layout.
-The check walks through the house door and back with the touch pad.
+The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.

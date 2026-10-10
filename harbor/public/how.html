@@ -20,8 +20,8 @@
 <h1>How this harbor is built</h1>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
-  Buildings, the dock and the hull are convex solids made of planes.
-  Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals.
+  Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.
+  Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals, and so are the gun barrels and carriage wheels, on horizontal axes.
   Rocks and tree canopies are ellipsoids.
   Sails and the flag are curved cloth.
   Inside the cloth's box, a ray samples the gap between the ray and the cloth.
@@ -34,10 +34,13 @@
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
+  Only hatch parts above the deck form the grouped shadow caster, with one bounding box.
+  The hatch boards and ladder receive light without shadow rays.
+  The hatch lantern emits light without shadow rays.
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
-  The house's lamp and fire and the cabin's hanging lantern light nearby room surfaces without shadow rays.
+  The house's lamp and fire, the cabin's hanging lantern and the gun deck lanterns light nearby surfaces without shadow rays.
   The cabin's wall lantern glows like the lit windows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
@@ -58,6 +61,7 @@
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
+  The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
@@ -83,7 +87,7 @@
   Inside a room, missed frames also reduce detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
-  Each door crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
+  Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
   A room redraws only after movement, looking, resizing, or another change that requires a new frame.
   Reduced motion also stops exterior animation.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
@@ -100,7 +104,7 @@
   Use the arrows to choose a point.
   Enter or a tap selects a destination.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
-  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house and cabin guidance</a> for door crossings and controls inside.</li>
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house, cabin and gun deck guidance</a> for door and hatch crossings and controls inside.</li>
   <li><b>Content.</b> <code>harbor/build.py</code> builds the points of interest with the README's Features list and More docs row, and the changelog.</li>
   <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>

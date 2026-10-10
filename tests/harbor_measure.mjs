@@ -14,8 +14,8 @@ window.checkMeasure = () => {
   mapMode = 0;
   const results = [];
   try {
-    for (const [room, size] of [[true, 1], [true, 1.15], [true, 1.3225], [true, 1.15], [false, 1.15], [true, 1.15]]) {
-      interior = room ? HOUSE : null;
+    for (const [inside, size] of [[true, 1], [true, 1.15], [true, 1.3225], [true, 1.15], [false, 1.15], [true, 1.15]]) {
+      interior = inside ? HOUSE : null;
       scale = size;
       const width = canvas.width, height = canvas.height;
       ctx.fillStyle = "#ff00ff";
