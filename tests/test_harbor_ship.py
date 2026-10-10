@@ -121,9 +121,9 @@ assert.equal(cell(SX,11)[1], 'o', 'the map must retain the raised bow');
 def test_ship_canvas_stays_pale_and_flag_stays_black_at_night():
     _run_ship_scene(
         r"""
-function paintPart(s, y) {
-  cam.x = cam.lx = (s.bb[0] + s.bb[3]) / 2;
-  cam.y = cam.ly = y; cam.z = s.bb[2] - 4;
+function paintPart(s, y, x = (s.bb[0] + s.bb[3]) / 2) {
+  cam.x = cam.lx = x;
+  cam.y = cam.ly = y; cam.z = s.bb[2] - 4; cam.r = [1, 0, 0]; cam.tanV = 0.62;
   hitS = s; hitT = hit(s, cam.lx, cam.ly, cam.z, 0, 0, 1); hitK = entryK;
   shadeSolid(0, 0, true, 0, 0, 1, 0, 0);
   return COLORS[C[0]].slice(1).match(/../g).map(v => parseInt(v, 16));
@@ -131,10 +131,128 @@ function paintPart(s, y) {
 const canvasPart = ship.find(s => s.tex === sailTexture);
 const pale = paintPart(canvasPart, (canvasPart.bb[1] + canvasPart.bb[4]) / 2);
 assert(pale.every(v => v > 150), 'the canvas must remain pale under night lighting');
-const black = paintPart(ship.find(s => s.flag), 20.1);
-assert(black.every(v => v < 80), 'the pirate flag must retain a dark silhouette');
+const flag = ship.find(s => s.flag);
+paintPart(flag, FLAG.at[1] - 2.8);
+assert.equal(G[0], ' ', 'the black flag must leave its cloth dark');
+const skull = paintPart(flag, FLAG.at[1] - 1.12, FLAG.at[0] + 2.5 * FLAG.cu);
+assert(G[0] === '@' && skull.every(v => v > 150), 'the skull must stand out pale on the black flag');
 const wood = paintPart(ship.find(s => s.hull), 0.15);
 assert(wood[0] - wood[1] > 20 && wood[1] - wood[2] > 20, 'the hull must keep its warm wood tone instead of using the cloth paint');
+"""
+    )
+
+
+def test_sails_fill_downwind_and_their_sheets_follow_the_corners():
+    _run_ship_scene(
+        r"""
+const part = cloth => ship.find(s => s.cloth === cloth);
+const corner = (sail, side) => clothPoint(sail, side * sail.half, clothFoot(sail, side * sail.half));
+for (const sail of SAILS) {
+  // Rays along the canvas normal: the foot sags below its corners in the middle, and the leeches bow out.
+  const s = part(sail), low = (clothFoot(sail, sail.half) + sail.v1) / 2;
+  const at = (u, v) => { const p = clothPoint(sail, u, v); return hit(s, p[0] + 10 * sail.su, p[1], p[2] - 10 * sail.cu, -sail.su, 0, sail.cu); };
+  assert(Number.isFinite(at(0, low)), 'the foot must sag below the corners in the middle');
+  assert.equal(at(0.95 * sail.half, low), Infinity, 'the foot must rise to the corners');
+  assert(Number.isFinite(at(1.03 * sail.half, clothFoot(sail, sail.half) / 2)), 'the leeches must bow out');
+}
+for (const sail of SAILS) {
+  // A ray along the wind, aimed past the mast, meets the canvas well downwind of the yard.
+  const from = [sail.at[0] - 20 * WIND.x, sail.at[1] - sail.v1 * 0.7, sail.at[2] - 20 * WIND.z];
+  const t = hit(part(sail), ...from, WIND.x, 0, WIND.z);
+  assert(Number.isFinite(t) && t - 20 > 1, 'each sail must belly at least a metre downwind');
+}
+const fly = clothPoint(FLAG, FLAG.u1, FLAG.v1 / 2), hoist = clothPoint(FLAG, 0, FLAG.v1 / 2);
+assert((fly[0] - hoist[0]) * WIND.x + (fly[2] - hoist[2]) * WIND.z > 3, 'the flag must stream downwind of its staff');
+T = 0; billow();
+const still = SAILS.flatMap(sail => [corner(sail, -1), corner(sail, 1)]);
+let breath = 0;
+for (let time = 0.25; time < 6; time += 0.25) {
+  T = time; billow();
+  for (const sail of [...SAILS, FLAG]) {
+    const box = part(sail).bb;
+    for (let i = 0; i <= 10; i++) for (let j = 0; j <= 10; j++) {
+      const u = sail.u0 + (sail.u1 - sail.u0) * i / 10, p = clothPoint(sail, u, clothFoot(sail, u) * j / 10);
+      assert(p.every((v, k) => v >= box[k] - 1e-9 && v <= box[k + 3] + 1e-9), 'the culling box must hold the moving cloth');
+    }
+  }
+  SAILS.flatMap(sail => [corner(sail, -1), corner(sail, 1)]).forEach((p, i) => {
+    assert(RIGGING.some(([a]) => Math.hypot(a[0] - p[0], a[1] - p[1], a[2] - p[2]) < 1e-9), 'a sheet must stay on each moving sail corner');
+    breath = Math.max(breath, Math.hypot(...p.map((v, k) => v - still[i][k])));
+  });
+}
+assert(breath > 0.05, 'the sails must breathe over time');
+"""
+    )
+
+
+def test_cloth_hits_find_the_nearest_valid_grazing_crossing():
+    _run_ship_scene(
+        r"""
+const part = k => ship.find(s => s.cloth === k);
+function reference(k, origin, direction) {
+  const local = t => {
+    const x = origin[0] + t * direction[0] - k.at[0], z = origin[2] + t * direction[2] - k.at[2];
+    return [x * k.cu + z * k.su, k.at[1] - origin[1] - t * direction[1], z * k.cu - x * k.su];
+  };
+  const gap = t => { const [u, v, w] = local(t); return w - clothDepth(k, u, v); };
+  let a = 0.001, fa = gap(a), rejected = false;
+  for (let b = a + 0.002; b <= 40; b += 0.002) {
+    const fb = gap(b);
+    if ((fa <= 0) !== (fb <= 0)) {
+      let lo = a, hi = b, flo = fa;
+      for (let i = 0; i < 30; i++) {
+        const m = (lo + hi) / 2, fm = gap(m);
+        if ((flo <= 0) === (fm <= 0)) { lo = m; flo = fm; } else hi = m;
+      }
+      const t = (lo + hi) / 2, [u, v, w] = local(t);
+      if (u >= k.u0 && u <= k.u1 && v >= 0 && v <= k.v1 && w >= k.w0 && w <= k.w1) {
+        if (clothInside(k, u, v)) return {t, rejected};
+        rejected = true;
+      }
+    }
+    a = b; fa = fb;
+  }
+  return {t: Infinity, rejected};
+}
+function check(k, origin, direction) {
+  const expected = reference(k, origin, direction), actual = hit(part(k), ...origin, ...direction);
+  if (Number.isFinite(expected.t)) {
+    assert(Number.isFinite(actual) && Math.abs(actual - expected.t) < 0.001,
+      `the nearest valid cloth crossing must remain visible: ${actual} vs ${expected.t}`);
+  } else assert.equal(actual, Infinity, 'a ray without a valid crossing must miss');
+  return expected;
+}
+function localRay(k, u, v, w, du, dv, dw) {
+  return [[k.at[0] + u * k.cu - w * k.su, k.at[1] - v, k.at[2] + u * k.su + w * k.cu],
+    [du * k.cu - dw * k.su, -dv, du * k.su + dw * k.cu]];
+}
+FLAG.phase = 3.18715;
+// The reported dock ray, given in the flag's own frame so that it grazes the cloth for any wind direction.
+const [origin, direction] = localRay(FLAG, -10.175203, 20.1, 1.201647, 0.546364, -0.835938, -0.051905);
+assert(Number.isFinite(check(FLAG, origin, direction).t), 'the reported dock ray must intersect the flag');
+check(FLAG, origin.map((v, i) => v + 40 * direction[i]), direction.map(v => -v));
+for (const sail of SAILS) {
+  for (const side of [-1, 1]) {
+    const ray = localRay(sail, side * (sail.half * 1.08 + 1), sail.v1 * 0.65, sail.belly * 0.6, -side, 0, 0);
+    assert(Number.isFinite(check(sail, ...ray).t), 'both directions must hit every curved sail');
+  }
+}
+let laterValidCrossing = false;
+for (const phase of [0, 1, 2, 3.18715, 4, 5]) {
+  FLAG.phase = phase;
+  for (const v of [0.2, 1.5, 2.8]) for (const side of [-1, 1]) {
+    const expected = check(FLAG, ...localRay(FLAG, side < 0 ? -1 : 6.2, v, 0.08, -side, 0, 0));
+    laterValidCrossing ||= expected.rejected && Number.isFinite(expected.t);
+  }
+}
+assert(laterValidCrossing, 'a crossing beyond the fly must not hide a later crossing inside the flag');
+const depth = clothDepth;
+let evaluations = 0;
+clothDepth = (...args) => { evaluations++; return depth(...args); };
+const miss = hit(part(FLAG), ...localRay(FLAG, 0.05, -1, 0.14, 0, 1, 0).flat());
+clothDepth = depth;
+assert.equal(miss, Infinity, 'the ray must clear the small ripples at the hoist');
+assert.equal(evaluations, 3, 'samples that prove a miss must not need more gap evaluations');
 """
     )
 

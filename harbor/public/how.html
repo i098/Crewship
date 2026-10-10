@@ -23,14 +23,19 @@
   Buildings, the dock and the hull are convex solids made of planes.
   Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals.
   Rocks and tree canopies are ellipsoids.
-  Ship rigging and the cabin stair hand rails use projected lines; tall grass uses projected tufts.
+  Sails and the flag are curved cloth.
+  Inside the cloth's box, a ray samples the gap between the ray and the cloth.
+  Near-parallel rays subdivide intervals that can contain crossings and select the nearest crossing inside the cloth's outline.
+  Each bracketed crossing uses a halving and straight-line steps.
+  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines; tall grass uses projected tufts.
   Both check the depth buffer instead of ray intersections.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
   The lighthouse beam sweeps; the moon gives a dim fill.
-  Ship sails and the flag bypass lamp and shadow calculations; fog still dims the sails.
+  Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
+  The black flag draws only its outline, its folds and its pale skull and crossbones.
   The house's lamp and fire and the cabin's hanging lantern light nearby room surfaces without shadow rays.
   The cabin's wall lantern glows like the lit windows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
@@ -53,7 +58,7 @@
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
-  <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea and the ship and redraws the grid on a canvas.
+  <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
   It stops when no remaining solid can be nearer than its hit.
   After the intro, the canvas keeps unchanged rows.
