@@ -59,3 +59,12 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [cloud-init](https://github.com/canonical/cloud-init): first-boot package setup. License: GPL-3.0-only OR Apache-2.0.
 - [Python](https://github.com/python/cpython): runs the recipe scripts. License: PSF-2.0.
 - [Git](https://github.com/git/git): version control for every lane. License: GPL-2.0-only.
+
+## Paintings
+
+The harbor house on [crewship.si](https://crewship.si) shows these public-domain works as glyph textures that `harbor/art.py` converts. Each artist died more than 100 years ago, and each source page marks the image as public domain.
+
+- *The Great Wave off Kanagawa*, Katsushika Hokusai, about 1830–1832, Metropolitan Museum of Art: [source](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Entrance to the Port of Palermo by Moonlight*, Claude-Joseph Vernet, 1769, Hermitage Museum: [source](https://commons.wikimedia.org/wiki/File:Entrance_to_the_Port_of_Palermo_by_Moonlight,_1769.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Sailing Ship on the Sea at Moonlight*, Ivan Aivazovsky, early 1840s: [source](https://commons.wikimedia.org/wiki/File:Ivan_Aivazovsky_Segelschiff_auf_hoher_See_bei_Mondschein_1840er.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Fishermen at Sea*, J. M. W. Turner, 1796, Tate: [source](https://commons.wikimedia.org/wiki/File:Joseph_Mallord_William_Turner_-_Fishermen_at_Sea_-_Google_Art_Project.jpg). License: public domain (PD-Art, PD-old-100-expired).

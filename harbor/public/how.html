@@ -62,6 +62,9 @@
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   The fountain pool and upper bowl use animated texture glyphs instead of the density ramp.
   Fountain droplets use <code>: ' ,</code>; spray and splashes also use <code>.</code>, and mist uses <code>. `</code>.
+  The house's paintings are glyph textures that <code>harbor/art.py</code> converts ahead of time from public-domain works.
+  Each texel keeps one glyph from <code> .:-=+*#%@</code> and one of a few colours; room light sets the colour level.
+  A painting far from you reads a half or quarter size copy of its texture.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>

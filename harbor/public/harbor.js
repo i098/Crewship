@@ -1086,16 +1086,107 @@ function rug(x0, z0, x1, z1) {
     return Math.abs((x + 9) * 2 % 1 - 0.5) + Math.abs((z + 9) * 2 % 1 - 0.5) < 0.2 ? "y" : null;
   } });
 }
-// A sea chart in a wooden frame, flat on a wall, in a box that is thin across the wall: pale coasts and blue
-// water under a grid. Charts do not block walking.
-function chart(x0, y0, z0, x1, y1, z1) {
-  const alongX = x1 - x0 > z1 - z0, a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
-  box(room, x0, y0, z0, x1, y1, z1, "y", { solid: false, tex: (x, y, z) => {
-    const u = alongX ? x : z;
-    if (Math.min(y - y0, y1 - y, u - a0, a1 - u) < 0.05) return "o";
-    if ((u + 9) * 6 % 1 < 0.08 || (y + 9) * 6 % 1 < 0.08) return "t";
-    return Math.sin(u * 5) + Math.sin(y * 7 + u * 2) > 0.9 ? null : "b";
+// Framed public-domain paintings; CREDITS.md names each work and its source. harbor/art.py writes ART: per work a
+// palette (a material and a colour level per colour), the texture size, then the texture at full, half and quarter
+// size. A texel is one character: its palette colour times the ART_GLYPHS length plus its glyph.
+const ART_GLYPHS = " .:-=+*#%@";
+const ART = {
+  wave: ["k3m7n7t7w1w5w7", 120, 40,
+    ")(';?;??????????????????????????@???@@@@@@?@@?@@????@@@@@@@@@@>>>>>@@@@@>>>>>>>>@@>@>>>@@@@>>>>>@@@@@@@@>@@@@@@@@@@@@@??''';?????????????????????????@@@@@@?@@@@@@>>>>>>@@>>>>>>>@@@@>>>>>>>>>>>>>>>>>>>@>>>>>>>>>>>>>>>>>>>>>>>>>@@@@@@@>>>@???'''???;';;??@@@?????????????@@@@@@@@>>>@@@@>>>@@>>>>>>>>@@@@>>>>>>>>>>>>>>>>>>>>>>>>>>>>@@>>>>>>>>>>@>@>>>@@@@@@@>@>>@??'';???)'bg;?????????????????@@>@>@@@@???;;155@???@>@@@>@@@@@@>>>>>>>>>>>>>>>>>>>>>644444>@>@@>>>>>>>>>>>@>@@@@@@>>@>>@??(';???<'Dhd??@@??????????@@@@@@???21544444445Ihhhd????>>>@>>>>>>>>>>>>446>>>>>66444444446>>>>>>>>>>>>>>>>>>>>@@>>>@>>@??(';??+(+Cgd??@@@?????IJJIJJHJ?154444444444463edhgi5gh>??@>>@>>>>>>>>4444444444444444444444666>>>>>@>>>>>@@@@>@@@@@@>>@??''''<')ECid??@@@@@@IJJJJJEII544444444465hhh_fhddiggehfgii;;?>>>@>>>>444444444444444444444444444HH>@@>@@@@@@?@@@@@@?@@@??'')%)')IChd???@@@IIIJJIG366464461d15645YddfYbddhfddbdhdhffd?@>@@@@@I646444444444444666444666664HJ>@@@?@?????@@@?????????'''%)'),_[d??????IIIIEE56664655/debXR/[YYXXRRRfhfgghfhddhdh=;??@@JJJHJJHHH6666466666666646@@>>>>@@????@??????@@@?@??????(')$)')%YYY''????;GEIHJ664441^Z^f^YRRRRRWRRRRRR[dhddddhggdhh??;?@JJJJJJJHHHJH6666665JJJJJ>>>@@@@@????????????@@?????????(')%%')%Y[)'''?;9EJHHHHH645/[ZRWRRRRRRRRRRRRRRRRRdifhdghihig4giddeddJJJJHHJJH6666HHHHJIIJI@@@@?@@?????????????@?????????(('&)()()))(''('JJJJHHHH666XRRRRRRRRRRRRRRRRRRRRRRWWcfhdhdehdidhhhhhiIJJJJJHH6666J65JJHJHJ>@@@@@@@??????????????????????('')('''()''))566HJJHJH6666/RRRRRRRRRRRRRRRRRRRRRRRX]ghfhhdhdhhehgggfGEJJHHHH6666666HHHHHHHJ@@>>@???@@????@@@?@?????????)'''(('(()))E5666HHJHH6664441R.RRRRRRRRRRRRRRRRRRRRbdhhdeddifigdhhdeIJEIJJJJJH466666HJJHH6HHJHHHHJ@@@>IJJJJJIJIJIJJJ@@@?[%%WWW&&DGIIII666HJIFE6644465g4ghdRRRRRRRRRRRRRRRREIIJhddhdhhhg4hffdIJIIJJJJJHH66666JJJHHJJJJJJHJHJ66HJJJJJJJJJJJJJJJJ>@XXXXW[GIIJJJII]fhhdYfi666643eddhgdaRRRRRRRRRRRRRRJJJHHJhdhdhIIG/gdddGCIIJJJJJJH6666HHHHHJHJHHHHHJHHHHHHHHJJHHJJJJJJJJJIIWRR?IIIIIIJJIG^ehhf^Y^E]/1g^fhdfhhghgdbaRRRRRRRRIJJJJHJJJJIJHHICIhdhJIJJJJJJJHH666HHJJJHHHJJHJHJJJ66666HJJIJJJJJJJJJIIIJ???dfG^Z[Y]G[WZhgg]^[^W_ehddehdhifdddhhhdRRRRRRRIJHJJHJJJJJJJJJJIEgFIIIJIIJJJJH6HHHJJJJJJHJJJJHJJJHJHHHHJJJJJJHJJJII5445???h_[[Z[Y^YWXXWWXbe_^[[fdicaXfaRXRdfddhfRRRRRRRIJJJJHJIJIJIJJIJIIIIIIIJJJJJJJHHJJJJJJJJJJJJJHJJJHJJJJJJJJJJJJJJIE544453?;^[[[^ZZZY^[XWXRRXh_Y_^^hgdbcW[XXRRRWb[WRRRRRRWJJJJJJJJIJJJJJJJJJJJJJJJJHHHJJHJJJJJJJJJJJJJJJJJJHJJJJJJHJJJJJJI544455dd'Y[[Y)$X[^WY^WWRRRRb^ZY[Yhdhhidf[RRRRRXXXRRRRRRRGJJJJJJIIJJJJJIJJJJJJJJJJJJHJJJJJIJJJJJJHJJJJJJJJJIIJJIJJJJJJIE6444445Y[^YZ[$%^XXRRRRRRRRRRYZ[[[RRcfYYhdWRRRRRRXXRRRRRRRREIIIIIIIIIIIIIIIJJIJJIIIJJJJJIIIIIJIJJJJIJJJIIIIIIIIIIIICIEC5444653hY[WY_[cccdYWRRRRRRRRRRRWRRRRRRR[Y[XRRRRRRRR3/RRRRRRRRRIIIIIIIIIIIIIIIJIIIIIIIIIIIIIIIIII?IIIIIIII?+'''''FEG%))364444hdefRRRYYhdhdfhfbWRRRRRRRRRRRRRRRRRRRRRRRRRRR34444413/RRRRR()((''''+???????????????????;;'''''((())))9%%%%%%&$R&3544444hhh^WRRR^[^deYZhhhdZ[[$XRRRRRRRRRRRRRRRRRRRW054444444444/RRR&%%)%%%%%9====<=============9=%%%%%%%%%%WWWWWWXWXWX[14444663hbbWRRRRY^Y[ZZYhiddW[Y%%%[WRRRRRRRRRRRRRRX3644444444444443bRXWWWZWWWWWWWWWWWWWWWWWW%&WWWWWWWWWWWWWWWWWWWXWWWW[ig444461RRRRRRRRRRf^[XX[WWRRRW[W%)Y[ZZ^Z[WWXWRRRRR/54444445235444446ddbXXXWWWWWWWWWWWWWWWWWW/563WWWWWWWWWWWWWWWWWWWWW3561i123.RRRRRRRRRRRhh?WRRRRXRRRRR[[W[[Y^[ZWWW[WY15644444455hddh644444442h4ghddWXWWWXXXXXXWWW^]4445g^WWWWWWWWXXWW%%)^]]44445bbWWWRRRRRRRd15gg???8RRRRRRRRXXW[Z[bbb(DXWZ564444465641hihdb14164644453hdfgg^WWWWWWXWW[Y^[XW050[h]][XXWW)%)))('i5i531//^^YWWWZR]RWcdggggi????dRDRRRRRW.[^IIEEEIIIJg6464446d/56hfeedggdhhg1dg164hhddggg][WXXaXXXXXWWXXXXXXa$XXXX&)))+*ghd[[bcbbbfd]]]]YWRbhggigggh??@IIgIIJJH6666gJHHJJJFehhh565hhddhf33d151hihhhhiccd25gie[W^iR[]gRiRRRWWWXWWWW[ffedddgihhf//22b[ZY_]]]hfRW.RcfgggiihfbRR??IIhhEEIJH666hhhIHJJJhdfhhdgggdhhhdggg445hhdgfaRWWXYY_Y]ZWXc_WWbhaWY]]]]]5g5555555ghhgih5646]]]Y[WWWWXRRX0hgghhhbRWWXRR????hebefYdhhdddhiCGIGdeihheh64444ghddh155dhhg5RRWW[%[WWW]][aXWXRRRWXRRigggg5566gggggedig551//^Z[WWWWWWR15gggbcaRRRRRRRR?????I]_]^[hdhhhhdRRfYY_hehdg55256gdddhfdhfgdh4/RRRRRZWWWW[Y_][WRRRRRRRRRR1555/0/15gihY[WWXWWWWWRXXXXWdggg5gggRRRWWXXXXX????<RR[fYRXcccdRRRR[^YYY^gedeidfididdedhf]Ydhg4RRRRRRR[WWWWWWW[WWWRRRRRXRRRRR]YWXaabRWRXXXWWWWRRRRCIgii^Z[[WXRXXXWRRRRR??;RRXRXWRRRRRRRRRRRR^Y[YYYhhdhhdhdfhgcaRRW[YdhigdRRRRRRRW[%%%W[%WW%))%&$RRR$$$$&W&$XXXXXXXXXXXZGJHHIhhd[[WWWRRRRRRRRRRR;;RRRRRRRRRRRRRRRRRRRRRRRRRfdibfhehgg53XRXWXRdffhggRRRRRRRR&%%%%%%9%%%))))))))%%%%%&%$&$WWWZYR]IIIRRRRRRRRXXXXXXaRRRRRRR?:RRRRRRRRRRRRRRRRRRRRRRRRRRaIgiihchg6IRYYWXRRRRRihJghRRRRRRRR$%(+?'''''(')())))))))%%%'^]_^[RWRRRRRRRRRRRcbbbehhhddefbW?RRRRRRRRRRRRRRRRRRRRRRRRRRRRIIde[XXb[WWXYYXXRRRRRRZdhI]RRRRRRRRXR8WWXX$&&&$$$&%fdigHHggecaaaaaRRRRRcbfhgiiiiiihhhhhhhhi%RRRRRRRRRRRRRRRRRRRRRRRRRRRXZX[XXY[^dWYYZ^YdRRRRRRRWWWZhhIhRRRR[RWWWWWW[[Y^]]IihhhhEEhhhiiiiiiiiihhhhhhhhhhhhhhhhhhhhhh",
+    "(;;????????????@@?@@@@@@@@@@@@@>>>@@>>>>@>>>@>>>>>@@>@@@@>@?'??;<?@???????@@@@@???@?@>>>@@>>>>>>>>>>>>6>@>>>>>>>>@@@>@@?''+')??@???@@>I?@5644ghhhg?@>>>>>>>44664444466>>>>>>>>@@>@@?')'');?@@@JIIIHHI5452dedhddhd;>@@>H4444444444H>>>@@@@?@@@???'%(()(??IEIIH45dRRXWRRRbdhdhhd??@JJJHH666HHHJ@>@@??????@????(%))))';EJHH6/WRRRRRRRRRRbfhhhghdhIJHJH66HJJJ@@@@???????????(((())'HHJH665BRRRRRRRRRRXhddhhhhhhIJJH66HHJHJJ>>@@@@@@@@@??$$bbdIIighh66gEghcRRRRRRRIJhhdhhhdhIJJJ66HJHHJHHHJHHJJJJJJJI)^hh^ICdideddhddhh_[RRRRJJJJJJJIhhIJJJJHHHJJJJJJJHHHJJJJJIJJ?dYYZYXRRf^Y^dccacRYRRRRJJJJIJJJJJJJJJJHJJJJJJJJHJJJJJJII46hd[[WWWRRRRY[[Y^^WRRRRRRRGIIIIIIIJJJJJJJJIJJJJJJIIIIIIIE6451[YZ[dWXRRRRRRRRRRRRRR1/0XX[EE???IIIIIIIII????EEFGGGCDC1445dRRYYY^]Y[WWRRRRRXRRR144444/XW[[99%%C%%%CC[9999WW&&&$WY645/WWRRdXXWWXW[[YYRWW0/5446hh4441Y[[WWWWWWWZ]]YWWWWWWW%Y_]_YWXXWWei?^WXXRX[^Y^fdg44gigddhh555ghd]YWXXXWWWWW[XX[fhhdY[[^^YY[figi??hhgggigHgddh51hdhgghhf[WdheW[[^[YY[[edhhhihhidZZZWXW^]dfcR??hddddhhDddhdggghdhhdhYXW[W[YWWXXXW^]gdigheff[WWXWY]]]WWRRR?=WXbRRRXWYfeddhhdhbbfd][XXXWWW[&&W$$$&&$$$XXXXWW^RRZ[WWWXRR)RRRRRRRRRRRRXedhdg[WWWW^_WXXXWWYYY^))))%%%[[ZYY[WaaacWWWWRRWRRRRRRRRRRRRR[[cWYW[[WXXW[dRWWW$&&&%%%)(+,IYWWWW[ZRhhhhhhhh",
+    "''?????@@@@@@@@>>>555JI>>@@@@?'';@@IIJ@>?;h??>>>444HH>>>@@@?)));IJICWRRRfdhhhJ666JJI??????%%'III][WRRRRhhhEIJHHHHJJJJII@^)dWC^^[[RRXJJJIIIJHJJJJJJJJJIY[WXXWW[XX0X[IIIIIIIIIIEEdEJ]W[WW[WWXWYg5]Y[WDWWCGDDWb[^^bWW][[Yhdhghhhhe]Y[WWW[[Z^^Z[[YY[?[[Wbddhhee^XX[WWWWZ[[WWWY^WWXWRXRRRaf[YWWWWWWW[%))^[[WW[[[["],
+  palermo: ["G7k1m2n3o4r5s0s1", 114, 41,
+    "rpppllleffefeffffffdefbfedlllllllllppnnn99999999=99============999=9999999==99=9999=99999999999999noogggpppponn99=plffbccccccc----accca--aacbbfllllllllpllppppoooo9999oonooppppoppllplllllppppppoppppoppplllllllllllllffffbbbfflllpolffbba.------------------accbbmmfbfllllllllpopppp999pplpppppppllllllplllllllppplpppplllllllllllllllbbbbbbbbbbbbblohbccc----------------------------cbbbbbbbbfbflppo999ropppppppppppppppplllllllllllpppoopppllmfmmlffbbbbcbbbbbcbbbblfbca-----------------------------accbbbbbbbbbbbbfffdpoppoonoooonppllllllllllllllmflllplpopdfffeffbbccca.a-accacbbldbc------------------------------ccbbbbbbbcbbbbbbffllleflpplloppplppplllllpppll8ddfd8flmlllfeefbbbbbca---.`----bblba------------------------------cfeffffbfffbffffdllpllffmmfbflpppn999oplpllpo999999999:pl::lpdfffbbbccc-acc..---blc------------------------------bfeeddddfffffddddppnplllllleddllllp9==;EII;qq=999999=9==<=99opr9:lllebbbcbbbb----kl.------------------------------bbeddllefbfffdlpppppnoopppoppllllp:999999999:b9998mlm7b79=9<9::99nppldfbbbbbbc---kl.--------------------------..-..bbfhpphddeeeflnoopoopppppopppponGEG=9=999=:ff88ppopoolmlllpllleelonpdefffbbbb.--kl.-------------------------aaa---..cclnolhdeddlp999nppllponnnrsqEIJJ;<?I??9fbh==9nopppppplplpldffdpnpefddffbbbc.-kl-----------------------.--..c.---..bh::plledllp9999pplllpppppppEIIClpqGDdfffg;===99oppplpppplleeeddeffbbfbcbbb.abl----------------------------c..-...cfgrrpl:pppC9==99ppppppplllprDllppllllddfhEJ;I;=99noo9nooopledefffffbbbbbbbcbbl-------------------------------...bbbbedpnrrqq;;;;;<=9999pppllllllllllprllleddfBCEI;<<F=99noollllldffffbbbfdfbbffp-----------------------------..ccbbbffffff8lllC9=99===;;==999:plllllppprlll8ddllhHH>>IH?;=99npppplldddddedfc---ccl.--------------------------.bbbbbbffffffffllpp:9999999999999999nooorGqrplrMMMrolBBDN<EI==99=9nppoornpffbb.-----..ld0.------------------------cbbbbbbfllpppplplpo999===99====999=EISSEEIINnPTSSSSSPIIIEEF==999:9999opnplmbbc.------kl=WXX/dlkbbff0----------...--ffffefdlllppponn=99<;J;99=<;EEEQPIJJ''J',+++RRRRTSSRHIIIIEE;===999=99npppplfc-..cb-.klVVVXXVVVhdbb.---------------ffbfffllllon9nn99==;FEC9==<EEIHRR+,,,********,,,TSSSSJIIIIIIIII=9==999pppppdfbcbbbbbblVVVXXVXWWVla-----------------bffelllllll8llpr=9olpp9=;;?>TOSR,****************RTSSJJIJTRHJEWV9=;F99oopl8fbbfellemlXXWWWXVWWWW/-----------------.dfdllllllllllpp::oooo99999=GQQQ)******************RTTTSMNLdfBbUWJJIE<9999==999oooppp9WV0----0VW-------------------bllllllllllllpp9=GEIJO9===?J(+,)(+HJ+,+*,,********,RRRM[YbhgggbDEIII;<===999999=GGG=9=V-------W0-----------------.dflloo99GGFrnpGEIIJJSTRR,,+,*,**RSSSS+*,((,***********+*gbbc.1fEIHIEG=9999=====<;;;?==V-------gf-----------------.fEEGG=FEEEIIIE;IIIJSSSTRR,***+++++++,*****++''++*******+bbbbb.-CIIIIIIJIIEF====GFGGEpV/-------/.-----------------.gEEIIIIEIIHIIEGFIIJHSTSTTR+,***********************,,,*%bbbbb../IHHHIJJIIIIIIIIIIIIIb--------.-------------------0WYGIIIEEEJJIJHIIJJIOSSSTTRRR,*********,+RRR*,**,***,,,,bbbbbbb..gPSJHHHHJIJIJJIIJIIIb-------------.-..-----------0XWCIEIGDIIIIIIIJSSSSSSSSTTTRRTRR++++++++RRTTSTRSRRRRRRTfffbbbbbcepIIIIIIIEIIEIEEEIIIb--.------..------------------V[XGIJXXEIHHSSSSSSSSSTTSTRRRRRRRRR,,,,,,RRTTOSTOSSTTTTOfffbbbbbcbllEIIIJGCEIIIEIIIIIXVVVXVUbUVVWXDA.--------------.XXCIFXVCIEQSSTTTSRTTRRSTRRRR,,*++***,,,,ROHOSRQSTSTRSSMWWWWgebbbmoDEIEI=9GIIIIIIIIIVVVVVVfeVVXW[EEQQMMMN/---------fdfehfll9GFEQPQQMEIIOSOSTTSS***RS****,,*+IIIHJEISSTTTTT[WWWhhgifdg=CEHHI==JJIIIIIIIhfehffbbVVXWEIISSSOOSSVbbbb.----cbcbb..0//fbfBVDFIIOOOSSSSSTR+RSR,,,,,RREEEEEEEHRRRRTRLl8ebbfbbbf89III;==;IIIEIIIIfcbcccbVVWWEIIOSSSSSSSQVbhbb------```---`--baUUBDCGFHSSSSSSSSSSSSSSSSSSSSJSSSIEQQQSSSSP9caccccbbbb9==C====GG=9===<c```abVWW[[EEOSTTSSSRRTEDZ[^W----fcd.//f/---1CCEIIJJJSSSSSSSSSSSSTTTTTSTSTTTTSSSSSSSSHJC888bffeffl99:8dh:88l:9====bdeWWEWXX[WWVWMQQOR,,++,HQQRWXWVbicf-adhg.--4[IIIIJJJHSSIOOMMSSSSJSSSSSJJHSSSSSSSSJJIII=999=9npppopnnmbkkkkkpn999=fffVZJ[UUXWW[VWSRO'**,**SQTSXZ_[Uff`.a.cUU--fBDDCGGGGCQEGB.-6EOOIIJRRSOIIIJIOPMQJIIIIEG99999opppponnplhhhhhllp8lpodVXW[G[0UWW[XVVMOQV$***+OSTM,*,VUVX-.a.`b/33/.----cb--..--.---/GGISRRRSHHJIDBb-CIEEIIE99pppllppppppllllfffellffelpW[[WWWW--XW[IVOQBUC[P'*TOOON+*,VVUBA-abbU---------.--------------7MSRTOOIEe``fgopnGGCrpplllllllpplllleffbbbbbbfbflVWVUU[XUUVWWZ[^]VUU[SSRSOQ[Y^'^YZYYZE[WWW------------------------f99M=9CpppmlfbmpppppllllllllpllpplmkbccbbbbbbbfelVVVVVVXVUVXXWXXVVXW5W000VVVXLNLXXCCCCXVVV...fc-------.3------bacffg888:haclllefebfblllmlllllllppllllleffbbcbcbbblpVUUUUUVVVVVVUUVXWVUUU```UUU`aaaaaaacc---````fcbba-----`bbkllbccaaackkkkbbbmlmkkbfbbblppppppplpppllpplllllllfbfbblpXpl/VVVVVVVVllXWXVl.bccbbbbbbcabbbbca---ccabcbbcccb.0.bffllllpphg99ggphg9gpppppgg9gnr999999=9999999999rnnoooppd==9",
+    "plfbbbbbbbbbbfelllpponn99999999nnnoon99999nnooppppllllpp9lba-----------.kbbfflll:99:ppppplpplllplp:pllllllfbbkkbklbc-------------aacbbbbbbflplpppopllllllll8lllllmbbcaaaacfc---------------fefffffelpllmmlpp9999rnnng9nopplefbcc.--f---------------.fddeffdppopppplp99999:8:ppmlnnpophfbbb.-f----------------.bppded:nopponnqqE;;989=nppplllllhfefbbaf--------------.-cbdnppn9=99ppplopllp889=;Frnnopllefbbbbbd--------------.bbbfmlpp9====99pplponlllBCII?=9npppdefb.cfl.------------bbbfdpllo9=====9=q(%(%(SSOEEEG9999nolbca-abXXXpl.--------bffllpnnr==9=;?>H,*****,+SHIII?;999oplbbkbfXWVpW3---------flllllp9:99==QQO*********+HEGClBIE=999:oppWU---3---------llonGG9GIJSST,,,+'+*+*****,ThbgDIIF=9==GEE3.---/---------5EEEIIIEIOSTRRRRRRRR*,*****SbbbfIHJJIIIIII--------------.5GICIIISSSSSTR++++++RRTTRRRQfbbchIIIIIIIIIldec0VV.K.-----/CEDFIHSSSTSRRRRRR,RRSSSSSTQWgdbfCEICEIIIIddebVWEOOOQ.----bbbehXXNEIOSSSRTR,RRPPQOTTTVVfdfdFIEEIIIIcacVW[ISSS+IW60-cccbcUVXEIHSSSSSSTTSHHHIISSE8bbffrppoDCG=UVZXVWCQSR*ROSGEfbabf`15FEEOMLMOOSSOJJIIJOI=99npppplffhpnXWWVVWW[XX+,OQHYVUcbbb---------ADSTJIDkpr==nlllppllffffmlVVVVUWW[VXEFWgFWWWggf------.---jmnnomllmlllllllpllmbbbbklVVVVVVUXXU--accaUUU---.baacb0/0llpllllllplononnnnnopppll9",
+    "lbccccbfflpg9noopppoooplllllp.------abbkmlllppppplpplmkkab--------.dldoppprqsoopoppdbbb-------.klpn=99poDlpq=9pllfbbe..----.mlp9=9=EI))JE;=9npbabid3----.lllC9=?+****HI=9ECCCof`b----0=EIESTR*,*,*RSbeIIIEIfbVd0--bgCIJSSRRRRSSTOhfgIEIIUVWYSONbccbhQSSSTRSOSSpml=CG<XWXW[]^^ebbblllLMSOnqqnppl88lVVVXVVVVVdca-jkbfplllppppplll"],
+  ship: ["k0k1k3m4w4w5y7", 66, 42,
+    "VVV0..00.....--#############$.&#######--......0VVVVVVVVVVVV0000...VV..V000.....--##############--#######---....00VVVVVVVVVVV0..0....0.0/V/00.......-#############$-KKKK........0.VVVVXVVVVVVV.......0...00VVUV00...-------..$###$%VXDDCDCCCCCDDM3NXXXXVVXXXVVVV.....0.....0.VVVVVV0..--....000/LNXMQO=<<<;;;;;<===OOCCWMMMMMMXVVVV......-.VVVVVVVVXXVLVVVLLLNMMQQCPO<;?hhhhhhhhd????;;<GGGGPQQMMMMNXVVVV0...NXXXNNMMMMMMXXWMMMQCGGGF;??hhiiiiiiiihh@@?????;EFGGOQQQQQMMXXXVV00MMNMMMMMMMQQQQQCGGGF<EEE??>igggggggggiiiihhh@???EEFGOOPQQMMMMNXVVVMMMMMMMMQQQPOOGFEE;???????higgggggggiiiiiiiih>@??IIESOOOPQMMMMMXVVMMMMMMQQQPOOGFEEE????????hiiiggggiiihhiiiiiiih>@??IGOPPPQQQQQMMMXVMMMMMQMQPOSEEI????@@@>hiiihhhigiiihhhdhhigggggi@??EGQQQQQQQQQMMMNXPCOQQMMMOOFEI????@?@@hhihd;<;dhedh?EFF;hhiiiiih@??;GOQQQQQQQMMMMMMFEEOQMMMQOGFE?????@@hhiiiihd?hgg>?;EEE?hhiiiihh@@??;EFGOOPQQQQQQQQEFGOQMLNMOGEI????@>@hhhhhhhhhhhhh????@>hhhiihhh>>@@??IIEFGOOOOPPPPGGGGPMMLMMGEEI??@>@EFI;??@hhgggggh@@??@hhhhhhhh@@@???IEEEEEFGOOOOOGGSSOQMM.VXCFE;??@;FEEE??@hhggggggi@??hhhggiih>@@@??IEEEFFGGGOOQQQOOOOOQMK/./WGEE?????@?d?@@hggggggghhhiiiiiihhh@@@???EEFGGOOOOPQQMMPPOOOQMU-00VMCOS?????>>>>>iiggggggiiiiihhihh>@@@??IEEFGGOOOPQQMMMMQQQQQQML.---VMQPOS??@>@???hggggggggiiihd?>@@?????;FFFGGOOPPQQMMMMNMMMMMMWV0-##$&XQOOOOO=<?@?>iiihhdhhhdfF;?????;E;SOOOOOOPQQQMMMMMXVMMMMMLV0.####$#%VMQOOSEE??@@@;==GGEEFGGGFEIEEGOOOPPQQPQQMMMMMMXXVVMXXXVV.-$#######VXMMQOGEE?????IIEEEEEFGGGGFGGOPPQQQQQQMMMMXXVVVVVVVVVV0..-########$VXQQOOGGF<;;;EEEEEEEEFGGOOOOPQQQQQMMMMNXVVVVV0...V.--....#########%VXMQMQQCCCCCCGCGGGGGCCQQQQQMMMMMMXXXXVVVVVVV0.0....-----.#########$VVNNMMMMMMMMMMMMMMMMMMMQPMMXXXXXVVVVVVVVXXXN3MM..........##########$.0VVVVVVVXXXXXXNNNNMMQPMXVVVXVVVVUVWWW[[[[[QQ........-0.$##$######$.UVVVVVVVVVXXXWWWMMQQQQMXXVXVXX+%#(N'%LLN,+XVLL0.//0.0/0-$$#########UUUUU-UUUUUVVVXMMMQPQQMUUUUU#######--$$##$QMMQMCCCCQ2/.###########)VKK.0LLLLVVVXXMQOSOPMMNNVVV&$#$###-.$####OOOGGGGGEFCK############V[995QDDMQQMMXXMQOOQOPQQMWWXWXVVVVV0..-#$$OOOSGGGGEEG*###########$M??hdIE;;SOQQMMMMMMMMMMMMXVVVVVVVXVVVVVVVVPPPOOOSSOSSO#########%.1O?>gghh@??;S9QQQMMMMMNNXVXVVVVVVVVVVVVVVVVQQQQQPPPPOOOQ$########.NO;hhggi>?????IIEOQMMMMMXXXXXXVVVVVVVVVVVVVMMMMMQQQQQQQQ.-#######.MO?>gghd?????EIEFSSOOPQQMMMMMMXXVVVVVXVVVVVMMMMMMMMMMMMM0.-#####.35O??IEEE;?EEEEEFGNLMOPPQQQQMMMMWXXXXMQMWXXVXXXXXWXXMMMMW0...$###-.UX=FFGG=GGGFGOOOOMNMOOOPQQQQMMMMMMWWMMMWWWWVVVVVVVVVLVXX/...-###-./WGIhih??EFGOPPPQMMQPQQQQQMMMMMMMMXXXXXXXXV....0000..VVV..---$$&..X[Iiggg>>ISPQQMMMMMMMMMMMMMMMMMMMXXXXXVVVVV...---....-$&--$#####..3WOEdih?EGOOQMMMNNNNXXXNMMMMMMMWXXXVVVV0.00-#####---####$#########$.VMCEGQMVL.(L.-UUUVVVVVVNNNNLLVVV0........$#######################-./MEOMMV.-#$#########$$$U...UU..........--#####################$$$..0MML.-..#############$--.----...--...-$",
+    "VVV0...-########UUUUUUUVVVVVV00..VVV0...-##$###%(88XVBVVVVVVVV....0LVVL0.00VXM*Oedddd_E<=PQMWXV/0..NNMMMMMCQO=;?hggiiihhh??;OPQQMNVVMMMMQOG<;???higgggiiiih@?TOOQQMMNQQMQOEI??@>hh??@>?;higg>?=CQQQMMMEGMMQF???@hhi@@>@??hhih>??EFOPQQQGGQXVCE?@;;edhggghdhiih>@?IEESSOQOOPVU/O;?IJ?higgghiiih>@??EGOOQQMQQMXU#)QG;;??hgihihdhh??;SOOPQMMNMM/.$###VCGS??dEFEFG<;=OPQQQMXXVV0..-####&XQPO=GGGGGGOPQQMMMXLVLV...--.#####)LN33BDDMMMPMNXNVVXWM11/0.0.%######UKKKVVXMMQQNVVV-...L0QPOOO+######/333XXXMQOPMXVVV...-#OOOSSO#####%Ehh?;=[MMMMMNVVVVVVVVQQQQPP+####VFHg@?IITOQMMMMXVVVVVVNMMMMWVU##$/OffF<EGONQOQQMMMWWWWX0VLLLVV&$$-0OHHJECQQMWQMMMMMMXNVV--$$$$$####.2G?OMMNLLLLNMMNVVV0..--##########-VQX.$###UUUUUUU....-",
+    "VVUU###-77.0VVV..VVXVX9=?@??EOQMV.MMZ<??@>>>ii?OQMXSMP?@?@ihdhh@EGOQOM.O??@>ghhh?EGPMM/##,=??efESOQWXVKK$##'WMMMQMMXVXXQQ*###VNNNQQNVUUUQPZ%#$E]]EPMMNVVVVNX)$$O?EOMQMMWXX#UU###VOV..KLL0.."],
+  fishermen: ["G3G4G7M0g7w4w5", 100, 37,
+    "aaaaaaaaaaaaaaaa``````````GCCCCDDDBBBABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDDDBDCCCCCCCCCCCCC``````aaaaaaaaaaaaaaaaa```````````CCCDDDDBBABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDCCDDCCCCCCCCGC`````aaaaaaaaaaaaaaaaa`````````````GCCCDBBBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBABDCCBDCG``````aaaaaaaaaaaaaaaaaaaa``````````aaaaaFDDBDAAAAAAAAAAEHaHHICGBBAAAAAAAAAAAAAAAAAAAAAAAAAAABDDBDC```````aaaaaaaaaaaaaaaaaaa```````````aacccXaHKFGDDBBADAAAEcbbbbaEFCBBAAAAAAAAAAAAAAAAADDDABAAAABCCCC```````aaaaaaaaaaaaaaaaaaaaaa`````````aaaaWbM3//.HH$$HCCGDaHaaa```BAADBDBAAAAAAAAAAAABBBBBBBDDDDC`````````aaaaaaaaaaaaaaaaaaaaaaaaLLaaa````acY'15446551'''[Wc``G`````KEBBGJHHICBAAAAAAABDDBAAAABCCGE`````aaaaaaaaaaaaaaaaaaaaaaaaaacb[[MZ[WWaaaacd'5644>>45,'%WXa`aWbfdQQMMHGGG`aaGDDBAABBABBDBBBBDCFC````````aaaaaa`aaaaaaaaaaaaaaaaaaacccaaXXcaaaaaaX/56>>>>?=WWY(3eWVV`aLMQPbacaa``CCDDBDBBBBDCDDDDGCGGG``````````aaaaaaaaaaaaaaaaaaaaaaaaaaccaaaaaaaac00/9989>>>>;<;551'WaaKKKaaacccaaaEGDCDCDDBCCGCDDCDCCG``````````aaa`aaaaaaaaaaaaaaaaaaaaaaaaaaXcbM166??>>>>>>>>>>>>455+'%MMMNLaaaVaaaaaaa````````EGCCDDDCGC``GG````````aaaaaaaaaaaaaaaaaaaaaaaaaXNY'154@>>>>>>>>>>>>>>>>6511'QMMMNMMNWWcaaaaa`````aa```GGGGGGGG``CCC``````````aXXXcccccaaaaaaaaaaaaWMMQ+644>>>>>>>>>>>>>>>>>444655+''(')MMNWWWXXaaaaaaaaa```````FG````G```````````aXXXcXXWWccaaaaaaacXWNMMM'164>>>>>>>>>>>>>>>>>4446555+'''(QMMMWWWWWcaaaaaaaaaaaa`````````````````a``aXXcaaXWWXaaaaaXXXWWW[MMMQ''+,?>>>>>>>>>>>>>4444446655++'''QMMMWWWWXcaaaaaaaaaaaaaaaaa`````````aaaaaaaacaaXXXXaaacXWWWWWW[MMMM)(''+,5566644>>>>444444445551'''(MMMMNWWWWXcaaaaaaaaaaaaaaaa```aa``aaaaaaaacccaaXXXXXXWXXWWWWWWNMMMQ'+++++5555666444656666446655,+'')MMMMMMWWWWWWWXXccaaaaaaaaaa`````aaaaaaaaaaacaacXXWXXWWXWWWWWWMMMMQ''+++++++5555555555555555555++++''QQMMMMMWWWWWWXXXcaaaaaaaaaaaaaaaaaaaaaaaaaaaaacXXWWWWWWWW[MMMMMMQ''''++++++++++55555++++++++++++++''''(QQMMMWWWWWWWWXaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacXaaaacWW[MMMMMMMM('''(())((''++++++++++++++'+''''''''''QQQMMMMMWWWWWWXXXXXXXccaaaaaaaaaaaaaaaaaccccaaaaaaaaaWMMMMLWWN)''%NWNWWW&&)'''''''33))())(())MMMMMQQQQMMMMMMZ[[[WWWWWWWWXbbbccccccaaaaccaacaaaaaaaaaaaaaaaWWNbXcaabMQMcac[Waaa^,*>*+6465SO+'''''QQQMMMMMMMNNNNNLLLLXXXXXXXXXXXXXVaaaaaaaaaccaabaaaaaaaaaaaaaaaaaaacaaaaaLaaaaaaaaacXW:fbcccccaaaaa$$VaaaaaaaLaaVaaa`aaaaaaaaaaa``FGEGGGF`````aaaaaaaaaaaaaaaaaaaaaaaaaaaa``VUUUVUUUUVVVVV$$caaaaacbcac&&$cccaaaaV``K`aa````````````````CDDBBBBDDDDC```aaaaaaaaaaaaaaaaacaaaaVXW[WXXLLLLLLMN)'+hihdbWWY+++++++''QMM[[[bfM[Wa```aa```````aaaaa````GCGGCGG```aaaaaacWWXWWaaaaacaaaXXW[ZMQMQYMMMMNQ''&X&ccaXXX&'+'+'++'QMZ[WXVVVWWXcacbccaa```aba```aaa```EEEIIa``aaaaccbWWWWWWWWWccacWWWWWNMMMNLKLMQM``aWWVcaa`UV'*+++''(M[WNLXWWWWWWcaaaaaaaaaaaaaaaaaa```a`EGDDBBDDGaaaaaVVVVXXXWWW[fMMMMMMMMMQMXVa``aaaaaXWV````aafMM%[WXLKLW[[WW[WWWXa```aaaaaaaaaaaaaaaa```GCBBBAAABGaa```aaa`aaaVVXXLMMMMOQMLLLLLWXXXWWXW[^OQLVa```aaLWW[[fddMLcaaaVaaXcHCCG``GCGGCGECDGDCCCBGDABABBABBDaa`````````aaaaaaaacXLMQQ[[MM[WWWW[WWW%%MMWWWXaaaW[W[WWLaaaa`a`aaaEGCAAAAAAAAACGBABBAAAADBAAAABAABABaa`a`a``````aaaaaaaaXXWNNNNMQP+_QQQQ('''QMNWW[MQMMWWWWWWcaaGCHHBD`DBBAAAAAAAABCEHGAAAAAAAAAAAAAAAAABaaaa`````````a`````````VUU`aaa$cQPQQ++'(QMQ_^QMMQQ+_O+^Wa`GDBBABBFIGDBAAAAAAAAGCGCCBAAAAAAAAAAABAAABaaaaa````````````````CCCCCCCFa``JLKacbaCEKa`aaKKKHECCIHIEGGEECGBBDBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBDaaaaa``````````````CCCDDBBBBDDBAABBBHaHAAAAGIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBCaaaaaaaa```````````CCCCDBBBBABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBGaaaaaaaaa```````````GGCCCDDBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAABD``aaaaaaaaaaaaaaa```````GCGCCCDDBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBDDCG`a",
+    "aaaaaaaa``````CDBBBAAAAAAAAAAAAAAAAABBCCCCCCC```aaaaaaaaa```````ECBBAAAABEFCAAAAAAAAAAAAAAADDC```aaaaaaaaaaa````aaaXH.EFGBCcWVGBAAAAAAAAADBAABC````aaaaaaaaaaaWWWa``b^645+'%VVXWXIGIJCBAABBBABCG```aaaaaaaaaaaaaXXXaaaa01?>?'('WVX[baa`GDDDBDCDCC`````aaaaaaaaaaaaaVVXM16?>>>>>>?53M%Lacaaa```EGCCC```````aaXcccaaaaaVWMS44>>>>>>>4455'()MLWXaaaaa``F````````aXXXXcaaXWWNMQ+*@>>>>>>4445+''MMWWXaaaaaaaa`````aaaccXXXXXWWWMM'++++?64656665+'(MMMWWWXccaaaaa`aaaaaaaacXXWWW[MM('+++++555+++++++'QQMMWWWWXaaaaaaaaaaaaacaaaaVbMNN%'%%WW%++''''(')))QQMMMM[WWWWWWcccaaaacaaaaaaaacaaacVVXVWMP%M%M%NLLLWXXLLKaaaaa```````aaaaaaaaaaaaaaXbXXXWWYMMNWZ^'(Q[WWWWX`aa```a`````CG`aaacbbbccccNW[Y[W[WWLLaaW++'Q[WWXWWaaaaaaaaa``FGCC`a`aaVVXWW[Z[WWLLLLLMLaaVXWWW[WXXVa``````````GDBBADa`a``aaaaaL[[[MQMMMQYWW[[[WWVa`aFCBAAAAGEBAAAAAAAAaa`````````GCGKKNNMNWWWWWWWWIGCBCCAAAAAABAAAAAAAABaaaa```````DBBBBAAGCAAAAAAAAAAAAAAAAAAAAAAAAAAAABCaaaaaa````GCCCBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBCI",
+    "aaaa```CBAAAAAAAAAABD```aaaaaaaVHHHHHHFCCAABBC``aaaaaaccXM?>;'WWaJGCGC```aaccaaa[S4>>445')WVaa`````aaccWNMQO?665*+(MWXXaaaaaaaaaWMMMM/511'(QMMWWXcaaaaaaaaaLLWW[W&MMNcaaa`a``F`aaacbf[XWWXVMMWcc`aa`EGBDa````aHW[ZWWWWIGCAABDAAABaa```CDBAAAUUAAAAAAAAAAAC"],
+};
+// A texel keeps its glyph, and its colour level follows the room light: it shows its palette level in ART_LIGHT, so a
+// painting brightens toward the lamp and the fire like the furniture.
+const ART_LIGHT = 0.7;
+function artTexture([pal, w, h, ...levels]) {
+  const entries = [];
+  for (let i = 0; i < pal.length; i += 2) {
+    for (const ch of ART_GLYPHS) entries.push({ m: pal[i], c: (+pal[i + 1] + 0.5) / 9 / ART_LIGHT, ch });
+  }
+  return { entries, w, h, levels: levels.map((s) => Uint8Array.from(s, (ch) => ch.charCodeAt(0) - 35 - (ch > "\\"))) };
+}
+// A box against a wall in wall coordinates: u along the wall to the right as seen from the room, n out from the wall.
+// `at` is the wall point [x, z] the coordinates start from and the wall's inward normal [nx, nz].
+function wallBox([x, z, nx, nz], u0, u1, n0, n1, y0, y1, mat, o) {
+  const xs = [x + nx * n0 - nz * u0, x + nx * n1 - nz * u1], zs = [z + nz * n0 + nx * u0, z + nz * n1 + nx * u1];
+  return box(room, Math.min(...xs), y0, Math.min(...zs), Math.max(...xs), y1, Math.max(...zs), mat, o);
+}
+// Screen column and row of world point (x, y, z), in cells: cell i spans columns i to i + 1.
+function screenColumn(x, y, z) {
+  const qx = x - cam.x, qy = y - cam.y, qz = z - cam.z, d = cam.f[0] * qx + cam.f[1] * qy + cam.f[2] * qz;
+  return ((cam.r[0] * qx + cam.r[2] * qz) / d / cam.tanH + 1) / 2 * cols;
+}
+function screenRow(x, y, z) {
+  const qx = x - cam.x, qy = y - cam.y, qz = z - cam.z, d = cam.f[0] * qx + cam.f[1] * qy + cam.f[2] * qz;
+  return (1 - (cam.u[0] * qx + cam.u[1] * qy + cam.u[2] * qz) / d / cam.tanV) / 2 * rows;
+}
+// The canvas face of a painting w wide from height y0 to y1. When a glyph cell covers more than about one and a half
+// texels, the canvas reads the half or quarter size texture, so a far painting does not break up into noise. The
+// size is chosen once a frame from the canvas's middle lines, so one texture covers the whole canvas.
+function canvasTexture([px, pz, nx, nz], { entries, w: W, h: H, levels }, w, y0, y1) {
+  const ex = -nz * w / 2, ez = nx * w / 2, ym = (y0 + y1) / 2;
+  let seen = -1, level, lw, lh;
+  return (x, y, z, hx, hy, hz) => {
+    if (hx * nx + hz * nz < 0.5) return null;
+    if (seen !== renders) {
+      const across = Math.abs(screenColumn(px + ex, ym, pz + ez) - screenColumn(px - ex, ym, pz - ez));
+      const texels = Math.max(W / across, H / Math.abs(screenRow(px, y0, pz) - screenRow(px, y1, pz)));
+      const k = texels < 1.5 ? 0 : texels < 3 ? 1 : 2;
+      seen = renders; level = levels[k]; lw = Math.ceil(W / 2 ** k); lh = Math.ceil(H / 2 ** k);
+    }
+    const u = Math.max(0, (nx * (z - pz) - nz * (x - px)) / w + 0.5), v = Math.max(0, (y1 - y) / (y1 - y0));
+    return entries[level[Math.min(lh - 1, v * lh | 0) * lw + Math.min(lw - 1, u * lw | 0)]];
+  };
+}
+// Plaque letters in bright brass, and the blank round them.
+const LETTERS = { " ": { m: "o", c: 0, ch: " " } };
+// A small brass plaque with its top at y. The title shows on one glyph row, one letter a cell, while it fits and that
+// row runs along the plaque's middle from end to end; the row and first column are found once a frame.
+function plaque(at, title, y) {
+  const [px, pz, nx, nz] = at, w = 0.32, h = 0.07, mid = y - h / 2, ex = -nz * w / 2, ez = nx * w / 2;
+  let seen = -1, row = -1, start = 0;
+  wallBox(at, -w / 2, w / 2, 0, 0.012, y - h, y, "o", { solid: false, tex: (x, yy, z, hx, hy, hz) => {
+    if (hx * nx + hz * nz < 0.5) return null;
+    if (seen !== renders) {
+      const left = screenColumn(px + ex, mid, pz + ez), right = screenColumn(px - ex, mid, pz - ez);
+      const rowL = screenRow(px + ex, mid, pz + ez), rowR = screenRow(px - ex, mid, pz - ez);
+      const fits = Math.abs(right - left) >= title.length + 2 && Math.abs(rowR - rowL) <= 0.5;
+      seen = renders; row = fits ? Math.floor((rowL + rowR) / 2) : -1; start = Math.round((left + right - title.length) / 2);
+    }
+    if (Math.floor(screenRow(x, yy, z)) !== row) return null;
+    const ch = title[Math.floor(screenColumn(x, yy, z)) - start] || " ";
+    return (LETTERS[ch] ||= { m: "o", c: 7.5 / 9 / ART_LIGHT, ch });
   } });
+}
+// A painting (an ART key) in a moulded frame of `wood` over a soft shadow, with a brass plaque under it. `at` is the
+// wall point under the painting's centre and the wall's inward normal; the canvas is w wide and h tall from height y0.
+// Paintings do not block walking.
+function painting(work, title, at, w, y0, h, wood) {
+  const [px, pz, nx, nz] = at, y1 = y0 + h, f = 0.075;
+  wallBox(at, -w / 2 - f - 0.03, w / 2 + f + 0.03, 0, 0.004, y0 - f - 0.05, y1 + f + 0.02, "p", { solid: false, dim: 0.12 });
+  wallBox(at, -w / 2, w / 2, 0, 0.02, y0, y1, "s", { solid: false, tex: canvasTexture(at, artTexture(ART[work]), w, y0, y1) });
+  // A dark groove runs round the front of the frame between its outer and inner mouldings.
+  const moulding = { solid: false, tex: (x, y, z, hx, hy, hz) => {
+    const out = Math.max(Math.abs(nx * (z - pz) - nz * (x - px)) - w / 2, y0 - y, y - y1);
+    return hx * nx + hz * nz > 0.5 && out > 0.03 && out < 0.045 ? "-" : null;
+  } };
+  for (const [u0, u1, v0, v1] of [[-w / 2 - f, w / 2 + f, y1, y1 + f], [-w / 2 - f, w / 2 + f, y0 - f, y0], [-w / 2 - f, -w / 2, y0, y1], [w / 2, w / 2 + f, y0, y1]]) {
+    wallBox(at, u0, u1, 0, 0.06, v0, v1, wood, moulding);
+  }
+  plaque(at, title, y0 - f - 0.06);
 }
 function buildRoom() {
   box(room, -3.2, -0.2, -0.2, 3.2, 0, 6.2, "o", { tex: roomFloor, dim: 0.4 });
@@ -1134,9 +1225,10 @@ function buildRoom() {
   plant(2.55, 5.5, 0, 1.15);
   plant(1.1, 5.87, 1.3, 0.45);
   rug(-0.9, 1.15, 1.3, 2.85);
-  chart(-3, 1.3, 0.7, -2.97, 2.1, 1.85);
-  chart(2.97, 1.35, 1.4, 3, 2.05, 2.5);
-  chart(1.85, 1.6, 5.97, 2.85, 2.35, 6);
+  painting("palermo", "VERNET", [-3, 1.3, 1, 0], 1.2, 1.3, 0.86, "o");
+  painting("wave", "HOKUSAI", [3, 2, -1, 0], 1.26, 1.3, 0.84, "n");
+  painting("ship", "AIVAZOVSKY", [2.3, 6, 0, -1], 0.7, 1.8, 0.9, "o");
+  painting("fishermen", "TURNER", [2.68, 4.4, -1, 0], 1, 1.5, 0.74, "o");
   // By the door: a sea chest under a wall shelf of books and a glass jar.
   box(room, -2.5, 0, 0.06, -1.45, 0.42, 0.6, "o", { dim: 0.7, tex: crateSlats });
   box(room, -2.54, 0.42, 0.04, -1.41, 0.52, 0.64, "n");
@@ -1280,15 +1372,16 @@ function shadeRoom(c, odd, dx, dy, dz) {
   const s = hitS, k = hitK, t = hitT;
   const nx = k >= 0 ? s.P[k] : hitN[0], ny = k >= 0 ? s.P[k + 1] : hitN[1], nz = k >= 0 ? s.P[k + 2] : hitN[2];
   const x = cam.x + dx * t, y = cam.y + dy * t, z = cam.z + dz * t;
-  const tex = s.tex && s.tex(x, y, z, nx, ny, nz), mat = tex && tex !== "-" ? tex[0] : s.mat;
+  // A texture returns a material letter, "-" for a darker line, or a painting texel with its colour and glyph.
+  const tex = s.tex && s.tex(x, y, z, nx, ny, nz), art = tex && tex.m, mat = art || (tex && tex !== "-" ? tex[0] : s.mat);
   let ch = "@", cls = "l7";
   if (mat !== "l") {
-    const warm = interior.light(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
+    const warm = interior.light(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = art ? tex.c : (tex === "-" ? 0.55 : 1) * (s.dim || 1);
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * y), fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
-    // Keep the bed, chart water, and blue book spines blue under warm room light.
+    // Keep the bed and blue book spines blue under warm room light.
     cls = CLASS[mat][(mat !== "b" && warm / lit > 0.55 && b > 0.2 ? 8 : 0) + Math.min(7, Math.floor(b * 9))];
-    ch = glyph(b, odd);
+    ch = art ? tex.ch : glyph(b, odd);
   }
   put(c, ch, cls, (ny > 0.7 ? -1 : 1) * (s.id * 16 + (k >= 0 ? k >> 2 : 12 - k)), t);
 }
@@ -1902,7 +1995,9 @@ function measure() {
 // Per-cell glyph, colour class, surface id (solid and face) and depth; the edge pass reads them.
 let G, C, ID, D, SP;
 const cam = {};
+let renders = 0; // counts render calls, so textures can do per-frame work once
 function render() {
+  renders++;
   const tanV = 0.62, tanH = tanV * aspect;
   const cy = Math.cos(me.yaw), sy = Math.sin(me.yaw), cp = Math.cos(me.pitch), sp = Math.sin(me.pitch);
   const fx = sy * cp, fy = sp, fz = cy * cp, rx = cy, rz = -sy, ux = -sp * sy, uy = cp, uz = -sp * cy;
@@ -2025,10 +2120,9 @@ function gulls() {
 
 // Screen cell of an anchor (possibly off screen), or null when it is behind you.
 function project(a, snap = Math.round) {
-  const p = [a.x - cam.x, a.y + (a.ship ? bob : 0) - cam.y, a.z - cam.z];
-  const dot = (v) => v[0] * p[0] + v[1] * p[1] + v[2] * p[2], z = dot(cam.f);
-  if (z < 0.3) return null;
-  return [snap(((dot(cam.r) / z / cam.tanH + 1) / 2) * cols), snap(((1 - dot(cam.u) / z / cam.tanV) / 2) * rows)];
+  const y = a.y + (a.ship ? bob : 0);
+  if (cam.f[0] * (a.x - cam.x) + cam.f[1] * (y - cam.y) + cam.f[2] * (a.z - cam.z) < 0.3) return null;
+  return [snap(screenColumn(a.x, y, a.z)), snap(screenRow(a.x, y, a.z))];
 }
 
 // Signs use scene cells.
