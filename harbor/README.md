@@ -1,7 +1,7 @@
 # harbor
 
 `harbor/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
-Each object shows an ASCII sign anchored to its surface.
+Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
 Selecting a destination on the ASCII mini map walks you there around obstacles; with reduced motion, you jump there instead.
 See [how.html](public/how.html) for the renderer and controls.
@@ -58,7 +58,12 @@ Add an object and a `SCENE` entry to give the link its own place.
 The build limits each sign to a title, a short description and one link.
 Unmapped pages share a short summary with a count and one link to the README feature index.
 The welcome sign has three project links.
-Signs first reflow below or beside the map, clear of the move pad and safe-area edges.
+Posted signs first place their bottom frame row on the lowest projected support top.
+Paired posts keep a screen-aligned rectangle wide enough to cover both supports; the higher support top passes behind the board.
+Projection uses the same cell centers as the ray-cast scene, not the aimed surface or the object's center.
+Signs without posts keep their existing anchor placement.
+If the post top is off screen or the frame cannot fit, signs reflow below or beside the map.
+Signs keep clear of the move pad and safe-area edges.
 If space is limited, signs remove spacing and shorten the visible copy.
 If no clear rectangle fits, compact signs can cover the map but keep their links clear of the move pad.
 Signs remain within the safe area.
@@ -68,7 +73,6 @@ Stacked links have one blank link row between them and separate hit regions at l
 Each stacked link row is at least 12 CSS pixels tall.
 The invisible hit padding can extend beyond the sign frame, but stays clear of the move pad.
 Touch frames fit the text, with one blank row before the links.
-Desktop signs keep their original layout.
 Click or tap a sign link to open it.
 Focus a feature-list link to show its sign.
 The sign highlights the focused link without scrolling the scene.
@@ -112,6 +116,9 @@ The check walks through the house door and back with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
+It checks the how, docsboard, and mailbox signs against the placement rules above.
+It uses three camera views and an additional oblique docsboard view.
+It checks each support independently for vertical gaps and horizontal coverage on desktop and iPhone portrait and landscape.
 It includes 320×568 phones in both orientations and landscape heights of 256 and 192 pixels.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
 On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks the canvas DPR limit.

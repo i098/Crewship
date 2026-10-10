@@ -91,11 +91,26 @@ render = function() {
 };
 let signCheckWidth = Infinity;
 const fitSign = signFit;
-signFit = (at, i0, j0, i1, j1, mode) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode);
+signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
 window.harborCheck = {
   place(x, z, yaw) { Object.assign(me, {x, z, yaw, pitch: 0}); moved = dirty = true; },
   state() { return {inside: insideHouse, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
   ids: ORDER,
+  postView(id, angle, distance, pitch, turn) {
+    const posts = world.filter(s => s.spot === id && s.bb[3] - s.bb[0] < 0.16 && s.bb[4] - s.bb[1] >= 1);
+    const x = posts.reduce((n, s) => n + (s.bb[0] + s.bb[3]) / 2, 0) / posts.length;
+    const z = posts.reduce((n, s) => n + (s.bb[2] + s.bb[5]) / 2, 0) / posts.length;
+    Object.assign(me, { x: x + Math.sin(angle) * distance, z: z - Math.cos(angle) * distance, yaw: -angle + turn, pitch });
+    me.eye = floorAt(me.x, me.z) + 1.6;
+    moved = true; jumped = id; render();
+    const screen = (x, y, z) => {
+      const p = [x - cam.x, y - cam.y, z - cam.z];
+      const dot = v => v.reduce((n, c, k) => n + c * p[k], 0), depth = dot(cam.f);
+      return [(dot(cam.r) / depth / cam.tanH + 1) * cols / 2, (1 - dot(cam.u) / depth / cam.tanV) * rows / 2];
+    };
+    return { ...this.bounds(), cols, tops: posts.map(s => screen(
+      (s.bb[0] + s.bb[3]) / 2, s.bb[4], (s.bb[2] + s.bb[5]) / 2)) };
+  },
   go(id) {
     signCheckWidth = Infinity;
     if (id) go(id);
@@ -221,6 +236,32 @@ if (!page.isClosed() && !errors.length) {
 await page.emulateMedia({ reducedMotion: "reduce" });
 const overlaps = (a, b) => b && a.x < b.x + b.width && a.x + a.width > b.x
   && a.y < b.y + b.height && a.y + a.height > b.y;
+if (["desktop", "iphone15pro", "landscape"].includes(name)) {
+  for (const id of ["how", "docsboard", "mailbox"]) {
+    const views = [[0, 5.5, 0, 0], [-0.6, 5, 0.1, 0.08], [0.6, 8, -0.1, -0.08]];
+    if (id === "docsboard") views.push([-1.0653, Math.hypot(3.225, 1.785), 0, 0]);
+    for (const view of views) {
+      const bounds = await page.evaluate(({ id, view }) => window.harborCheck.postView(id, ...view), { id, view });
+      if (bounds.tops.some(([i]) => i < 1 || i >= bounds.cols - 1)) {
+        assert(bounds.glyphs > 0 && !bounds.box.seated, `${name}/${id}: off-screen supports must retain a fallback sign`);
+        continue;
+      }
+      const bottom = bounds.box.j + bounds.box.h - 1;
+      assert(bounds.box.seated && bottom === Math.max(...bounds.tops.map(([, j]) => Math.floor(j))),
+        `${name}/${id}/${view}: board bottom misses its lowest support: ${JSON.stringify(bounds)}`);
+      for (const [i, j] of bounds.tops) {
+        assert(Math.floor(j) <= bottom, `${name}/${id}/${view}: a gap separates the board and its support`);
+        assert(Math.floor(i) >= bounds.box.i && Math.floor(i) < bounds.box.i + bounds.box.w,
+          `${name}/${id}/${view}: board misses its post horizontally`);
+      }
+    }
+    for (const view of [[0, 0.5, 0, 0], [0, 8, 1.1, 0]]) {
+      const bounds = await page.evaluate(({ id, view }) => window.harborCheck.postView(id, ...view), { id, view });
+      assert(bounds.glyphs > 0 && !bounds.box.seated, `${name}/${id}: an unfit or off-screen post must retain its fallback sign`);
+      assert(bounds.links.every(link => link.hit === link.href), `${name}/${id}: fallback links are not hit-testable`);
+    }
+  }
+}
 for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
   const timeout = setTimeout(() => {
     console.error(`${name}/${id}: sign rendering stalled`);
