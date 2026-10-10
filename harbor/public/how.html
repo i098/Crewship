@@ -47,7 +47,7 @@
   After the intro, the canvas keeps unchanged rows.
   Devices without <code>(pointer: coarse)</code> draw rows with changed cells again from their full text-run positions.
   Touch devices redraw only the changed span and its neighbouring cells.
-  Grass sways on a 12 Hz clock, so a still view redraws its grass cells at most 12 times a second.
+  Grass wind animation uses a 12 Hz clock; other scene changes can repaint grass cells between wind updates.
   The mini map draws again each frame, even when its cells do not change.
   The pop-up sign also draws again each frame; the cells it covered draw again when it moves or closes.
   Devices with <code>(pointer: coarse)</code> draw one glyph per <code>fillText</code> call to limit WebKit's text cache.

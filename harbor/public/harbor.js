@@ -978,11 +978,11 @@ const GRASS = plantGrass();
 // Colour classes by brightness: dark roots, green blades and pale moonlit tips.
 const grassTones = (mat) => Array.from({ length: 8 }, (_, i) => mat + i);
 const GRASS_ROOT = grassTones("M"), GRASS_BLADE = grassTones("g"), GRASS_TIP = grassTones("G"), GP = [0, 0, 0];
-// All grass sways on a 12 Hz clock, so a still view repaints its grass at most 12 times a second.
+// Quantize wind time to limit grass animation changes in a still view.
 const swayTime = () => Math.floor(T * 12) / 12;
-// Each frame projects the foot of each clump in view into the depth buffer, like the rigging, and draws a tuft there
-// at most rows / 14 tall, so near grass stays a tuft. Moonlight colours the blades, brighter on the side you see when
-// the moon is behind you, and the blades fade with distance.
+// Project clumps into the depth buffer, like the rigging.
+// Cap their height before cell rounding so near grass does not fill the view.
+// Moonlight brightens the blades when the moon is behind you; distance dims them.
 function drawGrass() {
   const sway = swayTime(), lit = 0.5 - 0.5 * (cam.f[0] * MOON[0] + cam.f[2] * MOON[2]), cap = rows / 14;
   const tall = rows / (2 * cam.tanV), wide = cols / (2 * cam.tanH); // rows and columns per metre, 1 m away
@@ -997,10 +997,9 @@ function drawGrass() {
     drawTuft(s, rise, half, across * h * (0.03 + 0.15 * gust) * wide / d * scale, b, b + 0.35 * Math.exp(-d / 30));
   }
 }
-// A tuft at GP: blades of different heights rise from a tight root and fan out, the middle ones tallest and the outer
-// ones splayed, drawn from the outside in. The wind bends each blade more toward its tip, so a blade stands upright at
-// the root and curves at the top. Gusts roll downwind in four steps, so a still tuft redraws only when its step
-// changes. Far tufts draw as many blades as fit side by side.
+// Blades fan out from a tight root, with the tallest blades in the middle.
+// Draw outer blades first so middle blades cover them.
+// Wind bends each blade more toward its tip; distant tufts use fewer blades.
 function drawTuft(s, rise, half, lean, b, pale) {
   const n = Math.min(7 + 2 * Math.floor(s * 3), 1 + 2 * Math.floor(half * 1.2)), tone = Math.min(7, Math.floor(b * 9));
   const root = GRASS_ROOT[tone], blade = GRASS_BLADE[tone], tip = GRASS_TIP[Math.min(7, Math.floor(pale * 9))];
