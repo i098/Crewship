@@ -1,11 +1,15 @@
 """Check the harbor's cloud layers: wind drift, moonlit edges, cover, and the sky buffer's refresh."""
 
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 
 
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_clouds_drift_light_cover_and_refresh():
     subprocess.run(
         ["node", "-", str(ROOT / "harbor/public/harbor.js")],
