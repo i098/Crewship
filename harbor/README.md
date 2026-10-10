@@ -49,6 +49,7 @@ The sheets stay taut to the moving sail corners.
 The black flag shows a pale skull and crossbones and has a wavy fly edge; it streams with the masthead pennants in the same wind.
 With reduced motion, the sails stay full but do not move.
 The sails keep a pale canvas tone at night and are brightest where they belly out farthest.
+Cloth rays refine only near-parallel crossings and select the nearest crossing inside the sail or flag outline.
 Outboard lanterns make the gun ports visible.
 
 The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.

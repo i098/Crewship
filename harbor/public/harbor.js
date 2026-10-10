@@ -1298,9 +1298,6 @@ function blobEntry(e, ox, oy, oz, dx, dy, dz) {
   entryK = -4; entryN[0] = nx / l; entryN[1] = ny / l; entryN[2] = nz / l;
   return t;
 }
-// Ray against cloth, in the cloth's (u, v, w): clip the ray to the cloth's box, then find the half of the clipped ray
-// whose ends lie on opposite sides of the surface; the middle point also catches a ray that crosses the curve twice.
-// Straight-line steps close in on the crossing. Sets entryK -1; the shading takes the normal from the cloth's slope.
 const RAY = new Float64Array(6); // the ray in the cloth's frame: origin u, v, w, then direction u, v, w
 const clothGap = (k, t) => RAY[2] + t * RAY[5] - clothDepth(k, RAY[0] + t * RAY[3], RAY[1] + t * RAY[4]);
 function clothEntry(k, ox, oy, oz, dx, dy, dz) {
@@ -1313,13 +1310,44 @@ function clothEntry(k, ox, oy, oz, dx, dy, dz) {
   if (!(near < far)) return Infinity;
   RAY[0] = u; RAY[1] = v; RAY[2] = w; RAY[3] = du; RAY[4] = -dy; RAY[5] = dw;
   const m = (near + far) / 2, fa = clothGap(k, near), fm = clothGap(k, m);
-  if ((fa <= 0) !== (fm <= 0)) return clothRoot(k, near, fa, m, fm);
-  const fb = clothGap(k, far);
-  return (fm <= 0) === (fb <= 0) ? Infinity : clothRoot(k, m, fm, far, fb);
+  const slope = k.ripple ? k.ripple * ((k.ku + 2.4) * Math.abs(du) + 0.5 * Math.abs(dy))
+    : Math.abs(k.belly) * (1.88 * k.ku * Math.abs(du) + 2.6 * k.kv * Math.abs(dy));
+  if (Math.abs(dw) >= slope) {
+    if (fa === 0 || fm === 0 || (fa <= 0) !== (fm <= 0)) return clothRoot(k, near, fa, m, fm);
+    const fb = clothGap(k, far);
+    return fb === 0 || (fm <= 0) !== (fb <= 0) ? clothRoot(k, m, fm, far, fb) : Infinity;
+  }
+  const p = 2.4 * du - 0.5 * dy, a = du * k.ku, b = dy * k.kv;
+  const curve = k.ripple ? k.ripple * (2 * Math.abs(a * p) + p * p)
+    : Math.abs(k.belly) * (1.88 * a * a + 10.4 * Math.abs(a * b) + 3 * b * b);
+  const jump = k.ripple ? 0 : 1.88 * Math.abs(k.belly * a);
+  const first = clothSearch(k, near, fa, m, fm, curve, jump);
+  return Number.isFinite(first) ? first : clothSearch(k, m, fm, far, clothGap(k, far), curve, jump);
 }
-// One halving, a straight line between the ends, then another on the side that still holds the crossing; below the
-// foot is open air.
+function clothSearch(k, a, fa, b, fb, curve, jump) {
+  const span = b - a, ua = RAY[0] + a * RAY[3], ub = RAY[0] + b * RAY[3];
+  let bends = 0;
+  if (jump) {
+    const lo = Math.min(ua, ub), hi = Math.max(ua, ub);
+    if (lo < -k.half && hi > -k.half) bends += jump;
+    if (lo < k.half && hi > k.half) bends += jump;
+  }
+  const error = curve * span * span / 8 + bends * span / 4;
+  if ((fa <= 0) === (fb <= 0) && Math.min(Math.abs(fa), Math.abs(fb)) > error) return Infinity;
+  if (fa === 0 && clothInside(k, ua, RAY[1] + a * RAY[4])) return a;
+  if ((fa <= 0) !== (fb <= 0) && Math.abs(fb - fa) / span > curve * span + 2 * bends) {
+    return clothRoot(k, a, fa, b, fb);
+  }
+  if (span * (Math.abs(RAY[3]) + Math.abs(RAY[4]) + Math.abs(RAY[5])) < 1e-5) {
+    return fa === 0 || fb === 0 || (fa <= 0) !== (fb <= 0) ? clothRoot(k, a, fa, b, fb) : Infinity;
+  }
+  const m = (a + b) / 2, fm = clothGap(k, m);
+  const first = clothSearch(k, a, fa, m, fm, curve, jump);
+  return Number.isFinite(first) ? first : clothSearch(k, m, fm, b, fb, curve, jump);
+}
 function clothRoot(k, a, fa, b, fb) {
+  if (fa === 0) return clothInside(k, RAY[0] + a * RAY[3], RAY[1] + a * RAY[4]) ? a : Infinity;
+  if (fb === 0) return clothInside(k, RAY[0] + b * RAY[3], RAY[1] + b * RAY[4]) ? b : Infinity;
   const h = (a + b) / 2, fh = clothGap(k, h);
   if ((fa <= 0) === (fh <= 0)) { a = h; fa = fh; } else { b = h; fb = fh; }
   const m = a + (b - a) * fa / (fa - fb), fm = clothGap(k, m);
@@ -2240,11 +2268,10 @@ function paintFlag(c, id, t, mark, k) {
 }
 // Canvas brightness follows the belly: brightest where the cloth stands farthest out (w, the hit's depth) and a few glyph
 // steps darker toward its edges. The canvas keeps its flat colour tier, so it stays pale and its rows draw in few runs.
-const CANVAS_TIERS = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7"];
 function paintCanvas(c, odd, id, t, s, k, u, v, w, cell) {
   const flat = s.fill * Math.exp(-t * 0.016), belly = k.belly ? w / (k.belly * 1.13) : 0;
   const b = flat * (0.88 + 0.3 * belly) * (s.tex(u, v, cell, k) ? 0.85 : 1);
-  put(c, glyph(b, odd), CANVAS_TIERS[Math.min(7, Math.floor(flat * 9))], id, t);
+  put(c, glyph(b, odd), CLASS.s[Math.min(7, Math.floor(flat * 9))], id, t);
 }
 function shadeSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   if (hitS.cloth) paintShipCloth(c, odd, ldx, ldy, dz);

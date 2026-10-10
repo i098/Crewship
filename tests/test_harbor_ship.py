@@ -158,7 +158,8 @@ for (const sail of SAILS) {
 for (const sail of SAILS) {
   // A ray along the wind, aimed past the mast, meets the canvas well downwind of the yard.
   const from = [sail.at[0] - 20 * WIND.x, sail.at[1] - sail.v1 * 0.7, sail.at[2] - 20 * WIND.z];
-  assert(hit(part(sail), ...from, WIND.x, 0, WIND.z) - 20 > 1, 'each sail must belly at least a metre downwind');
+  const t = hit(part(sail), ...from, WIND.x, 0, WIND.z);
+  assert(Number.isFinite(t) && t - 20 > 1, 'each sail must belly at least a metre downwind');
 }
 const fly = clothPoint(FLAG, FLAG.u1, FLAG.v1 / 2), hoist = clothPoint(FLAG, 0, FLAG.v1 / 2);
 assert((fly[0] - hoist[0]) * WIND.x + (fly[2] - hoist[2]) * WIND.z > 3, 'the flag must stream downwind of its staff');
@@ -180,6 +181,78 @@ for (let time = 0.25; time < 6; time += 0.25) {
   });
 }
 assert(breath > 0.05, 'the sails must breathe over time');
+"""
+    )
+
+
+def test_cloth_hits_find_the_nearest_valid_grazing_crossing():
+    _run_ship_scene(
+        r"""
+const part = k => ship.find(s => s.cloth === k);
+function reference(k, origin, direction) {
+  const local = t => {
+    const x = origin[0] + t * direction[0] - k.at[0], z = origin[2] + t * direction[2] - k.at[2];
+    return [x * k.cu + z * k.su, k.at[1] - origin[1] - t * direction[1], z * k.cu - x * k.su];
+  };
+  const gap = t => { const [u, v, w] = local(t); return w - clothDepth(k, u, v); };
+  let a = 0.001, fa = gap(a), rejected = false;
+  for (let b = a + 0.002; b <= 40; b += 0.002) {
+    const fb = gap(b);
+    if ((fa <= 0) !== (fb <= 0)) {
+      let lo = a, hi = b, flo = fa;
+      for (let i = 0; i < 30; i++) {
+        const m = (lo + hi) / 2, fm = gap(m);
+        if ((flo <= 0) === (fm <= 0)) { lo = m; flo = fm; } else hi = m;
+      }
+      const t = (lo + hi) / 2, [u, v, w] = local(t);
+      if (u >= k.u0 && u <= k.u1 && v >= 0 && v <= k.v1 && w >= k.w0 && w <= k.w1) {
+        if (clothInside(k, u, v)) return {t, rejected};
+        rejected = true;
+      }
+    }
+    a = b; fa = fb;
+  }
+  return {t: Infinity, rejected};
+}
+function check(k, origin, direction) {
+  const expected = reference(k, origin, direction), actual = hit(part(k), ...origin, ...direction);
+  if (Number.isFinite(expected.t)) {
+    assert(Number.isFinite(actual) && Math.abs(actual - expected.t) < 0.001,
+      `the nearest valid cloth crossing must remain visible: ${actual} vs ${expected.t}`);
+  } else assert.equal(actual, Infinity, 'a ray without a valid crossing must miss');
+  return expected;
+}
+function localRay(k, u, v, w, du, dv, dw) {
+  return [[k.at[0] + u * k.cu - w * k.su, k.at[1] - v, k.at[2] + u * k.su + w * k.cu],
+    [du * k.cu - dw * k.su, -dv, du * k.su + dw * k.cu]];
+}
+FLAG.phase = 3.18715;
+const origin = [6.5, 2.8, -8.07629], delta = [-0.883686, 1.53, 0.477623];
+const length = Math.hypot(...delta), direction = delta.map(v => v / length);
+assert(Number.isFinite(check(FLAG, origin, direction).t), 'the reported dock ray must intersect the flag');
+check(FLAG, origin.map((v, i) => v + 40 * direction[i]), direction.map(v => -v));
+for (const sail of SAILS) {
+  for (const side of [-1, 1]) {
+    const ray = localRay(sail, side * (sail.half * 1.08 + 1), sail.v1 * 0.65, sail.belly * 0.6, -side, 0, 0);
+    assert(Number.isFinite(check(sail, ...ray).t), 'both directions must hit every curved sail');
+  }
+}
+let laterValidCrossing = false;
+for (const phase of [0, 1, 2, 3.18715, 4, 5]) {
+  FLAG.phase = phase;
+  for (const v of [0.2, 1.5, 2.8]) for (const side of [-1, 1]) {
+    const expected = check(FLAG, ...localRay(FLAG, side < 0 ? -1 : 6.2, v, 0.08, -side, 0, 0));
+    laterValidCrossing ||= expected.rejected && Number.isFinite(expected.t);
+  }
+}
+assert(laterValidCrossing, 'a crossing beyond the fly must not hide a later crossing inside the flag');
+const depth = clothDepth;
+let evaluations = 0;
+clothDepth = (...args) => { evaluations++; return depth(...args); };
+const miss = hit(part(FLAG), ...localRay(FLAG, 0.05, -1, 0.14, 0, 1, 0).flat());
+clothDepth = depth;
+assert.equal(miss, Infinity, 'the ray must clear the small ripples at the hoist');
+assert.equal(evaluations, 3, 'samples that prove a miss must not need more gap evaluations');
 """
     )
 
