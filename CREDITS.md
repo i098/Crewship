@@ -21,6 +21,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Google Workspace CLI](https://github.com/googleworkspace/cli) (`gws`): Google Workspace access for agents. License: Apache-2.0.
 - [Sentrux](https://github.com/sentrux/sentrux) (`sentrux`, `sentrux-grammars`): the structural quality gate. License: MIT.
 - [Fallow](https://github.com/fallow-rs/fallow) (`fallow`): JavaScript and TypeScript changed-code checks. License: MIT.
+- [Pyrefly](https://github.com/facebook/pyrefly) (`pyrefly`): Python type checks and language server. License: MIT.
 - [Concord](https://github.com/chojs23/concord) (`concord`): the Discord terminal client. License: GPL-3.0-only.
 - [slk](https://github.com/gammons/slk) (`slk`): the Slack terminal client. License: MIT.
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.

@@ -66,6 +66,7 @@
 - Codex context: 272K default, 1M maximum, `extendedContext` on.
   The current bundled omp catalog limits the effective maximum to 872K.
 - omp plugins: `ponytail`, `i-have-adhd`, `caveman`
+- Python tooling: [Pyrefly](https://github.com/facebook/pyrefly), a checksum-verified type checker and language server installed on every host
 - omp extension `crewship-quality-gate`: [sentrux and fallow check](docs/omp.md#quality-gate) at each turn end
 - omp extension `aa-mode-icons`: [mode and hook icons](docs/omp.md#status-line-icons) on the status line
 - omp extension `crewship-herdr-sidebar`: topic, pane name, and PR line for the [Herdr sidebar](docs/herdr.md)
