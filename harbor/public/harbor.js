@@ -2732,7 +2732,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     const dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1) * grain;
     const [moonAndLamps, warm] = lightAt(wx, wy, pz, nx, ny, nz, shadows && !s.dry), lit = groundLight(s, moonAndLamps, warm, nx, ny, nz);
     // Contact shadow: walls darken toward the ground they stand on.
-    const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : floorAt(wx, pz) ?? 0)));
+    const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : standing(s, wy))));
     const fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
     // Textured cells keep their glyph; fountain water keeps its animated texture glyphs.
@@ -2743,6 +2743,10 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   // Floors get a negative id: they outline what stands on them but draw no edges themselves.
   put(c, ch, cls, (ny > 0.7 ? -1 : 1) * (s.id * 16 + (k >= 0 ? k >> 2 : 12 - k)), t);
   SP[c] = s.spot;
+}
+// The height a solid stands on, for its contact shadow, read once under its centre; steep ground is its own floor.
+function standing(s, y) {
+  return s === TERRAIN ? y : (s.ground ??= floorAt((s.bb[0] + s.bb[3]) / 2, (s.bb[2] + s.bb[5]) / 2) ?? 0);
 }
 // The glyph of an untextured cell: blades that lean with the wind on the grass, else one from the density ramp.
 function surfaceGlyph(s, mat, b, ny, x, z, odd) {
