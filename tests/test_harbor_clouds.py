@@ -1,4 +1,4 @@
-"""Check the harbor's cloud layers: wind drift, moonlit edges, cover, and the sky buffer's refresh."""
+"""Check the harbor's cloud layers (wind drift, moonlit edges, cover, the sky buffer's refresh) and the horizon."""
 
 import shutil
 import subprocess
@@ -122,6 +122,15 @@ for (let a = 0; !star && a < 6; a += 0.002) {
 }
 assert(star, 'the sky must have a star to cover');
 assert.notEqual(skyWith(0.5, star)[0], '*', 'cloud must hide the stars');
+// Just above the horizon the sky is empty or dark hills, never pale haze, at every azimuth.
+const horizon = new Set();
+for (let a = -Math.PI; a < Math.PI; a += 0.003) {
+  for (let el = 0; el < 0.04; el += 0.004) {
+    const [ch, cls] = skyWith(0, [Math.sin(a) * Math.cos(el), Math.sin(el), Math.cos(a) * Math.cos(el)]);
+    if (cls[0] !== 'l') horizon.add(ch + cls);
+  }
+}
+assert.deepEqual([...horizon].sort(), [' f', '#v'], 'the horizon must show only empty sky and dark hills');
 
 // Sky cells read the buffer: turning within fresh texels computes no clouds, each texel refreshes once a tenth of a
 // second with the elevation rows taking turns, and a refresh uses the clouds seen from where the camera stands.
