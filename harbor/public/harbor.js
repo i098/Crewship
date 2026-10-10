@@ -1210,7 +1210,10 @@ function hullSide(side, y0, y1, z0, z1) {
 // out through the port; two stepped wooden cheeks and a bed carry it on four round trucks.
 function gun(side, z) {
   const at = (u) => SX + side * u, span = (u0, u1) => [Math.min(at(u0), at(u1)), Math.max(at(u0), at(u1))];
-  const iron = { dim: 0.9 }, wood = { dim: 1.4 }, rings = (x) => ([1.45, 2.2].some((u) => Math.abs(Math.abs(x - SX) - u) < 0.03) ? "-" : null);
+  const iron = { dim: 0.9 }, wood = { dim: 1.4 }, rings = (x) => {
+    const u = Math.abs(x - SX);
+    return Math.abs(u - 1.45) < 0.03 || Math.abs(u - 2.2) < 0.03 ? "-" : null;
+  };
   barOut(side, z, 1.05, 3.2, 0.2, 0.14, { ...iron, tex: rings });
   barOut(side, z, 3, 3.12, 0.17, 0.17, iron);
   blob(gunDeck, at(1.05), GUN_Y, z, 0.16, 0.2, 0.2, IRON, iron);
