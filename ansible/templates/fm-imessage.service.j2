@@ -32,6 +32,8 @@ StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
 ExecStart={{ crewship_local_bin }}/bun bridge.ts
+KillMode=mixed
+TimeoutStopSec=10
 Restart=always
 RestartSec=15
 

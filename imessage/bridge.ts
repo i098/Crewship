@@ -16,7 +16,7 @@
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
@@ -25,6 +25,36 @@ import { type Attachment, bubbles, describe, DeskTiming, deskInput, deskPrompt, 
 import { type Chat, type Kind, Memory } from "./memory.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
 
+let stopping = false;
+const children = new Set<Bun.Subprocess>();
+function track<T extends Bun.Subprocess>(proc: T): T {
+  children.add(proc);
+  void proc.exited.finally(() => children.delete(proc));
+  return proc;
+}
+
+async function stop() {
+  if (stopping) return;
+  stopping = true;
+  const running = [...children];
+  for (const proc of running) proc.kill("SIGTERM");
+  await Promise.race([Promise.all(running.map((proc) => proc.exited)), Bun.sleep(2000)]);
+  for (const proc of children) proc.kill("SIGKILL");
+  // Reap killed children, but do not let a stuck child hold the bridge open.
+  await Promise.race([Promise.all([...children].map((proc) => proc.exited)), Bun.sleep(500)]);
+  process.exit(0);
+}
+process.on("SIGTERM", () => void stop());
+process.on("SIGINT", () => void stop());
+
+function persistLatest(path: string, text: string) {
+  try {
+    writeFileSync(`${path}.tmp`, text, { mode: 0o600 });
+    renameSync(`${path}.tmp`, path);
+  } catch (e) {
+    log("persist the latest text")(e);
+  }
+}
 const env = process.env;
 const need = (name: string) => env[name] || (() => { throw new Error(`fm-imessage: ${name} is not set`); })();
 const OWNER = need("FM_IMESSAGE_OWNER");
@@ -55,7 +85,7 @@ const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
 const typing = (space: LineMessage["space"], on: boolean) =>
-  void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
+  !stopping && void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
 // This service is the memory's one writer: systemd runs one instance of the unit.
 const memory = new Memory(MEMORY_DIR, compactChat, log("memory"));
 const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch(log("desk failed")));
@@ -98,7 +128,8 @@ for (const name of TRANSPORTS) {
     const bb = new BlueBubbles(relays, STATE);
     // The relays post their webhooks to this address:port; bluebubbles.ts reads each message back with the password.
     const listen = new URL(`http://${need("FM_BLUEBUBBLES_WEBHOOK")}`);
-    Bun.serve({ hostname: listen.hostname, port: Number(listen.port), fetch: (req) => bb.webhook(req) });
+    Bun.serve({ hostname: listen.hostname, port: Number(listen.port), fetch: (req) =>
+      stopping ? new Response("stopping\n", { status: 503 }) : bb.webhook(req) });
     bb.start();
     lines.push({
       name,
@@ -207,6 +238,7 @@ Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
   async fetch(req) {
+    if (stopping) return new Response("stopping\n", { status: 503 });
     if (!localCommand(req.headers, PORT)) return new Response("forbidden\n", { status: 403 });
     const url = new URL(req.url);
     if (req.method === "GET" && url.pathname === "/location") {
@@ -250,16 +282,19 @@ console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ?
 
 // Puts one item in the outbox and answers once the item is on disk.
 function queue(item: Out, what: string) {
+  if (stopping) return new Response("stopping\n", { status: 503 });
   put(item);
   return new Response(`queued ${what}; the bridge sends in order and retries while the upstream fails\n`);
 }
 
 // Puts one item in the outbox with a client GUID of its own.
 function put(item: Out) {
+  if (stopping) return;
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
 async function deliver(o: Out, save: (o: Out) => void) {
+  if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.react) {
     // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
@@ -320,12 +355,14 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (text: string) => {
+      if (stopping) throw new Error("bridge stopping");
       // A read-only lookup cannot have sent text, so its failure can use a fallback.
       const separated = reply ? await line.separated(space, reply).catch((e: unknown) => {
         throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
       }) : false;
       const thread = separated ? reply : undefined;
       try {
+        if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         await line.send(space, text, thread, guid);
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
@@ -346,28 +383,29 @@ function remember(kind: Kind, text: string): number | undefined {
 
 // One desk turn for his latest burst. It drops its draft if he sent more or Firstmate answered meanwhile.
 async function runDesk(current: () => boolean) {
+  if (stopping) return;
   const target = latest;
   const at = latestRef;
   if (!target || !at) return;
   typing(target.space, true);
-  const inbox = Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore" });
+  const inbox = track(Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore" }));
   const status = await new Response(inbox.stdout).text();
-  if (!current()) return typing(target.space, false);
+  if (stopping || !current()) return typing(target.space, false);
   // The view of the chat before his burst, then the per-turn state, then his burst, all under the ceiling.
   const from = burstFrom ?? memory.msgs.length;
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, memory.msgs.slice(from).map((m) => `${m.kind}: ${m.text}`).join("\n"));
-  const proc = Bun.spawn(
+  const proc = track(Bun.spawn(
     ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
       "--thinking=off", "--model", DESK_MODEL, "--system-prompt", DESK_PROMPT],
     { cwd: DESK_DIR, env: { ...env, FM_DESK_MEMORY: MEMORY_DIR, FM_DESK_SPENT: String(spent) }, stdin: new Blob([prompt]), stdout: "pipe", stderr: "ignore", timeout: 45_000 },
-  );
+  ));
   deskRun = proc;
   const drafted = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
   const ok = (await proc.exited) === 0 && drafted !== "";
   if (deskRun !== proc) return; // cancelled while drafting
   deskRun = undefined;
   typing(target.space, false);
-  if (!current()) return;
+  if (stopping || !current()) return;
   burstFrom = undefined;
   const skip = !ok || isSkip(drafted); // a failed desk stays quiet; Firstmate still has the note
   const tapback = skip ? undefined : parseReact(drafted);
@@ -380,15 +418,17 @@ async function runDesk(current: () => boolean) {
 // One compaction conversation: an omp session in its own private directory, which end() removes.
 // Request Luna 6 with thinking off and the priority (Fast) service tier; keep the desk model unchanged.
 function compactChat(system: string): Chat {
+  if (stopping) throw new Error("bridge stopping");
   const dir = mkdtempSync(`${STATE}/compact-`);
   let turns = 0;
   return {
     async say(text) {
-      const proc = Bun.spawn(
+      if (stopping) throw new Error("bridge stopping");
+      const proc = track(Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
           "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
         { cwd: DESK_DIR, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
-      );
+      ));
       const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
       if ((await proc.exited) !== 0 || !line) throw new Error(`compaction call failed (exit ${proc.exitCode})`);
       return line;
@@ -415,6 +455,7 @@ async function noteText(message: LineMessage) {
 
 // Files a Firstmate inbox note; true when the inbox took it.
 function fileNote(requestId: string, text: string): boolean {
+  if (stopping) return false;
   const note = Bun.spawnSync(
     [INBOX, "note", "--request-id", requestId, "--", `[iMessage from the owner; answer with fm-imessage] ${text}`],
     { cwd: FM_HOME, env: { ...env, FM_HOME } },
@@ -424,9 +465,14 @@ function fileNote(requestId: string, text: string): boolean {
 
 // Tries the attachments of his message again; once all are saved, files its note again with their paths.
 async function fetchAgain(ref: Ref) {
+  if (stopping) throw new Error("bridge stopping");
   const line = lineOf(ref);
   if (!line) throw Object.assign(new Error(`transport ${ref.line} is not set`), { permanent: true });
-  const { text, failed } = await noteText(await line.find(ref));
+  const { text, failed } = await line.find(ref).then(noteText).catch((e) => {
+    // A shutdown must not bury a download before its final inbox notice can be filed.
+    throw stopping ? new Error("bridge stopping") : e;
+  });
+  if (stopping) throw new Error("bridge stopping");
   if (failed !== undefined) throw failed;
   if (text !== undefined && !fileNote(`${line.name}-${ref.id}-saved`, `(an earlier attachment is saved now) ${text}`)) {
     throw new Error("the inbox note failed");
@@ -435,6 +481,7 @@ async function fetchAgain(ref: Ref) {
 
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
+  if (stopping) return;
   console.log(`fm-imessage: inbound ${line.name} ${message.content.type} -> ${text === undefined ? "ignored" : "note"}`);
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
@@ -451,12 +498,12 @@ async function handle(line: Line, message: LineMessage) {
     latestAt = at;
     recent.push(ref);
     recent.splice(0, Math.max(0, recent.length - 10));
-    await Bun.write(latestFile(line.name), `${message.space.id}\n${message.id}\n${at}\n`).catch(log("persist the latest text"));
+    persistLatest(latestFile(line.name), `${message.space.id}\n${message.id}\n${at}\n`);
   }
   if (directChat.test(ref.space) && at >= proactiveAt) {
     proactiveRef = ref;
     proactiveAt = at;
-    await Bun.write(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`).catch(log("persist the latest direct text"));
+    persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
   await message.read().catch(log("mark read"));
 }
@@ -497,6 +544,7 @@ async function watchEdits(client: AdvancedIMessage) {
 }
 
 function edited(e: EventTypeMap["message.edited"]) {
+  if (stopping) return;
   const text = e.content.text ?? "(no text)";
   const was = said.get(e.messageGuid) ?? "not known: the bridge did not see the text before the edit";
   console.log("fm-imessage: inbound edit -> note");
@@ -511,6 +559,7 @@ if (raw) void watchEdits(raw);
 // handled is released, so a webhook or catch-up delivers it again.
 const delivered = new Set<string>();
 for await (const [line, message] of inbound(lines, 1000, delivered)) {
+  if (stopping) break;
   if (message.direction === "outbound") {
     line.markSeen?.(message.id);
     continue;
@@ -521,6 +570,7 @@ for await (const [line, message] of inbound(lines, 1000, delivered)) {
     continue;
   }
   const handled = await handle(line, message).then(() => true, (e) => void log("failed to handle a message")(e));
+  if (stopping) break;
   if (handled) line.markSeen?.(message.id);
   else {
     delivered.delete(message.id);

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -1304,7 +1305,15 @@ function space(id) {
     startTyping: typing,
     stopTyping: typing,
     async send(text) { call("send"); sent(`send ${text}`, id); appendFileSync(`${dir}/send-targets`, `${id}\\n`); },
-    async getMessage(mid) { call("getMessage"); return existsSync(`${dir}/messages/${mid}.json`) ? load(mid) : undefined; },
+    async getMessage(mid) {
+      call("getMessage");
+      if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
+        writeFileSync(`${dir}/lookup-ready`, "");
+        while (!existsSync(`${dir}/lookup-release`)) await Bun.sleep(10);
+        throw Object.assign(new Error("attachment not found"), { permanent: true });
+      }
+      return existsSync(`${dir}/messages/${mid}.json`) ? load(mid) : undefined;
+    },
   };
 }
 function message(m) {
@@ -1427,6 +1436,63 @@ def fake_bridge(tmp_path):
         return result.stdout
 
     return fake, state, notes, err, start, inbound, cli, text
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("mode", ["desk", "compaction"])
+@pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGINT])
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
+    """Stop the actual bridge with a model child running, including a child that refuses SIGTERM."""
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    child_file = fake / "child"
+    child = tmp_path / "bin/omp"
+    child.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, signal, time\n"
+        "def terminate(signum, frame):\n"
+        f"    open({str(fake / 'term-received')!r}, 'w').write('received')\n"
+        f"    if not {ignore_term!r}: raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM, terminate)\n"
+        f"open({str(child_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True: time.sleep(1)\n"
+    )
+    if mode == "compaction":
+        (fake / "lookup-stop").touch()
+        (state / "downloads").mkdir(parents=True)
+        (state / "downloads/1.json").write_text(json.dumps({"space": "chat", "id": "lost"}))
+    bridge = start(1)
+    pid = None
+    try:
+        inbound("stop", text="x" * 600 if mode == "compaction" else "hello")
+        wait_for(lambda: text(child_file), "the model child")
+        pid = int(text(child_file))
+        if mode == "compaction":
+            wait_for(lambda: (fake / "lookup-ready").exists(), "the pending download lookup")
+        before = time.monotonic()
+        bridge.send_signal(stop_signal)
+        wait_for(lambda: (fake / "term-received").exists(), "SIGTERM delivery to the model child", timeout=3)
+        (fake / "lookup-release").touch()
+        assert bridge.wait(timeout=5) == 0, text(err)
+        assert time.monotonic() - before < 5
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        if mode == "compaction":
+            assert json.loads((state / "downloads/1.json").read_text())["id"] == "lost"
+            assert not list((state / "downloads-dead").glob("*.json"))
+        for path in (state / "memory").rglob("*.jsonl"):
+            for line in path.read_text().splitlines():
+                json.loads(line)
+        json.loads((state / "memory/view.json").read_text())
+    finally:
+        if bridge.poll() is None:
+            bridge.kill()
+            bridge.wait(timeout=5)
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")

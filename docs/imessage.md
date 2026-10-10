@@ -23,6 +23,7 @@ If the desk fails or times out after 45 seconds, the service sends nothing: Firs
 The desk's system prompt is `deskPrompt` in `imessage/desk.ts`. The owner's name and the two model names come from the config.
 
 The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, the newest of them is his latest text again, so replies, tapbacks, and typing still go to the right text. A file from before the time was kept counts as the oldest.
+The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
 
 ## Upstream outages
 
@@ -237,7 +238,20 @@ Apply installs these items:
 
 The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a unit drop-in (`systemctl --user edit fm-imessage`) and in the environment of the commands. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
 
-The service is for the host's own commands (`fm-imessage`, `fm-location`) only. It answers `403` to any request that lacks the header `X-Firstmate: 1` or whose `Host` is not exactly `127.0.0.1:<port>`, before it looks at the path. A web page open in a browser on the host cannot set a custom header without a CORS preflight, which the service never answers, and the `Host` check stops DNS rebinding. So a page cannot send messages as Firstmate or read the location. If you call the service with your own `curl`, add `-H "X-Firstmate: 1"`.
+The service is for the host's own commands (`fm-imessage`, `fm-location`) only.
+Except during shutdown, it checks the header `X-Firstmate: 1` and requires `Host` to be exactly `127.0.0.1:<port>` before looking at the path.
+It answers `403` if either check fails.
+A web page open in a browser on the host cannot set a custom header without a CORS preflight, which the service never answers.
+The `Host` check stops DNS rebinding.
+So a page cannot send messages as Firstmate or read the location.
+If you call the service with your own `curl`, add `-H "X-Firstmate: 1"`.
+
+On SIGTERM or SIGINT, the bridge refuses new work and sends SIGTERM to its running desk, compaction, and inbox-status children.
+During shutdown, the command endpoint and BlueBubbles webhook answer `503` before other request checks.
+The bridge waits up to two seconds, then sends SIGKILL to children that remain.
+It waits up to another 500 ms for those children to exit, then exits with status 0.
+The unit sets `KillMode=mixed` and `TimeoutStopSec=10` so systemd kills remaining service processes if shutdown stalls.
+See [Desk memory](#desk-memory) for compaction recovery after a restart.
 
 To turn it off, remove the block, then run `systemctl --user disable --now fm-imessage` and delete the unit.
 
