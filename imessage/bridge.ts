@@ -1,7 +1,6 @@
 // Two-way iMessage between the owner and Firstmate over the transports that FM_IMESSAGE_TRANSPORTS lists in order:
 //   photon (the default), the line of a Photon Spectrum project, and bluebubbles, self-hosted BlueBubbles servers on
-//   Macs (bluebubbles.ts). A bubble goes out on the first transport, and on the next one only when the send surely
-//   did not go out (desk.ts failover), so the second transport is the fallback line.
+//   Macs (bluebubbles.ts). See routes for outbound transport selection and docs/imessage.md for the routing contract.
 // Inbound: each text the owner sends is filed first as a Firstmate inbox note, which wakes Firstmate for the
 //   real answer, then marked read. A one-shot front-desk model steps in only when Firstmate stays silent for the
 //   quiet period after his last text; it often skips or uses a tapback, like a person would. No transport reports
@@ -79,7 +78,7 @@ type Line = {
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
   send(space: string, text: string, reply?: string, guid?: string): Promise<unknown>;
-  sent?(space: string, text: string, since: number): Promise<boolean>; // whether a text went out since; throws when unknown
+  sent?(space: string, text: string, since: number): Promise<boolean>;
   react(ref: Ref, emoji: string): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
@@ -160,7 +159,7 @@ for (const name of TRANSPORTS) {
     react: async (ref, emoji) => (await find(ref)).react(emoji),
   });
 }
-// The transport of a queued item or a kept text; undefined when that transport is not set any more.
+// The active transport of a queued item or a kept text; undefined when absent or unable to start.
 const lineOf = (ref: Ref) => lines.find((line) => line.name === (ref.line ?? "photon"));
 // A Ref on a transport; a Photon one has no `line`, the same as the items queued before there were transports.
 const refOn = (name: string, space: string, id: string): Ref => (name === "photon" ? { space, id } : { line: name, space, id });
@@ -170,12 +169,23 @@ const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATES
 let latest: LineMessage | undefined; // his latest text on any transport: typing, tapbacks and the desk go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
-for (const line of lines) {
-  const saved = Bun.file(latestFile(line.name));
-  if (!(await saved.exists())) continue;
-  const [space = "", id = "", time = ""] = (await saved.text()).trim().split("\n");
-  line.latest = refOn(line.name, space, id);
-  if ((Number(time) || 0) > latestAt) [latestRef, latestAt] = [line.latest, Number(time) || 0];
+let proactiveRef: Ref | undefined;
+let proactiveAt = -1;
+const directChat = /^[^;]+;-;[^;]+$/;
+for (const name of TRANSPORTS) {
+  for (const suffix of ["", "-direct"]) {
+    const saved = Bun.file(`${latestFile(name)}${suffix}`);
+    if (!(await saved.exists())) continue;
+    const [space = "", id = "", time = ""] = (await saved.text()).trim().split("\n");
+    const ref = refOn(name, space, id);
+    const at = Number(time) || 0;
+    if (!suffix) {
+      const line = lineOf(ref);
+      if (line) line.latest = ref;
+      if (at > latestAt) [latestRef, latestAt] = [ref, at];
+    }
+    if (directChat.test(space) && at > proactiveAt) [proactiveRef, proactiveAt] = [ref, at];
+  }
 }
 if (latestRef) latest = await lineOf(latestRef)?.find(latestRef).catch((e) => void log("could not restore the latest text; sends still go to it")(e));
 const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS);
@@ -208,7 +218,7 @@ Bun.serve({
       }
     }
     if (req.method !== "POST" || !["/send", "/typing", "/react"].includes(url.pathname)) return new Response("not found", { status: 404 });
-    const ref = latestRef; // sends and tapbacks go to his latest text as of now
+    const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
     desk.firstmateActive();
@@ -231,7 +241,9 @@ Bun.serve({
     const target = replyTo > 0 ? recent[recent.length - replyTo] : undefined;
     if (replyTo > 0 && !target) return new Response(`nothing queued: only ${recent.length} text(s) kept since the service started\n`, { status: 400 });
     // A threaded reply goes out on the transport and in the conversation of the text it replies to.
-    return queue({ ...(target ?? ref), bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, `${parts.length} bubble(s)`);
+    const destination = target ?? proactiveRef;
+    if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
+    return queue({ ...destination, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, `${parts.length} bubble(s)`);
   },
 });
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
@@ -247,10 +259,6 @@ function put(item: Out) {
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
-// Delivers one outbox item: the tapback on its own transport, or each bubble not sent yet, saving the progress
-// after each bubble so a retry or a restart sends at most the one bubble in flight again (delivery is at least
-// once). Each bubble goes out on the first transport that takes it (see routes). A send that may have gone out is
-// saved (`maybe`), and the retry first asks those transports whether it did, so a text is not sent twice.
 async function deliver(o: Out, save: (o: Out) => void) {
   const kind = o.kind ?? "supervisor";
   if (o.react) {
@@ -276,9 +284,6 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (!o.silent) remember(kind, parts.join("\n\n"));
 }
 
-// Sends bubble `i` of item `o`. First it asks each transport in `o.maybe` whether the bubble is already out there (a
-// BlueBubbles relay can say; Photon cannot, so the bubble then goes to Photon only). A failure that may hide a sent
-// text is saved in the item before it is thrown, so the retry, even after a restart, checks that transport first.
 async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
   const text = o.bubbles![i]!;
   const maybe: Record<string, string> = {};
@@ -301,17 +306,17 @@ async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
   }
 }
 
-// Where bubble `i` of item `o` can go: the first bubble with an explicit reply target tries its own transport first,
-// otherwise transport order. Only transports in `maybe` qualify when it has any. Other transports use his latest
-// conversation there, or their home chat. A send that may have gone out adds its transport and conversation to `maybe`.
+// Plain sends stay on their queued chat's transport, including --no-thread replies and desk responses.
+// An uncertain attempt stays in its original chat, even when a newer inbound text changes line.latest.
 function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
   const guid = o.guid && `${o.guid}-${i}`;
   const only = Object.keys(maybe);
-  const preferred = i === 0 && o.reply ? lineOf(o) : undefined;
-  const ordered = preferred ? [preferred, ...lines.filter((line) => line !== preferred)] : lines;
+  const preferred = !o.reply || i === 0 ? lineOf(o) : undefined;
+  const ordered = only.length ? lines : !o.reply ? (preferred ? [preferred] : []) :
+    preferred ? [preferred, ...lines.filter((line) => line !== preferred)] : lines;
   return ordered.flatMap((line) => {
     const own = line === lineOf(o);
-    const space = own ? o.space : line.latest?.space ?? line.home;
+    const space = maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (text: string) => {
@@ -320,7 +325,12 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
         throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
       }) : false;
       const thread = separated ? reply : undefined;
-      return line.send(space, text, thread, guid).catch((e) => { if (!notSent(e)) maybe[line.name] = space; throw e; });
+      try {
+        await line.send(space, text, thread, guid);
+      } catch (e) {
+        if (!notSent(e)) maybe[line.name] = space;
+        throw e;
+      }
     } }];
   });
 }
@@ -441,6 +451,11 @@ async function handle(line: Line, message: LineMessage) {
     recent.push(ref);
     recent.splice(0, Math.max(0, recent.length - 10));
     await Bun.write(latestFile(line.name), `${message.space.id}\n${message.id}\n${at}\n`).catch(log("persist the latest text"));
+  }
+  if (directChat.test(ref.space) && at >= proactiveAt) {
+    proactiveRef = ref;
+    proactiveAt = at;
+    await Bun.write(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`).catch(log("persist the latest direct text"));
   }
   await message.read().catch(log("mark read"));
 }
