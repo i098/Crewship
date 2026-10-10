@@ -44,9 +44,11 @@ Ten steps with pale treads, darker risers, and a hand rail on each side connect 
 Map walks connect the dock through the gangway and reach the stern roof through the supported stairs.
 Ship approaches avoid deck obstacles and reject unsupported floors or height changes larger than the manual walking limit.
 One scene wind fills the sails into curved bellies that slowly fill and ease.
-The sheets stay taut to the moving sail corners, and the flag and the masthead pennants stream with the same wind.
+Each foot sags in an arc between its corners, and the sides bow out.
+The sheets stay taut to the moving sail corners.
+The black flag shows a pale skull and crossbones and has a wavy fly edge; it streams with the masthead pennants in the same wind.
 With reduced motion, the sails stay full but do not move.
-The sails keep a pale canvas tone at night, and their shading shows the curves.
+The sails keep a pale canvas tone at night and are brightest where they belly out farthest.
 Outboard lanterns make the gun ports visible.
 
 The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.

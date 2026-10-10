@@ -121,9 +121,9 @@ assert.equal(cell(SX,11)[1], 'o', 'the map must retain the raised bow');
 def test_ship_canvas_stays_pale_and_flag_stays_black_at_night():
     _run_ship_scene(
         r"""
-function paintPart(s, y) {
-  cam.x = cam.lx = (s.bb[0] + s.bb[3]) / 2;
-  cam.y = cam.ly = y; cam.z = s.bb[2] - 4;
+function paintPart(s, y, x = (s.bb[0] + s.bb[3]) / 2) {
+  cam.x = cam.lx = x;
+  cam.y = cam.ly = y; cam.z = s.bb[2] - 4; cam.r = [1, 0, 0]; cam.tanV = 0.62;
   hitS = s; hitT = hit(s, cam.lx, cam.ly, cam.z, 0, 0, 1); hitK = entryK;
   shadeSolid(0, 0, true, 0, 0, 1, 0, 0);
   return COLORS[C[0]].slice(1).match(/../g).map(v => parseInt(v, 16));
@@ -131,8 +131,11 @@ function paintPart(s, y) {
 const canvasPart = ship.find(s => s.tex === sailTexture);
 const pale = paintPart(canvasPart, (canvasPart.bb[1] + canvasPart.bb[4]) / 2);
 assert(pale.every(v => v > 150), 'the canvas must remain pale under night lighting');
-const black = paintPart(ship.find(s => s.flag), 20.1);
-assert(black.every(v => v < 80), 'the pirate flag must retain a dark silhouette');
+const flag = ship.find(s => s.flag);
+paintPart(flag, FLAG.at[1] - 2.8);
+assert.equal(G[0], ' ', 'the black flag must leave its cloth dark');
+const skull = paintPart(flag, FLAG.at[1] - 1.12, FLAG.at[0] + 2.5 * FLAG.cu);
+assert(G[0] === '@' && skull.every(v => v > 150), 'the skull must stand out pale on the black flag');
 const wood = paintPart(ship.find(s => s.hull), 0.15);
 assert(wood[0] - wood[1] > 20 && wood[1] - wood[2] > 20, 'the hull must keep its warm wood tone instead of using the cloth paint');
 """
@@ -143,7 +146,15 @@ def test_sails_fill_downwind_and_their_sheets_follow_the_corners():
     _run_ship_scene(
         r"""
 const part = cloth => ship.find(s => s.cloth === cloth);
-const corner = (sail, side) => clothPoint(sail, side * sail.u1, sail.v1);
+const corner = (sail, side) => clothPoint(sail, side * sail.half, clothFoot(sail, side * sail.half));
+for (const sail of SAILS) {
+  // Rays along the canvas normal: the foot sags below its corners in the middle, and the leeches bow out.
+  const s = part(sail), low = (clothFoot(sail, sail.half) + sail.v1) / 2;
+  const at = (u, v) => { const p = clothPoint(sail, u, v); return hit(s, p[0] + 10 * sail.su, p[1], p[2] - 10 * sail.cu, -sail.su, 0, sail.cu); };
+  assert(Number.isFinite(at(0, low)), 'the foot must sag below the corners in the middle');
+  assert.equal(at(0.95 * sail.half, low), Infinity, 'the foot must rise to the corners');
+  assert(Number.isFinite(at(1.03 * sail.half, clothFoot(sail, sail.half) / 2)), 'the leeches must bow out');
+}
 for (const sail of SAILS) {
   // A ray along the wind, aimed past the mast, meets the canvas well downwind of the yard.
   const from = [sail.at[0] - 20 * WIND.x, sail.at[1] - sail.v1 * 0.7, sail.at[2] - 20 * WIND.z];
