@@ -60,7 +60,10 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   Each chunk and reduction task states the source message's kind.
   Retries share a 16,000-byte input budget, including prior replies and reserved framing.
   Each model call keeps its 60-second limit.
-  Compaction uses Haiku 4.5 with reasoning disabled; the configured desk model stays unchanged.
+  Compaction requests Luna 6 (`openai-codex/gpt-6-luna`) with `--thinking=off` and `--service-tier=priority` (the Fast tier, requested but not observed).
+  The configured desk model stays unchanged.
+  In omp 18.7.0, thinking off omits the reasoning setting rather than explicitly disabling reasoning.
+  The measured provider responses reported `serviceTier=default`, despite the priority request; some responses contained thinking blocks.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.
   The service retries after 30 seconds, then doubles the delay to at most 30 minutes.
   New messages do not trigger an early retry.
