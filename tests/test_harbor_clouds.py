@@ -51,7 +51,7 @@ for (const layer of layers) {
     const before = cloudDensity(...d);
     T = 40; gatherClouds(0);
     if (Math.abs(cloudDensity(...d) - before) > 0.1) moved++;
-    Object.assign(cam, {x: CLOUD_WIND[0] * layer.speed * 30, z: CLOUD_WIND[2] * layer.speed * 30}); gatherClouds(0);
+    Object.assign(cam, {x: WIND.x * layer.speed * 30, z: WIND.z * layer.speed * 30}); gatherClouds(0);
     assert(Math.abs(cloudDensity(...d) - before) < 1e-5, 'clouds must drift downwind at their layer speed');
     if (before > 0.5) clouded++;
   });

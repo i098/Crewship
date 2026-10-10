@@ -33,8 +33,6 @@ for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
 // ---- World -------------------------------------------------------------------------------
 const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
-// The scene's wind blows toward this unit vector in the ground plane, square to the braced yards; clouds drift with it.
-const CLOUD_WIND = [-0.6, 0, 0.8];
 const world = [];
 const ship = [];
 const room = [];
@@ -944,8 +942,8 @@ function blocked(x, z, fy) {
 }
 
 // ---- Tall grass ---------------------------------------------------------------------------
-// The scene's wind blows toward -x and +z, the way the flag streams.
-const WIND = { x: -0.82, z: 0.57 };
+// The scene's wind blows toward -x and +z, square to the ship's braced yards; grass and clouds move with it.
+const WIND = { x: -0.6, z: 0.8 };
 // Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
 // paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
 // dune grass.
@@ -2165,7 +2163,7 @@ let cloudFrame = -1;
 function gatherClouds(tenths) {
   if (reduced.matches) SKY_ROW.fill(--cloudFrame);
   else for (let j = 0; j < SKY_H; j++) SKY_ROW[j] = Math.floor(tenths + j * 0.618 % 1);
-  const along0 = cam.x * CLOUD_WIND[0] + cam.z * CLOUD_WIND[2], across0 = cam.x * CLOUD_WIND[2] - cam.z * CLOUD_WIND[0];
+  const along0 = cam.x * WIND.x + cam.z * WIND.z, across0 = cam.x * WIND.z - cam.z * WIND.x;
   cloudCount = 0;
   ROW_COUNT.fill(0);
   ROW_BINS.fill(0);
@@ -2180,7 +2178,7 @@ function gatherClouds(tenths) {
   });
 }
 function placeCloud(I, J, base, along, across) {
-  const x = along * CLOUD_WIND[0] + across * CLOUD_WIND[2] - cam.x, z = along * CLOUD_WIND[2] - across * CLOUD_WIND[0] - cam.z, y = base - cam.y;
+  const x = along * WIND.x + across * WIND.z - cam.x, z = along * WIND.z - across * WIND.x - cam.z, y = base - cam.y;
   const flat = Math.sqrt(x * x + z * z), haze = 1 - smooth(flat / base - 3.5), d = Math.sqrt(flat * flat + y * y);
   if (haze <= 0) return;
   const length = base * (0.7 + 0.4 * hash(I * 3, J * 5)), bumps = 3 + Math.floor(3 * hash(J, I * 7)), o = cloudCount * 25;
