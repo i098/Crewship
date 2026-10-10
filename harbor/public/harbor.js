@@ -2151,7 +2151,7 @@ function refreshTexel(k, j) {
 let cloudRim = 0;
 function skyClouds(az, el) {
   const u = (az + Math.PI) * (SKY_W / 2 / Math.PI) - 0.5, v = Math.min(SKY_H - 1.001, Math.max(0, el * (SKY_H * 2 / Math.PI) - 0.5));
-  const i = Math.floor(u), j = Math.floor(v), bin = Math.floor((u + 0.5) / 5);
+  const i = Math.floor(u), j = Math.floor(v), bin = Math.floor((u + 0.5) / 5) % 72;
   if (!(ROW_BINS[j * 72 + bin] | ROW_BINS[j * 72 + 72 + bin])) return (cloudRim = 0);
   const i0 = i < 0 ? SKY_W - 1 : i, a = j * SKY_W + i0, b = i0 + 1 < SKY_W ? a + 1 : j * SKY_W, c = a + SKY_W, d = b + SKY_W;
   if (SKY_STEP[a] !== SKY_ROW[j]) refreshTexel(a, j);
