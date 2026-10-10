@@ -17,6 +17,11 @@ See [how.html](public/how.html) for the canvas limits and intro rendering detail
 
 The island has staggered plaza paving, scattered stones and grass tufts, varied tree canopies, textured bark, and foam along the shore.
 
+Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
+The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.
+The layers are at different heights, so they move at different speeds when you walk.
+With reduced motion, the clouds stay still.
+
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
 A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.
 The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.

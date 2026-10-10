@@ -32,6 +32,13 @@
   The room lamp and the fire light nearby surfaces without shadow rays.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
+  <li><b>Clouds.</b> Three cloud layers at heights of 90, 160 and 320 m sample one tileable 128 x 128 noise texture.
+  Each layer curves down like a dome, so clouds near the horizon do not become flat streaks.
+  A second ray, a little nearer the moon, finds the cloud edges that face the moon, and these edges are brighter.
+  Cloud cover and moonlight pick glyphs from <code> .':;+%#</code>; thick cloud hides the stars and the moon, and thin cloud dims the moon.
+  The clouds move with the wind in half-second steps, and each pair of rows moves at a different time.
+  The cells of each 2 x 2 block share one cloud sample.
+  Each cell keeps its cloud until the camera moves, so a still view recomputes and redraws only a few sky rows in each frame.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
   Grass uses blade glyphs; pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
