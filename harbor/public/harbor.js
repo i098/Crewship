@@ -942,8 +942,8 @@ function blocked(x, z, fy) {
 }
 
 // ---- Tall grass ---------------------------------------------------------------------------
-// The scene's wind blows toward -x and +z, square to the ship's braced yards; grass and clouds move with it.
-const WIND = { x: -0.6, z: 0.8 };
+// The scene's wind blows toward -x and +z, the way the flag streams; grass and clouds move with it.
+const WIND = { x: -0.92, z: 0.39 };
 // Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
 // paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
 // dune grass.

@@ -59,11 +59,10 @@ for (const layer of layers) {
 }
 CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length, ...layers);
 
-Object.assign(cam, {x: -30, y: 2.8, z: -30}); T = 1907.56;
+// A cloud 26 m beside the zenith: its centre sits at a fixed world point whatever the wind.
+Object.assign(cam, {x: -30, y: 2.8, z: -30});
 cloudCount = 0; ROW_COUNT.fill(0); ROW_CLOUDS.fill(0); ROW_BINS.fill(0); SKY_STEP.fill(-1);
-placeCloud(-13, -1, 260,
-  (-15 + 0.1 + 0.8 * hash(-1, -13)) * 650 + 5 * T,
-  (-1 + 0.1 + 0.8 * hash(-12.5, -1)) * 650);
+placeCloud(-13, -1, 260, -50.94 * WIND.x - 45.73 * WIND.z, 45.73 * WIND.x - 50.94 * WIND.z);
 const polarRows = ROW_COUNT.slice();
 let polarCover = 0;
 for (let el = 83.5; el < 90; el++) {
