@@ -1198,7 +1198,7 @@ function render() {
   Object.assign(cam, { x: me.x, y: me.eye, z: me.z, f: [fx, fy, fz], r: [rx, 0, rz], u: [ux, uy, uz], tanH, tanV });
   // Camera origin in the ship frame (rotate by -roll about the ship's long axis, after the bob).
   cam.lx = rc * (me.x - SX) + rs * (me.eye - bob) + SX; cam.ly = -rs * (me.x - SX) + rc * (me.eye - bob);
-  keepClouds();
+  gatherClouds(performance.now() / 100);
   const scenery = insideHouse ? room : world, vessel = insideHouse ? NONE : ship;
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
@@ -2051,101 +2051,133 @@ function beamGlow(dx, dy, dz) {
   const gx = wx + sc * dx - tc * ux, gy = wy + sc * dy - tc * uy, gz = wz + sc * dz - tc * uz;
   return Math.max(0, 1 - Math.sqrt(gx * gx + gy * gy + gz * gz) / (0.4 + tc * 0.012)) * (1 - tc / BEAM.reach);
 }
-// ---- Clouds: three moonlit layers at different heights drift with the wind ------------------------------------
-// One tileable 128x128 value-noise texture of five octaves, stretched to 0..1; each layer samples it at its own scale.
-const CLOUD_N = 128, CLOUD = new Float32Array(CLOUD_N * CLOUD_N);
-for (let L = 4, amp = 0.5; L < CLOUD_N; L *= 2, amp *= 0.6) {
-  const g = Float32Array.from({ length: L * L }, (_, k) => hash(k % L, Math.floor(k / L) + L));
-  for (let k = 0; k < CLOUD.length; k++) {
-    const u = (k % CLOUD_N) * L / CLOUD_N, v = Math.floor(k / CLOUD_N) * L / CLOUD_N, i = Math.floor(u), j = Math.floor(v);
-    const fu = smooth(u - i), fv = smooth(v - j), i1 = (i + 1) % L, j1 = (j + 1) % L;
-    const a = g[j * L + i], b = g[j * L + i1], c = g[j1 * L + i], d = g[j1 * L + i1];
-    CLOUD[k] += amp * (a + (b - a) * fu + (c - a) * fv + (a - b - c + d) * fu * fv);
-  }
-}
-const CLOUD_LOW = CLOUD.reduce((a, b) => Math.min(a, b)), CLOUD_SPAN = CLOUD.reduce((a, b) => Math.max(a, b)) - CLOUD_LOW;
-CLOUD.forEach((v, k) => { CLOUD[k] = (v - CLOUD_LOW) / CLOUD_SPAN; });
-// Bilinear texture sample that wraps at the tile edges.
-function cloudAt(u, v) {
-  const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j, M = CLOUD_N - 1;
-  const r0 = (j & M) * CLOUD_N, r1 = ((j + 1) & M) * CLOUD_N, i0 = i & M, i1 = (i + 1) & M;
-  return (CLOUD[r0 + i0] + (CLOUD[r0 + i1] - CLOUD[r0 + i0]) * fu) * (1 - fv) + (CLOUD[r1 + i0] + (CLOUD[r1 + i1] - CLOUD[r1 + i0]) * fu) * fv;
-}
-// Farthest first: height (m), metres per texel across the wind, stretch along it, drift (m/s), cover threshold, opacity.
-const CLOUD_LAYERS = [{ h: 320, scale: 9, stretch: 2, speed: 2.4, cover: 0.6, opacity: 0.4 },
-  { h: 160, scale: 5, stretch: 1.3, speed: 1.7, cover: 0.6, opacity: 0.8 }, { h: 90, scale: 3, stretch: 1, speed: 1.2, cover: 0.62, opacity: 1 }];
-// Opacity of one layer where a rising ray meets it. Each layer curves down like a dome of 600 m radius, so clouds
-// near the horizon are not flattened into streaks, and haze thins the distant ones. The pattern drifts downwind; its
-// offset puts clouds over the opening views.
-function layerCover({ h, scale, stretch, speed, cover, opacity }, dx, dy, dz, t) {
-  const r = 600 * dy, s = Math.sqrt(r * r + h * (1200 + h)) - r, x = cam.x + dx * s, z = cam.z + dz * s;
-  const along = (x * WIND[0] + z * WIND[2] - speed * t) / (scale * stretch), across = (z * WIND[0] - x * WIND[2]) / scale;
-  return opacity * (1 - s / 2000) * smooth((cloudAt(along + h + 72, across + 80) - cover) / 0.15);
-}
-// Each cell keeps its cloud until the camera moves or its row's cloud clock steps.
-let cloudSteps = new Int32Array(0), cloudCover = new Float32Array(0), cloudLights = new Float32Array(0), cloudPose = "";
-function keepClouds() {
-  const pose = `${cam.x} ${cam.z} ${me.yaw} ${me.pitch} ${cam.tanH} ${cols} ${rows}`;
-  if (cloudSteps.length !== cols * rows) {
-    cloudSteps = new Int32Array(cols * rows); cloudCover = new Float32Array(cols * rows); cloudLights = new Float32Array(cols * rows);
-  }
-  if (pose !== cloudPose) cloudSteps.fill(-1e9);
-  cloudPose = pose;
-}
-// Cloud cover (0 to 1) along a sky ray; cloudLight gets its moonlit brightness. The clouds move in half-second steps,
-// each pair of rows at its own moment, so one frame recomputes and redraws only a few sky rows. Cells in 2x2 blocks
-// share the cloud of the block's first cell, which quarters the work.
-let cloudLight = 0;
-function clouds(c, dx, dy, dz, m) {
-  const row = Math.floor(c / cols), phase = (row >> 1) * 0.618 % 1, step = Math.floor(T * 2 + phase);
-  if (cloudSteps[c] !== step) {
-    cloudSteps[c] = step;
-    const from = (c - row * cols) & 1 && cloudSteps[c - 1] === step ? c - 1 : row & 1 && cloudSteps[c - cols] === step ? c - cols : -1;
-    if (from < 0) moonlitClouds(c, dx, dy, dz, m, (step - phase) / 2);
-    else {
-      cloudCover[c] = cloudCover[from];
-      cloudLights[c] = cloudLights[from];
+// ---- Clouds: three moonlit layers drift with the wind ------------------------------------------------------------
+// Each cloud is a long band of rounded bumps on a flat base, on a billboard that faces you. The clouds of a layer sit
+// on a square lattice that drifts downwind; some lattice cells stay empty, so clear sky lies between the clouds.
+// Base height (m), lattice spacing (m), drift (m/s); the nearest layer comes first.
+const CLOUD_LAYERS = [{ base: 260, spacing: 650, speed: 5 }, { base: 480, spacing: 1200, speed: 7 },
+  { base: 900, spacing: 2250, speed: 10 }];
+// The clouds in reach this frame, 25 numbers each: direction, distance, horizontal and upward billboard axes, cosine
+// of the angular radius, moon direction on the billboard, length, haze, bump count, then five bumps (centre, radius)
+// in band lengths. The seed picks a layout with clouds over the opening view.
+const CLOUDS = new Float32Array(160 * 25), CLOUD_SEED = 2;
+let cloudCount = 0;
+// Sky texels of 1°, azimuth by elevation, keep the cloud density and moonlit rim of their direction. SKY_ROW holds this
+// frame's tenth of a second for each elevation row, offset so the rows take turns. ROW_CLOUDS lists the clouds that can
+// reach each row, and ROW_BINS marks the 5° azimuth bins they can reach; sky cells elsewhere skip the buffer.
+const SKY_W = 360, SKY_H = 90, SKY = new Float32Array(SKY_W * SKY_H * 2), SKY_STEP = new Int32Array(SKY_W * SKY_H).fill(-1);
+const SKY_ROW = new Int32Array(SKY_H), ROW_CLOUDS = new Uint8Array(SKY_H * 160), ROW_COUNT = new Uint8Array(SKY_H);
+const ROW_BINS = new Uint8Array(SKY_H * 72);
+// Once per frame: each row's step for `tenths` (the wall clock in tenths of a second), and the clouds in reach.
+function gatherClouds(tenths) {
+  for (let j = 0; j < SKY_H; j++) SKY_ROW[j] = Math.floor(tenths + j * 0.618 % 1);
+  const along0 = cam.x * WIND[0] + cam.z * WIND[2], across0 = cam.x * WIND[2] - cam.z * WIND[0];
+  cloudCount = 0;
+  ROW_COUNT.fill(0);
+  ROW_BINS.fill(0);
+  CLOUD_LAYERS.forEach(({ base, spacing, speed }, n) => {
+    const reach = 4.5 * base, drift = speed * T;
+    for (let i = Math.floor((along0 - drift - reach) / spacing); i * spacing + drift < along0 + reach; i++) {
+      for (let j = Math.floor((across0 - reach) / spacing); j * spacing < across0 + reach; j++) {
+        const I = i + 60 * n + CLOUD_SEED, J = j - 40 * n;
+        if (hash(I, J) < 0.45 && cloudCount < 160) placeCloud(I, J, base, (i + 0.1 + 0.8 * hash(J, I)) * spacing + drift, (j + 0.1 + 0.8 * hash(I + 0.5, J)) * spacing);
+      }
     }
-  }
-  cloudLight = cloudLights[c];
-  return cloudCover[c];
+  });
 }
-// Nearest layer first. A second ray a little nearer the moon finds the edges of the nearest cloud that face it, and
-// thin cloud glows near the moon.
-function moonlitClouds(c, dx, dy, dz, m, t) {
-  const fade = smooth((dy - 0.02) / 0.08), halo = Math.max(0, (m - 0.75) / 0.25) ** 2;
-  let ex = MOON[0] - dx, ey = MOON[1] - dy, ez = MOON[2] - dz;
-  const k = 0.03 / (Math.sqrt(ex * ex + ey * ey + ez * ez) + 1e-6);
-  ex = dx + ex * k; ey = dy + ey * k; ez = dz + ez * k;
-  let cover = 0, light = 0, edge = m > 0;
-  for (let n = CLOUD_LAYERS.length - 1; n >= 0 && cover < 0.97; n--) {
-    const layer = CLOUD_LAYERS[n], a = layerCover(layer, dx, dy, dz, t) * fade;
+function placeCloud(I, J, base, along, across) {
+  const x = along * WIND[0] + across * WIND[2] - cam.x, z = along * WIND[2] - across * WIND[0] - cam.z, y = base - cam.y;
+  const flat = Math.sqrt(x * x + z * z), haze = 1 - smooth(flat / base - 3.5), d = Math.sqrt(flat * flat + y * y);
+  if (haze <= 0) return;
+  const length = base * (0.7 + 0.4 * hash(I * 3, J * 5)), bumps = 3 + Math.floor(3 * hash(J, I * 7)), o = cloudCount * 25;
+  const ux = -y * x / d / flat, uy = flat / d, uz = -y * z / d / flat; // the upward billboard axis
+  const mx = (MOON[0] * z - MOON[2] * x) / flat, my = MOON[0] * ux + MOON[1] * uy + MOON[2] * uz, ml = Math.hypot(mx, my) || 1;
+  CLOUDS.set([x / d, y / d, z / d, d, z / flat, -x / flat, ux, uy, uz, d / Math.hypot(d, 0.7 * length), mx / ml, my / ml, length, haze, bumps], o);
+  for (let b = 0; b < bumps; b++) {
+    const t = b / (bumps - 1), r = hash(I + b, J - b);
+    CLOUDS[o + 15 + 2 * b] = (t - 0.5) * 0.8 + 0.06 * (r - 0.5);
+    CLOUDS[o + 16 + 2 * b] = (0.14 + 0.13 * (1 - Math.abs(2 * t - 1))) * (0.85 + 0.3 * r);
+  }
+  // The rows and 5° azimuth bins the cloud can reach, from the corners and edge middles of its billboard rectangle.
+  const az = Math.atan2(x, z);
+  let low = 90, high = 0, left = 0, right = 0;
+  for (const [X, Y] of [[-0.6, -0.04], [0, -0.04], [0.6, -0.04], [-0.6, 0.32], [0, 0.32], [0.6, 0.32]]) {
+    const px = x + (z / flat * X + ux * Y) * length, py = y + uy * Y * length, pz = z - (x / flat * X - uz * Y) * length;
+    const rise = Math.asin(py / Math.hypot(px, py, pz)) * 180 / Math.PI, turn = (Math.atan2(px, pz) - az + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    low = Math.min(low, rise); high = Math.max(high, rise); left = Math.min(left, turn); right = Math.max(right, turn);
+  }
+  if (high > 75) { left = -Math.PI; right = Math.PI; }
+  for (let j = Math.max(0, Math.floor(low - 1)); j <= Math.min(SKY_H - 1, high + 1); j++) {
+    ROW_CLOUDS[j * 160 + ROW_COUNT[j]++] = cloudCount;
+    for (let b = Math.floor((az + left + Math.PI) * 36 / Math.PI - 0.2); b <= (az + right + Math.PI) * 36 / Math.PI + 0.2; b++) ROW_BINS[j * 72 + (b + 72) % 72] = 1;
+  }
+  cloudCount++;
+}
+// Cloud density (0 to 1) toward a direction, nearest cloud in front; haze trims distant clouds from the edge in, so
+// they shrink rather than fade to dots. cloudEdge gets the moonlit rim: the edge of each bump, or the flat base, on
+// the side that faces the moon.
+let cloudEdge = 0;
+function cloudDensity(dx, dy, dz) {
+  const row = Math.max(0, Math.min(SKY_H - 1, Math.floor(Math.asin(dy) * SKY_H * 2 / Math.PI))), count = ROW_COUNT[row];
+  let cover = 0, rim = 0;
+  for (let n = 0; n < count && cover < 0.98; n++) {
+    const o = ROW_CLOUDS[row * 160 + n] * 25, c = dx * CLOUDS[o] + dy * CLOUDS[o + 1] + dz * CLOUDS[o + 2];
+    if (c < CLOUDS[o + 9]) continue;
+    const k = CLOUDS[o + 3] / c / CLOUDS[o + 12], x = (dx * CLOUDS[o + 4] + dz * CLOUDS[o + 5]) * k;
+    const y = (dx * CLOUDS[o + 6] + dy * CLOUDS[o + 7] + dz * CLOUDS[o + 8]) * k;
+    let best = 0, q = 1, nx = 0;
+    for (let b = o + 15; b < o + 15 + 2 * CLOUDS[o + 14] && y > -0.03; b += 2) {
+      const bx = x - CLOUDS[b], qb = Math.sqrt(bx * bx + y * y) / CLOUDS[b + 1], f = smooth((1 - qb) / 0.55);
+      if (f > best) { best = f; q = qb; nx = bx; }
+    }
+    const haze = CLOUDS[o + 13], a = (best * smooth((y + 0.03) / 0.03) - 1 + haze) / haze;
     if (a <= 0) continue;
-    const rim = edge ? Math.max(0, a - layerCover(layer, ex, ey, ez, t) * fade) : 0;
-    edge = edge && a < 0.05;
-    light += (1 - cover) * a * (0.14 + 0.15 * halo + rim * (0.35 + 0.6 * m * m + 0.8 * halo) + 0.45 * halo * (1 - a));
+    const side = Math.max(0, (nx * CLOUDS[o + 10] + y * CLOUDS[o + 11]) / (Math.hypot(nx, y) || 1)) * smooth((q - 0.4) / 0.45);
+    rim += (1 - cover) * a * Math.max(side, Math.max(0, -CLOUDS[o + 11]) * smooth(1 - y / 0.06));
     cover += (1 - cover) * a;
   }
-  cloudCover[c] = cover;
-  cloudLights[c] = light;
+  cloudEdge = rim;
+  return cover;
 }
-// Glyph density grows with cover and moonlight, so lit edges stand out; dim bodies leave out at least half of their
-// glyphs. A per-cell dither softens the steps, and the moonlight picks the colour.
-const CLOUD_RAMP = " .':;+%#";
-function shadeCloud(c, cover) {
-  const b = cloudLight, n = CLOUD_RAMP.length - 1, dither = (Math.imul(c, 0x9e3779b1) >>> 24) / 255 - 0.5;
-  const k = b < 0.24 && dither > cover / 2 - 0.5 ? 0 : Math.max(0, Math.min(n, Math.round(cover * 3 + b * 7 + dither * 0.7)));
-  put(c, CLOUD_RAMP[k], b < 0.24 ? "f" : b < 0.5 ? "k3" : "k5", 0, Infinity);
+// A texel refreshes at about 10 Hz when a sky cell reads it: turning only reads the buffer, and a still view
+// recomputes a few rows per frame.
+function refreshTexel(k, j) {
+  SKY_STEP[k] = SKY_ROW[j];
+  const a = (k - j * SKY_W + 0.5) * 2 * Math.PI / SKY_W - Math.PI, b = (j + 0.5) * Math.PI / 2 / SKY_H, cb = Math.cos(b);
+  SKY[2 * k] = cloudDensity(cb * Math.sin(a), Math.sin(b), cb * Math.cos(a));
+  SKY[2 * k + 1] = cloudEdge;
+}
+// Bilinear read of the buffer for a sky direction; cloudRim gets the moonlit rim.
+let cloudRim = 0;
+function skyClouds(az, el) {
+  const u = (az + Math.PI) * (SKY_W / 2 / Math.PI) - 0.5, v = Math.min(SKY_H - 1.001, Math.max(0, el * (SKY_H * 2 / Math.PI) - 0.5));
+  const i = Math.floor(u), j = Math.floor(v), bin = Math.floor((u + 0.5) / 5);
+  if (!(ROW_BINS[j * 72 + bin] | ROW_BINS[j * 72 + 72 + bin])) return (cloudRim = 0);
+  const i0 = i < 0 ? SKY_W - 1 : i, a = j * SKY_W + i0, b = i0 + 1 < SKY_W ? a + 1 : j * SKY_W, c = a + SKY_W, d = b + SKY_W;
+  if (SKY_STEP[a] !== SKY_ROW[j]) refreshTexel(a, j);
+  if (SKY_STEP[b] !== SKY_ROW[j]) refreshTexel(b, j);
+  if (SKY_STEP[c] !== SKY_ROW[j + 1]) refreshTexel(c, j + 1);
+  if (SKY_STEP[d] !== SKY_ROW[j + 1]) refreshTexel(d, j + 1);
+  const fu = u - i, fv = v - j, wa = (1 - fu) * (1 - fv), wb = fu * (1 - fv), wc = (1 - fu) * fv, wd = fu * fv;
+  cloudRim = SKY[2 * a + 1] * wa + SKY[2 * b + 1] * wb + SKY[2 * c + 1] * wc + SKY[2 * d + 1] * wd;
+  return SKY[2 * a] * wa + SKY[2 * b] * wb + SKY[2 * c] * wc + SKY[2 * d] * wd;
+}
+// Glyphs grow denser with the cloud. Bodies keep the sky's dim colour; edges that face the moon, and thin cloud near
+// the moon, are pale.
+const CLOUD_RAMP = " .:-=+*#";
+function shadeCloud(c, density, m) {
+  const halo = Math.max(0, (m - 0.8) / 0.2) ** 2, light = cloudRim * (0.6 + 1.4 * halo) + 0.6 * halo * (1 - density);
+  put(c, CLOUD_RAMP[Math.min(7, Math.floor(density * 8))], light < 0.25 ? "f" : light < 0.6 ? "k3" : "k5", 0, Infinity);
 }
 // Cloud hides the stars, and the moon once it is thick; the lighthouse beam passes in front of it.
 function shadeSky(c, dx, dy, dz) {
-  const m = dx * MOON[0] + dy * MOON[1] + dz * MOON[2], el = Math.asin(dy), glow = beamGlow(dx, dy, dz);
-  const r = hash(Math.floor(Math.atan2(dx, dz) * 150), Math.floor(el * 150)) * 2.5;
-  const cover = dy > 0.03 ? clouds(c, dx, dy, dz, m) : 0;
+  const m = dx * MOON[0] + dy * MOON[1] + dz * MOON[2], el = Math.asin(dy), az = Math.atan2(dx, dz), glow = beamGlow(dx, dy, dz);
+  const r = hash(Math.floor(az * 150), Math.floor(el * 150)) * 2.5;
+  const cover = dy > 0.02 ? skyClouds(az, el) : 0;
   if (m > 0.9988 && cover < 0.6) put(c, m > 0.99935 && cover < 0.3 ? "@" : "%", cover < 0.3 ? "k" : "k4", 0, Infinity);
   else if (el > 0.04 && r < 0.03 && cover < 0.25) put(c, r < 0.006 ? "*" : ".", "k", 0, Infinity);
   else if (glow > 0.15) put(c, glyph(glow * 0.8, 0), "l" + Math.min(7, 2 + Math.floor(glow * 6)), 0, Infinity);
-  else if (cover > 0.1) shadeCloud(c, cover);
+  else if (cover >= 0.125) shadeCloud(c, cover, m);
   else put(c, el < 0.035 ? "." : " ", "f", 0, Infinity);
 }
 function put(c, ch, cls, id, depth) { G[c] = ch; C[c] = cls; ID[c] = id; D[c] = depth; }
