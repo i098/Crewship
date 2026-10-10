@@ -152,6 +152,42 @@ for (let k = 0; !cloudy && k < SKY_W * 40; k++) if (compute(...toward(...texelCe
 assert(cloudy, 'the new camera place must see a cloud');
 assert(Math.abs(skyClouds(...cloudy) - compute(...toward(...cloudy))) < 1e-6,
   'a texel must refresh from the new camera place within a tenth of a second');
+
+Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0;
+SKY_STEP.fill(-1); gatherClouds(100);
+const rowDirections = Array.from({length: SKY_W}, (_, i) => texelCentre(i, 20));
+const readRow = () => rowDirections.map((d) => {
+  const cover = skyClouds(...d);
+  return [cover, cloudRim];
+});
+const initialRow = readRow();
+assert(initialRow.some(([cover]) => cover > 0.5), 'the movement check must see a cloud');
+cam.x += 0.1; gatherClouds(100.16);
+const normalRow = readRow();
+assert.deepEqual(normalRow, initialRow, 'fresh texels must remain cached during normal-motion walking');
+
+reduced.matches = true;
+for (const axis of ['x', 'y', 'z']) {
+  for (const delta of [1, -1]) {
+    const before = readRow();
+    cam[axis] += delta; gatherClouds(100.16);
+    const after = readRow();
+    let changed = 0;
+    rowDirections.forEach((d, i) => {
+      const cover = compute(...toward(...d)), rim = cloudEdge;
+      assert(Math.abs(after[i][0] - cover) < 1e-6,
+        'reduced-motion movement must refresh density at the final camera position');
+      assert(Math.abs(after[i][1] - rim) < 1e-6,
+        'reduced-motion movement must refresh the rim at the final camera position');
+      if (Math.abs(after[i][0] - before[i][0]) > 1e-5) changed++;
+    });
+    assert(changed > 0, 'each camera axis must change the visible cloud density');
+    computed = 0; gatherClouds(100.16);
+    assert.deepEqual(readRow(), after, 'the final camera position must remain correct while idle');
+    assert.equal(computed, 0, 'an unchanged reduced-motion camera must keep fresh texels');
+  }
+}
+reduced.matches = false;
 `, context);
 """,
         text=True,
