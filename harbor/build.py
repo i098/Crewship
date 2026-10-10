@@ -40,10 +40,10 @@ def features(readme):
     """(title, link, description) for each README Features or More docs link."""
     section = readme.split("<summary><b>Show all features</b></summary>", 1)[1].split("</details>", 1)[0]
     rows = re.findall(r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", section, re.M)
-    more_docs = readme.split("\n## More docs:", 1)[1].splitlines()[0]
+    more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     rows.extend(
         (title, link, "Documentation")
-        for title, link in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", more_docs)
+        for title, link in re.findall(r"^- \[([^\]]+)\]\(([^)]+)\)$", more_docs, re.M)
     )
     return rows
 

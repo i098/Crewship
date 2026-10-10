@@ -53,7 +53,11 @@ def built(tmp_path, monkeypatch, readme):
 def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsys):
     readme = (ROOT / "README.md").read_text()
     unmapped = "docs/brand-new-page.md"
-    readme = readme.replace("\n## More docs:", f"\n## More docs: [Brand new]({unmapped})", 1)
+    readme = readme.replace(
+        "\n## More docs\n",
+        f"\n## More docs\n- [Brand new]({unmapped})\n",
+        1,
+    )
     links = [link for _, link, _ in build.features(readme) if link in build.SCENE]
     extra_count = sum(link not in build.SCENE for _, link, _ in build.features(readme))
     manifest = built(tmp_path, monkeypatch, readme)
@@ -77,7 +81,7 @@ def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, caps
     section = readme.split("<summary><b>Show all features</b></summary>", 1)[1].split("</details>", 1)[0]
     only = "\n".join(f"- [{title}]({link}): {desc}" for title, link, desc in mapped)
     readme = readme.replace(section, f"\n{only}\n", 1)
-    more_docs = readme.split("\n## More docs:", 1)[1].split("\n## ", 1)[0]
+    more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     readme = readme.replace(more_docs, "", 1)
     manifest = built(tmp_path, monkeypatch, readme)
 

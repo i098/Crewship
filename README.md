@@ -214,13 +214,22 @@ Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs
 
 </details>
 
-## More docs: [Architecture](docs/architecture.md)
+## More docs
 
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Support: [SUPPORT.md](SUPPORT.md). Bug report: [form](../../issues/new?template=bug_report.yml). Feature request: [form](../../issues/new?template=feature_request.yml). Pull request: [template](.github/PULL_REQUEST_TEMPLATE.md). Security: [SECURITY.md](SECURITY.md). Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). License: [FSL-1.1-Apache-2.0](LICENSE).
+- [Architecture](docs/architecture.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
+- [Report a bug](../../issues/new?template=bug_report.yml)
+- [Request a feature](../../issues/new?template=feature_request.yml)
+- [Pull request template](.github/PULL_REQUEST_TEMPLATE.md)
+- [Security](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [License: FSL-1.1-Apache-2.0](LICENSE)
 
 ## Built with
 
 Built on Herdr, Firstmate, omp, Ansible and more: see [CREDITS.md](CREDITS.md).
+
 ## Sponsors
 
 If Crewship saves you time, sponsor its development on GitHub.
