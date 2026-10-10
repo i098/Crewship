@@ -90,6 +90,12 @@ Skip this section when `transports` is `[bluebubbles]`.
 
 The unit reads `~/super.env` with `EnvironmentFile=` when it starts. The credentials never go into the repository, the unit, or `.local/host.yml`.
 
+On SIGTERM or SIGINT, the bridge refuses new work and sends SIGTERM to its running desk, compaction, and inbox-status children.
+After two seconds, it sends SIGKILL to children that remain and exits with status 0.
+Latest-message files use atomic replacement; the memory view and outbox keep their existing atomic writes.
+Unfinished compaction resumes from the message log on the next start.
+The unit sets `KillMode=mixed` and `TimeoutStopSec=10` so systemd kills remaining service processes if shutdown stalls.
+
 ## Use self-hosted BlueBubbles relays
 
 A relay is a Mac that runs [BlueBubbles server](https://bluebubbles.app) and is signed in to Messages. It costs nothing per month and does not depend on an outside messaging service. You can run the same Apple Account on several Macs: the bridge uses them as one line, in the order of the config.
