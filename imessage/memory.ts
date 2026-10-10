@@ -1,5 +1,5 @@
 // The front desk's memory: one chat that never ends, after https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449
-// Every message is logged whole. In the background the desk model compresses the log into a binary tree of
+// Every message is logged whole. In the background the compaction model compresses the log into a binary tree of
 // one-line summaries, and each desk turn sees the view: lines covering the whole chat, fine when recent, coarse
 // when old, at most VIEW_MAX bytes. Sizes are UTF-8 bytes. Free of spectrum-ts, so tests run without it.
 //
@@ -22,8 +22,7 @@ const RETRY_MAX_MS = 30 * 60_000;
 export const WORKERS = 3; // compaction calls at once
 export const TRIES = 5; // calls per compaction when the line comes back too long
 export const UNBUILT = "(not summarized yet: zoom it)";
-// Haiku's price rises past 100k input tokens. No desk or compaction request sends more than CEILING bytes, about
-// 60k tokens counted as bytes / 3, a count that overstates tokens for text.
+// The desk request byte ceiling and its token estimate are documented in docs/imessage.md#desk-memory.
 export const CEILING = 180_000;
 export const OVERHEAD = 4_000; // the runner's own framing and tool schema in each request
 export const CALL_OVERHEAD = 500; // one tool call or retry turn's framing

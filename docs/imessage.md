@@ -42,14 +42,19 @@ Only an item that is provably bad leaves the queue: a message or an attachment t
 The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `imessage/memory.ts`.
 
 - **The log.** The service appends one record for each text from the owner, each send and tapback from Firstmate, and each desk text and tapback. The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`. The service never edits or deletes a record.
-- **The tree.** In the background, Haiku 4.5 compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
+- **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
 - **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 64 KB, one batch merges lines until it is 32 KB or less. The view is in `memory/view.json`, and the service loads it at start.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
-- **The input cap.** The model's price rises past 100,000 tokens of input, so no desk or compaction request sends more than 180,000 bytes (about 60,000 tokens, counted as bytes / 3). The service clips the fleet status, long texts, and each zoom result (16 KB) to their head and tail. After the cap, zoom returns "context limit reached".
-- **Compaction size.** Each call reads at most 2 KB of context and 4 KB of source text.
+- **The input cap.** The desk limits request input to 180,000 bytes, including reserved framing.
+  The byte limit estimates 60,000 tokens as bytes / 3; it is not an exact token count.
+  The desk clips the fleet status, long texts, and each zoom result (16 KB) to their head and tail.
+  After the cap, zoom returns "context limit reached".
+  Compaction uses the smaller budget below and does not clip source text.
+- **Compaction size.** Each conversation starts with at most 2,048 bytes of context and 4,096 bytes of source text.
   Long messages use complete UTF-8 chunks; the model then merges their summaries.
   Each chunk and reduction task states the source message's kind.
-  Retries share a 16 KB conversation budget, and each model call keeps its 60-second limit.
+  Retries share a 16,000-byte input budget, including prior replies and reserved framing.
+  Each model call keeps its 60-second limit.
   Compaction uses Haiku 4.5 with reasoning disabled; the configured desk model stays unchanged.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.
   The service retries after 30 seconds, then doubles the delay to at most 30 minutes.
