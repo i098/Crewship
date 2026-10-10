@@ -845,13 +845,14 @@ function movePlayer(x, z, here) {
 }
 // The table lamp and the hearth fire light the room without shadow rays: x, y, z, intensity and reach of each.
 const ROOM_LIGHTS = [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2];
+// Light reaching a room surface at (x, y, z) with normal n: a dim fill plus the room lights, all lamplight.
 function roomLight(x, y, z, nx, ny, nz) {
   let warm = 0.28;
   for (let k = 0; k < ROOM_LIGHTS.length; k += 5) {
     const lx = ROOM_LIGHTS[k] - x, ly = ROOM_LIGHTS[k + 1] - y, lz = ROOM_LIGHTS[k + 2] - z, d = Math.sqrt(lx * lx + ly * ly + lz * lz);
     warm += ROOM_LIGHTS[k + 3] * Math.max(0, 1 - d / ROOM_LIGHTS[k + 4]) * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / d));
   }
-  return [warm + 0.06, warm / (warm + 0.06)];
+  return warm;
 }
 function castRoom(c, i, odd, dx, dy, dz) {
   hitT = Infinity; hitS = null; SP[c] = null;
@@ -862,8 +863,26 @@ function castRoom(c, i, odd, dx, dy, dz) {
   } else if (hitS && hitS.tex === roomFlame) {
     const [ch, cls] = roomFlame(cam.y + dy * hitT, hitS.bb);
     put(c, ch, cls, hitS.id * 16, hitT);
-  } else if (hitS) shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
+  } else if (hitS) shadeRoom(c, odd, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
+}
+// Shades a room surface like the lit solids outside: lamplight, a contact shadow toward the floor, and fog. The room
+// has no ship, terrain or blinking lights, and it builds no arrays or strings per cell, so furnished frames stay cheap.
+function shadeRoom(c, odd, dx, dy, dz) {
+  const s = hitS, k = hitK, t = hitT;
+  const nx = k >= 0 ? s.P[k] : hitN[0], ny = k >= 0 ? s.P[k + 1] : hitN[1], nz = k >= 0 ? s.P[k + 2] : hitN[2];
+  const x = cam.x + dx * t, y = cam.y + dy * t, z = cam.z + dz * t;
+  const tex = s.tex && s.tex(x, y, z, nx, ny, nz), mat = tex && tex !== "-" ? tex[0] : s.mat;
+  let ch = "@", cls = "l7";
+  if (mat !== "l") {
+    const warm = roomLight(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
+    const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * y), fog = Math.exp(-t * 0.016);
+    const b = (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog);
+    // Lamplight warms the colour of every bright surface except the blue bed.
+    cls = CLASS[mat][(mat !== "b" && warm / lit > 0.55 && b > 0.2 ? 8 : 0) + Math.min(7, Math.floor(b * 9))];
+    ch = glyph(b, odd);
+  }
+  put(c, ch, cls, (ny > 0.7 ? -1 : 1) * (s.id * 16 + (k >= 0 ? k >> 2 : 12 - k)), t);
 }
 
 // ---- Motion state ------------------------------------------------------------------------
@@ -1047,7 +1066,6 @@ function moveLights() {
 }
 // Light reaching a point with normal n: [brightness, share of it from lamps].
 function lightAt(x, y, z, nx, ny, nz) {
-  if (insideHouse) return roomLight(x, y, z, nx, ny, nz);
   const moon = 0.035 + 0.17 * Math.max(0, nx * MOON[0] + ny * MOON[1] + nz * MOON[2]) + 0.04 * Math.max(0, ny);
   let warm = 0;
   for (const L of LIGHTGRID.get(Math.floor(x / TILE) * 1000 + Math.floor(z / TILE)) || NONE) {
@@ -1137,6 +1155,9 @@ for (const [k, c] of Object.entries(BASE)) {
     Object.assign(COLORS, { [k + i]: lv, [k + "w" + i]: mix(lv, "#ffd479", 0.45) });
   }
 }
+// Colour class names per material: levels 0 to 7, then the same levels warmed, so room shading builds no strings.
+const CLASS = {};
+for (const k of Object.keys(BASE)) CLASS[k] = Array.from({ length: 16 }, (_, i) => k + (i > 7 ? "w" : "") + (i & 7));
 function measure() {
   // Phones and tablets draw at most 2 device pixels per CSS pixel: a 3x canvas costs more memory than it shows.
   // Cap the backing-store area, not each dimension; large high-DPR windows otherwise exceed browser canvas limits.
@@ -1911,7 +1932,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : floorAt(wx, pz) ?? 0)));
     const fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
-    cls = mat + tier(b, insideHouse && mat === "b" ? 0 : warm);
+    cls = mat + tier(b, warm);
     // Grass blades lean with the wind; fountain water keeps its texture glyphs below.
     const grass = ny > 0.7 && (mat === "g" || mat === "G" || mat === "M") && s === TERRAIN;
     ch = grass && b > 0.03 ? blade(px, pz, odd) : glyph(b, odd);
