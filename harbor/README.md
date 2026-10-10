@@ -16,6 +16,9 @@ Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
 The island has staggered plaza paving, scattered stones and grass tufts, varied tree canopies, textured bark, and foam along the shore.
+Tufts of tall grass sway in the wind and grow densest along the path edges and on the dry upper beach slopes.
+Grass is sparse on the dirt trails and never grows on the roads, the dock, the plaza, wet sand, or in buildings.
+Grass does not block walking or map routes, and it stays still with reduced motion.
 
 Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
 The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.

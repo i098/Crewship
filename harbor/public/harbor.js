@@ -134,6 +134,7 @@ function roadAt(x, z) {
   }
   return [Math.sqrt(best), along, concrete];
 }
+const trailHalfWidth = (along) => 0.5 + 0.12 * Math.sin(along * 1.7) + 0.08 * hash(Math.floor(along * 3), 7);
 // Staggered paving joints and individually divided stones around the round plaza.
 function plazaCurb(x, z) {
   return (Math.atan2(z - 24.6, x - 5) + Math.PI) * 12 % 1 < 0.12 ? "t:" : "s=";
@@ -154,7 +155,7 @@ function ground(x, y, z, nx, ny) {
   const [d, along, concrete] = roadAt(x, z), plaza = Math.hypot(x - 5, z - 24.6);
   if (plaza < 3.2) return plazaPaving(x, z, plaza);
   if (concrete && d < 1.5) return d > 1.38 ? along % 0.8 < 0.08 ? "t:" : "s_" : along % 3 < 0.12 ? "t:" : "t.";
-  if (!concrete && d < 0.5 + 0.12 * Math.sin(along * 1.7) + 0.08 * hash(Math.floor(along * 3), 7)) {
+  if (!concrete && d < trailHalfWidth(along)) {
     if (Math.abs(d - 0.22) < 0.06) return "o:";
     return hash(Math.floor(along * 2.5), Math.floor(d * 6)) < 0.18 ? "o," : "o.";
   }
@@ -199,9 +200,11 @@ function marchY(x, z) {
   const fu = u - i, fw = w - k, p = k * HW + i;
   return (HEIGHTS[p] * (1 - fu) + HEIGHTS[p + 1] * fu) * (1 - fw) + (HEIGHTS[p + HW] * (1 - fu) + HEIGHTS[p + HW + 1] * fu) * fw;
 }
+// The stone harbour wall, only where the dock needs deep water.
+const harbourWall = (x, y, z) => x > -8.5 && x < 9.5 && z < 14.3 && y < 1.15;
 // Ground texture by where you are: the stone harbour wall, sand on the beaches, ground on the plateau.
 function landTex(x, y, z, nx, ny) {
-  if (x > -8.5 && x < 9.5 && z < 14.3 && y < 1.15) return "t:";
+  if (harbourWall(x, y, z)) return "t:";
   return y < 1.12 ? sand(x, y, z, nx, ny) : ground(x, y, z, nx, ny);
 }
 const TERRAIN = { id: 4000, P: new Float64Array(0), bb: [-70, -1.6, -50, 60, 1.2, 60], mat: "g", spot: null, solid: false, tex: landTex };
@@ -572,13 +575,19 @@ shipRope([SX, 17.8, 6], [SX, 4.3, 18.5]);
 function shipRope(a, b) {
   RIGGING.push([a, b]);
 }
+// Screen column and row (fractional) and depth of a world point, written into `out`.
+function viewPoint(x, y, z, out) {
+  x -= cam.x; y -= cam.y; z -= cam.z;
+  const d = x * cam.f[0] + y * cam.f[1] + z * cam.f[2], div = Math.max(0.001, d);
+  out[0] = ((x * cam.r[0] + z * cam.r[2]) / div / cam.tanH + 1) * cols / 2;
+  out[1] = (1 - (x * cam.u[0] + y * cam.u[1] + z * cam.u[2]) / div / cam.tanV) * rows / 2;
+  out[2] = d;
+  return out;
+}
 // Project the stays into the depth buffer once, rather than ray-testing their large diagonal boxes.
 function ropePoint(p) {
-  const lx = p[0] - SX, x = SX + rc * lx - rs * p[1] - cam.x;
-  const y = rs * lx + rc * p[1] + bob - cam.y, z = p[2] - cam.z;
-  const d = x * cam.f[0] + y * cam.f[1] + z * cam.f[2], div = Math.max(0.001, d);
-  return [((x * cam.r[0] + z * cam.r[2]) / div / cam.tanH + 1) * cols / 2,
-    (1 - (x * cam.u[0] + y * cam.u[1] + z * cam.u[2]) / div / cam.tanV) * rows / 2, d];
+  const lx = p[0] - SX;
+  return viewPoint(SX + rc * lx - rs * p[1], rs * lx + rc * p[1] + bob, p[2], [0, 0, 0]);
 }
 function ropeEnds(a, b) {
   let p = ropePoint(a), q = ropePoint(b);
@@ -597,12 +606,12 @@ function ropeSpan(p, q) {
   }
   return lo > hi ? null : [lo, hi];
 }
-function ropeCell(i, j, depth, ch) {
+function ropeCell(i, j, depth, ch, cls = "o3") {
   if (i < 0 || i >= cols || j < 0 || j >= rows) return;
   const c = j * cols + i, h = ((2 * i + 1) / cols - 1) * cam.tanH, v = (1 - (2 * j + 1) / rows) * cam.tanV;
   const distance = depth * Math.sqrt(1 + h * h + v * v);
   if (distance > D[c] + 0.05) return;
-  put(c, ch, "o3", -1, distance); SP[c] = null;
+  put(c, ch, cls, -1, distance); SP[c] = null;
 }
 function drawRope(p, q) {
   const span = ropeSpan(p, q);
@@ -934,6 +943,88 @@ function blocked(x, z, fy) {
   return false;
 }
 
+// ---- Tall grass ---------------------------------------------------------------------------
+// The scene's wind blows toward -x and +z, the way the flag streams.
+const WIND = { x: -0.82, z: 0.57 };
+// Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
+// paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
+// dune grass.
+function grassGround(x, z) {
+  const y = terrainY(x, z), e = 0.5;
+  if (y < 0.55 || harbourWall(x, y, z)) return null;
+  const [way, along, concrete] = roadAt(x, z), road = way - (concrete ? 1.5 : trailHalfWidth(along)), plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
+  const slope = Math.hypot(terrainY(x + e, z) - terrainY(x - e, z), terrainY(x, z + e) - terrainY(x, z - e)) / (2 * e);
+  return [y, Math.min(road, plaza), concrete || plaza < road, slope];
+}
+// Chance of a clump: none on paving, few on trails, most along the edges of the ways and on slopes, patches elsewhere.
+function grassChance(x, z, edge, paved, slope) {
+  if (edge < (paved ? 0.3 : 0)) return paved ? 0 : 0.1;
+  const patch = smooth(Math.sin(x * 0.29 + Math.sin(z * 0.21) * 2) * Math.sin(z * 0.33 - x * 0.12) * 2 + 0.3);
+  return Math.min(1, 0.06 + 0.8 * patch + 1.2 * Math.exp(-edge * edge) + 3 * slope);
+}
+// Keep clumps outside solid footprints: walls, hedges, trunks, posts, crates.
+const grassFree = (solids, x, y, z) => !solids.some((s) => x > s.bb[0] && x < s.bb[3] && z > s.bb[2] && z < s.bb[5] && walkingSolid(s, y));
+// Seeded clumps on a jittered 0.9 m grid, the same on every visit: [x, y, z, height, seed] each.
+function plantGrass() {
+  const clumps = [], solids = world.filter((s) => s.solid);
+  for (let gx = -62; gx < 46; gx += 0.9) {
+    for (let gz = -43; gz < 55; gz += 0.9) {
+      const x = gx + hash(gx, gz) * 0.9, z = gz + hash(gz, gx) * 0.9, g = grassGround(x, z);
+      const p = g ? grassChance(x, z, g[1], g[2], g[3]) : 0;
+      if (hash(x * 1.7, z * 2.3) < p && grassFree(solids, x, g[0], z)) clumps.push(x, g[0], z, 0.4 + 0.6 * p * hash(z, x * 1.3), hash(x * 3.3, z));
+    }
+  }
+  return Float32Array.from(clumps);
+}
+const GRASS = plantGrass();
+// Colour classes by brightness: dark roots, green blades and pale moonlit tips.
+const grassTones = (mat) => Array.from({ length: 8 }, (_, i) => mat + i);
+const GRASS_ROOT = grassTones("M"), GRASS_BLADE = grassTones("g"), GRASS_TIP = grassTones("G"), GP = [0, 0, 0];
+// Quantize wind time to limit grass animation changes in a still view.
+const swayTime = () => Math.floor(T * 12) / 12;
+// Project clumps into the depth buffer, like the rigging.
+// Cap their height before cell rounding so near grass does not fill the view.
+// Moonlight brightens the blades when the moon is behind you; distance dims them.
+function drawGrass() {
+  const sway = swayTime(), lit = 0.5 - 0.5 * (cam.f[0] * MOON[0] + cam.f[2] * MOON[2]), cap = rows / 14;
+  const tall = rows / (2 * cam.tanV), wide = cols / (2 * cam.tanH); // rows and columns per metre, 1 m away
+  const across = WIND.x * cam.r[0] + WIND.z * cam.r[2]; // the part of the wind that blows across the view
+  for (let k = 0; k < GRASS.length; k += 5) {
+    viewPoint(GRASS[k], GRASS[k + 1], GRASS[k + 2], GP);
+    const d = GP[2], h = GRASS[k + 3], s = GRASS[k + 4], full = h * tall / d, rise = Math.min(cap, full);
+    if (d < 0.5 || full < 1 || GP[1] < 0 || GP[1] - rise > rows) continue;
+    const scale = rise / full, half = 0.35 * wide / d * scale, b = (0.42 + 0.12 * lit) * Math.exp(-d * 0.02);
+    if (GP[0] + half < -3 || GP[0] - half > cols + 3) continue;
+    const gust = Math.round(1.5 + 1.5 * Math.sin(sway * 1.7 - (GRASS[k] * WIND.x + GRASS[k + 2] * WIND.z) * 0.35 + s * 1.2)) / 3;
+    drawTuft(s, rise, half, across * h * (0.03 + 0.15 * gust) * wide / d * scale, b, b + 0.35 * Math.exp(-d / 30));
+  }
+}
+// Blades fan out from a tight root, with the tallest blades in the middle.
+// Draw outer blades first so middle blades cover them.
+// Wind bends each blade more toward its tip; distant tufts use fewer blades.
+function drawTuft(s, rise, half, lean, b, pale) {
+  const n = Math.min(7 + 2 * Math.floor(s * 3), 1 + 2 * Math.floor(half * 1.2)), tone = Math.min(7, Math.floor(b * 9));
+  const root = GRASS_ROOT[tone], blade = GRASS_BLADE[tone], tip = GRASS_TIP[Math.min(7, Math.floor(pale * 9))];
+  for (let k = 0; k < n; k++) {
+    const u = n > 1 ? (k & 1 ? 1 : -1) * (1 - 2 * (k >> 1) / (n - 1)) : 0;
+    const high = Math.max(1, Math.round(rise * (1 - 0.45 * u * u) * (0.7 + 0.3 * ((s * 13 + k * 0.61) % 1))));
+    drawGrassBlade(GP[0] + u * half * 0.25, u * half * 0.75, lean * high / rise, high, root, blade, tip);
+  }
+}
+function drawGrassBlade(foot, fan, bend, high, root, blade, tip) {
+  const crown = high > 4 ? high - 2 : high - 1;
+  for (let r = 0; r < high; r++) {
+    const t = (r + 0.5) / high, slope = (fan + 2 * bend * t) / high;
+    ropeCell(Math.floor(foot + fan * t + bend * t * t), Math.floor(GP[1]) - r, GP[2], grassBladeGlyph(slope, t, high), r >= crown ? tip : r ? blade : root);
+  }
+}
+function grassBladeGlyph(slope, t, high) {
+  const a = Math.abs(slope);
+  if (a >= 0.9) return slope > 0 ? "/" : "\\";
+  if (a >= 0.45 && t > 0.6 && high > 3) return slope > 0 ? ")" : "(";
+  return "|";
+}
+
 const me = { x: 6.5, z: -15, yaw: -0.6, pitch: 0.4 };
 const keys = new Set();
 const stick = { x: 0, y: 0 };
@@ -1203,6 +1294,7 @@ function render() {
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   if (!insideHouse) {
+    drawGrass();
     drawRigging();
     gulls();
   }
@@ -1953,7 +2045,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
 const glyph = (b, odd) => (b < 0.035 ? (odd ? " " : b > 0.02 ? "." : " ") : RAMP[Math.min(RAMP.length - 1, 1 + Math.floor(b * (RAMP.length - 2)))]);
 // A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island.
 function blade(x, z, odd) {
-  const h = hash(Math.floor(x * 5), Math.floor(z * 5)), gust = Math.sin(T * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(T * 3.1 + x * 1.3);
+  const t = swayTime(), h = hash(Math.floor(x * 5), Math.floor(z * 5)), gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3);
   if (h < 0.18) return odd ? " " : ",";
   if (h < 0.55) return gust > 0.6 ? "/" : gust < -0.6 ? "\\" : "|";
   return h < 0.75 ? "'" : h < 0.9 ? '"' : ";";

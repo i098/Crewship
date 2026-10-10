@@ -243,10 +243,6 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     return (await this.first((r) => this.call(r, "GET", `message/${encodeURIComponent(guid)}`, { with: "chats,attachments" }))) as BBMessage;
   }
 
-  // True when a relay shows `text` as sent into `chat` since `since`. Throws when no relay can be asked, so the
-  // caller does not send again unchecked. The relays that returned a possibly-sent error are asked first, whatever
-  // their health result says: the text is most likely on them. A sent text reaches the other Macs through iCloud, which
-  // can lag: a relay that did not send it may not show it yet.
   async sent(chat: string, text: string, since: number): Promise<boolean> {
     let asked = false;
     for (const r of new Set([...this.suspects, ...(await this.healthy())])) {
@@ -257,12 +253,13 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         this.suspects.delete(r);
         if (recent.some((m) => m.isFromMe && m.text?.trim() === text.trim())) return true;
       } catch {
-        // ask the next relay
+        continue;
       }
     }
     if (!asked) throw new RelayError("could not check whether an earlier try was sent; no relay answered", true, 503);
     return false;
   }
+
 
   // Start (POST) or stop (DELETE) the typing bubble in a chat.
   typing(chat: string, method: "POST" | "DELETE"): Promise<void> {

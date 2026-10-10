@@ -590,8 +590,8 @@ const reply = await message.reply("plain reply").catch((e) => e.message);
 done({{ calls: a.calls, sent: a.sent, reaction: reaction ?? null, reply: reply ?? null, logs }});
 """)
     assert not [call for call in result["calls"] if call.endswith("/typing") or call == "POST message/react"]
-    assert result["reaction"] is None and result["reply"] is None
     assert [item["message"] for item in result["sent"]] == ["plain reply"]
+    assert result["reaction"] is None and result["reply"] is None
     assert "selectedMessageGuid" not in result["sent"][0] and "partIndex" not in result["sent"][0]
     assert len(result["logs"]) == 1 and "Private API" in result["logs"][0]
 
@@ -1166,13 +1166,13 @@ function space(id) {
     id,
     startTyping: typing,
     stopTyping: typing,
-    async send(text) { call("send"); sent(`send ${text}`, id); },
+    async send(text) { call("send"); sent(`send ${text}`, id); appendFileSync(`${dir}/send-targets`, `${id}\\n`); },
     async getMessage(mid) { call("getMessage"); return existsSync(`${dir}/messages/${mid}.json`) ? load(mid) : undefined; },
   };
 }
 function message(m) {
   return {
-    id: m.id, direction: "inbound", sender: { id: m.sender }, space: space(m.space),
+    id: m.id, direction: "inbound", sender: { id: m.sender }, space: space(m.space), timestamp: m.at ? new Date(m.at) : undefined,
     content: m.name
       ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
@@ -1280,7 +1280,7 @@ def fake_bridge(tmp_path):
         return bridge
 
     def inbound(mid, **fields):
-        record = {"id": mid, "space": "chat-1", "sender": "+10000000000", **fields}
+        record = {"id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", **fields}
         publish_json(fake / "inbound" / f"{mid}.json", record)
         wait_for(lambda: f"photon-{mid} " in text(notes), f"the note for {mid}")
 
@@ -1466,7 +1466,6 @@ const db = new Database(":memory:");
 db.run("CREATE TABLE message (payload TEXT, chatGuid TEXT, associated_message_guid TEXT, dateCreated INTEGER)");
 const dir = process.env.FAKE_DIR;
 const mode = () => (existsSync(`${dir}/relay-mode`) ? readFileSync(`${dir}/relay-mode`, "utf8").trim() : "");
-const sentLines = () => (existsSync(`${dir}/relay-sent`) ? readFileSync(`${dir}/relay-sent`, "utf8").split("\\n").filter(Boolean) : []);
 const history = () => {
   const outgoing = existsSync(`${dir}/relay-history`) ? readFileSync(`${dir}/relay-history`, "utf8").trim().split("\\n").map((l) => JSON.parse(l)) : [];
   const incoming = readdirSync(`${dir}/relay`).map((f) => JSON.parse(readFileSync(`${dir}/relay/${f}`, "utf8")));
@@ -1479,9 +1478,11 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   if (path === "message/text") {
     const b = await req.json();
     appendFileSync(`${dir}/relay-payloads`, `${JSON.stringify(b)}\\n`);
+    if (mode() === "send-down") return new Response("unavailable", { status: 503 });
     if (mode() === "lost") return new Response("garbled");
     appendFileSync(`${dir}/relay-sent`, `${b.chatGuid} ${b.message}\\n`);
-    appendFileSync(`${dir}/relay-history`, `${JSON.stringify({ guid: b.tempGuid, text: b.message, isFromMe: true, dateCreated: Date.now(), chats: [{ guid: b.chatGuid }] })}\\n`);
+    const m = { guid: b.tempGuid, text: b.message, isFromMe: true, dateCreated: Date.now(), chats: [{ guid: b.chatGuid }] };
+    appendFileSync(`${dir}/relay-history`, `${JSON.stringify(m)}\\n`);
     return mode() === "garbled" ? new Response("garbled") : Response.json({ data: {} });
   }
   if (path === "message/react") {
@@ -1491,7 +1492,10 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   }
   if (/^chat\\/[^/]+\\/message$/.test(path)) {
     if (mode() === "garbled") return new Response("down", { status: 500 });
-    if (u.searchParams.has("after")) return Response.json({ data: sentLines().map((l) => ({ isFromMe: true, text: l.slice(l.indexOf(" ") + 1) })) });
+    if (u.searchParams.has("after")) {
+      const chat = decodeURIComponent(path.split("/")[1]);
+      return Response.json({ data: history().filter((m) => m.isFromMe && m.chats.some((c) => c.guid === chat)) });
+    }
     if (mode() === "last-404") return new Response("chat not found", { status: 404 });
     const chat = decodeURIComponent(path.split("/")[1]);
     const recent = history().filter((m) => m.chats.some((c) => c.guid === chat)).sort((a, b) => b.dateCreated - a.dateCreated);
@@ -1600,7 +1604,7 @@ class FallbackRig:
         assert result.returncode == 0, result.stderr
 
     def photon_text(self, mid, text):
-        record = {"id": mid, "space": "chat-1", "sender": "+10000000000", "text": text}
+        record = {"id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": text}
         publish_json(self.fake / "inbound" / f"{mid}.json", record)
         wait_for(lambda: f"photon-{mid} " in read_text(self.notes), f"the Photon note {mid}")
 
@@ -1632,7 +1636,7 @@ def test_reply_keeps_an_uncertain_fallback_queued_after_a_permanent_read_error(t
         wait_for(lambda: "outbox item 1 failed" in read_text(rig.err)
                  or list((rig.state / "outbox-dead").glob("*.json")), "the uncertain send result")
         assert not list((rig.state / "outbox-dead").glob("*.json"))
-        assert rig.outbox()[0]["maybe"] == {"photon": "chat-1"}
+        assert rig.outbox()[0]["maybe"] == {"photon": "iMessage;-;+10000000000"}
         (rig.fake / "send-unsure").unlink()
         rig.relay_mode("")
         wait_for(lambda: "send second" in read_text(rig.fake / "sent"), "the queued remaining bubbles")
@@ -1658,27 +1662,6 @@ def test_reply_read_timeout_uses_the_fallback_without_blocking_plain_sends(tmp_p
         wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "the completed fallback queue")
     finally:
         rig.close()
-
-
-@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_inbox_failure_notice_stays_plain_without_the_raw_photon_client(tmp_path):
-    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
-    (fake / "raw-missing").touch()
-    (fake / "inbox-fail").touch()
-    bridge = start(1)
-    try:
-        inbound("m1", text="the refused note")
-        (fake / "inbox-fail").unlink()
-        inbound("m2", text="the accepted note")
-        cli("later response")
-        wait_for(lambda: "send later response" in text(fake / "sent")
-                 or "outbox item 1 failed" in text(err), "the inbox refusal response")
-        observed = text(fake / "sent").splitlines()
-        assert [line.split(" ", 1)[0] for line in observed] == ["send", "send"]
-        assert observed[-1] == "send later response"
-    finally:
-        bridge.terminate()
-        bridge.wait(10)
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
@@ -1748,11 +1731,12 @@ def test_smart_reply_orders_history_across_lagging_relays(tmp_path, later):
         rig.cli("--no-thread", "--reply", n, "--", "- forced plain")
         rig.cli("--reply", n, "--no-thread", "--", "- forced plain again")
         rig.cli("--", "- plain")
-        wait_for(lambda: "send - plain" in read_text(rig.fake / "sent"), "the plain sends")
-        assert read_text(rig.fake / "sent").splitlines() == [
-            "send - forced plain", "send - forced plain again", "send - plain",
-        ]
-        assert len(read_text(rig.fake / "relay-payloads").splitlines()) == 1
+        wait_for(lambda: "- plain" in read_text(rig.fake / "relay-sent"), "the plain sends on the latest line")
+        payloads = [json.loads(line) for line in read_text(rig.fake / "relay-payloads").splitlines()]
+        assert [p["message"] for p in payloads] == ["- the answer", "- forced plain", "- forced plain again", "- plain"]
+        assert all(p["chatGuid"] == "iMessage;-;+10000000000" for p in payloads)
+        assert all("selectedMessageGuid" not in p for p in payloads[1:])
+        assert not read_text(rig.fake / "sent")
     finally:
         rig.close()
         relay.terminate()
@@ -1798,7 +1782,7 @@ def test_bridge_falls_back_to_bluebubbles_and_back(tmp_path):
         rig.start()
         rig.photon_text("m1", "you there")
         rig.photon_down(True)
-        rig.cli("on the fallback")
+        rig.cli("--reply", "1", "on the fallback")
         wait_for(lambda: read_text(rig.fake / "relay-sent"), "the fallback send")
         rig.photon_down(False)
         rig.cli("on photon again")
@@ -1823,7 +1807,7 @@ def test_a_text_that_may_be_out_on_one_line_is_not_sent_on_another_after_a_resta
         rig.photon_text("m1", "you there")
         rig.photon_down(True)
         rig.relay_mode("garbled")
-        rig.cli("once only")
+        rig.cli("--reply", "1", "once only")
         wait_for(lambda: read_text(rig.fake / "relay-sent"), "the relay send")
         wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe"), "the unsure state in the outbox item")
         item = rig.outbox()[0]
@@ -1844,13 +1828,13 @@ def test_a_text_that_may_be_out_on_photon_waits_while_photon_does_not_start(tmp_
     """The restart after an unsure Photon send finds Photon down: the bubble is not sent on BlueBubbles, and Photon sends it once later."""
     rig = FallbackRig(tmp_path)
     (rig.state / "outbox").mkdir(parents=True)
-    item = {"space": "chat-1", "id": "m1", "bubbles": ["pinned"], "guid": "g-1", "maybe": {"photon": "chat-1"}, "since": 1}
+    item = {"space": "iMessage;-;+10000000000", "id": "m1", "bubbles": ["pinned"], "guid": "g-1", "maybe": {"photon": "iMessage;-;+10000000000"}, "since": 1}
     (rig.state / "outbox/1.json").write_text(json.dumps(item))
     (rig.fake / "spectrum-down").touch()
     try:
         rig.start()
         wait_for(lambda: "outbox item 1 failed (try 2)" in read_text(rig.err), "a retry while Photon is not running")
-        assert read_text(rig.fake / "relay-sent") == "" and rig.outbox()[0]["maybe"] == {"photon": "chat-1"}
+        assert read_text(rig.fake / "relay-sent") == "" and rig.outbox()[0]["maybe"] == {"photon": "iMessage;-;+10000000000"}
         rig.stop()
         (rig.fake / "spectrum-down").unlink()
         rig.start()
@@ -1869,7 +1853,7 @@ def test_a_text_the_check_proves_not_sent_goes_out_once_on_photon(tmp_path):
         rig.photon_text("m1", "you there")
         rig.photon_down(True)
         rig.relay_mode("lost")
-        rig.cli("once only")
+        rig.cli("--reply", "1", "once only")
         wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe"), "the unsure state in the outbox item")
         rig.photon_down(False)
         wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "the outbox to empty")
@@ -1887,7 +1871,7 @@ def test_a_stuck_tapback_is_dropped_and_the_sends_behind_it_go_out(tmp_path):
         rig.photon_text("m1", "you there")
         rig.photon_down(True)
         rig.cli("--react", "👍")
-        rig.cli("behind the tapback")
+        rig.cli("--reply", "1", "behind the tapback")
         wait_for(lambda: "behind the tapback" in read_text(rig.fake / "relay-sent"), "the send behind the tapback")
         wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "an empty outbox")
     finally:
@@ -1908,7 +1892,7 @@ def test_a_restart_targets_his_newest_text_on_any_transport(tmp_path):
         rig.relay_text("g1", "later, on the icloud line", int(time.time() * 1000) + 5000)
         wait_for(lambda: (rig.state / "latest-bluebubbles").exists(), "the BlueBubbles latest file")
         rig.stop()
-        (rig.state / "latest").write_text("chat-1\nm1\n")  # the format before the time was kept
+        (rig.state / "latest").write_text("iMessage;-;+10000000000\nm1\n")
         rig.start()
         rig.cli("--react", "❤️")
         wait_for(lambda: "react g1 love" in read_text(rig.fake / "relay-sent"), "the tapback on the newest text")
@@ -1940,3 +1924,166 @@ def test_a_replayed_older_text_never_becomes_his_latest(tmp_path):
     assert "react" not in read_text(rig.fake / "relay-sent")
     assert not (rig.state / "latest-bluebubbles").exists()
     assert read_text(rig.notes).count("bluebubbles-g1 ") == 1
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("restart", [False, True])
+def test_proactive_send_uses_the_latest_inbound_chat_and_transport(tmp_path, restart):
+    rig = FallbackRig(tmp_path)
+    try:
+        rig.start()
+        rig.photon_text("p1", "old chat")
+        rig.relay_text("g1", "new chat", int(time.time() * 1000) + 1000,
+                       chats=[{"guid": "iMessage;-;new-handle"}])
+        wait_for(lambda: (rig.state / "latest-bluebubbles").exists(), "the latest chat")
+        if restart:
+            rig.stop()
+            rig.start()
+        rig.cli("daily schedule")
+        wait_for(lambda: not rig.outbox(), "the sent schedule")
+        assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;new-handle daily schedule"]
+        assert not read_text(rig.fake / "sent")
+    finally:
+        rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_proactive_send_does_not_leave_the_latest_transport_during_an_outage(tmp_path):
+    rig = FallbackRig(tmp_path)
+    try:
+        rig.start()
+        rig.photon_text("p1", "old chat")
+        rig.relay_text("g1", "new chat", int(time.time() * 1000) + 1000,
+                       chats=[{"guid": "iMessage;-;new-handle"}])
+        wait_for(lambda: (rig.state / "latest-bluebubbles").exists(), "the latest chat")
+        rig.relay_mode("send-down")
+        rig.cli("daily schedule")
+        wait_for(lambda: "outbox item 1 failed" in read_text(rig.err), "the queued retry")
+        assert rig.outbox() and not read_text(rig.fake / "sent")
+        rig.relay_mode("")
+        wait_for(lambda: not rig.outbox(), "the recovered schedule")
+        assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;new-handle daily schedule"]
+    finally:
+        rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_proactive_send_uses_a_changed_photon_chat(tmp_path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        inbound("m1", text="old handle")
+        inbound("m2", space="iMessage;-;new-handle", text="new handle")
+        cli("daily schedule")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the sent schedule")
+        assert text(fake / "send-targets").splitlines() == ["iMessage;-;new-handle"]
+        assert text(fake / "sent").splitlines() == ["send daily schedule"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("legacy", [False, True])
+def test_newest_direct_destination_survives_a_transport_startup_failure(tmp_path, legacy):
+    rig = FallbackRig(tmp_path)
+    try:
+        rig.start()
+        rig.relay_text("g1", "older direct chat", int(time.time() * 1000) - 1000)
+        wait_for(lambda: (rig.state / "latest-bluebubbles-direct").exists(), "the older direct destination")
+        rig.photon_text("p1", "newer direct chat")
+        wait_for(lambda: (rig.state / "latest-direct").exists(), "the newer direct destination")
+        rig.stop()
+        if legacy:
+            (rig.state / "latest-direct").unlink()
+            (rig.state / "latest-bluebubbles-direct").unlink()
+        (rig.fake / "spectrum-down").touch()
+        rig.start()
+        rig.cli("daily schedule")
+        wait_for(lambda: "outbox item 1 failed (try 2)" in read_text(rig.err), "the unavailable destination retry")
+        assert rig.outbox()[0]["space"] == "iMessage;-;+10000000000"
+        assert rig.outbox()[0].get("line", "photon") == "photon"
+        assert not read_text(rig.fake / "relay-sent")
+        rig.stop()
+        (rig.fake / "spectrum-down").unlink()
+        rig.start()
+        wait_for(lambda: not rig.outbox(), "the recovered proactive send")
+        assert read_text(rig.fake / "sent").splitlines() == ["send daily schedule"]
+        assert not read_text(rig.fake / "relay-sent")
+    finally:
+        rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("transport", ["photon", "bluebubbles"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_owner_group_text_preserves_the_direct_proactive_destination(tmp_path, transport, restart):
+    rig = FallbackRig(tmp_path)
+    group = "iMessage;+;group-test"
+    try:
+        rig.start()
+        rig.relay_text("d1", "direct chat", int(time.time() * 1000))
+        wait_for(lambda: (rig.state / "latest-bluebubbles-direct").exists(), "the direct destination")
+        if transport == "bluebubbles":
+            rig.relay_text("g1", "group chat", int(time.time() * 1000) + 1000,
+                           chats=[{"guid": group}])
+        else:
+            record = {"id": "g1", "space": group, "sender": "+10000000000", "text": "group chat",
+                      "at": int(time.time() * 1000) + 1000}
+            publish_json(rig.fake / "inbound/g1.json", record)
+            wait_for(lambda: "photon-g1 " in read_text(rig.notes), "the group note")
+        latest = rig.state / ("latest" if transport == "photon" else "latest-bluebubbles")
+        wait_for(lambda: group in read_text(latest), "the explicit group target")
+        rig.cli("--reply", "1", "explicit group answer")
+        wait_for(lambda: not rig.outbox(), "the explicit group reply")
+        if transport == "bluebubbles":
+            assert read_text(rig.fake / "relay-sent").splitlines() == [f"{group} explicit group answer"]
+        else:
+            assert read_text(rig.fake / "send-targets").splitlines() == [group]
+        if restart:
+            rig.stop()
+            rig.start()
+        rig.cli("daily schedule")
+        wait_for(lambda: not rig.outbox(), "the direct proactive send")
+        assert read_text(rig.fake / "relay-sent").splitlines()[-1] == "iMessage;-;+10000000000 daily schedule"
+        assert "daily schedule" not in read_text(rig.fake / "sent")
+    finally:
+        rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_inbox_failure_notice_stays_plain_without_the_raw_photon_client(tmp_path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    (fake / "raw-missing").touch()
+    (fake / "inbox-fail").touch()
+    bridge = start(1)
+    try:
+        inbound("m1", text="the refused note")
+        (fake / "inbox-fail").unlink()
+        inbound("m2", text="the accepted note")
+        cli("later response")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the public SDK sends")
+        assert text(fake / "sent").splitlines() == [
+            "send firstmate did not get that, send it again",
+            "send later response",
+        ]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_saved_group_chat_cannot_become_a_proactive_destination(tmp_path):
+    rig = FallbackRig(tmp_path)
+    rig.state.mkdir()
+    (rig.state / "latest").write_text("iMessage;+;group-test\ng1\n1000\n")
+    try:
+        rig.start()
+        result = subprocess.run([str(SEND), "daily schedule"], capture_output=True, text=True,
+                                env=rig.env, timeout=30)
+        assert result.returncode != 0
+        assert not rig.outbox()
+        assert not read_text(rig.fake / "sent")
+        assert not read_text(rig.fake / "relay-sent")
+    finally:
+        rig.close()
