@@ -1505,7 +1505,7 @@ const safe = { left: 0, right: 0, top: 0, bottom: 0 };
 const MONO = getComputedStyle(document.documentElement).getPropertyValue("--mono");
 const BASE = { "": "#5c6a88", k: "#e9eefb", w: "#3f78b8", d: "#22406a", m: "#a9c8f0", o: "#dba66b", s: "#efe6cf",
   t: "#a3adc2", l: "#ffd479", r: "#e0705f", b: "#62a8e0", f: "#3a4562", h: "#7ee0c3", g: "#6fbf73", y: "#e3d3a3", n: "#9b8a62",
-  G: "#a5d36e", M: "#4f8a4a", p: "#17171c" };
+  G: "#a5d36e", M: "#4f8a4a", p: "#17171c", v: "#10172b" };
 // Each colour in four tiers for the night lighting: dark, dim, bright, and warmed by lamplight.
 const mix = (a, b, f) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - f) + parseInt(b.slice(i, i + 2), 16) * f).toString(16).padStart(2, "0")).join("");
 const COLORS = {};
@@ -2539,16 +2539,23 @@ function shadeCloud(c, density, m) {
   const halo = Math.max(0, (m - 0.8) / 0.2) ** 2, light = cloudRim * (0.6 + 1.4 * halo) + 0.6 * halo * (1 - density);
   put(c, CLOUD_RAMP[Math.min(7, Math.floor(density * 8))], light < 0.25 ? "f" : light < 0.6 ? "k3" : "k5", 0, Infinity);
 }
-// Cloud hides the stars, and the moon once it is thick; the lighthouse beam passes in front of it.
+// Low hills on the far shore, in radians above the horizon: a smooth ridge, at most 0.05, over the northern and
+// eastern sea, with gaps of open sea and both ends sinking into it.
+function ridge(az) {
+  const w = smooth((az + 0.6) / 0.7) * smooth((2.9 - az) / 0.7);
+  return w * Math.max(0, 0.02 + 0.016 * Math.sin(2.3 * az - 0.5) + 0.012 * Math.sin(5.1 * az + 2) + 0.01 * Math.sin(9.7 * az + 1) + 0.006 * Math.sin(17 * az + 3));
+}
+// The hills hide the stars; cloud hides the stars, and the moon once it is thick; the lighthouse beam passes in front.
 function shadeSky(c, dx, dy, dz) {
   const m = dx * MOON[0] + dy * MOON[1] + dz * MOON[2], el = Math.asin(dy), az = Math.atan2(dx, dz), glow = beamGlow(dx, dy, dz);
   const r = hash(Math.floor(az * 150), Math.floor(el * 150)) * 2.5;
-  const cover = dy > 0.02 ? skyClouds(az, el) : 0;
+  const cover = dy > 0.02 ? skyClouds(az, el) : 0, hill = el >= 0 && el < 0.06 && el < ridge(az);
   if (m > 0.9988 && cover < 0.6) put(c, m > 0.99935 && cover < 0.3 ? "@" : "%", cover < 0.3 ? "k" : "k4", 0, Infinity);
-  else if (el > 0.04 && r < 0.03 && cover < 0.25) put(c, r < 0.006 ? "*" : ".", "k", 0, Infinity);
+  else if (el > 0.04 && !hill && r < 0.03 && cover < 0.25) put(c, r < 0.006 ? "*" : ".", "k", 0, Infinity);
   else if (glow > 0.15) put(c, glyph(glow * 0.8, 0), "l" + Math.min(7, 2 + Math.floor(glow * 6)), 0, Infinity);
+  else if (hill) put(c, "#", "v", 0, Infinity);
   else if (cover >= 0.125) shadeCloud(c, cover, m);
-  else put(c, el < 0.035 ? "." : " ", "f", 0, Infinity);
+  else put(c, " ", "f", 0, Infinity);
 }
 function put(c, ch, cls, id, depth) { G[c] = ch; C[c] = cls; ID[c] = id; D[c] = depth; }
 
