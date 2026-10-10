@@ -58,7 +58,12 @@ Add an object and a `SCENE` entry to give the link its own place.
 The build limits each sign to a title, a short description and one link.
 Unmapped pages share a short summary with a count and one link to the README feature index.
 The welcome sign has three project links.
-Signs first reflow below or beside the map, clear of the move pad and safe-area edges.
+Posted signs first place their bottom frame row at the projected post top.
+Paired posts use the midpoint of their world-space tops, with a frame wide enough to cover both supports.
+Projection uses the same cell centers as the ray-cast scene, not the aimed surface or the object's center.
+Signs without posts keep their existing anchor placement.
+If the post top is off screen or the frame cannot fit, signs reflow below or beside the map.
+Signs keep clear of the move pad and safe-area edges.
 If space is limited, signs remove spacing and shorten the visible copy.
 If no clear rectangle fits, compact signs can cover the map but keep their links clear of the move pad.
 Signs remain within the safe area.
@@ -112,6 +117,8 @@ The check walks through the house door and back with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
+From three camera views, it checks each posted sign's bottom row against its world-space mount within one glyph cell.
+It also checks that the frame covers both supports on desktop and iPhone portrait and landscape.
 It includes 320×568 phones in both orientations and landscape heights of 256 and 192 pixels.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
 On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks the canvas DPR limit.

@@ -368,7 +368,7 @@ for (const x of [-4, 12]) {
   box(world, x - 0.16, 4.2, 14.26, x + 0.32, 4.65, 14.7, "l");
 }
 // A mailbox by the office and a notice board on the quay that leads to how this page is built.
-box(world, -0.55, 1.2, 21.4, -0.45, 2.2, 21.5, "t", { spot: "mailbox" });
+box(world, -0.55, 1.2, 21.4, -0.45, 2.2, 21.5, "t", { spot: "mailbox", post: true });
 box(world, -0.8, 2.2, 21.2, -0.2, 2.7, 21.7, "r", { spot: "mailbox" });
 
 // Plaza fountain: an octagonal stone basin, a raised rim, and four falling streams.
@@ -439,10 +439,10 @@ for (let x = -25; x < -6; x += 2.5) box(world, x, 1.2, 15.6, x + 0.12, 2.1, 15.7
 box(world, -25, 1.75, 15.62, -6.3, 1.85, 15.7, "o");
 box(world, -25, 1.45, 15.62, -6.3, 1.53, 15.7, "o");
 const howText = painted("HOW", 7.4, 8.7, 2.45, 3.25);
-for (const x of [7.35, 8.6]) box(world, x, 1.2, 16.72, x + 0.15, 2.4, 16.85, "o", { spot: "how" });
+for (const x of [7.35, 8.6]) box(world, x, 1.2, 16.72, x + 0.15, 2.4, 16.85, "o", { spot: "how", post: true });
 box(world, 7.2, 2.35, 16.6, 8.9, 3.35, 16.72, "o", { spot: "how", tex: (x, y, z, nx, ny, nz) => (nz < -0.5 ? (howText(x, y) ? "l" : "-") : null) });
 const docsText = painted("DOCS", -1.9, 0.3, 2.45, 3.25);
-for (const x of [-1.95, 0.25]) box(world, x, 1.2, 16.72, x + 0.15, 2.4, 16.85, "o", { spot: "docsboard" });
+for (const x of [-1.95, 0.25]) box(world, x, 1.2, 16.72, x + 0.15, 2.4, 16.85, "o", { spot: "docsboard", post: true });
 box(world, -2.1, 2.35, 16.6, 0.5, 3.35, 16.72, "o", { spot: "docsboard", tex: (x, y, z, nx, ny, nz) => (nz < -0.5 ? (docsText(x, y) ? "l" : "-") : null) });
 
 // Ship stations [z, half breadth, sheer height, keel height]. The bow narrows and rises out of the water.
@@ -992,9 +992,17 @@ for (const [list, lift] of [[world, 0], [ship, 1]]) {
     const b = s.bb, a = (anchors[s.spot] ||= { x: 0, y: 0, z: 0, n: 0, r: 0, ship: lift });
     a.x += (b[0] + b[3]) / 2; a.y += (b[1] + b[4]) / 2; a.z += (b[2] + b[5]) / 2; a.n++;
     a.r = Math.max(a.r, (b[3] - b[0]) / 2, (b[5] - b[2]) / 2, (b[4] - b[1]) / 3);
+    if (s.post) (a.posts ||= []).push({ x: (b[0] + b[3]) / 2, y: b[4], z: (b[2] + b[5]) / 2 });
   }
 }
-for (const a of Object.values(anchors)) { a.x /= a.n; a.y /= a.n; a.z /= a.n; }
+for (const a of Object.values(anchors)) {
+  a.x /= a.n; a.y /= a.n; a.z /= a.n;
+  if (a.posts) a.post = {
+    x: a.posts.reduce((n, p) => n + p.x, 0) / a.posts.length,
+    y: a.posts.reduce((n, p) => n + p.y, 0) / a.posts.length,
+    z: a.posts.reduce((n, p) => n + p.z, 0) / a.posts.length
+  };
+}
 
 let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 0, padY = 0, aspect = 1, viewW = 0, viewH = 0;
 const safe = { left: 0, right: 0, top: 0, bottom: 0 };
@@ -1062,9 +1070,16 @@ function render() {
   const spot = SP[mid], looked = spot && D[mid] < (RANGE[spot] || 12);
   show(moved ? jumped || (looked ? spot : nearby()) : null);
   minimap();
-  // Anchor the sign to the aimed surface, or the object's projected centre.
-  label(looked && spot === target ? [cols >> 1, rows >> 1] : target && project(anchors[target]));
+  labelTarget(spot, looked);
   draw(mid);
+}
+function labelTarget(spot, looked) {
+  // Seat posted signs on their world-space support tops, not the aimed surface.
+  const a = target && anchors[target], post = !insideHouse && a?.post;
+  const tops = post && a.posts.map(p => project(p, Math.floor));
+  const at = post ? project(post, Math.floor) : looked && spot === target ? [cols >> 1, rows >> 1] : a && project(a);
+  const span = at && tops && tops.every(Boolean) ? Math.max(...tops.map(p => Math.abs(p[0] - at[0]))) * 2 + 3 : 0;
+  label(at, span);
 }
 // Each tile of one row by TILE_W columns keeps only the solids whose screen rectangle reaches it.
 function castRow(j, seenWorld, seenShip) {
@@ -1154,11 +1169,11 @@ function gulls() {
 }
 
 // Screen cell of an anchor (possibly off screen), or null when it is behind you.
-function project(a) {
+function project(a, snap = Math.round) {
   const p = [a.x - cam.x, a.y + (a.ship ? bob : 0) - cam.y, a.z - cam.z];
   const dot = (v) => v[0] * p[0] + v[1] * p[1] + v[2] * p[2], z = dot(cam.f);
   if (z < 0.3) return null;
-  return [Math.round(((dot(cam.r) / z / cam.tanH + 1) / 2) * cols), Math.round(((1 - dot(cam.u) / z / cam.tanV) / 2) * rows)];
+  return [snap(((dot(cam.r) / z / cam.tanH + 1) / 2) * cols), snap(((1 - dot(cam.u) / z / cam.tanV) / 2) * rows)];
 }
 
 // Signs use scene cells.
@@ -1209,7 +1224,7 @@ function signLayout(width, mode, available) {
     signLinks.push({ start, height, a });
   }
 }
-function label(at) {
+function label(at, span = 0) {
   LINE.clear();
   signBox = null;
   card.hidden = mapMode === 2;
@@ -1230,32 +1245,49 @@ function label(at) {
     [i0, below, Math.min(i1, padLeft), j1],
     [i0, j0, side, j1]
   ];
-  for (let mode = 0; mode < 3 && !signBox; mode++) {
-    for (const area of areas) {
-      signBox = signFit(anchor, ...area, mode);
-      if (signBox) break;
-    }
+  if (span) {
+    const obstacles = [];
+    if (mapBox) obstacles.push([mapBox.oi - 1, mapBox.oj - 1, mapBox.oi + mapBox.w + 1, mapBox.oj + mapBox.h + 1]);
+    if (controls) obstacles.push([padLeft, padTop, Math.ceil((controls.right + 12 - padX) / cellW), Math.ceil((controls.bottom + 12 - padY) / cellH)]);
+    signBox = signPlace(at, [[i0, j0, i1, j1]], span, obstacles);
   }
+  signBox ||= signPlace(anchor, areas);
   if (!signBox) {
     const clearLeft = controls ? Math.max(i0, Math.ceil((controls.right + 12 - padX) / cellW)) : i0;
     signBox = signFit(anchor, clearLeft, j0, i1, j1, 3);
   }
-  if (signBox && anchor) signLeader(...anchor);
+  if (signBox && anchor && !signBox.seated) signLeader(...anchor);
 }
-function signFit(at, i0, j0, i1, j1, mode = 0) {
+function signPlace(at, areas, span = 0, obstacles = []) {
+  for (let mode = 0; mode < 3; mode++) {
+    for (const area of areas) {
+      const fit = signFit(at, ...area, mode, span, obstacles);
+      if (fit) return fit;
+    }
+  }
+  return null;
+}
+function signFit(at, i0, j0, i1, j1, mode = 0, span = 0, obstacles = []) {
   const width = Math.min(52, i1 - i0 - (mode ? 2 : 4));
   if (width < 1 || j1 <= j0) return null;
   signLayout(width, mode, j1 - j0);
-  const w = Math.max(...signRows.map(([text]) => text.length + signInset * 2),
+  const w = Math.max(span, ...signRows.map(([text]) => text.length + signInset * 2),
     ...signLinks.map((link) => (link.left || signInset) + (link.width || 0) + signInset));
   const h = Math.ceil(Math.max(signRows.length, ...signLinks.map((link) => link.row === undefined ? link.start + link.height : link.row + 1))) + 2;
   const hitTop = Math.min(0, ...signLinks.map((link) => link.start + 1));
   const hitBottom = Math.max(h, ...signLinks.map((link) => link.start + link.height + 1));
   if (hitBottom - hitTop > j1 - j0) return null;
+  if (span) return seatBoard(at, w, h, hitTop, hitBottom, i0, j0, i1, j1, obstacles);
   const [ai, aj] = at || [i0, j0];
   const i = at ? ai + 4 + w > i1 ? ai - 4 - w : ai + 4 : i0;
   const j = at ? aj - h - 2 < j0 ? aj + 2 : aj - h - 2 : j0;
-  return { i: Math.max(i0, Math.min(i1 - w, i)), j: Math.max(j0 - hitTop, Math.min(j1 - hitBottom, j)), w, h, overlay: mode === 3 };
+  return { i: Math.max(i0, Math.min(i1 - w, i)), j: Math.max(j0 - hitTop, Math.min(j1 - hitBottom, j)), w, h, overlay: mode === 3, seated: false };
+}
+function seatBoard(at, w, h, hitTop, hitBottom, i0, j0, i1, j1, obstacles) {
+  const i = at[0] - Math.floor(w / 2), j = at[1] - h + 1;
+  if (i < i0 || i + w > i1 || j + hitTop < j0 || j + hitBottom > j1) return null;
+  if (obstacles.some(([x0, y0, x1, y1]) => i < x1 && i + w > x0 && j + hitTop < y1 && j + hitBottom > y0)) return null;
+  return { i, j, w, h, overlay: false, seated: true };
 }
 function signLeader(ai, aj) {
   const { i, j, w, h } = signBox;
