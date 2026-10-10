@@ -284,6 +284,11 @@ PRIVATE = re.compile(
 )
 
 
+# The vendored code-clarity skill (MIT, Lakr233) links its author's public repositories.
+# Those links are credits, not private details; the exemption covers only that folder.
+VENDORED_OWNER = {"skills/public/code-clarity/": "github.com/Lakr233"}
+
+
 def test_public_skills_and_rules_are_named_and_hold_no_private_details():
     shapes = ["/home/x", "a@b.io", "h.ts.net", "10.1.2.3", "github.com/x", "k.env", "Captain"]
     assert all(PRIVATE.search(s) for s in shapes)
@@ -294,9 +299,11 @@ def test_public_skills_and_rules_are_named_and_hold_no_private_details():
     ]
     assert files
     for path in files:
+        rel = path.relative_to(repo).as_posix()
         text = path.read_text()
-        hit = PRIVATE.search(text)
-        assert not hit, f"{path.relative_to(repo)}: {hit.group(0)!r}"
+        allowed = next((v for k, v in VENDORED_OWNER.items() if rel.startswith(k)), None)
+        hits = [m.group(0) for m in PRIVATE.finditer(text) if m.group(0) != allowed]
+        assert not hits, f"{rel}: {hits[0]!r}"
         if path.name == "SKILL.md":
             meta = yaml.safe_load(text.split("---")[1])
             assert meta["name"] == path.parent.name, path
