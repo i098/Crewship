@@ -33,9 +33,9 @@ for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
 // ---- World -------------------------------------------------------------------------------
 const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
-// The scene's one wind: the unit direction it blows toward on the ground plan (x, z), and its strength, where 1 fills
-// the sails as drawn. The sails belly before it, and the flag and pennants stream along it.
-const WIND = { x: Math.sin(-1.17), z: Math.cos(-1.17), strength: 1 };
+// The scene's one wind: the unit direction it blows toward on the ground plan (x, z). The sails belly before it, the
+// flag and pennants stream along it, and the tall grass bends with it.
+const WIND = { x: -0.92, z: 0.39 };
 const world = [];
 const ship = [];
 const room = [];
@@ -630,7 +630,7 @@ shipLantern(SX, 2.63, 10, true);
 // corners, and the leeches bow out.
 const SAILS = [];
 function squareSail(z, top, width, drop) {
-  const c = Math.cos(0.6), s = Math.sin(0.6), belly = 0.45 * width * WIND.strength * (WIND.z * c - WIND.x * s);
+  const c = Math.cos(0.6), s = Math.sin(0.6), belly = 0.45 * width * (WIND.z * c - WIND.x * s);
   // The corners sit at 87% of the centre's drop below the cloth's head.
   // The deepest canvas stands 1.13 bellies out, and up to 10% more as the sail breathes.
   const sag = 0.13, bow = 0.08, v1 = (drop - 0.1) / (1 - sag), deep = 1.25 * belly;
@@ -711,7 +711,7 @@ function ropeSpan(p, q) {
   }
   return lo > hi ? null : [lo, hi];
 }
-function ropeCell(i, j, depth, ch, cls) {
+function ropeCell(i, j, depth, ch, cls = "o3") {
   if (i < 0 || i >= cols || j < 0 || j >= rows) return;
   const c = j * cols + i, h = ((2 * i + 1) / cols - 1) * cam.tanH, v = (1 - (2 * j + 1) / rows) * cam.tanV;
   const distance = depth * Math.sqrt(1 + h * h + v * v);
