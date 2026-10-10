@@ -358,20 +358,18 @@ console.log(JSON.stringify({{
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_memory_nodes_fit_the_limit(tmp_path):
-    """A line over LIMIT is asked again in the same conversation, at most TRIES calls, and every node fits."""
+    """Shortening replies and a model that never fits both leave nodes within the byte limit."""
     result = bun(f"""
-import {{ LIMIT, Memory, TRIES }} from {MEMORY};
+import {{ LIMIT, Memory }} from {MEMORY};
 {FAKE}
 const shrinking = new Memory({json.dumps(str(tmp_path / "a"))}, fake([2000, 1000, 500]));
 shrinking.append("owner", "z".repeat(3000)); await idle(shrinking);
 const stubborn = new Memory({json.dumps(str(tmp_path / "b"))}, fake([2000, 1500, 900, 700, 600, 100]));
 stubborn.append("owner", "z".repeat(3000)); await idle(stubborn);
 const sizes = [...shrinking.nodes.values(), ...stubborn.nodes.values()].map((n) => n.size);
-console.log(JSON.stringify({{ turns: calls.map((c) => c.length), sizes, LIMIT, TRIES, retry: calls[0][1] }}));
+console.log(JSON.stringify({{ sizes, LIMIT }}));
 """)
-    assert result["turns"] == [3, result["TRIES"]]
     assert result["sizes"] == [500, result["LIMIT"]]
-    assert result["retry"].startswith("Too long: your line is 2000 bytes, over the 512-byte limit.")
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -405,17 +403,18 @@ console.log(JSON.stringify({{
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_compaction_stays_under_the_ceiling(tmp_path):
-    """One huge message is clipped head and tail, and retries stop before a request passes CEILING bytes."""
+    """Each chunk has a bounded conversation, and a long reply cannot make retries exceed the input cap."""
     result = bun(f"""
-import {{ CEILING, LIMIT, Memory, OVERHEAD }} from {MEMORY};
+import {{ CALL_OVERHEAD, LIMIT, Memory, OVERHEAD }} from {MEMORY};
 const requests = [], firsts = [];
 const chat = (system) => {{
   let sent = Buffer.byteLength(system) + OVERHEAD;
+  let turns = 0;
   return {{
     async say(text) {{
-      sent += Buffer.byteLength(text);
+      sent += Buffer.byteLength(text) + (turns++ ? CALL_OVERHEAD : 0);
       requests.push(sent);
-      if (requests.length === 1) firsts.push(text);
+      if (turns === 1) firsts.push(text);
       const reply = "r".repeat(3000); // a model that never fits
       sent += Buffer.byteLength(reply);
       return reply;
@@ -427,14 +426,152 @@ const m = new Memory({json.dumps(str(tmp_path))}, chat);
 m.append("owner", "HEAD" + "m".repeat(1000000) + "TAIL");
 while (m.pending) await Bun.sleep(0);
 console.log(JSON.stringify({{
-  requests, CEILING, keepsEnds: firsts[0].includes("owner: HEAD") && firsts[0].includes("TAIL\\n</input>"),
+  requests, keepsEnds: firsts.some((s) => s.includes("owner: HEAD")) && firsts.some((s) => s.includes("TAIL\\n</input>")),
   size: m.nodes.get("0:0").size, LIMIT,
 }}));
 """)
     assert len(result["requests"]) >= 2
-    assert max(result["requests"]) <= result["CEILING"]
+    assert max(result["requests"]) <= 16_000
     assert result["keepsEnds"]
     assert result["size"] <= result["LIMIT"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_compaction_chunks_keep_the_middle_and_unicode(tmp_path):
+    """All source text reaches a small model call, and summaries preserve details from every chunk."""
+    result = bun(f"""
+import {{ INPUT_MAX, LIMIT, Memory }} from {MEMORY};
+const source = "START " + "🌊".repeat(1800) + " MIDDLE " + "界".repeat(2500) + " END";
+const inputs = [];
+const m = new Memory({json.dumps(str(tmp_path))}, () => ({{
+  async say(text) {{
+    const input = text.split("<input>\\n")[1].split("\\n</input>")[0];
+    inputs.push(input);
+    return ["START", "MIDDLE", "END"].filter((word) => input.includes(word)).join(" ") || "water";
+  }},
+  end() {{}},
+}}));
+m.append("owner", source);
+while (m.pending) await Bun.sleep(0);
+const parts = inputs.slice(0, -1);
+console.log(JSON.stringify({{
+  reconstructed: parts.join(""), source: "owner: " + source,
+  sizes: inputs.map((s) => Buffer.byteLength(s)), INPUT_MAX,
+  summary: m.nodes.get("0:0").text, size: m.nodes.get("0:0").size, LIMIT,
+}}));
+""")
+    assert result["reconstructed"] == result["source"]
+    assert all(size <= result["INPUT_MAX"] for size in result["sizes"])
+    assert result["summary"] == "START MIDDLE END"
+    assert result["size"] <= result["LIMIT"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("kind", ["owner", "supervisor", "desk"])
+@pytest.mark.parametrize("source_size", [9000, 70000])
+def test_compaction_tasks_keep_the_message_kind(tmp_path, kind, source_size):
+    """Every chunk and reduction receives the source kind, even without a speaker prefix."""
+    result = bun(f"""
+import {{ INPUT_MAX, Memory, OVERHEAD }} from {MEMORY};
+const calls = [];
+const source = "x".repeat({source_size});
+const m = new Memory({json.dumps(str(tmp_path))}, (system) => ({{
+  async say(prompt) {{
+    const [task, body] = prompt.split("</chat>\\n")[1].split("<input>\\n");
+    calls.push({{
+      task, input: body.split("\\n</input>")[0],
+      size: OVERHEAD + Buffer.byteLength(system + prompt),
+    }});
+    return "s".repeat(400);
+  }},
+  end() {{}},
+}}));
+m.append({json.dumps(kind)}, source);
+while (m.pending) await Bun.sleep(0);
+console.log(JSON.stringify({{
+  calls, INPUT_MAX, original: m.msgs[0].text, node: m.nodes.get("0:0"),
+}}));
+""")
+    calls = result["calls"]
+    source = f"{kind}: " + "x" * source_size
+    chunk_count = (len(source) + result["INPUT_MAX"] - 1) // result["INPUT_MAX"]
+    chunks = calls[:chunk_count]
+    reductions = calls[chunk_count:]
+    assert "".join(call["input"] for call in chunks) == source
+    assert all(not call["input"].startswith(f"{kind}:") for call in chunks[1:])
+    assert reductions and all("x" not in call["input"] for call in reductions)
+    assert all(f"message 0 (kind: {kind})" in call["task"] for call in calls)
+    assert all(len(call["input"].encode()) <= result["INPUT_MAX"] for call in calls)
+    assert all(call["size"] <= 16_000 for call in calls)
+    assert result["original"] == "x" * source_size
+    assert result["node"]["text"] == "s" * 400
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_compaction_failure_preserves_memory_and_backs_off(tmp_path):
+    """A partial chunk failure writes no node; new turns do not retry it, and timed retries back off."""
+    result = bun(f"""
+import {{ Memory, load, zoom }} from {MEMORY};
+{FAKE}
+let now = 0, fail = true, count = 0;
+const scheduled = [], times = [];
+globalThis.setTimeout = (fn, ms) => {{
+  const timer = {{ fn, at: now + ms, unref() {{ return this; }} }};
+  scheduled.push(timer); return timer;
+}};
+async function advance(ms, m) {{
+  now += ms;
+  for (const timer of [...scheduled]) if (timer.at <= now) {{
+    scheduled.splice(scheduled.indexOf(timer), 1); timer.fn();
+  }}
+  await idle(m);
+}}
+const dir = {json.dumps(str(tmp_path))};
+const errors = [];
+const m = new Memory(dir, () => ({{
+  async say() {{
+    times.push(now);
+    if (fail && ++count > 1) throw new Error("model unavailable");
+    return "all chunks summarized";
+  }},
+  end() {{}},
+}}), (e) => errors.push(e.message));
+m.append("owner", "existing"); await idle(m);
+const source = "x".repeat(9000);
+m.append("owner", source);
+const before = files(dir);
+await idle(m);
+const unchanged = JSON.stringify(before) === JSON.stringify(files(dir));
+for (let n = 0; n < 5; n++) {{ m.append("desk", "ok"); await idle(m); }}
+const noTurnRetry = times.length === 2;
+await advance(29999, m);
+const beforeDeadline = times.length;
+await advance(1, m);
+const firstRetry = times.at(-1);
+await advance(59999, m);
+const beforeSecond = times.length;
+await advance(1, m);
+const secondRetry = times.at(-1);
+const secondCount = times.length;
+fail = false;
+await advance(120000, m);
+const disk = load(dir);
+console.log(JSON.stringify({{
+  unchanged, noTurnRetry, beforeDeadline, firstRetry, beforeSecond, secondRetry, secondCount,
+  original: zoom(disk.msgs, disk.nodes, 1, 1).endsWith("owner: " + source),
+  existing: disk.nodes.get("0:0").text,
+  finished: disk.nodes.get("0:1").text, errors,
+}}));
+""")
+    assert result["unchanged"] and result["noTurnRetry"]
+    assert result["beforeDeadline"] == 2
+    assert result["firstRetry"] == 30000
+    assert result["beforeSecond"] == 3
+    assert result["secondRetry"] == 90000
+    assert result["secondCount"] == 4
+    assert result["original"] and result["existing"] == "owner: existing"
+    assert result["finished"] == "all chunks summarized"
+    assert result["errors"] == ["model unavailable"] * 3
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")

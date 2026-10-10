@@ -36,7 +36,11 @@ See [the frame loop](public/how.html#frame-loop) for adaptive detail and display
 The pirate ship has a 28 m tapered hull, a raised stern castle, and two square-rigged masts.
 Its gun ports, railings, figurehead, and warm lanterns follow the hull and deck.
 Walking bounds and the map use the hull's tapered stations; the gangway joins the deck to the dock.
-Steps connect the main deck to the stern castle's roof.
+The stern castle is the cabin, with planked walls, framed windows, a dark strap-hinged door, a glowing wall lantern, and pale roof trim.
+Walk through the cabin door to enter a small furnished room.
+It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and starry windows.
+The cabin uses the house's door transition, collisions, and hidden map; the inside door returns you to the deck, facing the bow.
+Ten steps with pale treads, darker risers, and a hand rail on each side connect the main deck to the cabin roof.
 Map walks connect the dock through the gangway and reach the stern roof through the supported stairs.
 Ship approaches avoid deck obstacles and reject unsupported floors or height changes larger than the manual walking limit.
 The sails keep a pale canvas tone at night.

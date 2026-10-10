@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const element = {
   hidden: false, classList: { add() {}, toggle() {} }, focus() {}, addEventListener() {},
   firstElementChild: {}, clientWidth: 600, clientHeight: 400,
-  style: {setProperty() {}},
+  style: {setProperty() {}}, replaceChildren() {},
   getContext: () => ({setTransform() {}, fillRect() {}, measureText: () => ({width: 6})})
 };
 const context = vm.createContext({
@@ -192,5 +192,64 @@ for (const dt of [0.02, 0.1]) {
     }
   }
 }
+"""
+    )
+
+
+def test_cabin_door_leads_into_a_furnished_room_and_back_to_the_deck():
+    _run_ship_scene(
+        r"""
+function walk(channel, yaw, frames) {
+  me.yaw = yaw;
+  if (channel === 'keyboard') keys.add('f'); else stick.y = 1;
+  for (let i = 0; i < frames; i++) step(0.02);
+  keys.clear(); stick.y = 0; step(0);
+}
+for (const channel of ['keyboard', 'touch']) {
+  Object.assign(me, {x: SX, z: -8.4});
+  walk(channel, Math.PI, 6);
+  assert.equal(interior, CABIN, `${channel}: the cabin door must lead inside`);
+  assert.deepEqual([me.x, me.z, me.yaw], [0, 0.8, 0], 'entry must face into the cabin');
+  assert(floorAt(me.x, me.z) === 0 && !blocked(me.x, me.z, 0), 'entry must leave the player clear of the furniture');
+  mapKey({code: 'KeyM'});
+  minimap();
+  assert.equal(mapMode, 0, 'the island map must not open inside');
+  assert.equal(mapBox, null);
+  walk(channel, Math.PI, 8);
+  assert.equal(interior, null, `${channel}: the inside door must lead back out`);
+  assert.deepEqual([me.x, me.z, me.yaw], [SX, -8.35, 0], 'the exit must face the bow just outside the door');
+  const deck = floorAt(me.x, me.z);
+  assert(deck > 1.6 && !blocked(me.x, me.z, deck), 'the exit must land on clear deck');
+}
+for (const x of [SX - 0.6, SX + 0.6]) {
+  Object.assign(me, {x, z: -8.4});
+  walk('keyboard', Math.PI, 20);
+  assert.equal(interior, null, 'walking into the cabin front beside the door must not enter');
+  assert(me.z >= -8.75, 'the cabin front must still block walking');
+}
+interior = CABIN;
+for (const [x, z] of [[0, 3.2], [0, 4.3], [1.8, 1.9], [-1.8, 1.3]]) {
+  assert(blocked(x, z, 0), `the table, chair, bunk and chest must block walking at ${x},${z}`);
+}
+for (const [x, z] of [[0, 1.6], [1.6, 4.6], [-1.6, 4.6]]) {
+  assert(floorAt(x, z) === 0 && !blocked(x, z, 0), `the aisles must reach the stern windows at ${x},${z}`);
+}
+assert.equal(floorAt(0, 5.1), null, 'the stern wall must bound the cabin floor');
+"""
+    )
+
+
+def test_stair_treads_sit_where_the_walking_lane_puts_your_feet():
+    _run_ship_scene(
+        r"""
+let previous = DECK;
+for (const [x0, x1, z0, z1] of STERN_STEPS) {
+  const x = (x0 + x1) / 2, z = (z0 + z1) / 2, height = floorAt(x, z);
+  const tread = 9 - Math.min(...ship.map(s => hit(s, x, 9, z, 0, -1, 0)));
+  assert(Math.abs(tread - height) < 1e-9, `the tread at z ${z} must be at the walking height`);
+  assert(Math.abs(height - previous - 0.28) < 1e-9, 'every step must rise by one equal riser');
+  previous = height;
+}
+assert(Math.abs(previous - 4.8) < 1e-9, 'the top step must be level with the stern roof');
 """
     )
