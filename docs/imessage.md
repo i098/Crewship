@@ -48,6 +48,7 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
 - **The input cap.** The model's price rises past 100,000 tokens of input, so no desk or compaction request sends more than 180,000 bytes (about 60,000 tokens, counted as bytes / 3). The service clips the fleet status, long texts, and each zoom result (16 KB) to their head and tail. After the cap, zoom returns "context limit reached".
 - **Compaction size.** Each call reads at most 2 KB of context and 4 KB of source text.
   Long messages use complete UTF-8 chunks; the model then merges their summaries.
+  Each chunk and reduction task states the source message's kind.
   Retries share a 16 KB conversation budget, and each model call keeps its 60-second limit.
   Compaction uses Haiku 4.5 with reasoning disabled; the configured desk model stays unchanged.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.

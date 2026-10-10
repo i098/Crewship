@@ -275,7 +275,7 @@ export class Memory {
       const m = this.msgs[i];
       text = `${m.kind}: ${m.text}`;
       if (bytes(text) > LIMIT) {
-        text = await this.compact(i, `Compaction: compress message ${i} into one line of at most ${LIMIT} bytes
+        text = await this.compact(i, `Compaction: compress message ${i} (kind: ${m.kind}) into one line of at most ${LIMIT} bytes
 (about 70 words), the length of this ruler:
 ${RULER}`, text);
       }

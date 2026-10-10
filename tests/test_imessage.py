@@ -467,6 +467,47 @@ console.log(JSON.stringify({{
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("kind", ["owner", "supervisor", "desk"])
+@pytest.mark.parametrize("source_size", [9000, 70000])
+def test_compaction_tasks_keep_the_message_kind(tmp_path, kind, source_size):
+    """Every chunk and reduction receives the source kind, even without a speaker prefix."""
+    result = bun(f"""
+import {{ INPUT_MAX, Memory, OVERHEAD }} from {MEMORY};
+const calls = [];
+const source = "x".repeat({source_size});
+const m = new Memory({json.dumps(str(tmp_path))}, (system) => ({{
+  async say(prompt) {{
+    const [task, body] = prompt.split("</chat>\\n")[1].split("<input>\\n");
+    calls.push({{
+      task, input: body.split("\\n</input>")[0],
+      size: OVERHEAD + Buffer.byteLength(system + prompt),
+    }});
+    return "s".repeat(400);
+  }},
+  end() {{}},
+}}));
+m.append({json.dumps(kind)}, source);
+while (m.pending) await Bun.sleep(0);
+console.log(JSON.stringify({{
+  calls, INPUT_MAX, original: m.msgs[0].text, node: m.nodes.get("0:0"),
+}}));
+""")
+    calls = result["calls"]
+    source = f"{kind}: " + "x" * source_size
+    chunk_count = (len(source) + result["INPUT_MAX"] - 1) // result["INPUT_MAX"]
+    chunks = calls[:chunk_count]
+    reductions = calls[chunk_count:]
+    assert "".join(call["input"] for call in chunks) == source
+    assert all(not call["input"].startswith(f"{kind}:") for call in chunks[1:])
+    assert reductions and all("x" not in call["input"] for call in reductions)
+    assert all(f"message 0 (kind: {kind})" in call["task"] for call in calls)
+    assert all(len(call["input"].encode()) <= result["INPUT_MAX"] for call in calls)
+    assert all(call["size"] <= 16_000 for call in calls)
+    assert result["original"] == "x" * source_size
+    assert result["node"]["text"] == "s" * 400
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_compaction_failure_preserves_memory_and_backs_off(tmp_path):
     """A partial chunk failure writes no node; new turns do not retry it, and timed retries back off."""
     result = bun(f"""
