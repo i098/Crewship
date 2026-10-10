@@ -1,4 +1,4 @@
-"""Check the harbor's cloud layers (wind drift, moonlit edges, cover, the sky buffer's refresh) and the horizon."""
+"""Check the harbor's cloud layers (wind drift and streaks, soft edges, glyphs, moonlit edges, cover, the sky buffer's refresh) and the horizon."""
 
 import shutil
 import subprocess
@@ -53,75 +53,93 @@ for (const layer of layers) {
     if (Math.abs(cloudDensity(...d) - before) > 0.1) moved++;
     Object.assign(cam, {x: WIND.x * layer.speed * 30, z: WIND.z * layer.speed * 30}); gatherClouds(0);
     assert(Math.abs(cloudDensity(...d) - before) < 1e-5, 'clouds must drift downwind at their layer speed');
-    if (before > 0.5) clouded++;
+    if (before > 0.2) clouded++;
   });
   assert(clouded > 20 && moved > 20, 'the drift check must see clouds move');
 }
+
+// The middle and high sheets draw streaks along the wind: they change less downwind than across the wind.
+for (const layer of layers.slice(1)) {
+  CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length, layer);
+  Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0; gatherClouds(0);
+  clumpCount = 0; // the sheet alone
+  const at = (along, across) => {
+    const x = along * WIND.x + across * WIND.z, y = layer.base - cam.y, z = along * WIND.z - across * WIND.x, l = Math.hypot(x, y, z);
+    return cloudDensity(x / l, y / l, z / l);
+  };
+  let downwind = 0, crosswind = 0;
+  for (let a = -3 * layer.base; a < 3 * layer.base; a += layer.base / 13) {
+    for (let b = -3 * layer.base; b < 3 * layer.base; b += layer.base / 12) {
+      const here = at(a, b);
+      downwind += Math.abs(at(a + layer.base / 3, b) - here);
+      crosswind += Math.abs(at(a, b + layer.base / 3) - here);
+    }
+  }
+  assert(downwind < 0.8 * crosswind, 'cloud streaks must run along the wind');
+}
 CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length, ...layers);
 
-// A cloud 26 m beside the zenith: its centre sits at a fixed world point whatever the wind.
-Object.assign(cam, {x: -30, y: 2.8, z: -30});
-cloudCount = 0; ROW_COUNT.fill(0); ROW_CLOUDS.fill(0); ROW_BINS.fill(0); SKY_STEP.fill(-1);
-placeCloud(-13, -1, 260, -50.94 * WIND.x - 45.73 * WIND.z, 45.73 * WIND.x - 50.94 * WIND.z);
-const polarRows = ROW_COUNT.slice();
-let polarCover = 0;
-for (let el = 83.5; el < 90; el++) {
-  const b = el * Math.PI / 180;
-  for (let az = -179.5; az < 180; az++) {
-    const a = az * Math.PI / 180;
-    const d = [Math.cos(b) * Math.sin(a), Math.sin(b), Math.cos(b) * Math.cos(a)];
-    ROW_COUNT.fill(1);
-    const expected = cloudDensity(...d);
-    ROW_COUNT.set(polarRows);
-    assert(Math.abs(cloudDensity(...d) - expected) < 1e-6,
-      'row bounds must retain overhead cloud density');
-    assert(Math.abs(skyClouds(a, b) - expected) < (el === 89.5 ? 0.002 : 1e-5),
-      'azimuth bins must retain overhead cloud density');
-    if (el === 89.5 && expected > 0.125) polarCover++;
+// Cloud thins out to clear sky: dense cloud seldom lies within 1° of clear sky.
+const toward = (a, b) => [Math.cos(b) * Math.sin(a), Math.sin(b), Math.cos(b) * Math.cos(a)];
+const degrees = (az, el) => toward(az * Math.PI / 180, el * Math.PI / 180);
+Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0; gatherClouds(0);
+let dense = 0, abrupt = 0;
+for (let az = -180; az < 180; az += 2) {
+  for (let el = 15.5; el < 80; el += 2) {
+    if (cloudDensity(...degrees(az, el)) < 0.4) continue;
+    dense++;
+    if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([p, q]) => cloudDensity(...degrees(az + p, el + q)) < 0.05)) abrupt++;
   }
 }
-assert(polarCover > 0, 'the cloud must remain visible near the zenith');
-cloudCount = 0; ROW_COUNT.fill(0); ROW_BINS.fill(0);
-placeCloud(-13, -1, 260, 500, 500);
-assert.equal(ROW_COUNT[89], 0, 'a cloud below the zenith must not reach the top row');
-assert(ROW_BINS.slice(89 * 72).every((bin) => bin === 0),
-  'a cloud below the zenith must not mark the top azimuth bins');
+assert(dense > 200 && abrupt < 0.1 * dense, 'cloud must thin out to clear sky, not end at a hard edge');
 
-// Cloud edges that face the moon are lit; edges that face away are not.
-Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0; gatherClouds(0);
+// Cloud draws mostly light glyphs from its ramp, and its densest glyph rarely.
+const glyphs = {};
+let cells = 0;
+around(0, 0.02, (d) => {
+  if (skyClouds(Math.atan2(d[0], d[2]), Math.asin(d[1])) < 0.15) return;
+  shadeSky(0, ...d);
+  if (!CLOUD_TONES.includes(C[0])) return; // a star, the moon or the lighthouse beam
+  glyphs[G[0]] = (glyphs[G[0]] || 0) + 1;
+  cells++;
+});
+const share = (set) => [...set].reduce((n, g) => n + (glyphs[g] || 0), 0) / cells;
+assert(cells > 300 && Object.keys(glyphs).every((g) => CLOUD_RAMP.includes(g)), 'cloud must draw glyphs from its ramp');
+assert(share('.:~') > 0.5 && share('*') < 0.02, 'cloud must be mostly light glyphs and rarely the densest');
+
+// Cloud edges that face the moon are lit; edges that face away are not. The rim spans 1.5°.
 const edges = {toward: [], away: []};
 around(Math.atan2(MOON[0], MOON[2]), 0.01, (d) => {
-  const density = cloudDensity(...d), rim = cloudEdge;
-  if (density < 0.2 || density > 0.8) return;
+  const az = Math.atan2(d[0], d[2]), el = Math.asin(d[1]), cover = skyClouds(az, el);
+  if (cover < 0.2 || cover > 0.8) return;
   const m = d[0] * MOON[0] + d[1] * MOON[1] + d[2] * MOON[2];
-  const near = unit(d.map((v, k) => v + (MOON[k] - v) * 0.004 / Math.sqrt(2 - 2 * m)));
-  edges[cloudDensity(...near) < density ? 'toward' : 'away'].push(rim / density);
+  const near = unit(d.map((v, k) => v + (MOON[k] - v) * 0.026 / Math.sqrt(2 - 2 * m)));
+  edges[cloudDensity(...near) < cloudDensity(...d) ? 'toward' : 'away'].push(moonRim(cover, az, el) / cover);
 });
 const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 assert(edges.toward.length > 100 && edges.away.length > 100, 'the sample must cross many cloud edges');
 assert(mean(edges.toward) > 3 * mean(edges.away), 'moon-side edges must be brighter');
 
-// Thick cloud hides the moon and the stars; thin cloud only dims the moon.
+// Thick cloud hides the moon and the stars; thin cloud dims them.
 const read = skyClouds;
 function skyWith(cover, d) {
-  skyClouds = () => cover; cloudRim = 0.3;
+  skyClouds = () => cover;
   shadeSky(0, ...d);
   skyClouds = read;
   return [G[0], C[0]];
 }
 assert.deepEqual(skyWith(0, MOON), ['@', 'k'], 'a clear moon must stay bright');
 assert.deepEqual(skyWith(0.45, MOON), ['%', 'k4'], 'thin cloud must dim the moon');
-cloudRim = 0.3;
-shadeCloud(0, 0.8, 1);
-const thick = [G[0], C[0]];
-assert.deepEqual(skyWith(0.8, MOON), thick, 'thick cloud must cover the moon');
+const thick = skyWith(0.8, MOON)[0];
+assert(thick !== ' ' && CLOUD_RAMP.includes(thick), 'thick cloud must cover the moon');
 let star = null;
 for (let a = 0; !star && a < 6; a += 0.002) {
   const d = unit([Math.sin(a), 0.6, Math.cos(a)]);
   if (skyWith(0, d)[0] === '*') star = d;
 }
 assert(star, 'the sky must have a star to cover');
-assert.notEqual(skyWith(0.5, star)[0], '*', 'cloud must hide the stars');
+assert.deepEqual(skyWith(0.25, star), ['*', 'k1'], 'stars must show faintly through thin cloud');
+assert.notEqual(skyWith(0.5, star)[0], '*', 'thicker cloud must hide the stars');
 // Just above the horizon the sky is empty or dark hills, never pale haze, at every azimuth.
 const horizon = new Set();
 for (let a = -Math.PI; a < Math.PI; a += 0.003) {
@@ -154,9 +172,8 @@ assert(Math.abs(total - texels) <= 0.05 * texels, 'each texel must refresh once 
 assert(Math.max(...steps) < 0.4 * total, 'one frame must not refresh most rows');
 Object.assign(cam, {x: 400, z: -300}); gatherClouds(tenths += 1);
 const texelCentre = (i, j) => [(i + 0.5) * 2 * Math.PI / SKY_W - Math.PI, (j + 0.5) * Math.PI / 2 / SKY_H];
-const toward = (a, b) => [Math.cos(b) * Math.sin(a), Math.sin(b), Math.cos(b) * Math.cos(a)];
 let cloudy = null;
-for (let k = 0; !cloudy && k < SKY_W * 40; k++) if (compute(...toward(...texelCentre(k % SKY_W, 10 + Math.floor(k / SKY_W)))) > 0.5) cloudy = texelCentre(k % SKY_W, 10 + Math.floor(k / SKY_W));
+for (let k = 0; !cloudy && k < SKY_W * 40; k++) if (compute(...toward(...texelCentre(k % SKY_W, 10 + Math.floor(k / SKY_W)))) > 0.3) cloudy = texelCentre(k % SKY_W, 10 + Math.floor(k / SKY_W));
 assert(cloudy, 'the new camera place must see a cloud');
 assert(Math.abs(skyClouds(...cloudy) - compute(...toward(...cloudy))) < 1e-6,
   'a texel must refresh from the new camera place within a tenth of a second');
@@ -164,12 +181,9 @@ assert(Math.abs(skyClouds(...cloudy) - compute(...toward(...cloudy))) < 1e-6,
 Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0;
 SKY_STEP.fill(-1); gatherClouds(100);
 const rowDirections = Array.from({length: SKY_W}, (_, i) => texelCentre(i, 20));
-const readRow = () => rowDirections.map((d) => {
-  const cover = skyClouds(...d);
-  return [cover, cloudRim];
-});
+const readRow = () => rowDirections.map((d) => skyClouds(...d));
 const initialRow = readRow();
-assert(initialRow.some(([cover]) => cover > 0.5), 'the movement check must see a cloud');
+assert(initialRow.some((cover) => cover > 0.3), 'the movement check must see a cloud');
 cam.x += 0.1; gatherClouds(100.16);
 const normalRow = readRow();
 assert.deepEqual(normalRow, initialRow, 'fresh texels must remain cached during normal-motion walking');
@@ -179,12 +193,9 @@ gatherClouds(100.32);
 const transitionedRow = readRow();
 let transitionChanges = 0;
 rowDirections.forEach((d, i) => {
-  const cover = compute(...toward(...d)), rim = cloudEdge;
-  assert(Math.abs(transitionedRow[i][0] - cover) < 1e-6,
+  assert(Math.abs(transitionedRow[i] - compute(...toward(...d))) < 1e-6,
     'enabling reduced motion after walking must refresh density without further movement');
-  assert(Math.abs(transitionedRow[i][1] - rim) < 1e-6,
-    'enabling reduced motion after walking must refresh the rim without further movement');
-  if (Math.abs(transitionedRow[i][0] - normalRow[i][0]) > 1e-5) transitionChanges++;
+  if (Math.abs(transitionedRow[i] - normalRow[i]) > 1e-5) transitionChanges++;
 });
 assert(transitionChanges > 0, 'the mode transition must replace stale cloud positions');
 for (const axis of ['x', 'y', 'z']) {
@@ -194,19 +205,16 @@ for (const axis of ['x', 'y', 'z']) {
     const after = readRow();
     let changed = 0;
     rowDirections.forEach((d, i) => {
-      const cover = compute(...toward(...d)), rim = cloudEdge;
-      assert(Math.abs(after[i][0] - cover) < 1e-6,
+      assert(Math.abs(after[i] - compute(...toward(...d))) < 1e-6,
         'reduced-motion movement must refresh density at the final camera position');
-      assert(Math.abs(after[i][1] - rim) < 1e-6,
-        'reduced-motion movement must refresh the rim at the final camera position');
-      if (Math.abs(after[i][0] - before[i][0]) > 1e-5) changed++;
+      if (Math.abs(after[i] - before[i]) > 1e-5) changed++;
     });
     assert(changed > 0, 'each camera axis must change the visible cloud density');
     computed = 0; gatherClouds(100.16);
     assert.deepEqual(readRow(), after, 'a render after releasing movement must retain the final cloud position');
     assert(computed > 0, 'each reduced-motion render must refresh the texels it reads');
     computed = 0;
-    assert.deepEqual(readRow(), after, 'repeated reads within one render must retain density and rim');
+    assert.deepEqual(readRow(), after, 'repeated reads within one render must retain density');
     assert.equal(computed, 0, 'each texel must refresh only once per reduced-motion render');
   }
 }
