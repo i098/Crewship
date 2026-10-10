@@ -989,10 +989,11 @@ function drawGrass() {
   }
 }
 // A clump: four to eight blades fanning out from its foot, each bending further into the wind toward its tip.
+// Gusts roll downwind in four steps, so a still clump redraws only when its step changes.
 // Far clumps draw as many blades as fit side by side, each a straight stroke.
 function drawClump(k, sway, b, fit, bent) {
   const x = GRASS[k], y = GRASS[k + 1], z = GRASS[k + 2], h = GRASS[k + 3], s = GRASS[k + 4];
-  const gust = 0.5 + 0.4 * Math.sin(sway * 1.7 - (x * WIND.x + z * WIND.z) * 0.35 + s * 1.2) + 0.1 * Math.sin(sway * 6.1 + s * 40);
+  const gust = Math.round(1.5 + 1.5 * Math.sin(sway * 1.7 - (x * WIND.x + z * WIND.z) * 0.35 + s * 1.2)) / 3;
   const body = GRASS_BODY[Math.min(7, Math.floor(b * 9))], tip = GRASS_TIP[Math.min(7, Math.floor((b + 0.12) * 9))];
   for (let n = Math.min(fit, 4 + Math.floor(s * 5)), i = 0; i < n; i++) {
     const a = s * 6.28 + i * 2.4, ca = Math.cos(a), sa = Math.sin(a), f = 0.3 + 0.7 * ((s * 7 + i * 0.37) % 1);
