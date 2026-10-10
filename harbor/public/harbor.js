@@ -41,7 +41,7 @@ const ship = [];
 const room = [];
 const cabinRoom = [];
 const gunDeck = [];
-let indoors = null; // HOUSE, CABIN or GUN_DECK while you are in that interior, else null
+let interior = null; // the room you are inside (HOUSE, CABIN or GUN_DECK), or null outdoors
 
 function solid(list, planes, bb, mat, o) {
   const P = [];
@@ -1071,12 +1071,12 @@ const HOUSE = { solids: room, floorAt: roomFloorAt, light: roomLight, floor: [-2
 const CABIN = { solids: cabinRoom, floorAt: roomFloorAt, light: roomLight, floor: [-1.95, 1.95, 0.25, 4.95], lights: [0, 1.79, 3.2, 0.85, 9], door: [SX, -8.75, -1], exit: [SX, -8.35, 0] };
 
 function roomFloorAt(x, z) {
-  const f = indoors.floor;
+  const f = interior.floor;
   return x >= f[0] && x <= f[1] && z >= f[2] && z <= f[3] ? 0 : null;
 }
 // The walls, furniture and fittings of the interior you are in block walking.
 function roomBlocked(x, z, fy) {
-  return indoors.solids.some((s) => walkingSolid(s, fy) && x > walkBound(s.bb, 0) && x < walkBound(s.bb, 3) &&
+  return interior.solids.some((s) => walkingSolid(s, fy) && x > walkBound(s.bb, 0) && x < walkBound(s.bb, 3) &&
     z > walkBound(s.bb, 2) && z < walkBound(s.bb, 5));
 }
 // The room whose outside door the step from (me.x, me.z) to (x, z) walks through, or null.
@@ -1085,15 +1085,15 @@ function doorAhead(x, z) {
     dir * (me.z - dz) <= 0 && dir * (z - dz) > 0 && dir * (z - dz) < 0.45) || null;
 }
 function crossDoor(x, z) {
-  if (indoors === GUN_DECK) return false;
-  const next = !indoors ? doorAhead(x, z) : me.z >= 0.35 && z < 0.35 && Math.abs(x) < 0.42 ? null : indoors;
-  if (next === indoors) return false;
-  return crossInto(next, next ? { x: 0, z: 0.8, yaw: 0 } : { x: indoors.exit[0], z: indoors.exit[1], yaw: indoors.exit[2] });
+  if (interior === GUN_DECK) return false;
+  const next = !interior ? doorAhead(x, z) : me.z >= 0.35 && z < 0.35 && Math.abs(x) < 0.42 ? null : interior;
+  if (next === interior) return false;
+  return crossInto(next, next ? { x: 0, z: 0.8, yaw: 0 } : { x: interior.exit[0], z: interior.exit[1], yaw: interior.exit[2] });
 }
 // A door or hatch crossing draws the scene on the other side, stands you at `place`, and waits for the
 // movement keys and touch pad to be released before you move again.
 function crossInto(next, place) {
-  indoors = next;
+  interior = next;
   Object.assign(me, place, { pitch: 0 });
   probeMs = -1;
   slow = fast = 0;
@@ -1114,7 +1114,7 @@ function movePlayer(x, z, here) {
 }
 // The room fill and each room's lights share the same warm colour.
 function roomLight(x, y, z, nx, ny, nz) {
-  const L = indoors.lights;
+  const L = interior.lights;
   let warm = 0.28;
   for (let k = 0; k < L.length; k += 5) {
     const lx = L[k] - x, ly = L[k + 1] - y, lz = L[k + 2] - z, d = Math.sqrt(lx * lx + ly * ly + lz * lz);
@@ -1134,7 +1134,7 @@ function castRoom(c, i, odd, dx, dy, dz) {
     const [ch, cls] = roomFlame(cam.y + dy * hitT, hitS.bb);
     put(c, ch, cls, hitS.id * 16, hitT);
   } else if (hitS) shadeRoom(c, odd, dx, dy, dz);
-  else if (indoors === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
+  else if (interior === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
 // Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests. Like the rest
@@ -1153,7 +1153,7 @@ function shadeRoom(c, odd, dx, dy, dz) {
   const tex = s.tex && s.tex(x, y, z, nx, ny, nz), mat = tex && tex !== "-" ? tex[0] : s.mat;
   let ch = "@", cls = "l7";
   if (mat !== "l") {
-    const warm = indoors.light(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
+    const warm = interior.light(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * y), fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
     // Keep the bed, chart water, and blue book spines blue under warm room light.
@@ -1268,8 +1268,8 @@ const GUN_DECK = { solids: gunDeck, floorAt: gunDeckFloorAt, light: gunDeckLight
 // the ladder climbs back up to stand beside the hatch, facing aft along the main deck.
 function crossHatch(x, z) {
   const [x0, x1, z0, z1] = HATCH;
-  if ((indoors && indoors !== GUN_DECK) || x < x0 || x >= x1 || z < z0 || z >= z1) return false;
-  return crossInto(indoors ? null : GUN_DECK, { x: indoors ? SX + 1.6 : SX, z: indoors ? 4.55 : 3.45, yaw: Math.PI });
+  if ((interior && interior !== GUN_DECK) || x < x0 || x >= x1 || z < z0 || z >= z1) return false;
+  return crossInto(interior ? null : GUN_DECK, { x: interior ? SX + 1.6 : SX, z: interior ? 4.55 : 3.45, yaw: Math.PI });
 }
 
 // ---- Motion state ------------------------------------------------------------------------
@@ -1298,7 +1298,7 @@ const FLOORS = [
   [...HATCH, () => null],
 ];
 function floorAt(x, z) {
-  if (indoors) return indoors.floorAt(x, z);
+  if (interior) return interior.floorAt(x, z);
   const f = FLOORS.find(([x0, x1, z0, z1]) => x >= x0 && x < x1 && z >= z0 && z < z1);
   if (f) return f[4](x, z);
   const deck = shipFloor(x, z);
@@ -1309,7 +1309,7 @@ function floorAt(x, z) {
 const walkBound = (b, k) => b[k] + (k < 3 ? -0.25 : 0.25);
 const walkingSolid = (s, fy, lift = 0) => s.solid && s.bb[1] + lift < fy + 1.7 && s.bb[4] + lift > fy + 0.3;
 function blocked(x, z, fy) {
-  if (indoors) return roomBlocked(x, z, fy);
+  if (interior) return roomBlocked(x, z, fy);
   for (const list of [world, ship]) {
     const lift = list === ship ? bob : 0;
     for (const s of list) {
@@ -1749,7 +1749,7 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (indoors ? scale : 1);
+  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (interior ? scale : 1);
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1780,10 +1780,10 @@ function render() {
   // Camera origin in the ship frame (rotate by -roll about the ship's long axis, after the bob).
   cam.lx = rc * (me.x - SX) + rs * (me.eye - bob) + SX; cam.ly = -rs * (me.x - SX) + rc * (me.eye - bob);
   gatherClouds(performance.now() / 100);
-  const scenery = indoors ? indoors.solids : world, vessel = indoors ? NONE : ship;
+  const scenery = interior ? interior.solids : world, vessel = interior ? NONE : ship;
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
-  if (!indoors) {
+  if (!interior) {
     drawGrass();
     drawRigging();
     drawPennants();
@@ -1798,7 +1798,7 @@ function render() {
 }
 function labelTarget(spot, looked) {
   // Seat posted signs on their world-space support tops, not the aimed surface.
-  const a = target && anchors[target], post = !indoors && a?.post;
+  const a = target && anchors[target], post = !interior && a?.post;
   const tops = post && a.posts.map(p => project(p, Math.floor));
   const at = post ? project(post, Math.floor) : looked && spot === target ? [cols >> 1, rows >> 1] : a && project(a);
   const span = at && tops && tops.every(Boolean) ? Math.max(...tops.map(p => Math.abs(p[0] - at[0]))) * 2 + 3 : 0;
@@ -2045,7 +2045,7 @@ const MAPCELLS = new Map();
 let mapMode = 0, pick = 0, jumped = null, mapBox = null; // mapMode: 0 idle, 1 picking, 2 full screen
 function minimap() {
   MAPCELLS.clear();
-  if (indoors) { mapBox = null; return; }
+  if (interior) { mapBox = null; return; }
   const left = Math.max(1, Math.ceil((safe.left - padX) / cellW)), right = Math.max(1, Math.ceil((safe.right - padX) / cellW));
   const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom - padY) / cellH));
   const full = mapMode === 2, w = full ? cols - left - right : Math.min(30, cols - left - right), h = full ? rows - top - bottom : Math.min(15, rows - top - bottom);
@@ -2396,7 +2396,7 @@ function setMap(mode) {
 }
 // M picks on the map, M again fills the screen, M or Escape closes; arrows or the mouse choose, Enter goes.
 function mapKey(e) {
-  if (indoors) return e.code === "KeyM";
+  if (interior) return e.code === "KeyM";
   if (e.code === "KeyM") setMap((mapMode + 1) % 3);
   else if (!mapMode) return false;
   else if (e.key === "Escape") setMap(0);
@@ -2441,7 +2441,7 @@ function tapMap(cx, cy) {
 
 // One ray: the nearest of the solids, the moving sea surface and the sky decides the cell.
 function cast(c, i, odd, dx, dy, dz) {
-  if (indoors) { castRoom(c, i, odd, dx, dy, dz); return; }
+  if (interior) { castRoom(c, i, odd, dx, dy, dz); return; }
   // A downward ray meets the island or the sea before it sinks below the lowest wave, so no solid past that shows.
   hitT = dy < 0 ? (cam.y + SEA) / -dy : Infinity; hitS = null;
   trace(rowWorld, i, cam.x, cam.y, cam.z, dx, dy, dz);
@@ -2943,7 +2943,7 @@ function paint(run, cls, i, j) {
 }
 
 function nearby() {
-  if (indoors) return null;
+  if (interior) return null;
   let best = null, bd = 2.2;
   for (const [id, a] of Object.entries(anchors)) {
     const d = Math.hypot(a.x - me.x, a.z - me.z);
@@ -3091,7 +3091,7 @@ reduced.addEventListener("change", () => { dirty = true; });
 function adaptResolution(ms, late) {
   slow = ms > 20 || late ? slow + 1 : 0;
   fast = ms < 9 && !late ? fast + 1 : 0;
-  if (!indoors) {
+  if (!interior) {
     if (slow > 20 && shadows) { shadows = false; slow = 0; dirty = true; }
     return;
   }
@@ -3105,7 +3105,7 @@ function adaptResolution(ms, late) {
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;
-  const late = !!indoors && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
+  const late = !!interior && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
   probeMs = Math.min(0, probeMs);
   paintedLastFrame = false;
   return late;
@@ -3130,7 +3130,7 @@ function frame(now) {
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);
   // Interiors have no animated objects; repaint only after movement, looking, or resizing.
-  if (visible && cols && (walked || dirty || (!indoors && !still))) {
+  if (visible && cols && (walked || dirty || (!interior && !still))) {
     if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
       probeMs = frameMs;
       dirty = true;
@@ -3139,7 +3139,7 @@ function frame(now) {
     }
     if (layoutDirty) { measure(); layoutDirty = false; }
     dirty = false;
-    if (!indoors) {
+    if (!interior) {
       setGangway();
       moveLights();
       floatBoats();

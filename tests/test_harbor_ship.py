@@ -266,11 +266,11 @@ const DECK_SIDE = [SX + 1.6, 4.55, Math.PI], LADDER_FOOT = [SX, 3.45, Math.PI];
 for (const channel of ['keyboard', 'touch']) {
   for (const below of [false, true]) {
     reset();
-    indoors = below ? GUN_DECK : null;
+    interior = below ? GUN_DECK : null;
     Object.assign(me, {x: SX, z: below ? 3.45 : 3.6, yaw: 0});
     hold(channel, 'f', 'y', 1);
     for (let i = 0; i < 100; i++) step(0.02);
-    assert.equal(indoors, below ? null : GUN_DECK, `${channel}: walking into the hatch or ladder must cross it`);
+    assert.equal(interior, below ? null : GUN_DECK, `${channel}: walking into the hatch or ladder must cross it`);
     assert.deepEqual([me.x, me.z, me.yaw], below ? DECK_SIDE : LADDER_FOOT, `${channel}: held input must cross only once`);
     const fy = floorAt(me.x, me.z);
     assert(below ? fy > DECK - 0.01 : fy === 0, `${channel}: the crossing must land on the next floor`);
@@ -280,11 +280,11 @@ for (const channel of ['keyboard', 'touch']) {
     if (below) hold(channel, 'r', 'x', 1);
     else hold(channel, 'b', 'y', -1);
     for (let i = 0; i < 100; i++) step(0.02);
-    assert.equal(indoors, below ? GUN_DECK : null, `${channel}: released input must permit the next crossing`);
+    assert.equal(interior, below ? GUN_DECK : null, `${channel}: released input must permit the next crossing`);
   }
 }
 reset();
-indoors = GUN_DECK;
+interior = GUN_DECK;
 mapKey({code: 'KeyM'});
 minimap();
 assert.equal(mapMode, 0, 'the island map must stay closed below deck');
@@ -296,7 +296,7 @@ for (const side of [-1, 1]) {
   walk(SX, 0.6, side * Math.PI / 2);
   assert(Math.abs(me.x - SX) < 1, 'each gun must block walking into it');
 }
-assert.equal(indoors, GUN_DECK, 'walls and guns must keep the visitor below deck');
+assert.equal(interior, GUN_DECK, 'walls and guns must keep the visitor below deck');
 // Each gun points out of a hull gun port: the port is open above its barrel and the hull is closed between ports.
 function nearest(origin, ray) {
   let best = [Infinity, null];
@@ -392,7 +392,7 @@ function walk(channel, yaw, frames) {
 for (const channel of ['keyboard', 'touch']) {
   Object.assign(me, {x: SX, z: -8.4});
   walk(channel, Math.PI, 6);
-  assert.equal(indoors, CABIN, `${channel}: the cabin door must lead inside`);
+  assert.equal(interior, CABIN, `${channel}: the cabin door must lead inside`);
   assert.deepEqual([me.x, me.z, me.yaw], [0, 0.8, 0], 'entry must face into the cabin');
   assert(floorAt(me.x, me.z) === 0 && !blocked(me.x, me.z, 0), 'entry must leave the player clear of the furniture');
   mapKey({code: 'KeyM'});
@@ -400,7 +400,7 @@ for (const channel of ['keyboard', 'touch']) {
   assert.equal(mapMode, 0, 'the island map must not open inside');
   assert.equal(mapBox, null);
   walk(channel, Math.PI, 8);
-  assert.equal(indoors, null, `${channel}: the inside door must lead back out`);
+  assert.equal(interior, null, `${channel}: the inside door must lead back out`);
   assert.deepEqual([me.x, me.z, me.yaw], [SX, -8.35, 0], 'the exit must face the bow just outside the door');
   const deck = floorAt(me.x, me.z);
   assert(deck > 1.6 && !blocked(me.x, me.z, deck), 'the exit must land on clear deck');
@@ -408,10 +408,10 @@ for (const channel of ['keyboard', 'touch']) {
 for (const x of [SX - 0.6, SX + 0.6]) {
   Object.assign(me, {x, z: -8.4});
   walk('keyboard', Math.PI, 20);
-  assert.equal(indoors, null, 'walking into the cabin front beside the door must not enter');
+  assert.equal(interior, null, 'walking into the cabin front beside the door must not enter');
   assert(me.z >= -8.75, 'the cabin front must still block walking');
 }
-indoors = CABIN;
+interior = CABIN;
 for (const [x, z] of [[0, 3.2], [0, 4.3], [1.8, 1.9], [-1.8, 1.3]]) {
   assert(blocked(x, z, 0), `the table, chair, bunk and chest must block walking at ${x},${z}`);
 }
