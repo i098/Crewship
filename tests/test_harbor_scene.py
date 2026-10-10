@@ -114,7 +114,7 @@ for (let k = 1; k < path.length; k++) {
   for (let i = 0; i <= 20; i++) {
     const x = ax + (bx - ax) * i / 20, z = az + (bz - az) * i / 20;
     assert(!blocked(x, z, floorAt(x, z)), 'map route crosses the basin');
-    assert(roadAt(x, z)[2], 'map route leaves the concrete road');
+    assert(pathMask(x, z) > 0.5, 'map route leaves the road');
   }
 }
 function walkToSpot(id, start, dt, useMap = false) {
@@ -138,8 +138,8 @@ function walkToSpot(id, start, dt, useMap = false) {
   }
   assert.equal(walkPath.length, 0, 'auto-walk did not finish');
   assert.equal(jumped, id, 'auto-walk did not face ' + id + ' from ' + start);
-  const a = anchors[id], fy = floorAt(me.x, me.z);
-  assert.equal(fy > 1.6, !!a.ship, 'auto-walk missed the destination level: ' + id);
+  const a = anchors[id];
+  assert.equal(aboard(me.x, me.z), !!a.ship, 'auto-walk missed the destination level: ' + id);
   assert(Math.hypot(me.x - a.x, me.z - a.z) <= (['mast', 'sign'].includes(id) ? 4 : 16),
     'auto-walk missed the landmark: ' + id);
 }
@@ -242,10 +242,12 @@ for (const id of ORDER) walkToSpot(id, [-0.6, 25], 0.02, true);
 reduced.matches = false;
 const savedWorldLength = world.length;
 try {
-  box(world, 29, 1.2, 39, 31, 3, 39.2, 's');
-  box(world, 29, 1.2, 40.8, 31, 3, 41, 's');
-  box(world, 29, 1.2, 39, 29.2, 3, 41, 's');
-  box(world, 30.8, 1.2, 39, 31, 3, 41, 's');
+  // The walls stand on the hillside there, from 10 cm below its lowest corner to 2.4 m above that.
+  const low = Math.min(...[[29, 39], [31, 39], [29, 41], [31, 41]].map(p => floorAt(...p))) - 0.1, high = low + 2.4;
+  box(world, 29, low, 39, 31, high, 39.2, 's');
+  box(world, 29, low, 40.8, 31, high, 41, 's');
+  box(world, 29, low, 39, 29.2, high, 41, 's');
+  box(world, 30.8, low, 39, 31, high, 41, 's');
   rebuildRoutes();
   assert.deepEqual(approach([30, 40], [5, 19.6]), [], 'enclosed start must have no route');
   stoppedMapWalk([30, 40], 'how', true);

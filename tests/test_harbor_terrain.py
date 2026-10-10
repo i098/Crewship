@@ -1,0 +1,80 @@
+"""Check the island's rolling relief, its seated objects, roads and the walking bounds on its slopes."""
+
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).parents[1]
+
+
+def _run_scene(checks):
+    subprocess.run(
+        ["node", "-", str(ROOT / "harbor/public/harbor.js"), checks],
+        input=r"""
+const fs = require('node:fs'), vm = require('node:vm');
+const assert = require('node:assert/strict');
+const element = {
+  hidden: false, classList: { add() {}, toggle() {} }, focus() {}, addEventListener() {},
+  firstElementChild: {}, clientWidth: 600, clientHeight: 400,
+  style: {setProperty() {}},
+  getContext: () => ({setTransform() {}, fillRect() {}, measureText: () => ({width: 6})})
+};
+const context = vm.createContext({
+  document: {getElementById: () => element, querySelectorAll: () => [],
+    documentElement: {}, addEventListener() {},
+    fonts: { load: () => Promise.resolve(), ready: Promise.resolve() }},
+  matchMedia: () => ({matches: false, addEventListener() {}}),
+  getComputedStyle: () => ({getPropertyValue: () => 'monospace'}),
+  devicePixelRatio: 1, innerWidth: 600, performance: {now: () => 0},
+  IntersectionObserver: class {observe() {}}, ResizeObserver: class {observe() {}},
+  requestAnimationFrame() {}, console, window: {}, assert, addEventListener() {}
+});
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\n' + process.argv[3], context);
+""",
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_ground_rolls_inland_without_square_patches_and_keeps_objects_seated():
+    _run_scene(
+        r"""
+let top = -Infinity;
+for (let x = WORLD.x0; x <= WORLD.x1; x++) for (let z = WORLD.z0; z <= WORLD.z1; z++) top = Math.max(top, terrainY(x, z));
+assert(top > 1.2 + 1.5, 'the island must rise into hills, not stay a flat plateau');
+// Whatever stands at plateau height keeps its footing on the dock or the ground.
+for (const s of world.filter((s) => s.bb[1] === 1.2)) {
+  const [x0, , z0, x1, , z1] = s.bb;
+  for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [(x0 + x1) / 2, (z0 + z1) / 2]]) {
+    assert(Math.abs(floorAt(x, z) - 1.2) < 0.04, `the ground moved under the object at ${x}, ${z}`);
+  }
+}
+// Grass blades change within each fifth of a metre of ground, so no square near the eye shows one glyph.
+for (const [x, z] of [[-12.19, 19.81], [-30.39, 31.61], [14.61, 23.01]]) {
+  const blades = new Set();
+  for (let i = 0; i < 10; i++) for (let k = 0; k < 10; k++) blades.add(blade(x + i * 0.02, z + k * 0.02, 0, 0.2));
+  assert(blades.size > 2, `one grass glyph fills the square at ${x}, ${z}`);
+}
+// The roads run through their junctions and fade out into the grass.
+for (const [x, z] of NODES.slice(5, JUNCTIONS)) assert.equal(pathMask(x, z), 1, `no road at junction ${x}, ${z}`);
+assert.equal(pathMask(-40, 40), 0, 'road cover away from every road');
+"""
+    )
+
+
+def test_walking_height_bounds_hold_on_the_slopes():
+    _run_scene(
+        r"""
+// Map routes decide clearance from terrainRange, so it must bound the ground along any segment.
+let seed = 7;
+const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+for (let n = 0; n < 4000; n++) {
+  const a = [-60 + random() * 105, -40 + random() * 94], length = random() * 12, angle = random() * 6.283;
+  const c = [a[0] + length * Math.cos(angle), a[1] + length * Math.sin(angle)], [low, high] = terrainRange(a, c);
+  for (let i = 0; i <= 40; i++) {
+    const y = terrainY(a[0] + (c[0] - a[0]) * i / 40, a[1] + (c[1] - a[1]) * i / 40);
+    assert(y >= low - 1e-9 && y <= high + 1e-9, `terrainRange misses the ground between ${a} and ${c}`);
+  }
+}
+"""
+    )
