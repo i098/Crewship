@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
-def test_tall_grass_keeps_off_paving_and_crowds_trail_edges():
+def test_tall_grass_keeps_off_paving_and_crowds_edges_and_slopes():
     source = (ROOT / "harbor/public/harbor.js").read_text()
     world = source[source.index("const SX =") : source.index("const me =")]
     check = r"""
@@ -22,23 +22,30 @@ for (const [x, y, z] of clumps) {
   const [way, , concrete] = roadAt(x, z), at = `${x.toFixed(2)}, ${z.toFixed(2)}`;
   assert(!(concrete && way < 1.5), 'clump on a road at ' + at);
   assert(Math.hypot(x - 5, z - 24.6) > 3.2, 'clump on the plaza at ' + at);
-  assert(y >= 1.12 && !(x > 3 && x < 7 && z < 14), 'clump on sand, the dock or the sea at ' + at);
+  assert(y >= 0.55 && !harbourWall(x, y, z) && !(x > 3 && x < 7 && z < 14),
+    'clump on wet sand, the harbour wall, the dock or the sea at ' + at);
   assert(!world.some(s => walkingSolid(s, y) && x > s.bb[0] && x < s.bb[3] && z > s.bb[2] && z < s.bb[5]),
     'clump inside a building or another solid at ' + at);
 }
-// Clumps per square metre of land in a band around the dirt trails, and in the open.
-function density(band) {
+// Clumps per square metre of land at heights where land(y) holds, in a band around the ways.
+function density(land, band) {
   let count = 0, area = 0;
-  for (const [x, , z] of clumps) if (band(...roadAt(x, z))) count++;
+  for (const [x, y, z] of clumps) if (land(y) && band(...roadAt(x, z))) count++;
   for (let x = -62; x < 46; x += 0.5) {
-    for (let z = -43; z < 55; z += 0.5) if (terrainY(x, z) >= 1.12 && band(...roadAt(x, z))) area += 0.25;
+    for (let z = -43; z < 55; z += 0.5) {
+      const y = terrainY(x, z);
+      if (land(y) && !harbourWall(x, y, z) && band(...roadAt(x, z))) area += 0.25;
+    }
   }
   return count / area;
 }
-const trail = density((way, along, concrete) => !concrete && way < 0.5);
-const edge = density((way, along, concrete) => !concrete && way >= 0.5 && way < 1.5);
-const open = density(way => way > 5);
+const plateau = y => y >= 1.12, dunes = y => y >= 0.55 && y < 1.12;
+const trail = density(plateau, (way, along, concrete) => !concrete && way < 0.5);
+const edge = density(plateau, (way, along, concrete) => !concrete && way >= 0.5 && way < 1.5);
+const open = density(plateau, way => way > 5);
+const slope = density(dunes, way => way > 5);
 assert(edge > 1.5 * open, `trail edges (${edge}) must be denser than open ground (${open})`);
 assert(trail < 0.5 * open, `trails (${trail}) must be thinner than open ground (${open})`);
+assert(slope > 1.5 * open, `beach slopes (${slope}) must be denser than open ground (${open})`);
 """
     subprocess.run(["node", "-"], input=world + check, text=True, check=True, timeout=60)

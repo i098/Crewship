@@ -23,7 +23,7 @@
   Buildings, the dock and the hull are convex solids made of planes.
   Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals.
   Rocks and tree canopies are ellipsoids.
-  Ship rigging and tall grass use projected lines that check the depth buffer instead of ray intersections.
+  Ship rigging uses projected lines and tall grass uses projected tufts; both check the depth buffer instead of ray intersections.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled.
@@ -33,7 +33,9 @@
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
-  Grass uses blade glyphs; tall grass is brighter at the moonlit tips, and a tip low in its cell shows as a comma.
+  Grass uses blade glyphs.
+  Each tall-grass tuft is at most 1/14 of the screen height.
+  Its blades are <code>|</code> at the root and curve to <code>( ) \ /</code> near their pale moonlit tips; far tufts are dimmer.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the room use fixed glyphs from an orange base to pale tips, so the idle room needs no redraws.

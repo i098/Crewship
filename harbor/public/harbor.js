@@ -197,9 +197,11 @@ function marchY(x, z) {
   const fu = u - i, fw = w - k, p = k * HW + i;
   return (HEIGHTS[p] * (1 - fu) + HEIGHTS[p + 1] * fu) * (1 - fw) + (HEIGHTS[p + HW] * (1 - fu) + HEIGHTS[p + HW + 1] * fu) * fw;
 }
+// The stone harbour wall, only where the dock needs deep water.
+const harbourWall = (x, y, z) => x > -8.5 && x < 9.5 && z < 14.3 && y < 1.15;
 // Ground texture by where you are: the stone harbour wall, sand on the beaches, ground on the plateau.
 function landTex(x, y, z, nx, ny) {
-  if (x > -8.5 && x < 9.5 && z < 14.3 && y < 1.15) return "t:";
+  if (harbourWall(x, y, z)) return "t:";
   return y < 1.12 ? sand(x, y, z, nx, ny) : ground(x, y, z, nx, ny);
 }
 const TERRAIN = { id: 4000, P: new Float64Array(0), bb: [-70, -1.6, -50, 60, 1.2, 60], mat: "g", spot: null, solid: false, tex: landTex };
@@ -942,10 +944,11 @@ function blocked(x, z, fy) {
 // The scene's wind blows toward -x and +z, the way the flag streams.
 const WIND = { x: -0.82, z: 0.57 };
 // Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
-// paved, rise per metre], or null on sand and in the sea.
+// paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
+// dune grass.
 function grassGround(x, z) {
   const y = terrainY(x, z), e = 0.5;
-  if (y < 1.12) return null;
+  if (y < 0.55 || harbourWall(x, y, z)) return null;
   const [way, , concrete] = roadAt(x, z), road = way - (concrete ? 1.5 : 0.5), plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
   const slope = Math.hypot(terrainY(x + e, z) - terrainY(x - e, z), terrainY(x, z + e) - terrainY(x, z - e)) / (2 * e);
   return [y, Math.min(road, plaza), concrete || plaza < road, slope];
@@ -971,49 +974,44 @@ function plantGrass() {
   return Float32Array.from(clumps);
 }
 const GRASS = plantGrass();
-const GRASS_BODY = Array.from({ length: 8 }, (_, i) => "g" + i), GRASS_TIP = Array.from({ length: 8 }, (_, i) => "G" + i);
-const GP = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+// Colour classes by brightness: dark roots, green blades and pale moonlit tips.
+const grassTones = (mat) => Array.from({ length: 8 }, (_, i) => mat + i);
+const GRASS_ROOT = grassTones("M"), GRASS_BLADE = grassTones("g"), GRASS_TIP = grassTones("G"), GP = [0, 0, 0];
 // All grass sways on a 12 Hz clock, so a still view repaints its grass at most 12 times a second.
 const swayTime = () => Math.floor(T * 12) / 12;
-// Each frame projects the clumps in view, at least a row tall, into the depth buffer like the rigging. Moonlight
-// colours the blades, brighter on the side you see when the moon is behind you.
+// Each frame projects the foot of each clump in view into the depth buffer, like the rigging, and draws a tuft there
+// at most rows / 14 tall, so near grass stays a tuft. Moonlight colours the blades, brighter on the side you see when
+// the moon is behind you, and the blades fade with distance.
 function drawGrass() {
-  const sway = swayTime(), lit = 0.5 - 0.5 * (cam.f[0] * MOON[0] + cam.f[2] * MOON[2]);
+  const sway = swayTime(), lit = 0.5 - 0.5 * (cam.f[0] * MOON[0] + cam.f[2] * MOON[2]), cap = rows / 14;
   const tall = rows / (2 * cam.tanV), wide = cols / (2 * cam.tanH); // rows and columns per metre, 1 m away
+  const across = WIND.x * cam.r[0] + WIND.z * cam.r[2]; // the part of the wind that blows across the view
   for (let k = 0; k < GRASS.length; k += 5) {
-    const x = GRASS[k] - cam.x, y = GRASS[k + 1] + GRASS[k + 3] / 2 - cam.y, z = GRASS[k + 2] - cam.z;
-    const d = x * cam.f[0] + y * cam.f[1] + z * cam.f[2], size = GRASS[k + 3] * tall / d;
-    if (d < 1 || size < 1) continue;
-    if (Math.abs(x * cam.r[0] + z * cam.r[2]) > d * cam.tanH + 0.6 || Math.abs(x * cam.u[0] + y * cam.u[1] + z * cam.u[2]) > d * cam.tanV + 0.6) continue;
-    drawClump(k, sway, (0.3 + 0.14 * lit) * Math.exp(-d * 0.016), Math.ceil(wide * 0.3 / d), size > 3);
+    viewPoint(GRASS[k], GRASS[k + 1], GRASS[k + 2], GP);
+    const d = GP[2], h = GRASS[k + 3], s = GRASS[k + 4], full = h * tall / d, rise = Math.min(cap, full);
+    if (d < 0.5 || full < 1 || GP[1] < 0 || GP[1] - rise > rows) continue;
+    const scale = rise / full, half = 0.35 * wide / d * scale, b = (0.42 + 0.12 * lit) * Math.exp(-d * 0.02);
+    if (GP[0] + half < -3 || GP[0] - half > cols + 3) continue;
+    const gust = Math.round(1.5 + 1.5 * Math.sin(sway * 1.7 - (GRASS[k] * WIND.x + GRASS[k + 2] * WIND.z) * 0.35 + s * 1.2)) / 3;
+    drawTuft(s, rise, half, across * h * (0.03 + 0.15 * gust) * wide / d * scale, b, b + 0.35 * Math.exp(-d / 30));
   }
 }
-// A clump: four to eight blades fanning out from its foot, each bending further into the wind toward its tip.
-// Gusts roll downwind in four steps, so a still clump redraws only when its step changes.
-// Far clumps draw as many blades as fit side by side, each a straight stroke.
-function drawClump(k, sway, b, fit, bent) {
-  const x = GRASS[k], y = GRASS[k + 1], z = GRASS[k + 2], h = GRASS[k + 3], s = GRASS[k + 4];
-  const gust = Math.round(1.5 + 1.5 * Math.sin(sway * 1.7 - (x * WIND.x + z * WIND.z) * 0.35 + s * 1.2)) / 3;
-  const body = GRASS_BODY[Math.min(7, Math.floor(b * 9))], tip = GRASS_TIP[Math.min(7, Math.floor((b + 0.12) * 9))];
-  for (let n = Math.min(fit, 4 + Math.floor(s * 5)), i = 0; i < n; i++) {
-    const a = s * 6.28 + i * 2.4, ca = Math.cos(a), sa = Math.sin(a), f = 0.3 + 0.7 * ((s * 7 + i * 0.37) % 1);
-    const hb = h * (0.6 + 0.4 * ((s * 13 + i * 0.61) % 1)), out = 0.2 * hb, lean = hb * (0.04 + 0.26 * gust);
-    const bx = x + ca * 0.18 * f, bz = z + sa * 0.18 * f, tx = ca * out + WIND.x * lean, tz = sa * out + WIND.z * lean;
-    viewPoint(bx, y, bz, GP[0]);
-    viewPoint(bx + tx, y + hb, bz + tz, GP[2]);
-    if (!bent) { grassLine(GP[0], GP[2], tip, true); continue; }
-    viewPoint(bx + tx * 0.35, y + hb * 0.6, bz + tz * 0.35, GP[1]);
-    grassLine(GP[0], GP[1], body);
-    grassLine(GP[1], GP[2], tip, true);
-  }
-}
-// A blade from p to q, a glyph a cell; a tip in the lower half of its cell shows as a comma.
-function grassLine(p, q, cls, tip = false) {
-  const di = q[0] - p[0], dj = q[1] - p[1], n = Math.min(rows, Math.ceil(Math.max(Math.abs(di), Math.abs(dj))));
-  const ch = Math.abs(di) < Math.abs(dj) * 0.5 ? "|" : di * dj > 0 ? "\\" : "/";
-  for (let k = 0; k <= n; k++) {
-    const t = n && k / n;
-    ropeCell(Math.floor(p[0] + di * t), Math.floor(p[1] + dj * t), 1 / ((1 - t) / p[2] + t / q[2]), tip && k === n && q[1] % 1 > 0.5 ? "," : ch, cls);
+// A tuft at GP: blades of different heights rise from a tight root and fan out, the middle ones tallest and the outer
+// ones splayed, drawn from the outside in. The wind bends each blade more toward its tip, so a blade stands upright at
+// the root and curves at the top. Gusts roll downwind in four steps, so a still tuft redraws only when its step
+// changes. Far tufts draw as many blades as fit side by side.
+function drawTuft(s, rise, half, lean, b, pale) {
+  const n = Math.min(7 + 2 * Math.floor(s * 3), 1 + 2 * Math.floor(half * 1.2)), tone = Math.min(7, Math.floor(b * 9));
+  const root = GRASS_ROOT[tone], blade = GRASS_BLADE[tone], tip = GRASS_TIP[Math.min(7, Math.floor(pale * 9))];
+  for (let k = 0; k < n; k++) {
+    const u = n > 1 ? (k & 1 ? 1 : -1) * (1 - 2 * (k >> 1) / (n - 1)) : 0;
+    const high = Math.max(1, Math.round(rise * (1 - 0.45 * u * u) * (0.7 + 0.3 * ((s * 13 + k * 0.61) % 1))));
+    const foot = GP[0] + u * half * 0.25, fan = u * half * 0.75, bend = lean * high / rise, crown = high > 4 ? high - 2 : high - 1;
+    for (let r = 0; r < high; r++) {
+      const t = (r + 0.5) / high, slope = (fan + 2 * bend * t) / high, a = Math.abs(slope);
+      const ch = a >= 0.9 ? (slope > 0 ? "/" : "\\") : a >= 0.45 && t > 0.6 && high > 3 ? (slope > 0 ? ")" : "(") : "|";
+      ropeCell(Math.floor(foot + fan * t + bend * t * t), Math.floor(GP[1]) - r, GP[2], ch, r >= crown ? tip : r ? blade : root);
+    }
   }
 }
 
