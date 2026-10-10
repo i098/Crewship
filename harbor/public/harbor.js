@@ -132,6 +132,7 @@ function roadAt(x, z) {
   }
   return [Math.sqrt(best), along, concrete];
 }
+const trailHalfWidth = (along) => 0.5 + 0.12 * Math.sin(along * 1.7) + 0.08 * hash(Math.floor(along * 3), 7);
 // Staggered paving joints and individually divided stones around the round plaza.
 function plazaCurb(x, z) {
   return (Math.atan2(z - 24.6, x - 5) + Math.PI) * 12 % 1 < 0.12 ? "t:" : "s=";
@@ -152,7 +153,7 @@ function ground(x, y, z, nx, ny) {
   const [d, along, concrete] = roadAt(x, z), plaza = Math.hypot(x - 5, z - 24.6);
   if (plaza < 3.2) return plazaPaving(x, z, plaza);
   if (concrete && d < 1.5) return d > 1.38 ? along % 0.8 < 0.08 ? "t:" : "s_" : along % 3 < 0.12 ? "t:" : "t.";
-  if (!concrete && d < 0.5 + 0.12 * Math.sin(along * 1.7) + 0.08 * hash(Math.floor(along * 3), 7)) {
+  if (!concrete && d < trailHalfWidth(along)) {
     if (Math.abs(d - 0.22) < 0.06) return "o:";
     return hash(Math.floor(along * 2.5), Math.floor(d * 6)) < 0.18 ? "o," : "o.";
   }
@@ -949,7 +950,7 @@ const WIND = { x: -0.82, z: 0.57 };
 function grassGround(x, z) {
   const y = terrainY(x, z), e = 0.5;
   if (y < 0.55 || harbourWall(x, y, z)) return null;
-  const [way, , concrete] = roadAt(x, z), road = way - (concrete ? 1.5 : 0.5), plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
+  const [way, along, concrete] = roadAt(x, z), road = way - (concrete ? 1.5 : trailHalfWidth(along)), plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
   const slope = Math.hypot(terrainY(x + e, z) - terrainY(x - e, z), terrainY(x, z + e) - terrainY(x, z - e)) / (2 * e);
   return [y, Math.min(road, plaza), concrete || plaza < road, slope];
 }

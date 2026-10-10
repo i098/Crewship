@@ -16,6 +16,10 @@ def test_tall_grass_keeps_off_paving_and_crowds_edges_and_slopes():
     check = r"""
 const assert = require('node:assert/strict');
 assert.deepEqual(plantGrass(), GRASS, 'clumps must be the same on every visit');
+const x = -29.48990, z = -9.73310, g = grassGround(x, z);
+assert(['o:', 'o,', 'o.'].includes(ground(x, g[0], z, 0, 1)), 'regression point must render as a trail');
+assert(g[1] < 0 && !g[2], 'regression point must be inside a dirt trail');
+assert.equal(grassChance(x, z, g[1], g[2], g[3]), 0.1, 'rendered trail must get on-path density');
 const clumps = [];
 for (let k = 0; k < GRASS.length; k += 5) clumps.push([GRASS[k], GRASS[k + 1], GRASS[k + 2]]);
 for (const [x, y, z] of clumps) {
@@ -40,8 +44,8 @@ function density(land, band) {
   return count / area;
 }
 const plateau = y => y >= 1.12, dunes = y => y >= 0.55 && y < 1.12;
-const trail = density(plateau, (way, along, concrete) => !concrete && way < 0.5);
-const edge = density(plateau, (way, along, concrete) => !concrete && way >= 0.5 && way < 1.5);
+const trail = density(plateau, (way, along, concrete) => !concrete && way < trailHalfWidth(along));
+const edge = density(plateau, (way, along, concrete) => !concrete && way >= trailHalfWidth(along) && way < trailHalfWidth(along) + 1);
 const open = density(plateau, way => way > 5);
 const slope = density(dunes, way => way > 5);
 assert(edge > 1.5 * open, `trail edges (${edge}) must be denser than open ground (${open})`);
