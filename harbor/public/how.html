@@ -20,8 +20,8 @@
 <h1>How this harbor is built</h1>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
-  Buildings, the dock and the hull are convex solids made of planes.
-  Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals.
+  Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.
+  Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals, and so are the gun barrels and carriage wheels, on horizontal axes.
   Rocks and tree canopies are ellipsoids.
   Sails and the flag are curved cloth.
   Inside the cloth's box, a ray samples the gap between the ray and the cloth.
@@ -58,6 +58,7 @@
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
+  The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.

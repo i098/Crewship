@@ -84,6 +84,13 @@ function disc(list, cx, cy, z0, z1, r, mat, o) {
   }
   return solid(list, pl, [cx - r * 1.09, cy - r * 1.09, z0, cx + r * 1.09, cy + r * 1.09, z1], mat, o);
 }
+// A round bar along the x axis (axis 0: gun barrels) or the z axis (axis 2: wheels) from u0 to u1, radius r0 at u0
+// and r1 at u1, its axis through (p, q): (y, z) along x, (x, y) along z. Rays hit the true cone (barEntry).
+function bar(list, axis, p, q, u0, u1, r0, r1, mat, o) {
+  const b = (r1 - r0) / (u1 - u0), r = Math.max(r0, r1);
+  const bb = axis ? [p - r, q - r, u0, p + r, q + r, u1] : [u0, p - r, q - r, u1, p + r, q + r];
+  return solid(list, [], bb, mat, { bar: [p, q, r0 - b * u0, b, u0, u1, r0, r1], axis, ...o });
+}
 
 // Rope or spar from a to b: a box of half-width r aligned with the segment.
 function beam(list, a, b, mat, o = {}, r = 0.03) {
@@ -508,6 +515,10 @@ box(world, -2.1, 2.35, 16.6, 0.5, 3.35, 16.72, "o", { spot: "docsboard", tex: (x
 // Ship stations [z, half breadth, sheer height, keel height]. The bow narrows and rises out of the water.
 const HULL = [[-15, 2.35, 3.2, -0.5], [-12, 3.1, 2.8, -1.5], [-8, 3.1, DECK, -1.5],
   [4, 3.1, DECK, -1.5], [9, 2, 2.5, -0.1], [13, 0.18, 3, 2.7]];
+// The square hatch in the deck forward of the hold [x0, x1, z0, z1], and the ladder that climbs through it from
+// the gun deck floor (y = 0) toward the bow: the hull leaves the deck open there (holeEntry).
+const HATCH = [SX - 0.55, SX + 0.55, 4, 5.1];
+const ladderZ = (y) => 3.95 + y * 0.55;
 function hullPortTone(y, z) {
   if (z > -7.5 && z < 4.5 && y > 0.65 && y < 1.4) {
     const port = Math.abs((z + 9) % 3 - 0.6);
@@ -531,7 +542,8 @@ function hullSection(a, b) {
     [1, -0.45, -rake, SX + w0, h0, z0], [-1, -0.45, -rake, SX - w0, h0, z0],
     [0, 0, -1, 0, 0, z0], [0, 0, 1, 0, 0, z1]],
   [SX - Math.max(w0, w1), Math.min(k0, k1), z0, SX + Math.max(w0, w1), Math.max(h0, h1), z1],
-  "o", { solid: false, tex: (x, y, z, nx, ny) => hullTexture(x, y, z, nx, ny, h0 + dh * (z - z0)), hull: true, fill: 0.48 });
+  "o", { solid: false, tex: (x, y, z, nx, ny) => hullTexture(x, y, z, nx, ny, h0 + dh * (z - z0)), hull: true, fill: 0.48,
+    hole: z0 <= HATCH[2] && HATCH[3] <= z1 });
 }
 function shipProfile(z) {
   for (let i = 1; i < HULL.length; i++) {
@@ -788,26 +800,36 @@ disc(ship, SX, 3.3, -6.85, -6.72, 0.62, "o", { spot: "helm", tex: (x, y) => {
 } });
 box(ship, -3.6, DECK, 0.8, -1.2, 2.55, 3.2, "o", { spot: "hold",
   tex: (x, y, z, nx, ny) => (ny > 0.5 && ((x + 9) % 0.4 < 0.07 || (z + 9) % 0.4 < 0.07) ? "-" : null) });
-// A hatch forward of the hold opens onto the ladder down to the gun deck (crossHatch): a raised coaming
-// round the opening, and the ladder's two rails and handhold above the deck, leaning toward the bow. The
-// coaming's top follows the sheer, which rises toward the bow from z = 4, and stays low enough to step over.
-const HATCH = [SX - 0.5, SX + 0.5, 4, 5.1]; // the opening: x0, x1, z0, z1
-const ladderZ = (y) => 3.95 + y * 0.55; // the ladder climbs from the gun deck floor toward the bow
-solid(ship, [[1, 0, 0, HATCH[1] + 0.12, 0, 0], [-1, 0, 0, HATCH[0] - 0.12, 0, 0], [0, 1, -0.1, 0, DECK + 0.15, 4],
-  [0, -1, 0, 0, DECK, 0], [0, 0, 1, 0, 0, HATCH[3] + 0.12], [0, 0, -1, 0, 0, HATCH[2] - 0.12]],
-[HATCH[0] - 0.12, DECK, HATCH[2] - 0.12, HATCH[1] + 0.12, DECK + 0.28, HATCH[3] + 0.12], "s", { tex: hatchTop, fill: 0.5 });
-for (const x of [SX - 0.42, SX + 0.42]) beam(ship, [x, DECK, ladderZ(DECK)], [x, DECK + 1, ladderZ(DECK + 1)], "o", { fill: 0.6 }, 0.06);
-beam(ship, [SX - 0.42, DECK + 0.95, ladderZ(DECK + 0.95)], [SX + 0.42, DECK + 0.95, ladderZ(DECK + 0.95)], "o", { fill: 0.6 }, 0.045);
-// The opening shows the ladder below it: the view ray continues down to the first tread it meets (the upper
-// treads in wood, the lower ones dimmer) or else into the dark.
-function hatchTop(x, y, z, nx, ny) {
-  const [x0, x1, z0, z1] = HATCH, dx = x - cam.lx, dy = y - cam.ly, dz = z - cam.z;
-  if (ny < 0.5 || x < x0 || x > x1 || z < z0 || z > z1) return null;
-  for (let k = 6; k > 0; k--) {
-    const t = (k * 0.3 - y) / dy;
-    if (Math.abs(x + dx * t - SX) < 0.4 && Math.abs(z + dz * t - ladderZ(k * 0.3)) < 0.07) return k > 3 ? "o" : "n";
+// The hatch to the gun deck (crossHatch): a raised wooden coaming round the opening, a dark well 0.9 m deep under it
+// that only the opening shows, the ladder down the well, and a lantern on a post at the aft corner. The sea never
+// reaches what lies in the well (dry), so cast() skips the sea under it.
+hatchBoards(ship, DECK - 0.05, DECK + 0.3, { fill: 0.62, dry: true });
+hatchBoards(ship, DECK - 0.9, DECK - 0.05, { dim: 0.5, dry: true });
+box(ship, HATCH[0] - 0.12, DECK - 1, HATCH[2] - 0.12, HATCH[1] + 0.12, DECK - 0.9, HATCH[3] + 0.12, "p", { solid: false, dry: true });
+hatchLadder(ship, DECK - 0.9, { dry: true, fill: 0.5, tex: (x, y) => (y < DECK - 0.6 ? "-" : null) }, (y) => ({ dry: true, dim: 0.6 * y / DECK }));
+beam(ship, [SX - 1.05, DECK, 3.5], [SX - 1.05, DECK + 1.1, 3.5], "o", { fill: 0.4 }, 0.04);
+box(ship, SX - 1.2, DECK + 0.75, 3.35, SX - 0.9, DECK + 1.03, 3.65, "l", { light: [0.35, 3] });
+box(ship, SX - 1.24, DECK + 1.03, 3.31, SX - 0.86, DECK + 1.1, 3.69, "t", { solid: false });
+// Boards 0.12 m thick round the hatch opening, from y0 up to y1 plus the rise of the sheer forward of z = 4.
+function hatchBoards(list, y0, y1, o) {
+  const [x0, x1, z0, z1] = HATCH, t = 0.12;
+  for (const [a, b, c, d] of [[x0 - t, x1 + t, z0 - t, z0], [x0 - t, x1 + t, z1, z1 + t], [x0 - t, x0, z0, z1], [x1, x1 + t, z0, z1]]) {
+    box(list, a, y0, c, b, y1 + 0.1 * Math.max(0, (c + d) / 2 - 4), d, "o", { solid: false, ...o });
   }
-  return "p";
+}
+// The ladder up through the hatch from the height `bottom`: two rails that end in a handhold 0.85 m above the deck,
+// with `rail` options, and rungs every 0.3 m above the gun deck floor with the options rung(y) at height y.
+function hatchLadder(list, bottom, rail, rung) {
+  for (const x of [SX - 0.42, SX + 0.42]) beam(list, [x, bottom, ladderZ(bottom)], [x, DECK + 0.9, ladderZ(DECK + 0.9)], "o", rail, 0.06);
+  beam(list, [SX - 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], [SX + 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], "o", rail, 0.045);
+  for (let y = 0.3; y < DECK; y += 0.3) {
+    if (y > bottom) box(list, SX - 0.4, y - 0.05, ladderZ(y) - 0.07, SX + 0.4, y, ladderZ(y) + 0.07, "o", { solid: false, ...rung(y) });
+  }
+}
+// Planks 0.3 m wide along the ship, with seams between them and butt joints staggered every 3.6 m.
+function deckPlanks(x, y, z) {
+  const u = x + 99, k = Math.floor(u / 0.3);
+  return u % 0.3 < 0.03 || (z + 99 + k * 0.9) % 3.6 < 0.03 ? "-" : null;
 }
 beam(ship, [-3.5, 4.8, -11.5], [-3.5, 5.55, -11.5], "o", { spot: "spyglass" }, 0.05);
 beam(ship, [-3.8, 5.45, -12.1], [-3, 5.8, -10.8], "t", { spot: "spyglass" }, 0.1);
@@ -1107,8 +1129,15 @@ function castRoom(c, i, odd, dx, dy, dz) {
   } else if (hitS) {
     if (indoors === GUN_DECK) shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
     else shadeRoom(c, odd, dx, dy, dz);
-  } else if (indoors === GUN_DECK && dy < 0) shadeWater(c, cam.y / -dy, dx, dy, dz);
+  } else if (indoors === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
+}
+// Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests. Like the rest
+// of the gun deck, it holds still between repaints.
+function portSea(c, dx, dy, dz) {
+  const t = cam.y / -dy, x = cam.x + dx * t, z = cam.z + dz * t;
+  const wave = Math.sin(x * 1.3 + z * 0.4) + 0.6 * Math.sin(z * 1.9 - x * 0.7) + 0.4 * Math.sin(x * 7 + z * 3);
+  put(c, wave > 0.7 ? "~" : wave > -0.5 ? "-" : ".", wave > 0.7 ? "m5" : wave > -0.5 ? "w4" : "d4", -1, t);
 }
 // Shades a room surface like the lit solids outside: warm light, a contact shadow toward the floor, and fog. The room
 // has no ship, terrain or blinking lights, and it builds no arrays or strings per cell, so furnished frames stay cheap.
@@ -1130,37 +1159,36 @@ function shadeRoom(c, odd, dx, dy, dz) {
 }
 
 // ---- Gun deck: a second interior under the main deck, reached by the hatch and its ladder -----------
-// It keeps the ship frame without the swell. The hull sides lean out as they rise, as outside, and open at
-// the gun ports, where each cannon rests on its carriage with the muzzle run out through the port.
-const GUN_DECK_LAMPS = [];
+// It keeps the ship frame without the swell. Planks floor it and line the overhead between dark cross-beams. The hull
+// sides lean out as they rise, as outside, and open at the gun ports, where each cannon rests on its carriage with the
+// muzzle run out through the port and a rack of round shot beside it. Lanterns hang between the beams by the walkway.
+const GUN_DECK_LAMPS = [], IRON = "f";
 function buildGunDeck() {
-  const planks = (x) => seam(x), [x0, x1, z0, z1] = HATCH;
-  box(gunDeck, SX - 3.1, -0.1, -7.8, SX + 3.1, 0, 5.6, "o", { tex: planks, dim: 0.4 });
-  for (const z of [-7.95, 5.6]) box(gunDeck, SX - 3.1, -0.1, z, SX + 3.1, 2.1, z + 0.15, "o", { tex: planks, dim: 0.4 });
+  const [x0, x1, z0, z1] = HATCH;
+  box(gunDeck, SX - 3.1, -0.1, -7.8, SX + 3.1, 0, 5.6, "o", { tex: deckPlanks, dim: 0.7 });
+  for (const z of [-7.95, 5.6]) box(gunDeck, SX - 3.1, -0.1, z, SX + 3.1, 2.1, z + 0.15, "o", { tex: (x) => seam(x), dim: 0.4 });
   for (const [a, b, c, d] of [[SX - 3.1, SX + 3.1, -7.8, z0], [SX - 3.1, SX + 3.1, z1, 5.6], [SX - 3.1, x0, z0, z1], [x1, SX + 3.1, z0, z1]]) {
-    box(gunDeck, a, 1.95, c, b, 2.1, d, "o", { tex: planks, dim: 0.35 });
+    box(gunDeck, a, 1.95, c, b, 2.1, d, "o", { tex: deckPlanks, dim: 0.35 });
   }
-  // Low beams carry the deck, clear of the main mast and the hatch.
-  for (const z of [-6.75, -5.25, -3.75, -2.25, -0.75, 0.75, 2.25, 5.35]) box(gunDeck, SX - 3, 1.76, z - 0.1, SX + 3, 1.95, z + 0.1, "o", { dim: 0.8 });
-  column(gunDeck, SX, -3, 0.2, 0.2, 0, 1.95, "o", { dim: 0.9 });
+  // Dark cross-beams every metre carry the deck, clear of the main mast and the hatch.
+  for (const z of [-6.9, -5.9, -4.9, -3.9, -1.9, -0.9, 0.1, 1.1, 2.1, 3.1, 5.4]) {
+    box(gunDeck, SX - 3, 1.78, z - 0.11, SX + 3, 1.95, z + 0.11, "o", { dim: 0.12 });
+  }
+  column(gunDeck, SX, -3, 0.2, 0.2, 0, 1.95, "o");
+  hatchBoards(gunDeck, DECK - 0.1, DECK + 0.3, { fill: 0.4 });
+  hatchLadder(gunDeck, 0, { fill: 0.35 }, () => ({ dim: 0.8 }));
   for (const side of [-1, 1]) {
-    hullSide(side, -0.1, 0.78, -7.8, 5.6);
-    hullSide(side, 1.27, 2.05, -7.8, 5.6);
+    hullSide(side, -0.1, 0.68, -7.8, 5.6);
+    hullSide(side, 1.36, 2.05, -7.8, 5.6);
     let from = -7.8;
     for (const z of GUN_PORTS) {
-      hullSide(side, 0.78, 1.27, from, z - 0.31);
-      from = z + 0.31;
+      hullSide(side, 0.68, 1.36, from, z - 0.42);
+      from = z + 0.42;
       gun(side, z);
+      shotRack(side, z + 0.8);
+      gunDeckLantern(SX + side * 1.15, z - 2);
     }
-    hullSide(side, 0.78, 1.27, from, 5.6);
-    for (const z of [-6.9, -3.9, -0.9, 2.1]) gunDeckLantern(side, z);
-    for (const z of [-3.9, -0.9, 2.1]) shotRack(side, z);
-  }
-  for (const x of [SX - 0.42, SX + 0.42]) beam(gunDeck, [x, 0, ladderZ(0)], [x, DECK + 1, ladderZ(DECK + 1)], "o", {}, 0.06);
-  beam(gunDeck, [SX - 0.42, DECK + 0.95, ladderZ(DECK + 0.95)], [SX + 0.42, DECK + 0.95, ladderZ(DECK + 0.95)], "o", {}, 0.045);
-  for (let k = 1; k <= 6; k++) {
-    const y = k * 0.3;
-    box(gunDeck, SX - 0.4, y - 0.04, ladderZ(y) - 0.07, SX + 0.4, y, ladderZ(y) + 0.07, "o", { solid: false });
+    hullSide(side, 0.68, 1.36, from, 5.6);
   }
 }
 // The hull side between heights y0 and y1, its outer face on the hull's and 0.12 m thick.
@@ -1168,54 +1196,61 @@ function hullSide(side, y0, y1, z0, z1) {
   const inner = SX + side * (2.07 + 0.45 * y0), outer = SX + side * (2.2 + 0.45 * y1);
   solid(gunDeck, [[side, -0.45, 0, SX + side * 3.1, DECK, 0], [-side, 0.45, 0, SX + side * 2.97, DECK, 0],
     [0, 1, 0, 0, y1, 0], [0, -1, 0, 0, y0, 0], [0, 0, 1, 0, 0, z1], [0, 0, -1, 0, 0, z0]],
-  [Math.min(inner, outer), y0, z0, Math.max(inner, outer), y1, z1], "o", { tex: (x, y) => seam(y), dim: 0.45 });
+  [Math.min(inner, outer), y0, z0, Math.max(inner, outer), y1, z1], "o", { tex: (x, y) => seam(y), dim: 0.4 });
 }
-// A cannon on its carriage: two cheeks on a bed, four trucks, and the barrel run out through the port.
+// A cannon on its carriage at a gun port. The dark barrel tapers from a rounded breech with its knob to a ring at the
+// muzzle, run out through the port; two stepped wooden cheeks and a bed carry it on four round trucks.
 function gun(side, z) {
-  const at = (u) => SX + side * u, x0 = Math.min(at(1.3), at(2)), x1 = Math.max(at(1.3), at(2));
-  for (const dz of [-0.24, 0.24]) box(gunDeck, x0, 0.14, z + dz - 0.04, x1, 0.95, z + dz + 0.04, "o");
-  box(gunDeck, x0, 0.14, z - 0.2, x1, 0.3, z + 0.2, "o");
-  for (const u of [1.42, 1.88]) {
-    for (const dz of [-0.325, 0.325]) disc(gunDeck, at(u), 0.14, z + dz - 0.035, z + dz + 0.035, 0.14, "o", { dim: 0.75 });
+  const at = (u) => SX + side * u, span = (u0, u1) => [Math.min(at(u0), at(u1)), Math.max(at(u0), at(u1))];
+  const iron = { dim: 0.9 }, wood = { dim: 1.4 }, rings = (x) => ([1.45, 2.2].some((u) => Math.abs(Math.abs(x - SX) - u) < 0.03) ? "-" : null);
+  barOut(side, z, 1.05, 3.2, 0.2, 0.14, { ...iron, tex: rings });
+  barOut(side, z, 3, 3.12, 0.17, 0.17, iron);
+  blob(gunDeck, at(1.05), GUN_Y, z, 0.14, 0.2, 0.2, IRON, iron);
+  blob(gunDeck, at(0.86), GUN_Y, z, 0.06, 0.06, 0.06, IRON, iron);
+  for (const [u0, u1, top] of [[1.15, 1.6, 0.66], [1.6, 2.12, 0.86]]) {
+    const [a, b] = span(u0, u1);
+    for (const dz of [-0.235, 0.235]) box(gunDeck, a, 0.2, z + dz - 0.035, b, top, z + dz + 0.035, "o", wood);
   }
-  const rings = (x) => ([1.5, 2.1, 2.95].some((u) => Math.abs(Math.abs(x - SX) - u) < 0.035) ? "-" : null);
-  barrel(gunDeck, at(1.22), at(3.16), GUN_Y, z, 0.17, 0.12, "t", { dim: 0.85, tex: rings });
-  blob(gunDeck, at(1.15), GUN_Y, z, 0.07, 0.07, 0.07, "t", { dim: 0.85 });
-}
-// An eight-sided gun barrel along x, from the breech at x0 (radius r0) to the muzzle at x1 (radius r1).
-function barrel(list, x0, x1, y, z, r0, r1, mat, o) {
-  const d = Math.sign(x1 - x0), taper = d * (r0 - r1) / Math.abs(x1 - x0), pl = [[-d, 0, 0, x0, 0, 0], [d, 0, 0, x1, 0, 0]];
-  for (let i = 0; i < 8; i++) {
-    const a = (i + 0.5) * Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
-    pl.push([taper, c, s, x0, y + c * r0, z + s * r0]);
+  const [a, b] = span(1.15, 2.12);
+  box(gunDeck, a, 0.2, z - 0.2, b, 0.3, z + 0.2, "o", wood);
+  for (const [u, r] of [[1.32, 0.14], [1.95, 0.16]]) {
+    const x = at(u), hub = (px, py) => (Math.hypot(px - x, py - r) < 0.045 ? "t" : null);
+    for (const dz of [-0.31, 0.31]) bar(gunDeck, 2, x, r, z + dz - 0.035, z + dz + 0.035, r, r, "o", { ...wood, tex: hub });
   }
-  const r = r0 * 1.09;
-  return solid(list, pl, [Math.min(x0, x1), y - r, z - r, Math.max(x0, x1), y + r, z + r], mat, o);
 }
-// A shot rack against the hull side: a low plank with a row of iron balls sitting in its holes.
+// An iron bar at gun height along x on one side of the ship, from u0 to u1 out from the centre line, with radius r0
+// at u0 and r1 at u1.
+function barOut(side, z, u0, u1, r0, r1, o) {
+  const a = SX + side * u0, b = SX + side * u1;
+  return side > 0 ? bar(gunDeck, 0, GUN_Y, z, a, b, r0, r1, IRON, o) : bar(gunDeck, 0, GUN_Y, z, b, a, r1, r0, IRON, o);
+}
+// A rack of round shot against the hull side: three balls in a low tray and two resting on them.
 function shotRack(side, z) {
-  const a = SX + side * 1.62, b = SX + side * 1.98;
-  box(gunDeck, Math.min(a, b), 0, z - 0.55, Math.max(a, b), 0.26, z + 0.55, "o", { dim: 0.8 });
-  for (let k = -2; k <= 2; k++) blob(gunDeck, SX + side * 1.8, 0.33, z + k * 0.21, 0.085, 0.085, 0.085, "t", { dim: 0.7 });
+  const a = SX + side * 1.78, b = SX + side * 2.12;
+  box(gunDeck, Math.min(a, b), 0, z - 0.3, Math.max(a, b), 0.12, z + 0.3, "o", { dim: 1.4 });
+  for (const [dz, y] of [[-0.18, 0.205], [0, 0.205], [0.18, 0.205], [-0.09, 0.352], [0.09, 0.352]]) {
+    blob(gunDeck, SX + side * 1.95, y, z + dz, 0.085, 0.085, 0.085, IRON, { dim: 0.9 });
+  }
 }
-// A lantern on an iron bracket from the hull side between two ports; the lanterns are the deck's only light.
-function gunDeckLantern(side, z) {
-  const x = SX + side * 2.4;
-  beam(gunDeck, [SX + side * 2.8, 1.57, z], [x, 1.57, z], "t", {}, 0.02);
-  box(gunDeck, x - 0.14, 1.52, z - 0.14, x + 0.14, 1.57, z + 0.14, "t", { solid: false });
-  box(gunDeck, x - 0.11, 1.28, z - 0.11, x + 0.11, 1.52, z + 0.11, "l");
-  GUN_DECK_LAMPS.push([x, 1.4, z]);
+// A lantern hangs on a short rod from the planks between two beams, beside the walkway and just clear of the line of
+// sight, so its light pools on the planks overhead; the lanterns are the deck's only light.
+function gunDeckLantern(x, z) {
+  beam(gunDeck, [x, 1.79, z], [x, 1.95, z], "t", {}, 0.015);
+  box(gunDeck, x - 0.1, 1.76, z - 0.1, x + 0.1, 1.79, z + 0.1, "t", { solid: false });
+  box(gunDeck, x - 0.08, 1.62, z - 0.08, x + 0.08, 1.76, z + 0.08, "l", { solid: false });
+  GUN_DECK_LAMPS.push([x, 1.69, z]);
 }
 buildGunDeck();
 function gunDeckFloorAt(x, z) {
   return Math.abs(x - SX) <= 1.8 && z >= -7.55 && z <= 5.35 ? 0 : null;
 }
-// Dim warm light: each lantern lights what lies within 5 m, without shadow rays.
+// Dim warm light from the lanterns: a faint glow everywhere, brighter on what faces up, and a warm pool within about
+// 3 m of each lantern, without shadow rays.
 function gunDeckLight(x, y, z, nx, ny, nz) {
-  let warm = 0.07;
+  let warm = 0.14 + 0.16 * Math.max(0, ny);
   for (const [lx0, ly0, lz0] of GUN_DECK_LAMPS) {
-    const lx = lx0 - x, ly = ly0 - y, lz = lz0 - z, d2 = lx * lx + ly * ly + lz * lz, f = 1 - d2 / 25;
-    if (f > 0) warm += 0.6 * f * f * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / Math.sqrt(d2)));
+    const lx = lx0 - x, ly = ly0 - y, lz = lz0 - z, d2 = lx * lx + ly * ly + lz * lz, f = 1 - d2 / 10;
+    if (f > 0) warm += 0.9 * f * f * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / Math.sqrt(d2)));
   }
   return [warm + 0.03, warm / (warm + 0.03)];
 }
@@ -1414,7 +1449,20 @@ function coneEntry(cone, ox, oy, oz, dx, dy, dz) {
   }
   return best;
 }
-const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) : s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.hole ? holeEntry(s, ox, oy, oz, dx, dy, dz) :
+  s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) :
+  s.bar ? barEntry(s, ox, oy, oz, dx, dy, dz) : s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+// The hull under the hatch: a ray that enters through the opening in its deck (the first plane) goes on into the well.
+function holeEntry(s, ox, oy, oz, dx, dy, dz) {
+  const t = entry(s.P, ox, oy, oz, dx, dy, dz), x = ox + dx * t, z = oz + dz * t;
+  return entryK === 0 && x > HATCH[0] && x < HATCH[1] && z > HATCH[2] && z < HATCH[3] ? Infinity : t;
+}
+// Ray against a round bar: coneEntry with the bar's axis swapped in for y, then the normal swapped back.
+function barEntry(s, ox, oy, oz, dx, dy, dz) {
+  const k = s.axis, t = k ? coneEntry(s.bar, ox, oz, oy, dx, dz, dy) : coneEntry(s.bar, oy, ox, oz, dy, dx, dz), n = entryN[k];
+  entryN[k] = entryN[1]; entryN[1] = n;
+  return t;
+}
 // One perforated slab per railing replaces individual posts without filling the open spaces.
 function railEntry(s, ox, oy, oz, dx, dy, dz) {
   const t = entry(s.P, ox, oy, oz, dx, dy, dz);
@@ -1534,7 +1582,7 @@ function lamp(x, y, z, i, r, inShip = false) {
 const centre = ({ bb: b }) => [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
 const LIGHTS = [
   ...world.filter((s) => s.mat === "l" && s !== beacon && s !== antennaLamp).map((s) => lamp(...centre(s), 1, 10)),
-  ...ship.filter((s) => s.mat === "l").map((s) => lamp(...centre(s), 0.9, 9, true)),
+  ...ship.filter((s) => s.mat === "l").map((s) => lamp(...centre(s), ...(s.light || [0.9, 9]), true)),
   lamp(-7.4, 3, 20.8, 0.22, 2.3), lamp(-2.6, 3, 20.8, 0.22, 2.3), lamp(-0.8, 3, 23.2, 0.22, 2.3), lamp(-0.8, 3, 25.7, 0.22, 2.3),
   lamp(...centre(beacon), 1.1, 16),
 ];
@@ -2366,7 +2414,8 @@ function cast(c, i, odd, dx, dy, dz) {
   const shipNear = boxEntry(SHIP_BOUNDS, cam.lx, cam.ly, cam.z, 1 / ldx, 1 / ldy, 1 / dz);
   // Parallel rays on a box boundary can yield NaN; keep those for the exact part tests.
   if (shipNear < hitT || Number.isNaN(shipNear)) trace(rowShip, i, cam.lx, cam.ly, cam.z, ldx, ldy, dz);
-  const tw = surfaceHit(dx, dy, dz, hitS ? hitT : Infinity);
+  // The sea cannot come between you and what lies in the hatch's well (dry), which is under the deck.
+  const tw = hitS && hitS.dry ? Infinity : surfaceHit(dx, dy, dz, hitS ? hitT : Infinity);
   SP[c] = null;
   if (hitS && hitT < tw) shadeSolid(c, odd, hitS !== wS, dx, dy, dz, ldx, ldy);
   else if (tw < Infinity && onLand) shadeLand(c, odd, tw, dx, dy, dz);

@@ -51,11 +51,15 @@ With reduced motion, the sails stay full but do not move.
 The sails keep a pale canvas tone at night.
 Outboard lanterns make the gun ports visible.
 
-A hatch forward of the hold opens onto a ladder down to the gun deck.
+A square hatch forward of the hold has a raised wooden coaming and a lantern on a post at its aft corner.
+Its ladder goes down a dark well to the gun deck.
 Walk onto the hatch to climb down to the foot of the ladder, facing aft.
-Each gun port has a cannon on its carriage, with the muzzle out through the port.
-Shot racks, low beams, and lanterns between the ports fill the deck, and the lanterns give a dim warm light.
-The open ports show the sea.
+Each gun port has a cannon on a wooden carriage with four round wheels.
+The dark, tapered barrel runs from a rounded breech out through the port to a ring at the muzzle.
+A rack of stacked round shot stands beside each gun.
+Dark cross-beams carry the deck planks overhead, and the floor planks show their seams.
+Lanterns hang between the beams beside the walkway and cast pools of dim warm light.
+The open ports show the moonlit sea.
 Walk into the ladder to climb back up beside the hatch, facing aft.
 Keyboard and touch movement share the house door's transition: release the movement keys and touch pad after a crossing to move again.
 The guns, shot racks, and main mast block walking, and the map stays hidden below deck.

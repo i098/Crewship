@@ -308,12 +308,16 @@ function nearest(origin, ray) {
 }
 for (const side of [-1, 1]) {
   for (const z of GUN_PORTS) {
-    assert.equal(nearest([SX, GUN_Y, z], [side, 0, 0])[1].mat, 't', 'each gun port must hold a barrel');
-    assert.equal(nearest([SX, 1.24, z], [side, 0, 0])[0], Infinity, 'each port must open above its barrel');
-    const wall = nearest([SX, 1.24, z + 1.5], [side, 0, 0])[0];
+    assert.equal(nearest([SX + side * 4, GUN_Y, z], [-side, 0, 0])[1].mat, IRON, 'each gun must run its muzzle out through its port');
+    assert.equal(nearest([SX, 1.3, z], [side, 0, 0])[0], Infinity, 'each port must open above its barrel');
+    const wall = nearest([SX, 1.3, z + 1.5], [side, 0, 0])[0];
     assert(wall > 2.5 && wall < 2.7, 'the hull side must stay closed between the ports');
   }
 }
+// The deck stays open over the hatch: a ray down through the opening goes on below the deck into the well.
+const down = (x, z) => Math.min(...ship.map((s) => hit(s, x, 3, z, 0, -1, 0)));
+assert(down(SX - 0.5, 4.3) > 1.5, 'a ray down the hatch must go on below the deck into its well');
+assert(down(SX - 0.9, 4.3) < 1, 'the deck must stay closed beside the hatch');
 """
     )
 
