@@ -2077,7 +2077,8 @@ def test_proactive_send_uses_the_latest_inbound_chat_and_transport(tmp_path, res
             rig.stop()
             rig.start()
         rig.cli("daily schedule")
-        wait_for(lambda: not rig.outbox(), "the sent schedule")
+        wait_for(lambda: "iMessage;-;new-handle daily schedule" in read_text(rig.fake / "relay-sent"),
+                 "the sent schedule")
         assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;new-handle daily schedule"]
         assert not read_text(rig.fake / "sent")
     finally:
@@ -2098,7 +2099,8 @@ def test_proactive_send_does_not_leave_the_latest_transport_during_an_outage(tmp
         wait_for(lambda: "outbox item 1 failed" in read_text(rig.err), "the queued retry")
         assert rig.outbox() and not read_text(rig.fake / "sent")
         rig.relay_mode("")
-        wait_for(lambda: not rig.outbox(), "the recovered schedule")
+        wait_for(lambda: "iMessage;-;new-handle daily schedule" in read_text(rig.fake / "relay-sent"),
+                 "the recovered schedule")
         assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;new-handle daily schedule"]
     finally:
         rig.close()
@@ -2112,7 +2114,7 @@ def test_proactive_send_uses_a_changed_photon_chat(tmp_path):
         inbound("m1", text="old handle")
         inbound("m2", space="iMessage;-;new-handle", text="new handle")
         cli("daily schedule")
-        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the sent schedule")
+        wait_for(lambda: "iMessage;-;new-handle" in text(fake / "send-targets"), "the sent schedule")
         assert text(fake / "send-targets").splitlines() == ["iMessage;-;new-handle"]
         assert text(fake / "sent").splitlines() == ["send daily schedule"]
     finally:
@@ -2144,7 +2146,7 @@ def test_newest_direct_destination_survives_a_transport_startup_failure(tmp_path
         rig.stop()
         (rig.fake / "spectrum-down").unlink()
         rig.start()
-        wait_for(lambda: not rig.outbox(), "the recovered proactive send")
+        wait_for(lambda: "send daily schedule" in read_text(rig.fake / "sent"), "the recovered proactive send")
         assert read_text(rig.fake / "sent").splitlines() == ["send daily schedule"]
         assert not read_text(rig.fake / "relay-sent")
     finally:
@@ -2172,7 +2174,9 @@ def test_owner_group_text_preserves_the_direct_proactive_destination(tmp_path, t
         latest = rig.state / ("latest" if transport == "photon" else "latest-bluebubbles")
         wait_for(lambda: group in read_text(latest), "the explicit group target")
         rig.cli("--reply", "1", "explicit group answer")
-        wait_for(lambda: not rig.outbox(), "the explicit group reply")
+        sent = rig.fake / ("send-targets" if transport == "photon" else "relay-sent")
+        wait_for(lambda: group in read_text(sent), "the explicit group reply")
+        wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "the completed group reply")
         if transport == "bluebubbles":
             assert read_text(rig.fake / "relay-sent").splitlines() == [f"{group} explicit group answer"]
         else:
@@ -2181,7 +2185,8 @@ def test_owner_group_text_preserves_the_direct_proactive_destination(tmp_path, t
             rig.stop()
             rig.start()
         rig.cli("daily schedule")
-        wait_for(lambda: not rig.outbox(), "the direct proactive send")
+        wait_for(lambda: "iMessage;-;+10000000000 daily schedule" in read_text(rig.fake / "relay-sent"),
+                 "the direct proactive send")
         assert read_text(rig.fake / "relay-sent").splitlines()[-1] == "iMessage;-;+10000000000 daily schedule"
         assert "daily schedule" not in read_text(rig.fake / "sent")
     finally:
@@ -2199,7 +2204,7 @@ def test_inbox_failure_notice_stays_plain_without_the_raw_photon_client(tmp_path
         (fake / "inbox-fail").unlink()
         inbound("m2", text="the accepted note")
         cli("later response")
-        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the public SDK sends")
+        wait_for(lambda: "send later response" in text(fake / "sent"), "the public SDK sends")
         assert text(fake / "sent").splitlines() == [
             "send firstmate did not get that, send it again",
             "send later response",
