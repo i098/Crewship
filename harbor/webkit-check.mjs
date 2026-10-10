@@ -94,7 +94,7 @@ const fitSign = signFit;
 signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
 window.harborCheck = {
   place(x, z, yaw) { Object.assign(me, {x, z, yaw, pitch: 0}); moved = dirty = true; },
-  state() { return {inside: insideHouse, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
+  state() { return {inside: interior === HOUSE, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
   ids: ORDER,
   postView(id, angle, distance, pitch, turn) {
     const posts = world.filter(s => s.spot === id && s.bb[3] - s.bb[0] < 0.16 && s.bb[4] - s.bb[1] >= 1);

@@ -36,7 +36,8 @@ const DECK = 2; // deck height in the ship frame
 const world = [];
 const ship = [];
 const room = [];
-let insideHouse = false;
+const cabinRoom = [];
+let interior = null; // the room you are inside (HOUSE or CABIN), or null outdoors
 
 function solid(list, planes, bb, mat, o) {
   const P = [];
@@ -44,7 +45,7 @@ function solid(list, planes, bb, mat, o) {
     const l = Math.hypot(nx, ny, nz);
     P.push(nx / l, ny / l, nz / l, (nx * px + ny * py + nz * pz) / l);
   }
-  const s = { id: world.length + ship.length + room.length + 1, P: new Float64Array(P), bb, mat, spot: null, solid: true, tex: null, ...o };
+  const s = { id: world.length + ship.length + room.length + cabinRoom.length + 1, P: new Float64Array(P), bb, mat, spot: null, solid: true, tex: null, ...o };
   list.push(s);
   return s;
 }
@@ -513,22 +514,54 @@ for (const z of [-5.4, -2.4, 0.6, 3.6]) {
     beam(ship, [x - side * 0.35, 1.02, z], [x + side * 0.5, 1.02, z], "t", { fill: 0.32 }, 0.14);
   }
 }
-// The stern castle follows the tapered transom, not a box hung over the water.
+// The stern castle is the cabin. It follows the tapered transom, not a box hung over the water: planked walls with a
+// strap-hinged door, framed windows on the front, down each side and across the stern, and pale trim. Its roof is the
+// stern deck.
 solid(ship, [[0, 1, 0, 0, 4.8, 0], [0, -1, 0, 0, DECK, 0],
   [0, 0, -1, 0, 0, -14.6], [0, 0, 1, 0, 0, -9],
   [1, 0, -0.08, SX + 2.1, 0, -14.6], [-1, 0, -0.08, SX - 2.1, 0, -14.6]],
-[SX - 2.55, DECK, -14.6, SX + 2.55, 4.8, -9], "o", { spot: "cabin", tex: sternTexture, fill: 0.48 });
-function sternTexture(x, y, z, nx, ny, nz) {
+[SX - 2.55, DECK, -14.6, SX + 2.55, 4.8, -9], "o", { spot: "cabin", tex: cabinWall, fill: 0.48 });
+// Window centres: x from the centre line on the front and the stern, z along the sides.
+const CABIN_WINDOWS = { front: [-1.6], side: [-10.6, -12.9], stern: [-1.3, 0, 1.3] };
+// Deck seams on the roof; framed windows and horizontal planks on the walls.
+function cabinWall(x, y, z, nx, ny, nz) {
   if (ny > 0.5) return seam(x);
-  if (nz > 0.5 && Math.abs(x - SX) < 0.5 && y < 4.1) return "f";
-  const u = Math.abs(nz) > 0.5 ? x - SX + 9 : z + 18;
-  return y > 3.2 && y < 4.2 && u % 1.2 < 0.65 ? "l" : seam(y);
+  const side = Math.abs(nx) > 0.5, u = side ? z : x - SX;
+  return cabinWindow(u, y, side ? CABIN_WINDOWS.side : nz > 0.5 ? CABIN_WINDOWS.front : CABIN_WINDOWS.stern) ||
+    ((y - DECK) % 0.25 < 0.035 ? "-" : null);
 }
+// Two brass strap hinges and a ring handle on the dark painted door leaf.
+function cabinDoor(x, y) {
+  const u = x - SX;
+  return (u - 0.3) ** 2 + (y - 3) ** 2 < 0.0049 || (u < -0.1 && (Math.abs(y - 2.35) < 0.045 || Math.abs(y - 3.6) < 0.045)) ? "y" : "-";
+}
+// A pale frame and crossbars round four lit panes.
+function cabinWindow(u, y, centres) {
+  if (y < 2.9 || y > 3.9) return null;
+  for (const c of centres) {
+    const d = Math.abs(u - c);
+    if (d <= 0.4) return d > 0.33 || y < 2.97 || y > 3.83 || d < 0.035 || Math.abs(y - 3.4) < 0.035 ? "s" : "l";
+  }
+  return null;
+}
+// Raised trim does not change the walking bounds, map footprint, feature anchor or shadows.
+const cabinTrim = { spot: "cabin", anchor: false, solid: false, thin: true, fill: 0.55, shadow: false };
+box(ship, SX - 0.5, DECK, -9.01, SX + 0.5, 3.95, -8.97, "f", { ...cabinTrim, fill: 0.5, tex: cabinDoor });
+for (const x of [-0.58, 0.58]) beam(ship, [SX + x, DECK, -8.96], [SX + x, 4.02, -8.96], "s", cabinTrim, 0.07);
+beam(ship, [SX - 0.66, 4, -8.96], [SX + 0.66, 4, -8.96], "s", cabinTrim, 0.08);
 for (const side of [-1, 1]) {
+  beam(ship, [SX + side * 2.55, DECK, -9.02], [SX + side * 2.55, 4.8, -9.02], "s", cabinTrim, 0.08);
+  beam(ship, [SX + side * 2.14, 4.72, -14.6], [SX + side * 2.59, 4.72, -9], "s", cabinTrim, 0.07);
   shipRail([-14.6, 2.1, 4.8], [-9, 2.55, 4.8], side);
   shipLantern(SX + side * 2.5, 4.8, -14.3, false, SX + side * 2.1);
 }
+beam(ship, [SX - 2.62, 4.72, -8.96], [SX + 2.62, 4.72, -8.96], "s", cabinTrim, 0.07);
 beam(ship, [SX - 2.1, 5.55, -14.6], [SX + 2.1, 5.55, -14.6], "s", { fill: 0.58 }, 0.06);
+// A wall lantern hangs between the door and the stairs. Its glass glows like the windows but adds no light: another
+// ship light costs more per frame than its pool of lamplight shows.
+beam(ship, [SX + 0.88, 4.02, -9], [SX + 0.88, 4.02, -8.69], "t", cabinTrim, 0.03);
+box(ship, SX + 0.74, 3.92, -8.86, SX + 1.02, 3.99, -8.58, "t", cabinTrim);
+box(ship, SX + 0.77, 3.62, -8.83, SX + 0.99, 3.92, -8.61, "t", { ...cabinTrim, tex: () => "l" });
 function shipLantern(x, y, z, anchor = false, mountX = x) {
   beam(ship, [mountX, y, z], [mountX, y + 1.13, z], "o", { fill: 0.4 }, 0.045);
   if (mountX !== x) beam(ship, [mountX, y + 1.13, z], [x, y + 1.13, z], "o", { fill: 0.4 }, 0.045);
@@ -570,8 +603,8 @@ shipMast(6, 2.2, 18.2, 4.3);
 shipRope([SX, 20, -3], [SX, 17.8, 6]);
 shipRope([SX, 20, -3], [SX, 4.8, -14.3]);
 shipRope([SX, 17.8, 6], [SX, 4.3, 18.5]);
-function shipRope(a, b) {
-  RIGGING.push([a, b]);
+function shipRope(a, b, cls) {
+  RIGGING.push([a, b, cls]);
 }
 // Screen column and row (fractional) and depth of a world point, written into `out`.
 function viewPoint(x, y, z, out) {
@@ -582,7 +615,7 @@ function viewPoint(x, y, z, out) {
   out[2] = d;
   return out;
 }
-// Project the stays into the depth buffer once, rather than ray-testing their large diagonal boxes.
+// Project the stays and the stair rails into the depth buffer once, rather than ray-testing their large diagonal boxes.
 function ropePoint(p) {
   const lx = p[0] - SX;
   return viewPoint(SX + rc * lx - rs * p[1], rs * lx + rc * p[1] + bob, p[2], [0, 0, 0]);
@@ -611,7 +644,7 @@ function ropeCell(i, j, depth, ch, cls = "o3") {
   if (distance > D[c] + 0.05) return;
   put(c, ch, cls, -1, distance); SP[c] = null;
 }
-function drawRope(p, q) {
+function drawRope(p, q, cls = "o3") {
   const span = ropeSpan(p, q);
   if (!span) return;
   const [lo, hi] = span, dx = q[0] - p[0], dy = q[1] - p[1];
@@ -619,13 +652,13 @@ function drawRope(p, q) {
   const ch = Math.abs(dx) < Math.abs(dy) * 0.5 ? "|" : Math.abs(dy) < Math.abs(dx) * 0.5 ? "-" : dx * dy > 0 ? "\\" : "/";
   for (let k = 0; k <= n; k++) {
     const t = lo + (hi - lo) * k / n, depth = 1 / ((1 - t) / p[2] + t / q[2]);
-    ropeCell(Math.floor(p[0] + dx * t), Math.floor(p[1] + dy * t), depth, ch);
+    ropeCell(Math.floor(p[0] + dx * t), Math.floor(p[1] + dy * t), depth, ch, cls);
   }
 }
 function drawRigging() {
-  for (const [a, b] of RIGGING) {
+  for (const [a, b, cls] of RIGGING) {
     const ends = ropeEnds(a, b);
-    if (ends) drawRope(...ends);
+    if (ends) drawRope(...ends, cls);
   }
 }
 column(ship, SX, -3, 0.8, 0.85, 13.7, 14.4, "o", { spot: "nest", tex: (x, y) => (y < 13.85 ? "-" : null) });
@@ -661,12 +694,23 @@ beam(ship, [-3.8, 5.45, -12.1], [-3, 5.8, -10.8], "t", { spot: "spyglass" }, 0.1
 box(ship, -3.4, 2.2, 6, -3.25, 3.8, 6.15, "o", { spot: "bell" });
 column(ship, -3.32, 6.07, 0.3, 0.12, 3.05, 3.65, "r", { spot: "bell" });
 box(ship, -4.8, DECK, 0.3, -4.3, 2.5, 0.9, "t", { spot: "strongbox", tex: (x, y) => (Math.abs(y - 2.3) < 0.05 ? "-" : null) });
-// Seven supported steps connect the main deck to the stern castle's roof.
+// Ten steps climb from the main deck to the stern castle's roof, each a pale tread over a darker riser. Under each step
+// the block is cut along the slope of the flight, so from the side the steps sit on one straight stringer and the
+// soffit below is open. The hand rails are projected lines, like the rigging. The walking lane matches the treads.
 const STERN_STEPS = [];
-for (let i = 0; i < 7; i++) {
-  const z = -6 - i * 0.5, height = DECK + (i + 1) * 0.4;
-  box(ship, SX + 1.2, DECK, z, SX + 2.2, height, z + 0.5, "o", { solid: false });
-  STERN_STEPS.push([SX + 1.45, SX + 1.95, z, z + 0.5, (x) => bob + height * rc + rs * (x - SX)]);
+const RISE = 0.28, RUN = 0.35, STAIR_X0 = SX + 1.15, STAIR_X1 = SX + 2.25;
+for (let k = 1; k <= 10; k++) {
+  const front = -5.5 - (k - 1) * RUN, height = DECK + k * RISE;
+  solid(ship, [[1, 0, 0, STAIR_X1, 0, 0], [-1, 0, 0, STAIR_X0, 0, 0], [0, 1, 0, 0, height, 0], [0, -1, 0, 0, DECK, 0],
+    [0, 0, 1, 0, 0, front], [0, 0, -1, 0, 0, front - RUN], [0, -1, -RISE / RUN, 0, DECK - 0.3, -5.5]],
+  [STAIR_X0, Math.max(DECK, height - RISE - 0.3), front - RUN, STAIR_X1, height, front], "o", { solid: false, fill: 0.55, tex: (x, y, z, nx, ny) => (ny > 0.5 ? "s" : "-") });
+  STERN_STEPS.push([SX + 1.45, SX + 1.95, front - RUN, front, (x) => bob + height * rc + rs * (x - SX)]);
+}
+for (const x of [STAIR_X0 - 0.03, STAIR_X1 + 0.03]) {
+  const foot = [x, DECK + RISE + 0.85, -5.47], head = [x, 4.8 + 0.85, -8.68];
+  shipRope([x, DECK, -5.47], foot, "s5");
+  shipRope(foot, head, "s5");
+  shipRope([x, 4.8, -8.68], head, "s5");
 }
 const SHIP_BOUNDS = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
 for (const { bb } of ship) {
@@ -681,7 +725,7 @@ const gangway = solid(world, [[0, 1, 0, 0, 0, 0], [0, -1, 0, 0, 0, 0], [1, 0, 0,
   [-1, 0, 0, 0.55, 0, 0], [0, 0, 1, 0, 0, -0.6], [0, 0, -1, 0, 0, -1.8]], [0.55, 0, -1.8, 3.1, 0, -0.6], "o",
 { spot: "gangway", solid: false, tex: (x) => ((x + 9) % 0.5 < 0.07 ? "-" : null) });
 
-// ---- House interior: a separate room, with the same materials and glyph renderer ------------
+// ---- Interiors: the house and the ship's cabin, separate rooms with the same materials and glyph renderer ----
 function roomFloor(x, y, z) {
   return (x + 9) % 0.55 < 0.025 || (z + 9) % 2 < 0.025 ? "-" : null;
 }
@@ -822,24 +866,83 @@ function buildRoom() {
   column(room, -1.5, 0.14, 0.07, 0.06, 1.5, 1.72, "h");
 }
 buildRoom();
+// A sea chart in its own plane (u, v): a grid and wavy coastlines.
+function chartLine(u, v) {
+  return (u + 9) % 0.16 < 0.012 || (v + 9) % 0.16 < 0.012 || Math.abs((v + 9) % 0.5 - 0.25 - 0.08 * Math.sin(u * 9)) < 0.015 ? "-" : null;
+}
+// The cabin under the stern deck: plank walls and deck beams, starry windows where the outside shows them, a chart
+// table under a hanging lantern, a chair, a bunk along the port wall and a sea chest.
+function buildCabin() {
+  const wood = { dim: 0.36, tex: (x, y) => ((y + 9) % 0.22 < 0.02 ? "-" : null) }, pane = { tex: roomWindow, solid: false };
+  box(cabinRoom, -2.4, -0.2, -0.2, 2.4, 0, 5.4, "o", { tex: roomFloor, dim: 0.4 });
+  box(cabinRoom, -2.4, 2.45, -0.2, 2.4, 2.65, 5.4, "o", { dim: 0.28 });
+  for (const z of [1.2, 2.5, 3.8]) box(cabinRoom, -2.2, 2.3, z, 2.2, 2.45, z + 0.16, "o", { dim: 0.45 });
+  for (const [x0, x1] of [[-2.4, -2.2], [2.2, 2.4]]) box(cabinRoom, x0, 0, 0, x1, 2.45, 5.2, "o", wood);
+  box(cabinRoom, -2.2, 0, 5.2, 2.2, 2.45, 5.4, "o", wood);
+  for (const [x0, x1] of [[-2.2, -0.55], [0.55, 2.2]]) box(cabinRoom, x0, 0, -0.2, x1, 2.45, 0, "o", wood);
+  box(cabinRoom, -0.55, 1.95, -0.2, 0.55, 2.45, 0, "o", wood);
+  box(cabinRoom, -0.55, 0, -0.15, 0.55, 1.95, -0.1, "f", { solid: false, tex: (x, y) => ((x + 0.3) ** 2 + (y - 1) ** 2 < 0.0049 ? "y" : null) });
+  for (const x of [-0.62, 0.52]) box(cabinRoom, x, 0, 0, x + 0.1, 2.02, 0.1, "o");
+  box(cabinRoom, -0.62, 1.95, 0, 0.62, 2.05, 0.1, "o");
+  box(cabinRoom, 1.27, 0.9, 0, 1.93, 1.8, 0.06, "d", pane);
+  for (const x of [-2.2, 2.14]) for (const z of [1.6, 3.9]) box(cabinRoom, x, 0.9, z - 0.33, x + 0.06, 1.8, z + 0.33, "d", pane);
+  for (const x of [-1.3, 0, 1.3]) {
+    box(cabinRoom, x - 0.33, 0.9, 5.14, x + 0.33, 1.8, 5.2, "d", pane);
+    box(cabinRoom, x - 0.03, 0.9, 5.1, x + 0.03, 1.8, 5.2, "o");
+  }
+  box(cabinRoom, -1.7, 1.33, 5.1, 1.7, 1.39, 5.2, "o");
+  box(cabinRoom, -1.76, 0.84, 5.02, 1.76, 0.9, 5.2, "o");
+  box(cabinRoom, -2.2, 0.95, 2.1, -2.16, 1.75, 3.4, "y", { tex: (x, y, z) => chartLine(z, y), solid: false });
+  box(cabinRoom, -0.85, 0.72, 2.7, 0.85, 0.8, 3.7, "o");
+  for (const x of [-0.78, 0.7]) for (const z of [2.77, 3.55]) box(cabinRoom, x, 0, z, x + 0.08, 0.72, z + 0.08, "o");
+  box(cabinRoom, -0.62, 0.8, 2.82, 0.22, 0.81, 3.42, "y", { tex: (x, y, z) => chartLine(x, z) });
+  box(cabinRoom, 0.02, 0.8, 3, 0.66, 0.815, 3.58, "y", { tex: (x, y, z) => chartLine(x + 0.4, z), dim: 0.85 });
+  beam(cabinRoom, [-0.7, 0.85, 3.6], [0.05, 0.85, 3.62], "y", {}, 0.035);
+  box(cabinRoom, -0.28, 0, 4.05, 0.28, 0.48, 4.55, "o");
+  box(cabinRoom, -0.28, 0.48, 4.47, 0.28, 1.1, 4.55, "o");
+  beam(cabinRoom, [0, 2.45, 3.2], [0, 2, 3.2], "t", {}, 0.015);
+  box(cabinRoom, -0.15, 1.94, 3.05, 0.15, 2, 3.35, "t", { solid: false });
+  box(cabinRoom, -0.12, 1.64, 3.08, 0.12, 1.94, 3.32, "l", { solid: false });
+  box(cabinRoom, -0.14, 1.58, 3.06, 0.14, 1.64, 3.34, "t", { solid: false });
+  box(cabinRoom, 1.35, 0, 0.9, 2.2, 0.42, 2.9, "o", { tex: (x, y, z) => (Math.abs(y - 0.21) < 0.015 || Math.abs(z - 1.9) < 0.015 ? "-" : null) });
+  box(cabinRoom, 1.4, 0.42, 0.95, 2.2, 0.58, 2.85, "r");
+  box(cabinRoom, 1.5, 0.58, 2.4, 2.15, 0.7, 2.8, "s");
+  box(cabinRoom, 1.35, 0.42, 0.9, 1.4, 0.72, 2.9, "o");
+  for (const z of [0.9, 2.84]) box(cabinRoom, 1.35, 0.42, z, 2.2, 0.95, z + 0.06, "o");
+  box(cabinRoom, -2.15, 0, 1, -1.45, 0.5, 1.6, "o", {
+    tex: (x, y, z) => (Math.abs(z - 1.12) < 0.03 || Math.abs(z - 1.48) < 0.03 ? "t" : Math.abs(y - 0.38) < 0.015 ? "-" : null) });
+}
+buildCabin();
+// Each room's door is at its origin and the room runs along +z. `door` is the outside threshold [x, z, the direction
+// you walk along z to enter]; `exit` puts you back outside [x, z, yaw], facing away from the door. `lights` light the
+// room without shadow rays: x, y, z, intensity and reach of each (the house's table lamp and hearth fire, the cabin's
+// hanging lantern).
+const HOUSE = { solids: room, floor: [-2.75, 2.75, 0.25, 5.75], lights: [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2],
+  door: [-5, 20.75, 1], exit: [-5, 20.35, Math.PI] };
+const CABIN = { solids: cabinRoom, floor: [-1.95, 1.95, 0.25, 4.95], lights: [0, 1.79, 3.2, 0.85, 9], door: [SX, -8.75, -1], exit: [SX, -8.35, 0] };
 
 function roomFloorAt(x, z) {
-  return x >= -2.75 && x <= 2.75 && z >= 0.25 && z <= 5.75 ? 0 : null;
+  const f = interior.floor;
+  return x >= f[0] && x <= f[1] && z >= f[2] && z <= f[3] ? 0 : null;
 }
 function roomBlocked(x, z, fy) {
-  return room.some((s) => walkingSolid(s, fy) && x > walkBound(s.bb, 0) && x < walkBound(s.bb, 3) &&
+  return interior.solids.some((s) => walkingSolid(s, fy) && x > walkBound(s.bb, 0) && x < walkBound(s.bb, 3) &&
     z > walkBound(s.bb, 2) && z < walkBound(s.bb, 5));
 }
-function crossHouseDoor(x, z) {
-  const crossing = insideHouse ? me.z >= 0.35 && z < 0.35 && Math.abs(x) < 0.42 :
-    me.z <= 20.75 && z > 20.75 && z < 21.2 && Math.abs(x + 5) < 0.42;
-  if (!crossing) return false;
-  insideHouse = !insideHouse;
+// The room whose outside door the step from (me.x, me.z) to (x, z) walks through, or null.
+function doorAhead(x, z) {
+  return [HOUSE, CABIN].find(({ door: [dx, dz, dir] }) => Math.abs(x - dx) < 0.42 &&
+    dir * (me.z - dz) <= 0 && dir * (z - dz) > 0 && dir * (z - dz) < 0.45) || null;
+}
+function crossDoor(x, z) {
+  const next = !interior ? doorAhead(x, z) : me.z >= 0.35 && z < 0.35 && Math.abs(x) < 0.42 ? null : interior;
+  if (next === interior) return false;
+  Object.assign(me, next ? { x: 0, z: 0.8, yaw: 0, pitch: 0 } : { x: interior.exit[0], z: interior.exit[1], yaw: interior.exit[2], pitch: 0 });
+  interior = next;
   probeMs = -1;
   slow = fast = 0;
   layoutDirty = true;
   doorInputHeld = true;
-  Object.assign(me, insideHouse ? { x: 0, z: 0.8, yaw: 0, pitch: 0 } : { x: -5, z: 20.35, yaw: Math.PI, pitch: 0 });
   walkPath = []; walkTo = jumped = null;
   setMap(0); mapBox = null; MAPCELLS.clear(); LINE.clear();
   moved = dirty = true;
@@ -848,18 +951,17 @@ function crossHouseDoor(x, z) {
 }
 function movePlayer(x, z, here) {
   if (doorInputHeld) return;
-  if (crossHouseDoor(x, z)) return;
+  if (crossDoor(x, z)) return;
   const fy = floorAt(x, z);
   if (fy !== null && Math.abs(fy - here) <= 0.6 && !blocked(x, z, fy)) { me.x = x; me.z = z; }
 }
-// The table lamp and the hearth fire light the room without shadow rays: x, y, z, intensity and reach of each.
-const ROOM_LIGHTS = [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2];
-// The room fill, lamp, and fire share the same warm colour.
+// The room fill and each room's lights share the same warm colour.
 function roomLight(x, y, z, nx, ny, nz) {
+  const L = interior.lights;
   let warm = 0.28;
-  for (let k = 0; k < ROOM_LIGHTS.length; k += 5) {
-    const lx = ROOM_LIGHTS[k] - x, ly = ROOM_LIGHTS[k + 1] - y, lz = ROOM_LIGHTS[k + 2] - z, d = Math.sqrt(lx * lx + ly * ly + lz * lz);
-    warm += ROOM_LIGHTS[k + 3] * Math.max(0, 1 - d / ROOM_LIGHTS[k + 4]) * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / d));
+  for (let k = 0; k < L.length; k += 5) {
+    const lx = L[k] - x, ly = L[k + 1] - y, lz = L[k + 2] - z, d = Math.sqrt(lx * lx + ly * ly + lz * lz);
+    warm += L[k + 3] * Math.max(0, 1 - d / L[k + 4]) * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / d));
   }
   return warm;
 }
@@ -867,7 +969,9 @@ function castRoom(c, i, odd, dx, dy, dz) {
   hitT = Infinity; hitS = null; SP[c] = null;
   trace(rowWorld, i, cam.x, cam.y, cam.z, dx, dy, dz);
   if (hitS && hitS.tex === roomWindow) {
-    const star = roomWindow(cam.x + dx * hitT, cam.y + dy * hitT) === "*";
+    // Panes in a side wall face along x, so their stars spread along z.
+    const across = Math.abs(hitS.P[hitK]) > 0.5 ? cam.z + dz * hitT : cam.x + dx * hitT;
+    const star = roomWindow(across, cam.y + dy * hitT) === "*";
     put(c, star ? "*" : ".", star ? "m5" : "d2", hitS.id * 16 + (hitK >> 2), hitT);
   } else if (hitS && hitS.tex === roomFlame) {
     const [ch, cls] = roomFlame(cam.y + dy * hitT, hitS.bb);
@@ -918,7 +1022,7 @@ const FLOORS = [
   [3, 7, -16, 14, () => 1.2],
 ];
 function floorAt(x, z) {
-  if (insideHouse) return roomFloorAt(x, z);
+  if (interior) return roomFloorAt(x, z);
   const f = FLOORS.find(([x0, x1, z0, z1]) => x >= x0 && x < x1 && z >= z0 && z < z1);
   if (f) return f[4](x, z);
   const deck = shipFloor(x, z);
@@ -929,7 +1033,7 @@ function floorAt(x, z) {
 const walkBound = (b, k) => b[k] + (k < 3 ? -0.25 : 0.25);
 const walkingSolid = (s, fy, lift = 0) => s.solid && s.bb[1] + lift < fy + 1.7 && s.bb[4] + lift > fy + 0.3;
 function blocked(x, z, fy) {
-  if (insideHouse) return roomBlocked(x, z, fy);
+  if (interior) return roomBlocked(x, z, fy);
   for (const list of [world, ship]) {
     const lift = list === ship ? bob : 0;
     for (const s of list) {
@@ -1116,10 +1220,11 @@ function trace(list, col, ox, oy, oz, dx, dy, dz) {
 // with distance, and the solids near each light cast its shadows. The moon adds a dim, soft fill; the
 // lighthouse beam sweeps the harbor.
 let shadows = !touchFirst.matches;
+// Solids marked shadow: false (thin raised trim) cast no shadows; their shadows are too fine for the glyph grid.
 function casters(list, x, y, z, r) {
-  return list.filter(({ bb: b }) => {
+  return list.filter(({ bb: b, shadow }) => {
     const ex = Math.max(b[0] - x, 0, x - b[3]), ey = Math.max(b[1] - y, 0, y - b[4]), ez = Math.max(b[2] - z, 0, z - b[5]);
-    return ex + ey + ez > 0 && ex * ex + ey * ey + ez * ez < r * r; // near the light but not around it
+    return shadow !== false && ex + ey + ez > 0 && ex * ex + ey * ey + ez * ez < r * r; // near the light but not around it
   });
 }
 function lamp(x, y, z, i, r, inShip = false) {
@@ -1169,14 +1274,15 @@ function lightAt(x, y, z, nx, ny, nz) {
   const beam = beamOn(x, z) * Math.max(0.3, ny + 0.5);
   return [moon + warm + beam, (warm + beam) / (moon + warm + beam)];
 }
-// Is the way from a point to a light blocked by one of the solids near the light?
+// Is the way from a point to a light blocked by one of the solids near the light? Every solid is convex and the light
+// faces the point, so the solid being shaded (hitS) cannot block its own light.
 function shadowed(L, ox, oy, oz, dx, dy, dz, dist) {
   if (L.inShip) {
     const x = ox - SX, y = oy - bob;
     [ox, oy, dx, dy] = [rc * x + rs * y + SX, -rs * x + rc * y, rc * dx + rs * dy, -rs * dx + rc * dy];
   }
   const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
-  for (const s of tileCasters(L, ox, oz)) if (boxEntry(s.bb, ox, oy, oz, ix, iy, iz) < dist && hit(s, ox, oy, oz, dx, dy, dz) < dist) return true;
+  for (const s of tileCasters(L, ox, oz)) if (s !== hitS && boxEntry(s.bb, ox, oy, oz, ix, iy, iz) < dist && hit(s, ox, oy, oz, dx, dy, dz) < dist) return true;
   return false;
 }
 // The light's casters that can stand between it and any point above or below the 1 m plan tile at (x, z): those whose box
@@ -1257,7 +1363,7 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (insideHouse ? scale : 1);
+  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (interior ? scale : 1);
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1287,10 +1393,10 @@ function render() {
   Object.assign(cam, { x: me.x, y: me.eye, z: me.z, f: [fx, fy, fz], r: [rx, 0, rz], u: [ux, uy, uz], tanH, tanV });
   // Camera origin in the ship frame (rotate by -roll about the ship's long axis, after the bob).
   cam.lx = rc * (me.x - SX) + rs * (me.eye - bob) + SX; cam.ly = -rs * (me.x - SX) + rc * (me.eye - bob);
-  const scenery = insideHouse ? room : world, vessel = insideHouse ? NONE : ship;
+  const scenery = interior ? interior.solids : world, vessel = interior ? NONE : ship;
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
-  if (!insideHouse) {
+  if (!interior) {
     drawGrass();
     drawRigging();
     gulls();
@@ -1304,7 +1410,7 @@ function render() {
 }
 function labelTarget(spot, looked) {
   // Seat posted signs on their world-space support tops, not the aimed surface.
-  const a = target && anchors[target], post = !insideHouse && a?.post;
+  const a = target && anchors[target], post = !interior && a?.post;
   const tops = post && a.posts.map(p => project(p, Math.floor));
   const at = post ? project(post, Math.floor) : looked && spot === target ? [cols >> 1, rows >> 1] : a && project(a);
   const span = at && tops && tops.every(Boolean) ? Math.max(...tops.map(p => Math.abs(p[0] - at[0]))) * 2 + 3 : 0;
@@ -1551,7 +1657,7 @@ const MAPCELLS = new Map();
 let mapMode = 0, pick = 0, jumped = null, mapBox = null; // mapMode: 0 idle, 1 picking, 2 full screen
 function minimap() {
   MAPCELLS.clear();
-  if (insideHouse) { mapBox = null; return; }
+  if (interior) { mapBox = null; return; }
   const left = Math.max(1, Math.ceil((safe.left - padX) / cellW)), right = Math.max(1, Math.ceil((safe.right - padX) / cellW));
   const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom - padY) / cellH));
   const full = mapMode === 2, w = full ? cols - left - right : Math.min(30, cols - left - right), h = full ? rows - top - bottom : Math.min(15, rows - top - bottom);
@@ -1902,7 +2008,7 @@ function setMap(mode) {
 }
 // M picks on the map, M again fills the screen, M or Escape closes; arrows or the mouse choose, Enter goes.
 function mapKey(e) {
-  if (insideHouse) return e.code === "KeyM";
+  if (interior) return e.code === "KeyM";
   if (e.code === "KeyM") setMap((mapMode + 1) % 3);
   else if (!mapMode) return false;
   else if (e.key === "Escape") setMap(0);
@@ -1947,7 +2053,7 @@ function tapMap(cx, cy) {
 
 // One ray: the nearest of the solids, the moving sea surface and the sky decides the cell.
 function cast(c, i, odd, dx, dy, dz) {
-  if (insideHouse) { castRoom(c, i, odd, dx, dy, dz); return; }
+  if (interior) { castRoom(c, i, odd, dx, dy, dz); return; }
   // A downward ray meets the island or the sea before it sinks below the lowest wave, so no solid past that shows.
   hitT = dy < 0 ? (cam.y + SEA) / -dy : Infinity; hitS = null;
   trace(rowWorld, i, cam.x, cam.y, cam.z, dx, dy, dz);
@@ -2168,7 +2274,7 @@ function outline(c, i, j) {
   return slope(off(c - 1, i > 0), off(c + 1, i < cols - 1), off(c - cols, j > 0), off(c + cols, j < rows - 1));
 }
 // Keep unchanged rows. Desktop text runs keep their full-row origins; touch glyphs
-// have independent positions, so only their changed span and overhang need clearing.
+// have independent positions, so only their changed runs and overhang need clearing.
 let DG, DC, dpr = 1;
 const BACKGROUND = "#060a14";
 const snap = (v) => Math.round(v * dpr) / dpr;
@@ -2201,16 +2307,20 @@ function draw(mid) {
     ctx.fillRect(0, 0, viewW, viewH);
   }
   forgetSign();
+  const touch = touchFirst.matches;
   for (let j = 0; j < rows; j++) {
     const onMap = mapBox && j >= mapBox.oj && j < mapBox.oj + mapBox.h;
-    let first = cols, last = -1;
+    let first = -1, last = -1;
     for (let i = 0; i < cols; i++) {
-      if (update(j * cols + i, i, j, mid, onMap)) { first = Math.min(first, i); last = i; }
+      if (!update(j * cols + i, i, j, mid, onMap)) continue;
+      // Touch redraws each run of changed cells; runs fewer than five cells apart share one redraw.
+      if (touch && first >= 0 && i - last > 4) { redraw(j, Math.max(0, first - 1), last + 1); first = -1; }
+      if (first < 0) first = i;
+      last = i;
     }
-    if (last >= 0) {
-      if (touchFirst.matches) redraw(j, Math.max(0, first - 1), Math.min(cols - 1, last + 1));
-      else redraw(j, 0, cols - 1);
-    }
+    if (first < 0) continue;
+    if (touch) redraw(j, Math.max(0, first - 1), Math.min(cols - 1, last + 1));
+    else redraw(j, 0, cols - 1);
   }
   drawMap();
   drawSign();
@@ -2308,7 +2418,7 @@ function paint(run, cls, i, j) {
 }
 
 function nearby() {
-  if (insideHouse) return null;
+  if (interior) return null;
   let best = null, bd = 2.2;
   for (const [id, a] of Object.entries(anchors)) {
     const d = Math.hypot(a.x - me.x, a.z - me.z);
@@ -2456,7 +2566,7 @@ reduced.addEventListener("change", () => { dirty = true; });
 function adaptResolution(ms, late) {
   slow = ms > 20 || late ? slow + 1 : 0;
   fast = ms < 9 && !late ? fast + 1 : 0;
-  if (!insideHouse) {
+  if (!interior) {
     if (slow > 20 && shadows) { shadows = false; slow = 0; dirty = true; }
     return;
   }
@@ -2470,7 +2580,7 @@ function adaptResolution(ms, late) {
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;
-  const late = insideHouse && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
+  const late = !!interior && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
   probeMs = Math.min(0, probeMs);
   paintedLastFrame = false;
   return late;
@@ -2495,7 +2605,7 @@ function frame(now) {
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);
   // The room has no animated objects; repaint only after movement, looking, or resizing.
-  if (visible && cols && (walked || dirty || (!insideHouse && !still))) {
+  if (visible && cols && (walked || dirty || (!interior && !still))) {
     if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
       probeMs = frameMs;
       dirty = true;
@@ -2504,7 +2614,7 @@ function frame(now) {
     }
     if (layoutDirty) { measure(); layoutDirty = false; }
     dirty = false;
-    if (!insideHouse) {
+    if (!interior) {
       setGangway();
       moveLights();
       floatBoats();

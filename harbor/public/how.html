@@ -23,13 +23,16 @@
   Buildings, the dock and the hull are convex solids made of planes.
   Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals.
   Rocks and tree canopies are ellipsoids.
-  Ship rigging uses projected lines and tall grass uses projected tufts; both check the depth buffer instead of ray intersections.
+  Ship rigging and the cabin stair hand rails use projected lines; tall grass uses projected tufts.
+  Both check the depth buffer instead of ray intersections.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
-  Exterior solids cast shadows when shadow rays are enabled.
+  Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
+  A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; fog still dims the sails.
-  The room lamp and the fire light nearby surfaces without shadow rays.
+  The house's lamp and fire and the cabin's hanging lantern light nearby room surfaces without shadow rays.
+  The cabin's wall lantern glows like the lit windows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
@@ -39,14 +42,14 @@
   Far tufts are dimmer.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
-  Flames in the room use fixed glyphs from an orange base to pale tips, so the idle room needs no redraws.
+  Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea and the ship and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
   It stops when no remaining solid can be nearer than its hit.
   After the intro, the canvas keeps unchanged rows.
   Devices without <code>(pointer: coarse)</code> draw rows with changed cells again from their full text-run positions.
-  Touch devices redraw only the changed span and its neighbouring cells.
+  Touch devices redraw only each run of changed cells and its neighbouring cells; runs fewer than five cells apart share one redraw.
   Grass wind animation uses a 12 Hz clock; other scene changes can repaint grass cells between wind updates.
   The mini map draws again each frame, even when its cells do not change.
   The pop-up sign also draws again each frame; the cells it covered draw again when it moves or closes.
@@ -62,11 +65,11 @@
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
   Slow rendering first disables exterior shadow rays, if enabled, then uses larger room glyphs with fewer cells.
   Fast room rendering restores a finer grid.
-  Inside the room, missed frames also reduce detail relative to the measured display refresh rate.
+  Inside a room, missed frames also reduce detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
-  The room redraws only after movement, looking, resizing, or another change that requires a new frame.
+  A room redraws only after movement, looking, resizing, or another change that requires a new frame.
   Reduced motion also stops exterior animation.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
@@ -82,7 +85,7 @@
   Use the arrows to choose a point.
   Enter or a tap selects a destination.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
-  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house guidance</a> for door crossings and controls inside.</li>
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house and cabin guidance</a> for door crossings and controls inside.</li>
   <li><b>Content.</b> <code>harbor/build.py</code> builds the points of interest with the README's Features list and More docs row, and the changelog.</li>
   <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>

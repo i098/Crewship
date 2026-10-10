@@ -57,3 +57,48 @@ assert.equal(waterReflection(0.1, 0.1), null);
         capture_output=True,
         text=True,
     )
+
+
+def test_touch_redraw_repaints_changed_runs_and_leaves_the_rest():
+    subprocess.run(
+        [
+            "node",
+            "--input-type=module",
+            "-e",
+            r"""
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
+const source = fs.readFileSync(process.argv[1], "utf8");
+const names = ["draw", "update", "forgetSign", "redraw", "paint", "edge", "outline", "drawMap", "drawSign"];
+const functions = names.map(name =>
+  source.match(new RegExp(`^function ${name}\\(.*?^}`, "ms"))[0]);
+const constants = ["beyond", "slope", "snap"].map(name =>
+  source.match(new RegExp(`^const ${name} = .*;$`, "m"))[0]);
+vm.runInNewContext([...constants, ...functions, `
+const painted = [];
+const ctx = { save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, fillRect() {},
+  fillText(ch, x, y) { painted.push([x, y, ch]); } };
+const touchFirst = { matches: true }, COLORS = { k: "#fff" }, MAPCELLS = new Map(), LINE = new Map();
+const BACKGROUND = "#000", cols = 40, rows = 3, padX = 0, padY = 0, cellW = 1, cellH = 1, dpr = 1, viewW = 40, viewH = 3;
+const introProgress = 1, target = null, mapBox = null, signBox = null;
+let signDrawn = null;
+const G = Array(cols * rows).fill("."), C = Array(cols * rows).fill("k"), DG = [...G], DC = [...C];
+const ID = new Int32Array(cols * rows), D = new Float32Array(cols * rows), SP = [];
+// Two separate changes on the middle row: two cells at the left and two near the right.
+const changed = [3, 4, 30, 33];
+for (const i of changed) G[cols + i] = "#";
+draw(-1);
+for (const i of changed) {
+  assert(painted.some(([x, y, ch]) => x === i && y === 1 && ch === "#"), "a changed cell was not repainted");
+}
+assert(painted.every(([x, y]) => y === 1), "unchanged rows were repainted");
+assert(!painted.some(([x]) => x >= 10 && x <= 25), "cells far from any change were repainted");
+`].join("\n"), { assert });
+""",
+            str(ROOT / "harbor/public/harbor.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
