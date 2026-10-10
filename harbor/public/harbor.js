@@ -400,24 +400,21 @@ function unseated(x, z) {
 // Rolling hills from two octaves of value noise: up to 6 m high inland and behind the town, a swell of up to
 // 0.6 m in the town, none on the beaches.
 const hills = (x, z) => 0.72 * noise(x / 24, z / 24) + 0.28 * noise(x / 12 + 7.3, z / 12 - 3.1);
-const hillScale = (x, z) => (0.6 + 5.4 * smooth((roundedBox(x, z, -2, 22, 26, 8, 4) - 1) / 14)) * (0.3 + 0.7 * smooth((z - 4) / 14));
-const inland = (x, z, land = landDistance(x, z)) => smooth((-land - 5) / 12);
+const townDistance = (x, z) => roundedBox(x, z, -2, 22, 26, 8, 4);
+const hillScale = (town, z) => (0.6 + 5.4 * smooth((town - 1) / 14)) * (0.3 + 0.7 * smooth((z - 4) / 14));
+const inland = (land) => smooth((-land - 5) / 12);
 function relief(x, z, land) {
-  const fade = inland(x, z, land);
-  return fade && fade * hills(x, z) * hillScale(x, z) * unseated(x, z);
+  const fade = inland(land);
+  return fade && fade * hills(x, z) * hillScale(townDistance(x, z), z) * unseated(x, z);
 }
-// Each part of the relief with the most it changes per metre and its largest value: the noise octaves change by
-// 1.5 per lattice step, landDistance by at most 1.25 per metre, and the bilinear seat blend by up to sqrt(2)
-// times its smoothstep's slope. TOP is the highest the ground can be.
-const RELIEF_PARTS = [[hills, 0.12, 1], [hillScale, 1.04, 6], [inland, 0.16, 1], [unseated, Math.SQRT2 * 1.5 / SEAT_BLEND, 1]];
-const TOP = 1.2 + 6;
-// The lowest and highest relief within r of (x, z).
+// The lowest and highest relief within r of (x, z). The ramps only grow with townDistance, z and -landDistance,
+// which change by at most 1, 1 and 1.25 per metre; the noise changes by at most 0.12 per metre, and the bilinear
+// seat blend by at most sqrt(2) times its smoothstep's slope. TOP is the highest the ground can be.
+const TOP = 1.2 + 6, SEAT_CHANGE = Math.SQRT2 * 1.5 / SEAT_BLEND;
 function reliefRange(x, z, r) {
-  let low = 1, high = 1;
-  for (const [part, change, most] of RELIEF_PARTS) {
-    const v = part(x, z);
-    low *= Math.max(0, v - change * r); high *= Math.min(most, v + change * r);
-  }
+  const town = townDistance(x, z), land = landDistance(x, z), h = hills(x, z), u = unseated(x, z);
+  const low = hillScale(town - r, z - r) * inland(land + 1.25 * r) * Math.max(0, h - 0.12 * r) * Math.max(0, u - SEAT_CHANGE * r);
+  const high = hillScale(town + r, z + r) * inland(land - 1.25 * r) * Math.min(1, h + 0.12 * r) * Math.min(1, u + SEAT_CHANGE * r);
   return [low, high];
 }
 // The ray march, the shoreline and the water depth read the island from a 0.25 m height grid, filled once the
