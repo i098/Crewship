@@ -2098,7 +2098,7 @@ function placeCloud(I, J, base, along, across) {
     CLOUDS[o + 15 + 2 * b] = (t - 0.5) * 0.8 + 0.06 * (r - 0.5);
     CLOUDS[o + 16 + 2 * b] = (0.14 + 0.13 * (1 - Math.abs(2 * t - 1))) * (0.85 + 0.3 * r);
   }
-  // The rows and 5° azimuth bins the cloud can reach, from the corners and edge middles of its billboard rectangle.
+  // Six samples bound most billboards; pole crossings need a separate bound because elevation can peak between samples.
   const az = Math.atan2(x, z);
   let low = 90, high = 0, left = 0, right = 0;
   for (const [X, Y] of [[-0.6, -0.04], [0, -0.04], [0.6, -0.04], [-0.6, 0.32], [0, 0.32], [0.6, 0.32]]) {
@@ -2141,8 +2141,6 @@ function cloudDensity(dx, dy, dz) {
   cloudEdge = rim;
   return cover;
 }
-// A texel refreshes at about 10 Hz when a sky cell reads it: turning only reads the buffer, and a still view
-// recomputes a few rows per frame.
 function refreshTexel(k, j) {
   SKY_STEP[k] = SKY_ROW[j];
   const a = (k - j * SKY_W + 0.5) * 2 * Math.PI / SKY_W - Math.PI, b = (j + 0.5) * Math.PI / 2 / SKY_H, cb = Math.cos(b);

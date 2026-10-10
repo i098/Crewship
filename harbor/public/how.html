@@ -37,7 +37,9 @@
   Bump edges that face the moon are pale, and so is the flat base when the moon is below it.
   Cloud density picks glyphs from <code> .:-=+*#</code>; thick cloud hides the stars and the moon, and thin cloud dims the moon.
   A buffer of 1° sky texels keeps the cloud density and rim of each direction.
-  A texel refreshes about ten times a second when a sky cell reads it, and the elevation rows take turns, so turning only reads the buffer.</li>
+  A texel refreshes about ten times a second when a sky cell reads it.
+  The elevation rows take turns to spread refresh work across frames.
+  Turning reuses fresh texels but computes unseen or expired texels.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
   Grass uses blade glyphs; pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
