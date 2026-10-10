@@ -1079,6 +1079,7 @@ function labelTarget(spot, looked) {
   const tops = post && a.posts.map(p => project(p, Math.floor));
   const at = post ? project(post, Math.floor) : looked && spot === target ? [cols >> 1, rows >> 1] : a && project(a);
   const span = at && tops && tops.every(Boolean) ? Math.max(...tops.map(p => Math.abs(p[0] - at[0]))) * 2 + 3 : 0;
+  if (span) at[1] = Math.max(...tops.map(p => p[1]));
   label(at, span);
 }
 // Each tile of one row by TILE_W columns keeps only the solids whose screen rectangle reaches it.
