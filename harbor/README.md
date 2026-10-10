@@ -16,6 +16,9 @@ Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
 The island has staggered plaza paving, scattered stones and grass tufts, varied tree canopies, textured bark, and foam along the shore.
+Clumps of tall grass sway in the wind and grow densest along the path edges and on slopes.
+Grass is sparse on the dirt trails and never grows on the roads, the dock, the plaza, or in buildings.
+Grass does not block walking or map routes, and it stays still with reduced motion.
 
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
 A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.
