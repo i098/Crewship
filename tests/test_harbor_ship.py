@@ -139,6 +139,40 @@ assert(wood[0] - wood[1] > 20 && wood[1] - wood[2] > 20, 'the hull must keep its
     )
 
 
+def test_sails_fill_downwind_and_their_sheets_follow_the_corners():
+    _run_ship_scene(
+        r"""
+const part = cloth => ship.find(s => s.cloth === cloth);
+const corner = (sail, side) => clothPoint(sail, side * sail.u1, sail.v1);
+for (const sail of SAILS) {
+  // A ray along the wind, aimed past the mast, meets the canvas well downwind of the yard.
+  const from = [sail.at[0] - 20 * WIND.x, sail.at[1] - sail.v1 * 0.7, sail.at[2] - 20 * WIND.z];
+  assert(hit(part(sail), ...from, WIND.x, 0, WIND.z) - 20 > 1, 'each sail must belly at least a metre downwind');
+}
+const fly = clothPoint(FLAG, FLAG.u1, FLAG.v1 / 2), hoist = clothPoint(FLAG, 0, FLAG.v1 / 2);
+assert((fly[0] - hoist[0]) * WIND.x + (fly[2] - hoist[2]) * WIND.z > 3, 'the flag must stream downwind of its staff');
+T = 0; billow();
+const still = SAILS.flatMap(sail => [corner(sail, -1), corner(sail, 1)]);
+let breath = 0;
+for (let time = 0.25; time < 6; time += 0.25) {
+  T = time; billow();
+  for (const sail of [...SAILS, FLAG]) {
+    const box = part(sail).bb;
+    for (let i = 0; i <= 10; i++) for (let j = 0; j <= 10; j++) {
+      const u = sail.u0 + (sail.u1 - sail.u0) * i / 10, p = clothPoint(sail, u, clothFoot(sail, u) * j / 10);
+      assert(p.every((v, k) => v >= box[k] - 1e-9 && v <= box[k + 3] + 1e-9), 'the culling box must hold the moving cloth');
+    }
+  }
+  SAILS.flatMap(sail => [corner(sail, -1), corner(sail, 1)]).forEach((p, i) => {
+    assert(RIGGING.some(([a]) => Math.hypot(a[0] - p[0], a[1] - p[1], a[2] - p[2]) < 1e-9), 'a sheet must stay on each moving sail corner');
+    breath = Math.max(breath, Math.hypot(...p.map((v, k) => v - still[i][k])));
+  });
+}
+assert(breath > 0.05, 'the sails must breathe over time');
+"""
+    )
+
+
 def test_map_walks_use_supported_ship_and_dock_connections():
     _run_ship_scene(
         r"""

@@ -43,7 +43,10 @@ The cabin uses the house's door transition, collisions, and hidden map; the insi
 Ten steps with pale treads, darker risers, and a hand rail on each side connect the main deck to the cabin roof.
 Map walks connect the dock through the gangway and reach the stern roof through the supported stairs.
 Ship approaches avoid deck obstacles and reject unsupported floors or height changes larger than the manual walking limit.
-The sails keep a pale canvas tone at night.
+One scene wind fills the sails into curved bellies that slowly fill and ease.
+The sheets stay taut to the moving sail corners, and the flag and the masthead pennants stream with the same wind.
+With reduced motion, the sails stay full but do not move.
+The sails keep a pale canvas tone at night, and their shading shows the curves.
 Outboard lanterns make the gun ports visible.
 
 The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.

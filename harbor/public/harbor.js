@@ -33,6 +33,9 @@ for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
 // ---- World -------------------------------------------------------------------------------
 const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
+// The scene's one wind: the unit direction it blows toward on the ground plan (x, z), and its strength, where 1 fills
+// the sails as drawn. The sails belly before it, and the flag and pennants stream along it.
+const WIND = { x: Math.sin(-1.17), z: Math.cos(-1.17), strength: 1 };
 const world = [];
 const ship = [];
 const room = [];
@@ -91,6 +94,48 @@ function beam(list, a, b, mat, o = {}, r = 0.03) {
   const planes = [[...u.map((c) => -c), ...a], [...u, ...b], side(v, 1), side(v, -1), side(w, 1), side(w, -1)];
   const bb = [...a.map((c, i) => Math.min(c, b[i]) - r), ...a.map((c, i) => Math.max(c, b[i]) + r)];
   return solid(list, planes, bb, mat, { solid: false, thin: true, ...o });
+}
+// Cloth hangs from `at`: u runs along the level unit (cu, su), v runs down to its foot, and the cloth stands out
+// clothDepth along the level normal (-su, cu). size is [u0, u1, v1, w0, w1]; rays search the box that holds every shape
+// the cloth takes. shape sets the wind's belly (and its resting value, base), a flag's ripple and its phase, and roach,
+// how far the foot arches up between the corners. Every cloth has the same fields, so the ray tests stay monomorphic.
+function cloth(list, at, cu, su, [u0, u1, v1, w0, w1], shape, mat, o) {
+  const xs = [], zs = [];
+  for (const u of [u0, u1]) for (const w of [w0, w1]) { xs.push(at[0] + u * cu - w * su); zs.push(at[2] + u * su + w * cu); }
+  const s = box(list, Math.min(...xs), at[1] - v1, Math.min(...zs), Math.max(...xs), at[1], Math.max(...zs), mat, { solid: false, thin: true, ...o });
+  s.cloth = { at, cu, su, u0, u1, v1, w0, w1, ku: 1 / u1, kv: 1 / v1, base: 0, belly: 0, ripple: 0, phase: 0, roach: 0, ...shape };
+  return s.cloth;
+}
+// How far cloth k stands out at (u, v): a polynomial belly, deepest low across the middle and shallower toward the
+// corners, or a ripple that grows toward a flag's fly. Rays evaluate it often, so the belly uses products, not quotients
+// or Math.sin.
+function clothDepth(k, u, v) {
+  const a = u * k.ku, b = v * k.kv;
+  if (k.ripple) return k.ripple * a * Math.sin(u * 2.4 + v * 0.5 - k.phase);
+  return k.belly * ((1 - a * a) * b * (2.6 - 1.8 * b) + 0.3 * b * b);
+}
+// The change of clothDepth along u and along v, in SLOPE.
+const SLOPE = new Float64Array(2);
+function clothSlope(k, u, v) {
+  const a = u * k.ku, b = v * k.kv;
+  if (k.ripple) {
+    const p = u * 2.4 + v * 0.5 - k.phase, c = Math.cos(p);
+    SLOPE[0] = k.ripple * k.ku * (Math.sin(p) + 2.4 * u * c); SLOPE[1] = k.ripple * k.ku * 0.5 * u * c;
+    return;
+  }
+  SLOPE[0] = -2 * a * b * (2.6 - 1.8 * b) * k.belly * k.ku;
+  SLOPE[1] = ((1 - a * a) * (2.6 - 3.6 * b) + 0.6 * b) * k.belly * k.kv;
+}
+// How far down cloth k reaches at u.
+function clothFoot(k, u) {
+  const a = u * k.ku;
+  return k.v1 * (1 - k.roach * (1 - a * a));
+}
+// The point of cloth k at (u, v), written into p.
+function clothPoint(k, u, v, p = [0, 0, 0]) {
+  const w = clothDepth(k, u, v);
+  p[0] = k.at[0] + u * k.cu - w * k.su; p[1] = k.at[1] - v; p[2] = k.at[2] + u * k.su + w * k.cu;
+  return p;
 }
 // A 3x5 pixel font for the painted signs.
 const FONT = { A: "010101111101101", B: "110101110101110", C: "011100100100011", D: "110101101101110", E: "111100110100111",
@@ -571,32 +616,50 @@ function shipLantern(x, y, z, anchor = false, mountX = x) {
 shipLantern(1.15, DECK, 3, false, 0.7);
 shipLantern(SX - 3.55, DECK, -4, false, SX - 3.1);
 shipLantern(SX, 2.63, 10, true);
-// Rectangular canvas hangs directly below horizontal yards on each mast.
+// Square canvas hangs from horizontal yards braced round on each mast, and the wind across a sail fills it to leeward:
+// the head stays on its yard, the belly is deepest across the middle low down, the corners sag less, and the foot
+// arches up between them.
+const SAILS = [];
 function squareSail(z, top, width, drop) {
-  const c = Math.cos(0.6), s = Math.sin(0.6), x = width * c, dz = width * s;
+  const c = Math.cos(0.6), s = Math.sin(0.6), belly = 0.45 * width * WIND.strength * (WIND.z * c - WIND.x * s);
+  // The deepest canvas above the foot stands 1.09 bellies out, and up to 10% more as the sail breathes.
+  const deep = 1.2 * belly;
   beam(ship, [SX - (width + 0.2) * c, top, z - (width + 0.2) * s],
     [SX + (width + 0.2) * c, top, z + (width + 0.2) * s],
     "o", { spot: "mast", anchor: false, fill: 0.5 }, 0.075);
-  solid(ship, [[0, 1, 0, 0, top - 0.1, 0], [0, -1, 0, 0, top - drop, 0],
-    [c, 0, s, SX + x, 0, z + dz], [-c, 0, -s, SX - x, 0, z - dz],
-    [-s, 0, c, SX - s * 0.08, 0, z + c * 0.08], [s, 0, -c, SX + s * 0.08, 0, z - c * 0.08]],
-  [SX - x - s * 0.08, top - drop, z - dz - c * 0.08, SX + x + s * 0.08, top, z + dz + c * 0.08],
-  "s", { solid: false, tex: sailTexture, thin: true, fill: 0.8 });
+  const sail = cloth(ship, [SX, top - 0.1, z], c, s, [-width, width, drop - 0.1, Math.min(0, deep), Math.max(0, deep)],
+    { base: belly, belly, roach: 0.3 }, "s", { tex: sailTexture, fill: 0.8 });
+  SAILS.push(sail);
+  return sail;
 }
-function sailTexture(x, y) {
-  return (x + 99) % 0.8 < 0.025 || (y + 99) % 1.6 < 0.035 ? "-" : null;
+// Seams between the cloths and reef bands, each about one cell (`cell` metres) wide, in the sail's own (u, v): they
+// follow the canvas as it fills, so they bunch and bow where it curves away.
+function sailTexture(u, v, cell) {
+  return (u + 100) % 1.25 < cell * 0.6 || (v + 0.4) % 1.6 < cell * 1.2 ? "-" : null;
 }
-const RIGGING = [];
+const RIGGING = [], CLEWS = [];
 function shipMast(z, foot, height, width) {
   column(ship, SX, z, 0.16, 0.16, foot, height, "o", { spot: "mast", fill: 0.42 });
-  squareSail(z, height - 2.3, width * 0.7, 3.8);
-  squareSail(z, height - 7.2, width, 5.5);
+  const topsail = squareSail(z, height - 2.3, width * 0.7, 3.8), course = squareSail(z, height - 7.2, width, 5.5);
   for (const side of [-1, 1]) {
     for (const dz of [-1.6, 1.6]) {
       const [w, y] = shipProfile(z + dz);
       shipRope([SX, height - 3, z], [SX + side * w, y + 0.3, z + dz]);
     }
+    sheet(topsail, side, clothPoint(course, side * course.u1, 0));
+    sheet(course, side);
   }
+}
+// A sheet runs taut from a sail's lower corner, which moves as the canvas fills, to `to`: by default the rail
+// 2.5 m aft of the corner.
+function sheet(sail, side, to) {
+  const clew = clothPoint(sail, side * sail.u1, sail.v1);
+  CLEWS.push([sail, side, clew]);
+  if (!to) {
+    const z = clew[2] - 2.5, [w, y] = shipProfile(z);
+    to = [SX + side * (w - 0.05), y + 0.75, z];
+  }
+  shipRope(clew, to);
 }
 shipMast(-3, DECK, 20.5, 5.1);
 shipMast(6, 2.2, 18.2, 4.3);
@@ -637,7 +700,7 @@ function ropeSpan(p, q) {
   }
   return lo > hi ? null : [lo, hi];
 }
-function ropeCell(i, j, depth, ch, cls = "o3") {
+function ropeCell(i, j, depth, ch, cls) {
   if (i < 0 || i >= cols || j < 0 || j >= rows) return;
   const c = j * cols + i, h = ((2 * i + 1) / cols - 1) * cam.tanH, v = (1 - (2 * j + 1) / rows) * cam.tanV;
   const distance = depth * Math.sqrt(1 + h * h + v * v);
@@ -662,16 +725,34 @@ function drawRigging() {
   }
 }
 column(ship, SX, -3, 0.8, 0.85, 13.7, 14.4, "o", { spot: "nest", tex: (x, y) => (y < 13.85 ? "-" : null) });
-// The flagstaff and diagonal flag clear the main yard, exposing the black cloth against the sky.
-column(ship, SX, -3, 0.055, 0.055, 20.5, 22.2, "o", { solid: false, fill: 0.42 });
-solid(ship, [[0, 1, 0, 0, 22.1, 0], [0, -1, 0, 0, 20, 0],
-  [1, 0, 0, SX, 0, 0], [-1, 0, 0, SX - 3.4, 0, 0],
-  [0.7, 0, 1, SX, 0, -2.94], [-0.7, 0, -1, SX, 0, -3.06]],
-[SX - 3.4, 20, -3.06, SX, 22.1, -0.56], "p", { solid: false, thin: true, flag: true, tex: pirateFlag });
-function pirateFlag(x, y) {
-  const u = (SX - x - 1.7) / 1.1, v = (y - 21.05) / 0.65;
-  if (u * u + (v - 0.2) * (v - 0.2) < 0.22) return "s";
-  return v < 0 && Math.abs(Math.abs(u) + v + 0.5) < 0.12 ? "s" : null;
+// The flagstaff tops the main mast. The black flag streams downwind from it, rippling out to the fly.
+column(ship, SX, -3, 0.055, 0.055, 20.5, 22.7, "o", { solid: false, fill: 0.42 });
+const FLAG = cloth(ship, [SX, 22.1, -3], WIND.x, WIND.z, [0, 3.4, 2.1, -0.35, 0.35], { ripple: 0.3 }, "p",
+  { flag: true, tex: pirateFlag });
+function pirateFlag(u, v) {
+  const x = (u - 1.7) / 1.1, y = (1.05 - v) / 0.65;
+  if (x * x + (y - 0.2) * (y - 0.2) < 0.22) return "s";
+  return y < 0 && Math.abs(Math.abs(x) + y + 0.5) < 0.12 ? "s" : null;
+}
+// Red pennants stream downwind from the mastheads and wave more toward the tip; like the stays, they are projected lines.
+const PENNANTS = [[SX, 22.65, -3], [SX, 18.15, 6]];
+function drawPennants() {
+  for (const [x, y, z] of PENNANTS) {
+    let a = [x, y, z];
+    for (let k = 1; k <= 6; k++) {
+      const f = k / 6, side = 0.3 * f * Math.sin(k * 1.2 - T * 3.4);
+      const b = [x + 4 * f * WIND.x - side * WIND.z, y - 0.3 * f * f, z + 4 * f * WIND.z + side * WIND.x];
+      const ends = ropeEnds(a, b);
+      if (ends) drawRope(...ends, "r4");
+      a = b;
+    }
+  }
+}
+// The wind breathes: each sail fills and eases a little, slowly, its sheets follow, and the flag's ripples run out.
+function billow() {
+  for (const sail of SAILS) sail.belly = sail.base * (1 + 0.1 * Math.sin(T * 1.1 - sail.at[2] * 0.25 - sail.at[1] * 0.1));
+  for (const [sail, side, clew] of CLEWS) clothPoint(sail, side * sail.u1, sail.v1, clew);
+  FLAG.phase = T * 2.8;
 }
 // The bowsprit extends forward along the keel, away from the breakwater tower.
 beam(ship, [SX, 2.6, 10], [SX, 4.3, 18.5], "o", {}, 0.12);
@@ -1046,8 +1127,6 @@ function blocked(x, z, fy) {
 }
 
 // ---- Tall grass ---------------------------------------------------------------------------
-// The scene's wind blows toward -x and +z, the way the flag streams; grass and clouds move with it.
-const WIND = { x: -0.92, z: 0.39 };
 // Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
 // paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
 // dune grass.
@@ -1184,7 +1263,7 @@ function coneEntry(cone, ox, oy, oz, dx, dy, dz) {
   }
   return best;
 }
-const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) : s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
 // One perforated slab per railing replaces individual posts without filling the open spaces.
 function railEntry(s, ox, oy, oz, dx, dy, dz) {
   const t = entry(s.P, ox, oy, oz, dx, dy, dz);
@@ -1203,6 +1282,40 @@ function blobEntry(e, ox, oy, oz, dx, dy, dz) {
   const nx = (qx + t * vx) / e[3], ny = (qy + t * vy) / e[4], nz = (qz + t * vz) / e[5], l = Math.sqrt(nx * nx + ny * ny + nz * nz);
   entryK = -4; entryN[0] = nx / l; entryN[1] = ny / l; entryN[2] = nz / l;
   return t;
+}
+// Ray against cloth, in the cloth's (u, v, w): clip the ray to the cloth's box, then find the half of the clipped ray
+// whose ends lie on opposite sides of the surface; the middle point also catches a ray that crosses the curve twice.
+// Straight-line steps close in on the crossing. Sets entryK -1; the shading takes the normal from the cloth's slope.
+const RAY = new Float64Array(6); // the ray in the cloth's frame: origin u, v, w, then direction u, v, w
+const clothGap = (k, t) => RAY[2] + t * RAY[5] - clothDepth(k, RAY[0] + t * RAY[3], RAY[1] + t * RAY[4]);
+function clothEntry(k, ox, oy, oz, dx, dy, dz) {
+  const qx = ox - k.at[0], qz = oz - k.at[2], u = qx * k.cu + qz * k.su, v = k.at[1] - oy, w = qz * k.cu - qx * k.su;
+  const du = dx * k.cu + dz * k.su, dw = dz * k.cu - dx * k.su, iu = 1 / du, iv = -1 / dy, iw = 1 / dw;
+  const u0 = (k.u0 - u) * iu, u1 = (k.u1 - u) * iu, v0 = -v * iv, v1 = (k.v1 - v) * iv, w0 = (k.w0 - w) * iw, w1 = (k.w1 - w) * iw;
+  const near = Math.max(1e-3, Math.min(u0, u1), Math.min(v0, v1), Math.min(w0, w1));
+  const far = Math.min(Math.max(u0, u1), Math.max(v0, v1), Math.max(w0, w1));
+  entryK = -1;
+  if (!(near < far)) return Infinity;
+  RAY[0] = u; RAY[1] = v; RAY[2] = w; RAY[3] = du; RAY[4] = -dy; RAY[5] = dw;
+  const m = (near + far) / 2, fa = clothGap(k, near), fm = clothGap(k, m);
+  if ((fa <= 0) !== (fm <= 0)) return clothRoot(k, near, fa, m, fm);
+  const fb = clothGap(k, far);
+  return (fm <= 0) === (fb <= 0) ? Infinity : clothRoot(k, m, fm, far, fb);
+}
+// One halving, a straight line between the ends, then another on the side that still holds the crossing; below the
+// foot is open air.
+function clothRoot(k, a, fa, b, fb) {
+  const h = (a + b) / 2, fh = clothGap(k, h);
+  if ((fa <= 0) === (fh <= 0)) { a = h; fa = fh; } else { b = h; fb = fh; }
+  const m = a + (b - a) * fa / (fa - fb), fm = clothGap(k, m);
+  const t = (fa <= 0) === (fm <= 0) ? m + (b - m) * fm / (fm - fb) : a + (m - a) * fa / (fa - fm);
+  return RAY[1] + t * RAY[4] <= clothFoot(k, RAY[0] + t * RAY[3]) ? t : Infinity;
+}
+// The normal of cloth k at (u, v), in hitN, from the slope of its depth.
+function clothNormal(k, u, v) {
+  clothSlope(k, u, v);
+  const du = SLOPE[0], dv = SLOPE[1], nx = -du * k.cu - k.su, nz = k.cu - du * k.su, l = Math.sqrt(nx * nx + dv * dv + nz * nz);
+  hitN[0] = nx / l; hitN[1] = dv / l; hitN[2] = nz / l;
 }
 // Solids come nearest first, so once the nearest possible point of the next one is past the hit, none can come closer.
 function trace(list, col, ox, oy, oz, dx, dy, dz) {
@@ -1400,6 +1513,7 @@ function render() {
   if (!interior) {
     drawGrass();
     drawRigging();
+    drawPennants();
     gulls();
   }
   const mid = (rows >> 1) * cols + (cols >> 1);
@@ -2091,25 +2205,29 @@ function textureColor(s, tex, b, fog, warm) {
 function shipFill(s, tex, b, fog) {
   return s.fill ? Math.max(b, s.fill * fog * (tex === "-" ? 0.65 : 1)) : b;
 }
-// Canvas and flags use fixed moon tones, without point-light or shadow work.
-function paintShipCloth(c, odd, onShip, dx, dy, dz, ldx, ldy) {
-  const s = hitS, P = s.P, k = hitK, t = hitT;
-  const lnx = k >= 0 ? P[k] : hitN[0], lny = k >= 0 ? P[k + 1] : hitN[1], nz = k >= 0 ? P[k + 2] : hitN[2];
-  const ny = onShip ? rs * lnx + rc * lny : lny;
-  const px = onShip ? cam.lx + ldx * t : cam.x + dx * t, py = onShip ? cam.ly + ldy * t : cam.y + dy * t, pz = cam.z + dz * t;
-  const tex = s.tex && s.tex(px, py, pz, lnx, lny, nz);
+// Canvas and flags use fixed moon tones, without point-light or shadow work. Their curves shade them: thin cloth
+// takes the moon on either side, and cloth turned toward you is brighter. The canvas keeps its flat colour, so it stays
+// pale and its rows draw in few runs; the glyphs carry the shading. Each side of the cloth is its own face, so an edge
+// marks where the cloth folds out of sight.
+function paintShipCloth(c, odd, dx, dy, dz) {
+  const s = hitS, k = s.cloth, t = hitT;
+  const qx = cam.lx + dx * t - k.at[0], qz = cam.z + dz * t - k.at[2], u = qx * k.cu + qz * k.su, v = k.at[1] - cam.ly - dy * t;
+  clothNormal(k, u, v);
+  const nx = hitN[0], ny = hitN[1], nz = hitN[2], along = nx * dx + ny * dy + nz * dz;
+  const light = 0.5 * Math.abs(nx * MOON[0] + ny * MOON[1] + nz * MOON[2]) + 0.5 * along * along;
+  const tex = s.tex(u, v, t * 2 * cam.tanV / rows);
   let ch, cls;
   if (s.flag) {
-    ch = tex ? "@" : "█"; cls = tex ? "s6" : "p";
+    ch = tex ? "@" : light > 0.6 ? "█" : light > 0.35 ? "▓" : "▒"; cls = tex ? "s6" : "p";
   } else {
-    const b = s.fill * Math.exp(-t * 0.016) * (tex === "-" ? 0.65 : 1);
-    ch = glyph(b, odd); cls = "s" + tier(b, 0);
+    const flat = s.fill * Math.exp(-t * 0.016);
+    ch = glyph(flat * (0.7 + 0.5 * light) * (tex ? 0.65 : 1), odd); cls = "s" + tier(flat, 0);
   }
-  put(c, ch, cls, (ny > 0.7 ? -1 : 1) * (s.id * 16 + (k >= 0 ? k >> 2 : 12 - k)), t);
+  put(c, ch, cls, s.id * 16 + (along > 0 ? 13 : 14), t);
   SP[c] = s.spot;
 }
 function shadeSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
-  if (hitS.flag || hitS.tex === sailTexture) paintShipCloth(c, odd, onShip, dx, dy, dz, ldx, ldy);
+  if (hitS.cloth) paintShipCloth(c, odd, ldx, ldy, dz);
   else shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy);
 }
 function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
@@ -2743,6 +2861,7 @@ function frame(now) {
       moveLights();
       floatBoats();
       swayTrees();
+      billow();
     }
     me.eye = floorAt(me.x, me.z) + 1.6;
     const t0 = performance.now();
