@@ -1144,8 +1144,8 @@ function portSea(c, dx, dy, dz) {
   const wave = Math.sin(x * 1.3 + z * 0.4) + 0.6 * Math.sin(z * 1.9 - x * 0.7) + 0.4 * Math.sin(x * 7 + z * 3);
   put(c, wave > 0.7 ? "~" : wave > -0.5 ? "-" : ".", wave > 0.7 ? "m5" : wave > -0.5 ? "w4" : "d4", -1, t);
 }
-// Shades a room surface like the lit solids outside: warm light, a contact shadow toward the floor, and fog. The room
-// has no ship, terrain or blinking lights, and it builds no arrays or strings per cell, so furnished frames stay cheap.
+// Interior shading skips exterior motion and shadow rays.
+// Keep this per-cell path free of array and string allocations.
 function shadeRoom(c, odd, dx, dy, dz) {
   const s = hitS, k = hitK, t = hitT;
   const nx = k >= 0 ? s.P[k] : hitN[0], ny = k >= 0 ? s.P[k + 1] : hitN[1], nz = k >= 0 ? s.P[k + 2] : hitN[2];
