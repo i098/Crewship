@@ -518,7 +518,7 @@ const HULL = [[-15, 2.35, 3.2, -0.5], [-12, 3.1, 2.8, -1.5], [-8, 3.1, DECK, -1.
 // The square hatch in the deck forward of the hold [x0, x1, z0, z1], and the ladder that climbs through it from
 // the gun deck floor (y = 0) toward the bow: the hull leaves the deck open there (holeEntry).
 const HATCH = [SX - 0.55, SX + 0.55, 4, 5.1];
-const ladderZ = (y) => 3.95 + y * 0.55;
+const ladderZ = (y) => 4.25 + y * 0.4;
 function hullPortTone(y, z) {
   if (z > -7.5 && z < 4.5 && y > 0.65 && y < 1.4) {
     const port = Math.abs((z + 9) % 3 - 0.6);
@@ -800,16 +800,15 @@ disc(ship, SX, 3.3, -6.85, -6.72, 0.62, "o", { spot: "helm", tex: (x, y) => {
 } });
 box(ship, -3.6, DECK, 0.8, -1.2, 2.55, 3.2, "o", { spot: "hold",
   tex: (x, y, z, nx, ny) => (ny > 0.5 && ((x + 9) % 0.4 < 0.07 || (z + 9) % 0.4 < 0.07) ? "-" : null) });
-// The hatch to the gun deck (crossHatch): a raised wooden coaming round the opening, a dark well 0.9 m deep under it
-// that only the opening shows, the ladder down the well, and a lantern on a post at the aft corner. The sea never
-// reaches what lies in the well (dry), so cast() skips the sea under it.
-hatchBoards(ship, DECK - 0.05, DECK + 0.3, { fill: 0.62, dry: true });
-hatchBoards(ship, DECK - 0.9, DECK - 0.05, { dim: 0.5, dry: true });
-box(ship, HATCH[0] - 0.12, DECK - 1, HATCH[2] - 0.12, HATCH[1] + 0.12, DECK - 0.9, HATCH[3] + 0.12, "p", { solid: false, dry: true });
-hatchLadder(ship, DECK - 0.9, { dry: true, fill: 0.5, tex: (x, y) => (y < DECK - 0.6 ? "-" : null) }, (y) => ({ dry: true, dim: 0.6 * y / DECK }));
+// The hatch to the gun deck (crossHatch): a raised wooden coaming round the opening that lines a pitch-dark well 0.6 m
+// deep under it, which only the opening shows; the ladder goes down the well, and a lantern stands on a post at the
+// aft corner. The sea never reaches what lies in the well (dry), so cast() skips the sea under it. Each ladder rail is
+// two beams, above and below the deck, so their bounding boxes stay small.
+hatchBoards(ship, DECK - 0.6, DECK + 0.3, { fill: 0.62, dry: true, tex: (x, y, z) => (y < DECK - 0.02 + 0.1 * Math.max(0, z - 4) ? "p" : null) });
+box(ship, HATCH[0] - 0.12, DECK - 0.7, HATCH[2] - 0.12, HATCH[1] + 0.12, DECK - 0.6, HATCH[3] + 0.12, "p", { solid: false, dry: true });
+hatchLadder(ship, [[DECK - 0.6, DECK, { dry: true, fill: 0.3 }], [DECK, DECK + 0.9, { dry: true, fill: 0.5 }]], (y) => ({ dry: true, dim: 0.6 * y / DECK }));
 beam(ship, [SX - 1.05, DECK, 3.5], [SX - 1.05, DECK + 1.1, 3.5], "o", { fill: 0.4 }, 0.04);
-box(ship, SX - 1.2, DECK + 0.75, 3.35, SX - 0.9, DECK + 1.03, 3.65, "l", { light: [0.35, 3] });
-box(ship, SX - 1.24, DECK + 1.03, 3.31, SX - 0.86, DECK + 1.1, 3.69, "t", { solid: false });
+box(ship, SX - 1.2, DECK + 0.75, 3.35, SX - 0.9, DECK + 1.1, 3.65, "l", { light: [0.4, 2.5] });
 // Boards 0.12 m thick round the hatch opening, from y0 up to y1 plus the rise of the sheer forward of z = 4.
 function hatchBoards(list, y0, y1, o) {
   const [x0, x1, z0, z1] = HATCH, t = 0.12;
@@ -817,13 +816,15 @@ function hatchBoards(list, y0, y1, o) {
     box(list, a, y0, c, b, y1 + 0.1 * Math.max(0, (c + d) / 2 - 4), d, "o", { solid: false, ...o });
   }
 }
-// The ladder up through the hatch from the height `bottom`: two rails that end in a handhold 0.85 m above the deck,
-// with `rail` options, and rungs every 0.3 m above the gun deck floor with the options rung(y) at height y.
-function hatchLadder(list, bottom, rail, rung) {
-  for (const x of [SX - 0.42, SX + 0.42]) beam(list, [x, bottom, ladderZ(bottom)], [x, DECK + 0.9, ladderZ(DECK + 0.9)], "o", rail, 0.06);
-  beam(list, [SX - 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], [SX + 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], "o", rail, 0.045);
+// The ladder up through the hatch: rails over the spans [y0, y1, options] that end in a handhold 0.85 m above the deck,
+// and rungs every 0.3 m above the gun deck floor, from the lowest span up, with the options rung(y) at height y.
+function hatchLadder(list, rails, rung) {
+  for (const [y0, y1, o] of rails) {
+    for (const x of [SX - 0.42, SX + 0.42]) beam(list, [x, y0, ladderZ(y0)], [x, y1, ladderZ(y1)], "o", o, 0.06);
+  }
+  beam(list, [SX - 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], [SX + 0.42, DECK + 0.85, ladderZ(DECK + 0.85)], "o", rails.at(-1)[2], 0.045);
   for (let y = 0.3; y < DECK; y += 0.3) {
-    if (y > bottom) box(list, SX - 0.4, y - 0.05, ladderZ(y) - 0.07, SX + 0.4, y, ladderZ(y) + 0.07, "o", { solid: false, ...rung(y) });
+    if (y > rails[0][0]) box(list, SX - 0.4, y - 0.05, ladderZ(y) - 0.07, SX + 0.4, y, ladderZ(y) + 0.07, "o", { solid: false, ...rung(y) });
   }
 }
 // Planks 0.3 m wide along the ship, with seams between them and butt joints staggered every 3.6 m.
@@ -1161,7 +1162,8 @@ function shadeRoom(c, odd, dx, dy, dz) {
 // ---- Gun deck: a second interior under the main deck, reached by the hatch and its ladder -----------
 // It keeps the ship frame without the swell. Planks floor it and line the overhead between dark cross-beams. The hull
 // sides lean out as they rise, as outside, and open at the gun ports, where each cannon rests on its carriage with the
-// muzzle run out through the port and a rack of round shot beside it. Lanterns hang between the beams by the walkway.
+// muzzle run out through the port and a rack of round shot beside it. Lanterns hang between the beams by the walkway;
+// GUN_DECK_LAMPS holds x, y, z of each lantern in a row.
 const GUN_DECK_LAMPS = [], IRON = "f";
 function buildGunDeck() {
   const [x0, x1, z0, z1] = HATCH;
@@ -1176,7 +1178,7 @@ function buildGunDeck() {
   }
   column(gunDeck, SX, -3, 0.2, 0.2, 0, 1.95, "o");
   hatchBoards(gunDeck, DECK - 0.1, DECK + 0.3, { fill: 0.4 });
-  hatchLadder(gunDeck, 0, { fill: 0.35 }, () => ({ dim: 0.8 }));
+  hatchLadder(gunDeck, [[0, DECK + 0.9, { fill: 0.35 }]], () => ({ dim: 0.8 }));
   for (const side of [-1, 1]) {
     hullSide(side, -0.1, 0.68, -7.8, 5.6);
     hullSide(side, 1.36, 2.05, -7.8, 5.6);
@@ -1198,15 +1200,14 @@ function hullSide(side, y0, y1, z0, z1) {
     [0, 1, 0, 0, y1, 0], [0, -1, 0, 0, y0, 0], [0, 0, 1, 0, 0, z1], [0, 0, -1, 0, 0, z0]],
   [Math.min(inner, outer), y0, z0, Math.max(inner, outer), y1, z1], "o", { tex: (x, y) => seam(y), dim: 0.4 });
 }
-// A cannon on its carriage at a gun port. The dark barrel tapers from a rounded breech with its knob to a ring at the
-// muzzle, run out through the port; two stepped wooden cheeks and a bed carry it on four round trucks.
+// A cannon on its carriage at a gun port. The dark barrel tapers from a rounded breech to a ring at the muzzle, run
+// out through the port; two stepped wooden cheeks and a bed carry it on four round trucks.
 function gun(side, z) {
   const at = (u) => SX + side * u, span = (u0, u1) => [Math.min(at(u0), at(u1)), Math.max(at(u0), at(u1))];
   const iron = { dim: 0.9 }, wood = { dim: 1.4 }, rings = (x) => ([1.45, 2.2].some((u) => Math.abs(Math.abs(x - SX) - u) < 0.03) ? "-" : null);
   barOut(side, z, 1.05, 3.2, 0.2, 0.14, { ...iron, tex: rings });
   barOut(side, z, 3, 3.12, 0.17, 0.17, iron);
-  blob(gunDeck, at(1.05), GUN_Y, z, 0.14, 0.2, 0.2, IRON, iron);
-  blob(gunDeck, at(0.86), GUN_Y, z, 0.06, 0.06, 0.06, IRON, iron);
+  blob(gunDeck, at(1.05), GUN_Y, z, 0.16, 0.2, 0.2, IRON, iron);
   for (const [u0, u1, top] of [[1.15, 1.6, 0.66], [1.6, 2.12, 0.86]]) {
     const [a, b] = span(u0, u1);
     for (const dz of [-0.235, 0.235]) box(gunDeck, a, 0.2, z + dz - 0.035, b, top, z + dz + 0.035, "o", wood);
@@ -1235,10 +1236,9 @@ function shotRack(side, z) {
 // A lantern hangs on a short rod from the planks between two beams, beside the walkway and just clear of the line of
 // sight, so its light pools on the planks overhead; the lanterns are the deck's only light.
 function gunDeckLantern(x, z) {
-  beam(gunDeck, [x, 1.79, z], [x, 1.95, z], "t", {}, 0.015);
-  box(gunDeck, x - 0.1, 1.76, z - 0.1, x + 0.1, 1.79, z + 0.1, "t", { solid: false });
-  box(gunDeck, x - 0.08, 1.62, z - 0.08, x + 0.08, 1.76, z + 0.08, "l", { solid: false });
-  GUN_DECK_LAMPS.push([x, 1.69, z]);
+  beam(gunDeck, [x, 1.78, z], [x, 1.95, z], "t", {}, 0.015);
+  box(gunDeck, x - 0.08, 1.62, z - 0.08, x + 0.08, 1.78, z + 0.08, "l", { solid: false });
+  GUN_DECK_LAMPS.push(x, 1.7, z);
 }
 buildGunDeck();
 function gunDeckFloorAt(x, z) {
@@ -1248,8 +1248,10 @@ function gunDeckFloorAt(x, z) {
 // 3 m of each lantern, without shadow rays.
 function gunDeckLight(x, y, z, nx, ny, nz) {
   let warm = 0.14 + 0.16 * Math.max(0, ny);
-  for (const [lx0, ly0, lz0] of GUN_DECK_LAMPS) {
-    const lx = lx0 - x, ly = ly0 - y, lz = lz0 - z, d2 = lx * lx + ly * ly + lz * lz, f = 1 - d2 / 10;
+  for (let i = 0; i < GUN_DECK_LAMPS.length; i += 3) {
+    const lz = GUN_DECK_LAMPS[i + 2] - z;
+    if (lz * lz >= 10) continue;
+    const lx = GUN_DECK_LAMPS[i] - x, ly = GUN_DECK_LAMPS[i + 1] - y, d2 = lx * lx + ly * ly + lz * lz, f = 1 - d2 / 10;
     if (f > 0) warm += 0.9 * f * f * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / Math.sqrt(d2)));
   }
   return [warm + 0.03, warm / (warm + 0.03)];
@@ -1695,11 +1697,13 @@ const BASE = { "": "#5c6a88", k: "#e9eefb", w: "#3f78b8", d: "#22406a", m: "#a9c
 const mix = (a, b, f) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - f) + parseInt(b.slice(i, i + 2), 16) * f).toString(16).padStart(2, "0")).join("");
 const COLORS = {};
 for (const [k, c] of Object.entries(BASE)) {
-  Object.assign(COLORS, { [k]: c, [k + "w"]: mix(c, "#ffd479", 0.45) });
+  // Pitch-dark openings (p: gun ports, the hatch's well) take no warm tint.
+  const warm = (v) => (k === "p" ? v : mix(v, "#ffd479", 0.45));
+  Object.assign(COLORS, { [k]: c, [k + "w"]: warm(c) });
   // Eight levels from near black to full colour (and a little past it for the brightest), plus warm ones.
   for (let i = 0; i < 8; i++) {
     const lv = i < 7 ? mix("#060a14", c, Math.min(1, 0.12 + (i + 1) * 0.15)) : mix(c, "#ffffff", 0.25);
-    Object.assign(COLORS, { [k + i]: lv, [k + "w" + i]: mix(lv, "#ffd479", 0.45) });
+    Object.assign(COLORS, { [k + i]: lv, [k + "w" + i]: warm(lv) });
   }
 }
 // Colour class names per material: levels 0 to 7, then the same levels warmed, so room shading builds no strings.
