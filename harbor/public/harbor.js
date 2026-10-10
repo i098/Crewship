@@ -804,11 +804,17 @@ box(ship, -3.6, DECK, 0.8, -1.2, 2.55, 3.2, "o", { spot: "hold",
 // deep under it, which only the opening shows; the ladder goes down the well, and a lantern stands on a post at the
 // aft corner. The sea never reaches what lies in the well (dry), so cast() skips the sea under it. Each ladder rail is
 // two beams, above and below the deck, so their bounding boxes stay small.
+const hatchFrom = ship.length;
 hatchBoards(ship, DECK - 0.6, DECK + 0.3, { fill: 0.62, dry: true, tex: (x, y, z) => (y < DECK - 0.02 + 0.1 * Math.max(0, z - 4) ? "p" : null) });
 box(ship, HATCH[0] - 0.12, DECK - 0.7, HATCH[2] - 0.12, HATCH[1] + 0.12, DECK - 0.6, HATCH[3] + 0.12, "p", { solid: false, dry: true });
 hatchLadder(ship, [[DECK - 0.6, DECK, { dry: true, fill: 0.3 }], [DECK, DECK + 0.9, { dry: true, fill: 0.5 }]], (y) => ({ dry: true, dim: 0.6 * y / DECK }));
 beam(ship, [SX - 1.05, DECK, 3.5], [SX - 1.05, DECK + 1.1, 3.5], "o", { fill: 0.4 }, 0.04);
-box(ship, SX - 1.2, DECK + 0.75, 3.35, SX - 0.9, DECK + 1.1, 3.65, "l", { light: [0.4, 2.5] });
+box(ship, SX - 1.2, DECK + 0.75, 3.35, SX - 0.9, DECK + 1.1, 3.65, "l", { light: [0.4, 2.5, false] });
+// The ship's lamps meet the hatch as one shadow caster (groupEntry): a shadow ray that misses the box round its parts
+// above the deck skips them all. Parts below the deck would shade only the dark well, so they cast no shadows, and
+// the hatch's own surfaces and its small lantern skip shadow rays.
+const HATCH_PARTS = ship.slice(hatchFrom), HATCH_CASTER = { parts: HATCH_PARTS.filter((s) => s.bb[4] > DECK) };
+HATCH_CASTER.bb = [0, 1, 2, 3, 4, 5].map((k) => (k < 3 ? Math.min : Math.max)(...HATCH_CASTER.parts.map((s) => s.bb[k])));
 // Boards 0.12 m thick round the hatch opening, from y0 up to y1 plus the rise of the sheer forward of z = 4.
 function hatchBoards(list, y0, y1, o) {
   const [x0, x1, z0, z1] = HATCH, t = 0.12;
@@ -1453,7 +1459,15 @@ function coneEntry(cone, ox, oy, oz, dx, dy, dz) {
 }
 const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.hole ? holeEntry(s, ox, oy, oz, dx, dy, dz) :
   s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) :
-  s.bar ? barEntry(s, ox, oy, oz, dx, dy, dz) : s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+  s.bar ? barEntry(s, ox, oy, oz, dx, dy, dz) : s.parts ? groupEntry(s, ox, oy, oz, dx, dy, dz) :
+  s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+// Ray against a group of solids that casts shadows as one: the nearest hit on a part whose box the ray enters.
+function groupEntry(g, ox, oy, oz, dx, dy, dz) {
+  const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+  let best = Infinity;
+  for (const s of g.parts) if (boxEntry(s.bb, ox, oy, oz, ix, iy, iz) < best) best = Math.min(best, hit(s, ox, oy, oz, dx, dy, dz));
+  return best;
+}
 // The hull under the hatch: a ray that enters through the opening in its deck (the first plane) goes on into the well.
 function holeEntry(s, ox, oy, oz, dx, dy, dz) {
   const t = entry(s.P, ox, oy, oz, dx, dy, dz), x = ox + dx * t, z = oz + dz * t;
@@ -1578,13 +1592,19 @@ function casters(list, x, y, z, r) {
     return shadow !== false && ex + ey + ez > 0 && ex * ex + ey * ey + ez * ez < r * r; // near the light but not around it
   });
 }
-function lamp(x, y, z, i, r, inShip = false) {
-  return { x, y, z, i, r2: r * r, inShip, near: casters(inShip ? ship : world, x, y, z, r), tiles: new Map(), wx: x, wy: y, wz: z };
+// A lamp that does not shade lights without shadow rays. The ship's lamps meet the hatch as one caster (HATCH_CASTER).
+function lamp(x, y, z, i, r, inShip = false, shade = true) {
+  const near = shade ? casters(inShip ? SHIP_CASTERS : world, x, y, z, r) : [];
+  return { x, y, z, i, r2: r * r, inShip, near, tiles: new Map(), wx: x, wy: y, wz: z };
 }
 const centre = ({ bb: b }) => [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
+const SHIP_CASTERS = ship.filter((s) => !HATCH_PARTS.includes(s)).concat([HATCH_CASTER]);
 const LIGHTS = [
   ...world.filter((s) => s.mat === "l" && s !== beacon && s !== antennaLamp).map((s) => lamp(...centre(s), 1, 10)),
-  ...ship.filter((s) => s.mat === "l").map((s) => lamp(...centre(s), ...(s.light || [0.9, 9]), true)),
+  ...ship.filter((s) => s.mat === "l").map((s) => {
+    const [i, r, shade] = s.light || [0.9, 9, true];
+    return lamp(...centre(s), i, r, true, shade);
+  }),
   lamp(-7.4, 3, 20.8, 0.22, 2.3), lamp(-2.6, 3, 20.8, 0.22, 2.3), lamp(-0.8, 3, 23.2, 0.22, 2.3), lamp(-0.8, 3, 25.7, 0.22, 2.3),
   lamp(...centre(beacon), 1.1, 16),
 ];
@@ -1611,9 +1631,9 @@ function moveLights() {
   }
   BEAM.a = T * 0.5; BEAM.dx = Math.cos(BEAM.a); BEAM.dz = Math.sin(BEAM.a);
 }
-// Light reaching a point with normal n: [brightness, share of it from lamps].
-function lightAt(x, y, z, nx, ny, nz) {
-  if (indoors) return indoors.light(x, y, z, nx, ny, nz);
+// Light reaching a point with normal n: [brightness, share of it from lamps]. shade = false skips shadow rays.
+function lightAt(x, y, z, nx, ny, nz, shade = shadows) {
+  if (indoors === GUN_DECK) return indoors.light(x, y, z, nx, ny, nz);
   const moon = 0.035 + 0.17 * Math.max(0, nx * MOON[0] + ny * MOON[1] + nz * MOON[2]) + 0.04 * Math.max(0, ny);
   let warm = 0;
   for (const L of LIGHTGRID.get(Math.floor(x / TILE) * 1000 + Math.floor(z / TILE)) || NONE) {
@@ -1621,7 +1641,7 @@ function lightAt(x, y, z, nx, ny, nz) {
     if (d2 > L.r2) continue;
     const d = Math.sqrt(d2), ndl = (nx * lx + ny * ly + nz * lz) / d, f = 1 - d2 / L.r2;
     const add = ndl > 0 ? L.i * f * f * (0.35 + 0.65 * ndl) : 0;
-    if (add > 0.02 && !(shadows && shadowed(L, x + nx * 0.03, y + ny * 0.03, z + nz * 0.03, lx / d, ly / d, lz / d, d))) warm += add;
+    if (add > 0.02 && !(shade && shadowed(L, x + nx * 0.03, y + ny * 0.03, z + nz * 0.03, lx / d, ly / d, lz / d, d))) warm += add;
   }
   const beam = beamOn(x, z) * Math.max(0.3, ny + 0.5);
   return [moon + warm + beam, (warm + beam) / (moon + warm + beam)];
@@ -2488,7 +2508,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   } else {
     const wx = onShip ? SX + rc * (px - SX) - rs * py : px, wy = onShip ? rs * (px - SX) + rc * py + bob : py;
     const dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1) * grain;
-    const [lit, warm] = lightAt(wx, wy, pz, nx, ny, nz);
+    const [lit, warm] = lightAt(wx, wy, pz, nx, ny, nz, shadows && !s.dry);
     // Contact shadow: walls darken toward the ground they stand on.
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : floorAt(wx, pz) ?? 0)));
     const fog = Math.exp(-t * 0.016);
