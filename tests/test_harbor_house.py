@@ -133,9 +133,11 @@ mapKey({code: 'KeyM'});
 minimap();
 assert.equal(mapMode, 0, 'the island map must not open inside');
 assert.equal(mapBox, null);
-for (const [x, z] of [[-2, 3], [0, 4]]) {
-  assert(blocked(x, z, 0), 'interior furniture must block walking');
+// Table, bed, fireplace, bookcase, chair, armchair, crates, sea chest and corner plant.
+for (const [x, z] of [[-2, 3], [0, 4], [2.4, 4.4], [-2.4, 5.7], [-1.85, 2.12], [2.2, 2.1], [2.5, 0.4], [-2, 0.3], [2.55, 5.5]]) {
+  assert(blocked(x, z, 0), `interior furniture must block walking at ${x}, ${z}`);
 }
+assert(!blocked(0.2, 2, 0), 'the rug must not block walking');
 Object.assign(me, {x: 0, z: 0.8, yaw: 0});
 keys.add('f');
 for (let i = 0; i < 60; i++) step(0.02);
@@ -314,17 +316,16 @@ for (const period of [1000 / 60, 1000 / 30]) {
 }
 keys.clear();
 """
+    # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
     subprocess.run(
-        [
-            "node",
-            "-e",
-            "(async () => {\n"
-            + setup
-            + source
-            + "\nawait new Promise(setImmediate);\n"
-            + check
-            + "\n})().catch(error => { console.error(error); process.exit(1); });",
-        ],
+        ["node", "-"],
+        input="(async () => {\n"
+        + setup
+        + source
+        + "\nawait new Promise(setImmediate);\n"
+        + check
+        + "\n})().catch(error => { console.error(error); process.exit(1); });",
+        text=True,
         check=True,
         timeout=10,
     )

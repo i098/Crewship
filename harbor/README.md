@@ -18,6 +18,7 @@ See [how.html](public/how.html) for the canvas limits and intro rendering detail
 The island has staggered plaza paving, scattered stones and grass tufts, varied tree canopies, textured bark, and foam along the shore.
 
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
+A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.
 The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.

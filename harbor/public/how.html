@@ -29,12 +29,13 @@
   Exterior solids cast shadows when shadow rays are enabled.
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; fog still dims the sails.
-  The room lamp lights nearby surfaces without shadow rays.
+  The room lamp and the fire light nearby surfaces without shadow rays.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
   Grass uses blade glyphs; pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
+  Flames in the room use fixed glyphs from an orange base to pale tips, so the idle room needs no redraws.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea and the ship and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
