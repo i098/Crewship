@@ -1,7 +1,6 @@
 // Two-way iMessage between the owner and Firstmate over the transports that FM_IMESSAGE_TRANSPORTS lists in order:
 //   photon (the default), the line of a Photon Spectrum project, and bluebubbles, self-hosted BlueBubbles servers on
-//   Macs (bluebubbles.ts). Proactive sends stay on the latest inbound chat's transport. An explicit threaded reply
-//   can use another transport only when the send surely did not go out (desk.ts failover).
+//   Macs (bluebubbles.ts). See routes for outbound transport selection and docs/imessage.md for the routing contract.
 // Inbound: each text the owner sends is filed first as a Firstmate inbox note, which wakes Firstmate for the
 //   real answer, then marked read. A one-shot front-desk model steps in only when Firstmate stays silent for the
 //   quiet period after his last text; it often skips or uses a tapback, like a person would. No transport reports
@@ -160,7 +159,7 @@ for (const name of TRANSPORTS) {
     react: async (ref, emoji) => (await find(ref)).react(emoji),
   });
 }
-// The transport of a queued item or a kept text; undefined when that transport is not set any more.
+// The active transport of a queued item or a kept text; undefined when absent or unable to start.
 const lineOf = (ref: Ref) => lines.find((line) => line.name === (ref.line ?? "photon"));
 // A Ref on a transport; a Photon one has no `line`, the same as the items queued before there were transports.
 const refOn = (name: string, space: string, id: string): Ref => (name === "photon" ? { space, id } : { line: name, space, id });
@@ -219,7 +218,7 @@ Bun.serve({
       }
     }
     if (req.method !== "POST" || !["/send", "/typing", "/react"].includes(url.pathname)) return new Response("not found", { status: 404 });
-    const ref = latestRef; // sends and tapbacks go to his latest text as of now
+    const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
     desk.firstmateActive();
@@ -307,8 +306,8 @@ async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
   }
 }
 
-// Proactive sends stay on the latest inbound chat's transport. Explicit threaded replies can use the fallback
-// only after a provably unsent failure. An uncertain attempt remains pinned to its original chat.
+// Plain sends stay on their queued chat's transport, including --no-thread replies and desk responses.
+// An uncertain attempt stays in its original chat, even when a newer inbound text changes line.latest.
 function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
   const guid = o.guid && `${o.guid}-${i}`;
   const only = Object.keys(maybe);

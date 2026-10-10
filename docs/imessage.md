@@ -140,12 +140,13 @@ First [enable the bridge](#enable-it). Then add `transports` and the `bluebubble
 
 `webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. To use Photon alone again, remove `transports` and the `bluebubbles` block.
 
-With two transports, proactive sends use the latest inbound chat's transport, not configuration order:
+The bridge uses these routing rules with one or both transports:
 
 - **Sends.** Each send and tapback goes through the [outbox](#upstream-outages) first.
   A proactive send without `--reply` stays in the owner's latest direct one-to-one chat, on that chat's transport.
   An owner message in a group does not replace this destination.
-  The bridge saves the latest direct destination separately from explicit reply and tapback targets.
+  The bridge saves this destination in `latest-direct` for Photon and `latest-bluebubbles-direct` for BlueBubbles, under `~/.local/state/fm-imessage/`.
+  Without a known direct destination, the command returns HTTP 503 and queues nothing.
   The command selects that chat when it queues the text.
   An outage on that transport holds the send in the queue; it does not move the text to another line.
   An explicit threaded reply tries its target's transport first.
@@ -169,6 +170,7 @@ With two transports, proactive sends use the latest inbound chat's transport, no
 - **Inbound.** The bridge takes his texts from both transports. It files each message id once. His latest text is the one with the newest message time (the transport's own timestamp, or the time received when it gives none). A text that arrives late, for example one that a catch-up finds, is filed as a note and kept in the memory log, but it does not become his latest text when a newer one exists.
 - **Start.** If Photon cannot start while another transport is set, the bridge logs one line and runs on the others until its next restart.
   Saved destinations from every configured transport remain eligible even when that transport cannot start.
+  Older `latest` files also qualify when they identify a direct chat.
   Proactive texts for an unavailable transport stay queued until it runs again.
 
 ### How the relay set behaves
@@ -226,7 +228,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 
 | Command | What it does |
 | --- | --- |
-| `fm-imessage 'text'` | Queues a plain message for the owner, even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
+| `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
 | `fm-imessage --reply N 'text'` | Targets the owner's Nth most recent text (1 is the latest). The first bubble sends plain if the target is still the last bubble in its chat at delivery. It threads only when a later bubble exists from either side; tapbacks do not count. See [Reply separation](#how-the-relay-set-behaves) for checks across BlueBubbles relays. A transport that cannot thread sends plain. The command picks the target when it runs, and the queued message keeps that target's id through retries and restarts. The service keeps at most 10 texts received since it started that were the newest text at that time. A text that arrives late (see [Inbound](#choose-the-transports)) is not kept. If the Nth text is not kept, nothing is queued and the command exits non-zero. Any other value of N queues nothing and exits with code 2. |
 | `fm-imessage --no-thread 'text'` | Forces a plain send, even with `--reply N`, regardless of option order. |
 | `fm-imessage --typing` | Shows the typing bubble, best effort. The next send removes it. A typing error is only logged, so the command exits 0. |
