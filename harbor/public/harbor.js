@@ -335,9 +335,9 @@ function flower(x, z) {
 // with a ragged edge, without breaking every text run into single cells.
 const tint = (x, z) => noise(x * 3.1 + 17.3, z * 3.1 - 5.9);
 // Grass in three greens that drift over a few metres, paler up the hills and darker in the hollows.
-// shadeLitSolid draws it as blades swaying in the wind.
+// Each green dithers into the next over a few centimetres; shadeLitSolid draws blades swaying in the wind.
 function grass(x, y, z) {
-  const v = 0.75 * noise(x * 0.55, z * 0.55) + 0.25 * tint(x, z) + (y - 1.2) * 0.07;
+  const v = 0.75 * noise(x * 0.55, z * 0.55) + 0.25 * tint(x, z) + (y - 1.2) * 0.07 + (((specks(x, z) >>> 8) & 63) / 63 - 0.5) * 0.08;
   return v < 0.4 ? "M'" : v < 0.62 ? "g'" : "G'";
 }
 // The island is one height field: a plateau at 1.2 m whose edges slope down through sand beaches into the sea
@@ -2760,11 +2760,12 @@ function groundLight(s, lit, warm, nx, ny, nz) {
   const facing = nx * MOON[0] + ny * MOON[1] + nz * MOON[2] - MOON[1];
   return lit * (warm + (1 - warm) * 1.5 * Math.max(0.5, Math.min(2, 1 + 3.2 * facing)));
 }
-// A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island. Each cell
-// draws its own, and the blades thin out as the ground turns from the light.
+// A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island.
+// Speck bits dither the lean blade by blade, and the blades thin out as the ground turns from the light.
 function blade(x, z, odd, b) {
-  const t = swayTime(), h = ((specks(x, z) >>> 20) & 63) / 64, lit = smooth((b - 0.03) / 0.1);
-  const gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3);
+  const bits = specks(x, z);
+  const t = swayTime(), h = ((bits >>> 20) & 63) / 64, lit = smooth((b - 0.03) / 0.1);
+  const gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3) + ((bits & 63) / 63 - 0.5) * 1.6;
   const sparse = 0.18 + 0.25 * (1 - lit), tall = sparse + 0.37 * (0.6 + 0.4 * lit), short = 1 - tall;
   if (h < sparse) return odd ? " " : ",";
   if (h < tall) return gust > 0.6 ? "/" : gust < -0.6 ? "\\" : "|";

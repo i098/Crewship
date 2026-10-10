@@ -29,6 +29,37 @@ assert.equal(pathMask(-40, 40), 0, 'road cover away from every road');
     )
 
 
+def test_ground_lean_and_greens_blend_cell_by_cell():
+    _run_scene(
+        r"""
+let mixed = 0;
+for (let n = 0; n < 120; n++) {
+  T = n / 12;
+  const leans = new Set();
+  for (let i = 0; i < 5; i++) for (let k = 0; k < 5; k++) {
+    const ch = blade(-12.19 + i * 0.02, 19.81 + k * 0.02, 0, 0.2);
+    if (ch === '/' || ch === '|' || ch === '\\') leans.add(ch);
+  }
+  if (leans.size > 1) mixed++;
+}
+const edges = [];
+let previous = grass(-20, 1.2, 19.81), lastSwitch = -Infinity;
+for (let i = 1; i <= 2000; i++) {
+  const green = grass(-20 + i / 100, 1.2, 19.81);
+  if (green !== previous) {
+    if (i - lastSwitch > 20) edges.push(0);
+    edges[edges.length - 1]++;
+    lastSwitch = i;
+  }
+  previous = green;
+}
+assert(mixed > 60, `only ${mixed} moments mix tall blade leans; green switches per edge: ${edges}`);
+assert(edges.length >= 3, `only ${edges.length} green edges`);
+assert(edges.every(count => count >= 3), `green switches per edge: ${edges}`);
+"""
+    )
+
+
 def test_walking_height_bounds_hold_on_the_slopes():
     _run_scene(
         r"""
