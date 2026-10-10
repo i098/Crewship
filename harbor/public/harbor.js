@@ -1,6 +1,6 @@
 // Crewship harbor: a first-person 3D scene ray cast into a grid of text.
-// Plain JavaScript, no dependencies. The world is a list of convex solids (sets of planes)
-// plus the water plane; the ship's solids live in a frame that bobs and rolls at the dock.
+// Plain JavaScript, no dependencies. The world combines solids with island and sea height fields.
+// The ship's solids use a frame that bobs and rolls at the dock.
 const stage = document.getElementById("stage");
 const canvas = document.getElementById("scene");
 const ctx = canvas.getContext("2d");
@@ -2258,7 +2258,6 @@ function mapFrame() {
   [...(full ? tip + "   M or Esc closes" : tip).slice(0, iw)].forEach((ch, i) => mapPut(i + 1, h - 2, ch, "h"));
   if (touchFirst.matches) mapPut(w - 2, 0, full ? "x" : "+", "h");
 }
-// The island seen from above: plateau with roads and grass, beach and shallow-water bands, deep sea.
 function mapTerrain() {
   for (let j = 0; j < mapBox.ih; j++) {
     for (let i = 0; i < mapBox.iw; i++) {
