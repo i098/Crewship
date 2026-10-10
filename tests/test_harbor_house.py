@@ -125,7 +125,7 @@ keys.add('f');
 for (let i = 0; i < 4; i++) step(0.02);
 keys.clear();
 step(0);
-assert.equal(interior, HOUSE, 'walking into the door must enter the room');
+assert.equal(indoors, HOUSE, 'walking into the door must enter the room');
 assert.equal(floorAt(me.x, me.z), 0);
 assert(!blocked(me.x, me.z, 0), 'entry must leave the player in a clear aisle');
 assert.equal(walkPath.length, 0);
@@ -155,7 +155,7 @@ for (const [x, z, yaw] of [[-2.7, 1, -Math.PI/2], [2.7, 1, Math.PI/2], [1.8, 5.4
   keys.add('f');
   for (let i = 0; i < 30; i++) step(0.02);
   keys.clear();
-  assert.equal(interior, HOUSE, 'walking into a wall must not leave the room');
+  assert.equal(indoors, HOUSE, 'walking into a wall must not leave the room');
   assert.notEqual(floorAt(me.x, me.z), null, 'walking must stay within room bounds');
   assert(!blocked(me.x, me.z, 0));
 }
@@ -164,7 +164,7 @@ stick.y = 1;
 for (let i = 0; i < 8; i++) step(0.02);
 stick.y = 0;
 step(0);
-assert.equal(interior, null, 'the touch stick must exit through the door');
+assert.equal(indoors, null, 'the touch stick must exit through the door');
 assert.equal(me.yaw, Math.PI);
 assert(me.z < 20.75 && me.z > 19.8, 'exit must land just outside the door');
 assert(!blocked(me.x, me.z, floorAt(me.x, me.z)));
@@ -173,26 +173,26 @@ stick.y = 1;
 for (let i = 0; i < 4; i++) step(0.02);
 stick.y = 0;
 step(0);
-assert.equal(interior, HOUSE, 'the touch stick must enter through the door');
+assert.equal(indoors, HOUSE, 'the touch stick must enter through the door');
 Object.assign(me, {x: 0, z: 0.8, yaw: Math.PI});
 keys.add('f');
 for (let i = 0; i < 8; i++) step(0.02);
 keys.clear();
-assert.equal(interior, null, 'keyboard walking must exit through the door');
+assert.equal(indoors, null, 'keyboard walking must exit through the door');
 step(0);
 for (const x of [-5.5, -4.5]) {
   Object.assign(me, {x, z: 20.6, yaw: 0});
   keys.add('f');
   for (let i = 0; i < 20; i++) step(0.02);
   keys.clear();
-  assert.equal(interior, null, 'walking into the door frame must not enter');
+  assert.equal(indoors, null, 'walking into the door frame must not enter');
   assert(me.z <= 20.75, 'the exterior wall must still block walking');
 }
 for (const channel of ['keyboard', 'touch', 'combined']) {
   for (const direction of ['f', 'b', 'l', 'r']) {
     for (const startInside of [false, true]) {
       keys.clear(); stick.x = stick.y = 0; step(0);
-      interior = startInside ? HOUSE : null;
+      indoors = startInside ? HOUSE : null;
       const yaw = {f: 0, b: Math.PI, l: Math.PI / 2, r: -Math.PI / 2}[direction];
       Object.assign(me, startInside ? {x: 0, z: 0.8, yaw: yaw + Math.PI} : {x: -5, z: 20.6, yaw});
       if (channel !== 'touch') keys.add(direction);
@@ -201,24 +201,24 @@ for (const channel of ['keyboard', 'touch', 'combined']) {
         stick.x = direction === 'r' ? 1 : direction === 'l' ? -1 : 0;
       }
       for (let i = 0; i < 100; i++) step(0.02);
-      assert.equal(interior, startInside ? null : HOUSE, `${channel} ${direction}: held input must cross only once`);
+      assert.equal(indoors, startInside ? null : HOUSE, `${channel} ${direction}: held input must cross only once`);
       assert.equal(me.z, startInside ? 20.35 : 0.8);
       assert.equal(me.yaw, startInside ? Math.PI : 0);
       if (channel === 'combined') {
         const heldX = stick.x, heldY = stick.y;
         stick.x = stick.y = 0;
         for (let i = 0; i < 30; i++) step(0.02);
-        assert.equal(interior, startInside ? null : HOUSE, 'a held key must keep the touch release locked');
+        assert.equal(indoors, startInside ? null : HOUSE, 'a held key must keep the touch release locked');
         stick.x = heldX; stick.y = heldY;
         keys.clear();
         for (let i = 0; i < 30; i++) step(0.02);
-        assert.equal(interior, startInside ? null : HOUSE, 'a held touch must keep the keyboard release locked');
+        assert.equal(indoors, startInside ? null : HOUSE, 'a held touch must keep the keyboard release locked');
       }
       keys.clear(); stick.x = stick.y = 0; step(0);
       if (channel === 'keyboard') keys.add('b');
       else stick.y = -1;
       for (let i = 0; i < 100; i++) step(0.02);
-      assert.equal(interior, startInside ? HOUSE : null, 'released input must permit the next crossing');
+      assert.equal(indoors, startInside ? HOUSE : null, 'released input must permit the next crossing');
     }
   }
 }
@@ -226,7 +226,7 @@ keys.clear(); stick.x = stick.y = 0; step(0);
 let renderCost = 2;
 render = () => { clock += renderCost; };
 for (const roomScene of [false, true]) {
-  interior = roomScene ? HOUSE : null;
+  indoors = roomScene ? HOUSE : null;
   for (const interval of [1000 / 60, 1000 / 30]) {
     refreshMs = Infinity; paintedLastFrame = false;
     scale = 1.5; shadows = false; slow = fast = 0;
@@ -243,7 +243,7 @@ for (const roomScene of [false, true]) {
     else assert.equal(scale, 1, 'expensive exterior rendering must keep the startup grid');
   }
 }
-interior = HOUSE; renderCost = 2;
+indoors = HOUSE; renderCost = 2;
 let paintQueued = false;
 render = () => { clock += renderCost; paintQueued = true; };
 const paintFrame = (period, paintDelay = 0) => {
@@ -285,7 +285,7 @@ for (const period of [1000 / 60, 1000 / 30]) {
 for (const period of [1000 / 60, 1000 / 30]) {
   for (const entryMode of ['frame', 'step']) {
     keys.clear(); stick.x = stick.y = 0; step(0);
-    interior = null;
+    indoors = null;
     scale = 1; shadows = false; slow = fast = 0;
     refreshMs = Infinity; paintedLastFrame = false; paintQueued = false;
     Object.assign(me, {x: -5, z: 19, yaw: 0});
@@ -299,7 +299,7 @@ for (const period of [1000 / 60, 1000 / 30]) {
     if (entryMode === 'step') for (let i = 0; i < 4; i++) step(0.02);
     const paintDelay = period < 20 ? period : 0;
     for (let i = 0; i < 5; i++) paintFrame(period, paintDelay);
-    assert.equal(interior, HOUSE, 'the movement path must enter after prolonged exterior timing drift');
+    assert.equal(indoors, HOUSE, 'the movement path must enter after prolonged exterior timing drift');
     keys.clear(); step(0); keys.add('tr');
     const entryYaw = me.yaw;
     for (let i = 0; i < 80; i++) paintFrame(period, paintDelay);

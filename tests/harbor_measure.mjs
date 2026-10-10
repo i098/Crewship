@@ -9,13 +9,13 @@ export async function checkMeasure(page, origin) {
     return request.respond({ contentType: 'text/javascript', body: source + `
 window.checkMeasureReady = () => introProgress === 1 && cols > 0 && DG[0] !== undefined;
 window.checkMeasure = () => {
-  const saved = { visible, interior, scale, mapMode };
+  const saved = { visible, indoors, scale, mapMode };
   visible = false;
   mapMode = 0;
   const results = [];
   try {
-    for (const [room, size] of [[true, 1], [true, 1.15], [true, 1.3225], [true, 1.15], [false, 1.15], [true, 1.15]]) {
-      interior = room ? HOUSE : null;
+    for (const [inside, size] of [[true, 1], [true, 1.15], [true, 1.3225], [true, 1.15], [false, 1.15], [true, 1.15]]) {
+      indoors = inside ? HOUSE : null;
       scale = size;
       const width = canvas.width, height = canvas.height;
       ctx.fillStyle = "#ff00ff";
@@ -36,7 +36,7 @@ window.checkMeasure = () => {
       results.push({ stale, padding, sameSize: canvas.width === width && canvas.height === height });
     }
   } finally {
-    interior = saved.interior;
+    indoors = saved.indoors;
     scale = saved.scale;
     mapMode = saved.mapMode;
     measure();

@@ -37,7 +37,7 @@
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
-  The house's lamp and fire and the cabin's hanging lantern light nearby room surfaces without shadow rays.
+  The house's lamp and fire, the cabin's hanging lantern and the gun deck lanterns light nearby surfaces without shadow rays.
   The cabin's wall lantern glows like the lit windows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
@@ -78,13 +78,13 @@
   The first grid measurement waits for fonts; if the requested font fails to load, the scene uses a fallback font.
   For a fixed exterior viewport, the glyph size stays fixed; slow frames can disable shadows without changing the view.
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
-  Slow rendering first disables exterior shadow rays, if enabled, then uses larger room glyphs with fewer cells.
-  Fast room rendering restores a finer grid.
-  Inside a room, missed frames also reduce detail relative to the measured display refresh rate.
+  Slow rendering first disables exterior shadow rays, if enabled, then uses larger indoor glyphs with fewer cells.
+  Fast indoor rendering restores a finer grid.
+  Indoors, missed frames also reduce detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
-  Each door crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
-  A room redraws only after movement, looking, resizing, or another change that requires a new frame.
+  Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide indoor painting load.
+  The house, cabin and gun deck redraw only after movement, looking, resizing, or another change that requires a new frame.
   Reduced motion also stops exterior animation.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
@@ -100,7 +100,7 @@
   Use the arrows to choose a point.
   Enter or a tap selects a destination.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
-  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house and cabin guidance</a> for door crossings and controls inside.</li>
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house, cabin and gun deck guidance</a> for door and hatch crossings and controls inside.</li>
   <li><b>Content.</b> <code>harbor/build.py</code> builds the points of interest with the README's Features list and More docs row, and the changelog.</li>
   <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>

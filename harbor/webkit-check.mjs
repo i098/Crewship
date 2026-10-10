@@ -94,7 +94,7 @@ const fitSign = signFit;
 signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
 window.harborCheck = {
   place(x, z, yaw) { Object.assign(me, {x, z, yaw, pitch: 0}); moved = dirty = true; },
-  state() { return {inside: interior === HOUSE, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
+  state() { return {inside: indoors === HOUSE, below: indoors === GUN_DECK, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
   ids: ORDER,
   postView(id, angle, distance, pitch, turn) {
     const posts = world.filter(s => s.spot === id && s.bb[3] - s.bb[0] < 0.16 && s.bb[4] - s.bb[1] >= 1);
@@ -231,6 +231,20 @@ await page.touchscreen.tap(padX, padY);
 await page.waitForTimeout(1000);
 const outside = await page.evaluate(() => window.harborCheck.state());
 if (outside.inside || !outside.clear || outside.z >= 20.75 || outside.yaw !== Math.PI) errors.push("touch walking did not return outside facing away");
+await page.evaluate(() => window.harborCheck.place(-2.4, 3.6, 0));
+await page.touchscreen.tap(padX, padY);
+await page.waitForTimeout(1000);
+const below = await page.evaluate(() => window.harborCheck.state());
+if (!below.below || !below.clear || below.yaw !== Math.PI) errors.push("touch walking did not climb down the hatch to a clear gun deck");
+await page.evaluate(() => {
+  const {x, z} = window.harborCheck.state();
+  window.harborCheck.place(x, z, 0);
+});
+await page.touchscreen.tap(padX, padY);
+await page.touchscreen.tap(padX, padY);
+await page.waitForTimeout(1000);
+const deck = await page.evaluate(() => window.harborCheck.state());
+if (deck.below || deck.inside || !deck.clear || deck.yaw !== Math.PI) errors.push("touch walking did not climb the ladder back to the main deck");
 }
 if (!page.isClosed() && !errors.length) {
 await page.emulateMedia({ reducedMotion: "reduce" });
