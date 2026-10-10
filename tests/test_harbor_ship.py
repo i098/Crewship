@@ -227,8 +227,8 @@ function localRay(k, u, v, w, du, dv, dw) {
     [du * k.cu - dw * k.su, -dv, du * k.su + dw * k.cu]];
 }
 FLAG.phase = 3.18715;
-const origin = [6.5, 2.8, -8.07629], delta = [-0.883686, 1.53, 0.477623];
-const length = Math.hypot(...delta), direction = delta.map(v => v / length);
+// The reported dock ray, given in the flag's own frame so that it grazes the cloth for any wind direction.
+const [origin, direction] = localRay(FLAG, -10.175203, 20.1, 1.201647, 0.546364, -0.835938, -0.051905);
 assert(Number.isFinite(check(FLAG, origin, direction).t), 'the reported dock ray must intersect the flag');
 check(FLAG, origin.map((v, i) => v + 40 * direction[i]), direction.map(v => -v));
 for (const sail of SAILS) {

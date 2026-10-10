@@ -1324,16 +1324,23 @@ function clothEntry(k, ox, oy, oz, dx, dy, dz) {
   const first = clothSearch(k, near, fa, m, fm, curve, jump);
   return Number.isFinite(first) ? first : clothSearch(k, m, fm, far, clothGap(k, far), curve, jump);
 }
-function clothSearch(k, a, fa, b, fb, curve, jump) {
-  const span = b - a, ua = RAY[0] + a * RAY[3], ub = RAY[0] + b * RAY[3];
+function clothEdgeBends(k, ua, ub, jump) {
   let bends = 0;
   if (jump) {
     const lo = Math.min(ua, ub), hi = Math.max(ua, ub);
     if (lo < -k.half && hi > -k.half) bends += jump;
     if (lo < k.half && hi > k.half) bends += jump;
   }
+  return bends;
+}
+function clothSpanMiss(fa, fb, span, curve, bends) {
   const error = curve * span * span / 8 + bends * span / 4;
-  if ((fa <= 0) === (fb <= 0) && Math.min(Math.abs(fa), Math.abs(fb)) > error) return Infinity;
+  return (fa <= 0) === (fb <= 0) && Math.min(Math.abs(fa), Math.abs(fb)) > error;
+}
+function clothSearch(k, a, fa, b, fb, curve, jump) {
+  const span = b - a, ua = RAY[0] + a * RAY[3], ub = RAY[0] + b * RAY[3];
+  const bends = clothEdgeBends(k, ua, ub, jump);
+  if (clothSpanMiss(fa, fb, span, curve, bends)) return Infinity;
   if (fa === 0 && clothInside(k, ua, RAY[1] + a * RAY[4])) return a;
   if ((fa <= 0) !== (fb <= 0) && Math.abs(fb - fa) / span > curve * span + 2 * bends) {
     return clothRoot(k, a, fa, b, fb);
