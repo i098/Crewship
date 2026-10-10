@@ -14,7 +14,11 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 export const LIMIT = 512; // bytes per node
 export const VIEW_MIN = 32_000; // the view's sawtooth: past VIEW_MAX, one batch merges it down to VIEW_MIN
 export const VIEW_MAX = 64_000;
-export const CONTEXT_MAX = 16_000; // the view a compaction reads, merged further
+export const CONTEXT_MAX = 2_048; // context for a small compaction, not the whole desk view
+export const INPUT_MAX = 4_096; // bytes per chunk; long messages are reduced without dropping their middle
+const COMPACT_MAX = 16_000; // includes the conversation's replies and retry turns
+const RETRY_MS = 30_000;
+const RETRY_MAX_MS = 30 * 60_000;
 export const WORKERS = 3; // compaction calls at once
 export const TRIES = 5; // calls per compaction when the line comes back too long
 export const UNBUILT = "(not summarized yet: zoom it)";
@@ -26,7 +30,6 @@ export const CALL_OVERHEAD = 500; // one tool call or retry turn's framing
 export const ZOOM_MAX = 16_000; // bytes per zoom result
 export const ZOOM_RESERVE = 2 * ZOOM_MAX; // room a desk prompt keeps for zooms
 export const STATUS_MAX = 16_000; // the fleet status in a desk prompt
-export const RETRY_RESERVE = 8_000; // room a compaction prompt keeps for its retries
 export const LIMIT_REACHED = "context limit reached: answer from what you have, no more zooms";
 
 export type Kind = "owner" | "supervisor" | "desk";
@@ -170,7 +173,7 @@ export class Memory {
   view: Line[];
   private queue: Line[] = [];
   private queued = new Set<string>();
-  private failed: Line[] = [];
+  private attempts = new Map<string, number>();
   private running = 0;
 
   constructor(
@@ -202,8 +205,6 @@ export class Memory {
     appendFileSync(`${this.dir}/main/${date.slice(0, 10)}.jsonl`, `${JSON.stringify(msg)}\n`, { mode: 0o600 });
     this.msgs.push(msg);
     this.view.push([0, msg.i]);
-    // A failed compaction is tried again at the next message.
-    for (const x of this.failed.splice(0)) this.enqueue(x);
     this.enqueue([0, msg.i]);
     this.pump();
     // Sized after pump(): a short message's node is built there at once when a worker is free. An unbuilt line
@@ -244,12 +245,22 @@ export class Memory {
       const x = this.queue.shift()!;
       this.running++;
       this.build(x)
+        .then(() => {
+          this.queued.delete(key(x));
+          this.attempts.delete(key(x));
+        })
         .catch((e) => {
-          this.failed.push(x);
+          const attempt = this.attempts.get(key(x)) ?? 0;
+          this.attempts.set(key(x), attempt + 1);
+          const wait = Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(attempt, 10));
+          // Keep the node queued during backoff, so new messages or sibling completions cannot retry it early.
+          setTimeout(() => {
+            this.queue.push(x);
+            this.pump();
+          }, wait).unref();
           this.log(e);
         })
         .finally(() => {
-          this.queued.delete(key(x));
           this.running--;
           this.pump();
         });
@@ -287,11 +298,25 @@ of them from there too.`, `${ta.replace(/\s*\n\s*/g, " ")}\n${tb.replace(/\s*\n\
     this.queueParent(x);
   }
 
-  // One compaction call: the context view (built lines for messages before `end`, merged down to CONTEXT_MAX),
-  // then the task and its input. A line over LIMIT gets up to TRIES calls in one conversation; the shortest is
-  // kept, cut to LIMIT. No request's input passes CEILING: the input is clipped to leave RETRY_RESERVE, and a
-  // retry that would pass it is not sent.
+  // Reduce every chunk before merging its summaries. Do not clip away the middle of a long source message.
   private async compact(end: number, task: string, input: string): Promise<string> {
+    while (bytes(input) > INPUT_MAX) {
+      const source = Buffer.from(input);
+      const summaries: string[] = [];
+      for (let offset = 0; offset < source.length;) {
+        let stop = Math.min(offset + INPUT_MAX, source.length);
+        while (stop < source.length && (source[stop] & 0xc0) === 0x80) stop--;
+        summaries.push(await this.compactLine(end, `${task}\nThis input is one part of the source; summarize only this part.`, source.subarray(offset, stop).toString()));
+        offset = stop;
+      }
+      input = summaries.join("\n");
+    }
+    return this.compactLine(end, task, input);
+  }
+
+  // One bounded conversation: small context, task, and at most INPUT_MAX bytes of source.
+  // A line over LIMIT gets up to TRIES turns, but no retry passes COMPACT_MAX.
+  private async compactLine(end: number, task: string, input: string): Promise<string> {
     const context: Line[] = [];
     for (const x of this.view) {
       if (last(x) >= end || !this.nodes.has(key(x))) break;
@@ -301,7 +326,7 @@ of them from there too.`, `${ta.replace(/\s*\n\s*/g, " ")}\n${tb.replace(/\s*\n\
     // shrink() merges only built pairs, so during a model outage the context can still pass CONTEXT_MAX: clip it.
     const head = `<chat>\n${clip(context.map((x) => render(this.nodes, x)).join("\n"), CONTEXT_MAX)}\n</chat>\n${task}\n<input>\n`;
     const tail = "\n</input>";
-    const prompt = head + clip(input, CEILING - OVERHEAD - RETRY_RESERVE - bytes(COMPACT_PROMPT) - bytes(head) - bytes(tail)) + tail;
+    const prompt = head + input + tail;
     let spent = OVERHEAD + bytes(COMPACT_PROMPT) + bytes(prompt);
     const chat = this.chat(COMPACT_PROMPT);
     try {
@@ -314,7 +339,7 @@ the whole line again for the same <input>, cutting just enough of the
 least valuable items to fit before this cut:
 ${cut(line, LIMIT)}| ← LIMIT`;
         spent += bytes(reply) + CALL_OVERHEAD + bytes(retry);
-        if (spent > CEILING) break;
+        if (spent > COMPACT_MAX) break;
         reply = await chat.say(retry);
         line = reply.trim();
         if (bytes(line) < bytes(best)) best = line;

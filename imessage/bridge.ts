@@ -368,6 +368,7 @@ async function runDesk(current: () => boolean) {
 }
 
 // One compaction conversation: an omp session in its own private directory, which end() removes.
+// Haiku 4.5 honors thinking=off; automatic reasoning on newer models exceeded 60 seconds even with small inputs.
 function compactChat(system: string): Chat {
   const dir = mkdtempSync(`${STATE}/compact-`);
   let turns = 0;
@@ -375,7 +376,7 @@ function compactChat(system: string): Chat {
     async say(text) {
       const proc = Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
-          "--thinking=off", "--model", DESK_MODEL, "--system-prompt", system],
+          "--thinking=off", "--model", "anthropic/claude-haiku-4-5", "--system-prompt", system],
         { cwd: DESK_DIR, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
       );
       const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
