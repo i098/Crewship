@@ -33,7 +33,8 @@
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.
   The island is a smooth height field of rolling hills from value noise, levelled under the objects that stand on it.
   The page samples it once on a 25 cm grid, and each ray starts its march where it can first reach the highest ground nearby.
-  The roads are curves through control points; a 50 cm grid keeps each point's distance to the nearest road.</li>
+  The roads are curves through control points.
+  A 50 cm grid stores the centre-line distance and half width for the road whose edge is nearest.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.

@@ -2755,8 +2755,8 @@ function surfaceGlyph(s, mat, b, ny, x, z, odd) {
 }
 // Glyph for a brightness from the long ramp; the darkest cells thin out to a dither.
 const glyph = (b, odd) => (b < 0.035 ? (odd ? " " : b > 0.02 ? "." : " ") : RAMP[Math.min(RAMP.length - 1, 1 + Math.floor(b * (RAMP.length - 2)))]);
-// Moonlight on the ground with its slopes exaggerated: ground facing the moon brightens and ground facing away
-// darkens, so hills read at night. Flat ground and lamplight stay as they are.
+// Exaggerated slope lighting makes the hills visible at night.
+// The multiplier also brightens flat ground; the warm-light fraction blends it back toward 1.
 function groundLight(s, lit, warm, nx, ny, nz) {
   if (s !== TERRAIN) return lit;
   const facing = nx * MOON[0] + ny * MOON[1] + nz * MOON[2] - MOON[1];
