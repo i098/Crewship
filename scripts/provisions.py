@@ -44,6 +44,7 @@ ARCH = {
         "bun": "x64-baseline",
         "gnu": "x86_64",
         "goreleaser": "x86_64",
+        "nvim": "x86_64",
     },
     "linux-aarch64": {
         "node": "arm64",
@@ -51,6 +52,7 @@ ARCH = {
         "bun": "aarch64",
         "gnu": "aarch64",
         "goreleaser": "arm64",
+        "nvim": "arm64",
     },
 }
 # Native tools on their latest GitHub release: repository, tag prefix, asset
@@ -59,6 +61,12 @@ GITHUB_LATEST = {
     "herdr": ("herdrdev/herdr", "v", "herdr-{key}", {"herdr": "herdr"}),
     "bun": ("oven-sh/bun", "bun-v", "bun-linux-{bun}.zip", {"bun": "bun-linux-*/bun"}),
     "gh": ("cli/cli", "v", "gh_{v}_linux_{go}.tar.gz", {"gh": "gh_*/bin/gh"}),
+    "nvim": (
+        "neovim/neovim",
+        "v",
+        "nvim-linux-{nvim}.tar.gz",
+        {"nvim": "nvim-linux-*/bin/nvim"},
+    ),
     "no-mistakes": (
         "kunchenguid/no-mistakes",
         "v",
@@ -606,7 +614,7 @@ def omp_plugins(home, environment):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, required=True)
-    parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly")
+    parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
     parser.add_argument("--development", action="store_true")
     parser.add_argument(

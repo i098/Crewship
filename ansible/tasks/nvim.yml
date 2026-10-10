@@ -1,0 +1,16 @@
+---
+- name: Check for an existing Neovim configuration
+  ansible.builtin.stat:
+    path: "{{ crewship_cfg.home }}/.config/nvim"
+    follow: false
+    get_checksum: false
+  register: crewship_nvim_config
+
+# Preserve the whole existing path, including empty directories and symlinks.
+- name: Seed LazyVim only when no Neovim configuration exists
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/config/nvim/"
+    dest: "{{ crewship_cfg.home }}/.config/nvim/"
+    mode: "0644"
+    directory_mode: "0755"
+  when: not (crewship_nvim_config.stat.exists | default(false))

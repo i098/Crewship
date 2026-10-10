@@ -31,6 +31,8 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Node.js](https://github.com/nodejs/node) (`node`): the runtime of the npm tools. License: MIT.
 - [uv](https://github.com/astral-sh/uv) (`uv`): the Python bootstrap and environments. License: MIT OR Apache-2.0.
 - [btop](https://github.com/aristocratos/btop) (`btop`): the resource monitor pane. License: Apache-2.0.
+- [Neovim](https://github.com/neovim/neovim) (`nvim`): the terminal editor installed on every host. License: Apache-2.0.
+- [LazyVim starter](https://github.com/LazyVim/starter): the vendored Neovim configuration in `config/nvim/`, with an added Pyrefly configuration. License: Apache-2.0.
 - [rustup](https://github.com/rust-lang/rustup) (`rustup-init`): the Rust toolchain of the `development` profile. License: MIT OR Apache-2.0.
 - [Ansible](https://github.com/ansible/ansible): runs the recipe. License: GPL-3.0-or-later.
 - [jsonschema](https://github.com/python-jsonschema/jsonschema): validates the host config. License: MIT.

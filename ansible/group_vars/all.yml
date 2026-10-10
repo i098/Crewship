@@ -234,7 +234,7 @@ crewship_desktop_packages:
   - iproute2
 
 # --- Tool installer ---------------------------------------------------------
-crewship_core_tools: [herdr, node, bun, uv, btop, sentrux, fallow, pyrefly]
+crewship_core_tools: [herdr, node, bun, uv, btop, sentrux, fallow, pyrefly, nvim]
 # The terminal chat clients of the chat profile (docs/chat.md).
 crewship_chat_tools: [concord, slk]
 # The installer flags that choose which tools a run covers. tasks/preflight.yml
