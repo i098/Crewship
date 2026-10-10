@@ -58,12 +58,12 @@
   Turning reuses fresh texels but computes unseen or expired texels.
   With reduced motion, each render refreshes the texels it reads, including after movement or a change to the motion setting.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
-  Grass uses blade glyphs that thin out on slopes facing away from the moon.
+  Ground grass uses mostly short marks and sparse tall blades; shade increases gaps and reduces tall blades.
   The renderer caps each tuft's projected height at 1/14 of the screen height before rounding blades to whole cells.
   Blades use <code>| ( ) \ /</code> with pale moonlit tips.
   Far tufts are dimmer.
-  Road dirt, pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
-  Random 2 cm specks pick the grass blades and dither the edges between grass, sand and road, so no texture fills a square.
+  Road dirt, muted earth, pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
+  Random 2 cm specks vary ground blade lean and blend the greens and the edges between grass, sand and road.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
