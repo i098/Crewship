@@ -1,7 +1,7 @@
 // Two-way iMessage between the owner and Firstmate over the transports that FM_IMESSAGE_TRANSPORTS lists in order:
 //   photon (the default), the line of a Photon Spectrum project, and bluebubbles, self-hosted BlueBubbles servers on
-//   Macs (bluebubbles.ts). A bubble goes out on the first transport, and on the next one only when the send surely
-//   did not go out (desk.ts failover), so the second transport is the fallback line.
+//   Macs (bluebubbles.ts). Proactive sends stay on the latest inbound chat's transport. An explicit threaded reply
+//   can use another transport only when the send surely did not go out (desk.ts failover).
 // Inbound: each text the owner sends is filed first as a Firstmate inbox note, which wakes Firstmate for the
 //   real answer, then marked read. A one-shot front-desk model steps in only when Firstmate stays silent for the
 //   quiet period after his last text; it often skips or uses a tapback, like a person would. No transport reports
@@ -69,7 +69,7 @@ type Ref = { line?: string; space: string; id: string };
 // his text `reply` when set. `kind` is whose memory line it makes (Firstmate's unless "desk"); `silent` makes none.
 // `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
 // where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
-type Out = Ref & { react?: string; bubbles?: string[]; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number };
+type Out = Ref & { react?: string; bubbles?: string[]; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; receipt?: Ref };
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
 // `latest` is his latest text on it.
@@ -78,8 +78,9 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
-  send(space: string, text: string, reply?: string, guid?: string): Promise<unknown>;
-  sent?(space: string, text: string, since: number): Promise<boolean>; // whether a text went out since; throws when unknown
+  send(space: string, text: string, reply?: string, guid?: string): Promise<string>;
+  sent?(space: string, text: string, since: number): Promise<string | undefined>;
+  delivered(space: string, id: string): Promise<boolean>;
   react(ref: Ref, emoji: string): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
@@ -108,6 +109,7 @@ for (const name of TRANSPORTS) {
       separated: (space, id) => bb.separated(space, id),
       send: (space, text, reply, guid) => bb.send(space, text, reply, guid),
       sent: (space, text, since) => bb.sent(space, text, since),
+      delivered: (space, id) => bb.delivered(space, id),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
       react: (ref, emoji) => bb.react(ref.space, ref.id, emoji),
@@ -131,7 +133,7 @@ for (const name of TRANSPORTS) {
   // spectrum-ts upgrade.
   const internals = Reflect.get(app, "__internal") as { platforms?: Map<string, { client?: { client?: AdvancedIMessage }[] }> } | undefined;
   raw = internals?.platforms?.get?.("imessage")?.client?.[0]?.client;
-  if (!raw) console.warn("fm-imessage: no Advanced iMessage client in spectrum-ts internals; GET /location and edits are off until the bridge is updated for this spectrum-ts");
+  if (!raw) console.error("fm-imessage: no Advanced iMessage client in spectrum-ts internals; all Photon sends are blocked, GET /location and edits are off until the bridge is updated");
   const find = async (ref: Ref) => {
     const message = await (await imessage(app).space.get(ref.space)).getMessage(ref.id);
     if (!message) throw new Error(`message ${ref.id} not found`);
@@ -149,13 +151,21 @@ for (const name of TRANSPORTS) {
       const last = (await photon.chats.get(space)).lastMessage?.guid;
       return !!last && last !== id;
     },
-    async send(space, text, reply) {
+    async send(space, text, reply, guid) {
+      if (!photon) throw Object.assign(new Error("cannot send: Photon chat client is unavailable"), { maybeSent: false });
       // A reply target that is gone sends the bubble unthreaded.
       const thread = reply ? await find({ space, id: reply }).catch((e) => {
         if (!permanent(e)) throw e;
         console.error(`fm-imessage: reply target ${reply} gone, sending unthreaded: ${brief(e)}`);
       }) : undefined;
-      return thread ? thread.reply(text) : (await imessage(app).space.get(space)).send(text);
+      return (await photon.messages.sendText(space, text, { clientMessageId: guid, replyTo: thread ? reply : undefined })).guid;
+    },
+    async delivered(space, id) {
+      if (!photon) throw new Error("cannot confirm delivery: Photon chat client is unavailable");
+      const message = await photon.messages.get(id);
+      if (!message.isFromMe || !message.chatGuids.includes(space)) throw new Error(`message ${id} is not in the target chat`);
+      if (message.sendErrorCode) throw Object.assign(new Error(`message ${id} failed with send error ${message.sendErrorCode}`), { permanent: true });
+      return message.isDelivered;
     },
     react: async (ref, emoji) => (await find(ref)).react(emoji),
   });
@@ -247,10 +257,8 @@ function put(item: Out) {
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
-// Delivers one outbox item: the tapback on its own transport, or each bubble not sent yet, saving the progress
-// after each bubble so a retry or a restart sends at most the one bubble in flight again (delivery is at least
-// once). Each bubble goes out on the first transport that takes it (see routes). A send that may have gone out is
-// saved (`maybe`), and the retry first asks those transports whether it did, so a text is not sent twice.
+// Deliver a tapback on its own transport, or each bubble not yet confirmed. Save the returned message id before
+// checking delivery to the target chat. An uncertain write without a receipt keeps `maybe` through retries.
 async function deliver(o: Out, save: (o: Out) => void) {
   const kind = o.kind ?? "supervisor";
   if (o.react) {
@@ -271,17 +279,29 @@ async function deliver(o: Out, save: (o: Out) => void) {
     }
     if (latest) typing(latest.space, false);
     await sendBubble(o, i, save);
-    save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
+    save((o = { ...o, done: i + 1, maybe: undefined, since: undefined, receipt: undefined }));
   }
   if (!o.silent) remember(kind, parts.join("\n\n"));
 }
 
-// Sends bubble `i` of item `o`. First it asks each transport in `o.maybe` whether the bubble is already out there (a
-// BlueBubbles relay can say; Photon cannot, so the bubble then goes to Photon only). A failure that may hide a sent
-// text is saved in the item before it is thrown, so the retry, even after a restart, checks that transport first.
+// Keep the transport's message id before checking delivery. A retry checks that same chat and id, never resends.
+// An uncertain write without a receipt first searches the chat that may have taken it.
 async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
   const text = o.bubbles![i]!;
   const maybe: Record<string, string> = {};
+  let receipt = o.receipt;
+  const confirm = async (ref: Ref) => {
+    receipt = ref;
+    save({ ...o, receipt: ref });
+    try {
+      const line = lineOf(ref);
+      if (!line || !(await line.delivered(ref.space, ref.id))) throw new Error(`delivery of ${ref.id} is not confirmed`);
+    } catch (e) {
+      // A failed status read cannot prove that the preceding write did not happen.
+      throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: true });
+    }
+  };
+  if (receipt) return confirm(receipt);
   for (const [name, space] of Object.entries(o.maybe ?? {})) {
     const line = lines.find((l) => l.name === name);
     if (!line) {
@@ -289,29 +309,32 @@ async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
       continue;
     }
     if (!line.sent) maybe[name] = space;
-    else if (await line.sent(space, text, o.since ?? 0)) return;
+    else {
+      const id = await line.sent(space, text, o.since ?? 0);
+      if (id) return confirm(refOn(name, space, id));
+    }
   }
   const since = o.since ?? Date.now();
   try {
-    const via = await failover(routes(o, i, maybe), text, (line) => console.error(`fm-imessage: outbox ${line}`));
+    const via = await failover(routes(o, i, maybe, confirm), text, (line) => console.error(`fm-imessage: outbox ${line}`));
     if (via !== (o.line ?? "photon")) console.error(`fm-imessage: sent bubble ${i + 1} on the ${via} fallback`);
   } catch (e) {
-    if (Object.keys(maybe).length) save({ ...o, maybe, since });
+    if (Object.keys(maybe).length) save({ ...o, maybe, since, receipt });
     throw e;
   }
 }
 
-// Where bubble `i` of item `o` can go: the first bubble with an explicit reply target tries its own transport first,
-// otherwise transport order. Only transports in `maybe` qualify when it has any. Other transports use his latest
-// conversation there, or their home chat. A send that may have gone out adds its transport and conversation to `maybe`.
-function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
+// Proactive sends stay on the latest inbound chat's transport. Explicit threaded replies can use the fallback
+// only after a provably unsent failure. An uncertain attempt remains pinned to its original chat.
+function routes(o: Out, i: number, maybe: Record<string, string>, confirm: (ref: Ref) => Promise<void>): Route[] {
   const guid = o.guid && `${o.guid}-${i}`;
   const only = Object.keys(maybe);
-  const preferred = i === 0 && o.reply ? lineOf(o) : undefined;
-  const ordered = preferred ? [preferred, ...lines.filter((line) => line !== preferred)] : lines;
+  const preferred = !o.reply || i === 0 ? lineOf(o) : undefined;
+  const ordered = only.length ? lines : !o.reply ? (preferred ? [preferred] : []) :
+    preferred ? [preferred, ...lines.filter((line) => line !== preferred)] : lines;
   return ordered.flatMap((line) => {
     const own = line === lineOf(o);
-    const space = own ? o.space : line.latest?.space ?? line.home;
+    const space = maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (text: string) => {
@@ -320,7 +343,14 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
         throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
       }) : false;
       const thread = separated ? reply : undefined;
-      return line.send(space, text, thread, guid).catch((e) => { if (!notSent(e)) maybe[line.name] = space; throw e; });
+      try {
+        const id = await line.send(space, text, thread, guid);
+        maybe[line.name] = space;
+        await confirm(refOn(line.name, space, id));
+      } catch (e) {
+        if (!notSent(e)) maybe[line.name] = space;
+        throw e;
+      }
     } }];
   });
 }

@@ -52,7 +52,7 @@ class RelayError extends Error {
 
 type BBAttachment = { guid: string; transferName?: string; mimeType?: string; totalBytes?: number };
 type BBMessage = {
-  guid: string; text?: string | null; isFromMe?: boolean; dateCreated?: number; itemType?: number;
+  guid: string; text?: string | null; isFromMe?: boolean; isDelivered?: boolean; dateDelivered?: number; error?: number; dateCreated?: number; itemType?: number;
   handle?: { address?: string } | null; chats?: { guid: string }[]; attachments?: BBAttachment[];
   associatedMessageGuid?: string | null; threadOriginatorGuid?: string | null;
 };
@@ -209,13 +209,13 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     let last: unknown = new RelayError("no relay is reachable", false, 503);
     for (const r of await this.healthy()) {
       try {
-        if (!maybeSent || !(await this.sent(chat, text, started))) {
-          await this.call(r, "POST", "message/text", undefined,
-            { chatGuid: chat, tempGuid: guid ?? crypto.randomUUID(), message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
-            .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; });
-        }
+        const found = maybeSent ? await this.sent(chat, text, started) : undefined;
+        const message = found ? { guid: found } : await this.call(r, "POST", "message/text", undefined,
+          { chatGuid: chat, tempGuid: guid ?? crypto.randomUUID(), message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
+          .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; }) as BBMessage;
+        if (!message?.guid) throw new RelayError("the send returned no message id", true, 503);
         this.suspects.clear();
-        return;
+        return message.guid;
       } catch (e) {
         if (!(e instanceof RelayError)) throw e;
         maybeSent ||= e.maybeSent;
@@ -243,25 +243,36 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     return (await this.first((r) => this.call(r, "GET", `message/${encodeURIComponent(guid)}`, { with: "chats,attachments" }))) as BBMessage;
   }
 
-  // True when a relay shows `text` as sent into `chat` since `since`. Throws when no relay can be asked, so the
-  // caller does not send again unchecked. The relays that returned a possibly-sent error are asked first, whatever
-  // their health result says: the text is most likely on them. A sent text reaches the other Macs through iCloud, which
-  // can lag: a relay that did not send it may not show it yet.
-  async sent(chat: string, text: string, since: number): Promise<boolean> {
+  // Return the id of `text` in `chat` since `since`; presence alone does not confirm delivery.
+  // Throw when no relay can be asked, so the caller does not send again unchecked.
+  // Ask relays with a possibly-sent error first, regardless of health: other Macs' iCloud copies can lag.
+  async sent(chat: string, text: string, since: number): Promise<string | undefined> {
     let asked = false;
     for (const r of new Set([...this.suspects, ...(await this.healthy())])) {
+      let found: BBMessage | undefined;
       try {
         const recent = (await this.call(r, "GET", `chat/${encodeURIComponent(chat)}/message`,
           { after: String(since - this.opts.skewMs), sort: "DESC", limit: "50" })) as BBMessage[];
         asked = true;
         this.suspects.delete(r);
-        if (recent.some((m) => m.isFromMe && m.text?.trim() === text.trim())) return true;
+        found = recent.find((m) => m.isFromMe && m.text?.trim() === text.trim());
       } catch {
-        // ask the next relay
+        continue;
+      }
+      if (found) {
+        if (!found.guid) throw new RelayError("the earlier send has no message id", true, 503);
+        return found.guid;
       }
     }
     if (!asked) throw new RelayError("could not check whether an earlier try was sent; no relay answered", true, 503);
-    return false;
+    return undefined;
+  }
+
+  async delivered(chat: string, guid: string): Promise<boolean> {
+    const message = await this.read(guid);
+    if (!message.isFromMe || !message.chats?.some((c) => c.guid === chat)) throw new Error(`message ${guid} is not in the target chat`);
+    if (message.error) throw Object.assign(new Error(`message ${guid} failed with send error ${message.error}`), { permanent: true });
+    return message.isDelivered === true || (message.dateDelivered ?? 0) > 0;
   }
 
   // Start (POST) or stop (DELETE) the typing bubble in a chat.

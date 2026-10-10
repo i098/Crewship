@@ -29,7 +29,16 @@ The service ignores texts from all other senders. It saves attachments in `~/.lo
 The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503. The service keeps every message through such an outage. The code is `imessage/outbox.ts`.
 
 - **The outbox.** Each send and tapback goes to `~/.local/state/fm-imessage/outbox/` first, as one file. This covers the answers of Firstmate, the desk's text and tapback, and the "firstmate did not get that" reply, so they all keep one order. The service writes the file to a temporary name, syncs it to disk, and renames it. The file name is a sequence number that only goes up. The service answers `fm-imessage` only after the file is on disk. A desk message that waited out an outage is still sent, late.
-- **Delivery.** One loop sends the oldest file, then deletes it. If a send fails, the loop tries the same file again after a wait: 1 second, then 2, 4, and so on, up to 60 seconds, each with random jitter. This holds for an outage (`UNAVAILABLE`, HTTP 502, 503 or 504, a timeout, a network failure such as a dropped connection or a DNS error) and for every error that the service does not know. Thus the order stays the same and no message is lost. After each bubble of a message, the service records the bubbles that it sent. Delivery is at least once: if the upstream accepts a send but the answer fails, or the service stops between a send and the record, that one bubble can arrive twice. If the text that a send threads to is gone, the service sends it without the thread.
+- **Delivery.** One loop sends the oldest file.
+  It saves the transport, chat, and returned message id before it checks delivery.
+  The transport must confirm delivery of that message id to the target chat.
+  Acceptance alone does not count as delivery.
+  Until confirmation, the file stays queued and the memory log does not record the text as sent.
+  Retries check the saved message id, including after a restart; they do not send it again.
+  A pending delivery or an unknown error retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
+  A transport-reported send error moves the file to the dead-letter folder and writes the error to the log.
+  After each confirmed bubble, the service saves its progress.
+  If the text that a send threads to is gone, the service sends it without the thread.
 - **Downloads.** If an attachment download fails, the note says that the attachment could not be saved yet. The service records the message id in `~/.local/state/fm-imessage/downloads/` and tries the download again with the same waits. When the download works, the service files a second note with the saved path. If the download moves to the dead-letter folder (see below), the service files a second note with the message id that says the attachment is lost, so Firstmate stops waiting for a path.
 - **Restarts.** The outbox and the downloads are on disk, so they survive a restart of the service. At start, the service continues with the files that it finds.
 - **Typing.** Typing bubbles are best effort. A typing error is logged and never fails or delays a send.
@@ -135,10 +144,23 @@ First [enable the bridge](#enable-it). Then add `transports` and the `bluebubble
 
 `webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. To use Photon alone again, remove `transports` and the `bluebubbles` block.
 
-With two transports, the first one is the primary line and the second one is the fallback:
+With two transports, proactive sends use the latest inbound chat's transport, not configuration order:
 
-- **Sends.** Each send and tapback goes through the [outbox](#upstream-outages) first. The outbox loop sends each bubble into the owner's latest conversation on the first transport. A first bubble with an explicit reply target tries that target's transport first instead. If that send surely did not go out (a refused connection, a Photon `UNAVAILABLE` error that says the request was not taken ("No connection established" or "Please retry"), or no reachable relay), the bubble goes to the next transport and the bridge logs one line. Any other error, for example a timeout, a bare `UNAVAILABLE`, or an answer that cannot be read, may hide a sent text. The bridge then saves the transport in the outbox item (`maybe`, with the time the try started) and stops, so a text is never sent twice. The next bubble tries the primary first again, so the primary takes over again when it is back. If a send may have gone out, that send's error controls retries, even when an earlier transport returned a permanent error. Otherwise, the first attempted transport's error decides the result. The outbox retries the item or moves a provably bad item to the dead-letter folder.
-- **A retry after an unsure send.** The retry asks each saved transport first whether the text went out. A BlueBubbles relay can answer (the bridge looks for the same text from the line in the chat); if it went out, the bubble counts as sent. If the relay shows it did not, any transport may send it in that bubble's transport order. Photon cannot answer, so a bubble that may be out on Photon is sent on Photon only, until it takes it. This holds after a restart in which Photon does not start: the bubble waits in the outbox, and the outbox retries it, until Photon runs again. The saved state is in the outbox file, so it survives a restart. A saved transport that is no longer in `FM_IMESSAGE_TRANSPORTS` is ignored.
+- **Sends.** Each send and tapback goes through the [outbox](#upstream-outages) first.
+  A proactive send without `--reply` stays in the chat the owner last used, on that chat's transport.
+  The command selects that chat when it queues the text.
+  An outage on that transport holds the send in the queue; it does not move the text to another line.
+  An explicit threaded reply tries its target's transport first.
+  Only a provably unsent reply can use another transport.
+  A timeout or an unreadable answer saves the possible transport and chat in `maybe`, with the attempt time.
+  The outbox retries the item or reports a final error through its existing dead-letter path.
+- **A retry after an unsure send.** A saved receipt checks delivery of the same message id in the same chat.
+  Without a receipt, BlueBubbles searches the original chat for the text and returns its message id.
+  The bridge then checks delivery; presence in history alone does not count.
+  Photon retries with the same per-bubble idempotency key on the original chat.
+  A Photon item waits if Photon does not start after a restart.
+  The saved state stays in the outbox file.
+  A saved transport that is no longer configured is ignored only when no receipt exists.
 - **Where a fallback text arrives.** A fallback send goes into the owner's latest conversation on that transport. Before he texts the BlueBubbles line, it goes to a new chat with his number from the line's Apple Account. Photon can only answer in a conversation that he started.
 - **Replies, typing, and tapbacks.** See [Commands](#commands) for reply behavior.
   A read-only failure can use a fallback because no send has happened yet.
@@ -217,7 +239,10 @@ Use `--` before text that starts with a dash: `fm-imessage -- '- first item'`.
 Place send options before `--`: `fm-imessage --reply 1 --no-thread -- '- first item'`.
 All arguments after `--` are text, not options.
 
-If a spectrum-ts upgrade changes the internals that the service reads to reach the line's client, the service logs one warning at start. Until the bridge is updated, `fm-location` fails with HTTP 503 and the service does not see edits. Explicit Photon replies use a configured fallback; without one, they wait in the outbox because the bridge cannot check the latest bubble.
+If a spectrum-ts upgrade changes access to the Photon client, the service logs an error that states all Photon sends are blocked.
+Until the bridge is updated, `fm-location` returns HTTP 503 and the service does not see edits.
+Proactive Photon sends stay queued because the bridge cannot confirm delivery.
+Explicit threaded replies can use a configured fallback before any send occurs.
 
 `fm-imessage` exits 0 only when the message is on disk in the outbox, and prints that it is queued. It exits non-zero when it queues nothing. An unknown option queues nothing and exits with code 2.
 
