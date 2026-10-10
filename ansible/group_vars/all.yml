@@ -165,6 +165,8 @@ crewship_base_packages:
   - ca-certificates
   - curl
   - git
+  - gcc
+  - libc6-dev
   - gnupg
   - jq
   - tar

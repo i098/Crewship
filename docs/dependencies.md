@@ -50,8 +50,8 @@ The secret does not enter the image.
 ## Neovim and LazyVim
 
 Every host gets Neovim.
-Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `config/nvim/` only when `~/.config/nvim` does not exist.
-Apply leaves existing configurations unchanged, including empty directories and symlinks.
+Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `config/nvim/` when `~/.config/nvim` is missing or an empty real directory.
+Apply leaves nonempty directories, files, and symlinks unchanged, including dangling symlinks.
 It never merges files or installs plugins during apply.
 
 Run `nvim` to start the editor.
@@ -59,7 +59,7 @@ The first start needs network access: the starter downloads lazy.nvim, LazyVim, 
 Plugin downloads use the upstream Git repositories, not the Crewship checksum installer.
 LazyVim manages later plugin updates.
 The added `lua/plugins/pyrefly.lua` uses the Pyrefly executable from PATH with `mason = false`, so Mason does not install another copy.
-Pyrefly comes from the separate Crewship Pyrefly installer.
+See the Pyrefly entry in issue [#231](https://github.com/i098/Crewship/issues/231) for its installation.
 Use a Python project with `pyrefly.toml` to select its project root.
 
 The runtime starter files and Apache-2.0 license come from commit `803bc181d7c0d6d5eeba9274d9be49b287294d99`.
@@ -71,7 +71,8 @@ The Pyrefly configuration is the only added runtime file.
 
 `ansible/group_vars/all.yml`, `ansible/tasks/packages.yml`. Distribution versions, not pinned.
 
-- Base: ca-certificates, curl, git, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
+- Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
+  gcc and libc6-dev let LazyVim compile Treesitter parsers even when the `development` profile is disabled.
 - Headless browser libraries, every apply, without recommends: libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libasound2t64, libatk1.0-0t64, libatk-bridge2.0-0t64, libatspi2.0-0t64, libgbm1, libnss3, libnspr4, libxkbcommon0, fonts-dejavu-core. The chrome-headless-shell that omp's browser tool and puppeteer download needs the libraries to start and a font to draw text.
 - `chat`, without recommends: libegl1, libpipewire-0.3-0t64, libva2, libva-drm2 (the Concord binary links them).
 - `development`: build-essential, pkg-config, libssl-dev, python3-dev, cmake, ripgrep.

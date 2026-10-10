@@ -45,11 +45,14 @@
               crewship_local_bin ~ '/fallow',
               crewship_local_bin ~ '/pyrefly',
               crewship_local_bin ~ '/nvim',
-              crewship_cfg.home ~ '/.config/nvim',
               crewship_user_units ~ '/herdr-spaces.service',
               crewship_user_units ~ '/herdr-spaces.timer',
               crewship_user_units ~ '/timers.target.wants/herdr-spaces.timer',
               crewship_cfg.home ~ '/.profile']
+             + ([crewship_cfg.home ~ '/.config/nvim/init.lua',
+                 crewship_cfg.home ~ '/.config/nvim/lua/config/lazy.lua',
+                 crewship_cfg.home ~ '/.config/nvim/lua/plugins/pyrefly.lua']
+                if (crewship_nvim_seed | default(false) | bool) else [])
              + ([crewship_chrome_devtools_mcp_path, crewship_omp_sidebar_extension,
                  crewship_omp_status_icons_extension, crewship_omp_no_pattern_kill_extension,
                  crewship_omp_quality_gate_extension,

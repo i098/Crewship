@@ -31,14 +31,19 @@ def apply(tmp_path, home, check=False):
 
 
 @pytest.mark.parametrize("private_parent", [False, True])
-def test_seed_and_repeat_preserve_user_changes(tmp_path, private_parent):
+@pytest.mark.parametrize("empty_directory", [False, True])
+def test_seed_and_repeat_preserve_user_changes(tmp_path, private_parent, empty_directory):
     home = tmp_path / "home"
     home.mkdir()
     config = home / ".config/nvim"
     if private_parent:
         config.parent.mkdir(mode=0o700)
+    if empty_directory:
+        config.mkdir(parents=True)
     apply(tmp_path, home, check=True)
-    assert not config.exists()
+    assert config.is_dir() if empty_directory else not config.exists()
+    if empty_directory:
+        assert list(config.iterdir()) == []
     apply(tmp_path, home)
     if private_parent:
         assert config.parent.stat().st_mode & 0o777 == 0o700
@@ -54,7 +59,9 @@ def test_seed_and_repeat_preserve_user_changes(tmp_path, private_parent):
     assert not (config / "lua/plugins/pyrefly.lua").exists()
 
 
-@pytest.mark.parametrize("kind", ["directory", "file", "symlink", "dangling_symlink"])
+@pytest.mark.parametrize("kind", [
+    "directory", "hidden_entry", "nested_directory", "file", "symlink", "dangling_symlink",
+])
 def test_existing_configuration_is_never_merged_or_replaced(tmp_path, kind):
     home = tmp_path / "home"
     config = home / ".config/nvim"
@@ -62,6 +69,12 @@ def test_existing_configuration_is_never_merged_or_replaced(tmp_path, kind):
     target = tmp_path / "custom"
     if kind == "directory":
         config.mkdir()
+        (config / "init.lua").write_text("user config")
+    elif kind == "hidden_entry":
+        config.mkdir()
+        (config / ".keep").touch()
+    elif kind == "nested_directory":
+        (config / "lua").mkdir(parents=True)
     elif kind == "file":
         config.write_text("user config")
     else:
@@ -75,7 +88,13 @@ def test_existing_configuration_is_never_merged_or_replaced(tmp_path, kind):
         before.st_ino, before.st_mode, before.st_mtime_ns
     )
     if kind == "directory":
-        assert list(config.iterdir()) == []
+        assert (config / "init.lua").read_text() == "user config"
+        assert list(config.iterdir()) == [config / "init.lua"]
+    elif kind == "hidden_entry":
+        assert list(config.iterdir()) == [config / ".keep"]
+    elif kind == "nested_directory":
+        assert list(config.iterdir()) == [config / "lua"]
+        assert list((config / "lua").iterdir()) == []
     elif kind == "file":
         assert config.read_text() == "user config"
     elif kind == "symlink":
