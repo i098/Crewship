@@ -50,8 +50,11 @@ The stern castle is the cabin, with planked walls, framed windows, a dark strap-
 Walk through the cabin door to enter a small furnished room.
 It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and starry windows.
 The cabin uses the house's door transition, collisions, and hidden map; the inside door returns you to the deck, facing the bow.
-Ten steps with pale treads, darker risers, and a hand rail on each side connect the main deck to the cabin roof.
-Map walks connect the dock through the gangway and reach the stern roof through the supported stairs.
+A steep companionway ladder connects the main deck to the cabin roof: ten open pale treads between sloped stringers, with a thick pale handrail on posts on each side.
+The ship's wheel stands on a pedestal on the cabin roof, behind the top of the ladder.
+Its eight spokes go out past the rim as handles round a brass hub, and it is turned a little so the spokes show from the main deck.
+The wheel and its pedestal block walking, so you walk around them on the roof.
+Map walks connect the dock through the gangway and reach the stern roof up the ladder.
 Ship approaches avoid deck obstacles and reject unsupported floors or height changes larger than the manual walking limit.
 One scene wind fills the sails into curved bellies that slowly fill and ease.
 Each foot sags in an arc between its corners, and the sides bow out.

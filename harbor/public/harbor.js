@@ -75,14 +75,16 @@ function blob(list, cx, cy, cz, rx, ry, rz, mat, o) {
   s.blob = [cx, cy, cz, rx, ry, rz];
   return s;
 }
-// Eight-sided disc facing along z (the helm wheel).
-function disc(list, cx, cy, z0, z1, r, mat, o) {
-  const pl = [[0, 0, 1, 0, 0, z1], [0, 0, -1, 0, 0, z0]];
+// Eight-sided disc of radius r and thickness d round a level axle turned `yaw` from the z axis (the wheel's hub).
+function disc(list, cx, cy, cz, yaw, r, d, mat, o) {
+  const ax = Math.sin(yaw), az = Math.cos(yaw);
+  const pl = [[ax, 0, az, cx + ax * d / 2, 0, cz + az * d / 2], [-ax, 0, -az, cx - ax * d / 2, 0, cz - az * d / 2]];
   for (let i = 0; i < 8; i++) {
     const a = (i + 0.5) * Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
-    pl.push([c, s, 0, cx + c * r, cy + s * r, 0]);
+    pl.push([c * az, s, -c * ax, cx + c * az * r, cy + s * r, cz - c * ax * r]);
   }
-  return solid(list, pl, [cx - r * 1.09, cy - r * 1.09, z0, cx + r * 1.09, cy + r * 1.09, z1], mat, o);
+  const ex = r * 1.09 * Math.abs(az) + d * Math.abs(ax) / 2, ez = r * 1.09 * Math.abs(ax) + d * Math.abs(az) / 2;
+  return solid(list, pl, [cx - ex, cy - r * 1.09, cz - ez, cx + ex, cy + r * 1.09, cz + ez], mat, o);
 }
 // A round bar along the x axis (axis 0: gun barrels) or the z axis (axis 2: wheels) from u0 to u1, radius r0 at u0
 // and r1 at u1, its axis through (p, q): (y, z) along x, (x, y) along z. Rays hit the true cone (barEntry).
@@ -920,7 +922,7 @@ for (const side of [-1, 1]) {
 }
 beam(ship, [SX - 2.62, 4.72, -8.96], [SX + 2.62, 4.72, -8.96], "s", cabinTrim, 0.07);
 beam(ship, [SX - 2.1, 5.55, -14.6], [SX + 2.1, 5.55, -14.6], "s", { fill: 0.58 }, 0.06);
-// A wall lantern hangs between the door and the stairs. Its glass glows like the windows but adds no light: another
+// A wall lantern hangs between the door and the ladder. Its glass glows like the windows but adds no light: another
 // ship light costs more per frame than its pool of lamplight shows.
 beam(ship, [SX + 0.88, 4.02, -9], [SX + 0.88, 4.02, -8.69], "t", cabinTrim, 0.03);
 box(ship, SX + 0.74, 3.92, -8.86, SX + 1.02, 3.99, -8.58, "t", cabinTrim);
@@ -986,8 +988,8 @@ shipMast(6, 2.2, 18.2, 4.3);
 shipRope([SX, 20, -3], [SX, 17.8, 6]);
 shipRope([SX, 20, -3], [SX, 4.8, -14.3]);
 shipRope([SX, 17.8, 6], [SX, 4.3, 18.5]);
-function shipRope(a, b, cls) {
-  RIGGING.push([a, b, cls]);
+function shipRope(a, b) {
+  RIGGING.push([a, b]);
 }
 // Screen column and row (fractional) and depth of a world point, written into `out`.
 function viewPoint(x, y, z, out) {
@@ -998,7 +1000,7 @@ function viewPoint(x, y, z, out) {
   out[2] = d;
   return out;
 }
-// Project the stays and the stair rails into the depth buffer once, rather than ray-testing their large diagonal boxes.
+// Project the stays into the depth buffer once, rather than ray-testing their large diagonal boxes.
 function ropePoint(p) {
   const lx = p[0] - SX;
   return viewPoint(SX + rc * lx - rs * p[1], rs * lx + rc * p[1] + bob, p[2], [0, 0, 0]);
@@ -1039,9 +1041,9 @@ function drawRope(p, q, cls = "o3") {
   }
 }
 function drawRigging() {
-  for (const [a, b, cls] of RIGGING) {
+  for (const [a, b] of RIGGING) {
     const ends = ropeEnds(a, b);
-    if (ends) drawRope(...ends, cls);
+    if (ends) drawRope(...ends);
   }
 }
 column(ship, SX, -3, 0.8, 0.85, 13.7, 14.4, "o", { spot: "nest", tex: (x, y) => (y < 13.85 ? "-" : null) });
@@ -1087,11 +1089,6 @@ blob(ship, SX, 3.8, 13.55, 0.22, 0.23, 0.24, "s", { solid: false });
 beam(ship, [SX - 0.25, 3.4, 13.4], [SX + 0.25, 3.45, 13.9], "o", {}, 0.07);
 const nameText = painted("CREWSHIP", -0.8, 4.2, 1.7, 2.05);
 box(ship, 0.7, 1.62, -0.8, 0.76, 2.1, 4.2, "o", { spot: "sign", tex: (x, y, z, nx) => (nx > 0.5 && nameText(z, y) ? "s" : null) });
-box(ship, SX - 0.1, DECK, -7.05, SX + 0.1, 3.1, -6.85, "o", { spot: "helm" });
-disc(ship, SX, 3.3, -6.85, -6.72, 0.62, "o", { spot: "helm", tex: (x, y) => {
-  const dx = x - SX, dy = y - 3.3, rr = Math.hypot(dx, dy);
-  return rr > 0.42 || rr < 0.12 || Math.abs(Math.sin(4 * Math.atan2(dy, dx))) < 0.25 ? null : "-";
-} });
 box(ship, -3.6, DECK, 0.8, -1.2, 2.55, 3.2, "o", { spot: "hold",
   tex: (x, y, z, nx, ny) => (ny > 0.5 && ((x + 9) % 0.4 < 0.07 || (z + 9) % 0.4 < 0.07) ? "-" : null) });
 // The hatch to the gun deck (crossHatch): a raised wooden coaming round the opening that lines a pitch-dark well 0.6 m
@@ -1137,24 +1134,59 @@ beam(ship, [-3.8, 5.45, -12.1], [-3, 5.8, -10.8], "t", { spot: "spyglass" }, 0.1
 box(ship, -3.4, 2.2, 6, -3.25, 3.8, 6.15, "o", { spot: "bell" });
 column(ship, -3.32, 6.07, 0.3, 0.12, 3.05, 3.65, "r", { spot: "bell" });
 box(ship, -4.8, DECK, 0.3, -4.3, 2.5, 0.9, "t", { spot: "strongbox", tex: (x, y) => (Math.abs(y - 2.3) < 0.05 ? "-" : null) });
-// Ten steps climb from the main deck to the stern castle's roof, each a pale tread over a darker riser. Under each step
-// the block is cut along the slope of the flight, so from the side the steps sit on one straight stringer and the
-// soffit below is open. The hand rails are projected lines, like the rigging. The walking lane matches the treads.
+// A steep companionway ladder climbs from the main deck to the quarterdeck on the cabin roof: ten open pale treads,
+// the top one level with the roof, between two sloped stringers. On each side a thick pale handrail rises on a newel
+// post and a post on the stringer, then levels off over the roof to a post there. Like the trim, its parts block no
+// walking and cast no shadows. The walking lane matches the treads.
 const STERN_STEPS = [];
-const RISE = 0.28, RUN = 0.35, STAIR_X0 = SX + 1.15, STAIR_X1 = SX + 2.25;
+const RISE = 0.28, RUN = 0.17, LADDER_SLOPE = RISE / RUN, LADDER_X0 = SX + 1.35, LADDER_X1 = SX + 2.05;
+// The top tread reaches 0.25 m out from the cabin front, past the walking margin round its walls, so the tread below
+// it stands clear of the cabin as the ship rolls.
+const LADDER_TOP = -8.75, ladderPart = { solid: false, shadow: false };
+// Height of the line through the treads' front edges at z.
+const nosing = (z) => 4.8 - LADDER_SLOPE * (z - LADDER_TOP);
 for (let k = 1; k <= 10; k++) {
-  const front = -5.5 - (k - 1) * RUN, height = DECK + k * RISE;
-  solid(ship, [[1, 0, 0, STAIR_X1, 0, 0], [-1, 0, 0, STAIR_X0, 0, 0], [0, 1, 0, 0, height, 0], [0, -1, 0, 0, DECK, 0],
-    [0, 0, 1, 0, 0, front], [0, 0, -1, 0, 0, front - RUN], [0, -1, -RISE / RUN, 0, DECK - 0.3, -5.5]],
-  [STAIR_X0, Math.max(DECK, height - RISE - 0.3), front - RUN, STAIR_X1, height, front], "o", { solid: false, fill: 0.55, tex: (x, y, z, nx, ny) => (ny > 0.5 ? "s" : "-") });
-  STERN_STEPS.push([SX + 1.45, SX + 1.95, front - RUN, front, (x) => bob + height * rc + rs * (x - SX)]);
+  const front = LADDER_TOP + (10 - k) * RUN, back = k < 10 ? front - RUN : -9, height = DECK + k * RISE;
+  box(ship, LADDER_X0 + 0.07, height - 0.07, Math.min(back, front - 0.22), LADDER_X1 - 0.07, height, front, "s", { ...ladderPart, fill: 0.65 });
+  STERN_STEPS.push([SX + 1.5, SX + 1.9, back, front, (x) => bob + height * rc + rs * (x - SX)]);
 }
-for (const x of [STAIR_X0 - 0.03, STAIR_X1 + 0.03]) {
-  const foot = [x, DECK + RISE + 0.85, -5.47], head = [x, 4.8 + 0.85, -8.68];
-  shipRope([x, DECK, -5.47], foot, "s5");
-  shipRope(foot, head, "s5");
-  shipRope([x, 4.8, -8.68], head, "s5");
+ladderSide(LADDER_X0, LADDER_X0 + 0.07);
+ladderSide(LADDER_X1 - 0.07, LADDER_X1);
+// A stringer from x0 to x1, from the deck up to 0.1 m over the roof, and its handrail 0.9 m above the treads' front
+// edges and then the roof. Both come in short pieces, so the boxes rays test round these long slopes stay small.
+function ladderSide(x0, x1) {
+  const foot = LADDER_TOP + 2.9 / LADDER_SLOPE, newel = foot - 0.05, mid = -8, x = (x0 + x1) / 2;
+  const rail = (z) => [x, Math.min(nosing(z), 4.8) + 0.9, z], pale = { ...ladderPart, fill: 0.7 };
+  const stringer = [-9, -8.4, mid, -7.5, foot], handrail = [-9.3, LADDER_TOP, -8.4, mid, -7.5, newel];
+  for (let i = 1; i < stringer.length; i++) {
+    const z0 = stringer[i - 1], z1 = stringer[i];
+    solid(ship, [[1, 0, 0, x1, 0, 0], [-1, 0, 0, x0, 0, 0], [0, 1, LADDER_SLOPE, 0, 4.9, LADDER_TOP], [0, -1, -LADDER_SLOPE, 0, 4.38, LADDER_TOP],
+      [0, 1, 0, 0, 4.9, 0], [0, -1, 0, 0, DECK, 0], [0, 0, -1, 0, 0, z0], [0, 0, 1, 0, 0, z1]],
+    [x0, Math.max(DECK, nosing(z1) - 0.42), z0, x1, Math.min(4.9, nosing(z0) + 0.1), z1], "o", { ...ladderPart, fill: 0.45 });
+  }
+  for (let i = 1; i < handrail.length; i++) beam(ship, rail(handrail[i - 1]), rail(handrail[i]), "s", pale, 0.05);
+  for (const [z, y] of [[newel, DECK], [mid, nosing(mid) + 0.1], [-9.3, 4.8]]) beam(ship, [x, y, z], rail(z), "s", pale, 0.045);
 }
+// The ship's wheel stands on the quarterdeck behind the ladder's top, its axle along the keel but turned a little to
+// starboard so the spokes show: a rim, eight spokes that end past it in thicker handles, and a brass hub on an axle
+// that rests on a turned pedestal. The level spokes span the wheel, so they and the pedestal block walking; no part
+// casts shadows. HELM is the hub's x, y and z, and the turn.
+const HELM = [SX, 5.8, -9.8, 0.25];
+function shipWheel([cx, cy, cz, yaw]) {
+  const ax = Math.sin(yaw), az = Math.cos(yaw), part = { spot: "helm", fill: 0.7, solid: false, shadow: false };
+  // The point r from the axle at angle a round it, `back` behind the wheel along the axle.
+  const at = (r, a, back = 0) => [cx + r * Math.cos(a) * az - back * ax, cy + r * Math.sin(a), cz - r * Math.cos(a) * ax - back * az];
+  for (let i = 0; i < 16; i++) beam(ship, at(0.58, i * Math.PI / 8), at(0.58, (i + 1) * Math.PI / 8), "o", part, 0.07);
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4, spoke = { ...part, solid: k % 4 === 0 };
+    beam(ship, at(0.12, a), at(0.58, a), "o", spoke, 0.04);
+    beam(ship, at(0.58, a), at(0.92, a), "o", spoke, 0.05);
+  }
+  disc(ship, cx, cy, cz, yaw, 0.16, 0.24, "y", part);
+  beam(ship, at(0, 0, 0.12), at(0, 0, 0.38), "t", part, 0.05);
+  column(ship, cx - 0.38 * ax, cz - 0.38 * az, 0.16, 0.1, 4.8, cy, "o", { ...part, solid: true, fill: 0.45 });
+}
+shipWheel(HELM);
 const SHIP_BOUNDS = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
 for (const { bb } of ship) {
   for (let k = 0; k < 3; k++) {

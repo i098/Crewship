@@ -34,7 +34,7 @@
   Inside the cloth's box, a ray samples the gap between the ray and the cloth.
   Near-parallel rays subdivide intervals that can contain crossings and select the nearest crossing inside the cloth's outline.
   Each bracketed crossing uses a halving and straight-line steps.
-  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines.
+  Ship rigging and the masthead pennants use projected lines.
   Tall grass uses projected tufts, and fountain water uses projected droplets.
   Palm fronds use projected spines with paired leaflets; distant palms show fewer leaflets or only spines.
   They check the depth buffer instead of ray intersections.
@@ -43,7 +43,7 @@
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the ship's wind-driven sway.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
-  Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
+  Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim, the companionway ladder and the ship's wheel.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
   Only hatch parts above the deck form the grouped shadow caster, with one bounding box.
   The hatch boards and ladder receive light without shadow rays.

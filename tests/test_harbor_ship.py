@@ -62,6 +62,7 @@ keys.clear();
 assert(me.z < -11.5, 'the stairs must let a visitor reach the stern deck');
 assert(Math.abs(floorAt(me.x, me.z) - 4.8) < 1e-6, 'the stern floor must match the castle roof');
 assert(!blocked(me.x, me.z, floorAt(me.x, me.z)), 'the castle roof must provide a clear walking surface');
+assert(blocked(HELM[0], HELM[2], 4.8), 'the wheel must block walking through it on the stern deck');
 me.yaw = 0; keys.add('f');
 for (let i = 0; i < 100; i++) step(0.02);
 keys.clear();
@@ -411,6 +412,9 @@ for (const x of [SX - 0.6, SX + 0.6]) {
   assert.equal(interior, null, 'walking into the cabin front beside the door must not enter');
   assert(me.z >= -8.75, 'the cabin front must still block walking');
 }
+Object.assign(me, {x: SX, z: -4});
+walk('keyboard', Math.PI, 100);
+assert.equal(interior, CABIN, 'a straight walk aft along the deck must reach the cabin door');
 interior = CABIN;
 for (const [x, z] of [[0, 3.2], [0, 4.3], [1.8, 1.9], [-1.8, 1.3]]) {
   assert(blocked(x, z, 0), `the table, chair, bunk and chest must block walking at ${x},${z}`);
