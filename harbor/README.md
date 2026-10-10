@@ -1,7 +1,7 @@
 # harbor
 
 `harbor/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
-Each object shows an ASCII sign anchored to its surface.
+Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
 Selecting a destination on the ASCII mini map walks you there around obstacles; with reduced motion, you jump there instead.
 See [how.html](public/how.html) for the renderer and controls.
@@ -73,7 +73,6 @@ Stacked links have one blank link row between them and separate hit regions at l
 Each stacked link row is at least 12 CSS pixels tall.
 The invisible hit padding can extend beyond the sign frame, but stays clear of the move pad.
 Touch frames fit the text, with one blank row before the links.
-Desktop signs keep their original layout.
 Click or tap a sign link to open it.
 Focus a feature-list link to show its sign.
 The sign highlights the focused link without scrolling the scene.
@@ -117,7 +116,8 @@ The check walks through the house door and back with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
-From three camera views and an additional oblique docsboard view, it checks that each sign's bottom row matches its lowest projected support top.
+It checks the how, docsboard, and mailbox signs against the placement rules above.
+It uses three camera views and an additional oblique docsboard view.
 It checks each support independently for vertical gaps and horizontal coverage on desktop and iPhone portrait and landscape.
 It includes 320×568 phones in both orientations and landscape heights of 256 and 192 pixels.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
