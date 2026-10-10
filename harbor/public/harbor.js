@@ -1066,9 +1066,9 @@ buildCabin();
 // you walk along z to enter]; `exit` puts you back outside [x, z, yaw], facing away from the door. `lights` light the
 // room without shadow rays: x, y, z, intensity and reach of each (the house's table lamp and hearth fire, the cabin's
 // hanging lantern).
-const HOUSE = { solids: room, floorAt: roomFloorAt, floor: [-2.75, 2.75, 0.25, 5.75], lights: [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2],
+const HOUSE = { solids: room, floorAt: roomFloorAt, light: roomLight, floor: [-2.75, 2.75, 0.25, 5.75], lights: [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2],
   door: [-5, 20.75, 1], exit: [-5, 20.35, Math.PI] };
-const CABIN = { solids: cabinRoom, floorAt: roomFloorAt, floor: [-1.95, 1.95, 0.25, 4.95], lights: [0, 1.79, 3.2, 0.85, 9], door: [SX, -8.75, -1], exit: [SX, -8.35, 0] };
+const CABIN = { solids: cabinRoom, floorAt: roomFloorAt, light: roomLight, floor: [-1.95, 1.95, 0.25, 4.95], lights: [0, 1.79, 3.2, 0.85, 9], door: [SX, -8.75, -1], exit: [SX, -8.35, 0] };
 
 function roomFloorAt(x, z) {
   const f = indoors.floor;
@@ -1133,10 +1133,8 @@ function castRoom(c, i, odd, dx, dy, dz) {
   } else if (hitS && hitS.tex === roomFlame) {
     const [ch, cls] = roomFlame(cam.y + dy * hitT, hitS.bb);
     put(c, ch, cls, hitS.id * 16, hitT);
-  } else if (hitS) {
-    if (indoors === GUN_DECK) shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
-    else shadeRoom(c, odd, dx, dy, dz);
-  } else if (indoors === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
+  } else if (hitS) shadeRoom(c, odd, dx, dy, dz);
+  else if (indoors === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
 // Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests. Like the rest
@@ -1155,9 +1153,9 @@ function shadeRoom(c, odd, dx, dy, dz) {
   const tex = s.tex && s.tex(x, y, z, nx, ny, nz), mat = tex && tex !== "-" ? tex[0] : s.mat;
   let ch = "@", cls = "l7";
   if (mat !== "l") {
-    const warm = roomLight(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
+    const warm = indoors.light(x, y, z, nx, ny, nz), lit = warm + 0.06, dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1);
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * y), fog = Math.exp(-t * 0.016);
-    const b = (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog);
+    const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
     // Keep the bed, chart water, and blue book spines blue under warm room light.
     cls = CLASS[mat][(mat !== "b" && warm / lit > 0.55 && b > 0.2 ? 8 : 0) + Math.min(7, Math.floor(b * 9))];
     ch = glyph(b, odd);
@@ -1256,14 +1254,14 @@ function gunDeckFloorAt(x, z) {
 // Dim warm light from the lanterns: a faint glow everywhere, brighter on what faces up, and a warm pool within about
 // 3 m of each lantern, without shadow rays.
 function gunDeckLight(x, y, z, nx, ny, nz) {
-  let warm = 0.14 + 0.16 * Math.max(0, ny);
+  let warm = 0.11 + 0.16 * Math.max(0, ny);
   for (let i = 0; i < GUN_DECK_LAMPS.length; i += 3) {
     const lz = GUN_DECK_LAMPS[i + 2] - z;
     if (lz * lz >= 10) continue;
     const lx = GUN_DECK_LAMPS[i] - x, ly = GUN_DECK_LAMPS[i + 1] - y, d2 = lx * lx + ly * ly + lz * lz, f = 1 - d2 / 10;
     if (f > 0) warm += 0.9 * f * f * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / Math.sqrt(d2)));
   }
-  return [warm + 0.03, warm / (warm + 0.03)];
+  return warm;
 }
 const GUN_DECK = { solids: gunDeck, floorAt: gunDeckFloorAt, light: gunDeckLight };
 // Walking onto the open hatch climbs down to the foot of the ladder, facing aft along the guns; walking into
@@ -1460,10 +1458,22 @@ function coneEntry(cone, ox, oy, oz, dx, dy, dz) {
   }
   return best;
 }
-const hit = (s, ox, oy, oz, dx, dy, dz) => (s.rail ? railEntry(s, ox, oy, oz, dx, dy, dz) : s.hole ? holeEntry(s, ox, oy, oz, dx, dy, dz) :
-  s.blob ? blobEntry(s.blob, ox, oy, oz, dx, dy, dz) : s.cone ? coneEntry(s.cone, ox, oy, oz, dx, dy, dz) :
-  s.bar ? barEntry(s, ox, oy, oz, dx, dy, dz) : s.parts ? groupEntry(s, ox, oy, oz, dx, dy, dz) :
-  s.cloth ? clothEntry(s.cloth, ox, oy, oz, dx, dy, dz) : entry(s.P, ox, oy, oz, dx, dy, dz));
+function hit(s, ox, oy, oz, dx, dy, dz) {
+  if (s.rail) return railEntry(s, ox, oy, oz, dx, dy, dz);
+  if (s.hole) return holeEntry(s, ox, oy, oz, dx, dy, dz);
+  return curvedEntry(s, ox, oy, oz, dx, dy, dz);
+}
+function curvedEntry(s, ox, oy, oz, dx, dy, dz) {
+  if (s.blob) return blobEntry(s.blob, ox, oy, oz, dx, dy, dz);
+  if (s.cone) return coneEntry(s.cone, ox, oy, oz, dx, dy, dz);
+  if (s.bar) return barEntry(s, ox, oy, oz, dx, dy, dz);
+  return solidEntry(s, ox, oy, oz, dx, dy, dz);
+}
+function solidEntry(s, ox, oy, oz, dx, dy, dz) {
+  if (s.parts) return groupEntry(s, ox, oy, oz, dx, dy, dz);
+  if (s.cloth) return clothEntry(s.cloth, ox, oy, oz, dx, dy, dz);
+  return entry(s.P, ox, oy, oz, dx, dy, dz);
+}
 // Ray against a group of solids that casts shadows as one: the nearest hit on a part whose box the ray enters.
 function groupEntry(g, ox, oy, oz, dx, dy, dz) {
   const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
@@ -1636,7 +1646,6 @@ function moveLights() {
 }
 // Light reaching a point with normal n: [brightness, share of it from lamps]. shade = false skips shadow rays.
 function lightAt(x, y, z, nx, ny, nz, shade = shadows) {
-  if (indoors === GUN_DECK) return indoors.light(x, y, z, nx, ny, nz);
   const moon = 0.035 + 0.17 * Math.max(0, nx * MOON[0] + ny * MOON[1] + nz * MOON[2]) + 0.04 * Math.max(0, ny);
   let warm = 0;
   for (const L of LIGHTGRID.get(Math.floor(x / TILE) * 1000 + Math.floor(z / TILE)) || NONE) {
@@ -2516,7 +2525,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : floorAt(wx, pz) ?? 0)));
     const fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
-    cls = mat + tier(b, indoors && mat === "b" ? 0 : warm);
+    cls = mat + tier(b, warm);
     // Grass blades lean with the wind; fountain water keeps its texture glyphs below.
     const grass = ny > 0.7 && (mat === "g" || mat === "G" || mat === "M") && s === TERRAIN;
     ch = grass && b > 0.03 ? blade(px, pz, odd) : glyph(b, odd);
