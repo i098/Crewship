@@ -55,6 +55,35 @@ for (const layer of layers) {
 }
 CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length, ...layers);
 
+Object.assign(cam, {x: -30, y: 2.8, z: -30}); T = 1907.56;
+cloudCount = 0; ROW_COUNT.fill(0); ROW_CLOUDS.fill(0); ROW_BINS.fill(0); SKY_STEP.fill(-1);
+placeCloud(-13, -1, 260,
+  (-15 + 0.1 + 0.8 * hash(-1, -13)) * 650 + 5 * T,
+  (-1 + 0.1 + 0.8 * hash(-12.5, -1)) * 650);
+const polarRows = ROW_COUNT.slice();
+let polarCover = 0;
+for (let el = 83.5; el < 90; el++) {
+  const b = el * Math.PI / 180;
+  for (let az = -179.5; az < 180; az++) {
+    const a = az * Math.PI / 180;
+    const d = [Math.cos(b) * Math.sin(a), Math.sin(b), Math.cos(b) * Math.cos(a)];
+    ROW_COUNT.fill(1);
+    const expected = cloudDensity(...d);
+    ROW_COUNT.set(polarRows);
+    assert(Math.abs(cloudDensity(...d) - expected) < 1e-6,
+      'row bounds must retain overhead cloud density');
+    assert(Math.abs(skyClouds(a, b) - expected) < (el === 89.5 ? 0.002 : 1e-5),
+      'azimuth bins must retain overhead cloud density');
+    if (el === 89.5 && expected > 0.125) polarCover++;
+  }
+}
+assert(polarCover > 0, 'the cloud must remain visible near the zenith');
+cloudCount = 0; ROW_COUNT.fill(0); ROW_BINS.fill(0);
+placeCloud(-13, -1, 260, 500, 500);
+assert.equal(ROW_COUNT[89], 0, 'a cloud below the zenith must not reach the top row');
+assert(ROW_BINS.slice(89 * 72).every((bin) => bin === 0),
+  'a cloud below the zenith must not mark the top azimuth bins');
+
 // Cloud edges that face the moon are lit; edges that face away are not.
 Object.assign(cam, {x: 0, y: 2.8, z: 0}); T = 0; gatherClouds(0);
 const edges = {toward: [], away: []};

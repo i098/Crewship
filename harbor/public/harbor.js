@@ -2106,6 +2106,8 @@ function placeCloud(I, J, base, along, across) {
     const rise = Math.asin(py / Math.hypot(px, py, pz)) * 180 / Math.PI, turn = (Math.atan2(px, pz) - az + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
     low = Math.min(low, rise); high = Math.max(high, rise); left = Math.min(left, turn); right = Math.max(right, turn);
   }
+  const zenith = flat * d / y / length;
+  if (y > 0 && zenith >= -0.04 && zenith <= 0.32) high = 90;
   if (high > 75) { left = -Math.PI; right = Math.PI; }
   for (let j = Math.max(0, Math.floor(low - 1)); j <= Math.min(SKY_H - 1, high + 1); j++) {
     ROW_CLOUDS[j * 160 + ROW_COUNT[j]++] = cloudCount;
