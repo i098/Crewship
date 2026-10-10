@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How this is built: Crewship harbor</title>
 <meta name="theme-color" content="#0a0f1c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="harbor.css">
 </head>
 <body class="how">
@@ -76,7 +78,8 @@
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor" target="_blank" rel="noopener">house guidance</a> for door crossings and controls inside.</li>
   <li><b>Content.</b> <code>harbor/build.py</code> builds the points of interest with the README's Features list and More docs row, and the changelog.</li>
-  <li><b>Deploy.</b> <code>harbor/</code> is plain HTML, CSS and JavaScript with no dependencies. A GitHub Actions workflow builds it and deploys it to Cloudflare Workers static assets on every push to <code>main</code> and on each release; nothing in <code>harbor/</code> ever reaches a Crewship host or image.</li>
+  <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
+  The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>
 </ul>
 <p><a href="https://github.com/i098/Crewship/tree/main/harbor" target="_blank" rel="noopener">The source on GitHub</a> &middot; <a href="./">Back to the harbor</a></p>
 </body>

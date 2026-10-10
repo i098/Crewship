@@ -1,9 +1,12 @@
 """harbor/build.py fills the landing page's points of interest from the repository."""
 
 import importlib.util
+import re
+import struct
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("harbor_build", ROOT / "harbor/build.py")
@@ -101,3 +104,44 @@ def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     assert "<script>alert(1)</script>" in manifest.text["mast"]
     assert len(manifest.text["mast"]) <= len("omp agents") + 52
     assert len(manifest.links) == len(manifest.spots)
+
+
+class Head(HTMLParser):
+    """The built page's meta properties and names, and its link rels, with their values."""
+
+    def __init__(self):
+        super().__init__()
+        self.meta, self.links = {}, {}
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta" and "content" in attrs:
+            self.meta[attrs.get("property") or attrs.get("name")] = attrs["content"]
+        elif tag == "link":
+            self.links[attrs["rel"]] = attrs["href"]
+
+
+def png_size(path):
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR", path
+    return struct.unpack(">II", data[16:24])
+
+
+def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
+    dist = build.build(tmp_path / "dist")
+    head = Head()
+    head.feed((dist / "index.html").read_text())
+    tagline = re.search(r"^\*\*(.+)\*\*$", (ROOT / "README.md").read_text(), re.M)[1]
+
+    assert head.meta["og:title"] == "Crewship"
+    assert head.meta["og:description"] == tagline
+    assert head.meta["og:type"] == "website"
+    assert head.meta["twitter:card"] == "summary_large_image"
+    assert head.meta["og:url"] == "https://crewship.si/"
+    assert head.meta["twitter:image"] == head.meta["og:image"]
+    image = urlparse(head.meta["og:image"])
+    assert (image.scheme, image.netloc) == ("https", "crewship.si")
+    assert png_size(dist / image.path.lstrip("/")) == (1200, 630)
+    assert (head.meta["og:image:width"], head.meta["og:image:height"]) == ("1200", "630")
+    assert png_size(dist / head.links["apple-touch-icon"]) == (180, 180)
+    assert (dist / head.links["icon"]).read_text().startswith("<svg ")
