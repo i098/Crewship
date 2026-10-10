@@ -2666,7 +2666,6 @@ function shadeLand(c, odd, t, dx, dy, dz) {
     ID[c] = CREST_ID;
   }
 }
-// Brightness changes the ground textures ask for: kerbs and flowers brighter, joints, ruts and wet sand darker.
 const GRAIN = { _: 1.35, "=": 1.3, "*": 1.5, "~": 1.25, "+": 1.1, "-": 1.1, ".": 1, ",": 0.85, ":": 0.7, ";": 0.8, '"': 0.9, "'": 0.95, "`": 0.9, " ": 1 };
 // Ground marks keep their glyph and the least brightness returned here, which decreases in fog: road dirt (the
 // only ground in "o"), foam and paving joints. Other textures return 0 and shade like the rest of their surface.
@@ -2734,7 +2733,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : standing(s, wy))));
     const fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
-    // Textured cells keep their glyph; fountain water keeps its animated texture glyphs.
+    // Ground marks and fountain water keep their texture glyphs.
     const texture = textureColor(s, tex, b, fog, warm);
     cls = texture || mat + tier(b, warm);
     ch = texture ? tex[1] : surfaceGlyph(s, mat, b, ny, px, pz, odd);
