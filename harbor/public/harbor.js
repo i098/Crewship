@@ -1976,7 +1976,7 @@ function render() {
   gatherClouds(performance.now() / 100);
   const scenery = interior ? interior.solids : world, vessel = interior ? NONE : ship;
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
-  if (!insideHouse) groundRings();
+  if (!interior) groundRings();
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   if (!interior) {
     drawGrass();
@@ -2737,7 +2737,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
     // Textured cells keep their glyph; fountain water keeps its animated texture glyphs.
     const texture = textureColor(s, tex, b, fog, warm);
-    cls = texture || mat + tier(b, insideHouse && mat === "b" ? 0 : warm);
+    cls = texture || mat + tier(b, warm);
     ch = texture ? tex[1] : surfaceGlyph(s, mat, b, ny, px, pz, odd);
   }
   // Floors get a negative id: they outline what stands on them but draw no edges themselves.
@@ -2803,10 +2803,10 @@ function seaNormal(x, z) {
 let onLand = false;
 // Is the point below the island or the sea? Waves never rise above SEA, so higher points skip them.
 const under = (x, y, z) => y < groundHeight(x, z) || (y < SEA && y < seaHeight(x, z));
-// The highest ground or wave crest within each ring around you, from the tile peaks, once per frame, and RISE,
+// The highest ground or wave crest within each ring around you, from the tile peaks, once per frame, and GROUND_RISE,
 // the steepest upward slope (rise over run) at which a ray can still meet any of it.
 const RINGS = [2, 4, 8, 14, 24, 40, 70, 120, 260], RINGTOP = new Float64Array(RINGS.length);
-let RISE = Infinity;
+let GROUND_RISE = Infinity;
 function groundRings() {
   RINGTOP.fill(SEA);
   for (let tk = 0; tk < PH; tk++) {
@@ -2818,10 +2818,10 @@ function groundRings() {
       if (k < RINGS.length) RINGTOP[k] = Math.max(RINGTOP[k], PEAKS[tk * PW + ti]);
     }
   }
-  RISE = RINGTOP[0] >= cam.y ? Infinity : -Infinity;
+  GROUND_RISE = RINGTOP[0] >= cam.y ? Infinity : -Infinity;
   for (let k = 1; k < RINGS.length; k++) {
     RINGTOP[k] = Math.max(RINGTOP[k], RINGTOP[k - 1]);
-    RISE = Math.max(RISE, (RINGTOP[k] - cam.y) / RINGS[k - 1]);
+    GROUND_RISE = Math.max(GROUND_RISE, (RINGTOP[k] - cam.y) / RINGS[k - 1]);
   }
 }
 // How far along the ray the march can start: inside each ring the ray stays above the ring's highest point
@@ -2837,8 +2837,8 @@ function marchStart(dy, hd) {
 }
 function surfaceHit(dx, dy, dz, limit) {
   const hd = Math.sqrt(dx * dx + dz * dz);
-  // A level ray never reaches the sea, and one rising faster than RISE passes over all the ground.
-  if (dy > -1e-4 && dy > RISE * hd) return Infinity;
+  // A level ray never reaches the sea, and one rising faster than GROUND_RISE passes over all the ground.
+  if (dy > -1e-4 && dy > GROUND_RISE * hd) return Infinity;
   const end = Math.min(limit, 260, dy > 0 ? (RINGTOP[RINGS.length - 1] - cam.y) / dy : Infinity);
   for (let a = marchStart(dy, hd), i = 0; i < 56 && a < end; i++) {
     let b = Math.min(end, a + 0.25 + a * 0.08);
