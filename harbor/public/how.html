@@ -34,8 +34,9 @@
   Fog and contact shadows add depth.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
   Grass uses blade glyphs.
-  Each tall-grass tuft is at most 1/14 of the screen height.
-  Its blades are <code>|</code> at the root and curve to <code>( ) \ /</code> near their pale moonlit tips; far tufts are dimmer.
+  The renderer caps each tuft's projected height at 1/14 of the screen height before rounding blades to whole cells.
+  Blades use <code>| ( ) \ /</code> with pale moonlit tips.
+  Far tufts are dimmer.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the room use fixed glyphs from an orange base to pale tips, so the idle room needs no redraws.

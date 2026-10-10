@@ -960,7 +960,7 @@ function grassChance(x, z, edge, paved, slope) {
   const patch = smooth(Math.sin(x * 0.29 + Math.sin(z * 0.21) * 2) * Math.sin(z * 0.33 - x * 0.12) * 2 + 0.3);
   return Math.min(1, 0.06 + 0.8 * patch + 1.2 * Math.exp(-edge * edge) + 3 * slope);
 }
-// No clump where you cannot walk: walls, hedges, trunks, posts, crates.
+// Keep clumps outside solid footprints: walls, hedges, trunks, posts, crates.
 const grassFree = (solids, x, y, z) => !solids.some((s) => x > s.bb[0] && x < s.bb[3] && z > s.bb[2] && z < s.bb[5] && walkingSolid(s, y));
 // Seeded clumps on a jittered 0.9 m grid, the same on every visit: [x, y, z, height, seed] each.
 function plantGrass() {
