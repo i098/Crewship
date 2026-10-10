@@ -1006,13 +1006,21 @@ function drawTuft(s, rise, half, lean, b, pale) {
   for (let k = 0; k < n; k++) {
     const u = n > 1 ? (k & 1 ? 1 : -1) * (1 - 2 * (k >> 1) / (n - 1)) : 0;
     const high = Math.max(1, Math.round(rise * (1 - 0.45 * u * u) * (0.7 + 0.3 * ((s * 13 + k * 0.61) % 1))));
-    const foot = GP[0] + u * half * 0.25, fan = u * half * 0.75, bend = lean * high / rise, crown = high > 4 ? high - 2 : high - 1;
-    for (let r = 0; r < high; r++) {
-      const t = (r + 0.5) / high, slope = (fan + 2 * bend * t) / high, a = Math.abs(slope);
-      const ch = a >= 0.9 ? (slope > 0 ? "/" : "\\") : a >= 0.45 && t > 0.6 && high > 3 ? (slope > 0 ? ")" : "(") : "|";
-      ropeCell(Math.floor(foot + fan * t + bend * t * t), Math.floor(GP[1]) - r, GP[2], ch, r >= crown ? tip : r ? blade : root);
-    }
+    drawGrassBlade(GP[0] + u * half * 0.25, u * half * 0.75, lean * high / rise, high, root, blade, tip);
   }
+}
+function drawGrassBlade(foot, fan, bend, high, root, blade, tip) {
+  const crown = high > 4 ? high - 2 : high - 1;
+  for (let r = 0; r < high; r++) {
+    const t = (r + 0.5) / high, slope = (fan + 2 * bend * t) / high;
+    ropeCell(Math.floor(foot + fan * t + bend * t * t), Math.floor(GP[1]) - r, GP[2], grassBladeGlyph(slope, t, high), r >= crown ? tip : r ? blade : root);
+  }
+}
+function grassBladeGlyph(slope, t, high) {
+  const a = Math.abs(slope);
+  if (a >= 0.9) return slope > 0 ? "/" : "\\";
+  if (a >= 0.45 && t > 0.6 && high > 3) return slope > 0 ? ")" : "(";
+  return "|";
 }
 
 const me = { x: 6.5, z: -15, yaw: -0.6, pitch: 0.4 };
