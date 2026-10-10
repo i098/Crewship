@@ -315,8 +315,9 @@ for (let i = 0; i < 16; i++) {
 }
 
 // Harbor detail, kept to the edges so the walk stays clear: cargo, rope, boats, rocks, palms, lamps.
+const crateSlats = (x, y, z, nx, ny, nz) => (Math.abs(nx) + Math.abs(nz) > 0.5 && ((x + z + y) * 4 + 99) % 1 < 0.15 ? "-" : null);
 for (const [x, z, h] of [[6.2, -9.5, 0.8], [6.2, -8.6, 0.8], [6.25, -9.1, 1.6], [12, 21.2, 0.9], [13, 21.3, 0.9], [12.5, 21.2, 1.8]]) {
-  box(world, x, h - 0.8 + 1.2, z, x + 0.75, h + 1.2, z + 0.75, "o", { tex: (x, y, z, nx, ny, nz) => (Math.abs(nx) + Math.abs(nz) > 0.5 && ((x + z + y) * 4 + 99) % 1 < 0.15 ? "-" : null) });
+  box(world, x, h - 0.8 + 1.2, z, x + 0.75, h + 1.2, z + 0.75, "o", { tex: crateSlats });
 }
 for (const [x, z] of [[6.5, 0.6], [6.5, 1.3], [5.9, 0.9], [6.5, 10.8], [15.5, 21.4], [16.2, 21.3]]) {
   column(world, x, z, 0.3, 0.27, 1.2, 2.1, "o", { spot: "barrels", tex: (x, y) => (Math.abs(y - 1.42) < 0.06 || Math.abs(y - 1.88) < 0.06 ? "-" : null) });
@@ -678,6 +679,92 @@ function roomFloor(x, y, z) {
 function roomWindow(x, y) {
   return hash(Math.floor(x * 12), Math.floor(y * 12)) > 0.985 ? "*" : ".";
 }
+// A flame's glyph and colour at height y in its box b, from the base to the tip: an orange core, golden flame and
+// pale tips. Flames keep these glyphs, so the idle room still needs no redraws; the room light carries the glow.
+const FLAME = [["#", "rw6"], ["*", "l6"], ["'", "l7"]];
+function roomFlame(y, b) {
+  return FLAME[Math.min(2, 3 * (y - b[1]) / (b[4] - b[1]) | 0)];
+}
+// Big brick courses with staggered joints, along whichever horizontal axis the face runs. Each joint starts
+// another colour run in a text row, so the bricks stay large and only line the firebox.
+function brickBond(x, y, z) {
+  const u = x + z + (Math.floor((y + 9) / 0.2) % 2) * 0.25;
+  return (y + 9) % 0.2 < 0.025 || (u + 9) % 0.5 < 0.03 ? "-" : null;
+}
+// A row of books standing at height y0, at most h tall: eight spine colours, uneven heights and dark gaps,
+// along whichever horizontal axis the row runs.
+const SPINES = "rbgoynhM";
+function bookRow(x0, y0, z0, x1, h, z1) {
+  box(room, x0, y0, z0, x1, y0 + h, z1, "n", { tex: (x, y, z) => {
+    const u = (x + z + 9) * 15, k = Math.floor(u);
+    return u - k < 0.12 || y - y0 > h * (0.6 + 0.4 * hash(k, 5)) ? "p" : SPINES[Math.floor(hash(k, 7) * SPINES.length)];
+  } });
+}
+// A fireplace on the right wall: hearth, brick jambs and lintel, sooty back, mantel, a smooth brick-red chimney
+// breast, and a fire of embers, logs and flames.
+function fireplace() {
+  const brick = { tex: brickBond, dim: 0.75 };
+  box(room, 2.2, 0, 3.55, 3, 0.06, 5.25, "t");
+  for (const z of [3.7, 4.8]) box(room, 2.62, 0.06, z, 3, 1.15, z + 0.3, "r", brick);
+  box(room, 2.62, 0.85, 4, 3, 1.15, 4.8, "r", brick);
+  box(room, 2.92, 0.06, 4, 3, 0.85, 4.8, "p", { dim: 0.15 });
+  box(room, 2.5, 1.15, 3.6, 3, 1.25, 5.2, "o");
+  box(room, 2.68, 1.25, 3.75, 3, 3.4, 5.05, "r", { dim: 0.55 });
+  box(room, 2.66, 0.06, 4.1, 2.9, 0.1, 4.7, "r");
+  for (const x of [2.68, 2.8]) box(room, x, 0.1, 4.15, x + 0.1, 0.2, 4.65, "n", { dim: 0.5 });
+  for (const [x, z, r, h] of [[2.84, 4.18, 0.07, 0.3], [2.76, 4.3, 0.1, 0.5], [2.79, 4.44, 0.13, 0.62], [2.76, 4.57, 0.09, 0.45], [2.84, 4.66, 0.06, 0.28]]) {
+    column(room, x, z, r, 0.01, 0.2, 0.2 + h, "l", { tex: roomFlame });
+  }
+}
+// A bookcase against the back wall, left of the window, with a row of books on each shelf.
+function bookcase() {
+  for (const x of [-2.95, -1.85]) box(room, x, 0, 5.58, x + 0.05, 2.3, 6, "o");
+  box(room, -2.97, 2.3, 5.55, -1.78, 2.36, 6, "o");
+  for (const [y, end, h] of [[0, -1.95, 0.42], [0.6, -2.2, 0.34], [1.12, -1.92, 0.38], [1.62, -2.35, 0.3]]) {
+    box(room, -2.9, y, 5.6, -1.9, y + 0.05, 6, "o");
+    bookRow(-2.88, y + 0.05, 5.66, end, h, 5.96);
+  }
+}
+// A wooden chair at (x, z) facing +z (facing 1) or -z (facing -1): four legs, a seat and a back.
+function chair(x, z, facing) {
+  for (const dx of [-0.2, 0.16]) for (const dz of [-0.2, 0.16]) box(room, x + dx, 0, z + dz, x + dx + 0.04, 0.45, z + dz + 0.04, "o");
+  box(room, x - 0.22, 0.45, z - 0.22, x + 0.22, 0.5, z + 0.22, "o");
+  const back = z - facing * 0.2;
+  box(room, x - 0.22, 0.5, back - 0.025, x + 0.22, 1, back + 0.025, "o");
+}
+// A leather armchair facing +z from its corner at (x0, z0): seat, back and arms.
+function armchair(x0, z0) {
+  box(room, x0, 0, z0, x0 + 0.75, 0.42, z0 + 0.7, "n");
+  box(room, x0, 0, z0, x0 + 0.75, 0.95, z0 + 0.18, "n");
+  for (const x of [x0, x0 + 0.61]) box(room, x, 0.42, z0 + 0.18, x + 0.14, 0.62, z0 + 0.7, "n");
+}
+// A clay pot with a two-tier leafy crown standing at height y, `size` times a 1 m plant. The crown uses cones, not
+// ellipsoids: an ellipsoid would add another object shape to the room's ray loop and slow every room frame.
+function plant(x, z, y, size) {
+  const top = y + 0.36 * size;
+  column(room, x, z, 0.16 * size, 0.2 * size, y, top, "r");
+  column(room, x, z, 0.34 * size, 0.08 * size, top, top + 0.6 * size, "M");
+  column(room, x, z, 0.24 * size, 0.01, top + 0.4 * size, top + size, "M");
+}
+// A woven rug flat on the floor: a pale border, a brown band, then pale diamonds on red. It does not block walking.
+function rug(x0, z0, x1, z1) {
+  box(room, x0, 0, z0, x1, 0.015, z1, "r", { tex: (x, y, z) => {
+    const edge = Math.min(x - x0, x1 - x, z - z0, z1 - z);
+    if (edge < 0.2) return edge < 0.12 ? "y" : "n";
+    return Math.abs((x + 9) * 2 % 1 - 0.5) + Math.abs((z + 9) * 2 % 1 - 0.5) < 0.2 ? "y" : null;
+  } });
+}
+// A sea chart in a wooden frame, flat on a wall, in a box that is thin across the wall: pale coasts and blue
+// water under a grid. Charts do not block walking.
+function chart(x0, y0, z0, x1, y1, z1) {
+  const alongX = x1 - x0 > z1 - z0, a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
+  box(room, x0, y0, z0, x1, y1, z1, "y", { solid: false, tex: (x, y, z) => {
+    const u = alongX ? x : z;
+    if (Math.min(y - y0, y1 - y, u - a0, a1 - u) < 0.05) return "o";
+    if ((u + 9) * 6 % 1 < 0.08 || (y + 9) * 6 % 1 < 0.08) return "t";
+    return Math.sin(u * 5) + Math.sin(y * 7 + u * 2) > 0.9 ? null : "b";
+  } });
+}
 function buildRoom() {
   box(room, -3.2, -0.2, -0.2, 3.2, 0, 6.2, "o", { tex: roomFloor, dim: 0.4 });
   const plaster = { dim: 0.32 };
@@ -703,6 +790,27 @@ function buildRoom() {
   for (const x of [-0.55, 0.85]) for (const z of [3.2, 5.3]) box(room, x, 0, z, x + 0.1, 0.3, z + 0.1, "o");
   column(room, -2.2, 2.9, 0.12, 0.1, 1.05, 1.7, "t");
   column(room, -2.2, 2.9, 0.35, 0.2, 1.7, 2.1, "l");
+  // Furniture stands against the walls; the middle of the room and the right aisle stay clear.
+  fireplace();
+  bookcase();
+  chair(-1.85, 2.12, 1);
+  chair(-1.85, 3.88, -1);
+  armchair(1.85, 1.75);
+  for (const b of [[2.15, 0, 0.08, 2.85, 0.62, 0.72], [2.25, 0.62, 0.14, 2.75, 1.06, 0.6], [1.5, 0, 0.1, 2.05, 0.5, 0.6]]) {
+    box(room, ...b, "o", { tex: crateSlats });
+  }
+  plant(2.55, 5.5, 0, 1.15);
+  plant(1.1, 5.87, 1.3, 0.45);
+  rug(-0.9, 1.15, 1.3, 2.85);
+  chart(-3, 1.3, 0.7, -2.97, 2.1, 1.85);
+  chart(2.97, 1.35, 1.4, 3, 2.05, 2.5);
+  chart(1.85, 1.6, 5.97, 2.85, 2.35, 6);
+  // By the door: a sea chest under a wall shelf of books and a glass jar.
+  box(room, -2.5, 0, 0.06, -1.45, 0.42, 0.6, "o", { dim: 0.7, tex: crateSlats });
+  box(room, -2.54, 0.42, 0.04, -1.41, 0.52, 0.64, "n");
+  box(room, -2.6, 1.45, 0, -1.3, 1.5, 0.28, "o");
+  bookRow(-2.55, 1.5, 0.03, -1.75, 0.3, 0.25);
+  column(room, -1.5, 0.14, 0.07, 0.06, 1.5, 1.72, "h");
 }
 buildRoom();
 
@@ -735,9 +843,14 @@ function movePlayer(x, z, here) {
   const fy = floorAt(x, z);
   if (fy !== null && Math.abs(fy - here) <= 0.6 && !blocked(x, z, fy)) { me.x = x; me.z = z; }
 }
+// The table lamp and the hearth fire light the room without shadow rays: x, y, z, intensity and reach of each.
+const ROOM_LIGHTS = [-2.2, 1.9, 2.9, 0.85, 9, 2.5, 0.35, 4.4, 0.55, 3.2];
 function roomLight(x, y, z, nx, ny, nz) {
-  const lx = -2.2 - x, ly = 1.9 - y, lz = 2.9 - z, d = Math.hypot(lx, ly, lz);
-  const warm = 0.28 + 0.85 * Math.max(0, 1 - d / 9) * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / d));
+  let warm = 0.28;
+  for (let k = 0; k < ROOM_LIGHTS.length; k += 5) {
+    const lx = ROOM_LIGHTS[k] - x, ly = ROOM_LIGHTS[k + 1] - y, lz = ROOM_LIGHTS[k + 2] - z, d = Math.sqrt(lx * lx + ly * ly + lz * lz);
+    warm += ROOM_LIGHTS[k + 3] * Math.max(0, 1 - d / ROOM_LIGHTS[k + 4]) * (0.35 + 0.65 * Math.max(0, (nx * lx + ny * ly + nz * lz) / d));
+  }
   return [warm + 0.06, warm / (warm + 0.06)];
 }
 function castRoom(c, i, odd, dx, dy, dz) {
@@ -746,6 +859,9 @@ function castRoom(c, i, odd, dx, dy, dz) {
   if (hitS && hitS.tex === roomWindow) {
     const star = roomWindow(cam.x + dx * hitT, cam.y + dy * hitT) === "*";
     put(c, star ? "*" : ".", star ? "m5" : "d2", hitS.id * 16 + (hitK >> 2), hitT);
+  } else if (hitS && hitS.tex === roomFlame) {
+    const [ch, cls] = roomFlame(cam.y + dy * hitT, hitS.bb);
+    put(c, ch, cls, hitS.id * 16, hitT);
   } else if (hitS) shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
   else shadeSky(c, dx, dy, dz);
 }
