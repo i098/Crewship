@@ -2068,12 +2068,11 @@ let cloudCount = 0;
 const SKY_W = 360, SKY_H = 90, SKY = new Float32Array(SKY_W * SKY_H * 2), SKY_STEP = new Int32Array(SKY_W * SKY_H).fill(-1);
 const SKY_ROW = new Int32Array(SKY_H), ROW_CLOUDS = new Uint8Array(SKY_H * 160), ROW_COUNT = new Uint8Array(SKY_H);
 const ROW_BINS = new Uint8Array(SKY_H * 72);
-let cloudCamX, cloudCamY, cloudCamZ;
+let cloudFrame = -1;
 // Once per frame: each row's step for `tenths` (the wall clock in tenths of a second), and the clouds in reach.
 function gatherClouds(tenths) {
-  if (reduced.matches && (cam.x !== cloudCamX || cam.y !== cloudCamY || cam.z !== cloudCamZ)) SKY_STEP.fill(-1);
-  cloudCamX = cam.x; cloudCamY = cam.y; cloudCamZ = cam.z;
-  for (let j = 0; j < SKY_H; j++) SKY_ROW[j] = Math.floor(tenths + j * 0.618 % 1);
+  if (reduced.matches) SKY_ROW.fill(--cloudFrame);
+  else for (let j = 0; j < SKY_H; j++) SKY_ROW[j] = Math.floor(tenths + j * 0.618 % 1);
   const along0 = cam.x * WIND[0] + cam.z * WIND[2], across0 = cam.x * WIND[2] - cam.z * WIND[0];
   cloudCount = 0;
   ROW_COUNT.fill(0);

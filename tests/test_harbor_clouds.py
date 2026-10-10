@@ -167,6 +167,18 @@ const normalRow = readRow();
 assert.deepEqual(normalRow, initialRow, 'fresh texels must remain cached during normal-motion walking');
 
 reduced.matches = true;
+gatherClouds(100.32);
+const transitionedRow = readRow();
+let transitionChanges = 0;
+rowDirections.forEach((d, i) => {
+  const cover = compute(...toward(...d)), rim = cloudEdge;
+  assert(Math.abs(transitionedRow[i][0] - cover) < 1e-6,
+    'enabling reduced motion after walking must refresh density without further movement');
+  assert(Math.abs(transitionedRow[i][1] - rim) < 1e-6,
+    'enabling reduced motion after walking must refresh the rim without further movement');
+  if (Math.abs(transitionedRow[i][0] - normalRow[i][0]) > 1e-5) transitionChanges++;
+});
+assert(transitionChanges > 0, 'the mode transition must replace stale cloud positions');
 for (const axis of ['x', 'y', 'z']) {
   for (const delta of [1, -1]) {
     const before = readRow();
@@ -183,11 +195,19 @@ for (const axis of ['x', 'y', 'z']) {
     });
     assert(changed > 0, 'each camera axis must change the visible cloud density');
     computed = 0; gatherClouds(100.16);
-    assert.deepEqual(readRow(), after, 'the final camera position must remain correct while idle');
-    assert.equal(computed, 0, 'an unchanged reduced-motion camera must keep fresh texels');
+    assert.deepEqual(readRow(), after, 'a render after releasing movement must retain the final cloud position');
+    assert(computed > 0, 'each reduced-motion render must refresh the texels it reads');
+    computed = 0;
+    assert.deepEqual(readRow(), after, 'repeated reads within one render must retain density and rim');
+    assert.equal(computed, 0, 'each texel must refresh only once per reduced-motion render');
   }
 }
 reduced.matches = false;
+gatherClouds(100.32);
+const resumedRow = readRow();
+computed = 0; gatherClouds(100.32);
+assert.deepEqual(readRow(), resumedRow, 'disabling reduced motion must restore the time-based cache');
+assert.equal(computed, 0, 'normal-motion renders within the same time step must reuse texels');
 `, context);
 """,
         text=True,
