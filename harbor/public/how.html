@@ -60,7 +60,7 @@
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
   The house's lamp and fire, the cabin's hanging lantern and the gun deck lanterns light nearby surfaces without shadow rays.
-  The cabin's wall lantern glows like the lit windows but lights no other surface.
+  The cabin's wall lantern glows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Clouds.</b> Three cloud layers, with bases at 260, 480 and 900 m, drift downwind; the nearer layers move faster as you walk.
@@ -91,7 +91,9 @@
   Each texel keeps one glyph from <code> .:-=+*#%@</code> and one of a few colours; room light sets the colour level.
   A painting far from you reads a half or quarter size copy of its texture.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
-  The moonlit sea seen through the gun ports uses still wave glyphs.
+  Windows and gun ports are openings that each room shares with its outside walls.
+  A ray through one goes on in the scene on the other side, from where the room stands in it, so the room shows through its panes and the outside through its openings.
+  Each frame culls the far side only for the screen area of the openings, so no window needs its own rendering pass.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one, and along hill crests.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.

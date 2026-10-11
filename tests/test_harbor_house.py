@@ -134,23 +134,21 @@ minimap();
 assert.equal(mapMode, 0, 'the island map must not open inside');
 assert.equal(mapBox, null);
 // Table, bed, fireplace, bookcase, chair, armchair, crates, sea chest and corner plant.
-for (const [x, z] of [[-2, 3], [0, 4], [2.4, 4.4], [-2.4, 5.7], [-1.85, 2.12], [2.2, 2.1], [2.5, 0.4], [-2, 0.3], [2.55, 5.5]]) {
+for (const [x, z] of [[-2, 3], [2.8, 5.5], [0, 6.5], [-3.6, 6.2], [-1.85, 2.12], [2.2, 2.1], [2.5, 0.4], [-2, 0.3], [1.3, 6.4]]) {
   assert(blocked(x, z, 0), `interior furniture must block walking at ${x}, ${z}`);
 }
 assert(!blocked(0.2, 2, 0), 'the rug must not block walking');
 Object.assign(me, {x: 0, z: 0.8, yaw: 0});
 keys.add('f');
-for (let i = 0; i < 60; i++) step(0.02);
+for (let i = 0; i < 150; i++) step(0.02);
 keys.clear();
-assert(me.z > 2.5 && me.z < 3, 'walking must stop at the bed foot');
-keys.add('r');
-for (let i = 0; i < 24; i++) step(0.02);
-keys.clear();
+assert(me.z > 5.8 && me.z < 6.1, 'walking must stop at the hearth');
+Object.assign(me, {x: -2.4, z: 4.5, yaw: 0});
 keys.add('f');
 for (let i = 0; i < 60; i++) step(0.02);
 keys.clear();
-assert(me.z > 5 && !blocked(me.x, me.z, 0), 'the right aisle must reach the window');
-for (const [x, z, yaw] of [[-2.7, 1, -Math.PI/2], [2.7, 1, Math.PI/2], [1.8, 5.4, 0]]) {
+assert(me.z > 6.2 && !blocked(me.x, me.z, 0), 'the left aisle must reach the back window');
+for (const [x, z, yaw] of [[-2.7, 1, -Math.PI/2], [2.7, 1, Math.PI/2], [1.5, 3.5, 0]]) {
   Object.assign(me, {x, z, yaw});
   keys.add('f');
   for (let i = 0; i < 30; i++) step(0.02);
