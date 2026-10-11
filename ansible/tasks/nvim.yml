@@ -23,6 +23,8 @@
       {{ not (crewship_nvim_config.stat.exists | default(false))
          or ((crewship_nvim_config.stat.isdir | default(false))
              and not (crewship_nvim_config.stat.islnk | default(false))
+             and crewship_nvim_entries.skipped_paths is defined
+             and (crewship_nvim_entries.skipped_paths | length) == 0
              and (crewship_nvim_entries.matched | default(1)) == 0) }}
 
 - name: Seed LazyVim in a missing or empty configuration directory

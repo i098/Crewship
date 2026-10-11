@@ -52,6 +52,7 @@ The secret does not enter the image.
 Every host gets Neovim.
 Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `config/nvim/` when `~/.config/nvim` is missing or an empty real directory.
 Apply leaves nonempty directories, files, and symlinks unchanged, including dangling symlinks.
+Apply also leaves directories unchanged when it cannot complete the directory scan.
 It never merges files or installs plugins during apply.
 
 Run `nvim` to start the editor.

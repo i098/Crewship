@@ -1,6 +1,7 @@
 """Exercise the first-write configuration through Ansible in a disposable home."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -101,3 +102,28 @@ def test_existing_configuration_is_never_merged_or_replaced(tmp_path, kind):
         assert list(target.iterdir()) == []
     else:
         assert not target.exists()
+
+
+def test_unreadable_configuration_is_preserved(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("Directory permission failures require a non-root user")
+    home = tmp_path / "home"
+    config = home / ".config/nvim"
+    config.mkdir(parents=True)
+    init = config / "init.lua"
+    init.write_text("user config")
+    config.chmod(0o300)
+    before = config.stat()
+    try:
+        with pytest.raises(PermissionError):
+            list(config.iterdir())
+        for check in (True, False):
+            assert "changed=0" in apply(tmp_path, home, check=check)
+            assert init.read_text() == "user config"
+            after = config.stat()
+            assert (after.st_ino, after.st_mode, after.st_mtime_ns) == (
+                before.st_ino, before.st_mode, before.st_mtime_ns
+            )
+    finally:
+        config.chmod(0o700)
+    assert list(config.iterdir()) == [init]
