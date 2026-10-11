@@ -76,8 +76,8 @@ Host sizing and every auto pruner are listed in [Capacity and pruners](../capaci
 GitHub Actions (`.github/workflows/ci.yml`) starts on pushes to `main`, on pull requests, and on manual dispatch.
 When classification succeeds and identifies code changes, CI runs these checks:
 
-- `uv sync --locked --group dev`, then `ruff check` and `pytest`.
-- The [shared Postgres service verification](../shared-postgres.md#verification).
+- `uv sync --locked --group dev`, then `ruff check` and `pytest -n auto --dist worksteal` (pytest-xdist).
+- The [shared Postgres service verification](../shared-postgres.md#verification), run beside the tests.
 - `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../herdr-patch/README.md) also runs on the operator's computer.
 - `bash config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
 - `./ship.sh inspect` for `config/default.yml` and `containers/crewship.container.yml`.
@@ -87,7 +87,7 @@ When classification succeeds and identifies code changes, CI runs these checks:
 - A full worker image build and the behavior smoke in `tests/container-smoke.sh`.
 - The harbor checks in WebKit on iPhone and in desktop Chromium.
 
-The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`.
+The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`, and `scope=imessage` or `scope=all`.
 Documentation-only PRs change only root-level `README*` files, files under `docs/` or `changelog.d/`, or `*.md` files at any depth.
 Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
 Renames check both the old and new paths.
@@ -98,6 +98,7 @@ The separate `changelog fragment` job runs on PRs unless they have the `no chang
 The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
+A PR that changes only `imessage/` plus documentation (`scope=imessage`) runs only the iMessage tests and the core tests (changelog, instructions, README, skills) in the Python step; every other change and every push runs the whole suite.
 Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
