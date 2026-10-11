@@ -54,6 +54,9 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 ## How it works
 
+The services, agents and guards on a host, and how they connect: [Architecture](docs/architecture.md).
+
+
 ```mermaid
 flowchart TD
     box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]

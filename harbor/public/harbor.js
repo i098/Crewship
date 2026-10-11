@@ -27,7 +27,7 @@ for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) 
 const spots = {};
 for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
   const a = li.querySelector("a");
-  spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p") };
+  spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p"), doc: "doc" in li.dataset };
 }
 
 // ---- World -------------------------------------------------------------------------------
@@ -3888,8 +3888,9 @@ function show(id) {
       document.querySelector(".top nav").cloneNode(true));
     return;
   }
-  const s = spots[id], link = node("a", id === "docsboard" ? "Docs index" : "Open");
-  link.setAttribute("aria-label", `Open: ${s.title}`);
+  const s = spots[id], doc = s.doc, label = doc ? "Read the docs ->" : id === "docsboard" ? "Docs index" : "Open";
+  const link = node("a", label);
+  link.setAttribute("aria-label", `${label}: ${s.title}`);
   link.target = "_blank";
   link.rel = "noopener";
   link.href = s.href;
