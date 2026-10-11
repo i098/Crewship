@@ -37,12 +37,38 @@ check_args "$@"
 work=
 trap 'rm -rf "$work"' EXIT
 
+# Saves URL $1 to file $2; a 404 means release $3 has no install artifact yet.
+download() {
+  local code
+  code=$(curl -sSL -o "$2" -w '%{http_code}' "$1") || return 1
+  case $code in
+    200) ;;
+    404) echo "install.sh: the release $3 has no install artifact yet; try again in a few minutes" >&2; return 1 ;;
+    *) echo "install.sh: download of $1 failed (HTTP $code)" >&2; return 1 ;;
+  esac
+}
+
+# Prints the sha256 digest GitHub lists for asset $3 of release $2 in repo $1. The API is
+# rate limited (60 requests an hour per IP without GH_TOKEN or GITHUB_TOKEN); when it
+# does not answer, the .sha256 asset stays the only check.
+asset_digest() {
+  local token=${GH_TOKEN:-${GITHUB_TOKEN:-}} auth=() meta code
+  [ -z "$token" ] || auth=(-H "Authorization: Bearer $token")
+  meta=$work/release.json
+  code=$(curl -sS "${auth[@]}" -o "$meta" -w '%{http_code}' "https://api.github.com/repos/$1/releases/tags/$2") || code=000
+  if [ "$code" = 200 ]; then
+    jq -r --arg name "$3" '.assets[] | select(.name == $name) | .digest // empty' "$meta"
+  else
+    echo "install.sh: the GitHub API answered HTTP $code, so the asset digest is not checked; the .sha256 check still applies (set GH_TOKEN to raise the rate limit)" >&2
+  fi
+}
+
 # Downloads, verifies and unpacks the release artifact of $tag from $base into
 # $work/tree. Nothing outside $work changes, so a failure leaves the install alone.
 fetch_release() {
   local base=$1 tag=$2 digest=$3 name=crewship-$2.tar.gz want got
-  curl -fsSL -o "$work/$name" "$base/$name"
-  curl -fsSL -o "$work/$name.sha256" "$base/$name.sha256"
+  download "$base/$name" "$work/$name" "$tag"
+  download "$base/$name.sha256" "$work/$name.sha256" "$tag"
   want=$(awk '{print $1; exit}' "$work/$name.sha256")
   got=$(sha256sum "$work/$name" | awk '{print $1}')
   [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: $name does not match its .sha256; refusing to install" >&2; return 1; }
@@ -67,9 +93,8 @@ carry_host_files() {
 }
 
 main() {
-  local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-} base=${CREWSHIP_RELEASE_URL:-}
+  local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
-  local digest='' meta
   local sudo=sudo
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
@@ -86,14 +111,10 @@ main() {
     $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
   fi
 
-  # CREWSHIP_RELEASE_URL (a directory holding the two release files) is for tests and mirrors.
-  if [ -z "$base" ]; then
-    meta=$(curl -fsSL "https://api.github.com/repos/$repo/releases/${ref:+tags/}${ref:-latest}")
-    ref=$(jq -r .tag_name <<<"$meta")
-    digest=$(jq -r --arg name "crewship-$ref.tar.gz" '.assets[] | select(.name == $name) | .digest // empty' <<<"$meta")
-    base=https://github.com/$repo/releases/download/$ref
-  fi
+  # The latest tag comes from the unmetered releases/latest redirect, not the API.
+  [ -n "$ref" ] || { ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}; }
   [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
+  local base=https://github.com/$repo/releases/download/$ref
   if [ -e "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$dir/.git" ]; then
     echo "install.sh: $dir exists but is not a Crewship install; move it away and rerun" >&2
     return 1
@@ -105,7 +126,7 @@ main() {
   else
     mkdir -p "$releases"
     work=$(mktemp -d "$releases/.tmp.XXXXXX")
-    fetch_release "$base" "$ref" "$digest"
+    fetch_release "$base" "$ref" "$(asset_digest "$repo" "$ref" "crewship-$ref.tar.gz")"
     local old backup= prev=
     if [ -e "$dir" ]; then
       prev=$(readlink "$dir" || true)
@@ -126,10 +147,7 @@ main() {
       echo "The git clone moved to $backup (kept; delete it when you no longer need it)."
     else
       mv -T "$dir.new" "$dir"
-      # Keep the release just replaced for a rollback; remove older ones.
-      for old in "$releases"/v*; do
-        [ "$old" = "$target" ] || [ "$old" = "$prev" ] || rm -rf "$old"
-      done
+      if [[ $prev == "$releases"/* && $prev != "$target" ]]; then rm -rf "$prev"; fi
     fi
   fi
   echo "Crewship $ref in $dir"
