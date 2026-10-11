@@ -89,6 +89,8 @@ tui:
   vimModeDisplay: icon
 retry:
   fallbackChains:
+    anthropic/claude-opus-5-5:
+    - anthropic/claude-fable-5-1:medium
     anthropic/claude-fable-5-1:
     - anthropic/claude-opus-5
     anthropic/claude-sonnet-5:

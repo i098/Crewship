@@ -56,10 +56,10 @@ Crewship makes it super easy to start using agents in the cloud.
 <details>
 <summary><b>Default config</b></summary>
 
-- **Agents and models:** [omp](docs/omp.md) runs the agents. The home model is `anthropic/claude-opus-5-5:xhigh`, with the advisor off. Firstmate picks a model for each task: `anthropic/claude-haiku-5-5` or `openai-codex/gpt-6-luna` for small work, `anthropic/claude-sonnet-5-5` or `openai-codex/gpt-6.1-sol` for ordinary work (the default), and `anthropic/claude-opus-5-5` for hard work only. The spawning agent picks the thinking level.
-- **Model limits and fallbacks:** Codex context is 272K by default and 1M at most (the bundled omp catalog caps it at 872K). A model that keeps failing falls back along `retry.fallbackChains`: Fable 5.1 to Opus 5, and Sonnet 5 to Fable 5.1, then Opus 5.
+- **Models:** [omp](docs/omp.md) runs the agents. Opus 5.5 at extra-high thinking runs the home, with the advisor off. Firstmate picks a model for each task: Haiku 5.5 or Luna for small work, Sonnet 5.5 or Sol 6.1 for ordinary work (the default), and Opus 5.5 for hard work only. The spawning agent picks the thinking level.
+- **Fallbacks:** a model that keeps failing falls back to the next one. Opus 5.5 falls back to Fable 5.1 at medium thinking, Fable 5.1 to Opus 5, and Sonnet 5 to Fable 5.1, then Opus 5.
 - **Plugins and extensions:** the omp plugins `ponytail`, `i-have-adhd`, and `caveman`. Extensions add the [turn-end quality check](docs/omp.md#quality-gate), [status-line icons](docs/omp.md#status-line-icons), the [Herdr sidebar](docs/herdr.md) feed, and a block on kill-by-name commands such as `pkill` and `killall`.
-- **Gates:** the [no-mistakes pipeline](docs/omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. A gate runs on `anthropic/claude-sonnet-5-5:high` by default and on `anthropic/claude-opus-5-5:high` for hard work. Pick another model for one run with `--model`.
+- **Gates:** the [no-mistakes pipeline](docs/omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. Gates use Sonnet 5.5 at high thinking, and Opus 5.5 for hard work. Pick another model for one run with `--model`.
 - **Skills and rules:** [`skills/`](skills/) and [`config/AGENTS.md`](config/AGENTS.md) serve omp, Claude Code, and Codex. Public files install with the `agents` profile, and private files take precedence ([omp](docs/omp.md#skills)). The [rules](docs/omp.md#rules) set plain technical writing, always-on skills, and native stacked PRs.
 - **Profiles on by default:** `agents`, `development`, `firstmate`, `docker`, `chat`
 - **Opt-in profiles:** `tailscale`, `desktop`, `fleet_guards`, `shared_postgres`, `fleet_browsers`

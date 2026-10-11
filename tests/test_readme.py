@@ -97,38 +97,30 @@ def test_default_config_lists_the_current_defaults():
     ]
     lines = {line.split(":**")[0].removeprefix("- **"): line for line in section("Default config")}
 
-    assert (
-        ticks(profiles_on := [n for n, on in profiles.items() if on])
-        in lines["Profiles on by default"]
-    )
-    assert lines["Opt-in profiles"].endswith(ticks(n for n in profiles if n not in profiles_on))
+    on = [name for name, enabled in profiles.items() if enabled]
+    assert lines["Profiles on by default"].endswith(ticks(on))
+    assert lines["Opt-in profiles"].endswith(ticks(n for n in profiles if n not in on))
     assert lines["Opt-in settings"].endswith(ticks(unset))
-
-    agents = lines["Agents and models"]
-    advisor = "on" if omp["advisor"]["enabled"] else "off"
-    assert f"home model is `{omp['modelRoles']['default']}`, with the advisor {advisor}" in agents
-    dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
-    small, ordinary, hard = [
-        [choice["model"] for choice in rule["use"]] for rule in dispatch["rules"]
-    ]
-    assert dispatch["default"] == dispatch["rules"][1]["use"]
-    for models in (small, ordinary, hard):
-        assert " or ".join(f"`{model}`" for model in models) in agents
-
-    limits = lines["Model limits and fallbacks"]
-    model_overrides = yaml.safe_load((ROOT / "config/omp-models.yml").read_text())
-    for window in model_overrides["providers"]["openai-codex"]["modelOverrides"].values():
-        assert f"{window['contextWindow'] // 1000}K by default" in limits
-        assert f"{window['maxContextWindow'] // 1000000}M at most" in limits
-    chains = omp["retry"]["fallbackChains"]
-    assert chains == {
-        "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
-        "anthropic/claude-sonnet-5": ["anthropic/claude-fable-5-1", "anthropic/claude-opus-5"],
-    }, "update the fallback sentence in Default config"
-
-    gate = yaml.safe_load((ROOT / "config/no-mistakes-omp.yml").read_text())
-    assert f"`{gate['modelRoles']['default']}` by default" in lines["Gates"]
-    assert f"`{hard[0]}:high` for hard work" in lines["Gates"]
-
     for plugin in provisions.OMP_PLUGINS:
         assert f"`{plugin}`" in lines["Plugins and extensions"]
+
+    # The Models, Fallbacks and Gates lines name models in words, so pin the ids they stand for.
+    assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:xhigh"
+    assert "Opus 5.5 at extra-high thinking runs the home" in lines["Models"]
+    assert omp["advisor"]["enabled"] is False and "advisor off" in lines["Models"]
+    dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
+    tiers = [[rule_use["model"] for rule_use in rule["use"]] for rule in dispatch["rules"]]
+    assert tiers == [
+        ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"],
+        ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"],
+        ["anthropic/claude-opus-5-5"],
+    ], "update the Models line in Default config"
+    assert dispatch["default"] == dispatch["rules"][1]["use"]
+    assert omp["retry"]["fallbackChains"] == {
+        "anthropic/claude-opus-5-5": ["anthropic/claude-fable-5-1:medium"],
+        "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
+        "anthropic/claude-sonnet-5": ["anthropic/claude-fable-5-1", "anthropic/claude-opus-5"],
+    }, "update the Fallbacks line in Default config"
+    gate = yaml.safe_load((ROOT / "config/no-mistakes-omp.yml").read_text())
+    assert gate["modelRoles"]["default"] == "anthropic/claude-sonnet-5-5:high"
+    assert "Sonnet 5.5 at high thinking, and Opus 5.5 for hard work" in lines["Gates"]
