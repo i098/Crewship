@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-11
+
+### Added
+
+- The iMessage bridge can use self-hosted BlueBubbles relays on Macs, alone or as the fallback line when Photon fails, with relay failover, no double sends, and de-duplicated inbound messages ([#62](https://github.com/i098/Crewship/issues/62)).
+- Firstmate briefs add optional crew board instructions, and supervisor start output adds a read-only subscription step while the status file remains the durable ledger ([#120](https://github.com/i098/Crewship/issues/120)).
+- The harbor plaza has a stone fountain with flowing water, a solid basin, and a mini map marker ([#134](https://github.com/i098/Crewship/issues/134)).
+- Visitors can enter the harbor house, explore a warmly lit ASCII room, and walk back outside with keyboard or touch controls.
+  See the [house guidance](https://github.com/i098/Crewship/tree/main/harbor#harbor) for controls and the [frame loop](https://crewship.si/how.html#frame-loop) for adaptive detail ([#153](https://github.com/i098/Crewship/issues/153)).
+- `fm-imessage --reply N` checks ordered history across BlueBubbles relays; plain sends never thread, and `--no-thread` forces plain ([#156](https://github.com/i098/Crewship/issues/156)).
+- The harbor hides the initial page text and adds a skippable ASCII noise intro that fades in from black and respects reduced motion ([#158](https://github.com/i098/Crewship/issues/158)).
+- Add opt-in shared Postgres with Docker access checks, TCP readiness, per-project databases and roles, and private environment files for serialized worktree seeding ([#164](https://github.com/i098/Crewship/issues/164)).
+- The harbor ship's cabin is detailed and opens onto a furnished room, and its deck stairs have real treads, risers, and hand rails ([#194](https://github.com/i098/Crewship/issues/194)).
+- Visitors can climb down a lantern-lit hatch on the pirate ship to a gun deck with a cannon on a wheeled carriage at every gun port, racks of round shot, dark cross-beams, and the moonlit sea outside the ports, and climb back up with keyboard or touch controls ([#196](https://github.com/i098/Crewship/issues/196)).
+- The crewship.si night sky has three layers of moonlit clouds that move with the wind and pass in front of the moon and the stars ([#198](https://github.com/i098/Crewship/issues/198)).
+- Links to https://crewship.si show a link preview: the title, the tagline, and a 1200x630 image of the ship, the house, and the moon drawn by the landing page's own renderer, with a new favicon and an apple-touch-icon ([#200](https://github.com/i098/Crewship/issues/200)).
+- The harbor island has tufts of tall grass that sway in the wind, densest along path edges and on the beach slopes, and still with reduced motion ([#204](https://github.com/i098/Crewship/issues/204)).
+- The harbor house shows four framed public-domain paintings by Hokusai, Vernet, Aivazovsky, and Turner, drawn as glyphs with brass name plaques ([#226](https://github.com/i098/Crewship/issues/226)).
+- Crewship installs checksum-verified Pyrefly musl releases on every host for Python type checks and language-server support ([#231](https://github.com/i098/Crewship/issues/231)).
+- Every host gets verified Neovim, compiler prerequisites, and a LazyVim/Pyrefly starter for missing or empty configuration directories, while other paths remain unchanged ([#232](https://github.com/i098/Crewship/issues/232)).
+- A public skill, `code-clarity` (MIT, by Lakr233), for readable code: naming, early return, abstraction levels and class design. Vendored unchanged from [Lakr233/code-clarity](https://github.com/Lakr233/code-clarity) at commit `a0d5802` ([#233](https://github.com/i098/Crewship/issues/233)).
+- A public skill, `pr-preview`, that builds a Lavish board recreating the GitHub PR, issue or comment page before it is posted: the header with "wants to merge N commits into base from fork:branch", the body rendered by GitHub's Markdown API with the Primer Markdown CSS (vendored from `github-markdown-css`, MIT), and Commits and Files changed tabs from the real branch ([#236](https://github.com/i098/Crewship/issues/236)).
+- Add an optional `--rules` contribution rules cross-reference table to the `pr-preview` skill ([#247](https://github.com/i098/Crewship/issues/247)).
+
+### Changed
+
+- **Breaking:** renamed the config keys and variables to Crewship names, with no aliases. `ship.sh` rewrites an old host config once, keeps a private backup beside it, and prints a notice. Update these names by hand: Compose, devcontainer, and image `FACTORY_USER`, `FACTORY_UID`, `FACTORY_GID`, `FACTORY_HOME`, `FACTORY_WORKSPACE`, `CODE_FACTORY_TAG`, `CODE_FACTORY_SECRET_DIR`, `CODE_FACTORY_ROOT`, `CODE_FACTORY_CONFIG`, `CODE_FACTORY_IMAGE` are now `CREWSHIP_USER`, `CREWSHIP_UID`, `CREWSHIP_GID`, `CREWSHIP_HOME`, `CREWSHIP_WORKSPACE`, `CREWSHIP_TAG`, `CREWSHIP_SECRET_DIR`, `CREWSHIP_ROOT`, `CREWSHIP_CONFIG`, `CREWSHIP_IMAGE`; the Docker build argument `FACTORY_CONFIG` is now `CREWSHIP_CONFIG_FILE`; direct `ansible-playbook -e factory_*` overrides are now `crewship_*`, and `code_factory_repo` is now `crewship_repo` ([#97](https://github.com/i098/Crewship/issues/97)).
+- **Breaking:** renamed the on-host paths and unit names from `code-factory` to `crewship`, with no aliases: for example `~/.local/share/crewship`, `~/.cache/crewship`, `~/.local/state/crewship`, `/usr/local/lib/crewship`, `crewship-vnc.service`, `crewship-novnc.service`, the omp extensions `crewship-herdr-sidebar.ts` and `crewship-quality-gate.ts`, the Compose project and image `crewship/worker`, `/opt/crewship` in the image, and the Firstmate patch trailer `Crewship-Patch`. The playbook migrates an existing install once: it stops and removes the old units, moves the old paths to the new names, and then installs and enables the new units; a second apply changes nothing. Compose and devcontainer volumes get new names; copy their data by hand ([#98](https://github.com/i098/Crewship/issues/98)).
+- The CI runner label is now `crewship` ([#99](https://github.com/i098/Crewship/issues/99)).
+- Crewship adds tiered crewmate models, verified Pi-only gate selection, and Codex long-context overrides that preserve user configuration across YAML and legacy JSONC formats ([#110](https://github.com/i098/Crewship/issues/110)).
+- The harbor house now has roof and wall trim, framed warm windows with sills, and a framed door with a step.
+  The house trim preserves Releases targeting, the feature anchor, collision bounds, and map cells ([#135](https://github.com/i098/Crewship/issues/135)).
+- The harbor island has varied paving, stones and grass tufts, textured trees, and a clearer shoreline with foam and rocks ([#136](https://github.com/i098/Crewship/issues/136)).
+- Document the release version policy: patch bumps only, with minor or major bumps requiring owner approval ([#137](https://github.com/i098/Crewship/issues/137)).
+- Crewmates use per-task model tiers with Sonnet 5.5 or GPT-6.1 Sol as the default, and the README checks these tiers against `config/crew-dispatch.json` ([#138](https://github.com/i098/Crewship/issues/138)).
+- The harbor ship has a larger tapered hull, two square-rigged masts with pale sails, a pirate flag, cannons, railings, and warm lanterns.
+  Map walks from the dock and ship use supported gangway and stair connections and avoid deck obstacles in both directions.
+  Ship cloth shading uses a separate path to keep the structural complexity gate clean ([#154](https://github.com/i098/Crewship/issues/154)).
+- The mobile harbor joystick now sits at the bottom-left with safe-area spacing, while touch look remains available on the right ([#155](https://github.com/i098/Crewship/issues/155)).
+- Harbor pop-ups now use short ASCII signs with clickable grid links and off-screen keyboard and screen reader access.
+  The docs link opens the feature index.
+  Signs reflow on narrow phones and use compact scene placement when no clear rectangle fits.
+  Compact signs keep their links clear of the touch move pad.
+  Keyboard link focus closes the map and cancels pending automatic selection ([#159](https://github.com/i098/Crewship/issues/159)).
+- Replace architecture prose with six diagrams and preserve the detailed reference for agents with updated section links ([#160](https://github.com/i098/Crewship/issues/160)).
+- The crewship.si scene runs at a higher frame rate: it tests only the objects each part of the screen can see and redraws only changed cells ([#161](https://github.com/i098/Crewship/issues/161)).
+- The README features section now uses a distinct label for its collapsed list ([#186](https://github.com/i098/Crewship/issues/186)).
+- One scene wind fills the harbor ship's sails into gently moving curved bellies with taut sheets. A black skull-and-crossbones flag and the pennants stream with it ([#195](https://github.com/i098/Crewship/issues/195)).
+- The harbor house room now has a fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug ([#197](https://github.com/i098/Crewship/issues/197)).
+- The README footer now lists documentation links with short, readable labels ([#199](https://github.com/i098/Crewship/issues/199)).
+- The iMessage desk now requests Luna 6 for memory compaction with thinking off and the priority service tier, without changing the desk model ([#218](https://github.com/i098/Crewship/issues/218)).
+- The harbor's oak, lime, and birch trees have tapered trunks that branch into ragged clumps of leaves, with gaps that show the sky.
+  The palms have curved, ringed trunks and drooping fronds of many leaflets, and all trees sway in the scene's wind ([#227](https://github.com/i098/Crewship/issues/227)).
+- Skip heavy CI jobs on documentation-only pull requests while required checks still report.
+  Keep classification and changelog failures blocking through an existing required check, and keep the quality gate PR-only ([#250](https://github.com/i098/Crewship/issues/250)).
+- The installer downloads and verifies a release tarball and its checksum into a versioned directory instead of running `git clone`; rerunning it updates and keeps `.local/host.yml`, and an existing git install moves to a backup beside the new layout ([#255](https://github.com/i098/Crewship/issues/255)).
+- The crewboard daemon and CLI now default to `$XDG_RUNTIME_DIR/crewboard.sock` (else `/run/user/<uid>/crewboard.sock`) when `CREWBOARD_SOCKET` is unset, so running agents need no restart. The Firstmate board patch gates use the same default ([#257](https://github.com/i098/Crewship/issues/257)).
+- Skip heavy CI jobs for pull requests limited to harbor files, documentation, or both.
+  Keep the changelog check and the separate harbor deployment workflow unchanged ([#259](https://github.com/i098/Crewship/issues/259)).
+
+### Removed
+
+- **Breaking:** remove the shared Supabase profile and installer; use [Shared Postgres](../docs/shared-postgres.md), remove `profiles.shared_supabase`, `fleet.supabase_project_id`, `fleet.fixture_archive`, and `fleet.worktree_pools`, and remove existing stacks manually when no longer needed ([#165](https://github.com/i098/Crewship/issues/165)).
+- Remove the stale `opus-speed` public skill; the skills installer removes its installed copies on the next apply ([#237](https://github.com/i098/Crewship/issues/237)).
+
+### Fixed
+
+- BlueBubbles relay setup now writes a password and disables public tunnels before the first launch, then checks that the API requires the password ([#117](https://github.com/i098/Crewship/issues/117)).
+- The BlueBubbles bridge skips typing and tapbacks and sends replies without a thread when a relay's Private API is off ([#141](https://github.com/i098/Crewship/issues/141)).
+- The crewship.si landing page no longer crashes on iPhone Safari: phones and tablets draw the scene one glyph at a time at 2 device pixels per CSS pixel at most ([#143](https://github.com/i098/Crewship/issues/143)).
+- Keep main CI runs from being cancelled by newer pushes ([#146](https://github.com/i098/Crewship/issues/146)).
+- Harbor map walks now route around every walking obstacle from shared collision bounds, including trees, hedges, the fountain basin, and the house.
+  Map walks use the local floor height and continuous ground coverage, including sloped beaches and the dock-to-gangway crossing.
+  Map walks reach the mast and bow sign from nearby deck positions instead of reporting arrival at the starting position ([#150](https://github.com/i098/Crewship/issues/150)).
+- The harbor keeps its first grid and field of view, waits for fonts, and redraws resizes without blank frames ([#157](https://github.com/i098/Crewship/issues/157)).
+- The BlueBubbles bridge reports a refused relay connection as "connection refused" with Bun 1.4.3 and later, which use the `ECONNREFUSED` error code ([#168](https://github.com/i098/Crewship/issues/168)).
+- The landing page no longer shows the plain page when a browser add-on adds a failing resource or promise, and large high-DPR windows keep the canvas within browser size limits ([#178](https://github.com/i098/Crewship/issues/178)).
+- The iMessage bridge tests publish complete fake messages atomically and wait for queue completion without reading files that can disappear ([#189](https://github.com/i098/Crewship/issues/189)).
+- Touch signs use compact link rows with padded tap regions, so the welcome sign hides less of the ship ([#190](https://github.com/i098/Crewship/issues/190)).
+- Harbor ASCII signs now seat rectangular frames on the lowest projected support top, covering each post, with compact layouts when space is limited ([#201](https://github.com/i098/Crewship/issues/201)).
+- Proactive iMessage sends stay in the owner's latest direct chat, including through transport startup outages, without delivery-confirmation blocking ([#207](https://github.com/i098/Crewship/issues/207)).
+- The iMessage desk uses small compaction chunks and retries failures with exponential backoff while keeping source messages intact.
+  Each compaction chunk and reduction retains the source message's kind ([#208](https://github.com/i098/Crewship/issues/208)).
+- The iMessage routing tests wait for recorded sends before checking results, which removes outbox read races ([#215](https://github.com/i098/Crewship/issues/215)).
+- The harbor fountain's water now falls as droplets well inside its upper bowl and basin, breaking up as it falls, with splashes, spreading ripples, and mist where the streams land ([#224](https://github.com/i098/Crewship/issues/224)).
+- The crewship.si landing page no longer draws a pale band of dotted rows on the horizon; low, dark hills rise from the sea on part of it instead ([#225](https://github.com/i098/Crewship/issues/225)).
+- The iMessage bridge stops its running model children within a few seconds on SIGTERM or SIGINT, with a 10-second systemd stop limit ([#228](https://github.com/i098/Crewship/issues/228)).
+- The iMessage bridge disables inherited compaction memory work and saves a shared exponential cooldown across restarts without delaying desk replies ([#235](https://github.com/i098/Crewship/issues/235)).
+- The harbor ship now sways gently at its mooring: a much smaller roll and bob, a slower eased period, still scaled by the wind.
+  The cabin and gun deck now share the gentle sway, with a small pitch and moving lanterns.
+  Reduced motion keeps the ship and both rooms still ([#243](https://github.com/i098/Crewship/issues/243)).
+
 ## [0.4.0] - 2026-10-10
 
 ### Added
@@ -105,7 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/i098/Crewship/releases/tag/v0.4.1
 [0.4.0]: https://github.com/i098/Crewship/releases/tag/v0.4.0
 [0.3.0]: https://github.com/i098/Crewship/releases/tag/v0.3.0
 [0.2.0]: https://github.com/i098/Crewship/releases/tag/v0.2.0
