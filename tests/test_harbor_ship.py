@@ -40,6 +40,30 @@ vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nmeasure();\n' + pr
     )
 
 
+def test_ship_wheel_faces_forward_across_the_keel():
+    _run_ship_scene(
+        r"""
+const start = ship.length;
+shipWheel(HELM);
+const wheel = ship.splice(start);
+const depth = (x, y, z, dz) => Math.min(...wheel.map(s => hit(s, x, y, z, 0, 0, dz)));
+const [cx, cy, cz] = HELM;
+for (const dz of [-1, 1]) {
+  const z = cz - dz * 2;
+  const left = depth(cx - 0.5, cy, z, dz), right = depth(cx + 0.5, cy, z, dz);
+  assert(Number.isFinite(left) && Number.isFinite(right), 'both level spokes must face fore and aft');
+  assert(Math.abs(left - right) < 1e-6, 'the wheel plane must run across the keel');
+}
+for (let k = 0; k < 8; k++) {
+  const a = k * Math.PI / 4;
+  assert(Number.isFinite(depth(cx + 0.85 * Math.cos(a), cy + 0.85 * Math.sin(a), cz + 2, -1)),
+    'each of the eight spokes must have a handle beyond the rim');
+}
+assert(Number.isFinite(depth(cx, 5, cz + 2, -1)), 'the upright wheel must stand on its pedestal');
+"""
+    )
+
+
 def test_ship_deck_ports_and_map_match_the_hull():
     _run_ship_scene(
         r"""

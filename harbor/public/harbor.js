@@ -1167,11 +1167,11 @@ function ladderSide(x0, x1) {
   for (let i = 1; i < handrail.length; i++) beam(ship, rail(handrail[i - 1]), rail(handrail[i]), "s", pale, 0.05);
   for (const [z, y] of [[newel, DECK], [mid, nosing(mid) + 0.1], [-9.3, 4.8]]) beam(ship, [x, y, z], rail(z), "s", pale, 0.045);
 }
-// The ship's wheel stands on the quarterdeck behind the ladder's top, its axle along the keel but turned a little to
-// starboard so the spokes show: a rim, eight spokes that end past it in thicker handles, and a brass hub on an axle
+// The ship's wheel stands on the quarterdeck behind the ladder's top, with its axle along the keel and its plane
+// across the ship: a rim, eight spokes that end past it in thicker handles, and a brass hub on an axle
 // that rests on a turned pedestal. The level spokes span the wheel, so they and the pedestal block walking; no part
 // casts shadows. HELM is the hub's x, y and z, and the turn.
-const HELM = [SX, 5.8, -9.8, 0.25];
+const HELM = [SX, 5.8, -9.8, 0];
 function shipWheel([cx, cy, cz, yaw]) {
   const ax = Math.sin(yaw), az = Math.cos(yaw), part = { spot: "helm", fill: 0.7, solid: false, shadow: false };
   // The point r from the axle at angle a round it, `back` behind the wheel along the axle.
