@@ -46,6 +46,40 @@ def test_verified_install_runs_and_second_install_changes_nothing(tmp_path, monk
     assert not installer.install_asset(tmp_path, "tool", spec, "linux-x86_64")
 
 
+@pytest.mark.parametrize(
+    ("key", "arch"), [("linux-x86_64", "x86_64"), ("linux-aarch64", "arm64")]
+)
+def test_neovim_keeps_its_runtime_tree_and_installs_once(tmp_path, monkeypatch, key, arch):
+    archive = io.BytesIO()
+    root = f"nvim-linux-{arch}"
+    files = {
+        f"{root}/bin/nvim": b"#!/bin/sh\nprintf 'NVIM v9.9.9\\n'\n",
+        f"{root}/lib/nvim/parser/python.so": b"parser",
+        f"{root}/share/nvim/runtime/syntax/python.vim": b"syntax",
+    }
+    with tarfile.open(fileobj=archive, mode="w:gz") as stream:
+        for name, payload in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            stream.addfile(member, io.BytesIO(payload))
+    payload = archive.getvalue()
+    upstream(monkeypatch)
+    spec = installer.resolve_latest(key, {"nvim"})["nvim"]
+    assert spec["version"] == "9.9.9"
+    assert spec["assets"][key]["sha256"] == "a" * 64
+    assert spec["assets"][key]["format"] == "tar"
+    spec["assets"][key]["sha256"] = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(payload))
+    assert installer.install_asset(tmp_path, "nvim", spec, key)
+    command = tmp_path / ".local/bin/nvim"
+    assert command.is_symlink()
+    assert subprocess.check_output([command, "--version"], text=True).strip() == "NVIM v9.9.9"
+    installed = command.resolve().parents[2]
+    for name, content in files.items():
+        assert (installed / name).read_bytes() == content
+    assert not installer.install_asset(tmp_path, "nvim", spec, key)
+
+
 def test_bad_checksum_never_installs_command(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(b"corrupt"))
     with pytest.raises(ValueError, match="checksum mismatch"):
@@ -146,6 +180,7 @@ RELEASES = {
     "herdrdev/herdr": ("v9.9.9", "herdr-linux-x86_64"),
     "oven-sh/bun": ("bun-v9.9.9", "bun-linux-x64-baseline.zip"),
     "cli/cli": ("v9.9.9", "gh_9.9.9_linux_amd64.tar.gz"),
+    "neovim/neovim": ("v9.9.9", "nvim-linux-x86_64.tar.gz", "nvim-linux-arm64.tar.gz"),
     "kunchenguid/no-mistakes": ("v9.9.10-beta.1", "no-mistakes-v9.9.10-beta.1-linux-amd64.tar.gz"),
     "kunchenguid/treehouse": ("v9.9.9", "treehouse-v9.9.9-linux-amd64.tar.gz"),
     "astral-sh/uv": ("9.9.9", "uv-x86_64-unknown-linux-gnu.tar.gz"),

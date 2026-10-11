@@ -15,7 +15,10 @@ The source machine already uses Ubuntu packages, user-level systemd services, ho
 | OpenTofu | Cloud instances, networks, DNS, resource lifecycle | Add when a provider/resource contract is chosen; no pretend provider configuration is shipped |
 | cloud-init | Initial VM prerequisites before configuration management | Small vendor-neutral bootstrap input only |
 
-This is repeatable configuration, not a bit-identical OS image. Ubuntu packages receive distribution security updates. Everything the recipe installs is latest, verified by published checksums (the three omp marketplace plugins are the one exception: no publisher checksums them), so a later rebuild installs newer versions. Rebuilding an environment does not recreate authenticated accounts, databases, or running processes.
+This is repeatable configuration, not a bit-identical OS image.
+Ubuntu packages receive distribution security updates.
+See [Dependencies](../dependencies.md) for tool release selection and verification.
+Rebuilding an environment does not recreate authenticated accounts, databases, or running processes.
 
 ## Host and container boundary
 
@@ -61,7 +64,7 @@ Host sizing and every auto pruner are listed in [Capacity and pruners](../capaci
 
 ## Reproducibility policy
 
-1. Everything latest, verified by published checksums. Each apply resolves the newest release of every tool the host installs, once (`scripts/provisions.py --resolve`, with the same `--tools`, `--npm` and `--development` selection as the install), installs exactly that, and verifies each download against the checksum its publisher posts for that exact release. A release without a published checksum is refused; the one exception is the omp marketplace plugins, which no publisher checksums. What each source is verified against is in [Dependencies](../dependencies.md) and [Primary sources](#primary-sources).
+1. Follow [Dependencies](../dependencies.md) for tool release selection, download verification, and exceptions.
 2. Do not copy a live global package directory.
 3. Three locks stay, because they are this repository's own development environment rather than installed tools: change Python dependencies with `uv lock` and commit the lock, change `crewboard/` Rust dependencies with `cargo update` or `cargo add` and commit `crewboard/Cargo.lock` (CI builds with `--locked`), and keep each GitHub Action pinned to the commit SHA of its latest release, which `.github/dependabot.yml` advances weekly.
 4. Keep machine differences in ignored `.local/host.yml`; schema validation precedes provisioning.

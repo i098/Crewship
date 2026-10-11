@@ -188,6 +188,9 @@ Logs: `/var/log/koncreet.log`. Backups: `*.koncreet.bak`. The provider's console
 
 ## Updates
 
-Tools track their latest release, and every download is verified against the checksum its publisher posts for that release (what each source checks is in [Dependencies](dependencies.md)); a release without one is refused (Koncreet, being optional, is skipped with a warning instead). The one exception is the three omp marketplace plugins (ponytail, i-have-adhd, caveman): no publisher checksums them, they track each author's default branch, and they load as agent instructions and hooks. The operator accepted that to keep them at the latest commit. Checksums prove a download is the published artifact; they do not establish that a publisher is trustworthy. Review added tools and installer behavior before adding them. Ubuntu security updates remain an operating-system responsibility rather than freezing an entire vulnerable package index forever.
+See [Dependencies](dependencies.md) for tool release selection, download verification, and exceptions.
+Checksums prove a download is the published artifact; they do not establish that a publisher is trustworthy.
+Review added tools and installer behavior before adding them.
+Ubuntu security updates remain an operating-system responsibility rather than freezing an entire vulnerable package index forever.
 
 Back up project repositories and application data separately, using encrypted storage and an application-aware restore procedure. A successful environment bootstrap is not evidence that a database backup is recoverable.
