@@ -3,7 +3,7 @@
 # latest releases tasks/preflight.yml resolved.
 #
 # Contract: python3 <repo>/scripts/provisions.py
-#           --home <crewship.home> --tools herdr,node,bun,uv,btop,sentrux,fallow[,concord,slk]
+#           --home <crewship.home> --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly[,concord,slk]
 #           [--npm] [--development]
 #           --resolved <crewship_latest as JSON>
 # The installer is idempotent and prints a final JSON object

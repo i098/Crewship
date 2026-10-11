@@ -229,7 +229,7 @@ herdr_installed_bin() {
 image_is_current() {
     local latest versions='map_values(.version? // .)'
     latest=$(python3 "${CF_ROOT}/scripts/provisions.py" \
-        --home "${HOME}" --tools herdr,node,bun,uv,btop,sentrux,fallow --npm --development --resolve) \
+        --home "${HOME}" --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly --npm --development --resolve) \
         || fail "could not resolve the latest releases"
     [ "$(jq -cS "${versions}" <<<"${latest}")" = "$(jq -cS "${versions}" "${RESOLVED_STAMP}")" ] \
         && return 0
@@ -657,7 +657,7 @@ check_installer_idempotent() {
     local out
     out=$(python3 "${CF_ROOT}/scripts/provisions.py" \
             --home "${HOME}" \
-            --tools herdr,node,bun,uv,btop,sentrux,fallow \
+            --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly \
             --resolved "$(cat "${RESOLVED_STAMP}")" \
             --npm --development 2>&1) || {
         printf '%s\n' "${out}" | tail -n 20

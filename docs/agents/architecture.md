@@ -88,7 +88,8 @@ Every action is pinned to the commit SHA of its latest release (Dependabot moves
 ## Primary sources
 
 - [Herdr installation](https://herdr.dev/docs/install/), [headless/SSH persistence](https://herdr.dev/docs/persistence-remote/), [session-state limits](https://herdr.dev/docs/session-state/), [config reference](https://herdr.dev/docs/config-reference/).
-- [Herdr latest release](https://github.com/herdrdev/herdr/releases/latest). GitHub-hosted assets (the tools in [Dependencies](../dependencies.md)) are verified against the SHA-256 digest GitHub publishes for each release asset; no claim is made that a release supplies an independent SBOM or signature bundle.
+- [Herdr latest release](https://github.com/herdrdev/herdr/releases/latest). See [Dependencies](../dependencies.md#latest-releases) for each tool's checksum source.
+  Crewship does not claim that a release supplies an independent SBOM or signature bundle.
 - [Node.js release index](https://nodejs.org/dist/index.json). Node assets are verified against the `SHASUMS256.txt` published beside each release.
 - [rustup stable release](https://static.rust-lang.org/rustup/release-stable.toml). rustup-init is verified against the `.sha256` published beside it.
 - [Ansible introduction](https://docs.ansible.com/projects/ansible/latest/getting_started/index.html), [checksummed downloads](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/get_url_module.html), [user systemd/D-Bus requirements](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/systemd_service_module.html).
