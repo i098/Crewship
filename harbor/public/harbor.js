@@ -1748,7 +1748,7 @@ function crossInto(next, place) {
   interior = next;
   Object.assign(me, place, { pitch: 0 });
   probeMs = -1;
-  slow = fast = 0;
+  slow = fast = 0; scale = 1;
   layoutDirty = true;
   doorInputHeld = true;
 
@@ -4331,14 +4331,14 @@ function coarsen() {
   else { scale = Math.min(growLimit(), scale * 1.15); layoutDirty = dirty = true; }
 }
 function refine() {
-  if (scale > 1 && growLimit() > 1) { scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; }
+  if (scale > 1) { scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; }
   else fields = false;
 }
 function adaptResolution(ms, late) {
   slow = ms > 10 || late ? slow + 1 : 0;
   fast = ms < (halfRate() ? 4.5 : 6) && !late ? fast + 1 : 0; // a field costs half a frame: restore a full frame once it would cost under 9 ms
   if (slow > 20 && ((!fields && canField()) || shadows || scale < growLimit())) { coarsen(); slow = 0; }
-  else if (fast > 90 && ((scale > 1 && growLimit() > 1) || fields)) { refine(); fast = 0; }
+  else if (fast > 90 && (scale > 1 || fields)) { refine(); fast = 0; }
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;

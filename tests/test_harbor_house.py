@@ -227,7 +227,7 @@ for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
   interior = scene;
   for (const interval of [1000 / 60, 1000 / 30]) {
     refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
-    scale = 1.5; shadows = false; slow = fast = 0; fields = true;
+    scale = scene === null ? 1 : 1.5; shadows = false; slow = fast = 0; fields = true;
     renderCost = 2;
     const runFrame = () => { dirty = true; last = clock; clock += interval; frame(clock); };
     for (let i = 0; i < 91; i++) runFrame();
@@ -258,10 +258,10 @@ const startYaw = me.yaw;
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native 60 Hz to 30 Hz switch during held turning must not reduce detail');
 assert(me.yaw > startYaw, 'cadence sampling must not interrupt held turning');
-scale = 1.5; slow = fast = 0; fields = true;
+scale = scene === null ? 1 : 1.5; slow = fast = 0; fields = true;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 30);
 assert(scene === null ? !fields : scale < 1.5, 'detail must recover at the changed native cadence during held turning');
-scale = 1.5; slow = fast = 0; fields = true;
+scale = scene === null ? 1 : 1.5; slow = fast = 0; fields = true;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 60);
 assert(scene === null ? !fields : scale < 1.5, 'detail must recover when the display returns to 60 Hz');
 keys.clear();

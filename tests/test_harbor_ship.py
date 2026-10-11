@@ -617,5 +617,15 @@ assert(cellH <= base * 1.5 + 1 && cellH < inRoom, 'outdoor glyphs on a touch dev
 touchFirst.matches = false; interior = HOUSE; scale = 1; fields = false; shadows = false; slow = 0;
 slowFrames();
 assert.equal(scale, 3);
+crossInto(null, {x: -5, z: 20.6, yaw: 0});
+measure();
+assert(scale === 1 && cellH === base, 'leaving a grown room must start outdoors at the base glyph size');
+crossInto(HOUSE, {x: 0, z: 0.8, yaw: 0});
+measure();
+assert(scale === 1 && cellH < inRoom, 'entering a room must start at the base glyph size');
+touchFirst.matches = true; interior = null; scale = 3; fields = true; shadows = false;
+for (let i = 0; i < 2000; i++) adaptResolution(1, false);
+assert.equal(scale, 1, 'fast frames must unwind a leftover scale outdoors');
+touchFirst.matches = false;
 """
     )
