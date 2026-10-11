@@ -87,7 +87,8 @@ Crewship makes it super easy to start using agents in the cloud.
 After the installer finishes, paste this into your coding agent or `omp` on the new machine. It walks you through the rest ([omp sign-in](docs/omp.md#sign-in), [install layout](docs/install.md)):
 
 ```text
-Finish setting up Crewship on this machine. Work in ~/Crewship, run each step yourself, and ask me when you need a choice.
+Finish setting up Crewship on this machine.
+Work in ~/Crewship, run each step yourself, and ask me when you need a choice.
 1. Run `gh auth login` and help me sign in to GitHub.
 2. Start `omp` and help me sign in with `/login` (docs/omp.md#sign-in).
 3. Run `./ship.sh dock`, then open .local/host.yml and ask me which profiles to turn on.
