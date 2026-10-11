@@ -32,6 +32,8 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Node.js](https://github.com/nodejs/node) (`node`): the runtime of the npm tools. License: MIT.
 - [uv](https://github.com/astral-sh/uv) (`uv`): the Python bootstrap and environments. License: MIT OR Apache-2.0.
 - [btop](https://github.com/aristocratos/btop) (`btop`): the resource monitor pane. License: Apache-2.0.
+- [Neovim](https://github.com/neovim/neovim) (`nvim`): the terminal editor installed on every host. License: Apache-2.0.
+- [LazyVim starter](https://github.com/LazyVim/starter): the vendored Neovim configuration in `config/nvim/`, with an added Pyrefly configuration. License: Apache-2.0.
 - [rustup](https://github.com/rust-lang/rustup) (`rustup-init`): the Rust toolchain of the `development` profile. License: MIT OR Apache-2.0.
 - [Ansible](https://github.com/ansible/ansible): runs the recipe. License: GPL-3.0-or-later.
 - [jsonschema](https://github.com/python-jsonschema/jsonschema): validates the host config. License: MIT.
@@ -59,3 +61,12 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [cloud-init](https://github.com/canonical/cloud-init): first-boot package setup. License: GPL-3.0-only OR Apache-2.0.
 - [Python](https://github.com/python/cpython): runs the recipe scripts. License: PSF-2.0.
 - [Git](https://github.com/git/git): version control for every lane. License: GPL-2.0-only.
+
+## Paintings
+
+The harbor house on [crewship.si](https://crewship.si) shows these public-domain works as glyph textures that `harbor/art.py` converts. Each artist died more than 100 years ago, and each source page marks the image as public domain.
+
+- *The Great Wave off Kanagawa*, Katsushika Hokusai, about 1830–1832, Metropolitan Museum of Art: [source](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Entrance to the Port of Palermo by Moonlight*, Claude-Joseph Vernet, 1769, Hermitage Museum: [source](https://commons.wikimedia.org/wiki/File:Entrance_to_the_Port_of_Palermo_by_Moonlight,_1769.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Sailing Ship on the Sea at Moonlight*, Ivan Aivazovsky, early 1840s: [source](https://commons.wikimedia.org/wiki/File:Ivan_Aivazovsky_Segelschiff_auf_hoher_See_bei_Mondschein_1840er.jpg). License: public domain (PD-Art, PD-old-100-expired).
+- *Fishermen at Sea*, J. M. W. Turner, 1796, Tate: [source](https://commons.wikimedia.org/wiki/File:Joseph_Mallord_William_Turner_-_Fishermen_at_Sea_-_Google_Art_Project.jpg). License: public domain (PD-Art, PD-old-100-expired).

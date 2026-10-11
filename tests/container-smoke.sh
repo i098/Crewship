@@ -229,7 +229,7 @@ herdr_installed_bin() {
 image_is_current() {
     local latest versions='map_values(.version? // .)'
     latest=$(python3 "${CF_ROOT}/scripts/provisions.py" \
-        --home "${HOME}" --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly --npm --development --resolve) \
+        --home "${HOME}" --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim --npm --development --resolve) \
         || fail "could not resolve the latest releases"
     [ "$(jq -cS "${versions}" <<<"${latest}")" = "$(jq -cS "${versions}" "${RESOLVED_STAMP}")" ] \
         && return 0
@@ -335,13 +335,13 @@ check_core_tools() {
     done
 }
 
-# The installed herdr, gh, no-mistakes, treehouse, gws, omp, AXI tools, acpx and
+# The installed herdr, gh, no-mistakes, treehouse, gws, nvim, omp, AXI tools, acpx and
 # chrome-devtools-mcp are exactly
 # the releases the build resolved and recorded in RESOLVED_STAMP.
 check_resolved_releases() {
     local tool version banner package prefix
     [ -f "${RESOLVED_STAMP}" ] || fail "installer wrote no ${RESOLVED_STAMP}"
-    for tool in herdr gh no-mistakes treehouse gws; do
+    for tool in herdr gh no-mistakes treehouse gws nvim; do
         version=$(resolved_version ".\"${tool}\".version")
         banner=$("${HOME}/.local/bin/${tool}" --version 2>&1) || fail "${tool} --version exited nonzero: ${banner}"
         case "${banner%%$'\n'*}" in
@@ -657,7 +657,7 @@ check_installer_idempotent() {
     local out
     out=$(python3 "${CF_ROOT}/scripts/provisions.py" \
             --home "${HOME}" \
-            --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly \
+            --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim \
             --resolved "$(cat "${RESOLVED_STAMP}")" \
             --npm --development 2>&1) || {
         printf '%s\n' "${out}" | tail -n 20
