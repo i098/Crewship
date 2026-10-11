@@ -73,7 +73,8 @@ Host sizing and every auto pruner are listed in [Capacity and pruners](../capaci
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main`, on every pull request, and on manual dispatch:
+GitHub Actions (`.github/workflows/ci.yml`) starts on pushes to `main`, on pull requests, and on manual dispatch.
+When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest`.
 - The [shared Postgres service verification](../shared-postgres.md#verification).
@@ -81,8 +82,23 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main`, on every p
 - `bash config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
 - `./ship.sh inspect` for `config/default.yml` and `containers/crewship.container.yml`.
 - Audits of the Dockerfile, devcontainer, and Compose definitions (the image builds from `mirror.gcr.io/library/ubuntu:latest`, Compose services are digest-pinned, no host namespaces or socket, resource caps).
-- On pull requests, the `quality gate` job: `sentrux gate .` against the committed `.sentrux/baseline.json` fails on a `DEGRADED` verdict, on a drop past `FM_QUALITY_MAX_DROP`, and when the gate cannot give a verdict; `fallow audit` on the changed JS/TS only warns ([Quality gate](../omp.md#quality-gate)).
+- On code PRs, the `quality gate` job checks the committed baseline and blocks structural regressions or an unavailable verdict.
+  `fallow audit` warns about changed JS/TS ([Quality gate](../omp.md#quality-gate)).
 - A full worker image build and the behavior smoke in `tests/container-smoke.sh`.
+- The harbor checks in WebKit on iPhone and in desktop Chromium.
+
+The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`.
+Documentation-only PRs change only root-level `README*` files, files under `docs/` or `changelog.d/`, or `*.md` files at any depth.
+Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
+Renames check both the old and new paths.
+CI skips heavy jobs on documentation-only PRs when classification succeeds and the changelog check succeeds or skips.
+Job-level conditions let skipped required checks report instead of remaining pending.
+The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
+The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
+CodeQL keeps running through GitHub's default setup.
+Code PRs run all heavy jobs.
+Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
+The sponsors bot starts CI through manual dispatch, so its documentation-only updates use the manual-run policy.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
