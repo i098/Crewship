@@ -4475,7 +4475,7 @@ function castOnWorkers(t0, late) {
   const band = Math.ceil(rows / (ready.length * 4)), bands = [];
   for (let j = 0; j < rows; j += band) bands.push([j, Math.min(rows, j + band)]);
   const moment = { id: ++castId, T, bob, roll, me: { ...me }, room: ROOMS.indexOf(interior), shadows, still: reduced.matches,
-    tenths: performance.now() / 100, cols, rows, aspect, layout: { padX, padY, cellW, cellH, dpr, font: ctx.font } };
+    tenths: performance.now() / 100, cols, rows, aspect, layout: { padX, padY, cellW, cellH, dpr, font: ctx.font, runs: !touchFirst.matches } };
   const f = { moment, phase: CAST, bands, next: 0, out: 0, workers: ready, cast: [], draw: null, bitmaps: [], ms: 0, late };
   frames.push(f);
   for (const w of ready) w.postMessage(moment);
@@ -4615,7 +4615,7 @@ let pixels = null, bitmapCtx = null;
 // Readies the sprites for this layout; false when this worker's text differs from the page's.
 function spritesFor({ font, cellW, cellH, dpr }) {
   if (spriteKey === `${font}/${dpr}`) return canDraw;
-  spriteKey = `${font}/${dpr}`; spriteDpr = dpr; sprites.clear();
+  spriteKey = `${font}/${dpr}`; spriteDpr = dpr; sprites.clear(); ADVANCE.clear();
   padS = Math.ceil(cellW * dpr); spriteW = 3 * padS; spriteH = Math.ceil(cellH * dpr) + 2 * padT;
   spriteCtx = new OffscreenCanvas(spriteW, spriteH).getContext("2d", { willReadFrequently: true });
   spriteCtx.font = font; spriteCtx.textBaseline = "top";
@@ -4668,6 +4668,13 @@ function sprite(code, cls, q) {
 // BLEND[f << 8 | v]: channel value v times f / 255, rounded, for blending a glyph over what is drawn.
 const BLEND = new Uint8Array(PAGE ? 0 : 65536);
 for (let f = 0; f < BLEND.length >> 8; f++) for (let v = 0; v < 256; v++) BLEND[f << 8 | v] = Math.round(v * f / 255);
+// A glyph's advance in CSS pixels; a glyph from a fallback font can be wider than the cell.
+const ADVANCE = new Map();
+function advance(code) {
+  let a = ADVANCE.get(code);
+  if (a === undefined) ADVANCE.set(code, a = spriteCtx.measureText(String.fromCharCode(code)).width);
+  return a;
+}
 function drawBand(id, j0, j1, buf) {
   const { layout, cols: width } = moments.get(id);
   if (typeof OffscreenCanvas !== "function" || !spritesFor(layout)) { postMessage({ id, j0, bmp: null }); return; }
@@ -4680,10 +4687,15 @@ function drawBand(id, j0, j1, buf) {
   for (let j = j0, c = 0; j < j1; j++) {
     const y = (padY + j * cellH) * dpr, top = Math.round(y) - Y0, bottom = Math.round((padY + (j + 1) * cellH) * dpr) - Y0;
     const oy = Math.floor(y) + (y - Math.floor(y) >= lowerFrom ? 1 : 0) - padT - Y0;
+    // Desktop text runs (one colour each) place each glyph at the previous glyph's advance from the run's start, so a
+    // wider fallback glyph pushes the rest of its run along; touch draws each glyph at its own cell.
+    let run = -1, x = 0;
     for (let i = 0; i < width; i++, c++) {
+      if (!layout.runs || k[c] !== run) { run = k[c]; x = (padX + i * cellW) * dpr; }
+      const at = x;
+      x += advance(g[c]) * dpr;
       if (g[c] === 32) continue;
-      const x = (padX + i * cellW) * dpr;
-      let left = Math.floor(x), q = Math.floor((x - left) * 4 + 0.5);
+      let left = Math.floor(at), q = Math.floor((at - left) * 4 + 0.5);
       if (q === 4) { left++; q = 0; }
       const s = sprite(g[c], k[c], q), ox = left - padS - X0;
       if (oy + s.y0 >= top && oy + s.y1 < bottom && ox + s.x0 >= 0 && ox + s.x1 < w) {
