@@ -65,8 +65,13 @@ Keyboard and touch movement share the house door's transition: release the movem
 The guns, shot racks, and main mast block walking, and the map stays hidden below deck.
 Map walks go around the open hatch.
 
-The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.
-Its basin blocks walking, and a blue `O` marks it on the mini map.
+The plaza fountain has an octagonal stone rim around a pool, and a pedestal with an upper bowl.
+Six streams rise from the central nozzle and fall into the upper bowl.
+Six spouts on the pedestal arc out into the pool.
+The droplets follow ballistic arcs and land well inside the bowl or the pool.
+The streams break up into droplets as they fall, and splashes, spreading rings, and mist show where they land.
+With reduced motion, the water stays still.
+The basin blocks walking, and a blue `O` marks the fountain on the mini map.
 The fountain marker leaves map labels and selected point markers clear.
 Map walks check each road and approach segment against the walking collision bounds at the local floor height and require continuous ground coverage.
 Detour corners come from every walking obstacle, including trees, hedges, the basin, the house, dock cargo, and ship fixtures.
