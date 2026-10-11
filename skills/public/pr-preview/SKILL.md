@@ -32,7 +32,7 @@ The board is one HTML file. The body comes from GitHub's own Markdown API (`gh a
 
 An approval board for an open-source PR ALWAYS carries the rules cross-reference. Write one row per rule from the target repository's CONTRIBUTING file, PR template and AGENTS or CLAUDE files. Give each row the source link and a result (`pass`, `fail`, `n/a`, or a short note). Pass the file with `--rules`:
 
-- JSON: `[{"rule": "Conventional Commits", "source": "https://github.com/O/R/blob/main/CONTRIBUTING.md", "result": "pass"}]`
+- JSON: `[{"rule": "Conventional Commits", "source": "https://example.test/CONTRIBUTING.md", "result": "pass"}]`
 - Markdown table with the header `| Rule | Source | Result |`. A source can be a URL or `[text](url)`.
 
 The script exits non-zero with a message when the file is missing or malformed.
