@@ -18,7 +18,7 @@
     <path d="M180 388L150 480" marker-end="url(#a)"/>
     <path d="M300 388L380 480" marker-end="url(#a)"/>
     <path d="M730 440V480" stroke-dasharray="6 5" marker-start="url(#a)" marker-end="url(#a)"/>
-    <path d="M630 330H384" marker-end="url(#a)"/>
+    <path d="M630 350H384" marker-end="url(#a)"/>
     <!-- boxes -->
     <rect x="98" y="140" width="284" height="280" rx="10"/>
     <rect x="80" y="16" width="460" height="56" rx="8"/>
@@ -72,7 +72,7 @@
     <text x="36" y="130" font-weight="600">Your server</text>
     <text x="646" y="130" font-weight="600">Shared on the server</text>
     <text x="240" y="412" text-anchor="middle" font-weight="600">Herdr panes</text>
-    <text x="507" y="322" text-anchor="middle">shared by every agent</text>
+    <text x="507" y="342" text-anchor="middle">shared by every agent</text>
     <text x="252" y="102" text-anchor="start">SSH</text>
     <text x="512" y="102" text-anchor="start">iMessage</text>
   </g>
