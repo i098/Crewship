@@ -75,16 +75,13 @@ function blob(list, cx, cy, cz, rx, ry, rz, mat, o) {
   s.blob = [cx, cy, cz, rx, ry, rz];
   return s;
 }
-// Eight-sided disc of radius r and thickness d round a level axle turned `yaw` from the z axis (the wheel's hub).
-function disc(list, cx, cy, cz, yaw, r, d, mat, o) {
-  const ax = Math.sin(yaw), az = Math.cos(yaw);
-  const pl = [[ax, 0, az, cx + ax * d / 2, 0, cz + az * d / 2], [-ax, 0, -az, cx - ax * d / 2, 0, cz - az * d / 2]];
+function disc(list, cx, cy, cz, r, d, mat, o) {
+  const pl = [[0, 0, 1, 0, 0, cz + d / 2], [0, 0, -1, 0, 0, cz - d / 2]];
   for (let i = 0; i < 8; i++) {
     const a = (i + 0.5) * Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
-    pl.push([c * az, s, -c * ax, cx + c * az * r, cy + s * r, cz - c * ax * r]);
+    pl.push([c, s, 0, cx + c * r, cy + s * r, cz]);
   }
-  const ex = r * 1.09 * Math.abs(az) + d * Math.abs(ax) / 2, ez = r * 1.09 * Math.abs(ax) + d * Math.abs(az) / 2;
-  return solid(list, pl, [cx - ex, cy - r * 1.09, cz - ez, cx + ex, cy + r * 1.09, cz + ez], mat, o);
+  return solid(list, pl, [cx - r * 1.09, cy - r * 1.09, cz - d / 2, cx + r * 1.09, cy + r * 1.09, cz + d / 2], mat, o);
 }
 // A round bar along the x axis (axis 0: gun barrels) or the z axis (axis 2: wheels) from u0 to u1, radius r0 at u0
 // and r1 at u1, its axis through (p, q): (y, z) along x, (x, y) along z. Rays hit the true cone (barEntry).
@@ -1170,21 +1167,21 @@ function ladderSide(x0, x1) {
 // The ship's wheel stands on the quarterdeck behind the ladder's top, with its axle along the keel and its plane
 // across the ship: a rim, eight spokes that end past it in thicker handles, and a brass hub on an axle
 // that rests on a turned pedestal. The level spokes span the wheel, so they and the pedestal block walking; no part
-// casts shadows. HELM is the hub's x, y and z, and the turn.
-const HELM = [SX, 5.8, -9.8, 0];
-function shipWheel([cx, cy, cz, yaw]) {
-  const ax = Math.sin(yaw), az = Math.cos(yaw), part = { spot: "helm", fill: 0.7, solid: false, shadow: false };
-  // The point r from the axle at angle a round it, `back` behind the wheel along the axle.
-  const at = (r, a, back = 0) => [cx + r * Math.cos(a) * az - back * ax, cy + r * Math.sin(a), cz - r * Math.cos(a) * ax - back * az];
+// casts shadows.
+const HELM = [SX, 5.8, -9.8];
+function shipWheel([cx, cy, cz]) {
+  const part = { spot: "helm", fill: 0.7, solid: false, shadow: false };
+  const at = (r, a, back = 0) => [cx + r * Math.cos(a), cy + r * Math.sin(a), cz + back];
   for (let i = 0; i < 16; i++) beam(ship, at(0.58, i * Math.PI / 8), at(0.58, (i + 1) * Math.PI / 8), "o", part, 0.07);
   for (let k = 0; k < 8; k++) {
     const a = k * Math.PI / 4, spoke = { ...part, solid: k % 4 === 0 };
     beam(ship, at(0.12, a), at(0.58, a), "o", spoke, 0.04);
-    beam(ship, at(0.58, a), at(0.92, a), "o", spoke, 0.05);
+    beam(ship, at(0.58, a), at(0.92, a, -0.12), "o", spoke, 0.05);
   }
-  disc(ship, cx, cy, cz, yaw, 0.16, 0.24, "y", part);
+  disc(ship, cx, cy, cz, 0.16, 0.24, "y", part);
+  disc(ship, cx, cy, cz - 0.16, 0.12, 0.08, "y", part);
   beam(ship, at(0, 0, 0.12), at(0, 0, 0.38), "t", part, 0.05);
-  column(ship, cx - 0.38 * ax, cz - 0.38 * az, 0.16, 0.1, 4.8, cy, "o", { ...part, solid: true, fill: 0.45 });
+  column(ship, cx, cz + 0.38, 0.16, 0.1, 4.8, cy, "o", { ...part, solid: true, fill: 0.45 });
 }
 shipWheel(HELM);
 const SHIP_BOUNDS = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
@@ -1517,11 +1514,16 @@ function crossInto(next, place) {
   show(null);
   return true;
 }
-function movePlayer(x, z, here) {
+function movePlayer(x, z) {
   if (doorInputHeld) return;
-  if (crossDoor(x, z) || crossHatch(x, z)) return;
-  const fy = floorAt(x, z);
-  if (fy !== null && Math.abs(fy - here) <= 0.6 && !blocked(x, z, fy)) { me.x = x; me.z = z; }
+  const dx = x - me.x, dz = z - me.z, count = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.1));
+  for (let i = 0; i < count; i++) {
+    const nx = me.x + dx / count, nz = me.z + dz / count;
+    if (crossDoor(nx, nz) || crossHatch(nx, nz)) return;
+    const here = floorAt(me.x, me.z), fy = floorAt(nx, nz);
+    if (fy === null || Math.abs(fy - here) > 0.6 || blocked(nx, nz, fy)) return;
+    me.x = nx; me.z = nz;
+  }
 }
 // The room fill and each room's lights share the same warm colour.
 function roomLight(x, y, z, nx, ny, nz) {
@@ -3695,9 +3697,8 @@ function step(dt) {
   me.yaw += turn * 1.9 * dt;
   me.pitch = Math.max(-1.2, Math.min(1.2, me.pitch + tilt * 1.2 * dt));
   const c = Math.cos(me.yaw), s = Math.sin(me.yaw), v = 3.4 * dt;
-  const here = floorAt(me.x, me.z);
-  movePlayer(me.x + (s * fwd + c * side) * v, me.z, here);
-  movePlayer(me.x, me.z + (c * fwd - s * side) * v, here);
+  movePlayer(me.x + (s * fwd + c * side) * v, me.z);
+  movePlayer(me.x, me.z + (c * fwd - s * side) * v);
   return true;
 }
 

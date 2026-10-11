@@ -40,7 +40,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nmeasure();\n' + pr
     )
 
 
-def test_ship_wheel_faces_forward_across_the_keel():
+def test_ship_wheel_faces_aft_across_the_keel():
     _run_ship_scene(
         r"""
 const start = ship.length;
@@ -56,10 +56,51 @@ for (const dz of [-1, 1]) {
 }
 for (let k = 0; k < 8; k++) {
   const a = k * Math.PI / 4;
-  assert(Number.isFinite(depth(cx + 0.85 * Math.cos(a), cy + 0.85 * Math.sin(a), cz + 2, -1)),
+  const x = cx + 0.85 * Math.cos(a), y = cy + 0.85 * Math.sin(a);
+  const aft = depth(x, y, cz - 0.2, 1), bow = depth(x, y, cz + 0.2, -1);
+  assert(Number.isFinite(aft) && Number.isFinite(bow),
     'each of the eight spokes must have a handle beyond the rim');
+  assert(aft < bow, 'each handle must project aft toward the helmsman');
 }
 assert(Number.isFinite(depth(cx, 5, cz + 2, -1)), 'the upright wheel must stand on its pedestal');
+assert(Math.abs(depth(cx + 0.08, cy, cz - 2, 1) - 1.8) < 1e-6, 'the hub cap must face aft');
+assert(!blocked(cx, cz - 0.55, 4.8), 'the helmsman must have room aft of the wheel');
+"""
+    )
+
+
+def test_companionway_movement_does_not_skip_treads_during_slow_frames():
+    _run_ship_scene(
+        r"""
+for (const dt of [0.02, 0.1]) {
+  for (const channel of ['keyboard', 'touch']) {
+    for (const up of [true, false]) {
+      keys.clear(); stick.x = stick.y = 0;
+      me.x = SX + 1.7; me.z = up ? -7.1 : -10; me.yaw = 5 * Math.PI / 4;
+      if (channel === 'keyboard') {
+        keys.add(up ? 'f' : 'b'); keys.add(up ? 'l' : 'r');
+      } else {
+        stick.y = up ? 1 : -1; stick.x = up ? -1 : 1;
+      }
+      for (let i = 0; i < Math.ceil(0.8 / dt); i++) step(dt);
+      assert(up ? me.z < -10.5 : me.z > -6.5, `${channel}: slow diagonal movement must traverse the ladder`);
+      assert(Math.abs(floorAt(me.x, me.z) - (up ? 4.8 : DECK)) < 1e-6);
+      assert(!blocked(me.x, me.z, floorAt(me.x, me.z)));
+    }
+  }
+}
+keys.clear(); stick.x = stick.y = 0;
+me.x = SX + 1; me.z = -8.9;
+movePlayer(me.x, -9.3);
+assert.equal(me.z, -8.9, 'subdivision must not allow climbing a wall higher than 0.6');
+for (const direction of [-1, 1]) {
+  me.x = HELM[0]; me.z = HELM[2] + direction;
+  movePlayer(me.x, HELM[2] - direction);
+  assert(direction * (me.z - HELM[2]) > 0, 'neither direction may pass through the wheel');
+  me.x = SX + 1.7; me.z = HELM[2] + direction;
+  movePlayer(me.x, HELM[2] - direction);
+  assert(Math.abs(me.z - (HELM[2] - direction)) < 1e-6, 'the wheel must remain bypassable');
+}
 """
     )
 
