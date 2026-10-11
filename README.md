@@ -56,7 +56,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
-  <img alt="You message Firstmate from a phone or laptop. Firstmate splits the work across optional second mates and workers, one isolated copy per task. Workers use model providers and GitHub issues, pull requests and projects. Guards, the crew board and the secrets file are shared on the server. Every agent can optionally reach your Mac over SSH." src="docs/how-it-works-light.svg">
+  <img alt="You message Firstmate from a phone or laptop. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. Guards, the crew board and the secrets file are shared on the server. Every agent can optionally reach your Mac over SSH." src="docs/how-it-works-light.svg">
 </picture>
 
 ## More docs
