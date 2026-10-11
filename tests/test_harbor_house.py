@@ -79,17 +79,16 @@ for (const s of world.filter(s => s.anchor === false)) {
   }
 }
 """
+    # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
     subprocess.run(
-        [
-            "node",
-            "-e",
-            "const spots = {office: {}}; const touchFirst = {matches: false};\n"
-            + scene
-            + shading
-            + put
-            + nearby
-            + check,
-        ],
+        ["node", "-"],
+        input="const spots = {office: {}}; const touchFirst = {matches: false};\n"
+        + scene
+        + shading
+        + put
+        + nearby
+        + check,
+        text=True,
         check=True,
         timeout=10,
     )
