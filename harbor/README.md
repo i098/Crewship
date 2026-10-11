@@ -28,8 +28,9 @@ With reduced motion, cloud drift stops, but walking still changes your view of t
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
 A fireplace with a fire, a bookcase, chairs, an armchair, crates, a sea chest, potted plants, and a rug furnish the room.
 Four public-domain paintings hang on the walls in moulded frames with brass name plaques.
-They are Hokusai's *The Great Wave off Kanagawa*, Vernet's *Entrance to the Port of Palermo by Moonlight*, Aivazovsky's *Sailing Ship on the Sea at Moonlight*, and Turner's *Fishermen at Sea* over the mantel.
-`art.py` converts each painting to glyph textures ahead of time; [CREDITS.md](../CREDITS.md#paintings) lists their sources and licences.
+The painting above the mantel is by Turner.
+See [CREDITS.md](../CREDITS.md#paintings) for the works, sources, and licences.
+See [art.py](art.py) for the texture conversion command and [how.html](public/how.html) for rendering details.
 The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.
