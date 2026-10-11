@@ -81,6 +81,7 @@ flowchart LR
     link <-.->|"optional SSH: open links, drive apps<br/>message relay"| mac
     worker --> gh
     worker --> models
+    linkStyle default stroke:#8b949e,stroke-width:2px
 ```
 
 ## More docs
