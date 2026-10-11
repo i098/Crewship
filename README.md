@@ -2,7 +2,7 @@
 
 # 🚢 Crewship
 
-**Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.**
+**This makes it super easy to start using agents in the cloud, enjoy!**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
@@ -18,8 +18,6 @@
 *A finished host: Herdr lists the workspaces and agents on the left, and omp agents work side by side.*
 
 </div>
-
-Crewship makes it super easy to start using agents in the cloud.
 
 ## Features
 
