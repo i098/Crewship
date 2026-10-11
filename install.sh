@@ -37,13 +37,13 @@ check_args "$@"
 work=
 trap 'rm -rf "$work"' EXIT
 
-# Saves URL $1 to file $2; a 404 means release $3 has no install artifact yet.
+# Saves URL $1 to file $2. Returns 22 on HTTP 404 (the caller decides what that means).
 download() {
   local code
   code=$(curl -sSL -o "$2" -w '%{http_code}' "$1") || return 1
   case $code in
     200) ;;
-    404) echo "install.sh: the release $3 has no install artifact yet; try again in a few minutes" >&2; return 1 ;;
+    404) return 22 ;;
     *) echo "install.sh: download of $1 failed (HTTP $code)" >&2; return 1 ;;
   esac
 }
@@ -63,16 +63,37 @@ asset_digest() {
   fi
 }
 
-# Downloads, verifies and unpacks the release artifact of $tag from $base into
-# $work/tree. Nothing outside $work changes, so a failure leaves the install alone.
+# Releases are immutable, so a release made without the artifact never gets one. Then the
+# source archive GitHub builds for the tag (no .git) is installed, after its commit (the
+# pax header comment of the archive) is checked against the commit of the tag.
+verify_source_archive() {
+  local repo=$1 tag=$2 file=$3 want got
+  want=$(git ls-remote "https://github.com/$repo" "refs/tags/$tag^{}" "refs/tags/$tag" | awk 'END {print $1}')
+  got=$(gzip -dc "$file" 2>/dev/null | head -c 1024 | tr -d '\0' | grep -ao 'comment=[0-9a-f]*' | head -1 | cut -d= -f2 || true)
+  [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: the source archive of $tag is not commit '$want' of the tag (got '$got'); refusing to install" >&2; return 1; }
+}
+
+# Downloads, verifies and unpacks release $2 of repo $1 into $work/tree: the release artifact
+# and its .sha256 (plus the asset digest $3), or the verified source archive when the release
+# has no artifact. Nothing outside $work changes, so a failure leaves the install alone.
 fetch_release() {
-  local base=$1 tag=$2 digest=$3 name=crewship-$2.tar.gz want got
-  download "$base/$name" "$work/$name" "$tag"
-  download "$base/$name.sha256" "$work/$name.sha256" "$tag"
-  want=$(awk '{print $1; exit}' "$work/$name.sha256")
-  got=$(sha256sum "$work/$name" | awk '{print $1}')
-  [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: $name does not match its .sha256; refusing to install" >&2; return 1; }
-  [ -z "$digest" ] || [ "$digest" = "sha256:$got" ] || { echo "install.sh: $name does not match the release asset digest; refusing to install" >&2; return 1; }
+  local repo=$1 tag=$2 digest=$3 name=crewship-$2.tar.gz want got rc=0
+  local base=https://github.com/$1/releases/download/$2
+  download "$base/$name" "$work/$name" || rc=$?
+  if [ "$rc" = 0 ]; then
+    download "$base/$name.sha256" "$work/$name.sha256" || { echo "install.sh: the release $tag has no $name.sha256; refusing to install" >&2; return 1; }
+    want=$(awk '{print $1; exit}' "$work/$name.sha256")
+    got=$(sha256sum "$work/$name" | awk '{print $1}')
+    [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: $name does not match its .sha256; refusing to install" >&2; return 1; }
+    [ -z "$digest" ] || [ "$digest" = "sha256:$got" ] || { echo "install.sh: $name does not match the release asset digest; refusing to install" >&2; return 1; }
+  elif [ "$rc" = 22 ]; then
+    echo "install.sh: the release $tag has no install artifact; using GitHub's source archive of the tag" >&2
+    name=source.tar.gz
+    download "https://github.com/$repo/archive/refs/tags/$tag.tar.gz" "$work/$name" || { echo "install.sh: no release $tag in $repo" >&2; return 1; }
+    verify_source_archive "$repo" "$tag" "$work/$name"
+  else
+    return 1
+  fi
   mkdir "$work/tree"
   tar -xzf "$work/$name" -C "$work/tree" --strip-components=1
   [ -x "$work/tree/ship.sh" ] || { echo "install.sh: $name is not a Crewship release" >&2; return 1; }
@@ -114,7 +135,6 @@ main() {
   # The latest tag comes from the unmetered releases/latest redirect, not the API.
   [ -n "$ref" ] || { ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}; }
   [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
-  local base=https://github.com/$repo/releases/download/$ref
   if [ -e "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$dir/.git" ]; then
     echo "install.sh: $dir exists but is not a Crewship install; move it away and rerun" >&2
     return 1
@@ -126,7 +146,7 @@ main() {
   else
     mkdir -p "$releases"
     work=$(mktemp -d "$releases/.tmp.XXXXXX")
-    fetch_release "$base" "$ref" "$(asset_digest "$repo" "$ref" "crewship-$ref.tar.gz")"
+    fetch_release "$repo" "$ref" "$(asset_digest "$repo" "$ref" "crewship-$ref.tar.gz")"
     local old backup= prev=
     if [ -e "$dir" ]; then
       prev=$(readlink "$dir" || true)
