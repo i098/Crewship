@@ -105,6 +105,14 @@ Ship bob and roll do not rebuild the graph during a map click.
 If no free viewing spot exists, the map selection stops without moving the player.
 Without reduced motion, a missing clear route also stops the map walk without moving the player.
 
+The harbor plays ambient sound that fades with distance: sea and surf at the nearest waterline or ship side, water at the fountain, wind in the nearest tree, creaking timbers along the ship, and gulls circling far over the bay.
+Inside the house and the ship's rooms, a fire or lantern crackles nearby and the outdoor sounds are muffled; the ship's rooms keep the creaking.
+Sound starts with the first click or tap, as browsers require, and the speaker button in the bottom-left corner turns it off or on.
+The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
+Sound stops while the tab is hidden; reduced motion does not change it.
+The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
+See [how.html](public/how.html) for the audio graph.
+
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
 Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `harbor/`, and the playbook never copies it.
 `tests/test_harbor_isolation.py` checks both.

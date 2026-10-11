@@ -798,7 +798,7 @@ for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.
 // `top` is the top's gust displacement in metres.
 const TREES = [], PALMS = [];
 function growTree(x, z, height, top) {
-  const t = { y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
+  const t = { x, z, y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
   TREES.push(t);
   return t;
 }
@@ -2738,7 +2738,10 @@ function label(at, span = 0) {
   const i1 = Math.min(cols - 1, Math.floor((stage.clientWidth - right - padX) / cellW));
   const j0 = Math.max(1, Math.ceil((top - padY) / cellH));
   const j1 = Math.min(rows - 1, Math.floor((stage.clientHeight - bottom - padY) / cellH));
-  const controls = pad.offsetParent ? pad.getBoundingClientRect() : null;
+  // The touch pad and the speaker button share the bottom-left corner; signs keep clear of both.
+  const shown = [pad, soundButton].filter((el) => el.offsetParent).map((el) => el.getBoundingClientRect());
+  const controls = shown.length ? { left: Math.min(...shown.map((r) => r.left)), top: Math.min(...shown.map((r) => r.top)),
+    right: Math.max(...shown.map((r) => r.right)), bottom: Math.max(...shown.map((r) => r.bottom)) } : null;
   const padLeft = controls ? Math.floor((controls.left - 12 - padX) / cellW) : i1;
   const padTop = controls ? Math.floor((controls.top - 12 - padY) / cellH) : j1;
   const below = mapBox ? Math.max(j0, mapBox.oj + mapBox.h + 1) : j0;
@@ -3902,7 +3905,7 @@ const KEYS = { KeyW: "f", ArrowUp: "f", KeyS: "b", ArrowDown: "b", KeyA: "l", Ke
 const open = () => { if (target) window.open(spots[target].href, "_blank", "noopener"); };
 stage.addEventListener("keydown", (e) => {
   if (mapKey(e)) { e.preventDefault(); dirty = true; return; }
-  if (e.key === "Enter" && target && !e.target.closest("a")) { e.preventDefault(); open(); return; }
+  if (e.key === "Enter" && target && !e.target.closest("a, button")) { e.preventDefault(); open(); return; }
   const k = KEYS[e.code];
   if (!k || e.altKey || e.ctrlKey || e.metaKey) return;
   e.preventDefault();
@@ -3949,9 +3952,9 @@ function steer(e) {
   releaseDoorInput();
   knob.style.transform = `translate(${x * half * 0.6}px, ${y * half * 0.6}px)`;
 }
-// Link presses do not dismiss the intro or start a touch drag.
+// Link and button presses do not dismiss the intro or start a touch drag.
 stage.addEventListener("pointerdown", (e) => {
-  if (e.target.closest("a") || signHit(e.clientX, e.clientY)) return;
+  if (e.target.closest("a, button") || signHit(e.clientX, e.clientY)) return;
   moved = true; dirty = true;
   if (tapMap(e.clientX, e.clientY)) return;
   if (e.pointerType === "mouse") return;
@@ -3987,6 +3990,105 @@ function step(dt) {
   movePlayer(me.x + (s * fwd + c * side) * v, me.z);
   movePlayer(me.x, me.z + (c * fwd - s * side) * v);
   return true;
+}
+
+// ---- Sound -------------------------------------------------------------------------------
+// Positional ambient loops. Each loop plays from the emitter nearest to you, through an HRTF panner that fades it
+// with distance. Sound starts on the first click, tap or key press (autoplay rules) unless the speaker button turned
+// it off on an earlier visit; the button's choice is stored. Positions update at most 20 times a second.
+const soundButton = document.getElementById("sound");
+let audio = null, soundOn = false, soundAt = 0, soundPref = null, SHORE = null, TREE_TOPS = null;
+try { soundPref = localStorage.getItem("harbor-sound"); } catch { /* blocked storage: sound starts on */ }
+// Name, loop length in seconds, level, and the distance in metres where fading starts. Each file repeats the last
+// and first 0.25 s of its loop around it, so decoder padding cannot put a gap in the loop.
+const LOOPS = [["sea", 16, 0.8, 3], ["fountain", 8, 0.7, 2], ["wind", 12, 0.5, 3], ["creak", 16, 0.6, 3],
+  ["fire", 8, 0.9, 1.5], ["gulls", 20, 0.35, 12]];
+const HEARTH = HOUSE.lights.slice(5, 8); // the fireplace light
+// Sea emitters: the island's waterline on a 2 m grid, and both sides of the moored hull.
+function shorePoints() {
+  const P = [], h = groundHeight;
+  for (let z = HZ0 + 2; z < HZ0 + 108; z += 2) for (let x = HX0 + 2; x < HX0 + 128; x += 2) {
+    if (h(x, z) >= 0 && Math.min(h(x - 2, z), h(x + 2, z), h(x, z - 2), h(x, z + 2)) < 0) P.push(x, 0, z);
+  }
+  for (let z = -14; z <= 13; z += 3) P.push(SX - 3.3, 0, z, SX + 3.3, 0, z);
+  return P;
+}
+// The nearest point of a flat x, y, z list on the ground plan.
+function nearest(P, x, z) {
+  let best = 0, bd = Infinity;
+  for (let k = 0; k < P.length; k += 3) {
+    const d = (P[k] - x) ** 2 + (P[k + 2] - z) ** 2;
+    if (d < bd) { bd = d; best = k; }
+  }
+  return P.slice(best, best + 3);
+}
+function startSound() {
+  try {
+    const ctx = new AudioContext({ latencyHint: "playback", sampleRate: 32000 });
+    SHORE = shorePoints();
+    TREE_TOPS = TREES.flatMap((t) => [t.x, t.y0 + 0.7 * t.height, t.z]);
+    audio = { ctx, nodes: LOOPS.map(([name, loop, level, refDistance]) => {
+      const gain = new GainNode(ctx, { gain: 0 });
+      const panner = new PannerNode(ctx, { panningModel: "HRTF", distanceModel: "inverse", refDistance });
+      gain.connect(panner).connect(ctx.destination);
+      // AAC plays in every major browser; Chromium builds without AAC take the Opus copy. A loop that fails stays silent.
+      const load = (type) => fetch(`audio/${name}.${type}`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b));
+      load("m4a").catch(() => load("webm")).then((buffer) => {
+        const source = new AudioBufferSourceNode(ctx, { buffer, loop: true, loopStart: 0.25, loopEnd: 0.25 + loop });
+        source.connect(gain);
+        source.start(0, 0.25 + Math.random() * loop);
+      }).catch(() => {});
+      return { gain, panner, level };
+    }) };
+  } catch {
+    soundButton.hidden = true; // no Web Audio
+  }
+}
+function setSound(on) {
+  soundOn = on;
+  soundButton.setAttribute("aria-pressed", on);
+  if (on && !audio) startSound();
+  // A muted or hidden page suspends the context, so it costs no CPU.
+  if (audio) (on && !document.hidden ? audio.ctx.resume() : audio.ctx.suspend()).catch(() => {});
+}
+// Only a click or tap starts sound, so a keyboard user can reach the button without hearing it first.
+function firstGesture(e) {
+  if (e.target.closest?.("#sound")) return;
+  removeEventListener("pointerup", firstGesture, true);
+  if (soundPref !== "off") setSound(true);
+}
+addEventListener("pointerup", firstGesture, true);
+soundButton.addEventListener("click", () => {
+  removeEventListener("pointerup", firstGesture, true);
+  setSound(!soundOn);
+  try { localStorage.setItem("harbor-sound", soundOn ? "on" : "off"); } catch { /* not remembered */ }
+});
+document.addEventListener("visibilitychange", () => audio && setSound(soundOn));
+// Web Audio's z axis points the other way from the scene's.
+function place(node, [x, y, z], t) {
+  node.positionX.setTargetAtTime(x, t, 0.1);
+  node.positionY.setTargetAtTime(y, t, 0.1);
+  node.positionZ.setTargetAtTime(-z, t, 0.1);
+}
+function soundTick(now) {
+  if (!soundOn || !audio || now - soundAt < 50) return;
+  soundAt = now;
+  const { ctx, nodes } = audio, t = ctx.currentTime;
+  // The house and cabin are drawn around their own origin: place them at their outside door.
+  const [ox, oz] = interior?.exit || [0, 0], x = ox + me.x, z = oz + me.z, y = me.eye ?? 1.6;
+  ctx.listener.setPosition(x, y, -z);
+  ctx.listener.setOrientation(Math.sin(me.yaw), 0, -Math.cos(me.yaw), 0, 1, 0);
+  const room = interior === HOUSE ? HEARTH : interior === CABIN ? CABIN.lights : interior && nearest(GUN_DECK_LAMPS, x, z);
+  const walls = interior === HOUSE ? 0.15 : interior ? 0.4 : 1, a = now / 9000;
+  const at = [nearest(SHORE, x, z), [POOL.x, POOL.y, POOL.z], nearest(TREE_TOPS, x, z),
+    [SX, DECK, Math.max(-12, Math.min(11, z))], room ? [ox + room[0], room[1], oz + room[2]] : [x, y, z],
+    [25 * Math.cos(a), 18, -35 + 12 * Math.sin(a)]];
+  // Rooms muffle the outdoor loops; the ship's rooms keep its creaking, and only rooms play the fire.
+  const levels = [walls, walls, walls, interior && interior !== HOUSE ? 1 : walls, room ? 1 : 0, walls];
+  nodes.forEach(({ gain, panner, level }, i) => {
+    gain.gain.setTargetAtTime(level * levels[i], t, 0.3);
+    place(panner, at[i], t);
+  });
 }
 
 // ---- Loop --------------------------------------------------------------------------------
@@ -4038,6 +4140,7 @@ function frame(now) {
   if (still) { bob = 0; roll = 0; } else { roll = WIND.force * (0.02 * Math.sin(T * 0.55) + 0.01 * Math.sin(T * 0.8 + 1.3)); bob = WIND.force * (0.03 * Math.sin(T * 0.55 + 0.8) + 0.015 * Math.sin(T * 0.8 + 2)); }
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);
+  soundTick(now);
   // Ship rooms animate with the hull; the house and reduced-motion views repaint only on input.
   if (visible && cols && (walked || dirty || (!still && interior !== HOUSE))) {
     if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
