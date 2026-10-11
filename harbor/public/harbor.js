@@ -4114,14 +4114,15 @@ function soundTick(now) {
   if (!soundOn || !audio || now - soundAt < 50) return;
   soundAt = now;
   const { ctx, nodes } = audio, t = ctx.currentTime;
-  // The house and cabin are drawn around their own origin: place them at their outside door.
-  const [ox, oz] = interior?.exit || [0, 0], x = ox + me.x, z = oz + me.z, y = me.eye ?? 1.6;
+  // The house and cabin are drawn around their own origin: place them at their outside door; the cabin faces the other way.
+  const [ox, oz] = interior?.exit || [0, 0], s = interior === CABIN ? -1 : 1;
+  const x = ox + s * me.x, z = oz + s * me.z, y = me.eye ?? 1.6, yaw = me.yaw + (s < 0 ? Math.PI : 0);
   ctx.listener.setPosition(x, y, -z);
-  ctx.listener.setOrientation(Math.sin(me.yaw), 0, -Math.cos(me.yaw), 0, 1, 0);
+  ctx.listener.setOrientation(Math.sin(yaw), 0, -Math.cos(yaw), 0, 1, 0);
   const room = interior === HOUSE ? HEARTH : interior === CABIN ? CABIN.lights : interior && nearest(GUN_DECK_LAMPS, x, z);
   const walls = interior === HOUSE ? 0.15 : interior ? 0.4 : 1, a = now / 9000;
   const at = [nearest(SHORE, x, z), [POOL.x, POOL.y, POOL.z], nearest(TREE_TOPS, x, z),
-    [SX, DECK, Math.max(-12, Math.min(11, z))], room ? [ox + room[0], room[1], oz + room[2]] : [x, y, z],
+    [SX, DECK, Math.max(-12, Math.min(11, z))], room ? [ox + s * room[0], room[1], oz + s * room[2]] : [x, y, z],
     [25 * Math.cos(a), 18, -35 + 12 * Math.sin(a)]];
   // Rooms muffle the outdoor loops; the ship's rooms keep its creaking, and only rooms play the fire.
   const levels = [walls, walls, walls, interior && interior !== HOUSE ? 1 : walls, room ? 1 : 0, walls];

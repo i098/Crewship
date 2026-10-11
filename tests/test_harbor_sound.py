@@ -34,7 +34,7 @@ const window = {};
 // Web Audio stand-ins that keep the last target of each parameter; the loops never load.
 const param = () => ({value: 0, setTargetAtTime(v) { this.value = v; }});
 class AudioContext {
-  constructor() { this.currentTime = 0; this.listener = {setPosition: (...p) => { this.ear = p; }, setOrientation() {}}; }
+  constructor() { this.currentTime = 0; this.listener = {setPosition: (...p) => { this.ear = p; }, setOrientation: (...p) => { this.facing = p; }}; }
   resume() { return Promise.resolve(); }
   suspend() { return Promise.resolve(); }
 }
@@ -85,6 +85,15 @@ const lamps = [];
 for (let k = 0; k < GUN_DECK_LAMPS.length; k += 3) lamps.push(Math.hypot(GUN_DECK_LAMPS[k] - SX, GUN_DECK_LAMPS[k + 2]));
 assert(Math.abs(flat(at(4), ear()) - Math.min(...lamps)) < 1e-9, 'the nearest gun deck lantern crackles');
 assert(gain(0) > 0.2 && gain(0) < 0.8, 'the hull muffles the sea');
+
+// The cabin is drawn turned half-way round: walking into it heads towards the stern, and the lantern hangs there.
+crossInto(CABIN, {x: 0, z: 4, yaw: 0});
+me.eye = 1.6;
+tick();
+assert.deepEqual(ear(), [CABIN.exit[0], 1.6, CABIN.exit[1] - 4], 'four metres into the cabin is four metres further towards the stern');
+assert(Math.abs(audio.ctx.facing[2] - 1) < 1e-9, 'facing into the cabin is facing the stern (-z)');
+assert.deepEqual(at(4), [CABIN.exit[0], CABIN.lights[1], CABIN.exit[1] - CABIN.lights[2]], 'the lantern hangs at its world position');
+assert.equal(gain(4), 0.9);
 """
     # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
     subprocess.run(
