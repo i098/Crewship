@@ -3,7 +3,7 @@
 # latest releases tasks/preflight.yml resolved.
 #
 # Contract: python3 <repo>/scripts/provisions.py
-#           --home <crewship.home> --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly[,concord,slk]
+#           --home <crewship.home> --tools herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim[,concord,slk]
 #           [--npm] [--development]
 #           --resolved <crewship_latest as JSON>
 # The installer is idempotent and prints a final JSON object
@@ -110,3 +110,6 @@
       different builds; the installer owns this symlink.
     quiet: true
   when: not ansible_check_mode
+
+- name: Install the first-write Neovim configuration
+  ansible.builtin.import_tasks: nvim.yml

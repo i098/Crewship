@@ -32,7 +32,11 @@ The layers are at different heights, so they move at different speeds when you w
 With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
-A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.
+A fireplace with a fire, a bookcase, chairs, an armchair, crates, a sea chest, potted plants, and a rug furnish the room.
+Four public-domain paintings hang on the walls in moulded frames with brass name plaques.
+The painting above the mantel is by Turner.
+See [CREDITS.md](../CREDITS.md#paintings) for the works, sources, and licences.
+See [art.py](art.py) for the texture conversion command and [how.html](public/how.html) for rendering details.
 The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.
@@ -54,6 +58,9 @@ Each foot sags in an arc between its corners, and the sides bow out.
 The sheets stay taut to the moving sail corners.
 The black flag shows a pale skull and crossbones and has a wavy fly edge; it streams with the masthead pennants in the same wind.
 With reduced motion, the sails stay full but do not move.
+The moored ship sways gently with the wind, under 2 degrees of roll, combining smooth cycles of about 8 and 11 seconds.
+The cabin and gun deck share the hull's roll and a pitch under 1 degree; their hanging lanterns swing slightly.
+With reduced motion, the hull, both ship rooms, and their lanterns stay still.
 The sails keep a pale canvas tone at night.
 Outboard lanterns make the gun ports visible.
 

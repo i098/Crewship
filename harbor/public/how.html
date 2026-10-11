@@ -39,7 +39,8 @@
   Palm fronds use projected spines with paired leaflets; distant palms show fewer leaflets or only spines.
   They check the depth buffer instead of ray intersections.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
-  The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.
+  The sea is a height field of travelling waves, ray marched per cell; the small boats ride it.
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the ship's wind-driven sway.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
@@ -77,6 +78,9 @@
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   The fountain pool and upper bowl use animated texture glyphs instead of the density ramp.
   Fountain droplets use <code>: ' ,</code>; spray and splashes also use <code>.</code>, and mist uses <code>. `</code>.
+  The house's paintings are glyph textures that <code>harbor/art.py</code> converts ahead of time from public-domain works.
+  Each texel keeps one glyph from <code> .:-=+*#%@</code> and one of a few colours; room light sets the colour level.
+  A painting far from you reads a half or quarter size copy of its texture.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
@@ -107,8 +111,9 @@
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
-  A room redraws only after movement, looking, resizing, or another change that requires a new frame.
-  Reduced motion also stops exterior animation.</li>
+  The house redraws only after movement, looking, resizing, or another change that requires a new frame.
+  The cabin and gun deck also redraw while swaying with the hull.
+  Reduced motion stops exterior animation and idle ship-room redraws; see the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for ship motion.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
   Each intro frame ends with a black canvas fill at opacity <code>1 - progress * progress</code>.

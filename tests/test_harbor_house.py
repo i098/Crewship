@@ -29,7 +29,8 @@ assert.equal(blocked(-5, 20.8, 1.2), true);  // the old wall still blocks
 assert.equal(blocked(-0.7, 23, 1.2), false); // side approach
 assert.equal(blocked(-0.8, 23, 1.2), true);
 """
-    subprocess.run(["node", "-e", world + check], check=True, timeout=10)
+    # The world section with the paintings' textures nears the 128 KiB limit for one argument, so it goes in on stdin.
+    subprocess.run(["node", "-"], input=world + check, text=True, check=True, timeout=10)
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
@@ -327,4 +328,74 @@ keys.clear();
         text=True,
         check=True,
         timeout=10,
+    )
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+def test_house_paintings_show_their_textures_and_plaques():
+    source = (ROOT / "harbor/public/harbor.js").read_text()
+    setup = r"""
+const assert = require('node:assert/strict');
+// Any 2D context call is a no-op; measureText reports a 6 px wide cell.
+const context = new Proxy({}, {get: (target, key) => key in target ? target[key] : () => ({width: 6})});
+const element = {
+  hidden: false, classList: {add() {}, remove() {}, toggle() {}}, focus() {}, addEventListener() {},
+  firstElementChild: {style: {}}, clientWidth: 1200, clientHeight: 800,
+  style: {setProperty() {}}, replaceChildren() {}, getContext: () => context
+};
+const document = {getElementById: () => element, querySelectorAll: () => [],
+  documentElement: {}, addEventListener() {}, fonts: {load: () => Promise.resolve(), ready: Promise.resolve()}};
+const matchMedia = () => ({matches: false, addEventListener() {}});
+const getComputedStyle = () => ({getPropertyValue: () => 'monospace'});
+const devicePixelRatio = 1, innerWidth = 1200;
+const performance = {now: () => 0};
+const IntersectionObserver = class {observe() {}}, ResizeObserver = class {observe() {}};
+function requestAnimationFrame() {}
+function addEventListener() {}
+function removeEventListener() {}
+const window = {};
+"""
+    check = r"""
+// Every texel names a palette colour and glyph, and each smaller texture halves the one before.
+for (const [key, [pal, w, h, ...levels]] of Object.entries(ART)) {
+  assert.equal(levels.length, 3, key);
+  levels.forEach((level, k) => {
+    assert.equal(level.length, Math.ceil(w / 2 ** k) * Math.ceil(h / 2 ** k), `${key} level ${k} size`);
+    for (const ch of level) assert(ch.charCodeAt(0) - 35 - (ch > '\\') < pal.length / 2 * ART_GLYPHS.length, key);
+  });
+}
+finishIntro();
+Object.assign(me, {x: -5, z: 20.7, yaw: 0, pitch: 0});
+crossDoor(-5, 20.8);
+measure();
+// Face each plaque from 1.2 m: its painter's name shows once, on one glyph row.
+const plaques = room.filter(s => s.mat === 'o' && s.tex && Math.min(s.bb[3] - s.bb[0], s.bb[5] - s.bb[2]) < 0.013);
+assert.equal(plaques.length, 4);
+const seen = [];
+for (const {bb} of plaques) {
+  const alongX = bb[3] - bb[0] > bb[5] - bb[2], cx = (bb[0] + bb[3]) / 2, cz = (bb[2] + bb[5]) / 2;
+  const nx = alongX ? 0 : Math.sign(-cx), nz = alongX ? Math.sign(3 - cz) : 0;
+  Object.assign(me, {x: cx + nx * 1.2, z: cz + nz * 1.2, yaw: Math.atan2(-nx, -nz), pitch: 0, eye: (bb[1] + bb[4]) / 2});
+  render();
+  // G holds the cast glyphs, before the aim mark and edge glyphs are drawn over them.
+  const text = Array.from({length: rows}, (_, j) => G.slice(j * cols, (j + 1) * cols).join('')).join('\n');
+  const names = ['HOKUSAI', 'VERNET', 'AIVAZOVSKY', 'TURNER'].filter(name => text.includes(` ${name} `));
+  assert.equal(names.length, 1, `one whole name under the plaque at ${cx}, ${cz}`);
+  assert.equal(text.split(names[0]).length, 2, `${names[0]} shows once`);
+  seen.push(names[0]);
+}
+assert.deepEqual(seen.sort(), ['AIVAZOVSKY', 'HOKUSAI', 'TURNER', 'VERNET']);
+"""
+    # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
+    subprocess.run(
+        ["node", "-"],
+        input="(async () => {\n"
+        + setup
+        + source
+        + "\nawait new Promise(setImmediate);\n"
+        + check
+        + "\n})().catch(error => { console.error(error); process.exit(1); });",
+        text=True,
+        check=True,
+        timeout=20,
     )

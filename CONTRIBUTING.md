@@ -20,7 +20,9 @@ Every task is idempotent; a second unchanged `launch` reports `changed=0`.
 
 Every task is check-mode safe: `chart` (Ansible `--check`) previews without mutating.
 
-Nothing is pinned: every tool tracks its latest release, resolved once per apply and verified by the checksum its publisher posts; what each source is verified against, and the omp marketplace plugin exception, are in [Dependencies](docs/dependencies.md). Only the repository's own development environments (`uv.lock`, `crewboard/Cargo.lock`) stay locked, and CI pins each GitHub Action to the commit SHA of its latest release, kept current by Dependabot.
+Follow [Dependencies](docs/dependencies.md) for tool release selection, download verification, and exceptions.
+Only the repository's own development environments (`uv.lock`, `crewboard/Cargo.lock`) stay locked.
+CI pins each GitHub Action to the commit SHA of its latest release, kept current by Dependabot.
 
 No unconditional restarts, daemon-reloads, or bare commands.
 
@@ -44,6 +46,8 @@ uv run ansible-playbook -i ansible/inventory.yml ansible/site.yml --syntax-check
 # Full CI (runs all of the above + Docker worker smoke)
 ./scripts/ci-local.sh
 ```
+
+See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
 
 ## Adding a new tool
 
@@ -105,7 +109,10 @@ Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or th
 
 GitHub rulesets enforce these rules, with no bypass:
 
-- `main` changes only through a pull request. Before a merge, the checks `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass. No approval is necessary.
+- `main` changes only through a pull request.
+  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
+  No approval is necessary.
 - `main` cannot be force-pushed or deleted.
 - GitHub deletes the head branch after the merge.
 - A `v*` tag cannot be deleted or moved.

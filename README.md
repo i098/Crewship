@@ -2,7 +2,7 @@
 
 # 🚢 Crewship
 
-**Orchestrate hundreds of agents effortlessly - hardware is the limit.**
+**Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
@@ -23,7 +23,7 @@
 
 - **Self-hosted AI coding agents:** one Ubuntu 24.04 or 26.04 machine runs Herdr, the Firstmate orchestrator, and the omp agent fleet. No cloud dependencies.
 - **Reproducible with Ansible:** profiles in one host file, a check-mode preview with `./ship.sh chart`, and one `./ship.sh launch` that changes the host. No Nix, no chezmoi.
-- **Checksum-verified toolchain:** every apply installs the latest releases and verifies their checksums. The three omp marketplace plugins are the one exception.
+- **Checksum-verified toolchain:** every apply installs the latest tool releases and verifies their checksums. The omp and Neovim plugins use upstream Git repositories.
 - **Built for an agent fleet:** fleet guards, auto pruners, a self-hosted CI pool, and the Concord (Discord) and slk (Slack) terminal chat clients.
 
 ## Features
@@ -49,6 +49,7 @@
 - [Google Workspace CLI](docs/google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](docs/dependencies.md): every tool, package, and image the recipe installs
+- [Neovim with LazyVim](docs/dependencies.md#neovim-and-lazyvim): a terminal editor on every host, with Pyrefly for Python
 - [Migration and recovery](docs/recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](docs/recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
 - [Tailscale](docs/security.md#remote-access): the Tailscale daemon for remote access (opt-in)

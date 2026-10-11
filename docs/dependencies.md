@@ -1,6 +1,15 @@
 # Dependencies
 
-Everything the recipe installs, grouped by where it comes from. Nothing is pinned: every `./ship.sh launch` resolves each tool's newest release once and installs exactly that, so re-running apply upgrades an existing host. Every download is verified against the checksum its publisher posts for that exact release, and a release without one fails the apply instead of installing an unverified artifact (the optional Koncreet is skipped with a warning instead). The one exception is the three omp marketplace plugins (ponytail, i-have-adhd, caveman): no publisher checksums them. The installer records the releases it resolved in `~/.local/share/crewship/resolved.json`, which the container smoke compares against; `ansible/tasks/verify.yml` also asserts that the herdr service and omp run the resolved releases. `./ship.sh chart` installs none of this.
+Everything the recipe installs, grouped by source.
+Each `./ship.sh launch` resolves the newest tool releases once, then installs those releases.
+Re-running apply upgrades an existing host.
+The installer verifies downloads against publisher checksums and refuses releases without them.
+Optional Koncreet failures produce a warning instead.
+The omp marketplace plugins and Neovim plugins use upstream Git repositories without publisher checksums.
+Neovim downloads its plugins on first start, not during apply.
+The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
+`ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
+`./ship.sh chart` installs none of this.
 
 ## Repository tooling
 
@@ -16,30 +25,56 @@ Everything the recipe installs, grouped by where it comes from. Nothing is pinne
 - Always: herdr ([herdrdev/herdr](https://github.com/herdrdev/herdr/releases/latest)), bun ([oven-sh/bun](https://github.com/oven-sh/bun/releases/latest), the x64 `baseline` build), uv ([astral-sh/uv](https://github.com/astral-sh/uv/releases/latest)), btop ([aristocratos/btop](https://github.com/aristocratos/btop/releases/latest), the static musl build, linked as `btop-bin`; `btop` is the launcher in [btop](herdr.md#btop)), sentrux ([sentrux/sentrux](https://github.com/sentrux/sentrux/releases/latest), the binary plus the same release's `grammars-<platform>.tar.gz`, whose grammars are linked into `~/.sentrux/plugins/<language>/grammars/` so sentrux never downloads them itself, unverified, on first run), fallow ([fallow-rs/fallow](https://github.com/fallow-rs/fallow/releases/latest), the static musl binary `fallow-linux-<arch>-musl`, for the [quality gate](omp.md#quality-gate)), verified against the GitHub release-asset digest. A herdr upgrade rewrites and restarts `herdr.service`.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
 - Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`.
+- Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
+  The installer keeps the complete `nvim-linux-<arch>` tree and links `~/.local/bin/nvim` to its executable.
 - `agents` profile, native: gh ([cli/cli](https://github.com/cli/cli/releases/latest)), treehouse ([kunchenguid/treehouse](https://github.com/kunchenguid/treehouse/releases/latest)), verified against the GitHub release-asset digest.
 - `agents` profile, native: gws, the Google Workspace CLI ([googleworkspace/cli](https://github.com/googleworkspace/cli/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes. Signing in Google accounts is manual: see [Google Workspace CLI](google-workspace.md).
 - `agents` profile, no-mistakes ([kunchenguid/no-mistakes](https://github.com/kunchenguid/no-mistakes/releases)): the one tool that tracks the prerelease channel. Each apply resolves the newest non-draft release, betas included (not only the latest stable one), and verifies it against the GitHub release-asset digest.
 - `agents` profile, npm: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6.
 - `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
-- `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces, installed once and upgraded with `omp plugin upgrade` on every apply. These are the only installs that are not checksum-verified: no publisher posts a checksum for them, so they track each author's default branch and load as agent instructions and hooks. The operator accepted this to keep them at the latest commit.
+- `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
+  Apply installs them once and runs `omp plugin upgrade` on later applies.
+  These plugins have no publisher checksums and track each author's default branch.
+  They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
 - `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
 
 The GitHub API allows 60 unauthenticated requests per hour per IP.
 Shared IPs, such as CI runners, can reach this limit.
-A resolution makes one request per GitHub repository, at most fifteen.
+A resolution makes one request per GitHub repository, at most sixteen.
 Only the tools a run installs are resolved, so an unused source cannot fail the run.
 The lookups use `GITHUB_TOKEN` from the environment that runs `./ship.sh launch` or `./onboard.sh`, if set.
 The token goes to the GitHub API only.
 Container builds take the token as the optional BuildKit secret `github_token` (`docker build --secret id=github_token,env=GITHUB_TOKEN ...`).
 The token never enters the image.
 
+## Neovim and LazyVim
+
+Every host gets Neovim.
+Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `config/nvim/` when `~/.config/nvim` is missing or an empty real directory.
+Apply leaves nonempty directories, files, and symlinks unchanged, including dangling symlinks.
+Apply also leaves directories unchanged when it cannot complete the directory scan.
+It never merges files or installs plugins during apply.
+
+Run `nvim` to start the editor.
+The first start needs network access: the starter downloads lazy.nvim, LazyVim, and their plugins.
+Plugin downloads use the upstream Git repositories, not the Crewship checksum installer.
+LazyVim manages later plugin updates.
+The added `lua/plugins/pyrefly.lua` uses the Pyrefly executable from PATH with `mason = false`, so Mason does not install another copy.
+See the Pyrefly entry under [Latest releases](#latest-releases) for its installation.
+Use a Python project with `pyrefly.toml` to select its project root.
+
+The runtime starter files and Apache-2.0 license come from commit `803bc181d7c0d6d5eeba9274d9be49b287294d99`.
+The unused example plugin and upstream development files are not included.
+The Pyrefly configuration is the only added runtime file.
+
 ## Ubuntu packages
 
 `ansible/group_vars/all.yml`, `ansible/tasks/packages.yml`. Distribution versions, not pinned.
 
-- Base: ca-certificates, curl, git, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
+- Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
+  gcc and libc6-dev let LazyVim compile Treesitter parsers even when the `development` profile is disabled.
 - Headless browser libraries, every apply, without recommends: libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libasound2t64, libatk1.0-0t64, libatk-bridge2.0-0t64, libatspi2.0-0t64, libgbm1, libnss3, libnspr4, libxkbcommon0, fonts-dejavu-core. The chrome-headless-shell that omp's browser tool and puppeteer download needs the libraries to start and a font to draw text.
 - `chat`, without recommends: libegl1, libpipewire-0.3-0t64, libva2, libva-drm2 (the Concord binary links them).
 - `development`: build-essential, pkg-config, libssl-dev, python3-dev, cmake, ripgrep.
