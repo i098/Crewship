@@ -30,7 +30,7 @@ No unconditional restarts, daemon-reloads, or bare commands.
 
 ## Working on Crewship itself
 
-Users install Crewship with the one-line installers on [crewship.si](https://crewship.si). Clone the repository only to change Crewship or to run the playbook from a checkout.
+Users install Crewship with the one-line installers in the [README](README.md#install). Clone the repository only to change Crewship or to run the playbook from a checkout.
 
 You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root account with sudo, Python 3.12+, `git`, and `gh`. [`cloud-init/user-data.yaml`](cloud-init/user-data.yaml) can preinstall the OS packages on first boot.
 
