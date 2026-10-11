@@ -107,32 +107,33 @@
 
 <section class="post">
 <h2>6. Cost is the cell count</h2>
-<p>Rays per frame at the smallest glyphs. Bigger screen, more cells.</p>
-<pre aria-hidden="true">iPhone ##                            12,120
-1080p  #######                       34,202
-1440p  ############                  60,450
-4K     ############################ 136,808</pre>
-<p>Frame slow? Shadows go off, then glyphs grow up to 3x: 9x fewer rays. Frames fast again? Glyphs shrink back.</p>
+<p>Rays per frame at the default glyph size. Bigger screen, more cells, until the cell cap holds 4K down.</p>
+<pre aria-hidden="true">iPhone ###                           15,194
+1080p  #######                       34,560
+1440p  #############                 61,344
+4K     #########                     41,880</pre>
+<p>Frame slow? Fields come first, then shadows go off. A phone may then grow outdoor glyphs up to 1.5x, and a room up to 3x. Frames fast again? Glyphs shrink back.</p>
 </section>
 
 <details>
 <summary>All the detail (long)</summary>
 <h3>Cells per screen</h3>
-<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall. "Largest glyphs" is the coarsest grid the page falls back to, 3 times as big. Frame time depends on the device, so it is not listed here.</p>
+<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 0.9 of the old 6.5 to 11 px range up to 2560 by 1440 CSS pixels, and taller above that, because the cell cap is 76,000 and falls with the square root of the stage area above 2560 by 1440 (about 51,000 cells at 3840 by 2160). Cells are whole device pixels. "Largest glyphs" is the 3 times larger grid a room can fall back to. The counts assume a glyph 0.6 times as wide as tall, a 393 by 852 phone at pixel ratio 3, and desktops at pixel ratio 1. Frame time depends on the device, so it is not listed here.</p>
 <div class="scroll"><table>
 <tr><th>Screen</th><th>Cells (rays), full detail</th><th>Cells (rays), largest glyphs</th></tr>
-<tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>40 x 33 = 1,320</td></tr>
-<tr><td>1440 x 900</td><td>294 x 91 = 26,754</td><td>98 x 30 = 2,940</td></tr>
-<tr><td>1920 x 1080</td><td>349 x 98 = 34,202</td><td>116 x 32 = 3,712</td></tr>
-<tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>155 x 43 = 6,665</td></tr>
-<tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>232 x 65 = 15,080</td></tr>
+<tr><td>iPhone 15 Pro</td><td>107 x 142 = 15,194</td><td>36 x 48 = 1,728</td></tr>
+<tr><td>1440 x 900</td><td>288 x 100 = 28,800</td><td>90 x 34 = 3,060</td></tr>
+<tr><td>1920 x 1080</td><td>320 x 108 = 34,560</td><td>106 x 36 = 3,816</td></tr>
+<tr><td>2560 x 1440</td><td>426 x 144 = 61,344</td><td>142 x 48 = 6,816</td></tr>
+<tr><td>3840 x 2160 (4K)</td><td>349 x 120 = 41,880</td><td>213 x 72 = 15,336</td></tr>
 </table></div>
 <h3>How the page adapts</h3>
 <ul>
-  <li>A frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page turns shadow rays off.</li>
-  <li>If still slow, each glyph grows 15% at a time, up to 3 times as big.</li>
-  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again.</li>
-  <li>Phones draw at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
+  <li>A frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row, outdoors, the page casts every other row each frame (fields).</li>
+  <li>If still slow, the page turns shadow rays off.</li>
+  <li>If still slow, glyphs grow 15% at a time: not at all outdoors on a desktop, up to 1.5 times as big outdoors on a touch device, up to 3 times in a room. Crossing a door resets them to the default size.</li>
+  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again, then fields end.</li>
+  <li>Every canvas draws at the display's pixel ratio, and none is bigger than 4096 x 4096 device pixels.</li>
   <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
   <li>Measured at 1440 x 900 over five views: the scene has 444 shapes (275 outside, 169 on the ship). For each list a ray walks, it meets 1.3 to 2.6 candidate shapes, box-tests 0.6 to 1.7 of them, and runs the exact formula 0.3 to 1.2 times. The 5 tree crowns hold 43 leaf clumps in all.</li>
 </ul>
