@@ -31,8 +31,9 @@
   Inside the cloth's box, a ray samples the gap between the ray and the cloth.
   Near-parallel rays subdivide intervals that can contain crossings and select the nearest crossing inside the cloth's outline.
   Each bracketed crossing uses a halving and straight-line steps.
-  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines; tall grass uses projected tufts, and palm fronds use projected spines with a leaflet on each side at each step.
-  These check the depth buffer instead of ray intersections.
+  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines, tall grass uses projected tufts, palm fronds use projected spines with a leaflet on each side at each step, and fountain water uses projected droplets.
+  They check the depth buffer instead of ray intersections.
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
@@ -67,7 +68,8 @@
   Leaves pick glyphs from <code>,.:;&amp;%@</code> by brightness, one for each 20 cm patch, and draw no outline edges.
   Bark uses strokes that follow its limb on screen, with <code>( )</code> on the sides of upright trunks; palm rings and birch marks cross the limb.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
-  Fountain water uses animated texture glyphs instead of the density ramp.
+  The fountain pool and upper bowl use animated texture glyphs instead of the density ramp.
+  Fountain droplets use <code>: ' ,</code>; spray and splashes also use <code>.</code>, and mist uses <code>. `</code>.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
@@ -79,6 +81,7 @@
   Touch devices redraw only each run of changed cells and its neighbouring cells; runs fewer than five cells apart share one redraw.
   Grass and tree wind animation uses a 12 Hz clock; other scene changes can repaint grass and tree cells between wind updates.
   The wind bends each tree a little before the scene's one wind direction, more toward its top, and its leaf clumps flutter across it.
+  Fountain water moves on a 24 Hz clock; other scene changes can repaint its cells between water updates.
   The mini map draws again each frame, even when its cells do not change.
   The pop-up sign also draws again each frame; the cells it covered draw again when it moves or closes.
   Devices with <code>(pointer: coarse)</code> draw one glyph per <code>fillText</code> call to limit WebKit's text cache.
