@@ -104,6 +104,8 @@ Every action is pinned to the commit SHA of its latest release (Dependabot moves
 
 `.github/workflows/npm-publish.yml` runs when a `vX.Y.Z` GitHub release is published. It sets the version of the `crewship` npm package (`npm/`) to the tag and publishes it with npm trusted publishing: the job's OIDC token (`id-token: write`, its only other permission is `contents: read`) replaces a stored npm token, and npm adds a provenance attestation. The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment. Each publish shows under Deployments with the package page as its URL. The package holds only `npm/crewship.js`, which fetches and runs `install.sh` from the release with the same version; `tests/test_npm_package.py` fails if anything else enters the tarball.
 
+`.github/workflows/release-artifact.yml` runs on the same event and attaches `crewship-<tag>.tar.gz` (a `git archive` of the tag, built by `scripts/build-release-artifact.sh`) and its `.sha256` to the release, with `contents: write` as its only permission. `install.sh` installs that artifact instead of cloning ([Install, update and migrate](../install.md)).
+
 ## Primary sources
 
 - [Herdr installation](https://herdr.dev/docs/install/), [headless/SSH persistence](https://herdr.dev/docs/persistence-remote/), [session-state limits](https://herdr.dev/docs/session-state/), [config reference](https://herdr.dev/docs/config-reference/).
