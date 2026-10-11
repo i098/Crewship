@@ -1,0 +1,51 @@
+# Attaches the install artifact to each published vX.Y.Z release, or, started by hand
+# with a tag, to an existing release (--clobber lets a failed run be re-driven).
+#
+# The job checks out the workflow's own ref (it has the build script, which an old tag
+# lacks) with all tags; the script archives the tag.
+#
+# crewship-<tag>.tar.gz is a `git archive` of the tag (no .git) and
+# crewship-<tag>.tar.gz.sha256 its checksum, both built by
+# scripts/build-release-artifact.sh. install.sh downloads and verifies them
+# instead of cloning the repository. Actions are pinned to the commit SHA of
+# their latest release (the same pin as npm-publish.yml).
+name: release-artifact
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z) to attach the artifact to
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  artifact:
+    name: attach the install artifact
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Build the artifact and its checksum
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: scripts/build-release-artifact.sh "$TAG" dist
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
