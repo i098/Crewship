@@ -27,7 +27,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
 - **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
 - **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
-- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) in the terminal, and [iMessage](docs/imessage.md) through Photon or a BlueBubbles relay on your own Mac.
+- **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal.
 - **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
 - **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
