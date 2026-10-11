@@ -58,30 +58,37 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 ```mermaid
 flowchart TD
-    you["You: terminal, iMessage, Discord, Slack"]
-    env["~/super.env:<br/>iMessage bridge credentials"]
-    subgraph host["Crewship host: Herdr panes"]
-        fm["Firstmate"]
-        sm["Second mates (optional)"]
-        board["Crew board (optional)"]
-        gates["Guards and quality gate"]
-        subgraph worker["Worker, one per task"]
-            direction LR
-            omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"] --> pr["Pull request"]
+    you["You: phone or laptop<br/>terminal, iMessage, Discord, Slack"]
+    subgraph vps["Your server (VPS)"]
+        env["~/super.env"]
+        subgraph herdr["Herdr panes"]
+            fm["Firstmate"]
+            sm["Second mates (optional)"]
+            board["Crew board (optional)"]
+            gates["Guards and quality gate"]
+            subgraph worker["Worker, one per task"]
+                omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"]
+            end
         end
+        docker["Docker engine"]
     end
+    gh["GitHub: pull requests"]
+    models["Model providers: Anthropic, OpenAI"]
     subgraph opt["Optional routes"]
-        mac["Your Mac over SSH and Tailscale,<br/>BlueBubbles relay"]
-        more["Review desktop, CI pool,<br/>shared Postgres, browser ladder"]
+        ts["Tailscale"] --> mac["Your Mac: ssh mac,<br/>BlueBubbles relay"]
+        desktop["Review desktop over noVNC"]
     end
     you --> fm
     env --> fm
     fm --> sm
     sm --> worker
-    fm <-->|spawn, brief / status, inbox| worker
+    fm <--> worker
     board <-.-> worker
     gates --- worker
-    worker -.->|optional| opt
+    gates -.-> docker
+    worker --> gh
+    worker --> models
+    herdr -.-> opt
     style opt stroke-dasharray: 5 5
 ```
 
