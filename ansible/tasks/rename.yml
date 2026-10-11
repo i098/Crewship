@@ -36,6 +36,9 @@
     crewship_renamed_writer_units: [herdr-spaces.timer, herdr-spaces.service]
     crewship_renamed_existing: >-
       {{ crewship_renamed_path_stat.results | selectattr('stat.exists') | map(attribute='item') | list }}
+    crewship_renamed_releases_only: >-
+      {{ 'releases' in crewship_renamed_share_entries.stdout_lines | default([])
+         and crewship_renamed_share_entries.stdout_lines | difference(['releases', 'tools', '.install.lock']) | length == 0 }}
     crewship_renamed_home_re: "^{{ crewship_cfg.home | regex_escape }}/"
   block:
     - name: Find the pre-rename paths and their new names
@@ -46,6 +49,17 @@
       become: true
       loop: "{{ crewship_renamed_paths | flatten }}"
       register: crewship_renamed_path_stat
+      check_mode: false
+
+    # install.sh keeps its release, and onboard.sh bootstraps uv (and its lock file), under the new share
+    # directory before this runs, so a directory holding only those does not make the new name taken.
+    - name: List what the new share directory already holds
+      ansible.builtin.command:
+        argv: [find, "{{ crewship_share_dir }}", -mindepth, "1", -maxdepth, "1", -printf, '%f\n']
+      become: true
+      register: crewship_renamed_share_entries
+      changed_when: false
+      failed_when: false
       check_mode: false
 
     - name: Stop when a pre-rename path and its new name both exist
@@ -59,7 +73,9 @@
       vars:
         crewship_renamed_conflicts: >-
           {{ crewship_renamed_paths | selectattr('0', 'in', crewship_renamed_existing)
-             | selectattr('1', 'in', crewship_renamed_existing) | map('join', ' and ') | list }}
+             | selectattr('1', 'in', crewship_renamed_existing)
+             | rejectattr('1', 'eq', crewship_share_dir if crewship_renamed_releases_only else '')
+             | map('join', ' and ') | list }}
 
     - name: Find the units to stop before the move
       ansible.builtin.stat:
@@ -151,6 +167,42 @@
         removes: "{{ item[0] }}"
       become: true
       loop: "{{ crewship_renamed_paths | rejectattr('0', 'match', crewship_renamed_home_re) | list }}"
+
+    # The home paths above moved unless the installer's releases, tools and lock file already
+    # hold the new share directory; the old directory's contents then move into it, entry by
+    # entry. The release install.sh runs from is never moved. A tool version both hold stays as
+    # the old directory has it (the bootstrap copy is the same release); any other clash stops here.
+    - name: Merge the pre-rename share directory into the one the installer made
+      ansible.builtin.shell:
+        cmd: |
+          set -e
+          new="{{ crewship_share_dir }}"
+          old="{{ crewship_share_dir | dirname }}/{{ crewship_renamed_word }}"
+          for entry in "$old"/* "$old"/.[!.]*; do
+            [ -e "$entry" ] || continue
+            name=${entry##*/}
+            if [ ! -e "$new/$name" ]; then
+              mv "$entry" "$new/"
+            elif [ "$name" = .install.lock ]; then
+              rm -f "$entry"
+            elif [ "$name" = tools ]; then
+              for tool in "$entry"/*; do
+                if [ ! -e "$new/tools/${tool##*/}" ]; then mv "$tool" "$new/tools/"; continue; fi
+                for version in "$tool"/*; do
+                  if [ ! -e "$new/tools/${tool##*/}/${version##*/}" ]; then mv "$version" "$new/tools/${tool##*/}/"; fi
+                done
+              done
+            fi
+          done
+          # Only the tool versions both held are left in the old tools directory.
+          rm -rf "$old/tools"
+          rmdir "$old"
+        executable: /bin/bash
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      when:
+        - crewship_renamed_releases_only
+        - (crewship_share_dir | dirname) ~ '/' ~ crewship_renamed_word in crewship_renamed_existing
 
     # The installer refuses to replace a command link that points outside its
     # own directory, so links into the old directory follow it.
