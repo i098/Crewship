@@ -1380,7 +1380,7 @@ function shadeRoom(c, odd, dx, dy, dz) {
 }
 
 // ---- Gun deck: a second interior under the main deck, reached by the hatch and its ladder -----------
-// It keeps the ship frame without the swell. Planks floor it and line the overhead between dark cross-beams. The hull
+// It keeps the ship frame without the sway. Planks floor it and line the overhead between dark cross-beams. The hull
 // sides lean out as they rise, as outside, and open at the gun ports, where each cannon rests on its carriage with the
 // muzzle run out through the port and a rack of round shot beside it. Lanterns hang between the beams by the walkway;
 // GUN_DECK_LAMPS holds x, y, z of each lantern in a row.
@@ -3344,7 +3344,7 @@ function frame(now) {
   const still = reduced.matches;
   advanceIntro(now, still);
   if (!still) T += dt;
-  // The ship sways gently at its mooring: two slow sines (about 11 s and 8 s, under 2 degrees of roll) scaled by the wind.
+  // Keep the heavy moored ship independent of the steep wave slopes that tilt the small boats.
   if (still) { bob = 0; roll = 0; } else { roll = WIND.force * (0.02 * Math.sin(T * 0.55) + 0.01 * Math.sin(T * 0.8 + 1.3)); bob = WIND.force * (0.03 * Math.sin(T * 0.55 + 0.8) + 0.015 * Math.sin(T * 0.8 + 2)); }
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);

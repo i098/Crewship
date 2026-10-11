@@ -52,7 +52,8 @@ Each foot sags in an arc between its corners, and the sides bow out.
 The sheets stay taut to the moving sail corners.
 The black flag shows a pale skull and crossbones and has a wavy fly edge; it streams with the masthead pennants in the same wind.
 With reduced motion, the sails stay full but do not move.
-The moored ship sways gently with the wind, under 2 degrees of roll with a period of about 8 to 11 seconds; with reduced motion it stays still.
+The moored ship sways gently with the wind, under 2 degrees of roll, combining smooth cycles of about 8 and 11 seconds.
+With reduced motion, the ship stays still.
 The sails keep a pale canvas tone at night.
 Outboard lanterns make the gun ports visible.
 
