@@ -48,10 +48,17 @@ def features(readme, index=""):
         for _, _, desc in rows
         for title, link in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", desc)
     ]
+    # The list sits in docs/, so its links are relative to it. It only gives scene objects their
+    # entry; its other rows stay out of the docs board's sign.
     rows.extend(
-        # The list sits in docs/, so its links are relative to it.
-        (title, posixpath.normpath(f"docs/{link}"), desc)
-        for title, link, desc in re.findall(r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M)
+        (title, link, desc)
+        for title, link, desc in (
+            (title, posixpath.normpath(f"docs/{link}"), desc)
+            for title, link, desc in re.findall(
+                r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M
+            )
+        )
+        if link in SCENE
     )
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     rows.extend(

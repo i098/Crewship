@@ -280,7 +280,9 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
     assert(!overlaps(bounds, bounds.map), `${name}/${id}: sign covers the map`);
     assert(!overlaps(bounds, bounds.pad), `${name}/${id}: sign covers the move pad`);
   }
-  assert.equal(bounds.links.length, id ? 1 : 3, `${id}: a sign link is missing`);
+  // A sign has its title link; the docs board also lists a link per unmapped doc in its body.
+  const docLinks = id ? await page.evaluate((id) => document.querySelectorAll(`#manifest li[data-spot="${id}"] a`).length, id) : 3;
+  assert.equal(bounds.links.length, docLinks, `${id}: a sign link is missing`);
   if (touch) assert(bounds.dpr <= 2, `${name}/${id}: touch canvas exceeds DPR 2`);
   if (name === "iphone15pro" && !id) {
     // Title, description, one blank row, one link row, and two frame rows.
