@@ -9,6 +9,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [i-have-adhd](https://github.com/ayghri/i-have-adhd) (`i-have-adhd`): omp marketplace plugin, short answer-first output. License: MIT.
 - [caveman](https://github.com/JuliusBrussee/caveman) (`caveman`): omp marketplace plugin, compressed agent output. License: Apache-2.0.
 - [code-clarity](https://github.com/Lakr233/code-clarity) (`code-clarity`): public skill for readable code, by Lakr233, vendored unchanged at commit [`a0d5802`](https://github.com/Lakr233/code-clarity/commit/a0d58020022bc2537de2b8b6673f71620fec3c45). License: MIT.
+- [github-markdown-css](https://github.com/sindresorhus/github-markdown-css) (`github-markdown-css`): the Primer Markdown CSS of the `pr-preview` public skill, by Sindre Sorhus, vendored unchanged at version 5.9.0 (`github-markdown-light.css` and its license). License: MIT.
 - [no-mistakes](https://github.com/kunchenguid/no-mistakes) (`no-mistakes`): the review, test, and CI pipeline for agent pull requests. License: MIT.
 - [treehouse](https://github.com/kunchenguid/treehouse) (`treehouse`): the pool of git worktrees for agent lanes. License: MIT.
 - [acpx](https://github.com/openclaw/acpx) (`acpx`): the Agent Client Protocol client that runs the fallback gate agent. License: MIT.
