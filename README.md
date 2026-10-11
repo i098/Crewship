@@ -48,6 +48,8 @@ Paste this into your coding agent or `omp` on the machine. It installs Crewship 
 Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
 ```
 
+Update: run `npx crewship update` (or the same install command again)
+
 Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
 ## How it works

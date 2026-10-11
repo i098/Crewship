@@ -12,9 +12,10 @@
 set -euo pipefail
 
 # The same text is in npm/crewship.js; tests/test_install.py keeps the two equal.
-USAGE='Usage: crewship [--container] [--user NAME] [--home DIR]
+USAGE='Usage: crewship [update] [--container] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
+  update      install the newest release over this host, keeping its .local/ files
   -h, --help  print this help and exit'
 
 # Runs before any install step, so --help and a bad option change nothing.
@@ -32,6 +33,8 @@ check_args() {
   done
   (($# == 0)) || { printf 'install.sh: bad option: %s\n%s\n' "$1" "$USAGE" >&2; exit 2; }
 }
+# `update` is the rerun itself (it only names it): the newest release, .local/ carried over.
+[ "${1:-}" != update ] || shift
 check_args "$@"
 
 work=

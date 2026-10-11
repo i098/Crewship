@@ -17,7 +17,7 @@ Download and checks happen in a temporary directory first; a failure leaves the 
 
 ## Update
 
-Run the installer again: `npx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
+Run `npx crewship update` (it takes the newest release, whatever the version of the npm package), or run the installer again: `npx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
 
 - copies the host's own files into it: `.local/` (including `host.yml`), `skills/private/` and `rules/private/`;
 - switches `~/Crewship` to the new release in one step (`mv -T` of a new symlink);
