@@ -12,7 +12,7 @@ const pad = document.getElementById("pad");
 const knob = pad.firstElementChild;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const touchFirst = matchMedia("(pointer: coarse)");
-// The intro keeps the camera, grid, and canvas at their final size.
+// The intro keeps the camera and canvas at their final size.
 let introStart = null, introProgress = reduced.matches ? 1 : 0;
 stage.classList.toggle("loading", introProgress < 1);
 function finishIntro() {
@@ -75,14 +75,13 @@ function blob(list, cx, cy, cz, rx, ry, rz, mat, o) {
   s.blob = [cx, cy, cz, rx, ry, rz];
   return s;
 }
-// Eight-sided disc facing along z (the helm wheel).
-function disc(list, cx, cy, z0, z1, r, mat, o) {
-  const pl = [[0, 0, 1, 0, 0, z1], [0, 0, -1, 0, 0, z0]];
+function disc(list, cx, cy, cz, r, d, mat, o) {
+  const pl = [[0, 0, 1, 0, 0, cz + d / 2], [0, 0, -1, 0, 0, cz - d / 2]];
   for (let i = 0; i < 8; i++) {
     const a = (i + 0.5) * Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
-    pl.push([c, s, 0, cx + c * r, cy + s * r, 0]);
+    pl.push([c, s, 0, cx + c * r, cy + s * r, cz]);
   }
-  return solid(list, pl, [cx - r * 1.09, cy - r * 1.09, z0, cx + r * 1.09, cy + r * 1.09, z1], mat, o);
+  return solid(list, pl, [cx - r * 1.09, cy - r * 1.09, cz - d / 2, cx + r * 1.09, cy + r * 1.09, cz + d / 2], mat, o);
 }
 // A round bar along the x axis (axis 0: gun barrels) or the z axis (axis 2: wheels) from u0 to u1, radius r0 at u0
 // and r1 at u1, its axis through (p, q): (y, z) along x, (x, y) along z. Rays hit the true cone (barEntry).
@@ -920,7 +919,7 @@ for (const side of [-1, 1]) {
 }
 beam(ship, [SX - 2.62, 4.72, -8.96], [SX + 2.62, 4.72, -8.96], "s", cabinTrim, 0.07);
 beam(ship, [SX - 2.1, 5.55, -14.6], [SX + 2.1, 5.55, -14.6], "s", { fill: 0.58 }, 0.06);
-// A wall lantern hangs between the door and the stairs. Its glass glows like the windows but adds no light: another
+// A wall lantern hangs between the door and the ladder. Its glass glows like the windows but adds no light: another
 // ship light costs more per frame than its pool of lamplight shows.
 beam(ship, [SX + 0.88, 4.02, -9], [SX + 0.88, 4.02, -8.69], "t", cabinTrim, 0.03);
 box(ship, SX + 0.74, 3.92, -8.86, SX + 1.02, 3.99, -8.58, "t", cabinTrim);
@@ -986,8 +985,8 @@ shipMast(6, 2.2, 18.2, 4.3);
 shipRope([SX, 20, -3], [SX, 17.8, 6]);
 shipRope([SX, 20, -3], [SX, 4.8, -14.3]);
 shipRope([SX, 17.8, 6], [SX, 4.3, 18.5]);
-function shipRope(a, b, cls) {
-  RIGGING.push([a, b, cls]);
+function shipRope(a, b) {
+  RIGGING.push([a, b]);
 }
 // Screen column and row (fractional) and depth of a world point, written into `out`.
 function viewPoint(x, y, z, out) {
@@ -998,7 +997,7 @@ function viewPoint(x, y, z, out) {
   out[2] = d;
   return out;
 }
-// Project the stays and the stair rails into the depth buffer once, rather than ray-testing their large diagonal boxes.
+// Project the stays into the depth buffer once, rather than ray-testing their large diagonal boxes.
 function ropePoint(p) {
   const lx = p[0] - SX;
   return viewPoint(SX + rc * lx - rs * p[1], rs * lx + rc * p[1] + bob, p[2], [0, 0, 0]);
@@ -1039,9 +1038,9 @@ function drawRope(p, q, cls = "o3") {
   }
 }
 function drawRigging() {
-  for (const [a, b, cls] of RIGGING) {
+  for (const [a, b] of RIGGING) {
     const ends = ropeEnds(a, b);
-    if (ends) drawRope(...ends, cls);
+    if (ends) drawRope(...ends);
   }
 }
 column(ship, SX, -3, 0.8, 0.85, 13.7, 14.4, "o", { spot: "nest", tex: (x, y) => (y < 13.85 ? "-" : null) });
@@ -1087,11 +1086,6 @@ blob(ship, SX, 3.8, 13.55, 0.22, 0.23, 0.24, "s", { solid: false });
 beam(ship, [SX - 0.25, 3.4, 13.4], [SX + 0.25, 3.45, 13.9], "o", {}, 0.07);
 const nameText = painted("CREWSHIP", -0.8, 4.2, 1.7, 2.05);
 box(ship, 0.7, 1.62, -0.8, 0.76, 2.1, 4.2, "o", { spot: "sign", tex: (x, y, z, nx) => (nx > 0.5 && nameText(z, y) ? "s" : null) });
-box(ship, SX - 0.1, DECK, -7.05, SX + 0.1, 3.1, -6.85, "o", { spot: "helm" });
-disc(ship, SX, 3.3, -6.85, -6.72, 0.62, "o", { spot: "helm", tex: (x, y) => {
-  const dx = x - SX, dy = y - 3.3, rr = Math.hypot(dx, dy);
-  return rr > 0.42 || rr < 0.12 || Math.abs(Math.sin(4 * Math.atan2(dy, dx))) < 0.25 ? null : "-";
-} });
 box(ship, -3.6, DECK, 0.8, -1.2, 2.55, 3.2, "o", { spot: "hold",
   tex: (x, y, z, nx, ny) => (ny > 0.5 && ((x + 9) % 0.4 < 0.07 || (z + 9) % 0.4 < 0.07) ? "-" : null) });
 // The hatch to the gun deck (crossHatch): a raised wooden coaming round the opening that lines a pitch-dark well 0.6 m
@@ -1137,24 +1131,59 @@ beam(ship, [-3.8, 5.45, -12.1], [-3, 5.8, -10.8], "t", { spot: "spyglass" }, 0.1
 box(ship, -3.4, 2.2, 6, -3.25, 3.8, 6.15, "o", { spot: "bell" });
 column(ship, -3.32, 6.07, 0.3, 0.12, 3.05, 3.65, "r", { spot: "bell" });
 box(ship, -4.8, DECK, 0.3, -4.3, 2.5, 0.9, "t", { spot: "strongbox", tex: (x, y) => (Math.abs(y - 2.3) < 0.05 ? "-" : null) });
-// Ten steps climb from the main deck to the stern castle's roof, each a pale tread over a darker riser. Under each step
-// the block is cut along the slope of the flight, so from the side the steps sit on one straight stringer and the
-// soffit below is open. The hand rails are projected lines, like the rigging. The walking lane matches the treads.
+// A steep companionway ladder climbs from the main deck to the quarterdeck on the cabin roof: ten open pale treads,
+// the top one level with the roof, between two sloped stringers. On each side a thick pale handrail rises on a newel
+// post and a post on the stringer, then levels off over the roof to a post there. Like the trim, its parts block no
+// walking and cast no shadows. The walking lane matches the treads.
 const STERN_STEPS = [];
-const RISE = 0.28, RUN = 0.35, STAIR_X0 = SX + 1.15, STAIR_X1 = SX + 2.25;
+const RISE = 0.28, RUN = 0.17, LADDER_SLOPE = RISE / RUN, LADDER_X0 = SX + 1.35, LADDER_X1 = SX + 2.05;
+// The top tread reaches 0.25 m out from the cabin front, past the walking margin round its walls, so the tread below
+// it stands clear of the cabin as the ship rolls.
+const LADDER_TOP = -8.75, ladderPart = { solid: false, shadow: false };
+// Height of the line through the treads' front edges at z.
+const nosing = (z) => 4.8 - LADDER_SLOPE * (z - LADDER_TOP);
 for (let k = 1; k <= 10; k++) {
-  const front = -5.5 - (k - 1) * RUN, height = DECK + k * RISE;
-  solid(ship, [[1, 0, 0, STAIR_X1, 0, 0], [-1, 0, 0, STAIR_X0, 0, 0], [0, 1, 0, 0, height, 0], [0, -1, 0, 0, DECK, 0],
-    [0, 0, 1, 0, 0, front], [0, 0, -1, 0, 0, front - RUN], [0, -1, -RISE / RUN, 0, DECK - 0.3, -5.5]],
-  [STAIR_X0, Math.max(DECK, height - RISE - 0.3), front - RUN, STAIR_X1, height, front], "o", { solid: false, fill: 0.55, tex: (x, y, z, nx, ny) => (ny > 0.5 ? "s" : "-") });
-  STERN_STEPS.push([SX + 1.45, SX + 1.95, front - RUN, front, (x) => bob + height * rc + rs * (x - SX)]);
+  const front = LADDER_TOP + (10 - k) * RUN, back = k < 10 ? front - RUN : -9, height = DECK + k * RISE;
+  box(ship, LADDER_X0 + 0.07, height - 0.07, Math.min(back, front - 0.22), LADDER_X1 - 0.07, height, front, "s", { ...ladderPart, fill: 0.65 });
+  STERN_STEPS.push([SX + 1.5, SX + 1.9, back, front, (x) => bob + height * rc + rs * (x - SX)]);
 }
-for (const x of [STAIR_X0 - 0.03, STAIR_X1 + 0.03]) {
-  const foot = [x, DECK + RISE + 0.85, -5.47], head = [x, 4.8 + 0.85, -8.68];
-  shipRope([x, DECK, -5.47], foot, "s5");
-  shipRope(foot, head, "s5");
-  shipRope([x, 4.8, -8.68], head, "s5");
+ladderSide(LADDER_X0, LADDER_X0 + 0.07);
+ladderSide(LADDER_X1 - 0.07, LADDER_X1);
+// A stringer from x0 to x1, from the deck up to 0.1 m over the roof, and its handrail 0.9 m above the treads' front
+// edges and then the roof. Both come in short pieces, so the boxes rays test round these long slopes stay small.
+function ladderSide(x0, x1) {
+  const foot = LADDER_TOP + 2.9 / LADDER_SLOPE, newel = foot - 0.05, mid = -8, x = (x0 + x1) / 2;
+  const rail = (z) => [x, Math.min(nosing(z), 4.8) + 0.9, z], pale = { ...ladderPart, fill: 0.7 };
+  const stringer = [-9, -8.4, mid, -7.5, foot], handrail = [-9.3, LADDER_TOP, -8.4, mid, -7.5, newel];
+  for (let i = 1; i < stringer.length; i++) {
+    const z0 = stringer[i - 1], z1 = stringer[i];
+    solid(ship, [[1, 0, 0, x1, 0, 0], [-1, 0, 0, x0, 0, 0], [0, 1, LADDER_SLOPE, 0, 4.9, LADDER_TOP], [0, -1, -LADDER_SLOPE, 0, 4.38, LADDER_TOP],
+      [0, 1, 0, 0, 4.9, 0], [0, -1, 0, 0, DECK, 0], [0, 0, -1, 0, 0, z0], [0, 0, 1, 0, 0, z1]],
+    [x0, Math.max(DECK, nosing(z1) - 0.42), z0, x1, Math.min(4.9, nosing(z0) + 0.1), z1], "o", { ...ladderPart, fill: 0.45 });
+  }
+  for (let i = 1; i < handrail.length; i++) beam(ship, rail(handrail[i - 1]), rail(handrail[i]), "s", pale, 0.05);
+  for (const [z, y] of [[newel, DECK], [mid, nosing(mid) + 0.1], [-9.3, 4.8]]) beam(ship, [x, y, z], rail(z), "s", pale, 0.045);
 }
+// The ship's wheel stands on the quarterdeck behind the ladder's top, with its axle along the keel and its plane
+// across the ship: a rim, eight spokes that end past it in thicker handles, and a brass hub on an axle
+// that rests on a turned pedestal. The level spokes span the wheel, so they and the pedestal block walking; no part
+// casts shadows.
+const HELM = [SX, 5.8, -9.8];
+function shipWheel([cx, cy, cz]) {
+  const part = { spot: "helm", fill: 0.7, solid: false, shadow: false };
+  const at = (r, a, back = 0) => [cx + r * Math.cos(a), cy + r * Math.sin(a), cz + back];
+  for (let i = 0; i < 16; i++) beam(ship, at(0.58, i * Math.PI / 8), at(0.58, (i + 1) * Math.PI / 8), "o", part, 0.07);
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4, spoke = { ...part, solid: k % 4 === 0 };
+    beam(ship, at(0.12, a), at(0.58, a), "o", spoke, 0.04);
+    beam(ship, at(0.58, a), at(0.92, a, -0.12), "o", spoke, 0.05);
+  }
+  disc(ship, cx, cy, cz, 0.16, 0.24, "y", part);
+  disc(ship, cx, cy, cz - 0.16, 0.12, 0.08, "y", part);
+  beam(ship, at(0, 0, 0.12), at(0, 0, 0.38), "t", part, 0.05);
+  column(ship, cx, cz + 0.38, 0.16, 0.1, 4.8, cy, "o", { ...part, solid: true, fill: 0.45 });
+}
+shipWheel(HELM);
 const SHIP_BOUNDS = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
 for (const { bb } of ship) {
   for (let k = 0; k < 3; k++) {
@@ -1485,11 +1514,16 @@ function crossInto(next, place) {
   show(null);
   return true;
 }
-function movePlayer(x, z, here) {
+function movePlayer(x, z) {
   if (doorInputHeld) return;
-  if (crossDoor(x, z) || crossHatch(x, z)) return;
-  const fy = floorAt(x, z);
-  if (fy !== null && Math.abs(fy - here) <= 0.6 && !blocked(x, z, fy)) { me.x = x; me.z = z; }
+  const dx = x - me.x, dz = z - me.z, count = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.1));
+  for (let i = 0; i < count; i++) {
+    const nx = me.x + dx / count, nz = me.z + dz / count;
+    if (crossDoor(nx, nz) || crossHatch(nx, nz)) return;
+    const here = floorAt(me.x, me.z), fy = floorAt(nx, nz);
+    if (fy === null || Math.abs(fy - here) > 0.6 || blocked(nx, nz, fy)) return;
+    me.x = nx; me.z = nz;
+  }
 }
 // The room fill and each room's lights share the same warm colour.
 function roomLight(x, y, z, nx, ny, nz) {
@@ -2284,7 +2318,7 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (interior ? scale : 1);
+  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale;
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3663,9 +3697,8 @@ function step(dt) {
   me.yaw += turn * 1.9 * dt;
   me.pitch = Math.max(-1.2, Math.min(1.2, me.pitch + tilt * 1.2 * dt));
   const c = Math.cos(me.yaw), s = Math.sin(me.yaw), v = 3.4 * dt;
-  const here = floorAt(me.x, me.z);
-  movePlayer(me.x + (s * fwd + c * side) * v, me.z, here);
-  movePlayer(me.x, me.z + (c * fwd - s * side) * v, here);
+  movePlayer(me.x + (s * fwd + c * side) * v, me.z);
+  movePlayer(me.x, me.z + (c * fwd - s * side) * v);
   return true;
 }
 
@@ -3680,16 +3713,13 @@ const resize = new ResizeObserver(() => {
 });
 reduced.addEventListener("change", () => { dirty = true; });
 // Adaptive resolution: drop shadows, then grow glyphs; restore detail when frames run short.
+// Leave time for canvas painting within a 60 Hz display period.
 function adaptResolution(ms, late) {
-  slow = ms > 20 || late ? slow + 1 : 0;
-  fast = ms < 9 && !late ? fast + 1 : 0;
-  if (!interior) {
-    if (slow > 20 && shadows) { shadows = false; slow = 0; dirty = true; }
-    return;
-  }
-  if (slow > 20 && (shadows || scale < 2.2)) {
+  slow = ms > 10 || late ? slow + 1 : 0;
+  fast = ms < 6 && !late ? fast + 1 : 0;
+  if (slow > 20 && (shadows || scale < 3)) {
     if (shadows) shadows = false;
-    else { scale *= 1.15; layoutDirty = dirty = true; }
+    else { scale = Math.min(3, scale * 1.15); layoutDirty = dirty = true; }
     slow = 0;
   } else if (fast > 90 && scale > 1) {
     scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; fast = 0;
@@ -3697,7 +3727,7 @@ function adaptResolution(ms, late) {
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;
-  const late = !!interior && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
+  const late = (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
   probeMs = Math.min(0, probeMs);
   paintedLastFrame = false;
   return late;

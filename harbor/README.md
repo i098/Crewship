@@ -9,7 +9,7 @@ The off-screen HTML list and current sign keep links available to screen readers
 An uncaught error or rejected promise in `harbor.js`, or a failure to load it, hides the scene and shows the plain page.
 Errors and rejected promises from other scripts or resources, such as browser add-ons, do not.
 JavaScript hides the plain page before the first paint; visitors without JavaScript still see it.
-The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera or resizing the grid.
+The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera.
 Any key, click, touch, or mouse wheel input skips the animation.
 Reduced-motion visitors get the scene immediately.
 Waves, the fountain, and boats keep moving during the intro.
@@ -50,9 +50,14 @@ The stern castle is the cabin, with planked walls, framed windows, a dark strap-
 Walk through the cabin door to enter a small furnished room.
 It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and starry windows.
 The cabin uses the house's door transition, collisions, and hidden map; the inside door returns you to the deck, facing the bow.
-Ten steps with pale treads, darker risers, and a hand rail on each side connect the main deck to the cabin roof.
-Map walks connect the dock through the gangway and reach the stern roof through the supported stairs.
+A steep companionway ladder connects the main deck to the cabin roof: ten open pale treads between sloped stringers, with a thick pale handrail on posts on each side.
+The ship's wheel stands on a pedestal on the cabin roof, behind the top of the ladder.
+Its eight spokes extend past the rim as handles around a brass hub, with the handles and hub cap pointing aft.
+The upright wheel runs across the ship, with its axle along the keel and the helmsman aft looking forward.
+The wheel and its pedestal block walking, so you walk around them on the roof.
+Map walks connect the dock through the gangway and reach the stern roof up the ladder.
 Ship approaches avoid deck obstacles and reject unsupported floors or height changes larger than the manual walking limit.
+Keyboard and touch movement use short segments so slow frames do not skip the ladder treads.
 One scene wind fills the sails into curved bellies that slowly fill and ease.
 Each foot sags in an arc between its corners, and the sides bow out.
 The sheets stay taut to the moving sail corners.
@@ -161,7 +166,6 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
-The check also fails if the first 30 slow exterior frames change the grid, cell size, field of view, or canvas layout.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
@@ -170,6 +174,8 @@ It checks the how, docsboard, and mailbox signs against the placement rules abov
 It uses three camera views and an additional oblique docsboard view.
 It checks each support independently for vertical gaps and horizontal coverage on desktop and iPhone portrait and landscape.
 It includes 320×568 phones in both orientations and landscape heights of 256 and 192 pixels.
+The geometry fixtures use fixed normal and coarse grids, independent of host rendering speed.
+The Python checks exercise adaptive detail with controlled render costs and painting delays in the exterior, house, cabin, and gun deck.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
 On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks the canvas DPR limit.
 It also taps six pixels above and below each stacked link center to check the separate hit regions.

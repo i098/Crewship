@@ -40,6 +40,71 @@ vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nmeasure();\n' + pr
     )
 
 
+def test_ship_wheel_faces_aft_across_the_keel():
+    _run_ship_scene(
+        r"""
+const start = ship.length;
+shipWheel(HELM);
+const wheel = ship.splice(start);
+const depth = (x, y, z, dz) => Math.min(...wheel.map(s => hit(s, x, y, z, 0, 0, dz)));
+const [cx, cy, cz] = HELM;
+for (const dz of [-1, 1]) {
+  const z = cz - dz * 2;
+  const left = depth(cx - 0.5, cy, z, dz), right = depth(cx + 0.5, cy, z, dz);
+  assert(Number.isFinite(left) && Number.isFinite(right), 'both level spokes must face fore and aft');
+  assert(Math.abs(left - right) < 1e-6, 'the wheel plane must run across the keel');
+}
+for (let k = 0; k < 8; k++) {
+  const a = k * Math.PI / 4;
+  const x = cx + 0.85 * Math.cos(a), y = cy + 0.85 * Math.sin(a);
+  const aft = depth(x, y, cz - 0.2, 1), bow = depth(x, y, cz + 0.2, -1);
+  assert(Number.isFinite(aft) && Number.isFinite(bow),
+    'each of the eight spokes must have a handle beyond the rim');
+  assert(aft < bow, 'each handle must project aft toward the helmsman');
+}
+assert(Number.isFinite(depth(cx, 5, cz + 2, -1)), 'the upright wheel must stand on its pedestal');
+assert(Math.abs(depth(cx + 0.08, cy, cz - 2, 1) - 1.8) < 1e-6, 'the hub cap must face aft');
+assert(!blocked(cx, cz - 0.55, 4.8), 'the helmsman must have room aft of the wheel');
+"""
+    )
+
+
+def test_companionway_movement_does_not_skip_treads_during_slow_frames():
+    _run_ship_scene(
+        r"""
+for (const dt of [0.02, 0.1]) {
+  for (const channel of ['keyboard', 'touch']) {
+    for (const up of [true, false]) {
+      keys.clear(); stick.x = stick.y = 0;
+      me.x = SX + 1.7; me.z = up ? -7.1 : -10; me.yaw = 5 * Math.PI / 4;
+      if (channel === 'keyboard') {
+        keys.add(up ? 'f' : 'b'); keys.add(up ? 'l' : 'r');
+      } else {
+        stick.y = up ? 1 : -1; stick.x = up ? -1 : 1;
+      }
+      for (let i = 0; i < Math.ceil(0.8 / dt); i++) step(dt);
+      assert(up ? me.z < -10.5 : me.z > -6.5, `${channel}: slow diagonal movement must traverse the ladder`);
+      assert(Math.abs(floorAt(me.x, me.z) - (up ? 4.8 : DECK)) < 1e-6);
+      assert(!blocked(me.x, me.z, floorAt(me.x, me.z)));
+    }
+  }
+}
+keys.clear(); stick.x = stick.y = 0;
+me.x = SX + 1; me.z = -8.9;
+movePlayer(me.x, -9.3);
+assert.equal(me.z, -8.9, 'subdivision must not allow climbing a wall higher than 0.6');
+for (const direction of [-1, 1]) {
+  me.x = HELM[0]; me.z = HELM[2] + direction;
+  movePlayer(me.x, HELM[2] - direction);
+  assert(direction * (me.z - HELM[2]) > 0, 'neither direction may pass through the wheel');
+  me.x = SX + 1.7; me.z = HELM[2] + direction;
+  movePlayer(me.x, HELM[2] - direction);
+  assert(Math.abs(me.z - (HELM[2] - direction)) < 1e-6, 'the wheel must remain bypassable');
+}
+"""
+    )
+
+
 def test_ship_deck_ports_and_map_match_the_hull():
     _run_ship_scene(
         r"""
@@ -62,6 +127,7 @@ keys.clear();
 assert(me.z < -11.5, 'the stairs must let a visitor reach the stern deck');
 assert(Math.abs(floorAt(me.x, me.z) - 4.8) < 1e-6, 'the stern floor must match the castle roof');
 assert(!blocked(me.x, me.z, floorAt(me.x, me.z)), 'the castle roof must provide a clear walking surface');
+assert(blocked(HELM[0], HELM[2], 4.8), 'the wheel must block walking through it on the stern deck');
 me.yaw = 0; keys.add('f');
 for (let i = 0; i < 100; i++) step(0.02);
 keys.clear();
@@ -411,6 +477,9 @@ for (const x of [SX - 0.6, SX + 0.6]) {
   assert.equal(interior, null, 'walking into the cabin front beside the door must not enter');
   assert(me.z >= -8.75, 'the cabin front must still block walking');
 }
+Object.assign(me, {x: SX, z: -4});
+walk('keyboard', Math.PI, 100);
+assert.equal(interior, CABIN, 'a straight walk aft along the deck must reach the cabin door');
 interior = CABIN;
 for (const [x, z] of [[0, 3.2], [0, 4.3], [1.8, 1.9], [-1.8, 1.3]]) {
   assert(blocked(x, z, 0), `the table, chair, bunk and chest must block walking at ${x},${z}`);
@@ -492,5 +561,30 @@ for (const [room, place] of [[CABIN, {x: 0, z: 0.8, yaw: 0}], [GUN_DECK, {x: SX,
 crossInto(HOUSE, {x: 0, z: 0.8, yaw: 0}); step(0);
 dirty = true; frame(now += 16); tick();
 assert(!paintedLastFrame, 'the house must remain idle');
+"""
+    )
+
+
+def test_exterior_adapts_detail_to_slow_rendering_and_missed_frames():
+    _run_ship_scene(
+        r"""
+const originalRows = rows, originalCellH = cellH;
+const canvasSize = [canvas.width, canvas.height];
+for (let i = 0; i < 100; i++) adaptResolution(40, false);
+measure();
+assert(rows < originalRows && cellH > originalCellH, 'slow exterior rendering must reduce the ray grid');
+assert.deepEqual([canvas.width, canvas.height], canvasSize, 'adaptive detail must not grow the canvas memory');
+const coarseCellH = cellH;
+for (let i = 0; i < 100; i++) adaptResolution(1, false);
+measure();
+assert(cellH < coarseCellH, 'fast exterior rendering must restore detail');
+const restoredCellH = cellH;
+refreshMs = 1000 / 60;
+paintedLastFrame = true;
+const late = roomFrameLate(1000 / 30);
+assert(late, 'missed exterior frames must count even when render CPU time is low');
+for (let i = 0; i < 21; i++) adaptResolution(1, late);
+measure();
+assert(cellH > restoredCellH, 'missed exterior frames must reduce detail');
 """
     )

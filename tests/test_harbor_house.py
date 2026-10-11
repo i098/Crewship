@@ -225,25 +225,23 @@ for (const channel of ['keyboard', 'touch', 'combined']) {
 keys.clear(); stick.x = stick.y = 0; step(0);
 let renderCost = 2;
 render = () => { clock += renderCost; };
-for (const roomScene of [false, true]) {
-  interior = roomScene ? HOUSE : null;
+for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
+  interior = scene;
   for (const interval of [1000 / 60, 1000 / 30]) {
-    refreshMs = Infinity; paintedLastFrame = false;
+    refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
     scale = 1.5; shadows = false; slow = fast = 0;
     renderCost = 2;
     const runFrame = () => { dirty = true; last = clock; clock += interval; frame(clock); };
     for (let i = 0; i < 91; i++) runFrame();
-    if (roomScene) assert(scale < 1.5, 'a cheap room render must recover detail at either display refresh rate');
-    else assert.equal(scale, 1.5, 'exterior rendering must not change the grid');
+    assert(scale < 1.5, 'a cheap render must recover detail at either display refresh rate');
     scale = 1; shadows = true; slow = fast = 0;
     renderCost = 25;
     for (let i = 0; i < 42; i++) runFrame();
     assert.equal(shadows, false, 'expensive rendering must drop shadows');
-    if (roomScene) assert(scale > 1, 'expensive room rendering must reduce detail');
-    else assert.equal(scale, 1, 'expensive exterior rendering must keep the startup grid');
+    assert(scale > 1, 'expensive rendering must reduce detail in every scene');
   }
 }
-interior = HOUSE; renderCost = 2;
+renderCost = 2;
 let paintQueued = false;
 render = () => { clock += renderCost; paintQueued = true; };
 const paintFrame = (period, paintDelay = 0) => {
@@ -251,8 +249,11 @@ const paintFrame = (period, paintDelay = 0) => {
   paintQueued = false;
   dirty = true; last = clock; clock += interval; frame(clock);
 };
+for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
+interior = scene;
+paintQueued = false;
 scale = 1; shadows = false; slow = fast = 0;
-refreshMs = Infinity; paintedLastFrame = false;
+refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
 keys.add('tr');
 paintFrame(1000 / 60);
 const startYaw = me.yaw;
@@ -267,14 +268,14 @@ for (let i = 0; i < 100; i++) paintFrame(1000 / 60);
 assert(scale < 1.5, 'detail must recover when the display returns to 60 Hz');
 keys.clear();
 scale = 1; shadows = false; slow = fast = 0;
-refreshMs = Infinity; paintedLastFrame = false; paintQueued = false;
+refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
 paintFrame(1000 / 60);
 for (let i = 0; i < 12; i++) paintFrame(1000 / 60, 1000 / 60);
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native cadence change must clear prior painting-overload evidence before coarsening');
 for (const period of [1000 / 60, 1000 / 30]) {
   scale = 1; shadows = true; slow = fast = 0;
-  refreshMs = Infinity; paintedLastFrame = false; paintQueued = false;
+  refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
   paintFrame(period);
   for (let i = 0; i < 60; i++) paintFrame(period, period);
   assert(!shadows && scale > 1, 'deferred painting must reduce detail after an unloaded cadence sample');
@@ -282,17 +283,18 @@ for (const period of [1000 / 60, 1000 / 30]) {
   for (let i = 0; i < 100; i++) paintFrame(period);
   assert(scale < coarseScale, 'detail must recover when deferred painting stops dropping frames');
 }
+}
 for (const period of [1000 / 60, 1000 / 30]) {
   for (const entryMode of ['frame', 'step']) {
     keys.clear(); stick.x = stick.y = 0; step(0);
     interior = null;
     scale = 1; shadows = false; slow = fast = 0;
-    refreshMs = Infinity; paintedLastFrame = false; paintQueued = false;
+    refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
     Object.assign(me, {x: -5, z: 19, yaw: 0});
     keys.add('tr');
     paintFrame(period);
     for (let i = 0; i < 1000; i++) paintFrame(1000 / 30);
-    assert.equal(scale, 1, 'prolonged exterior callback drift must preserve the startup grid');
+    assert.equal(scale, 1, 'native exterior cadence changes must not reduce detail');
     keys.clear();
     Object.assign(me, {x: -5, z: 20.6, yaw: 0});
     keys.add('f');
