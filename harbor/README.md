@@ -30,7 +30,11 @@ The layers are at different heights, so they move at different speeds when you w
 With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
 Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
-A fireplace with a fire, a bookcase, chairs, an armchair, sea charts, crates, a sea chest, potted plants, and a rug furnish the room.
+A fireplace with a fire, a bookcase, chairs, an armchair, crates, a sea chest, potted plants, and a rug furnish the room.
+Four public-domain paintings hang on the walls in moulded frames with brass name plaques.
+The painting above the mantel is by Turner.
+See [CREDITS.md](../CREDITS.md#paintings) for the works, sources, and licences.
+See [art.py](art.py) for the texture conversion command and [how.html](public/how.html) for rendering details.
 The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.
@@ -69,8 +73,13 @@ Keyboard and touch movement share the house door's transition: release the movem
 The guns, shot racks, and main mast block walking, and the map stays hidden below deck.
 Map walks go around the open hatch.
 
-The plaza fountain has an octagonal stone rim, a central spout, and water that uses the existing animation clock.
-Its basin blocks walking, and a blue `O` marks it on the mini map.
+The plaza fountain has an octagonal stone rim around a pool, and a pedestal with an upper bowl.
+Six streams rise from the central nozzle and fall into the upper bowl.
+Six spouts on the pedestal arc out into the pool.
+The droplets follow ballistic arcs and land well inside the bowl or the pool.
+The streams break up into droplets as they fall, and splashes, spreading rings, and mist show where they land.
+With reduced motion, the water stays still.
+The basin blocks walking, and a blue `O` marks the fountain on the mini map.
 The fountain marker leaves map labels and selected point markers clear.
 Map walks check each road and approach segment against the walking collision bounds at the local floor height and require continuous ground coverage.
 Detour corners come from every walking obstacle, including trees, hedges, the basin, the house, dock cargo, and ship fixtures.

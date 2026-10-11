@@ -284,9 +284,12 @@ PRIVATE = re.compile(
 )
 
 
-# The vendored code-clarity skill (MIT, Lakr233) links its author's public repositories.
-# Those links are credits, not private details; the exemption covers only that folder.
-VENDORED_OWNER = {"skills/public/code-clarity/": "github.com/Lakr233"}
+# The vendored skills (MIT) link their authors' public repositories or carry their license text.
+# Those are credits, not private details; each exemption covers only its own folder.
+VENDORED_OWNER = {
+    "skills/public/code-clarity/": "github.com/Lakr233",
+    "skills/public/pr-preview/": "sindresorhus@gmail.com",
+}
 
 
 def test_public_skills_and_rules_are_named_and_hold_no_private_details():

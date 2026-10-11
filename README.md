@@ -23,7 +23,7 @@
 
 - **Self-hosted AI coding agents:** one Ubuntu 24.04 or 26.04 machine runs Herdr, the Firstmate orchestrator, and the omp agent fleet. No cloud dependencies.
 - **Reproducible with Ansible:** profiles in one host file, a check-mode preview with `./ship.sh chart`, and one `./ship.sh launch` that changes the host. No Nix, no chezmoi.
-- **Checksum-verified toolchain:** every apply installs the latest releases and verifies their checksums. The three omp marketplace plugins are the one exception.
+- **Checksum-verified toolchain:** every apply installs the latest tool releases and verifies their checksums. The omp and Neovim plugins use upstream Git repositories.
 - **Built for an agent fleet:** fleet guards, auto pruners, a self-hosted CI pool, and the Concord (Discord) and slk (Slack) terminal chat clients.
 
 ## Features
@@ -49,6 +49,7 @@
 - [Google Workspace CLI](docs/google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](docs/dependencies.md): every tool, package, and image the recipe installs
+- [Neovim with LazyVim](docs/dependencies.md#neovim-and-lazyvim): a terminal editor on every host, with Pyrefly for Python
 - [Migration and recovery](docs/recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](docs/recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
 - [Tailscale](docs/security.md#remote-access): the Tailscale daemon for remote access (opt-in)
@@ -66,6 +67,7 @@
 - Codex context: 272K default, 1M maximum, `extendedContext` on.
   The current bundled omp catalog limits the effective maximum to 872K.
 - omp plugins: `ponytail`, `i-have-adhd`, `caveman`
+- Python tooling: [Pyrefly](https://github.com/facebook/pyrefly), a checksum-verified type checker and language server installed on every host
 - omp extension `crewship-quality-gate`: [sentrux and fallow check](docs/omp.md#quality-gate) at each turn end
 - omp extension `aa-mode-icons`: [mode and hook icons](docs/omp.md#status-line-icons) on the status line
 - omp extension `crewship-herdr-sidebar`: topic, pane name, and PR line for the [Herdr sidebar](docs/herdr.md)

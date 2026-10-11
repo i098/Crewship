@@ -65,10 +65,20 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   The configured desk model stays unchanged.
   In omp 18.7.0, thinking off omits the reasoning setting rather than explicitly disabling reasoning.
   The measured provider responses reported `serviceTier=default`, despite the priority request; some responses contained thinking blocks.
+  The runner uses a private temporary cwd and explicitly sets `memory.backend: off` in an omp configuration overlay.
+  The existing flags skip extensions, tools, skills, and rules; sessions preserve shortening turns.
+  Inherited native memory work can delay exit after the model produces a valid summary.
+  A stalled exit still fails the call at 60 seconds; a partial response is not accepted.
+  Each saved model summary logs `compacted summary`, its range, and its byte count.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.
-  The service retries after 30 seconds, then doubles the delay to at most 30 minutes.
-  New messages do not trigger an early retry.
-  A restart rebuilds unfinished nodes from the unchanged message log.
+  All model compactions share one cooldown: 5 minutes, then 10, 20, 40, and at most 60 minutes.
+  Three initial workers can finish after the first failure; recovery uses one worker until a model compaction succeeds.
+  A continuous outage permits at most six failed node attempts in any hour, regardless of the backlog.
+  New messages do not trigger an early retry, and desk replies continue during the cooldown.
+  Short source messages still build without a model call, so later desk turns see their text during an outage.
+  `memory/retry.json` saves the failure count and next allowed time with an atomic rename.
+  A restart restores this cooldown before rebuilding unfinished nodes from the unchanged message log.
+  Missing retry state needs no migration; the service creates it after the first failure.
 
 The memory holds the owner's texts word for word, on the host only. The directory is private to the account (mode `0700`). To make the desk forget everything, stop the service, delete `~/.local/state/fm-imessage/memory/`, and start the service again.
 

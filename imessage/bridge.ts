@@ -17,6 +17,7 @@
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
 import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
@@ -415,22 +416,25 @@ async function runDesk(current: () => boolean) {
   appendFileSync(DESK_LOG, `${new Date().toISOString()} ${target.id} ${outcome}\n`, { mode: 0o600 });
 }
 
-// One compaction conversation: an omp session in its own private directory, which end() removes.
+// One compaction conversation: a private temporary cwd and session, which end() removes.
 // Request Luna 6 with thinking off and the priority (Fast) service tier; keep the desk model unchanged.
 function compactChat(system: string): Chat {
   if (stopping) throw new Error("bridge stopping");
-  const dir = mkdtempSync(`${STATE}/compact-`);
+  const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
+  // --no-extensions does not disable omp's native memory backend or its teardown work.
+  writeFileSync(`${dir}/config.yml`, "memory:\n  backend: off\n", { mode: 0o600 });
   let turns = 0;
   return {
     async say(text) {
       if (stopping) throw new Error("bridge stopping");
       const proc = track(Bun.spawn(
-        ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
+        ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
           "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
-        { cwd: DESK_DIR, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
+        { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
       ));
       const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
-      if ((await proc.exited) !== 0 || !line) throw new Error(`compaction call failed (exit ${proc.exitCode})`);
+      const exit = await proc.exited;
+      if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
       return line;
     },
     end: () => rmSync(dir, { recursive: true, force: true }),

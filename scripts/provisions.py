@@ -7,7 +7,7 @@ are never replaced. Archives cannot write outside their staging directory.
 Nothing is pinned: every tool tracks its latest release (no-mistakes its newest
 non-draft one, prereleases included). Native assets are
 verified against the SHA-256 their publisher lists for that exact release (the
-GitHub release-asset digest, or the release's own .sha256 file for gws, Node's
+GitHub release-asset digest, or the release's own .sha256 file for gws and Pyrefly, Node's
 SHASUMS256.txt, rustup's .sha256), npm tools
 against the integrity npm records for the resolved version, psutil against the
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
@@ -44,6 +44,7 @@ ARCH = {
         "bun": "x64-baseline",
         "gnu": "x86_64",
         "goreleaser": "x86_64",
+        "nvim": "x86_64",
     },
     "linux-aarch64": {
         "node": "arm64",
@@ -51,6 +52,7 @@ ARCH = {
         "bun": "aarch64",
         "gnu": "aarch64",
         "goreleaser": "arm64",
+        "nvim": "arm64",
     },
 }
 # Native tools on their latest GitHub release: repository, tag prefix, asset
@@ -59,6 +61,12 @@ GITHUB_LATEST = {
     "herdr": ("herdrdev/herdr", "v", "herdr-{key}", {"herdr": "herdr"}),
     "bun": ("oven-sh/bun", "bun-v", "bun-linux-{bun}.zip", {"bun": "bun-linux-*/bun"}),
     "gh": ("cli/cli", "v", "gh_{v}_linux_{go}.tar.gz", {"gh": "gh_*/bin/gh"}),
+    "nvim": (
+        "neovim/neovim",
+        "v",
+        "nvim-linux-{nvim}.tar.gz",
+        {"nvim": "nvim-linux-*/bin/nvim"},
+    ),
     "no-mistakes": (
         "kunchenguid/no-mistakes",
         "v",
@@ -91,6 +99,13 @@ GITHUB_LATEST = {
     "sentrux-grammars": ("sentrux/sentrux", "v", "grammars-{key}.tar.gz", {}),
     # JS/TS changed-code health for the omp quality gate (docs/omp.md#quality-gate).
     "fallow": ("fallow-rs/fallow", "v", "fallow-linux-{node}-musl", {"fallow": "fallow"}),
+    # Python type checker and language server for every host.
+    "pyrefly": (
+        "facebook/pyrefly",
+        "",
+        "pyrefly-linux-{goreleaser}-musl.tar.gz",
+        {"pyrefly": "pyrefly"},
+    ),
     # Terminal chat clients for the chat profile (docs/chat.md).
     "concord": (
         "chojs23/concord",
@@ -119,7 +134,7 @@ GITHUB_LATEST = {
 # Resolved when they can be, skipped with a warning when they cannot: they never stop a run.
 OPTIONAL = {"koncreet"}
 # Verified against the `<asset>.sha256` file of the release instead of the GitHub digest.
-SHA256_FILE = {"gws"}
+SHA256_FILE = {"gws", "pyrefly"}
 # npm tools on the registry's latest version, each installed into its own prefix.
 NPM_LATEST = {
     "omp": "@oh-my-pi/pi-coding-agent",
@@ -599,7 +614,7 @@ def omp_plugins(home, environment):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, required=True)
-    parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow")
+    parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
     parser.add_argument("--development", action="store_true")
     parser.add_argument(

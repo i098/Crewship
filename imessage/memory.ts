@@ -17,8 +17,8 @@ export const VIEW_MAX = 64_000;
 export const CONTEXT_MAX = 2_048; // context for a small compaction, not the whole desk view
 export const INPUT_MAX = 4_096; // bytes per chunk; long messages are reduced without dropping their middle
 const COMPACT_MAX = 16_000; // includes the conversation's replies and retry turns
-const RETRY_MS = 30_000;
-const RETRY_MAX_MS = 30 * 60_000;
+const RETRY_MS = 5 * 60_000;
+const RETRY_MAX_MS = 60 * 60_000;
 export const WORKERS = 3; // compaction calls at once
 export const TRIES = 5; // calls per compaction when the line comes back too long
 export const UNBUILT = "(not summarized yet: zoom it)";
@@ -172,7 +172,8 @@ export class Memory {
   view: Line[];
   private queue: Line[] = [];
   private queued = new Set<string>();
-  private attempts = new Map<string, number>();
+  private retry = { failures: 0, nextAllowed: 0 };
+  private retryTimer?: NodeJS.Timeout;
   private running = 0;
 
   constructor(
@@ -180,21 +181,58 @@ export class Memory {
     private chat: (system: string) => Chat,
     private log: (e: unknown) => void = console.error,
   ) {
+    this.prepareLogs();
+    ({ msgs: this.msgs, nodes: this.nodes, view: this.view } = load(dir));
+    this.restoreRetry();
+    this.restoreViewTail();
+    this.queueUnfinishedWork();
+    this.pump();
+  }
+
+  private prepareLogs() {
     for (const sub of ["main", "tree"]) {
-      mkdirSync(`${dir}/${sub}`, { recursive: true, mode: 0o700 });
-      for (const f of readdirSync(`${dir}/${sub}`)) {
-        const text = readFileSync(`${dir}/${sub}/${f}`, "utf8");
-        if (text && !text.endsWith("\n")) appendFileSync(`${dir}/${sub}/${f}`, "\n");
+      mkdirSync(`${this.dir}/${sub}`, { recursive: true, mode: 0o700 });
+      this.repairLogTails(sub);
+    }
+  }
+
+  private repairLogTails(sub: string) {
+    for (const f of readdirSync(`${this.dir}/${sub}`)) {
+      const text = readFileSync(`${this.dir}/${sub}/${f}`, "utf8");
+      if (text && !text.endsWith("\n")) appendFileSync(`${this.dir}/${sub}/${f}`, "\n");
+    }
+  }
+
+  private restoreRetry() {
+    const retryFile = `${this.dir}/retry.json`;
+    if (existsSync(retryFile)) {
+      try {
+        const retry = JSON.parse(readFileSync(retryFile, "utf8"));
+        this.validateRetryValue(retry.failures);
+        this.validateRetryValue(retry.nextAllowed);
+        this.retry = retry;
+      } catch (e) {
+        this.log(e);
+        this.retry = { failures: 1, nextAllowed: Date.now() + RETRY_MAX_MS };
+        this.saveRetry();
       }
     }
-    ({ msgs: this.msgs, nodes: this.nodes, view: this.view } = load(dir));
+  }
+
+  private validateRetryValue(value: number) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("invalid compaction retry state");
+  }
+
+  private restoreViewTail() {
     // A crash between logging a message and saving the view leaves the view short of the newest messages.
     const covered = this.view.reduce((s, [l]) => s + 2 ** l, 0);
     for (let i = covered; i < this.msgs.length; i++) this.view.push([0, i]);
+  }
+
+  private queueUnfinishedWork() {
     // One pass at start finds the unfinished work; from then on each finished node queues its parent.
     for (let i = 0; i < this.msgs.length; i++) if (!this.nodes.has(key([0, i]))) this.enqueue([0, i]);
     for (const n of this.nodes.values()) this.queueParent([n.l, n.i]);
-    this.pump();
   }
 
   // Log one message, append its line to the view, and start its node in the background.
@@ -224,9 +262,9 @@ export class Memory {
     return this.view.filter((x) => last(x) < end).map((x) => render(this.nodes, x)).join("\n");
   }
 
-  // Compactions queued or running, for tests.
+  // Runnable or running builds, excluding work held by the outage cooldown.
   get pending() {
-    return this.queue.length + this.running;
+    return (Date.now() >= this.retry.nextAllowed ? this.queue.length : 0) + this.running;
   }
 
   private enqueue(x: Line) {
@@ -239,24 +277,43 @@ export class Memory {
     if (this.nodes.has(key([l, i ^ 1]))) this.enqueue([l + 1, i >> 1]);
   }
 
+  private saveRetry() {
+    try {
+      writeFileSync(`${this.dir}/retry.json.tmp`, JSON.stringify(this.retry), { mode: 0o600 });
+      renameSync(`${this.dir}/retry.json.tmp`, `${this.dir}/retry.json`);
+    } catch (e) {
+      this.log(e);
+    }
+  }
+
   private pump() {
     while (this.running < WORKERS && this.queue.length) {
-      const x = this.queue.shift()!;
+      // Keep short source messages visible during an outage, without calling the model.
+      const held = Date.now() < this.retry.nextAllowed || (this.retry.failures > 0 && this.running > 0);
+      const index = held ? this.queue.findIndex(([l, i]) =>
+        l === 0 && this.msgs[i].size + this.msgs[i].kind.length + 2 <= LIMIT) : 0;
+      if (index < 0) {
+        if (Date.now() < this.retry.nextAllowed && !this.retryTimer) this.retryTimer = setTimeout(() => {
+          this.retryTimer = undefined;
+          this.pump();
+        }, this.retry.nextAllowed - Date.now()).unref();
+        return;
+      }
+      const x = index === 0 ? this.queue.shift()! : this.queue.splice(index, 1)[0];
       this.running++;
       this.build(x)
-        .then(() => {
+        .then((compacted) => {
           this.queued.delete(key(x));
-          this.attempts.delete(key(x));
+          if (compacted && Date.now() >= this.retry.nextAllowed && this.retry.failures) {
+            this.retry = { failures: 0, nextAllowed: 0 };
+            this.saveRetry();
+          }
         })
         .catch((e) => {
-          const attempt = this.attempts.get(key(x)) ?? 0;
-          this.attempts.set(key(x), attempt + 1);
-          const wait = Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(attempt, 10));
-          // Keep the node queued during backoff, so new messages or sibling completions cannot retry it early.
-          setTimeout(() => {
-            this.queue.push(x);
-            this.pump();
-          }, wait).unref();
+          this.retry.failures++;
+          this.retry.nextAllowed = Date.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(this.retry.failures - 1, 4));
+          this.saveRetry();
+          this.queue.push(x);
           this.log(e);
         })
         .finally(() => {
@@ -270,10 +327,12 @@ export class Memory {
   private async build(x: Line) {
     const [l, i] = x;
     let text: string;
+    let compacted = false;
     if (l === 0) {
       const m = this.msgs[i];
       text = `${m.kind}: ${m.text}`;
       if (bytes(text) > LIMIT) {
+        compacted = true;
         text = await this.compact(i, `Compaction: compress message ${i} (kind: ${m.kind}) into one line of at most ${LIMIT} bytes
 (about 70 words), the length of this ruler:
 ${RULER}`, text);
@@ -284,6 +343,7 @@ ${RULER}`, text);
       const [ta, tb] = [a, b].map((y) => this.nodes.get(key(y))!.text);
       text = `${ta}\n${tb}`;
       if (bytes(text) > LIMIT) {
+        compacted = true;
         text = await this.compact(last(x) + 1, `Compaction: merge lines ${name(a)} and ${name(b)}, adjacent, into one line of at most
 ${LIMIT} bytes (about 70 words), the length of this ruler:
 ${RULER}
@@ -295,6 +355,8 @@ of them from there too.`, `${ta.replace(/\s*\n\s*/g, " ")}\n${tb.replace(/\s*\n\
     appendFileSync(`${this.dir}/tree/${new Date().toISOString().slice(0, 10)}.jsonl`, `${JSON.stringify(node)}\n`, { mode: 0o600 });
     this.nodes.set(key(x), node);
     this.queueParent(x);
+    if (compacted) this.log(`compacted summary ${name(x)} (${node.size} bytes)`);
+    return compacted;
   }
 
   // Reduce every chunk before merging its summaries. Do not clip away the middle of a long source message.
