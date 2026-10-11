@@ -3932,6 +3932,7 @@ function cellAt(x, y) {
 }
 // A free pointer aims at the object under it, so that object's sign card shows.
 function hoverAim(x, y) {
+  if (signHit(x, y)) return; // A pointer on a sign link keeps that sign, not the object behind it.
   const cell = mapMode ? -1 : cellAt(x, y);
   if (cell !== hover) { hover = cell; dirty = true; }
 }
