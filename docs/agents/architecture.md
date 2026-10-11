@@ -46,8 +46,8 @@ The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`
 
 | File | Value |
 | --- | --- |
-| `crew-dispatch.json` | [Per-task model choice](../../README.md): small, normal, and hard tiers, with Sonnet 5.5 or GPT-6.1 Sol as the default. The spawning agent picks the thinking level. |
-| `secondmate-harness` | `omp anthropic/claude-opus-5-5 xhigh`. |
+| `crew-dispatch.json` | [Per-task model choice](../../README.md): small, normal, and hard tiers, with Sonnet 5.5 as the default. GPT-6.1 Sol takes ordinary work only when the Anthropic quota is exhausted. The spawning agent picks the thinking level. |
+| `secondmate-harness` | `omp anthropic/claude-opus-5-5 medium`. |
 | `omp-crew-overlay.yml` | omp overlay Firstmate applies to crewmate and scout launches, never secondmates, ahead of its tracked worker overlay. It sets `modelRoles.advisor: anthropic/claude-fable-5-1:low`, `advisor.enabled: true`, `advisor.immuneTurns: 10` and `advisor.syncBacklog: "off"`, plus `providers.anthropic.serverSideFallback: false`: with the global server-side fallback on, Anthropic rejects every advisor call with a 400. Every omp crewmate runs a fable-5.1 advisor at low thinking (its lowest level). Crews never wait on it, because `syncBacklog: "off"` overrides the global `"1"`. Turns that land during a review batch into the next call instead of one call per turn, and the advisor interrupts at most once per 10 turns. omp has no every-N-turns setting. |
 | `spawn-memory-floor-mb` | `8000`; see [fleet guards](../fleet-guards.md). |
 | `crew-harness`, `backend` | Crew harness and Herdr backend. |
@@ -55,7 +55,7 @@ The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`
 | `herdr-presentation-spaces` | `off`: crewmates and scouts use the flat Herdr layout, not one workspace per task. |
 | `turnend-churn-absorb` | Present (empty): the watcher may also count a pane that changed as work evidence for a bare turn end. |
 
-`config/omp.yml` seeds `~/.omp/agent/config.yml` on first write only. It holds the host's `modelRoles` (`default` is `anthropic/claude-opus-5-5:xhigh`, `task` and `subagent` are `anthropic/claude-opus-5-5:auto`, `memory` is `anthropic/claude-haiku-5-5`, `advisor` is `anthropic/claude-opus-5-5:auto`, `smol` is `anthropic/claude-sonnet-5-5:off`, and `commit` and `tiny` are `anthropic/claude-haiku-5-5`) and `retry.fallbackChains` with no `default` chain. Its `advisor` block keeps the global advisor off (`enabled: false`) with `syncBacklog: '1'`; only crews and the omp the no-mistakes daemon spawns turn it on. Crews do it through the overlay above, which also sets `syncBacklog` to `"off"`; the daemon's omp does it through its own overlay ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)). No router or gateway sits between omp and the provider.
+`config/omp.yml` seeds `~/.omp/agent/config.yml` on first write only. It holds the host's `modelRoles` (`default` is `anthropic/claude-opus-5-5:high`, `task` and `subagent` are `anthropic/claude-opus-5-5:auto`, `memory` is `anthropic/claude-haiku-5-5`, `advisor` is `anthropic/claude-opus-5-5:auto`, `smol` is `anthropic/claude-sonnet-5-5:off`, and `commit` and `tiny` are `anthropic/claude-haiku-5-5`), `tier.openai: priority`, and `retry.fallbackChains` with no `default` chain. Its `advisor` block keeps the global advisor off (`enabled: false`) with `syncBacklog: '1'`; only crews and the omp the no-mistakes daemon spawns turn it on. Crews do it through the overlay above, which also sets `syncBacklog` to `"off"`; the daemon's omp does it through its own overlay ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)). No router or gateway sits between omp and the provider.
 
 Crews use the dispatch policy above, not the host's `modelRoles.default`.
 See [omp setup](../omp.md#what-the-recipe-sets-up) for model override merging and context configuration.
