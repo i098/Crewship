@@ -8,7 +8,7 @@ The installer:
 
 1. Installs the OS packages it needs.
 2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`npx crewship` uses the release with its own version, so it needs no lookup).
-3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. If either is missing, it stops with `the release <tag> has no install artifact yet; try again in a few minutes`. The release workflow builds both with `scripts/build-release-artifact.sh`; the tarball is a `git archive` of the tag, so it has no `.git`.
+3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`.
@@ -39,6 +39,6 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 
 `CREWSHIP_REF` selects a tag. `CREWSHIP_REPO` (default `i098/Crewship`) selects another GitHub repository.
 
-## Attach the artifact to an existing release
+## Attach the artifact to a draft release
 
-The `release-artifact` workflow runs when a release is published. For a release that has no artifact, or after a failed run, start it by hand: Actions, `release-artifact`, Run workflow, with the tag (for example `v1.2.3`) as input. It builds the artifact from that tag and uploads it with `--clobber`; it creates no release, tag or version.
+Part of the release steps in [CONTRIBUTING.md](../CONTRIBUTING.md#changelog-and-releases). Create the release as a draft, then run the `release-artifact` workflow by hand (Actions, `release-artifact`, Run workflow, with the tag, for example `v1.2.3`, as input) or `gh workflow run release-artifact.yml -f tag=v1.2.3`. It builds the artifact from the tag and uploads it with `--clobber`; it refuses a release that is already published, because immutable releases accept no new assets. It creates no release, tag or version. Publish the draft afterwards.

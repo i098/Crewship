@@ -1,5 +1,9 @@
-# Attaches the install artifact to each published vX.Y.Z release, or, started by hand
-# with a tag, to an existing release (--clobber lets a failed run be re-driven).
+# Attaches the install artifact to a DRAFT release, started by hand with its tag.
+#
+# Releases here are immutable: once a release is published, no asset can be added, so the
+# artifact has to be on the draft before it is published (CONTRIBUTING.md, "Changelog and
+# releases"). There is no `published` trigger for that reason. --clobber lets a failed
+# run be re-driven.
 #
 # The job checks out the workflow's own ref (it has the build script, which an old tag
 # lacks) with all tags; the script archives the tag.
@@ -7,17 +11,16 @@
 # crewship-<tag>.tar.gz is a `git archive` of the tag (no .git) and
 # crewship-<tag>.tar.gz.sha256 its checksum, both built by
 # scripts/build-release-artifact.sh. install.sh downloads and verifies them
-# instead of cloning the repository. Actions are pinned to the commit SHA of
+# instead of cloning the repository, and installs the source archive of the tag
+# when a release has no artifact. Actions are pinned to the commit SHA of
 # their latest release (the same pin as npm-publish.yml).
 name: release-artifact
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag (vX.Y.Z) to attach the artifact to
+        description: Tag (vX.Y.Z) of the draft release to attach the artifact to
         required: true
         type: string
 
@@ -26,7 +29,7 @@ permissions: {}
 jobs:
   artifact:
     name: attach the install artifact
-    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    if: startsWith(inputs.tag, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -39,13 +42,24 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Build the artifact and its checksum
-        env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        run: scripts/build-release-artifact.sh "$TAG" dist
-
-      - name: Attach to the release
+      - name: Check the release is a draft
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$draft" != true ]; then
+            echo "::error title=release not a draft::$TAG is already published and releases are immutable; create the release as a draft, run this workflow, then publish it"
+            exit 1
+          fi
+
+      - name: Build the artifact and its checksum
+        env:
+          TAG: ${{ inputs.tag }}
+        run: scripts/build-release-artifact.sh "$TAG" dist
+
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
