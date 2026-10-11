@@ -28,6 +28,36 @@ def classify(directory, event="pull_request"):
     return result.returncode, output.read_text() if output.exists() else ""
 
 
+def outputs(directory, event="pull_request"):
+    returncode, text = classify(directory, event)
+    assert returncode == 0
+    return dict(line.split("=", 1) for line in text.splitlines())
+
+
+def commit_change(directory, old, new):
+    def git(*args):
+        subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True)
+
+    git("init", "--quiet")
+    git("config", "user.name", "CI test")
+    git("config", "user.email", "ci-test")
+    if old:
+        source = directory / old
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("content\n")
+        git("add", ".")
+    git("commit", "--quiet", "--allow-empty", "-m", "base")
+    if old:
+        source.unlink()
+    paths = [new] if isinstance(new, str) else new or []
+    for path in paths:
+        target = directory / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("content\n")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "change")
+
+
 @pytest.mark.parametrize(("old", "new", "expected"), [
     (None, "README.txt", "false"),
     (None, "docs/nested/example.py", "false"),
@@ -53,33 +83,33 @@ def classify(directory, event="pull_request"):
     ("docs/old.md", None, "false"),
 ])
 def test_changed_paths(tmp_path, old, new, expected):
-    def git(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    commit_change(tmp_path, old, new)
+    assert outputs(tmp_path)["code"] == expected
 
-    git("init", "--quiet")
-    git("config", "user.name", "CI test")
-    git("config", "user.email", "ci-test")
-    if old:
-        source = tmp_path / old
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text("content\n")
-        git("add", ".")
-    git("commit", "--quiet", "--allow-empty", "-m", "base")
-    if old:
-        source.unlink()
-    paths = [new] if isinstance(new, str) else new or []
-    for path in paths:
-        target = tmp_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("content\n")
-    git("add", ".")
-    git("commit", "--quiet", "-m", "change")
-    assert classify(tmp_path) == (0, f"code={expected}\n")
+
+@pytest.mark.parametrize(("new", "scope"), [
+    ("imessage/bridge.ts", "imessage"),
+    (("imessage/bridge.ts", "imessage/memory.ts"), "imessage"),
+    (("imessage/bridge.ts", "docs/imessage.md", "changelog.d/1.fixed.md"), "imessage"),
+    ("imessage/NOTES.md", "all"),
+    (("imessage/bridge.ts", "scripts/ship.py"), "all"),
+    (("imessage/bridge.ts", "config/default.yml"), "all"),
+    (("imessage/bridge.ts", "tests/conftest.py"), "all"),
+    (("imessage/bridge.ts", "ansible/site.yml"), "all"),
+    (("imessage/bridge.ts", "pyproject.toml"), "all"),
+    (("imessage/bridge.ts", ".github/workflows/ci.yml"), "all"),
+    (("imessage/bridge.ts", "harbor/public/harbor.js"), "all"),
+    ("imessage-lookalike/bridge.ts", "all"),
+    ("docs/imessage.md", "all"),
+])
+def test_imessage_only_changes_narrow_the_python_tests(tmp_path, new, scope):
+    commit_change(tmp_path, None, new)
+    assert outputs(tmp_path)["scope"] == scope
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 def test_non_pr_runs_without_a_checkout(tmp_path, event):
-    assert classify(tmp_path, event) == (0, "code=true\n")
+    assert classify(tmp_path, event) == (0, "code=true\nscope=all\n")
 
 
 def test_missing_base_fails_without_skip_output(tmp_path):

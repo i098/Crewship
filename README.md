@@ -2,7 +2,7 @@
 
 # 🚢 Crewship
 
-**Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.**
+**This makes it super easy to start using agents in the cloud, enjoy!**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
@@ -19,8 +19,6 @@
 
 </div>
 
-Crewship makes it super easy to start using agents in the cloud.
-
 ## Features
 
 - **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent runs many coding agents.
@@ -30,7 +28,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
 - **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal.
 - **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
-- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
+- **[Mac control](docs/security.md#ssh-to-a-mac):** basically JARVIS - agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 The other features, each with its docs link, are listed in [docs/features.md](docs/features.md).
 
@@ -54,32 +52,47 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 ## How it works
 
+For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
+
 ```mermaid
 flowchart TD
-    box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]
-    boot --> init["./ship.sh dock: writes .local/host.yml"]
-    init --> check["./ship.sh inspect, then chart"]
-    check --> apply["./ship.sh launch"]
-    lock["toolchain: latest releases, checksum-verified (omp plugins excepted)"] --> apply
-    apply --> profiles["Ansible profiles"]
-    subgraph host["Finished host"]
-        herdr["Herdr workspace"]
-        fm["Firstmate orchestrator"]
-        agents["omp agents"]
-        guards["Fleet guards"]
+    you["You: phone or laptop<br/>terminal, iMessage, Discord, Slack"]
+    subgraph vps["Your server (VPS)"]
+        env["~/super.env"]
+        subgraph herdr["Herdr panes"]
+            fm["Firstmate"]
+            sm["Second mates (optional)"]
+            board["Crew board (optional)"]
+            gates["Guards and quality gate"]
+            subgraph worker["Worker, one per task"]
+                omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"]
+            end
+        end
         docker["Docker engine"]
-        chat["Concord and slk chat clients"]
     end
-    profiles --> herdr
-    profiles --> fm
-    profiles --> agents
-    profiles --> guards
-    profiles --> docker
-    profiles --> chat
+    gh["GitHub: pull requests"]
+    models["Model providers: Anthropic, OpenAI"]
+    subgraph opt["Optional routes"]
+        ts["Tailscale"] --> mac["Your Mac: ssh mac,<br/>BlueBubbles relay"]
+        desktop["Review desktop over noVNC"]
+    end
+    you --> fm
+    env --> fm
+    fm --> sm
+    sm --> worker
+    fm <--> worker
+    board <-.-> worker
+    gates --- worker
+    gates -.-> docker
+    worker --> gh
+    worker --> models
+    herdr -.-> opt
+    style opt stroke-dasharray: 5 5
 ```
 
 ## More docs
 
+- [Architecture](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Report a bug](../../issues/new?template=bug_report.yml)

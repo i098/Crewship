@@ -91,8 +91,8 @@ uv sync --group dev
 # Lint
 uv run ruff check scripts tests
 
-# Test (the Koncreet apply tests need root or fakeroot; unprivileged without it they skip)
-uv run pytest
+# Test, in parallel as CI runs it (the Koncreet apply tests need root or fakeroot; unprivileged without it they skip)
+uv run pytest -n auto --dist worksteal
 
 # Ansible syntax check
 uv run ansible-playbook -i ansible/inventory.yml ansible/site.yml --syntax-check

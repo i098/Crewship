@@ -14,6 +14,7 @@ HARBOR = Path(__file__).resolve().parent
 ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
 MARK = "<!-- points: harbor/build.py fills this list from README.md and CHANGELOG.md -->"
+FOOT_MARK = "<!-- footer: harbor/build.py fills the architecture link -->"
 
 # Each Features link maps to its scene object; unmapped docs share a summary and index link.
 SCENE = {
@@ -72,22 +73,22 @@ def points(readme, changelog):
             print(
                 f"harbor: no scene object for {link}; listing it on the docs board", file=sys.stderr
             )
+            url = f"{REPO}/{link[len('../../') :]}" if link.startswith("../../") else href
             extra.append(
-                title.removeprefix("Private ")
-                .removeprefix("Shared ")
-                .replace("Browser ladder", "Browsers")
-                .lower()
+                (
+                    title.removeprefix("Private ")
+                    .removeprefix("Shared ")
+                    .replace("Browser ladder", "Browsers")
+                    .lower(),
+                    url,
+                )
             )
     if extra:
-        rows.append(
-            (
-                "docsboard",
-                "More docs",
-                f"{REPO}#features",
-                inline(", ".join(extra[:3]), 40)
-                + (f", + {len(extra) - 3} more" if len(extra) > 3 else ""),
-            )
+        links = ", ".join(
+            f'<a target="_blank" rel="noopener" href="{html.escape(url)}">{html.escape(name)}</a>'
+            for name, url in extra
         )
+        rows.append(("docsboard", "More docs", f"{REPO}#features", links))
     version = re.search(r"^## \[(\d[^\]]*)\]", changelog, re.M).group(1)
     quick = readme.split("\n## Quick start\n", 1)[1]
     rows += [
@@ -123,14 +124,16 @@ def build(dist=HARBOR / "dist"):
     readme = (ROOT / "README.md").read_text()
     changelog = (ROOT / "CHANGELOG.md").read_text()
     items = "\n".join(
-        f'      <li data-spot="{spot}"><a target="_blank" rel="noopener" href="{href}">'
+        f'      <li data-spot="{spot}"{" data-doc" if "/blob/main/" in href else ""}>'
+        f'<a target="_blank" rel="noopener" href="{href}">'
         f"{html.escape(title)}</a><p>{body}</p></li>"
         for spot, title, href, body in points(readme, changelog)
     )
     shutil.rmtree(dist, ignore_errors=True)
     shutil.copytree(HARBOR / "public", dist)
     page = dist / "index.html"
-    page.write_text(page.read_text().replace(MARK, items))
+    footer = f'Read the <a target="_blank" rel="noopener" href="{REPO}/blob/main/docs/architecture.md">Architecture</a>.'
+    page.write_text(page.read_text().replace(MARK, items).replace(FOOT_MARK, footer))
     return dist
 
 

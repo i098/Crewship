@@ -27,7 +27,7 @@ for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) 
 const spots = {};
 for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
   const a = li.querySelector("a");
-  spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p") };
+  spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p"), doc: "doc" in li.dataset };
 }
 
 // ---- World -------------------------------------------------------------------------------
@@ -798,7 +798,9 @@ for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.
 // `top` is the top's gust displacement in metres.
 const TREES = [], PALMS = [];
 function growTree(x, z, height, top) {
-  const t = { x, z, y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
+  // shoreY, not terrainY: terrainY would build the seat grid while the scenery is still going up, and every object
+  // added afterwards (fence posts, signs) would then stand on rising ground. A trunk keeps its footing like them.
+  const t = { x, z, y0: shoreY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
   TREES.push(t);
   return t;
 }
@@ -2483,6 +2485,8 @@ for (const a of Object.values(anchors)) {
 }
 
 let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 0, padY = 0, aspect = 1, viewW = 0, viewH = 0;
+// The grid cell under the pointer while the mouse is free, or -1.
+let hover = -1;
 const safe = { left: 0, right: 0, top: 0, bottom: 0 };
 const MONO = getComputedStyle(document.documentElement).getPropertyValue("--mono");
 const BASE = { "": "#5c6a88", k: "#e9eefb", w: "#3f78b8", d: "#22406a", m: "#a9c8f0", o: "#dba66b", s: "#efe6cf",
@@ -2570,8 +2574,10 @@ function render() {
     gulls();
   }
   const mid = (rows >> 1) * cols + (cols >> 1);
-  const spot = SP[mid], looked = spot && D[mid] < (RANGE[spot] || 12);
-  show(moved ? jumped || (looked ? spot : nearby()) : null);
+  // A free pointer over a doc object aims the card at it; otherwise the crosshair cell decides.
+  const hovering = hover >= 0 && !document.pointerLockElement && !mapMode, aim = hovering ? hover : mid;
+  const spot = SP[aim], looked = spot && D[aim] < (RANGE[spot] || 12);
+  show(moved || hovering ? jumped || (looked ? spot : nearby()) : null);
   minimap();
   labelTarget(spot, looked);
   draw(mid);
@@ -3891,8 +3897,9 @@ function show(id) {
       document.querySelector(".top nav").cloneNode(true));
     return;
   }
-  const s = spots[id], link = node("a", id === "docsboard" ? "Docs index" : "Open");
-  link.setAttribute("aria-label", `Open: ${s.title}`);
+  const s = spots[id], doc = s.doc, label = doc ? "Read the docs ->" : id === "docsboard" ? "Docs index" : "Open";
+  const link = node("a", label);
+  link.setAttribute("aria-label", `${label}: ${s.title}`);
   link.target = "_blank";
   link.rel = "noopener";
   link.href = s.href;
@@ -3919,13 +3926,29 @@ const look = (dx, dy, k) => {
   moved = true; jumped = null; walkPath = [];
   dirty = true;
 };
+// The grid cell under a screen point, or -1 off the grid.
+function cellAt(x, y) {
+  const r = canvas.getBoundingClientRect();
+  const i = Math.floor((x - r.left - padX) / cellW), j = Math.floor((y - r.top - padY) / cellH);
+  return i < 0 || j < 0 || i >= cols || j >= rows ? -1 : j * cols + i;
+}
+// A free pointer aims at the object under it, so that object's sign card shows.
+function hoverAim(x, y) {
+  const cell = mapMode ? -1 : cellAt(x, y);
+  if (cell !== hover) { hover = cell; dirty = true; }
+}
 // Grid links open on desktop and touch without starting mouse look.
 canvas.addEventListener("click", (e) => {
   const link = signHit(e.clientX, e.clientY);
   if (link) { link.click(); return; }
+  const cell = mapMode ? -1 : cellAt(e.clientX, e.clientY), id = cell >= 0 ? SP[cell] : null;
+  // A click on the aimed doc object opens its doc; the first click or tap aims at it.
+  if (id && spots[id]?.doc && hover === cell) { window.open(spots[id].href, "_blank", "noopener"); return; }
+  hoverAim(e.clientX, e.clientY);
   if (!mapMode && !touchFirst.matches && stage.requestPointerLock) stage.requestPointerLock();
   stage.focus({ preventScroll: true });
 });
+canvas.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hoverAim(-1, -1); });
 document.getElementById("page").addEventListener("focusin", (e) => {
   const id = e.target.closest("[data-spot]")?.dataset.spot;
   if (id && anchors[id]) {
@@ -3940,7 +3963,7 @@ card.addEventListener("focusin", () => {
 });
 document.addEventListener("mousemove", (e) => {
   if (document.pointerLockElement === stage) look(e.movementX, e.movementY, 0.0022);
-  else hoverMap(e.clientX, e.clientY);
+  else { hoverAim(e.clientX, e.clientY); hoverMap(e.clientX, e.clientY); }
 });
 let padId = null, lookId = null, lastX = 0, lastY = 0;
 function steer(e) {

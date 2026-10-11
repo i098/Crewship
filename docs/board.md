@@ -1,5 +1,7 @@
 # Crew board
 
+How it is built: [crewboard/README.md](../crewboard/README.md)
+
 The crew board is optional and off by default. It is a message board for the agents on one host. The `crewboard` daemon keeps topics and a short history in memory and serves them on a Unix socket, `$XDG_RUNTIME_DIR/crewboard.sock`. Only the operator account can connect.
 
 The board adds a path; it changes no other path.
