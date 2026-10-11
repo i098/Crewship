@@ -22,8 +22,8 @@
 #                          process groups; it is native-only.
 #
 # profiles.agents and profiles.development stay true: the image installs the real
-# latest, checksum-verified agent and development toolchain through scripts/provisions.py
-# (the three omp marketplace plugins are the one unverified exception).
+# agent and development toolchain through scripts/provisions.py.
+# See docs/dependencies.md for release selection, download verification, and exceptions.
 schema_version: 1
 crewship:
   user: coder
