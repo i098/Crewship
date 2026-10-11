@@ -2483,6 +2483,8 @@ for (const a of Object.values(anchors)) {
 }
 
 let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 0, padY = 0, aspect = 1, viewW = 0, viewH = 0;
+// The grid cell under the pointer while the mouse is free, or -1.
+let hover = -1;
 const safe = { left: 0, right: 0, top: 0, bottom: 0 };
 const MONO = getComputedStyle(document.documentElement).getPropertyValue("--mono");
 const BASE = { "": "#5c6a88", k: "#e9eefb", w: "#3f78b8", d: "#22406a", m: "#a9c8f0", o: "#dba66b", s: "#efe6cf",
@@ -2570,8 +2572,10 @@ function render() {
     gulls();
   }
   const mid = (rows >> 1) * cols + (cols >> 1);
-  const spot = SP[mid], looked = spot && D[mid] < (RANGE[spot] || 12);
-  show(moved ? jumped || (looked ? spot : nearby()) : null);
+  // A free pointer over a doc object aims the card at it; otherwise the crosshair cell decides.
+  const hovering = hover >= 0 && !document.pointerLockElement && !mapMode, aim = hovering ? hover : mid;
+  const spot = SP[aim], looked = spot && D[aim] < (RANGE[spot] || 12);
+  show(moved || hovering ? jumped || (looked ? spot : nearby()) : null);
   minimap();
   labelTarget(spot, looked);
   draw(mid);
@@ -3917,13 +3921,29 @@ const look = (dx, dy, k) => {
   moved = true; jumped = null; walkPath = [];
   dirty = true;
 };
+// The grid cell under a screen point, or -1 off the grid.
+function cellAt(x, y) {
+  const r = canvas.getBoundingClientRect();
+  const i = Math.floor((x - r.left - padX) / cellW), j = Math.floor((y - r.top - padY) / cellH);
+  return i < 0 || j < 0 || i >= cols || j >= rows ? -1 : j * cols + i;
+}
+// A free pointer aims at the object under it, so that object's sign card shows.
+function hoverAim(x, y) {
+  const cell = mapMode ? -1 : cellAt(x, y);
+  if (cell !== hover) { hover = cell; dirty = true; }
+}
 // Grid links open on desktop and touch without starting mouse look.
 canvas.addEventListener("click", (e) => {
   const link = signHit(e.clientX, e.clientY);
   if (link) { link.click(); return; }
+  const cell = mapMode ? -1 : cellAt(e.clientX, e.clientY), id = cell >= 0 ? SP[cell] : null;
+  // A click on the aimed doc object opens its doc; the first click or tap aims at it.
+  if (id && spots[id]?.doc && hover === cell) { window.open(spots[id].href, "_blank", "noopener"); return; }
+  hoverAim(e.clientX, e.clientY);
   if (!mapMode && !touchFirst.matches && stage.requestPointerLock) stage.requestPointerLock();
   stage.focus({ preventScroll: true });
 });
+canvas.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hoverAim(-1, -1); });
 document.getElementById("page").addEventListener("focusin", (e) => {
   const id = e.target.closest("[data-spot]")?.dataset.spot;
   if (id && anchors[id]) {
@@ -3938,7 +3958,7 @@ card.addEventListener("focusin", () => {
 });
 document.addEventListener("mousemove", (e) => {
   if (document.pointerLockElement === stage) look(e.movementX, e.movementY, 0.0022);
-  else hoverMap(e.clientX, e.clientY);
+  else { hoverAim(e.clientX, e.clientY); hoverMap(e.clientX, e.clientY); }
 });
 let padId = null, lookId = null, lastX = 0, lastY = 0;
 function steer(e) {
