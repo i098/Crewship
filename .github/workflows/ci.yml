@@ -34,12 +34,47 @@ defaults:
     shell: bash
 
 jobs:
-  config-and-python:
-    name: configuration and python checks
+  changes:
+    name: classify changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Checkout PR merge
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Classify changed paths
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          code=true
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            code=false
+            # Disable rename detection so both the old and new paths count.
+            git diff --name-only --no-renames -z HEAD^1 HEAD > "$RUNNER_TEMP/changed-files"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                skills/*|rules/*|config/*) code=true; break ;;
+                README*|docs/*|changelog.d/*|*.md) ;;
+                *) code=true; break ;;
+              esac
+            done < "$RUNNER_TEMP/changed-files"
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  changelog:
+    name: changelog fragment
+    if: >-
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'no changelog')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,16 +89,31 @@ jobs:
           version: latest
           enable-cache: true
 
+      - name: Changelog fragment
+        run: uv run --locked --only-group dev towncrier check --compare-with HEAD^1
+
+  config-and-python:
+    name: configuration and python checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install latest uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: latest
+          enable-cache: true
+
       - name: Sync locked dependencies
         run: uv sync --locked --group dev
-
-      # Every PR adds changelog.d/<issue>.<type>.md (CONTRIBUTING.md); a PR
-      # with nothing to note carries the `no changelog` label instead.
-      - name: Changelog fragment
-        if: >-
-          github.event_name == 'pull_request' &&
-          !contains(github.event.pull_request.labels.*.name, 'no changelog')
-        run: uv run towncrier check --compare-with HEAD^1
 
       # Bun tracks its latest release, the same as every ./ship.sh launch.
       - name: Install latest Bun
@@ -104,6 +154,8 @@ jobs:
   # Rust tracks its latest stable release through the runner's rustup.
   crewboard:
     name: crewboard rust checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -136,6 +188,8 @@ jobs:
   # Playwright tracks its latest release, like the other tools.
   harbor-webkit:
     name: harbor webkit iphone check
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -164,7 +218,8 @@ jobs:
   # .sentrux/baseline.json, plus fallow audit on the changed files as a warning.
   quality-gate:
     name: quality gate
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -195,6 +250,7 @@ jobs:
         run: bun config/omp-quality-gate.ts
 
       - name: fallow audit (advisory)
+        if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
@@ -203,6 +259,8 @@ jobs:
 
   container-smoke:
     name: worker image behavior smoke
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

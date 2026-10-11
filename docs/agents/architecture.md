@@ -81,8 +81,19 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main`, on every p
 - `bash config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
 - `./ship.sh inspect` for `config/default.yml` and `containers/crewship.container.yml`.
 - Audits of the Dockerfile, devcontainer, and Compose definitions (the image builds from `mirror.gcr.io/library/ubuntu:latest`, Compose services are digest-pinned, no host namespaces or socket, resource caps).
-- On pull requests, the `quality gate` job: `sentrux gate .` against the committed `.sentrux/baseline.json` fails on a `DEGRADED` verdict, on a drop past `FM_QUALITY_MAX_DROP`, and when the gate cannot give a verdict; `fallow audit` on the changed JS/TS only warns ([Quality gate](../omp.md#quality-gate)).
+- The `quality gate` job: `sentrux gate .` checks the committed baseline and blocks structural regressions or an unavailable verdict.
+  On PRs, `fallow audit` warns about changed JS/TS ([Quality gate](../omp.md#quality-gate)).
 - A full worker image build and the behavior smoke in `tests/container-smoke.sh`.
+- The harbor checks in WebKit on iPhone and in desktop Chromium.
+
+The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`.
+Documentation-only PRs change only `README*`, `docs/**`, `changelog.d/**`, or `*.md` files at any depth.
+Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
+Renames check both the old and new paths.
+Each heavy job uses a job-level condition, so skipped required checks still report.
+The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
+CodeQL keeps running through GitHub's default setup.
+Code PRs, pushes to `main`, and manual runs execute all heavy jobs.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 

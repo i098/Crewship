@@ -47,6 +47,14 @@ uv run ansible-playbook -i ansible/inventory.yml ansible/site.yml --syntax-check
 ./scripts/ci-local.sh
 ```
 
+CI skips heavy jobs on documentation-only pull requests.
+Every changed file must match `README*`, `docs/**`, `changelog.d/**`, or `*.md` at any depth.
+Files under `skills/`, `rules/`, and `config/` always count as code, including Markdown files.
+Skipped jobs still report their check names, so required checks do not remain pending.
+The separate `changelog fragment` job still checks documentation PRs unless they have the `no changelog` label.
+CodeQL keeps running through GitHub's default setup.
+Code PRs, pushes to `main`, and manual runs execute all heavy jobs.
+
 ## Adding a new tool
 
 1. Add it to `GITHUB_LATEST` (a GitHub release whose assets carry a SHA-256 digest; when the release publishes its own `<asset>.sha256` files, also list it in `SHA256_FILE` to verify against those) or `NPM_LATEST` in `scripts/provisions.py`. A tool from elsewhere needs its own resolver in `resolve_latest` that reads the checksum its publisher posts for the release.
