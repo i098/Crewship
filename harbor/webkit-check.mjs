@@ -43,6 +43,8 @@ await page.context().route("**/*", async (route) => {
   if (path === "harbor.js") {
     const source = await readFile(new URL(path, dist), "utf8");
     return route.fulfill({ contentType: type, body: source + `
+// Ray workers load this file too; the hooks belong to the page.
+if (PAGE) {
 ["top", "right", "bottom", "left"].forEach((side, n) => stage.style.setProperty("--safe-" + side, ${JSON.stringify(expectedInsets)}[n] + "px"));
 const drawPopup = drawSign;
 drawSign = function() {
@@ -66,6 +68,7 @@ measure = function() {
   scale = ${scale};
   measureGrid();
 };
+const frameDrawn = () => window.frames.push([cols, rows, cellW, cellH, cam.tanH, cam.tanV, canvas.width, canvas.height]);
 const renderScene = render;
 render = function() {
   renderScene();
@@ -74,8 +77,10 @@ render = function() {
     window.firstFrameBlack = pixels.every((value, i) => i % 4 === 3 || value === 0);
   }
   if (introProgress < 1) window.introClocks.push(T);
-  window.frames.push([cols, rows, cellW, cellH, cam.tanH, cam.tanV, canvas.width, canvas.height]);
+  frameDrawn();
 };
+const paintWorkerFrame = paintCast;
+paintCast = function(f) { paintWorkerFrame(f); frameDrawn(); };
 let signCheckWidth = Infinity;
 const fitSign = signFit;
 signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
@@ -152,6 +157,7 @@ window.harborCheck = {
   }
 };
 stage.addEventListener("pointerdown", () => { if (padId !== null) for (let i = 0; i < 8; i++) step(0.02); });
+}
 ` });
   }
   await route.fulfill({ body: await readFile(new URL(path, dist)), contentType: type });

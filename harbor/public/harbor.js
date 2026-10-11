@@ -1,34 +1,43 @@
 // Crewship harbor: a first-person 3D scene ray cast into a grid of text.
 // Plain JavaScript, no dependencies. The world combines solids with island and sea height fields.
 // The ship's solids use a frame that bobs and rolls at the dock.
-const stage = document.getElementById("stage");
-const canvas = document.getElementById("scene");
-const ctx = canvas.getContext("2d");
-const card = document.getElementById("card");
+// The page runs the scene. Worker copies of this file (see Ray workers) have no document: they build the same world
+// and cast rows of the grid for the page.
+const PAGE = typeof document !== "undefined";
+const stage = PAGE && document.getElementById("stage");
+const canvas = PAGE && document.getElementById("scene");
+const ctx = PAGE && canvas.getContext("2d");
+const card = PAGE && document.getElementById("card");
 // With JavaScript the scene fills the screen and the plain page stays for screen readers only.
-stage.hidden = false;
-stage.focus({ preventScroll: true });
-const pad = document.getElementById("pad");
-const knob = pad.firstElementChild;
-const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-const touchFirst = matchMedia("(pointer: coarse)");
-// The intro keeps the camera and canvas at their final size.
-let introStart = null, introProgress = reduced.matches ? 1 : 0;
-stage.classList.toggle("loading", introProgress < 1);
+if (PAGE) {
+  stage.hidden = false;
+  stage.focus({ preventScroll: true });
+}
+const pad = PAGE && document.getElementById("pad");
+const knob = PAGE && pad.firstElementChild;
+// A ray worker takes reduced motion from the page with each frame.
+const reduced = PAGE ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+const touchFirst = PAGE ? matchMedia("(pointer: coarse)") : { matches: false };
+// The intro keeps the camera and canvas at their final size. Ray workers only cast after it.
+let introStart = null, introProgress = reduced.matches || !PAGE ? 1 : 0;
+if (PAGE) stage.classList.toggle("loading", introProgress < 1);
 function finishIntro() {
   introProgress = 1;
   stage.classList.remove("loading");
   dirty = true;
   for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) removeEventListener(event, finishIntro, true);
 }
-for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) addEventListener(event, finishIntro, { capture: true, passive: true });
+if (PAGE) for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) addEventListener(event, finishIntro, { capture: true, passive: true });
 
-// The features come from the plain list, so the scene and the list never disagree.
+// The features come from the plain list, so the scene and the list never disagree. A ray worker gets their ids from the
+// page as its worker name.
 const spots = {};
-for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
-  const a = li.querySelector("a");
-  spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p"), doc: "doc" in li.dataset };
-}
+if (PAGE) {
+  for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
+    const a = li.querySelector("a");
+    spots[li.dataset.spot] = { title: a.textContent, href: a.href, body: li.querySelector("p"), doc: "doc" in li.dataset };
+  }
+} else for (const id of JSON.parse(name)) spots[id] = {};
 
 // ---- World -------------------------------------------------------------------------------
 const SX = -2.4; // ship centre line (x) and roll axis
@@ -463,8 +472,8 @@ function landTex(x, y, z, nx, ny) {
   return y < 1.17 && smooth((1.17 - y) / 0.1 + 0.9 * (noise(x * 0.7, z * 0.7) - 1)) > r ? sand(x, y, z, nx, ny) : ground(x, y, z, nx, ny, r);
 }
 const TERRAIN = { id: 4000, P: new Float64Array(0), bb: [-70, -1.6, -50, 60, TOP, 60], mat: "g", spot: null, solid: false, tex: landTex };
-// The surface id of a hill crest's cells; the other ground cells get TERRAIN.id * 16 + 17, as shadeLand hits face -5.
-const CREST_ID = TERRAIN.id * 16 + 18;
+// The surface id (up to its sign) of ground cells, as shadeLand hits face -5, and of a hill crest's cells.
+const LAND_ID = TERRAIN.id * 16 + 17, CREST_ID = TERRAIN.id * 16 + 18;
 // Sand: light and dotted when dry, darker and wet by the waterline, where the wash comes and goes, with a few shells.
 function wetSand(x, y, z) {
   const wash = 0.12 + 0.08 * Math.sin(T * 0.9 + x * 0.3 + z * 0.2);
@@ -2488,7 +2497,7 @@ let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 
 // The grid cell under the pointer while the mouse is free, or -1.
 let hover = -1;
 const safe = { left: 0, right: 0, top: 0, bottom: 0 };
-const MONO = getComputedStyle(document.documentElement).getPropertyValue("--mono");
+const MONO = PAGE && getComputedStyle(document.documentElement).getPropertyValue("--mono");
 const BASE = { "": "#5c6a88", k: "#e9eefb", w: "#3f78b8", d: "#22406a", m: "#a9c8f0", o: "#dba66b", s: "#efe6cf",
   t: "#a3adc2", l: "#ffd479", r: "#e0705f", b: "#62a8e0", f: "#3a4562", h: "#7ee0c3", g: "#6fbf73", y: "#e3d3a3", n: "#9b8a62",
   G: "#a5d36e", M: "#4f8a4a", p: "#17171c", v: "#10172b" };
@@ -2551,7 +2560,9 @@ function swayRoomCamera() {
     }
   }
 }
-function render() {
+// The camera, the sky and the solids in view for one frame, before any row is cast; tenths of a second key the sky.
+let seenWorld = NONE, seenShip = NONE;
+function view(tenths) {
   renders++;
   const tanV = 0.62, tanH = tanV * aspect;
   const cy = Math.cos(me.yaw), sy = Math.sin(me.yaw), cp = Math.cos(me.pitch), sp = Math.sin(me.pitch);
@@ -2560,12 +2571,20 @@ function render() {
   swayRoomCamera();
   // Camera origin in the ship frame (rotate by -roll about the ship's long axis, after the bob).
   cam.lx = rc * (me.x - SX) + rs * (me.eye - bob) + SX; cam.ly = -rs * (me.x - SX) + rc * (me.eye - bob);
-  gatherClouds(performance.now() / 100);
+  gatherClouds(tenths);
   const scenery = interior ? interior.solids : world, vessel = interior ? NONE : ship;
-  const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
+  seenWorld = cull(scenery, false); seenShip = cull(vessel, true);
   if (!interior) groundRings();
+}
+function render() {
+  view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
+  finish();
+}
+// Everything after the cast but the drawing: crests, the projected details, the sign and the map. Returns the middle cell.
+function compose() {
   if (!interior) {
+    crests();
     drawGrass();
     drawPalms();
     drawFountain();
@@ -2580,7 +2599,23 @@ function render() {
   show(moved || hovering ? jumped || (looked ? spot : nearby()) : null);
   minimap();
   labelTarget(spot, looked);
-  draw(mid);
+  return mid;
+}
+function finish() {
+  draw(compose());
+}
+// A hill crest against the sky, the sea or far ground catches the moon: two colour tiers brighter, and a surface id of
+// its own, so the edge pass outlines it. Nearer rows of flat ground are never so far apart. It compares each ground
+// cell with the cell above, so it runs once every row is cast.
+function crests() {
+  if (introProgress < 1) return;
+  for (let c = cols; c < cols * rows; c++) {
+    const t = D[c];
+    if ((ID[c] === LAND_ID || ID[c] === -LAND_ID) && t < 70 && D[c - cols] > t * 2 + 5) {
+      C[c] = C[c].slice(0, -1) + Math.min(7, Number(C[c].slice(-1)) + 2);
+      ID[c] = CREST_ID;
+    }
+  }
 }
 function labelTarget(spot, looked) {
   // Seat posted signs on their world-space support tops, not the aimed surface.
@@ -3250,12 +3285,6 @@ function shadeLand(c, odd, t, dx, dy, dz) {
   const [hx, hz] = groundGradient(cam.x + dx * t, cam.z + dz * t), l = Math.sqrt(hx * hx + 1 + hz * hz);
   hitS = TERRAIN; hitK = -5; hitT = t; hitN[0] = -hx / l; hitN[1] = 1 / l; hitN[2] = -hz / l;
   shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
-  // A hill crest against the sky, the sea or far ground catches the moon: two colour tiers brighter, and a
-  // surface id of its own, so the edge pass outlines it. Nearer rows of flat ground are never so far apart.
-  if (introProgress === 1 && c >= cols && t < 70 && D[c - cols] > t * 2 + 5) {
-    C[c] = C[c].slice(0, -1) + Math.min(7, Number(C[c].slice(-1)) + 2);
-    ID[c] = CREST_ID;
-  }
 }
 const GRAIN = { _: 1.35, "=": 1.3, "*": 1.5, "~": 1.25, "+": 1.1, "-": 1.1, ".": 1, ",": 0.85, ":": 0.7, ";": 0.8, '"': 0.9, "'": 0.95, "`": 0.9, " ": 1 };
 // Ground marks keep their glyph and the least brightness returned here, which decreases in fog: road dirt,
@@ -3904,97 +3933,100 @@ function show(id) {
 }
 
 // ---- Input -------------------------------------------------------------------------------
-const KEYS = { KeyW: "f", ArrowUp: "f", KeyS: "b", ArrowDown: "b", KeyA: "l", KeyD: "r", ArrowLeft: "tl", ArrowRight: "tr",
-  KeyR: "u", KeyF: "d" };
-const open = () => { if (target) window.open(spots[target].href, "_blank", "noopener"); };
-stage.addEventListener("keydown", (e) => {
-  if (mapKey(e)) { e.preventDefault(); dirty = true; return; }
-  if (e.key === "Enter" && target && !e.target.closest("a")) { e.preventDefault(); open(); return; }
-  const k = KEYS[e.code];
-  if (!k || e.altKey || e.ctrlKey || e.metaKey) return;
-  e.preventDefault();
-  keys.add(k);
-});
-stage.addEventListener("keyup", (e) => { keys.delete(KEYS[e.code]); releaseDoorInput(); });
-stage.addEventListener("blur", () => { keys.clear(); releaseDoorInput(); });
-const look = (dx, dy, k) => {
-  me.yaw += dx * k;
-  me.pitch = Math.max(-1.2, Math.min(1.2, me.pitch - dy * k));
-  moved = true; jumped = null; walkPath = [];
-  dirty = true;
-};
-// The grid cell under a screen point, or -1 off the grid.
-function cellAt(x, y) {
-  const r = canvas.getBoundingClientRect();
-  const i = Math.floor((x - r.left - padX) / cellW), j = Math.floor((y - r.top - padY) / cellH);
-  return i < 0 || j < 0 || i >= cols || j >= rows ? -1 : j * cols + i;
-}
-// A free pointer aims at the object under it, so that object's sign card shows.
-function hoverAim(x, y) {
-  const cell = mapMode ? -1 : cellAt(x, y);
-  if (cell !== hover) { hover = cell; dirty = true; }
-}
-// Grid links open on desktop and touch without starting mouse look.
-canvas.addEventListener("click", (e) => {
-  const link = signHit(e.clientX, e.clientY);
-  if (link) { link.click(); return; }
-  const cell = mapMode ? -1 : cellAt(e.clientX, e.clientY), id = cell >= 0 ? SP[cell] : null;
-  // A click on the aimed doc object opens its doc; the first click or tap aims at it.
-  if (id && spots[id]?.doc && hover === cell) { window.open(spots[id].href, "_blank", "noopener"); return; }
-  hoverAim(e.clientX, e.clientY);
-  if (!mapMode && !touchFirst.matches && stage.requestPointerLock) stage.requestPointerLock();
-  stage.focus({ preventScroll: true });
-});
-canvas.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hoverAim(-1, -1); });
-document.getElementById("page").addEventListener("focusin", (e) => {
-  const id = e.target.closest("[data-spot]")?.dataset.spot;
-  if (id && anchors[id]) {
-    setMap(0); walkPath = []; walkTo = null;
-    moved = true; face(id); dirty = true;
-  }
-});
-card.addEventListener("focusin", () => {
-  setMap(0); walkPath = []; walkTo = null;
-  if (target) jumped = target;
-  dirty = true;
-});
-document.addEventListener("mousemove", (e) => {
-  if (document.pointerLockElement === stage) look(e.movementX, e.movementY, 0.0022);
-  else { hoverAim(e.clientX, e.clientY); hoverMap(e.clientX, e.clientY); }
-});
+// Ray workers take no input.
 let padId = null, lookId = null, lastX = 0, lastY = 0;
-function steer(e) {
-  const r = pad.getBoundingClientRect(), half = r.width / 2;
-  let x = (e.clientX - r.left - half) / half, y = (e.clientY - r.top - half) / half;
-  const l = Math.hypot(x, y);
-  if (l > 1) { x /= l; y /= l; }
-  stick.x = x; stick.y = -y;
-  releaseDoorInput();
-  knob.style.transform = `translate(${x * half * 0.6}px, ${y * half * 0.6}px)`;
+if (PAGE) {
+  const KEYS = { KeyW: "f", ArrowUp: "f", KeyS: "b", ArrowDown: "b", KeyA: "l", KeyD: "r", ArrowLeft: "tl", ArrowRight: "tr",
+    KeyR: "u", KeyF: "d" };
+  const open = () => { if (target) window.open(spots[target].href, "_blank", "noopener"); };
+  stage.addEventListener("keydown", (e) => {
+    if (mapKey(e)) { e.preventDefault(); dirty = true; return; }
+    if (e.key === "Enter" && target && !e.target.closest("a")) { e.preventDefault(); open(); return; }
+    const k = KEYS[e.code];
+    if (!k || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    keys.add(k);
+  });
+  stage.addEventListener("keyup", (e) => { keys.delete(KEYS[e.code]); releaseDoorInput(); });
+  stage.addEventListener("blur", () => { keys.clear(); releaseDoorInput(); });
+  const look = (dx, dy, k) => {
+    me.yaw += dx * k;
+    me.pitch = Math.max(-1.2, Math.min(1.2, me.pitch - dy * k));
+    moved = true; jumped = null; walkPath = [];
+    dirty = true;
+  };
+  // The grid cell under a screen point, or -1 off the grid.
+  const cellAt = (x, y) => {
+    const r = canvas.getBoundingClientRect();
+    const i = Math.floor((x - r.left - padX) / cellW), j = Math.floor((y - r.top - padY) / cellH);
+    return i < 0 || j < 0 || i >= cols || j >= rows ? -1 : j * cols + i;
+  };
+  // A free pointer aims at the object under it, so that object's sign card shows.
+  const hoverAim = (x, y) => {
+    const cell = mapMode ? -1 : cellAt(x, y);
+    if (cell !== hover) { hover = cell; dirty = true; }
+  };
+  // Grid links open on desktop and touch without starting mouse look.
+  canvas.addEventListener("click", (e) => {
+    const link = signHit(e.clientX, e.clientY);
+    if (link) { link.click(); return; }
+    const cell = mapMode ? -1 : cellAt(e.clientX, e.clientY), id = cell >= 0 ? SP[cell] : null;
+    // A click on the aimed doc object opens its doc; the first click or tap aims at it.
+    if (id && spots[id]?.doc && hover === cell) { window.open(spots[id].href, "_blank", "noopener"); return; }
+    hoverAim(e.clientX, e.clientY);
+    if (!mapMode && !touchFirst.matches && stage.requestPointerLock) stage.requestPointerLock();
+    stage.focus({ preventScroll: true });
+  });
+  canvas.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hoverAim(-1, -1); });
+  document.getElementById("page").addEventListener("focusin", (e) => {
+    const id = e.target.closest("[data-spot]")?.dataset.spot;
+    if (id && anchors[id]) {
+      setMap(0); walkPath = []; walkTo = null;
+      moved = true; face(id); dirty = true;
+    }
+  });
+  card.addEventListener("focusin", () => {
+    setMap(0); walkPath = []; walkTo = null;
+    if (target) jumped = target;
+    dirty = true;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement === stage) look(e.movementX, e.movementY, 0.0022);
+    else { hoverAim(e.clientX, e.clientY); hoverMap(e.clientX, e.clientY); }
+  });
+  const steer = (e) => {
+    const r = pad.getBoundingClientRect(), half = r.width / 2;
+    let x = (e.clientX - r.left - half) / half, y = (e.clientY - r.top - half) / half;
+    const l = Math.hypot(x, y);
+    if (l > 1) { x /= l; y /= l; }
+    stick.x = x; stick.y = -y;
+    releaseDoorInput();
+    knob.style.transform = `translate(${x * half * 0.6}px, ${y * half * 0.6}px)`;
+  };
+  // Link presses do not dismiss the intro or start a touch drag.
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("a") || signHit(e.clientX, e.clientY)) return;
+    moved = true; dirty = true;
+    if (tapMap(e.clientX, e.clientY)) return;
+    if (e.pointerType === "mouse") return;
+    if (pad.contains(e.target)) {
+      padId = e.pointerId; steer(e);
+    } else { lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY; }
+    stage.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (e.pointerId === padId) steer(e);
+    else if (e.pointerId === lookId) { look(e.clientX - lastX, e.clientY - lastY, 0.006); lastX = e.clientX; lastY = e.clientY; }
+  });
+  const release = (e) => {
+    if (e.pointerId === padId) { padId = null; stick.x = stick.y = 0; knob.style.transform = ""; }
+    if (e.pointerId === lookId) lookId = null;
+    releaseDoorInput();
+  };
+  stage.addEventListener("pointerup", release);
+  stage.addEventListener("pointercancel", release);
 }
-// Link presses do not dismiss the intro or start a touch drag.
-stage.addEventListener("pointerdown", (e) => {
-  if (e.target.closest("a") || signHit(e.clientX, e.clientY)) return;
-  moved = true; dirty = true;
-  if (tapMap(e.clientX, e.clientY)) return;
-  if (e.pointerType === "mouse") return;
-  if (pad.contains(e.target)) {
-    padId = e.pointerId; steer(e);
-  } else { lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY; }
-  stage.setPointerCapture(e.pointerId);
-  e.preventDefault();
-});
-stage.addEventListener("pointermove", (e) => {
-  if (e.pointerId === padId) steer(e);
-  else if (e.pointerId === lookId) { look(e.clientX - lastX, e.clientY - lastY, 0.006); lastX = e.clientX; lastY = e.clientY; }
-});
-const release = (e) => {
-  if (e.pointerId === padId) { padId = null; stick.x = stick.y = 0; knob.style.transform = ""; }
-  if (e.pointerId === lookId) lookId = null;
-  releaseDoorInput();
-};
-stage.addEventListener("pointerup", release);
-stage.addEventListener("pointercancel", release);
 
 function step(dt) {
   releaseDoorInput();
@@ -4015,21 +4047,26 @@ function step(dt) {
 // ---- Loop --------------------------------------------------------------------------------
 let last = performance.now(), dirty = true, visible = true, slow = 0, fast = 0, layoutDirty = false, resizeTimer;
 let refreshMs = Infinity, paintedLastFrame = false, probeMs = 0;
-new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(stage);
-const resize = new ResizeObserver(() => {
+const resize = PAGE && new ResizeObserver(() => {
   if (stage.clientWidth === viewW && stage.clientHeight === viewH) return;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { layoutDirty = true; dirty = true; }, 120);
 });
-reduced.addEventListener("change", () => { dirty = true; });
-// Adaptive resolution: drop shadows, then grow glyphs; restore detail when frames run short.
+if (PAGE) {
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(stage);
+  reduced.addEventListener("change", () => { dirty = true; });
+}
+// Adaptive resolution, a last resort for weak phones only: slow frames drop shadows, then grow glyphs, never past
+// COARSEST; detail returns when frames run short. Desktops always cast every cell with shadows.
 // Leave time for canvas painting within a 60 Hz display period.
+const COARSEST = 1.5;
 function adaptResolution(ms, late) {
+  if (!touchFirst.matches) return;
   slow = ms > 10 || late ? slow + 1 : 0;
   fast = ms < 6 && !late ? fast + 1 : 0;
-  if (slow > 20 && (shadows || scale < 3)) {
+  if (slow > 20 && (shadows || scale < COARSEST)) {
     if (shadows) shadows = false;
-    else { scale = Math.min(3, scale * 1.15); layoutDirty = dirty = true; }
+    else { scale = Math.min(COARSEST, scale * 1.15); layoutDirty = dirty = true; }
     slow = 0;
   } else if (fast > 90 && scale > 1) {
     scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; fast = 0;
@@ -4048,7 +4085,28 @@ function advanceIntro(now, still) {
   introProgress = Math.min(1, (now - introStart) / 1200);
   if (still || introProgress === 1) finishIntro();
 }
+// The world's motion at this moment: the gangway, the ship's lights and the beam, the boats, the trees and the sails.
+function prepare() {
+  if (interior) return;
+  setGangway();
+  moveLights();
+  floatBoats();
+  swayTrees();
+  billow();
+}
 function frame(now) {
+  // The ray workers' newest finished frame paints first (an older finished one is dropped). A new frame starts only
+  // while fewer than two are in hand, and a new layout waits until none is; time waits with it.
+  let done = 0;
+  while (frames[done]?.phase === DONE) done++;
+  if (done) {
+    const t0 = performance.now(), dropped = frames.splice(0, done), f = dropped.pop();
+    for (const g of dropped) for (const [, bmp] of g.bitmaps) bmp.close();
+    paintCast(f);
+    adaptResolution(f.ms + performance.now() - t0, f.late);
+    paintedLastFrame = true;
+  }
+  if (frames.length > 1 || (layoutDirty && frames.length)) { requestAnimationFrame(frame); return; }
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   const probing = probeMs > 0;
@@ -4063,7 +4121,7 @@ function frame(now) {
   const walked = step(dt);
   // Ship rooms animate with the hull; the house and reduced-motion views repaint only on input.
   if (visible && cols && (walked || dirty || (!still && interior !== HOUSE))) {
-    if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
+    if (probeMs < 0 || (touchFirst.matches && late && slow % 20 === 0 && !probing)) {
       probeMs = frameMs;
       dirty = true;
       requestAnimationFrame(frame);
@@ -4071,31 +4129,321 @@ function frame(now) {
     }
     if (layoutDirty) { measure(); layoutDirty = false; }
     dirty = false;
-    if (!interior) {
-      setGangway();
-      moveLights();
-      floatBoats();
-      swayTrees();
-      billow();
-    }
+    prepare();
     me.eye = floorAt(me.x, me.z) + 1.6;
     const t0 = performance.now();
-    render();
-    const ms = performance.now() - t0;
-    adaptResolution(ms, late);
-    paintedLastFrame = true;
+    if (!(introProgress === 1 && castOnWorkers(t0, late))) {
+      render();
+      adaptResolution(performance.now() - t0, late);
+      paintedLastFrame = true;
+    }
   }
   requestAnimationFrame(frame);
 }
+
+// ---- Ray workers --------------------------------------------------------------------------
+// Worker copies of this file cast and draw the rows on the other cores; the page keeps input, the projected details,
+// signs and the map. For each frame the page posts its moment (time, ship motion, camera, room, shadows, layout) to
+// every worker, then hands out bands of rows one at a time as workers come free, oldest frame first, so fast and slow
+// cores share the work. A cast band comes back packed: depth, surface id, glyph, colour and spot of each cell. Once a
+// frame's bands are all back, and the frames before it are composed, the page composes it at its own moment (crests,
+// details, edges, aim, labels), packs what each cell shows, and hands the bands out again to be drawn into bitmaps,
+// which it paints on the next animation frame. Two frames are in hand, one drawing while the next casts. With fewer
+// than two workers, or once one fails, the page casts alone; when a worker cannot draw text exactly as the page
+// does, the page draws.
+let workerCount = PAGE && typeof Worker !== "undefined" ? Math.min(8, (navigator.hardwareConcurrency || 1) - 1) : 0;
+const rayWorkers = [];
+// Frames in hand, oldest first: moment, phase, bands ([j0, j1]), next band, bands out, workers, cast and draw buffers,
+// bitmaps, page ms, lateness and middle cell.
+const CAST = 0, DRAW = 1, DONE = 2;
+const frames = [];
+let castId = 0, workersDraw = true;
+const ROOMS = [null, HOUSE, CABIN, GUN_DECK];
+const CLASS_LIST = Object.keys(COLORS), CLASS_INDEX = new Map(CLASS_LIST.map((k, n) => [k, n]));
+const SPOT_LIST = [null, ...Object.keys(spots)], SPOT_INDEX = new Map(SPOT_LIST.map((k, n) => [k, n]));
+const GLYPHS = [];
+function startWorkers() {
+  for (let k = 0; k < workerCount; k++) {
+    const w = new Worker("harbor.js", { type: "module", name: JSON.stringify(Object.keys(spots)) });
+    w.busy = 0;
+    w.onmessage = ({ data }) => {
+      if (data.ready) { w.ready = true; workersDraw &&= data.draws; return; }
+      w.busy--;
+      if ("bmp" in data) drawn(data);
+      else banded(data);
+      handOut(w);
+    };
+    w.onerror = (e) => { e.preventDefault(); stopWorkers(); };
+    rayWorkers.push(w);
+  }
+}
+function stopWorkers() {
+  for (const w of rayWorkers) w.terminate();
+  rayWorkers.length = workerCount = frames.length = 0;
+  dirty = true;
+  DG?.fill(undefined); // a frame in hand may have composed rows that were never painted
+}
+// Posts this moment to each ready worker and hands out its first bands; false when the page should cast the frame.
+function castOnWorkers(t0, late) {
+  const ready = rayWorkers.filter((w) => w.ready);
+  if (ready.length < 2) return false;
+  const band = Math.ceil(rows / (ready.length * 4)), bands = [];
+  for (let j = 0; j < rows; j += band) bands.push([j, Math.min(rows, j + band)]);
+  const moment = { id: ++castId, T, bob, roll, me: { ...me }, room: ROOMS.indexOf(interior), shadows, still: reduced.matches,
+    tenths: performance.now() / 100, cols, rows, aspect, layout: { padX, padY, cellW, cellH, dpr, font: ctx.font } };
+  const f = { moment, phase: CAST, bands, next: 0, out: 0, workers: ready, cast: [], draw: null, bitmaps: [], ms: 0, late };
+  frames.push(f);
+  for (const w of ready) w.postMessage(moment);
+  for (const w of ready) handOut(w);
+  f.ms += performance.now() - t0;
+  return true;
+}
+// Keeps each worker two bands deep, so it never waits on a busy page for its next band: the next band of the oldest
+// frame that has one, to cast it or to draw what its cells show.
+function handOut(w) {
+  let f;
+  while (w.busy < 2 && (f = frames.find((f) => f.phase !== DONE && f.next < f.bands.length && f.workers.includes(w)))) {
+    const [j0, j1] = f.bands[f.next], buf = f.draw?.[f.next];
+    f.next++; f.out++; w.busy++;
+    if (buf) w.postMessage([f.moment.id, j0, j1, buf], [buf]);
+    else w.postMessage([f.moment.id, j0, j1]);
+  }
+}
+// A cast band is back: keep it until its frame composes.
+function banded({ id, j0, j1, buf }) {
+  const f = frames.find((f) => f.moment.id === id);
+  if (!f) return;
+  f.cast.push([j0, j1, buf]);
+  f.out--;
+  // Frames compose in order: each once all its bands are back.
+  for (const g of frames) {
+    if (g.phase !== CAST) continue;
+    if (g.next < g.bands.length || g.out) break;
+    composeCast(g);
+  }
+}
+// Composes frame f at its own moment, then packs what each cell shows into its bands and hands them out to be drawn.
+function composeCast(f) {
+  const t0 = performance.now(), live = { T, bob, roll, interior, shadows, me: { ...me } };
+  useMoment(f.moment);
+  for (const [j0, j1, buf] of f.cast) {
+    const a = j0 * cols, n = (j1 - j0) * cols;
+    D.set(new Float32Array(buf, 0, n), a);
+    ID.set(new Int32Array(buf, n * 4, n), a);
+    const g = new Uint16Array(buf, n * 8, n), k = new Uint16Array(buf, n * 10, n), sp = new Uint8Array(buf, n * 12, n);
+    for (let c = 0; c < n; c++) {
+      G[a + c] = GLYPHS[g[c]] ??= String.fromCharCode(g[c]);
+      C[a + c] = CLASS_LIST[k[c]];
+      SP[a + c] = SPOT_LIST[sp[c]];
+    }
+  }
+  f.cast = null;
+  f.mid = compose();
+  if (workersDraw) {
+    for (let j = 0, c = 0; j < rows; j++) {
+      const onMap = mapBox && j >= mapBox.oj && j < mapBox.oj + mapBox.h;
+      for (let i = 0; i < cols; i++, c++) update(c, i, j, f.mid, onMap);
+    }
+    f.draw = f.bands.map(([j0, j1]) => {
+      const a = j0 * cols, n = (j1 - j0) * cols, buf = new ArrayBuffer(n * 4), g = new Uint16Array(buf, 0, n), k = new Uint16Array(buf, n * 2, n);
+      for (let c = 0; c < n; c++) { g[c] = DG[a + c].charCodeAt(0); k[c] = CLASS_INDEX.get(DC[a + c]); }
+      return buf;
+    });
+    f.phase = DRAW; f.next = 0; f.settled = true;
+  } else f.phase = DONE;
+  ({ T, bob, roll, interior, shadows } = live);
+  Object.assign(me, live.me);
+  rc = Math.cos(roll); rs = Math.sin(roll);
+  f.ms += performance.now() - t0;
+  for (const w of f.workers) handOut(w);
+}
+// A drawn band is back; a worker that cannot draw like the page sends no bitmap, and the page draws from then on.
+function drawn({ id, j0, bmp }) {
+  const f = frames.find((f) => f.moment.id === id);
+  if (!f) { bmp?.close(); return; }
+  if (bmp) f.bitmaps.push([j0, bmp]);
+  else { workersDraw = false; f.next = f.bands.length; }
+  f.out--;
+  if (f.next >= f.bands.length && !f.out) f.phase = DONE;
+}
+function paintCast(f) {
+  if (f.bitmaps.length && workersDraw) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (const [j0, bmp] of f.bitmaps) ctx.drawImage(bmp, Math.round(padX * dpr), Math.round((padY + j0 * cellH) * dpr));
+    ctx.restore();
+    drawMap();
+    drawSign();
+  } else {
+    // The cells' final glyphs are already in DG, but no worker drew them: draw every row again.
+    if (f.settled) DG.fill(undefined);
+    draw(f.mid);
+  }
+  for (const [, bmp] of f.bitmaps) bmp.close();
+}
+// Sets the world to a frame's moment: time, ship motion, camera, room and shadows, then the motion and the view.
+function useMoment(m) {
+  ({ T, bob, roll } = m);
+  Object.assign(me, m.me);
+  rc = Math.cos(roll); rs = Math.sin(roll);
+  interior = ROOMS[m.room]; shadows = m.shadows; aspect = m.aspect;
+  if (!PAGE) {
+    reduced.matches = m.still;
+    if (m.cols !== cols || m.rows !== rows) {
+      ({ cols, rows } = m);
+      G = new Array(cols * rows); C = new Array(cols * rows); ID = new Int32Array(cols * rows); D = new Float32Array(cols * rows); SP = new Array(cols * rows);
+    }
+  }
+  prepare();
+  view(m.tenths);
+}
+
+// In a ray worker: keeps the page's last few moments, then casts and packs, or draws, each band it is handed.
+const moments = new Map();
+let castMoment = 0;
+function takeMoment(m) {
+  moments.set(m.id, m);
+  for (const id of moments.keys()) if (id < m.id - 3) moments.delete(id);
+}
+function castBand(id, j0, j1) {
+  if (castMoment !== id) { castMoment = id; useMoment(moments.get(id)); }
+  for (let j = j0; j < j1; j++) castRow(j, seenWorld, seenShip);
+  const a = j0 * cols, n = (j1 - j0) * cols, buf = new ArrayBuffer(n * 13);
+  new Float32Array(buf, 0, n).set(D.subarray(a, a + n));
+  new Int32Array(buf, n * 4, n).set(ID.subarray(a, a + n));
+  const g = new Uint16Array(buf, n * 8, n), k = new Uint16Array(buf, n * 10, n), sp = new Uint8Array(buf, n * 12, n);
+  for (let c = 0; c < n; c++) {
+    g[c] = G[a + c].charCodeAt(0);
+    k[c] = CLASS_INDEX.get(C[a + c]);
+    sp[c] = SPOT_INDEX.get(SP[a + c]) ?? 0;
+  }
+  postMessage({ id, j0, j1, buf }, [buf]);
+}
+// Drawing copies the page's text exactly. The page draws each glyph at its cell's corner, in device pixels; the text
+// renderer places glyphs to a quarter pixel across and rounds the baseline to a whole pixel. So a worker keeps a sprite
+// for each glyph, colour and quarter pixel, drawn by the same renderer with the same font, and lays each sprite at its
+// cell, one pixel lower where the corner's fraction rounds the baseline down (lowerFrom). Glyphs blend over the
+// background, clipped to their row, left to right as the page draws them.
+const sprites = new Map(), BACK = 0xff140a06; // BACKGROUND as little-endian RGBA
+let spriteCtx = null, spriteKey = "", spriteDpr = 1, spriteW = 0, spriteH = 0, padS = 0, padT = 2, lowerFrom = 1, canDraw = false;
+let pixels = null, bitmapCtx = null;
+// Readies the sprites for this layout; false when this worker's text differs from the page's.
+function spritesFor({ font, cellW, cellH, dpr }) {
+  if (spriteKey === `${font}/${dpr}`) return canDraw;
+  spriteKey = `${font}/${dpr}`; spriteDpr = dpr; sprites.clear();
+  padS = Math.ceil(cellW * dpr); spriteW = 3 * padS; spriteH = Math.ceil(cellH * dpr) + 2 * padT;
+  spriteCtx = new OffscreenCanvas(spriteW, spriteH).getContext("2d", { willReadFrequently: true });
+  spriteCtx.font = font; spriteCtx.textBaseline = "top";
+  canDraw = spriteCtx.font === font && Math.abs(spriteCtx.measureText("M").width - cellW) < 1e-6;
+  // The first pixel row of "@" drawn at a fraction f of a pixel lower: where it moves down is where rounding starts.
+  const topRow = (f) => {
+    spriteCtx.setTransform(1, 0, 0, 1, 0, 0); spriteCtx.clearRect(0, 0, spriteW, spriteH);
+    spriteCtx.setTransform(dpr, 0, 0, dpr, padS, padT + f); spriteCtx.fillStyle = "#fff"; spriteCtx.fillText("@", 0, 0);
+    const d = spriteCtx.getImageData(0, 0, spriteW, spriteH).data;
+    for (let p = 3; p < d.length; p += 4) if (d[p]) return Math.floor((p >> 2) / spriteW);
+    return -1;
+  };
+  const first = topRow(0);
+  let low = 0, high = 1;
+  if (topRow(0.9999) === first) lowerFrom = 1;
+  else {
+    for (let n = 0; n < 14; n++) { const f = (low + high) / 2; if (topRow(f) > first) high = f; else low = f; }
+    lowerFrom = high;
+  }
+  return canDraw;
+}
+// The pixels of glyph `code` in colour class `cls` at quarter pixel q: offsets, premultiplied colour and coverage.
+function sprite(code, cls, q) {
+  const key = (code * CLASS_LIST.length + cls) * 4 + q;
+  let s = sprites.get(key);
+  if (s) return s;
+  spriteCtx.setTransform(1, 0, 0, 1, 0, 0); spriteCtx.clearRect(0, 0, spriteW, spriteH);
+  spriteCtx.setTransform(spriteDpr, 0, 0, spriteDpr, padS + q / 4, padT);
+  spriteCtx.fillStyle = COLORS[CLASS_LIST[cls]];
+  spriteCtx.fillText(String.fromCharCode(code), 0, 0);
+  const d = spriteCtx.getImageData(0, 0, spriteW, spriteH).data;
+  let n = 0;
+  for (let p = 3; p < d.length; p += 4) if (d[p]) n++;
+  s = { n, x: new Int16Array(n), y: new Int16Array(n), r: new Uint8Array(n), g: new Uint8Array(n), b: new Uint8Array(n), a: new Uint8Array(n),
+    over: new Uint32Array(n), x0: spriteW, x1: -1, y0: spriteH, y1: -1, w: 0, at: null };
+  for (let p = 0, k = 0; p < d.length; p += 4) {
+    const a = d[p + 3];
+    if (!a) continue;
+    const x = (p >> 2) % spriteW, y = Math.floor((p >> 2) / spriteW);
+    s.x[k] = x; s.y[k] = y; s.a[k] = a;
+    s.r[k] = Math.round(d[p] * a / 255); s.g[k] = Math.round(d[p + 1] * a / 255); s.b[k] = Math.round(d[p + 2] * a / 255);
+    s.x0 = Math.min(s.x0, x); s.x1 = Math.max(s.x1, x); s.y0 = Math.min(s.y0, y); s.y1 = Math.max(s.y1, y);
+    const f = (255 - a) << 8, over = (c, v) => Math.min(255, c + BLEND[f | v]); // BACKGROUND is 6, 10, 20
+    s.over[k] = (0xff000000 | over(s.b[k], 20) << 16 | over(s.g[k], 10) << 8 | over(s.r[k], 6)) >>> 0;
+    k++;
+  }
+  sprites.set(key, s);
+  return s;
+}
+// BLEND[f << 8 | v]: channel value v times f / 255, rounded, for blending a glyph over what is drawn.
+const BLEND = new Uint8Array(PAGE ? 0 : 65536);
+for (let f = 0; f < BLEND.length >> 8; f++) for (let v = 0; v < 256; v++) BLEND[f << 8 | v] = Math.round(v * f / 255);
+function drawBand(id, j0, j1, buf) {
+  const { layout, cols: width } = moments.get(id);
+  if (typeof OffscreenCanvas !== "function" || !spritesFor(layout)) { postMessage({ id, j0, bmp: null }); return; }
+  const { padX, padY, cellW, cellH, dpr } = layout, n = (j1 - j0) * width, g = new Uint16Array(buf, 0, n), k = new Uint16Array(buf, n * 2, n);
+  const X0 = Math.round(padX * dpr), w = Math.round((padX + width * cellW) * dpr) - X0;
+  const Y0 = Math.round((padY + j0 * cellH) * dpr), h = Math.round((padY + j1 * cellH) * dpr) - Y0;
+  if (!pixels || pixels.length < w * h * 4) pixels = new Uint8ClampedArray(w * h * 4);
+  const px = new Uint8ClampedArray(pixels.buffer, 0, w * h * 4), px32 = new Uint32Array(pixels.buffer, 0, w * h);
+  px32.fill(BACK);
+  for (let j = j0, c = 0; j < j1; j++) {
+    const y = (padY + j * cellH) * dpr, top = Math.round(y) - Y0, bottom = Math.round((padY + (j + 1) * cellH) * dpr) - Y0;
+    const oy = Math.floor(y) + (y - Math.floor(y) >= lowerFrom ? 1 : 0) - padT - Y0;
+    for (let i = 0; i < width; i++, c++) {
+      if (g[c] === 32) continue;
+      const x = (padX + i * cellW) * dpr;
+      let left = Math.floor(x), q = Math.floor((x - left) * 4 + 0.5);
+      if (q === 4) { left++; q = 0; }
+      const s = sprite(g[c], k[c], q), ox = left - padS - X0;
+      if (oy + s.y0 >= top && oy + s.y1 < bottom && ox + s.x0 >= 0 && ox + s.x1 < w) {
+        // The whole glyph lies inside its row: offsets into the band, worked out once for its width.
+        if (s.w !== w) { s.w = w; s.at = new Int32Array(s.n); for (let p = 0; p < s.n; p++) s.at[p] = s.y[p] * w + s.x[p]; }
+        const base = oy * w + ox;
+        for (let p = 0; p < s.n; p++) {
+          const o = base + s.at[p];
+          if (px32[o] === BACK) { px32[o] = s.over[p]; continue; } // most glyph pixels land on untouched background
+          const f = (255 - s.a[p]) << 8;
+          px[4 * o] = s.r[p] + BLEND[f | px[4 * o]]; px[4 * o + 1] = s.g[p] + BLEND[f | px[4 * o + 1]]; px[4 * o + 2] = s.b[p] + BLEND[f | px[4 * o + 2]];
+        }
+        continue;
+      }
+      for (let p = 0; p < s.n; p++) {
+        const sy = oy + s.y[p], sx = ox + s.x[p];
+        if (sy < top || sy >= bottom || sx < 0 || sx >= w) continue;
+        const o = sy * w + sx, f = (255 - s.a[p]) << 8;
+        if (px32[o] === BACK) { px32[o] = s.over[p]; continue; }
+        px[4 * o] = s.r[p] + BLEND[f | px[4 * o]]; px[4 * o + 1] = s.g[p] + BLEND[f | px[4 * o + 1]]; px[4 * o + 2] = s.b[p] + BLEND[f | px[4 * o + 2]];
+      }
+    }
+  }
+  bitmapCtx ??= new OffscreenCanvas(w, h).getContext("2d");
+  if (bitmapCtx.canvas.width !== w || bitmapCtx.canvas.height !== h) { bitmapCtx.canvas.width = w; bitmapCtx.canvas.height = h; }
+  bitmapCtx.putImageData(new ImageData(px, w, h), 0, 0);
+  const bmp = bitmapCtx.canvas.transferToImageBitmap();
+  postMessage({ id, j0, bmp }, [bmp]);
+}
+
 // The scenery stands now: fill the height grid around it and plant the grass on it. Bob and roll change height,
 // not walking topology, so build the corner graph once before animation starts.
 fillGround();
-GRASS = plantGrass();
-rebuildRoutes();
-// A font that fails to load does not stop the scene.
-document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => {
-  measure();
-  resize.observe(stage);
-  last = performance.now();
-  requestAnimationFrame(frame);
-});
+if (PAGE) {
+  GRASS = plantGrass();
+  rebuildRoutes();
+  // A font that fails to load does not stop the scene.
+  document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => {
+    measure();
+    resize.observe(stage);
+    startWorkers();
+    last = performance.now();
+    requestAnimationFrame(frame);
+  });
+} else {
+  onmessage = ({ data }) => (data.length === 3 ? castBand(...data) : data.length === 4 ? drawBand(...data) : takeMoment(data));
+  postMessage({ ready: true, draws: typeof OffscreenCanvas === "function" });
+}

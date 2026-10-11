@@ -225,6 +225,14 @@ for (const channel of ['keyboard', 'touch', 'combined']) {
 keys.clear(); stick.x = stick.y = 0; step(0);
 let renderCost = 2;
 render = () => { clock += renderCost; };
+// A desktop keeps full detail however slow its frames are.
+interior = null; scale = 1; shadows = true; slow = fast = 0;
+refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
+renderCost = 40;
+for (let i = 0; i < 300; i++) { dirty = true; last = clock; clock += 1000 / 60; frame(clock); }
+assert(shadows && scale === 1, 'slow desktop frames must keep shadows and full glyph density');
+// Only phones trade detail for speed, and never past COARSEST.
+touchFirst.matches = true;
 for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
   interior = scene;
   for (const interval of [1000 / 60, 1000 / 30]) {
@@ -239,6 +247,8 @@ for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
     for (let i = 0; i < 42; i++) runFrame();
     assert.equal(shadows, false, 'expensive rendering must drop shadows');
     assert(scale > 1, 'expensive rendering must reduce detail in every scene');
+    for (let i = 0; i < 500; i++) runFrame();
+    assert.equal(scale, COARSEST, 'glyphs must never grow past COARSEST');
   }
 }
 renderCost = 2;

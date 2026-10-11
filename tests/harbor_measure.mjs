@@ -7,8 +7,10 @@ export async function checkMeasure(page, origin) {
   const intercept = request => {
     if (request.url() !== `${origin}/harbor.js`) return request.continue();
     return request.respond({ contentType: 'text/javascript', body: source + `
-window.checkMeasureReady = () => introProgress === 1 && cols > 0 && DG[0] !== undefined;
-window.checkMeasure = () => {
+// The page draws alone here (workerCount = 0): this check measures its own drawing. Ray workers skip the hook.
+if (PAGE) workerCount = 0;
+if (PAGE) window.checkMeasureReady = () => introProgress === 1 && cols > 0 && DG[0] !== undefined;
+if (PAGE) window.checkMeasure = () => {
   const saved = { visible, interior, scale, mapMode };
   visible = false;
   mapMode = 0;
