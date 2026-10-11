@@ -42,6 +42,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      scope: ${{ steps.diff.outputs.scope }}
     steps:
       - name: Checkout PR merge
         if: github.event_name == 'pull_request'
@@ -55,20 +56,26 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          code=true
+          code=true scope=all
           if [[ "$EVENT_NAME" == pull_request ]]; then
-            code=false
+            code=false scope=imessage
             # Disable rename detection so both the old and new paths count.
             git diff --name-only --no-renames -z HEAD^1 HEAD > "$RUNNER_TEMP/changed-files"
             while IFS= read -r -d '' path; do
               case "$path" in
-                skills/*|rules/*|config/*) code=true; break ;;
-                README*|docs/*|changelog.d/*|harbor/*|*.md) ;;
-                *) code=true; break ;;
+                skills/*|rules/*|config/*) code=true scope=all; break ;;
+                README*|docs/*|changelog.d/*|*.md) ;;
+                harbor/*) scope=all ;;
+                # Only the iMessage bridge reads imessage/; the Python tests that cover it are
+                # tests/test_imessage.py and tests/test_bluebubbles_relay.py.
+                imessage/*) code=true ;;
+                *) code=true scope=all; break ;;
               esac
             done < "$RUNNER_TEMP/changed-files"
           fi
+          [[ "$code" == true ]] || scope=all
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
 
   changelog:
     name: changelog fragment
@@ -146,11 +153,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends fakeroot
 
-      - name: Python tests
-        run: uv run pytest
-
-      - name: Shared Postgres disposable service smoke
-        run: bash tests/shared-postgres-smoke.sh
+      # pytest-xdist: -n auto is one worker per CPU of the runner, and worksteal lets an idle
+      # worker take the tail of a busy one's queue, so the long node tests do not set the finish.
+      # The Postgres smoke waits on Docker and the network, so it runs beside the tests.
+      # A pull request that changes only imessage/ runs the iMessage tests and the core
+      # (changelog, instructions, README, skills); every other change and every push runs all.
+      - name: Python tests and shared Postgres disposable service smoke
+        env:
+          SCOPE: ${{ needs.changes.outputs.scope }}
+        run: |
+          tests=(tests)
+          if [[ "$SCOPE" == imessage ]]; then
+            tests=(tests/test_imessage.py tests/test_bluebubbles_relay.py tests/test_changelog.py
+              tests/test_instructions.py tests/test_readme.py tests/test_skills.py)
+          fi
+          bash tests/shared-postgres-smoke.sh > "$RUNNER_TEMP/postgres-smoke.log" 2>&1 &
+          smoke=$!
+          tests_status=0 smoke_status=0
+          uv run pytest -n auto --dist worksteal "${tests[@]}" || tests_status=$?
+          wait "$smoke" || smoke_status=$?
+          echo "::group::Shared Postgres disposable service smoke (exit $smoke_status)"
+          cat "$RUNNER_TEMP/postgres-smoke.log"
+          echo "::endgroup::"
+          [[ "$tests_status" == 0 && "$smoke_status" == 0 ]]
 
       # herdr-patch also runs on the operator's computer: macOS ships Python 3.9.
       - name: herdr-patch tests on Python 3.9

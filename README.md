@@ -28,7 +28,7 @@
 - **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
 - **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal.
 - **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
-- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
+- **[Mac control](docs/security.md#ssh-to-a-mac):** basically JARVIS - agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 The other features, each with its docs link, are listed in [docs/features.md](docs/features.md).
 
@@ -52,7 +52,7 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 ## How it works
 
-For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host:
+For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
 
 ```mermaid
 flowchart TD
