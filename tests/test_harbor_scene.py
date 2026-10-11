@@ -11,7 +11,13 @@ import pytest
 ROOT = Path(__file__).parents[1]
 
 
-def test_fountain_stops_walking_and_leaves_room_to_pass():
+# The auto-walk sweeps are CPU-bound; each part runs the shared setup and one sweep.
+@pytest.mark.parametrize(
+    "part",
+    ["routes", "plaza", "ship", "reduced", *(f"world-grid:{i}" for i in range(2)),
+     *(f"plaza-grid:{i}" for i in range(3))],
+)
+def test_fountain_stops_walking_and_leaves_room_to_pass(part):
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required to run the JavaScript scene")
@@ -21,7 +27,7 @@ def test_fountain_stops_walking_and_leaves_room_to_pass():
     )
     point_data = json.dumps([[spot, title] for spot, title, *_ in points])
     subprocess.run(
-        [node, "-", str(ROOT / "harbor/public/harbor.js"), point_data],
+        [node, "-", str(ROOT / "harbor/public/harbor.js"), point_data, part],
         input=r"""
 const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');
@@ -117,6 +123,7 @@ for (let k = 1; k < path.length; k++) {
     assert(pathMask(x, z) > 0.5, 'map route leaves the road');
   }
 }
+const [part, shard] = '${process.argv[4]}'.split(':').map((s, i) => i ? Number(s) : s);
 function walkToSpot(id, start, dt, useMap = false) {
   me.x = start[0]; me.z = start[1]; me.eye = floorAt(...start) + 1.6;
   if (useMap) {
@@ -165,18 +172,20 @@ assert(walkable(slopeStart), 'uphill rock start must be walkable');
 assert(walkable(dockStart), 'dock edge start must be walkable');
 assert(!clear(dockStart, dockGapEnd, obstacles), 'dock-to-gangway gap must reject a direct link');
 assert(!clear(dockGapEnd, dockStart, obstacles), 'reverse gangway-to-dock gap must reject a direct link');
-for (const start of [slopeStart, dockStart]) {
-  for (const id of ORDER) walkToSpot(id, start, 0.01);
-}
-walkToSpot('how', [-0.6, 25], 0.016, true);
-anchors.disconnected = {x: -0.6, y: 1.2, z: 27.5, r: 0, ship: 0};
-walkToSpot('disconnected', [7.1, 24.6], 0.016);
-const savedRoadLinks = LINKS.slice();
-try {
-  LINKS.length = 0;
-  stoppedMapWalk([7.1, 24.6], 'how');
-} finally {
-  LINKS.push(...savedRoadLinks);
+if (part === 'routes') {
+  for (const start of [slopeStart, dockStart]) {
+    for (const id of ORDER) walkToSpot(id, start, 0.01);
+  }
+  walkToSpot('how', [-0.6, 25], 0.016, true);
+  anchors.disconnected = {x: -0.6, y: 1.2, z: 27.5, r: 0, ship: 0};
+  walkToSpot('disconnected', [7.1, 24.6], 0.016);
+  const savedRoadLinks = LINKS.slice();
+  try {
+    LINKS.length = 0;
+    stoppedMapWalk([7.1, 24.6], 'how');
+  } finally {
+    LINKS.push(...savedRoadLinks);
+  }
 }
 const corner = [6.876, 26.5], cornerTarget = [7.1, 24.6];
 assert(!blocked(...corner, floorAt(...corner)), 'corner start must be walkable');
@@ -189,13 +198,15 @@ assert(!blocked(basinBoundary, 24.6, floorAt(basinBoundary, 24.6)), 'walking bou
 assert(blocked(basinBoundary - 0.001, 24.6, floorAt(basinBoundary, 24.6)), 'basin interior must remain blocked');
 assert.deepEqual(approach([basinBoundary, 24], [basinBoundary, 25]), [[basinBoundary, 25]], 'boundary-parallel link was rejected');
 assert.deepEqual(approach(cornerTarget, cornerTarget), [cornerTarget], 'stationary clear link was rejected');
-anchors.corner = {x: cornerTarget[0], y: 1.2, z: cornerTarget[1] + 2.5, r: 0, ship: 0};
-walkToSpot('corner', corner, 0.016);
+if (part === 'routes') {
+  anchors.corner = {x: cornerTarget[0], y: 1.2, z: cornerTarget[1] + 2.5, r: 0, ship: 0};
+  walkToSpot('corner', corner, 0.016);
+}
 const plazaPoints = [[2.9, 24.6], [7.1, 24.6], [5, 22.5], [5, 26.7],
   [5, 29.5], [3.8, 29.5], [6.2, 29.5], [5, 27.5], [2.9, 29.5], [7.1, 29.5],
   [0.5, 28], [9.5, 28], [0.5, 21.5], [9.5, 21.5], corner,
   [3.124, 26.5], [6.876, 22.7], [3.124, 22.7]];
-for (const start of plazaPoints) {
+if (part === 'plaza') for (const start of plazaPoints) {
   for (const id of ORDER) walkToSpot(id, start, 0.1);
   for (const end of plazaPoints) {
     const approachPath = [start, ...approach(start, end)];
@@ -214,22 +225,24 @@ for (const start of plazaPoints) {
     walkToSpot('approach', start, 0.02);
   }
 }
-for (let x = WORLD.x0; x <= WORLD.x1; x += 4) {
+let worldCell = 0;
+if (part === 'world-grid') for (let x = WORLD.x0; x <= WORLD.x1; x += 4) {
   for (let z = WORLD.z0; z <= WORLD.z1; z += 4) {
     const start = [x, z], fy = floorAt(x, z);
-    if (fy === null || blocked(x, z, fy)) continue;
+    if (fy === null || blocked(x, z, fy) || worldCell++ % 2 !== shard) continue;
     for (const id of ORDER) walkToSpot(id, start, 1000);
   }
 }
-for (let x = -10; x <= 12; x += 0.5) {
+let plazaCell = 0;
+if (part === 'plaza-grid') for (let x = -10; x <= 12; x += 0.5) {
   for (let z = 20; z <= 30; z += 0.5) {
     const start = [x, z], fy = floorAt(x, z);
-    if (fy === null || blocked(x, z, fy)) continue;
+    if (fy === null || blocked(x, z, fy) || plazaCell++ % 3 !== shard) continue;
     for (const id of ORDER) walkToSpot(id, start, 1000);
   }
 }
 // Ship height changes must not invalidate island or deck collision-safe routes.
-for (const [lift, tilt] of [[0.2, 0.03], [-0.2, -0.03]]) {
+if (part === 'ship') for (const [lift, tilt] of [[0.2, 0.03], [-0.2, -0.03]]) {
   bob = lift; roll = tilt; rc = Math.cos(roll); rs = Math.sin(roll);
   for (const start of [[-0.6, 25], [-3.1, -6], [SX + shipProfile(5.5)[0] - 0.4, 5.5]]) {
     assert(walkable(start), 'ship-motion start must remain on clear walking ground');
@@ -237,23 +250,25 @@ for (const [lift, tilt] of [[0.2, 0.03], [-0.2, -0.03]]) {
   }
 }
 bob = roll = 0; rc = 1; rs = 0;
-reduced.matches = true;
-for (const id of ORDER) walkToSpot(id, [-0.6, 25], 0.02, true);
-reduced.matches = false;
-const savedWorldLength = world.length;
-try {
-  // The walls stand on the hillside there, from 10 cm below its lowest corner to 2.4 m above that.
-  const low = Math.min(...[[29, 39], [31, 39], [29, 41], [31, 41]].map(p => floorAt(...p))) - 0.1, high = low + 2.4;
-  box(world, 29, low, 39, 31, high, 39.2, 's');
-  box(world, 29, low, 40.8, 31, high, 41, 's');
-  box(world, 29, low, 39, 29.2, high, 41, 's');
-  box(world, 30.8, low, 39, 31, high, 41, 's');
-  rebuildRoutes();
-  assert.deepEqual(approach([30, 40], [5, 19.6]), [], 'enclosed start must have no route');
-  stoppedMapWalk([30, 40], 'how', true);
-} finally {
-  world.length = savedWorldLength;
-  rebuildRoutes();
+if (part === 'reduced') {
+  reduced.matches = true;
+  for (const id of ORDER) walkToSpot(id, [-0.6, 25], 0.02, true);
+  reduced.matches = false;
+  const savedWorldLength = world.length;
+  try {
+    // The walls stand on the hillside there, from 10 cm below its lowest corner to 2.4 m above that.
+    const low = Math.min(...[[29, 39], [31, 39], [29, 41], [31, 41]].map(p => floorAt(...p))) - 0.1, high = low + 2.4;
+    box(world, 29, low, 39, 31, high, 39.2, 's');
+    box(world, 29, low, 40.8, 31, high, 41, 's');
+    box(world, 29, low, 39, 29.2, high, 41, 's');
+    box(world, 30.8, low, 39, 31, high, 41, 's');
+    rebuildRoutes();
+    assert.deepEqual(approach([30, 40], [5, 19.6]), [], 'enclosed start must have no route');
+    stoppedMapWalk([30, 40], 'how', true);
+  } finally {
+    world.length = savedWorldLength;
+    rebuildRoutes();
+  }
 }
 `, context);
 """,
