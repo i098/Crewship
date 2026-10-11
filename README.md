@@ -86,7 +86,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - omp rules ([TTSR](docs/omp.md#rules)): `always-on-skills`, `asd-ste100`, `use-native-stacked-prs`; with the browser ladder: `drive-the-browser-yourself`, `fleet-browser-default-tier`.
 - Profiles on: `agents`, `development`, `firstmate`, `docker`, `chat`
 - Profiles off (opt-in): `tailscale`, `desktop`, `fleet_guards`, `shared_postgres`, `fleet_browsers`
-- Unset (opt-in): `data_dir`, `firstmate.checklist`, `mac_ssh`, `skills`, `imessage`, `github_board`, `board`, `ci_pool`
+- Unset (opt-in): `data_dir`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `ci_pool`
 - Full files: [`config/default.yml`](config/default.yml), [`config/omp.yml`](config/omp.yml)
 
 </details>

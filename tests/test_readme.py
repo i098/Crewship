@@ -27,7 +27,6 @@ FEATURES = {
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
     "crewship.mac_ssh": "docs/security.md#ssh-to-a-mac",
-    "crewship.skills": "docs/omp.md#skills",
     "crewship.imessage": "docs/imessage.md",
     "crewship.github_board": "docs/github-board.md",
     "crewship.board": "docs/board.md",
@@ -44,6 +43,8 @@ EXCLUDED = {
     "crewship.fleet.docker_guard",
     "crewship.browsers",
     "crewship.imessage.bluebubbles",
+    # Host-only skills: documented in docs/omp.md, not a README feature.
+    "crewship.skills",
 }
 
 
