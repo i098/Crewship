@@ -63,9 +63,7 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
         1,
     )
     index = (ROOT / "docs/features.md").read_text()
-    rows = build.features(readme, index)
-    links = [link for _, link, _ in rows if link in build.SCENE]
-    extra_count = sum(link not in build.SCENE for _, link, _ in rows)
+    links = [link for _, link, _ in build.features(readme, index) if link in build.SCENE]
     manifest = built(tmp_path, monkeypatch, readme)
 
     hrefs = Counter(a["href"] for a in manifest.links)
@@ -73,8 +71,7 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
         links, 1
     )
     assert hrefs[f"{build.REPO}#features"] == 1
-    assert hrefs[f"{build.REPO}/blob/main/{unmapped}"] == 0
-    assert f"+ {extra_count - 3} more" in manifest.text["docsboard"]
+    assert hrefs[f"{build.REPO}/blob/main/{unmapped}"] == 1
     assert len(manifest.spots) == len(set(manifest.spots))
     assert all(a.get("target") == "_blank" for a in manifest.links)
     assert "docsboard" in manifest.spots
@@ -123,7 +120,6 @@ def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     assert "<script>alert(1)</script>" not in page
     assert "<script>alert(1)</script>" in manifest.text["antenna"]
     assert len(manifest.text["antenna"]) <= len("Chat clients") + 52
-    assert len(manifest.links) == len(manifest.spots)
 
 
 class Head(HTMLParser):

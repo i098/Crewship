@@ -8,7 +8,7 @@ request, an issue or a single comment, so it can be checked before posting.
 
 The body comes from GitHub's own Markdown API (gh api markdown, mode gfm, the
 target repository as context), so @mentions, #refs and task lists resolve as
-they will on the real page. The styling is the vendored Primer Markdown CSS.
+they will on the real page. The styling is the vendored Primer Markdown CSS (dark only).
 Commits and files come from local git (default) or from the compare API
 (--compare, for a branch that is already pushed). Prints the HTML path.
 """
@@ -56,76 +56,76 @@ def when(iso):
 
 PAGE_CSS = """
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;background:#fff;color:#1f2328;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+body{color-scheme:dark;margin:0;background:#0d1117;color:#f0f6fc;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
 .wrap{max-width:1280px;margin:0 auto;padding:24px 32px 64px}
 .title{font-size:32px;font-weight:400;line-height:1.25;margin:0 0 8px;overflow-wrap:anywhere}
-.num{color:#59636e;font-weight:300}
-.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:#59636e;margin-bottom:16px}
-.who{color:#59636e;text-decoration:underline;font-weight:600}
-.state{display:inline-flex;align-items:center;gap:4px;background:#1f883d;color:#fff;font-weight:600;padding:5px 12px;border-radius:2em}
-.ref{background:#ddf4ff;color:#0969da;border-radius:6px;padding:2px 6px;font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
-.tabs{display:flex;align-items:flex-end;border-bottom:1px solid #d1d9e0;margin-bottom:20px}
-.tabs label{display:inline-flex;align-items:center;gap:8px;padding:0 16px;height:40px;cursor:pointer;color:#1f2328;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;margin-bottom:-1px}
-.pill{background:#818b981f;border-radius:2em;padding:0 6px;font-size:12px;font-weight:500;line-height:18px}
+.num{color:#9198a1;font-weight:300}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:#9198a1;margin-bottom:16px}
+.who{color:#9198a1;text-decoration:underline;font-weight:600}
+.state{display:inline-flex;align-items:center;gap:4px;background:#238636;color:#fff;font-weight:600;padding:5px 12px;border-radius:2em}
+.ref{background:#388bfd1a;color:#4493f8;border-radius:6px;padding:2px 6px;font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+.tabs{display:flex;align-items:flex-end;border-bottom:1px solid #3d444d;margin-bottom:20px}
+.tabs label{display:inline-flex;align-items:center;gap:8px;padding:0 16px;height:40px;cursor:pointer;color:#f0f6fc;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;margin-bottom:-1px}
+.pill{background:#656c7633;border-radius:2em;padding:0 6px;font-size:12px;font-weight:500;line-height:18px}
 .stat{margin-left:auto;padding-bottom:8px;font-size:12px;display:flex;gap:4px;align-items:center}
-.ga{color:#1a7f37}.gd{color:#d1242f}
-.sq{display:inline-flex;gap:1px}.sq i{width:8px;height:8px;background:#d1d9e0}.sq i.g{background:#1f883d}.sq i.r{background:#cf222e}
+.ga{color:#3fb950}.gd{color:#f85149}
+.sq{display:inline-flex;gap:1px}.sq i{width:8px;height:8px;background:#3d444d}.sq i.g{background:#238636}.sq i.r{background:#da3633}
 .panes>section{display:none}
 #t-conv:checked~.panes #p-conv,#t-commits:checked~.panes #p-commits,#t-files:checked~.panes #p-files{display:block}
 #t-conv:checked~.panes #p-conv{display:grid}
-#t-conv:checked~.tabs label[for=t-conv],#t-commits:checked~.tabs label[for=t-commits],#t-files:checked~.tabs label[for=t-files]{border-color:#d1d9e0;background:#fff}
+#t-conv:checked~.tabs label[for=t-conv],#t-commits:checked~.tabs label[for=t-commits],#t-files:checked~.tabs label[for=t-files]{border-color:#3d444d;background:#0d1117}
 .grid{grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
 .single{max-width:872px}
-.rule{border:0;border-top:1px solid #d1d9e0;margin:16px 0 24px}
+.rule{border:0;border-top:1px solid #3d444d;margin:16px 0 24px}
 .tl{display:flex;gap:16px;align-items:flex-start}
-.av{border-radius:50%;background:#d1d9e0;flex:none}
-.box{flex:1;min-width:0;border:1px solid #d1d9e0;border-radius:6px;position:relative;background:#fff}
-.box::before{content:"";position:absolute;top:11px;left:-8px;border:8px solid transparent;border-left:0;border-right-color:#d1d9e0}
-.box::after{content:"";position:absolute;top:12px;left:-6px;border:7px solid transparent;border-left:0;border-right-color:#f6f8fa}
-.bh{display:flex;align-items:center;gap:4px;padding:8px 16px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;border-radius:6px 6px 0 0;color:#59636e;min-height:37px}
-.bh b{color:#59636e;font-weight:600}
-.label{margin-left:auto;border:1px solid #d1d9e0;border-radius:2em;padding:0 7px;font-size:12px;line-height:18px;color:#59636e}
-.dots{color:#59636e;letter-spacing:1px;margin-left:8px}
-.bb{padding:16px;font-size:14px;background:#fff;border-radius:0 0 6px 6px;overflow-wrap:anywhere}
-.bb .user-mention{font-weight:600;color:#1f2328}
+.av{border-radius:50%;background:#3d444d;flex:none}
+.box{flex:1;min-width:0;border:1px solid #3d444d;border-radius:6px;position:relative;background:#0d1117}
+.box::before{content:"";position:absolute;top:11px;left:-8px;border:8px solid transparent;border-left:0;border-right-color:#3d444d}
+.box::after{content:"";position:absolute;top:12px;left:-6px;border:7px solid transparent;border-left:0;border-right-color:#151b23}
+.bh{display:flex;align-items:center;gap:4px;padding:8px 16px;background:#151b23;border-bottom:1px solid #3d444d;border-radius:6px 6px 0 0;color:#9198a1;min-height:37px}
+.bh b{color:#9198a1;font-weight:600}
+.label{margin-left:auto;border:1px solid #3d444d;border-radius:2em;padding:0 7px;font-size:12px;line-height:18px;color:#9198a1}
+.dots{color:#9198a1;letter-spacing:1px;margin-left:8px}
+.bb{padding:16px;font-size:14px;background:#0d1117;border-radius:0 0 6px 6px;overflow-wrap:anywhere}
+.bb .user-mention{font-weight:600;color:#f0f6fc}
 .bb .highlight{position:relative}
-.bb .highlight::after{content:"";position:absolute;top:8px;right:8px;width:28px;height:28px;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2359636e' stroke-width='1.5'%3E%3Crect x='5.5' y='5.5' width='8' height='8' rx='1.5'/%3E%3Cpath d='M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2'/%3E%3C/svg%3E") center/16px no-repeat}
-.side h3{font-size:12px;font-weight:600;color:#59636e;margin:0 0 8px}
-.side p{margin:0;font-size:12px;color:#59636e}
-.side>div{padding:16px 0;border-bottom:1px solid #d1d9e0}.side>div:first-child{padding-top:0}
-.muted{color:#59636e}
+.bb .highlight::after{content:"";position:absolute;top:8px;right:8px;width:28px;height:28px;border:1px solid #3d444d;border-radius:6px;background:#151b23 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239198a1' stroke-width='1.5'%3E%3Crect x='5.5' y='5.5' width='8' height='8' rx='1.5'/%3E%3Cpath d='M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2'/%3E%3C/svg%3E") center/16px no-repeat}
+.side h3{font-size:12px;font-weight:600;color:#9198a1;margin:0 0 8px}
+.side p{margin:0;font-size:12px;color:#9198a1}
+.side>div{padding:16px 0;border-bottom:1px solid #3d444d}.side>div:first-child{padding-top:0}
+.muted{color:#9198a1}
 .summary{margin:0 0 16px}
-.file{border:1px solid #d1d9e0;border-radius:6px;margin-bottom:16px;overflow:hidden}
-.fh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;color:#59636e}
-.fn{font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;color:#1f2328;overflow-wrap:anywhere}
+.file{border:1px solid #3d444d;border-radius:6px;margin-bottom:16px;overflow:hidden}
+.fh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#151b23;border-bottom:1px solid #3d444d;color:#9198a1}
+.fn{font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;color:#f0f6fc;overflow-wrap:anywhere}
 .cnt{font-size:12px;font-weight:600}
-.note{padding:16px;text-align:center;color:#59636e}
+.note{padding:16px;text-align:center;color:#9198a1}
 .diff{width:100%;border-collapse:collapse;font:12px/20px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;tab-size:8}
 .diff td{padding:0 10px;white-space:pre-wrap;word-break:break-all;vertical-align:top}
-.diff td.n{width:50px;min-width:50px;text-align:right;color:#59636e;user-select:none;white-space:nowrap}
-.diff td.m{width:18px;padding:0 0 0 4px;color:#59636e;user-select:none}
-.diff .hunk td{background:#ddf4ff;color:#59636e}
-.diff .add td{background:#dafbe1}.diff .add td.n{background:#aceebb}
-.diff .del td{background:#ffebe9}.diff .del td.n{background:#ffcecb}
-.diff .nonl td{color:#59636e}
-.commits{border-left:2px solid #d1d9e0;margin-left:7px;padding-left:24px}
-.cday{margin-left:-35px;color:#59636e;display:flex;gap:8px;align-items:center;margin-bottom:8px;background:#fff}
-.crow{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid #d1d9e0;border-radius:6px;padding:8px 16px;margin-bottom:8px}
+.diff td.n{width:50px;min-width:50px;text-align:right;color:#9198a1;user-select:none;white-space:nowrap}
+.diff td.m{width:18px;padding:0 0 0 4px;color:#9198a1;user-select:none}
+.diff .hunk td{background:#388bfd1a;color:#9198a1}
+.diff .add td{background:#2ea04326}.diff .add td.n{background:#3fb9504d}
+.diff .del td{background:#f851491a}.diff .del td.n{background:#f8514166}
+.diff .nonl td{color:#9198a1}
+.commits{border-left:2px solid #3d444d;margin-left:7px;padding-left:24px}
+.cday{margin-left:-35px;color:#9198a1;display:flex;gap:8px;align-items:center;margin-bottom:8px;background:#0d1117}
+.crow{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid #3d444d;border-radius:6px;padding:8px 16px;margin-bottom:8px}
 .ct{font-size:16px;line-height:24px}
-.cm{display:flex;gap:6px;align-items:center;font-size:12px;color:#59636e}
+.cm{display:flex;gap:6px;align-items:center;font-size:12px;color:#9198a1}
 .cm .av{border-radius:50%}
-.ini{width:20px;height:20px;border-radius:50%;background:#d1d9e0;display:inline-grid;place-items:center;font-size:11px;font-weight:600}
-.sha{font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;color:#59636e}
-.rules{border:1px solid #d1d9e0;border-radius:6px;margin-bottom:16px;overflow:hidden}
-.rules h2{margin:0;padding:8px 16px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;font-size:14px;font-weight:600}
+.ini{width:20px;height:20px;border-radius:50%;background:#3d444d;display:inline-grid;place-items:center;font-size:11px;font-weight:600}
+.sha{font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;color:#9198a1}
+.rules{border:1px solid #3d444d;border-radius:6px;margin-bottom:16px;overflow:hidden}
+.rules h2{margin:0;padding:8px 16px;background:#151b23;border-bottom:1px solid #3d444d;font-size:14px;font-weight:600}
 .rules table{width:100%;border-collapse:collapse}
-.rules th{text-align:left;color:#59636e;font-size:12px;font-weight:600;padding:6px 16px;border-bottom:1px solid #d1d9e0}
-.rules td{padding:6px 16px;border-top:1px solid #d1d9e0;vertical-align:top;overflow-wrap:anywhere}
+.rules th{text-align:left;color:#9198a1;font-size:12px;font-weight:600;padding:6px 16px;border-bottom:1px solid #3d444d}
+.rules td{padding:6px 16px;border-top:1px solid #3d444d;vertical-align:top;overflow-wrap:anywhere}
 .rules tr:first-child td{border-top:0}
-.rules a{color:#0969da;text-decoration:none}
-.res{display:inline-block;border:1px solid #d1d9e0;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;color:#59636e}
-.res.pass{color:#1a7f37;border-color:#1f883d66;background:#dafbe1}
-.res.fail{color:#d1242f;border-color:#cf222e66;background:#ffebe9}
+.rules a{color:#4493f8;text-decoration:none}
+.res{display:inline-block;border:1px solid #3d444d;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;color:#9198a1}
+.res.pass{color:#3fb950;border-color:#2ea04366;background:#2ea04326}
+.res.fail{color:#f85149;border-color:#f8514966;background:#f851491a}
 """
 
 # ---- commits and files ------------------------------------------------------
@@ -387,8 +387,8 @@ def build_comment(a):
 
 
 def document(inner, title):
-    css = (HERE / "github-markdown-light.css").read_text()
-    return (f'<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8">'
+    css = (HERE / "github-markdown-dark.css").read_text()
+    return (f'<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{e(title)}</title><style>{css}</style><style>{PAGE_CSS}</style></head>'
             f'<body><div class="wrap">{inner}</div></body></html>')
