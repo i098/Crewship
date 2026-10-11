@@ -798,7 +798,9 @@ for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.
 // `top` is the top's gust displacement in metres.
 const TREES = [], PALMS = [];
 function growTree(x, z, height, top) {
-  const t = { y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
+  // shoreY, not terrainY: terrainY would build the seat grid while the scenery is still going up, and every object
+  // added afterwards (fence posts, signs) would then stand on rising ground. A trunk keeps its footing like them.
+  const t = { y0: shoreY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
   TREES.push(t);
   return t;
 }
