@@ -18,50 +18,88 @@
 ~~~\_________/~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </pre>
 <h1>How this harbor is built</h1>
-<h2>Rendered natively</h2>
-<p>There is no game engine, no WebGL and no 3D model files. The harbor is one plain JavaScript file, <code>harbor.js</code>, that draws on an ordinary 2D canvas.
-Every frame it works out, with maths, what each character on the screen should be. Then it prints that character in a colour.
-The "3D" is only arithmetic: the file never loads a mesh, a texture file or a graphics library.</p>
-<p>The method is a <b>ray caster</b>. Think of a grid of characters laid over your view. For each cell the program asks one question: what is the first thing you would see if you looked through this cell?</p>
-<pre class="steps" role="img" aria-label="For each character cell: cast a ray from the eye, find the nearest shape it hits, work out the light on that spot, pick a character by brightness, pick a colour.">
- for every character cell on screen
+<p class="lede">Drawn natively. Every frame is maths per character.</p>
 
- 1 RAY     a line leaves your eye
-           through the middle of the cell
-    |
-    v
- 2 HIT     test it against the shapes;
-           the nearest hit wins
-    |
-    v
- 3 LIGHT   moon, lamps, lighthouse beam;
-           a shadow ray checks each lamp
-    |
-    v
- 4 GLYPH   brightness picks a character
-           from  .`',:;~-=+*#%@▒▓█
-    |
-    v
- 5 COLOUR  the material's colour,
-           in one of eight brightness levels
-</pre>
-<h2>What the objects are made of</h2>
-<p>Nothing is a mesh of triangles. Each object is a short formula that a ray can be tested against, and the program solves it to find where, if anywhere, the ray touches.</p>
-<ul>
-  <li><b>Planes.</b> Buildings, the dock and the ship's hull are solid blocks bounded by flat planes.</li>
-  <li><b>Cones.</b> Masts, barrels, the lighthouse and the base of broadleaf trunks are cones with smooth sides and flat caps.</li>
-  <li><b>Ellipsoids.</b> Rocks are stretched spheres.</li>
-  <li><b>Tapered limbs.</b> Tree trunks and branches are round rods that get thinner along their length, in any direction.</li>
-  <li><b>Noisy spheres.</b> A leaf clump is a sphere whose radius is changed by noise, so it has ragged edges and gaps.</li>
-  <li><b>Curved cloth.</b> Sails and the flag are a surface that bellies in the wind.</li>
-  <li><b>Height fields.</b> The sea (travelling waves) and the island (rolling hills) are a height at each point. The ray steps along until it passes below the surface.</li>
-  <li><b>Flat marks.</b> Rigging, grass, fountain droplets and palm fronds are lines and dots placed on the screen and checked against the depth of the cells.</li>
-</ul>
-<p>A <b>material</b> is not a texture file. It is one letter that names a base colour, for example moss green or lamp yellow. Brightness then chooses one of eight levels of that colour, and a lamp-lit spot is tinted warmer.
-<b>Light</b> is a sum: a dim moon fill that is stronger on slopes facing the moon, plus each nearby lamp, which gets weaker with distance, plus the sweeping lighthouse beam. For each lamp, a shadow ray goes from the spot back to the lamp. If a solid is in the way, that lamp adds nothing. Fog dims what is far away.</p>
-<h2>The frame budget</h2>
-<p>The cost of a frame grows with the number of cells: one ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall, so a bigger screen has more cells. The counts below come from the grid code in <code>harbor.js</code>, checked in a real page at the camera's default view.
-"Full detail" is the smallest glyphs. "Largest glyphs" is the coarsest grid the page falls back to, 3 times as big. Frame time depends on the device, so it is not listed here.</p>
+<section class="post">
+<h2>1. No engine. No WebGL. No 3D models.</h2>
+<p>One plain JS file draws on a 2D canvas. That is all.</p>
+<pre aria-hidden="true">harbor.js  -->  2D canvas  -->  text</pre>
+</section>
+
+<section class="post">
+<h2>2. One ray per character</h2>
+<p>Each character cell asks: what do I see first, looking through me?</p>
+<pre aria-hidden="true">          +---+---+---+
+ eye      | . | : | # |
+  o ----- | - | = | @ |  1 ray
+          | * | + | % |  per cell
+          +---+---+---+
+
+ RAY > HIT > LIGHT > GLYPH > COLOUR</pre>
+</section>
+
+<section class="post">
+<h2>3. Shapes are formulas, not meshes</h2>
+<p>A ray solves each formula to find where it touches. No triangles.</p>
+<div class="shapes">
+<figure><pre aria-hidden="true">  +++++++++++'
+  ------------
+  ------------
+  ------------
+  .-----------</pre><figcaption><b>Plane.</b> Buildings, dock, hull.</figcaption></figure>
+<figure><pre aria-hidden="true">       @+
+      @@*~
+     %@%#=;
+    %@@%#+-:
+   %@@@%#*=~,
+    +@@%#*+'</pre><figcaption><b>Cone.</b> Masts, lighthouse.</figcaption></figure>
+<figure><pre aria-hidden="true">    **+=;
+ %@@@%%#+=~`
+%@@@%%#*+-~,
+*###**+=-;,.
+'~~-~~;:,`.
+   .....</pre><figcaption><b>Ellipsoid.</b> Rocks.</figcaption></figure>
+<figure><pre aria-hidden="true">            %#
+         %@#~
+      #@@*;
+   #@@%+:.
+ @@%#=:.
+-**-,.</pre><figcaption><b>Tapered limb.</b> Trunks, branches.</figcaption></figure>
+</div>
+<p>Sea and island are height fields. Sails are curved cloth. Grass and spray are dots.</p>
+</section>
+
+<section class="post">
+<h2>4. Light picks the character</h2>
+<p>Moon, lamps and the lighthouse beam add up. Brighter spot, denser glyph.</p>
+<pre aria-hidden="true">   *###*+=~
+  *%@@@@%%#*+-~,
+ #%@@@@@@%#*+=-;'
+ +#%@@@@%%#*+=~;,.
+ +##%%%%%##*+=-~:'.
+  -+**##***+=-~;:'..
+   ~-======-~;:,'..
+ moon is at the top left
+
+ .`',:;~-=+*#%@
+ dim ------> bright</pre>
+<p>A shadow ray per lamp. A solid in the way means no light. Colour is the material, in 8 brightness levels.</p>
+</section>
+
+<section class="post">
+<h2>5. Cost is the cell count</h2>
+<p>Rays per frame at the smallest glyphs. Bigger screen, more cells.</p>
+<pre aria-hidden="true">iPhone ##                            12,120
+1080p  #######                       34,202
+1440p  ############                  60,450
+4K     ############################ 136,808</pre>
+<p>Frame slow? Shadows go off, then glyphs grow up to 3x: 9x fewer rays. Frames fast again? Glyphs shrink back.</p>
+</section>
+
+<details>
+<summary>All the detail (long)</summary>
+<h3>Cells per screen</h3>
+<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall. "Largest glyphs" is the coarsest grid the page falls back to, 3 times as big. Frame time depends on the device, so it is not listed here.</p>
 <div class="scroll"><table>
 <tr><th>Screen</th><th>Cells (rays), full detail</th><th>Cells (rays), largest glyphs</th></tr>
 <tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>40 x 33 = 1,320</td></tr>
@@ -70,15 +108,15 @@ The "3D" is only arithmetic: the file never loads a mesh, a texture file or a gr
 <tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>155 x 43 = 6,665</td></tr>
 <tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>232 x 65 = 15,080</td></tr>
 </table></div>
-<p>So a 4K screen at full detail needs about 137,000 rays per frame. The page does not draw everything at full detail. It adapts to keep frames short:</p>
+<h3>How the page adapts</h3>
 <ul>
-  <li>A frame that takes more than 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page first turns shadow rays off.</li>
-  <li>If it is still slow, it makes each glyph 15% bigger, up to 3 times as big. That is 9 times fewer cells and rays.</li>
-  <li>After 90 fast frames in a row (under 6 ms) it makes the glyphs smaller again.</li>
-  <li>Phones draw with at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
-  <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit. The page does not redraw rows that did not change.</li>
+  <li>A frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page turns shadow rays off.</li>
+  <li>If still slow, each glyph grows 15% at a time, up to 3 times as big.</li>
+  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again.</li>
+  <li>Phones draw at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
+  <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
 </ul>
-<h2>The detail</h2>
+<h3>The rest</h3>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
   Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.
@@ -202,6 +240,7 @@ The "3D" is only arithmetic: the file never loads a mesh, a texture file or a gr
   <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>
 </ul>
+</details>
 <p><a href="https://github.com/i098/Crewship/tree/main/harbor" target="_blank" rel="noopener">The source on GitHub</a> &middot; <a href="./">Back to the harbor</a></p>
 </body>
 </html>

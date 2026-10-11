@@ -100,9 +100,20 @@ kbd {
 .how ul { padding-left: 18px; }
 .how li { margin: 0 0 8px; color: var(--muted); }
 .how b { color: var(--fg); }
-.how h2 { margin: 22px 0 8px; font: 700 17px/1.2 var(--mono); color: var(--accent); }
-.how p { color: var(--muted); }
-.how .steps { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); }
+.how .lede { margin: 0 0 4px; color: var(--muted); font: 15px/1.4 var(--mono); }
+.how .post { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.how .post h2 { margin: 0 0 6px; font: 700 17px/1.25 var(--mono); color: var(--fg); }
+.how .post p { margin: 0 0 10px; color: var(--muted); }
+.how .post pre { margin: 8px 0 10px; color: var(--accent); font: 12px/1.25 var(--mono); }
+.how .post > :last-child { margin-bottom: 0; }
+.how .shapes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 10px; }
+.how .shapes figure { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.how .shapes pre { margin: 0 0 6px; min-height: 7.5em; }
+.how figcaption { color: var(--muted); font-size: 13px; }
+.how details { margin: 18px 0; }
+.how summary { cursor: pointer; color: var(--accent); font: 700 15px/1.4 var(--mono); }
+.how h3 { margin: 16px 0 6px; font: 700 15px/1.2 var(--mono); color: var(--fg); }
+.how details p { color: var(--muted); }
 .how table { width: 100%; border-collapse: collapse; margin: 8px 0; font: 13px/1.4 var(--mono); }
 .how th, .how td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .how th { color: var(--fg); }
