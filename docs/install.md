@@ -7,7 +7,7 @@
 The installer:
 
 1. Installs the OS packages it needs.
-2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`npx crewship` uses the release with its own version, so it needs no lookup).
+2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`npx crewship` without `update` uses the release with its own version, so it needs no lookup; `npx crewship update` does the same redirect lookup).
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
