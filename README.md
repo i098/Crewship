@@ -39,7 +39,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - [Capacity and auto pruners](docs/capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](docs/configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)
 - [Self-hosted CI pool](docs/ci-pool.md): GitHub Actions runners, one job per fresh container (opt-in)
-- [GitHub board](docs/github-board.md): agent work as issues on a Project board, and a shared message board (opt-in)
+- [GitHub board](docs/github-board.md): agent work as issues on a Project board (opt-in)
 - [Host-move checklist](docs/configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)
 - [Google Workspace CLI](docs/google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
