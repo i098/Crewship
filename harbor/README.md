@@ -24,7 +24,7 @@ Oak, lime, and birch trees have tapered trunks that branch into clumps of ragged
 The moon lights the tops of the clumps; their undersides and the inside of each crown stay dark.
 Palms have curved, ringed trunks and drooping fronds of many leaflets.
 Trees and palms bend and flutter in the scene's wind and stay still with reduced motion.
-Tree trunks block walking and map routes; leaves and palms do not.
+Broadleaf trunk feet block walking and map routes; their upper limbs, leaves, and palms do not.
 
 Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
 The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.

@@ -595,10 +595,10 @@ for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.
   plazaHedges.push(hedge);
 }
 // ---- Trees ---------------------------------------------------------------------------------
-// A tree is its trunk's foot, which blocks walking, round limbs (limbEntry) and, for a broadleaf tree, a crown of leaf
-// clumps (plantCrown, crownEntry). It keeps its parts at rest: a limb solid (s) or a clump or heart centre (c), the rest
-// ends or centre, and their heights as shares of the tree's height. swayTrees moves them before the wind; `top` is how
-// far (m) a gust moves the top.
+// A broadleaf tree has a trunk foot that blocks walking. Trees and palms have round limbs (limbEntry).
+// Broadleaf crowns group leaf clumps (plantCrown, crownEntry). Each tree keeps its parts' rest positions and relative heights.
+// Parts hold a limb solid (s) or a clump or heart centre (c). swayTrees moves them with the wind.
+// `top` is the top's gust displacement in metres.
 const TREES = [], PALMS = [];
 function growTree(x, z, height, top) {
   const t = { y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
@@ -753,8 +753,8 @@ function swayPart(p, gust, time) {
   p.c[0] = r[0] + WIND.x * lean - WIND.z * flutter;
   p.c[2] = r[2] + WIND.z * lean + WIND.x * flutter;
 }
-// Fronds are projected lines, like the rigging: a spine that rises from the heart and droops, with a thin leaflet
-// hanging down from each side at each step. Fronds that face the moon are brighter; far palms draw fewer leaflets.
+// Fronds use projected lines with paired leaflets, like the rigging, to avoid ray intersections.
+// Fronds that face the moon are brighter; far palms draw fewer leaflets or only spines.
 const FROND_STEPS = 12, FROND_A = [0, 0, 0], FROND_B = [0, 0, 0];
 function drawPalms() {
   const tall = rows / (2 * cam.tanV);
@@ -1883,7 +1883,7 @@ function crownEntry(s, ox, oy, oz, dx, dy, dz) {
   return best;
 }
 // Puts the clumps of tree t whose outer sphere the ray enters in REACH_I, ordered by where it enters (REACH_T); returns
-// how many. Rays from the eye use the eye's offsets from the clumps, worked out once a frame (eyeClumps).
+// how many. Rays from the eye reuse its offsets until the eye or wind moves (eyeClumps).
 function reachClumps(t, ox, oy, oz, dx, dy, dz) {
   if (ox === cam.x && oy === cam.y && oz === cam.z) return reachFromEye(eyeClumps(t), dx, dy, dz);
   let n = 0;
@@ -1923,9 +1923,9 @@ function eyeClumps(t) {
   });
   return t.eye;
 }
-// Ray against a leaf clump. Two samples of the leaf noise find where the ray meets the near side; where the noise there
-// dips below the gap level, the ray goes on to the far side, seen from inside, or out through a gap there. Sets entryK
-// (-6 near side, -7 far side) and entryN.
+// Ray against a leaf clump. One or two noise samples locate the near surface.
+// A gap can cause another sample for the far surface, seen from inside, or let the ray through.
+// Sets entryK (-6 near side, -7 far side) and entryN.
 function clumpEntry(k, ox, oy, oz, dx, dy, dz) {
   const X = ox - k[0], Y = oy - k[1], Z = oz - k[2], tc = -(X * dx + Y * dy + Z * dz), outer = k[13];
   const m2 = X * X + Y * Y + Z * Z - tc * tc; // squared distance from the centre to the ray
