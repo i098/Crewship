@@ -515,6 +515,7 @@ def test_compaction_failure_preserves_memory_and_backs_off(tmp_path):
 import {{ Memory, load, zoom }} from {MEMORY};
 {FAKE}
 let now = 0, fail = true, count = 0;
+Date.now = () => now;
 const scheduled = [], times = [];
 globalThis.setTimeout = (fn, ms) => {{
   const timer = {{ fn, at: now + ms, unref() {{ return this; }} }};
@@ -536,7 +537,7 @@ const m = new Memory(dir, () => ({{
     return "all chunks summarized";
   }},
   end() {{}},
-}}), (e) => errors.push(e.message));
+}}), (e) => {{ if (e instanceof Error) errors.push(e.message); }});
 m.append("owner", "existing"); await idle(m);
 const source = "x".repeat(9000);
 m.append("owner", source);
@@ -545,17 +546,17 @@ await idle(m);
 const unchanged = JSON.stringify(before) === JSON.stringify(files(dir));
 for (let n = 0; n < 5; n++) {{ m.append("desk", "ok"); await idle(m); }}
 const noTurnRetry = times.length === 2;
-await advance(29999, m);
+await advance(299999, m);
 const beforeDeadline = times.length;
 await advance(1, m);
 const firstRetry = times.at(-1);
-await advance(59999, m);
+await advance(599999, m);
 const beforeSecond = times.length;
 await advance(1, m);
 const secondRetry = times.at(-1);
 const secondCount = times.length;
 fail = false;
-await advance(120000, m);
+await advance(1200000, m);
 const disk = load(dir);
 console.log(JSON.stringify({{
   unchanged, noTurnRetry, beforeDeadline, firstRetry, beforeSecond, secondRetry, secondCount,
@@ -566,13 +567,91 @@ console.log(JSON.stringify({{
 """)
     assert result["unchanged"] and result["noTurnRetry"]
     assert result["beforeDeadline"] == 2
-    assert result["firstRetry"] == 30000
+    assert result["firstRetry"] == 300000
     assert result["beforeSecond"] == 3
-    assert result["secondRetry"] == 90000
+    assert result["secondRetry"] == 900000
     assert result["secondCount"] == 4
     assert result["original"] and result["existing"] == "owner: existing"
     assert result["finished"] == "all chunks summarized"
     assert result["errors"] == ["model unavailable"] * 3
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_compaction_timeout_limits_all_nodes_and_survives_restart(tmp_path):
+    """A timed-out runner cannot drain a backlog or bypass the cooldown on new turns or restarts."""
+    result = bun(f"""
+import {{ Memory, load, zoom }} from {MEMORY};
+import {{ readFileSync }} from "node:fs";
+let now = 0, fail = true;
+Date.now = () => now;
+const timers = [], attempts = [];
+globalThis.setTimeout = (fn, ms) => {{
+  const timer = {{ fn, at: now + ms, unref() {{ return this; }} }};
+  timers.push(timer); return timer;
+}};
+const runner = () => ({{
+  async say() {{
+    attempts.push(now);
+    if (fail) {{
+      await new Promise((resolve) => setTimeout(resolve, 60000));
+      throw new Error("compaction call failed (exit 143)");
+    }}
+    return "owner: source preserved";
+  }},
+  end() {{}},
+}});
+const dir = {json.dumps(str(tmp_path))};
+const logs = [];
+let memory = new Memory(dir, runner, (e) => logs.push(e));
+async function settle() {{ for (let n = 0; n < 20; n++) await Bun.sleep(0); }}
+async function advance(ms) {{
+  now += ms;
+  for (const timer of [...timers]) if (timer.at <= now) {{
+    timers.splice(timers.indexOf(timer), 1); timer.fn();
+  }}
+  await settle();
+}}
+for (let n = 0; n < 30; n++) memory.append("owner", `source ${{n}} ` + "x".repeat(700));
+await settle();
+await advance(60000);
+const saved = JSON.parse(readFileSync(`${{dir}}/retry.json`, "utf8"));
+const beforeRestart = attempts.length;
+memory.append("owner", "my flight moved to 17:30");
+await settle();
+const shortVisible = memory.render().includes("owner: my flight moved to 17:30");
+const shortHeld = attempts.length === beforeRestart;
+timers.length = 0; // the old process is gone
+memory = new Memory(dir, runner, (e) => logs.push(e));
+await settle();
+const restartHeld = attempts.length === beforeRestart;
+const visibleAfterRestart = memory.render().includes("owner: my flight moved to 17:30");
+for (let n = 0; n < 180; n++) {{
+  memory.append("desk", `reply ${{n}}`);
+  await advance(60000);
+}}
+const maxHourly = Math.max(...attempts.map((start) => attempts.filter((at) => at >= start && at < start + 3600000).length));
+const disk = load(dir);
+const replies = disk.msgs.filter((m) => m.kind === "desk").map((m) => m.text);
+const original = zoom(disk.msgs, disk.nodes, 0, 1).endsWith("owner: source 0 " + "x".repeat(700));
+fail = false;
+await advance(3600000);
+await settle();
+console.log(JSON.stringify({{
+  maxHourly, firstHour: attempts.filter((at) => at < 3600000).length,
+  restartHeld, shortVisible, shortHeld, visibleAfterRestart, saved, original, replies,
+  reset: JSON.parse(readFileSync(`${{dir}}/retry.json`, "utf8")),
+  completed: load(dir).nodes.get("0:0")?.text,
+  errors: logs.filter((e) => e instanceof Error).map((e) => e.message),
+}}));
+""")
+    assert result["firstHour"] <= 6 and result["maxHourly"] <= 6
+    assert result["restartHeld"] and result["saved"]["nextAllowed"] > 60000
+    assert result["shortVisible"] and result["shortHeld"] and result["visibleAfterRestart"]
+    assert result["original"]
+    assert result["replies"] == [f"reply {n}" for n in range(180)]
+    assert result["errors"] and set(result["errors"]) == {"compaction call failed (exit 143)"}
+    assert result["completed"] == "owner: source preserved"
+    assert result["reset"] == {"failures": 0, "nextAllowed": 0}
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -1436,6 +1515,49 @@ def fake_bridge(tmp_path):
         return result.stdout
 
     return fake, state, notes, err, start, inbound, cli, text
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_path):
+    """The real runner deadline rejects a completed summary without delaying desk replies."""
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    attempts = fake / "compaction-attempts"
+    runner = tmp_path / "bin/omp"
+    runner.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        "sys.stdin.read()\n"
+        "if any('gpt-6-luna' in arg for arg in sys.argv):\n"
+        f"    with open({str(attempts)!r}, 'a') as log: log.write('attempt\\n')\n"
+        "    print('owner: valid summary before teardown stalls', flush=True)\n"
+        "    time.sleep(120)\n"
+        "else:\n"
+        "    print('desk ok')\n"
+    )
+    runner.chmod(0o755)
+    bridge = start(1)
+    try:
+        inbound("long", text="x" * 700)
+        wait_for(lambda: text(attempts), "the compaction runner")
+        wait_for(lambda: text(fake / "sent").splitlines() == ["send desk ok"], "the first desk reply", timeout=15)
+        retry_file = state / "memory/retry.json"
+        wait_for(retry_file.exists, "the runner timeout and saved cooldown", timeout=75)
+        assert "compaction call failed (exit 143)" in text(err)
+        assert json.loads(retry_file.read_text())["nextAllowed"] > time.time() * 1000
+        inbound("during-cooldown", text="hello again")
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the desk reply during cooldown", timeout=15)
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        inbound("after-restart", text="still there")
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 3, "the desk reply after restart", timeout=15)
+        assert text(attempts).splitlines() == ["attempt"]
+        assert text(fake / "sent").splitlines() == ["send desk ok"] * 3
+        source = [json.loads(line) for path in (state / "memory/main").glob("*.jsonl") for line in path.read_text().splitlines()]
+        assert any(record["text"] == "x" * 700 for record in source)
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
