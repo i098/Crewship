@@ -12,7 +12,7 @@ const pad = document.getElementById("pad");
 const knob = pad.firstElementChild;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const touchFirst = matchMedia("(pointer: coarse)");
-// The intro keeps the camera, grid, and canvas at their final size.
+// The intro keeps the camera and canvas at their final size.
 let introStart = null, introProgress = reduced.matches ? 1 : 0;
 stage.classList.toggle("loading", introProgress < 1);
 function finishIntro() {

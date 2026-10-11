@@ -9,7 +9,7 @@ The off-screen HTML list and current sign keep links available to screen readers
 An uncaught error or rejected promise in `harbor.js`, or a failure to load it, hides the scene and shows the plain page.
 Errors and rejected promises from other scripts or resources, such as browser add-ons, do not.
 JavaScript hides the plain page before the first paint; visitors without JavaScript still see it.
-The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera or resizing the grid.
+The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera.
 Any key, click, touch, or mouse wheel input skips the animation.
 Reduced-motion visitors get the scene immediately.
 Waves, the fountain, and boats keep moving during the intro.
