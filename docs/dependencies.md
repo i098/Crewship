@@ -40,12 +40,14 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
 - `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
 
-GitHub allows 60 unauthenticated API requests per hour per IP.
-The resolver makes one request per installed GitHub repository.
-It only resolves sources the host uses, so unused sources cannot fail apply.
-The lookups use `GITHUB_TOKEN` when it is set, and send the token only to the GitHub API.
-Container builds accept the optional BuildKit secret `github_token` (`docker build --secret id=github_token,env=GITHUB_TOKEN ...`).
-The secret does not enter the image.
+The GitHub API allows 60 unauthenticated requests per hour per IP.
+Shared IPs, such as CI runners, can reach this limit.
+A resolution makes one request per GitHub repository, at most sixteen.
+Only the tools a run installs are resolved, so an unused source cannot fail the run.
+The lookups use `GITHUB_TOKEN` from the environment that runs `./ship.sh launch` or `./onboard.sh`, if set.
+The token goes to the GitHub API only.
+Container builds take the token as the optional BuildKit secret `github_token` (`docker build --secret id=github_token,env=GITHUB_TOKEN ...`).
+The token never enters the image.
 
 ## Neovim and LazyVim
 
@@ -60,13 +62,12 @@ The first start needs network access: the starter downloads lazy.nvim, LazyVim, 
 Plugin downloads use the upstream Git repositories, not the Crewship checksum installer.
 LazyVim manages later plugin updates.
 The added `lua/plugins/pyrefly.lua` uses the Pyrefly executable from PATH with `mason = false`, so Mason does not install another copy.
-See the Pyrefly entry in issue [#231](https://github.com/i098/Crewship/issues/231) for its installation.
+See the Pyrefly entry under [Latest releases](#latest-releases) for its installation.
 Use a Python project with `pyrefly.toml` to select its project root.
 
 The runtime starter files and Apache-2.0 license come from commit `803bc181d7c0d6d5eeba9274d9be49b287294d99`.
 The unused example plugin and upstream development files are not included.
 The Pyrefly configuration is the only added runtime file.
-
 
 ## Ubuntu packages
 
