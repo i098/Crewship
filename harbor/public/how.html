@@ -67,7 +67,7 @@
   Cloud density picks glyphs from <code> .:~-=+*</code> in the dim colour of the empty sky; the star hash of each cell breaks bands of one glyph into grain.
   Only edges where the cloud thins toward the moon are pale, and those nearest the moon are palest.
   Thin cloud dims the stars and the moon, and thick cloud hides them.
-  A buffer of 1° sky texels keeps the cloud density of each direction.
+  A buffer of 1° sky texels keeps the cloud density and moon-side rim of each direction.
   Without reduced motion, a texel refreshes about ten times a second when a sky cell reads it.
   The elevation rows take turns to spread refresh work across frames.
   Turning reuses fresh texels but computes unseen or expired texels.

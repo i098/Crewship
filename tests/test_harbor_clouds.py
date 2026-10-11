@@ -93,6 +93,21 @@ for (let az = -180; az < 180; az += 2) {
 }
 assert(dense > 200 && abrupt < 0.1 * dense, 'cloud must thin out to clear sky, not end at a hard edge');
 
+// A cumulus clump must fade to clear sky before either side of its billboard.
+CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length);
+clumpCount = 1;
+for (let seed = 0; seed < 10; seed++) {
+  CLUMPS.set([0, 1, 0, 260, 1, 0, 0, 0, 1, 0, 260, 1, seed], 0);
+  assert(cloudDensity(...unit([0, 1, 0.02])) > 0.2, 'the isolated clump must have a body');
+  for (const sign of [-1, 1]) {
+    for (const x of [0.48, 0.49, 0.5]) {
+      assert.equal(cloudDensity(...unit([sign * x, 1, 0.02])), 0, 'clump sides must fade before the billboard cutoff');
+    }
+  }
+}
+CLOUD_LAYERS.splice(0, CLOUD_LAYERS.length, ...layers);
+gatherClouds(0);
+
 // Cloud draws mostly light glyphs from its ramp, and its densest glyph rarely.
 const glyphs = {};
 let cells = 0;
@@ -114,7 +129,8 @@ around(Math.atan2(MOON[0], MOON[2]), 0.01, (d) => {
   if (cover < 0.2 || cover > 0.8) return;
   const m = d[0] * MOON[0] + d[1] * MOON[1] + d[2] * MOON[2];
   const near = unit(d.map((v, k) => v + (MOON[k] - v) * 0.026 / Math.sqrt(2 - 2 * m)));
-  edges[cloudDensity(...near) < cloudDensity(...d) ? 'toward' : 'away'].push(moonRim(cover, az, el) / cover);
+  skyClouds(az, el, true);
+  edges[cloudDensity(...near) < cloudDensity(...d) ? 'toward' : 'away'].push(cloudRim / cover);
 });
 const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 assert(edges.toward.length > 100 && edges.away.length > 100, 'the sample must cross many cloud edges');

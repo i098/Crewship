@@ -3279,6 +3279,7 @@ const CLUMPS = new Float32Array(12 * 13);
 let clumpCount = 0;
 // Sky texels of 1°, azimuth by elevation, keep the cloud of their direction; SKY_ROW holds each row's refresh key.
 const SKY_W = 360, SKY_H = 90, SKY = new Float32Array(SKY_W * SKY_H), SKY_STEP = new Int32Array(SKY_W * SKY_H).fill(-1);
+const SKY_RIM = new Float32Array(SKY_W * SKY_H), SKY_RIM_STEP = new Int32Array(SKY_W * SKY_H).fill(-1);
 const SKY_ROW = new Int32Array(SKY_H);
 let cloudFrame = -1;
 // Negative render keys differ from time steps and the initial -1, so reduced-motion frames cannot retain stale camera views.
@@ -3327,9 +3328,10 @@ function cloudDensity(dx, dy, dz) {
     // A dome over a flat base, in clump lengths; noise makes the top lumpy, wears the edges and thins the body unevenly.
     const dome = 1 - 4 * x * x;
     if (dome <= 0 || y < -0.03) continue;
-    const top = 0.45 * Math.sqrt(dome) * (0.55 + 0.9 * valueNoise(8 * x + s, s));
+    const noise = valueNoise(8 * x + s, s), top = 0.45 * Math.sqrt(dome) * (0.55 + 0.9 * noise);
     const body = 1 - y / top + 0.8 * fbm(4 * x + s, 4 * y, 3, 0.14 * CLUMPS[o + 3] / CLUMPS[o + 10]);
-    cover += (1 - cover) * 0.8 * CLUMPS[o + 11] * smooth(body / 0.75) * smooth((y + 0.03) / 0.05);
+    const side = smooth((0.44 + 0.04 * noise - Math.abs(x)) / 0.12);
+    cover += (1 - cover) * 0.8 * CLUMPS[o + 11] * smooth(body / 0.75) * smooth((y + 0.03) / 0.05) * side;
   }
   return cover;
 }
@@ -3338,8 +3340,15 @@ function refreshTexel(k, j) {
   const a = (k - j * SKY_W + 0.5) * 2 * Math.PI / SKY_W - Math.PI, b = (j + 0.5) * Math.PI / 2 / SKY_H, cb = Math.cos(b);
   SKY[k] = cloudDensity(cb * Math.sin(a), Math.sin(b), cb * Math.cos(a));
 }
-// Bilinear read of the buffer for a sky direction; the azimuth may lie outside -π to π.
-function skyClouds(az, el) {
+// Cache the moonward density difference at the same angular and temporal resolution as density.
+function refreshRim(k, j) {
+  const az = (k - j * SKY_W + 0.5) * 2 * Math.PI / SKY_W - Math.PI, el = (j + 0.5) * Math.PI / 2 / SKY_H;
+  SKY_RIM[k] = moonRim(SKY[k], az, el);
+  SKY_RIM_STEP[k] = SKY_ROW[j];
+}
+// Bilinear density read; lighting also gets the cached moon-side rim, without a second direction lookup.
+let cloudRim = 0;
+function skyClouds(az, el, lighting = false) {
   const u = (az / Math.PI + 3) % 2 * (SKY_W / 2) - 0.5, v = Math.min(SKY_H - 1.001, Math.max(0, el * (SKY_H * 2 / Math.PI) - 0.5));
   const i = Math.floor(u), j = Math.floor(v);
   const i0 = i < 0 ? SKY_W - 1 : i, a = j * SKY_W + i0, b = i0 + 1 < SKY_W ? a + 1 : j * SKY_W, c = a + SKY_W, d = b + SKY_W;
@@ -3347,8 +3356,18 @@ function skyClouds(az, el) {
   if (SKY_STEP[b] !== SKY_ROW[j]) refreshTexel(b, j);
   if (SKY_STEP[c] !== SKY_ROW[j + 1]) refreshTexel(c, j + 1);
   if (SKY_STEP[d] !== SKY_ROW[j + 1]) refreshTexel(d, j + 1);
-  const fu = u - i, fv = v - j;
-  return (SKY[a] * (1 - fu) + SKY[b] * fu) * (1 - fv) + (SKY[c] * (1 - fu) + SKY[d] * fu) * fv;
+  const fu = u - i, fv = v - j, wa = (1 - fu) * (1 - fv), wb = fu * (1 - fv), wc = (1 - fu) * fv, wd = fu * fv;
+  const cover = SKY[a] * wa + SKY[b] * wb + SKY[c] * wc + SKY[d] * wd;
+  if (lighting) cloudRim = 0;
+  // Below this cover, even the largest grain offset cannot draw a cloud glyph.
+  if (lighting && cover >= 0.035) {
+    if (SKY_RIM_STEP[a] !== SKY_ROW[j]) refreshRim(a, j);
+    if (SKY_RIM_STEP[b] !== SKY_ROW[j]) refreshRim(b, j);
+    if (SKY_RIM_STEP[c] !== SKY_ROW[j + 1]) refreshRim(c, j + 1);
+    if (SKY_RIM_STEP[d] !== SKY_ROW[j + 1]) refreshRim(d, j + 1);
+    cloudRim = SKY_RIM[a] * wa + SKY_RIM[b] * wb + SKY_RIM[c] * wc + SKY_RIM[d] * wd;
+  }
+  return cover;
 }
 // Glyphs grow denser with the cloud, in the empty sky's dim slate, so cloud and sky share text runs. The moon lights
 // only the edges that face it, where the cloud thins toward the moon, and those nearest the moon most.
@@ -3359,8 +3378,8 @@ function moonRim(cover, az, el) {
   const ce = Math.cos(el), pa = ((MOON_AZ - az + 3 * Math.PI) % (2 * Math.PI) - Math.PI) * ce, pe = MOON_EL - el, l = Math.hypot(pa, pe) || 1;
   return Math.max(0, cover - skyClouds(az + 0.026 * pa / l / Math.max(ce, 0.05), el + 0.026 * pe / l));
 }
-function shadeCloud(c, cover, grain, m, az, el) {
-  const light = moonRim(cover, az, el) * (5 + 10 * Math.max(0, (m - 0.9) / 0.1) ** 2);
+function shadeCloud(c, grain, m) {
+  const light = cloudRim * (5 + 10 * Math.max(0, (m - 0.9) / 0.1) ** 2);
   put(c, CLOUD_RAMP[Math.min(7, Math.floor(grain * 8))], CLOUD_TONES[light < 0.3 ? 0 : light < 0.8 ? 1 : 2], 0, Infinity);
 }
 // Low hills on the far shore, in radians above the horizon: a smooth ridge, at most 0.05, over the northern and
@@ -3373,13 +3392,13 @@ function ridge(az) {
 function shadeSky(c, dx, dy, dz) {
   const m = dx * MOON[0] + dy * MOON[1] + dz * MOON[2], el = Math.asin(dy), az = Math.atan2(dx, dz), glow = beamGlow(dx, dy, dz);
   const r = hash(Math.floor(az * 150), Math.floor(el * 150)) * 2.5;
-  const cover = dy > 0.02 ? skyClouds(az, el) : 0, hill = el >= 0 && el < 0.06 && el < ridge(az);
+  const cover = dy > 0.02 ? skyClouds(az, el, true) : 0, hill = el >= 0 && el < 0.06 && el < ridge(az);
   const grain = cover + 0.072 * r - 0.09; // the star hash breaks bands of one glyph into grain
   if (m > 0.9988 && cover < 0.6) put(c, m > 0.99935 && cover < 0.3 ? "@" : "%", cover < 0.3 ? "k" : "k4", 0, Infinity);
   else if (el > 0.04 && !hill && r < 0.03 && cover < 0.4) put(c, r < 0.006 ? "*" : ".", cover < 0.15 ? "k" : "k1", 0, Infinity);
   else if (glow > 0.15) put(c, glyph(glow * 0.8, 0), "l" + Math.min(7, 2 + Math.floor(glow * 6)), 0, Infinity);
   else if (hill) put(c, "#", "v", 0, Infinity);
-  else if (grain >= 0.125) shadeCloud(c, cover, grain, m, az, el);
+  else if (grain >= 0.125) shadeCloud(c, grain, m);
   else put(c, " ", "f", 0, Infinity);
 }
 function put(c, ch, cls, id, depth) { G[c] = ch; C[c] = cls; ID[c] = id; D[c] = depth; }
