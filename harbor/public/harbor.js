@@ -4493,7 +4493,8 @@ function castOnWorkers(t0, late) {
   const band = Math.ceil(rows / (ready.length * 4)), bands = [];
   for (let j = 0; j < rows; j += band) bands.push([j, Math.min(rows, j + band)]);
   const moment = { id: ++castId, T, bob, roll, me: { ...me }, room: ROOMS.indexOf(interior), shadows, still: reduced.matches,
-    tenths: performance.now() / 100, cols, rows, aspect, layout: { padX, padY, cellW, cellH, dpr, font: ctx.font, runs: !touchFirst.matches } };
+    tenths: performance.now() / 100, cols, rows, aspect,
+    layout: { padX, padY, cellW, cellH, dpr, font: ctx.font, advance: ctx.measureText("M").width, runs: !touchFirst.matches } };
   const f = { moment, phase: CAST, bands, next: 0, out: 0, workers: ready, cast: [], draw: null, bitmaps: [], ms: 0, late };
   frames.push(f);
   for (const w of ready) w.postMessage(moment);
@@ -4631,13 +4632,13 @@ const sprites = new Map(), BACK = 0xff140a06; // BACKGROUND as little-endian RGB
 let spriteCtx = null, spriteKey = "", spriteDpr = 1, spriteW = 0, spriteH = 0, padS = 0, padT = 2, lowerFrom = 1, canDraw = false;
 let pixels = null, bitmapCtx = null;
 // Readies the sprites for this layout; false when this worker's text differs from the page's.
-function spritesFor({ font, cellW, cellH, dpr }) {
+function spritesFor({ font, advance, cellW, cellH, dpr }) {
   if (spriteKey === `${font}/${dpr}`) return canDraw;
   spriteKey = `${font}/${dpr}`; spriteDpr = dpr; sprites.clear(); ADVANCE.clear();
   padS = Math.ceil(cellW * dpr); spriteW = 3 * padS; spriteH = Math.ceil(cellH * dpr) + 2 * padT;
   spriteCtx = new OffscreenCanvas(spriteW, spriteH).getContext("2d", { willReadFrequently: true });
   spriteCtx.font = font; spriteCtx.textBaseline = "top";
-  canDraw = Math.abs(spriteCtx.measureText("M").width - cellW) < 1e-6;
+  canDraw = spriteCtx.measureText("M").width === advance;
   // The first pixel row of "@" drawn at a fraction f of a pixel lower: where it moves down is where rounding starts.
   const topRow = (f) => {
     spriteCtx.setTransform(1, 0, 0, 1, 0, 0); spriteCtx.clearRect(0, 0, spriteW, spriteH);
