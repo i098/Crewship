@@ -4017,7 +4017,7 @@ function step(dt) {
 
 // ---- Sound -------------------------------------------------------------------------------
 // Positional ambient loops. Each loop plays from the emitter nearest to you, through an HRTF panner that fades it
-// with distance. Sound starts on the first click, tap or key press (autoplay rules) unless the speaker button turned
+// with distance. Sound starts on the first click or tap (autoplay rules) unless the speaker button turned
 // it off on an earlier visit; the button's choice is stored. Positions update at most 20 times a second.
 const soundButton = document.getElementById("sound");
 let audio = null, soundOn = false, soundAt = 0, soundPref = null, SHORE = null, TREE_TOPS = null;
