@@ -1124,15 +1124,8 @@ function wallBox([x, z, nx, nz], u0, u1, n0, n1, y0, y1, mat, o) {
   const xs = [x + nx * n0 - nz * u0, x + nx * n1 - nz * u1], zs = [z + nz * n0 + nx * u0, z + nz * n1 + nx * u1];
   return box(room, Math.min(...xs), y0, Math.min(...zs), Math.max(...xs), y1, Math.max(...zs), mat, o);
 }
-// Screen column and row of world point (x, y, z), in cells: cell i spans columns i to i + 1.
-function screenColumn(x, y, z) {
-  const qx = x - cam.x, qy = y - cam.y, qz = z - cam.z, d = cam.f[0] * qx + cam.f[1] * qy + cam.f[2] * qz;
-  return ((cam.r[0] * qx + cam.r[2] * qz) / d / cam.tanH + 1) / 2 * cols;
-}
-function screenRow(x, y, z) {
-  const qx = x - cam.x, qy = y - cam.y, qz = z - cam.z, d = cam.f[0] * qx + cam.f[1] * qy + cam.f[2] * qz;
-  return (1 - (cam.u[0] * qx + cam.u[1] * qy + cam.u[2] * qz) / d / cam.tanV) / 2 * rows;
-}
+// viewPoint's output for the painting textures, reused so a cell builds no array.
+const ART_VIEW = [0, 0, 0];
 // The canvas face of a painting w wide from height y0 to y1. When a glyph cell covers more than about one and a half
 // texels, the canvas reads the half or quarter size texture, so a far painting does not break up into noise. The
 // size is chosen once a frame from the canvas's middle lines, so one texture covers the whole canvas.
@@ -1142,9 +1135,9 @@ function canvasTexture([px, pz, nx, nz], { entries, w: W, h: H, levels }, w, y0,
   return (x, y, z, hx, hy, hz) => {
     if (hx * nx + hz * nz < 0.5) return null;
     if (seen !== renders) {
-      const across = Math.abs(screenColumn(px + ex, ym, pz + ez) - screenColumn(px - ex, ym, pz - ez));
-      const texels = Math.max(W / across, H / Math.abs(screenRow(px, y0, pz) - screenRow(px, y1, pz)));
-      const k = texels < 1.5 ? 0 : texels < 3 ? 1 : 2;
+      const across = Math.abs(viewPoint(px + ex, ym, pz + ez, ART_VIEW)[0] - viewPoint(px - ex, ym, pz - ez, ART_VIEW)[0]);
+      const up = Math.abs(viewPoint(px, y0, pz, ART_VIEW)[1] - viewPoint(px, y1, pz, ART_VIEW)[1]);
+      const texels = Math.max(W / across, H / up), k = texels < 1.5 ? 0 : texels < 3 ? 1 : 2;
       seen = renders; level = levels[k]; lw = Math.ceil(W / 2 ** k); lh = Math.ceil(H / 2 ** k);
     }
     const u = Math.max(0, (nx * (z - pz) - nz * (x - px)) / w + 0.5), v = Math.max(0, (y1 - y) / (y1 - y0));
@@ -1161,13 +1154,13 @@ function plaque(at, title, y) {
   wallBox(at, -w / 2, w / 2, 0, 0.012, y - h, y, "o", { solid: false, tex: (x, yy, z, hx, hy, hz) => {
     if (hx * nx + hz * nz < 0.5) return null;
     if (seen !== renders) {
-      const left = screenColumn(px + ex, mid, pz + ez), right = screenColumn(px - ex, mid, pz - ez);
-      const rowL = screenRow(px + ex, mid, pz + ez), rowR = screenRow(px - ex, mid, pz - ez);
+      const [left, rowL] = viewPoint(px + ex, mid, pz + ez, ART_VIEW), [right, rowR] = viewPoint(px - ex, mid, pz - ez, ART_VIEW);
       const fits = Math.abs(right - left) >= title.length + 2 && Math.abs(rowR - rowL) <= 0.5;
       seen = renders; row = fits ? Math.floor((rowL + rowR) / 2) : -1; start = Math.round((left + right - title.length) / 2);
     }
-    if (Math.floor(screenRow(x, yy, z)) !== row) return null;
-    const ch = title[Math.floor(screenColumn(x, yy, z)) - start] || " ";
+    viewPoint(x, yy, z, ART_VIEW);
+    if (Math.floor(ART_VIEW[1]) !== row) return null;
+    const ch = title[Math.floor(ART_VIEW[0]) - start] || " ";
     return (LETTERS[ch] ||= { m: "o", c: 7.5 / 9 / ART_LIGHT, ch });
   } });
 }
@@ -2120,9 +2113,10 @@ function gulls() {
 
 // Screen cell of an anchor (possibly off screen), or null when it is behind you.
 function project(a, snap = Math.round) {
-  const y = a.y + (a.ship ? bob : 0);
-  if (cam.f[0] * (a.x - cam.x) + cam.f[1] * (y - cam.y) + cam.f[2] * (a.z - cam.z) < 0.3) return null;
-  return [snap(screenColumn(a.x, y, a.z)), snap(screenRow(a.x, y, a.z))];
+  const p = [a.x - cam.x, a.y + (a.ship ? bob : 0) - cam.y, a.z - cam.z];
+  const dot = (v) => v[0] * p[0] + v[1] * p[1] + v[2] * p[2], z = dot(cam.f);
+  if (z < 0.3) return null;
+  return [snap(((dot(cam.r) / z / cam.tanH + 1) / 2) * cols), snap(((1 - dot(cam.u) / z / cam.tanV) / 2) * rows)];
 }
 
 // Signs use scene cells.
