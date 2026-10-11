@@ -14,7 +14,8 @@
 # Required checks: a pull request opened with GITHUB_TOKEN starts no
 # workflows, so the last step starts ci.yml on the branch with
 # workflow_dispatch (the one event GITHUB_TOKEN may trigger). Its jobs report
-# the required checks on the branch head and run every heavy job.
+# the required checks on the branch head; the pull-request-only quality gate
+# reports as skipped.
 #
 # Every action is pinned to the commit SHA of its latest release (verified
 # 2026-10-09 via the GitHub REST API); .github/dependabot.yml moves the pins.

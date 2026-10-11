@@ -52,8 +52,10 @@ Every changed file must match `README*`, `docs/**`, `changelog.d/**`, or `*.md` 
 Files under `skills/`, `rules/`, and `config/` always count as code, including Markdown files.
 Skipped jobs still report their check names, so required checks do not remain pending.
 The separate `changelog fragment` job still checks documentation PRs unless they have the `no changelog` label.
+The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
-Code PRs, pushes to `main`, and manual runs execute all heavy jobs.
+Code PRs run all heavy jobs.
+Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
 
 ## Adding a new tool
 

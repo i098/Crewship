@@ -94,13 +94,27 @@ jobs:
 
   config-and-python:
     name: configuration and python checks
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, changelog]
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.code != 'false' ||
+       (needs.changelog.result != 'success' && needs.changelog.result != 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
+      - name: Check prerequisite results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          CHANGELOG_RESULT: ${{ needs.changelog.result }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]] &&
+          [[ "$CODE" == true || "$CODE" == false ]] &&
+          [[ "$CHANGELOG_RESULT" == success || "$CHANGELOG_RESULT" == skipped ]]
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -219,7 +233,7 @@ jobs:
   quality-gate:
     name: quality gate
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -250,7 +264,6 @@ jobs:
         run: bun config/omp-quality-gate.ts
 
       - name: fallow audit (advisory)
-        if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
