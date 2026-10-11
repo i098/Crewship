@@ -12,9 +12,10 @@
 set -euo pipefail
 
 # The same text is in npm/crewship.js; tests/test_install.py keeps the two equal.
-USAGE='Usage: crewship [--container] [--user NAME] [--home DIR]
+USAGE='Usage: crewship [update] [--container] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
+  update      install the newest release over this host, keeping its .local/ files
   -h, --help  print this help and exit'
 
 # Runs before any install step, so --help and a bad option change nothing.
@@ -32,6 +33,8 @@ check_args() {
   done
   (($# == 0)) || { printf 'install.sh: bad option: %s\n%s\n' "$1" "$USAGE" >&2; exit 2; }
 }
+# `update` is the rerun itself (it only names it): the newest release, .local/ carried over.
+[ "${1:-}" != update ] || shift
 check_args "$@"
 
 work=
@@ -113,6 +116,37 @@ carry_host_files() {
   tr '\0' '\n' <"$list" | sed 's/^/  carried /'
 }
 
+# One-time fixes for a v0.4.0 host, run before the re-apply (both are no-ops on a newer one):
+# v0.4.0 kept its tools under share/code-factory (tools/, omp, npm packages); v0.4.1 uses share/crewship and refuses the
+# old ~/.local/bin links. The links into that tree go (provisions recreates them); the tree itself is
+# left for ansible's rename step, since running units still use it. v0.4.1 also rejects three fleet keys
+# of host.yml; they are dropped, one line each, and the original is kept as host.yml.v0.4.0.
+migrate_v040() {
+  local old link
+  old=$(readlink -f "$HOME/.local/share/code-factory")
+  if [ -d "$old" ]; then
+    for link in "$HOME"/.local/bin/*; do
+      [ -L "$link" ] && [[ $(readlink -f "$link") == "$old"/* ]] && { echo "  relinking $link"; rm -f "$link"; }
+    done
+  fi
+  [ -f .local/host.yml ] || return 0
+  python3 - <<'PY'
+import shutil, yaml
+path = ".local/host.yml"
+document = yaml.safe_load(open(path))
+# v0.4.0 names the root "factory"; ship.sh renames it to "crewship" and needs host.yml.bak free for that.
+root = next((document[k] for k in ("factory", "crewship") if isinstance(document, dict) and isinstance(document.get(k), dict)), {})
+fleet = root.get("fleet")
+dropped = [key for key in ("supabase_project_id", "fixture_archive", "worktree_pools") if isinstance(fleet, dict) and key in fleet]
+if dropped:
+    shutil.copy2(path, path + ".v0.4.0")
+    for key in dropped:
+        del fleet[key]
+        print(f"  dropped fleet.{key} from {path} (removed in v0.4.1; the original is {path}.v0.4.0)")
+    yaml.safe_dump(document, open(path, "w"), sort_keys=False)
+PY
+}
+
 main() {
   local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
@@ -120,9 +154,9 @@ main() {
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
 
-  # The cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode.
+  # The cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
   local packages=(ca-certificates curl gnupg openssl git rsync tar unzip xz-utils zstd
-    python3 python3-venv python3-apt jq procps acl sudo) missing=() package
+    python3 python3-venv python3-apt python3-yaml jq procps acl sudo) missing=() package
   for package in "${packages[@]}"; do
     dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed ||
       missing+=("$package")
@@ -173,6 +207,7 @@ main() {
   echo "Crewship $ref in $dir"
 
   cd "$dir"
+  migrate_v040
   ./onboard.sh
   [ -f .local/host.yml ] || ./ship.sh dock "$@"
   ./ship.sh inspect

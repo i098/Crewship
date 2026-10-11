@@ -7,7 +7,7 @@
 The installer:
 
 1. Installs the OS packages it needs.
-2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`npx crewship` uses the release with its own version, so it needs no lookup).
+2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`npx crewship` without `update` uses the release with its own version, so it needs no lookup; `npx crewship update` does the same redirect lookup).
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
@@ -17,11 +17,13 @@ Download and checks happen in a temporary directory first; a failure leaves the 
 
 ## Update
 
-Run the installer again: `npx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
+Run `npx crewship update` (it takes the newest release, whatever the version of the npm package), or run the installer again: `npx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
 
 - copies the host's own files into it: `.local/` (including `host.yml`), `skills/private/` and `rules/private/`;
 - switches `~/Crewship` to the new release in one step (`mv -T` of a new symlink);
 - removes the release it replaced, after the switch worked.
+
+A host still on v0.4.0 gets a one-time migration before the re-apply: links in `~/.local/bin` into the old `~/.local/share/code-factory` tree are removed and the installer links the tools again under `crewship`; the old tree itself is left in place for the rename step of the re-apply, and the `fleet` keys v0.4.1 removed (`supabase_project_id`, `fixture_archive`, `worktree_pools`) are dropped from `.local/host.yml`, one line each, with the original kept as `host.yml.v0.4.0`. Comments in `host.yml` are not preserved in the rewritten file.
 
 If the latest release is already installed, the download is skipped. Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
 
