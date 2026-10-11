@@ -55,39 +55,31 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
 
 ```mermaid
-flowchart TD
-    you["You: phone or laptop<br/>terminal, iMessage, Discord, Slack"]
-    subgraph vps["Your server (VPS)"]
-        env["~/super.env"]
+flowchart LR
+    you["You<br/>phone or laptop"]
+    subgraph vps["Your server"]
+        direction LR
+        secrets["Secrets file"]
         subgraph herdr["Herdr panes"]
+            direction TB
             fm["Firstmate"]
-            sm["Second mates (optional)"]
-            board["Crew board (optional)"]
-            gates["Guards and quality gate"]
-            subgraph worker["Worker, one per task"]
-                omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"]
-            end
+            sm["Second mates<br/>(optional)"]
+            worker["Worker per task<br/>isolated worktree"]
+            gates["Guards and<br/>quality gate"]
+            board["Crew board<br/>(optional)"]
+            fm --> sm --> worker
+            gates --- worker
+            board <-.-> worker
         end
-        docker["Docker engine"]
+        secrets --> fm
     end
-    gh["GitHub: pull requests"]
-    models["Model providers: Anthropic, OpenAI"]
-    subgraph opt["Optional routes"]
-        ts["Tailscale"] --> mac["Your Mac: ssh mac,<br/>BlueBubbles relay"]
-        desktop["Review desktop over noVNC"]
-    end
+    mac["Your Mac (host)"]
+    gh["Code host<br/>pull requests"]
+    models["Model providers<br/>any provider"]
     you --> fm
-    env --> fm
-    fm --> sm
-    sm --> worker
-    fm <--> worker
-    board <-.-> worker
-    gates --- worker
-    gates -.-> docker
+    herdr <-.->|"optional SSH: open links, drive apps<br/>message relay"| mac
     worker --> gh
     worker --> models
-    herdr -.-> opt
-    style opt stroke-dasharray: 5 5
 ```
 
 ## More docs
