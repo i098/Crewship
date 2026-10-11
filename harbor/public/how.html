@@ -29,7 +29,7 @@
   Each bracketed crossing uses a halving and straight-line steps.
   Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines, tall grass uses projected tufts, and fountain water uses projected droplets.
   They check the depth buffer instead of ray intersections.
-  Fountain droplets follow ballistic arcs from their jets under gravity and land in the upper bowl or the pool.
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
@@ -60,7 +60,8 @@
   Blades use <code>| ( ) \ /</code> with pale moonlit tips.
   Far tufts are dimmer.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
-  The fountain pool uses animated texture glyphs instead of the density ramp; fountain droplets use <code>: ' , .</code> and thin out as they fall.
+  The fountain pool and upper bowl use animated texture glyphs instead of the density ramp.
+  Fountain droplets use <code>: ' ,</code>; spray and splashes also use <code>.</code>, and mist uses <code>. `</code>.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>

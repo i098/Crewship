@@ -464,7 +464,7 @@ const LANDING = Float64Array.from(JETS.flatMap(({ x, y, z, c, s, h, v, floor }) 
   return [x + c * reach, z + s * reach, floor];
 }));
 const JET_LIFE = JETS.map(({ y, v, floor }) => flightTime(y, v * (1 + SPREAD), floor) + SPLASH_TIME);
-// The water moves on a 24 Hz clock, so droplets update and the fountain's cells repaint at most 24 times a second.
+// A shared water tick keeps droplets and surface waves in step; see how.html for animation timing.
 // Reduced motion freezes the clock and keeps one still frame of the same water.
 const waterTime = () => Math.floor(T * 24) / 24;
 // The pool and the bowl: dark water with rings spreading from each landing point on that surface, over a gentle swell

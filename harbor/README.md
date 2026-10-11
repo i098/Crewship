@@ -66,7 +66,8 @@ The guns, shot racks, and main mast block walking, and the map stays hidden belo
 Map walks go around the open hatch.
 
 The plaza fountain has an octagonal stone rim around a pool, and a pedestal with an upper bowl.
-A central jet climbs from the bowl and falls back into it, and six spouts on the pedestal arc out into the pool.
+Six streams rise from the central nozzle and fall into the upper bowl.
+Six spouts on the pedestal arc out into the pool.
 The droplets follow ballistic arcs and land well inside the bowl or the pool.
 The streams break up into droplets as they fall, and splashes, spreading rings, and mist show where they land.
 With reduced motion, the water stays still.
