@@ -247,7 +247,7 @@
   Up to 2560 by 1440 CSS pixels the glyph height is 0.9 of the old default, as if you had pressed Cmd-minus once, so the same view uses about 1.23 times as many cells; a larger stage gets taller glyphs because the cell cap falls with the square root of the stage area (about 51000 cells at 3840 by 2160), and each cell is still a whole number of device pixels.
   On a desktop the glyph size is fixed by the stage size alone, outdoors and in rooms, so walking and turning never change it and the lens never changes. On a phone it stays fixed unless shadows off cannot hold the frame rate; then it may grow up to 1.5 times and shrinks back when frames are fast.
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
-  On a phone, slow rendering first disables exterior shadow rays, if enabled, then uses larger glyphs with fewer cells, up to 1.5 times as big.
+  On a phone, slow rendering first disables shadow rays, if enabled, then uses larger glyphs with fewer cells, up to 1.5 times as big.
   Fast rendering restores a finer grid.
   Missed frames also reduce a phone's detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
