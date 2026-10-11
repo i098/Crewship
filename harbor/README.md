@@ -173,6 +173,8 @@ It checks the how, docsboard, and mailbox signs against the placement rules abov
 It uses three camera views and an additional oblique docsboard view.
 It checks each support independently for vertical gaps and horizontal coverage on desktop and iPhone portrait and landscape.
 It includes 320×568 phones in both orientations and landscape heights of 256 and 192 pixels.
+The geometry fixtures use fixed normal and coarse grids, independent of host rendering speed.
+The Python checks exercise adaptive detail with controlled render costs and painting delays in the exterior, house, cabin, and gun deck.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
 On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks the canvas DPR limit.
 It also taps six pixels above and below each stacked link center to check the separate hit regions.

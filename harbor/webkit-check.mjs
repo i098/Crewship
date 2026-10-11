@@ -59,20 +59,12 @@ drawSign = function() {
 window.frames = [];
 window.introClocks = [];
 window.firstFrameBlack = false;
+// Geometry fixtures use a fixed grid; synthetic frame timing is checked in the Python suite.
+adaptResolution = () => {};
 const measureGrid = measure;
 measure = function() {
+  scale = ${scale};
   measureGrid();
-  if (${scale} !== 1) {
-    cellH *= ${scale};
-    ctx.font = cellH + "px " + MONO;
-    cellW = ctx.measureText("M").width;
-    cols = Math.floor(stage.clientWidth / cellW);
-    rows = Math.floor(stage.clientHeight / cellH);
-    padX = (stage.clientWidth - cols * cellW) / 2;
-    padY = (stage.clientHeight - rows * cellH) / 2;
-    G = new Array(cols * rows); C = new Array(cols * rows);
-    ID = new Int32Array(cols * rows); D = new Float32Array(cols * rows); SP = new Array(cols * rows);
-  }
 };
 const renderScene = render;
 render = function() {
