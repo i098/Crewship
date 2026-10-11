@@ -16,9 +16,10 @@ name: ci
 on:
   push:
     branches: [main]
-  # labeled/unlabeled: the changelog fragment check reads the `no changelog` label.
+  # No labeled/unlabeled: a label added while opening a PR started a second run
+  # that cancelled the first one (see changelog.yml for the label-aware check).
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 # Read-only by default; no job requests more.
@@ -77,38 +78,13 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
 
-  changelog:
-    name: changelog fragment
-    if: >-
-      github.event_name == 'pull_request' &&
-      !contains(github.event.pull_request.labels.*.name, 'no changelog')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # On a pull request HEAD is the merge commit; HEAD^1 is the base.
-          fetch-depth: 2
-
-      - name: Install latest uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: latest
-          enable-cache: true
-
-      - name: Changelog fragment
-        run: uv run --locked --only-group dev towncrier check --compare-with HEAD^1
-
   config-and-python:
     name: configuration and python checks
-    needs: [changes, changelog]
+    needs: changes
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
-       needs.changes.outputs.code != 'false' ||
-       (needs.changelog.result != 'success' && needs.changelog.result != 'skipped'))
+       needs.changes.outputs.code != 'false')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -118,11 +94,9 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          CHANGELOG_RESULT: ${{ needs.changelog.result }}
         run: |
           [[ "$CHANGES_RESULT" == success ]] &&
-          [[ "$CODE" == true || "$CODE" == false ]] &&
-          [[ "$CHANGELOG_RESULT" == success || "$CHANGELOG_RESULT" == skipped ]]
+          [[ "$CODE" == true || "$CODE" == false ]]
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
