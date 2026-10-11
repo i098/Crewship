@@ -57,44 +57,31 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host:
 
 ```mermaid
-flowchart LR
-    you["You: terminal over SSH<br/>(Concord and slk in tabs beside it)"]
-    phone["You: iMessage"]
+flowchart TD
+    you["You: terminal, iMessage, Discord, Slack"]
+    env["~/super.env:<br/>iMessage bridge credentials"]
     subgraph host["Crewship host: Herdr panes"]
         fm["Firstmate"]
-        sm["Second mate (optional)"]
-        files["Status files and inboxes"]
+        sm["Second mates (optional)"]
         board["Crew board (optional)"]
-        bridge["fm-imessage bridge (optional)"]
-        secrets["~/super.env<br/>(from Cloudflare Secrets Store)"]
-        guards["Fleet guards (optional)"]
-        subgraph crew["Crewmate per task"]
-            omp["omp agent in<br/>treehouse worktree"]
-            gate["Quality gate,<br/>no-pattern-kill guard"]
-            pr["GitHub pull request"]
+        gates["Guards and quality gate"]
+        subgraph worker["Worker, one per task"]
+            direction LR
+            omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"] --> pr["Pull request"]
         end
     end
-    you --> fm
-    phone <--> bridge
-    secrets --> bridge
-    bridge -->|inbox note| files
-    fm -->|reply| bridge
-    fm -->|spawn, brief| omp
-    fm --> sm -->|spawn, brief| omp
-    fm -->|instructions| files
-    omp -->|status| files
-    files -->|watcher wakes| fm
-    omp <--> board
-    fm -.->|observe| board
-    omp --- gate
-    guards -.->|reap containers, dev servers| omp
-    omp -->|no-mistakes or direct PR| pr
-    subgraph opt["Optional, off by default"]
-        mac["Your Mac: ssh mac opens links, drives apps;<br/>a Mac can also run a BlueBubbles relay"]
-        more["Browser ladder, shared Postgres,<br/>review desktop (noVNC), CI pool"]
+    subgraph opt["Optional routes"]
+        mac["Your Mac over SSH and Tailscale,<br/>BlueBubbles relay"]
+        more["Review desktop, CI pool,<br/>shared Postgres, browser ladder"]
     end
-    omp -.->|SSH over Tailscale| mac
-    bridge -.->|BlueBubbles| mac
+    you --> fm
+    env --> fm
+    fm --> sm
+    sm --> worker
+    fm <-->|spawn, brief / status, inbox| worker
+    board <-.-> worker
+    gates --- worker
+    worker -.->|optional| opt
     style opt stroke-dasharray: 5 5
 ```
 
