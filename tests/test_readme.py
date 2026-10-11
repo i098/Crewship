@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import re
 from pathlib import Path
 
 import yaml
@@ -11,9 +10,6 @@ DEFAULT = yaml.safe_load((ROOT / "config/default.yml").read_text())
 SPEC = importlib.util.spec_from_file_location("provisions", ROOT / "scripts/provisions.py")
 provisions = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(provisions)
-SPEC = importlib.util.spec_from_file_location("ci_pool", ROOT / "maintenance/ci-pool.py")
-ci_pool = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(ci_pool)
 
 # Host config switch -> the doc its Features line links.
 FEATURES = {
@@ -93,72 +89,46 @@ def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_defau
 
 def test_default_config_lists_the_current_defaults():
     omp = yaml.safe_load((ROOT / "config/omp.yml").read_text())
-    roles = omp["modelRoles"]
-    group_vars = yaml.safe_load((ROOT / "ansible/group_vars/all.yml").read_text())
-    extensions = {
-        Path(value).stem
-        for value in group_vars.values()
-        if isinstance(value, str) and "/.omp/agent/extensions/" in value
-    }
-    patches = {path.stem for path in (ROOT / "patches/firstmate").glob("*.patch")}
     profiles = DEFAULT["crewship"]["profiles"]
     unset = [
         path.removeprefix("crewship.")
         for path, off in switches()
         if off and ".profiles." not in path and path not in EXCLUDED
     ]
-    lines = section("Default config")
-    for line in [
-        f"- Agent harness: [omp](docs/omp.md), home model `{roles['default']}`, "
-        f"advisor {'on' if omp['advisor']['enabled'] else 'off'}",
-        "- omp plugins: " + ticks(provisions.OMP_PLUGINS),
-        "- Profiles on: " + ticks(name for name, on in profiles.items() if on),
-        "- Profiles off (opt-in): " + ticks(name for name, on in profiles.items() if not on),
-        "- Unset (opt-in): " + ticks(unset),
-    ]:
-        assert line in lines
+    lines = {line.split(":**")[0].removeprefix("- **"): line for line in section("Default config")}
 
+    assert (
+        ticks(profiles_on := [n for n, on in profiles.items() if on])
+        in lines["Profiles on by default"]
+    )
+    assert lines["Opt-in profiles"].endswith(ticks(n for n in profiles if n not in profiles_on))
+    assert lines["Opt-in settings"].endswith(ticks(unset))
+
+    agents = lines["Agents and models"]
+    advisor = "on" if omp["advisor"]["enabled"] else "off"
+    assert f"home model is `{omp['modelRoles']['default']}`, with the advisor {advisor}" in agents
     dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
     small, ordinary, hard = [
         [choice["model"] for choice in rule["use"]] for rule in dispatch["rules"]
     ]
-    assert (
-        f"- Models: dynamic per-task selection; small {ticks(small)}; "
-        f"ordinary (default) {ticks(ordinary)}; hard only {ticks(hard)}."
-    ) in lines
     assert dispatch["default"] == dispatch["rules"][1]["use"]
-    assert "- The spawning agent picks the thinking level." in lines
+    for models in (small, ordinary, hard):
+        assert " or ".join(f"`{model}`" for model in models) in agents
+
+    limits = lines["Model limits and fallbacks"]
     model_overrides = yaml.safe_load((ROOT / "config/omp-models.yml").read_text())
-    windows = model_overrides["providers"]["openai-codex"]["modelOverrides"]
-    for window in windows.values():
-        assert (
-            f"- Codex context: {window['contextWindow'] // 1000}K default, "
-            f"{window['maxContextWindow'] // 1000000}M maximum, "
-            f"`extendedContext` {'on' if omp['extendedContext'] else 'off'}."
-        ) in lines
+    for window in model_overrides["providers"]["openai-codex"]["modelOverrides"].values():
+        assert f"{window['contextWindow'] // 1000}K by default" in limits
+        assert f"{window['maxContextWindow'] // 1000000}M at most" in limits
+    chains = omp["retry"]["fallbackChains"]
+    assert chains == {
+        "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
+        "anthropic/claude-sonnet-5": ["anthropic/claude-fable-5-1", "anthropic/claude-opus-5"],
+    }, "update the fallback sentence in Default config"
+
     gate = yaml.safe_load((ROOT / "config/no-mistakes-omp.yml").read_text())
-    assert (
-        f"- Gate models: per-run pins; routine `{ordinary[1]}:medium`; "
-        f"ordinary (default) `{gate['modelRoles']['default']}`; hard `{hard[0]}:high`."
-    ) in lines
+    assert f"`{gate['modelRoles']['default']}` by default" in lines["Gates"]
+    assert f"`{hard[0]}:high` for hard work" in lines["Gates"]
 
-    hook_env = ci_pool.HOOK_ENV
-    assert (
-        f"- Hooks: `crewship-quality-gate` at omp turn end, SessionStart banners from "
-        f"{ticks(provisions.OMP_PLUGINS)}, `{hook_env}` (opt-in with the [CI pool](docs/ci-pool.md))"
-    ) in lines
-    assert "crewship-quality-gate" in extensions
-
-    def named(prefix):
-        return {line.split("`")[1] for line in lines if line.startswith(prefix)}
-
-    assert named("- omp extension `") == extensions
-    assert named("- Firstmate patch `") == patches
-
-    rule_line = next(line for line in lines if line.startswith("- omp rules "))
-    names = re.findall(r"`([^`]+)`", rule_line)
-    public_rules = {
-        path.stem for path in (ROOT / "rules/public").glob("*.md") if path.name != "README.md"
-    }
-    assert set(names) == public_rules
-    assert len(names) == len(public_rules)
+    for plugin in provisions.OMP_PLUGINS:
+        assert f"`{plugin}`" in lines["Plugins and extensions"]

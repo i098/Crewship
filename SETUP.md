@@ -1,19 +1,24 @@
 # Set up Crewship (for an AI agent)
 
-You are an AI agent. A user asked you to finish setting up Crewship on this machine. Do the steps below in order. Run each command yourself. Stop and ask the user where a step says STOP. Never guess a login, a code, or a choice.
+You are an AI agent. A user has a fresh Ubuntu machine and asked you to set up Crewship on it. Do the steps below in order. Run each command yourself. Stop and ask the user where a step says STOP. Never guess a login, a code, or a choice.
 
-Crewship installs on Ubuntu 24.04 or 26.04 with systemd. Use a non-root account that has sudo. The installer (`curl`, `npx crewship`, `bunx crewship`, or `pnpm dlx crewship`) has already run. It put Crewship in `~/Crewship` and ran `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). The steps below finish what the installer cannot do without the user.
+You need Ubuntu 24.04 or 26.04 with systemd, and a non-root account that has sudo. Check with `lsb_release -rs`, `id -u` (not 0), and `sudo -n true`. If the machine does not fit, STOP and tell the user.
 
 Report each result to the user in one line. If a command fails, show its last lines, then fix it or ask. Do not skip a step to hide a failure.
 
-## 0. Check the install
+## 0. Install Crewship
 
 ```bash
-cd ~/Crewship && ls ship.sh .local/host.yml
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
-- Check: both files exist.
-- If `~/Crewship` is missing, the installer did not run. STOP and tell the user to run one installer line from the [README](README.md#install). Do not clone the repository.
+`npx crewship` does the same when Node is installed. Do not clone the repository.
+
+The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` with the default profiles ([Install, update and migrate](docs/install.md)). The later steps sign in and change the profiles, then apply again.
+
+- STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
+- Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
+- Then run `cd ~/Crewship` for every later step.
 
 ## 1. Sign in to GitHub
 
@@ -74,7 +79,9 @@ This runs Ansible in check mode and changes nothing. Tell the user what it would
 
 - STOP: ask the user to approve the launch.
 
-## 5. Apply
+## 5. Apply again
+
+The installer already applied the default profiles. This run applies your changes and the new sign-ins.
 
 ```bash
 ./ship.sh launch

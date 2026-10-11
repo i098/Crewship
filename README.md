@@ -56,39 +56,17 @@ Crewship makes it super easy to start using agents in the cloud.
 <details>
 <summary><b>Default config</b></summary>
 
-- Agent harness: [omp](docs/omp.md), home model `anthropic/claude-opus-5-5:xhigh`, advisor off
-- Models: dynamic per-task selection; small `anthropic/claude-haiku-5-5`, `openai-codex/gpt-6-luna`; ordinary (default) `anthropic/claude-sonnet-5-5`, `openai-codex/gpt-6.1-sol`; hard only `anthropic/claude-opus-5-5`.
-- The spawning agent picks the thinking level.
-- Codex context: 272K default, 1M maximum, `extendedContext` on.
-  The current bundled omp catalog limits the effective maximum to 872K.
-- omp plugins: `ponytail`, `i-have-adhd`, `caveman`
-- Python tooling: [Pyrefly](https://github.com/facebook/pyrefly), a checksum-verified type checker and language server installed on every host
-- omp extension `crewship-quality-gate`: [sentrux and fallow check](docs/omp.md#quality-gate) at each turn end
-- omp extension `aa-mode-icons`: [mode and hook icons](docs/omp.md#status-line-icons) on the status line
-- omp extension `crewship-herdr-sidebar`: topic, pane name, and PR line for the [Herdr sidebar](docs/herdr.md)
-- omp extension `herdr-omp-agent-state`: Herdr's agent-state reporter
-- omp extension `fm-no-pattern-kill`: blocks `pkill`, `killall`, and kill-by-`pgrep` commands
-- Firstmate patch `0001-watch-wake-on-queued-inbox-note`: [wakes Firstmate](docs/dependencies.md#firstmate-patch-layer) on a queued inbox note
-- Firstmate patch `0002-watch-end-idle-wait-for-inbox-note`: ends the idle wait within about 1 s for an inbox note
-- Firstmate patch `0003-brief-crewboard`: adds the optional [crew board instructions](docs/board.md#firstmate-instructions)
-- Hooks: `crewship-quality-gate` at omp turn end, SessionStart banners from `ponytail`, `i-have-adhd`, `caveman`, `ACTIONS_RUNNER_HOOK_JOB_STARTED` (opt-in with the [CI pool](docs/ci-pool.md))
-- Pipeline gates: [no-mistakes](docs/omp.md#no-mistakes-pipeline-agent) and `ponytail-review`
-- Gate models: per-run pins; routine `openai-codex/gpt-6.1-sol:medium`; ordinary (default) `anthropic/claude-sonnet-5-5:high`; hard `anthropic/claude-opus-5-5:high`.
-  The verified Pi-only adapter preserves per-run model choices and fails on wrapper refusal.
-- Skills and rules: [`skills/`](skills/) for omp and Claude Code, [`config/AGENTS.md`](config/AGENTS.md) for Claude Code, omp, and Codex; public files install with the `agents` profile and private files take precedence ([omp](docs/omp.md#skills)).
-- omp rules ([TTSR](docs/omp.md#rules)): `always-on-skills`, `asd-ste100`, `use-native-stacked-prs`; with the browser ladder: `drive-the-browser-yourself`, `fleet-browser-default-tier`.
-- Profiles on: `agents`, `development`, `firstmate`, `docker`, `chat`
-- Profiles off (opt-in): `tailscale`, `desktop`, `fleet_guards`, `shared_postgres`, `fleet_browsers`
-- Unset (opt-in): `data_dir`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `ci_pool`
-- Full files: [`config/default.yml`](config/default.yml), [`config/omp.yml`](config/omp.yml)
+- **Agents and models:** [omp](docs/omp.md) runs the agents. The home model is `anthropic/claude-opus-5-5:xhigh`, with the advisor off. Firstmate picks a model for each task: `anthropic/claude-haiku-5-5` or `openai-codex/gpt-6-luna` for small work, `anthropic/claude-sonnet-5-5` or `openai-codex/gpt-6.1-sol` for ordinary work (the default), and `anthropic/claude-opus-5-5` for hard work only. The spawning agent picks the thinking level.
+- **Model limits and fallbacks:** Codex context is 272K by default and 1M at most (the bundled omp catalog caps it at 872K). A model that keeps failing falls back along `retry.fallbackChains`: Fable 5.1 to Opus 5, and Sonnet 5 to Fable 5.1, then Opus 5.
+- **Plugins and extensions:** the omp plugins `ponytail`, `i-have-adhd`, and `caveman`. Extensions add the [turn-end quality check](docs/omp.md#quality-gate), [status-line icons](docs/omp.md#status-line-icons), the [Herdr sidebar](docs/herdr.md) feed, and a block on kill-by-name commands such as `pkill` and `killall`.
+- **Gates:** the [no-mistakes pipeline](docs/omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. A gate runs on `anthropic/claude-sonnet-5-5:high` by default and on `anthropic/claude-opus-5-5:high` for hard work. Pick another model for one run with `--model`.
+- **Skills and rules:** [`skills/`](skills/) and [`config/AGENTS.md`](config/AGENTS.md) serve omp, Claude Code, and Codex. Public files install with the `agents` profile, and private files take precedence ([omp](docs/omp.md#skills)). The [rules](docs/omp.md#rules) set plain technical writing, always-on skills, and native stacked PRs.
+- **Profiles on by default:** `agents`, `development`, `firstmate`, `docker`, `chat`
+- **Opt-in profiles:** `tailscale`, `desktop`, `fleet_guards`, `shared_postgres`, `fleet_browsers`
+- **Opt-in settings:** `data_dir`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `ci_pool`
+- **Full lists:** [`config/default.yml`](config/default.yml), [`config/omp.yml`](config/omp.yml), and the [wiki](https://github.com/i098/Crewship/wiki).
 
 </details>
-
-After the installer finishes, paste this into your coding agent or `omp` on the new machine. It does the rest with you ([SETUP.md](SETUP.md)):
-
-```text
-Set up Crewship on this machine by following https://raw.githubusercontent.com/i098/Crewship/main/SETUP.md
-```
 
 ## How it works
 
@@ -120,39 +98,19 @@ flowchart TD
 
 ### Get a machine
 
-Rent an Ubuntu 24.04 or 26.04 server from any VPS or cloud provider, for example [Hetzner Cloud](https://www.hetzner.com/cloud/), [OVHcloud VPS](https://www.ovhcloud.com/en/vps/), or [DigitalOcean Droplets](https://www.digitalocean.com/products/droplets). A spare machine at home works too.
+Buy an Ubuntu 24.04 or 26.04 server from any VPS or cloud provider, for example [Hetzner Cloud](https://www.hetzner.com/cloud/), [OVHcloud VPS](https://www.ovhcloud.com/en/vps/), or [DigitalOcean Droplets](https://www.digitalocean.com/products/droplets). A spare machine at home works too.
 
 Runs on 4 vCPU / 16 GB and up; a 96 vCPU / 247 GB host ran 37 agents in about 67 GB RAM ([Capacity](docs/capacity.md)).
 
-### Install
+### Set up
 
-With curl:
+Paste this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
+```text
+Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
 ```
 
-With npx:
-
-```bash
-npx crewship
-```
-
-With bunx:
-
-```bash
-bunx crewship
-```
-
-With pnpm:
-
-```bash
-pnpm dlx crewship
-```
-
-The installer downloads and verifies a release artifact; there is no git clone. Run it again to update, and see [Install, update and migrate](docs/install.md) for the layout and for moving an older git install.
-
-Full guide: [GitHub wiki](https://github.com/i098/Crewship/wiki).
+Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
 ## More docs
 
