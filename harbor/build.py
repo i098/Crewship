@@ -38,7 +38,7 @@ SCENE = {
 
 def features(readme):
     """(title, link, description) for each README Features or More docs link."""
-    section = readme.split("\n## Features\n", 1)[1].split("</details>", 1)[0]
+    section = readme.split("\n## Features\n", 1)[1].split("\n## ", 1)[0]
     rows = re.findall(r"^- \*{0,2}\[([^\]]+)\]\(([^)]+)\):\*{0,2} (.+)$", section, re.M)
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     rows.extend(

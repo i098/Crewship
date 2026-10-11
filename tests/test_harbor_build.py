@@ -78,7 +78,7 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
 def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, capsys):
     readme = (ROOT / "README.md").read_text()
     mapped = [row for row in build.features(readme) if row[1] in build.SCENE]
-    section = readme.split("\n## Features\n", 1)[1].split("</details>", 1)[0]
+    section = readme.split("\n## Features\n", 1)[1].split("\n## ", 1)[0]
     only = "\n".join(f"- [{title}]({link}): {desc}" for title, link, desc in mapped)
     readme = readme.replace(section, f"\n{only}\n", 1)
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
@@ -93,7 +93,7 @@ def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, caps
 def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     readme = (ROOT / "README.md").read_text()
     readme = readme.replace(
-        "sign-in, model roles, fallbacks, and the advisor",
+        "Discord, Slack, and",
         "<script>alert(1)</script> " + "long description " * 20,
     )
     root = tmp_path / "repo"
@@ -105,8 +105,8 @@ def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     manifest = Manifest()
     manifest.feed(page)
     assert "<script>alert(1)</script>" not in page
-    assert "<script>alert(1)</script>" in manifest.text["mast"]
-    assert len(manifest.text["mast"]) <= len("omp agents") + 52
+    assert "<script>alert(1)</script>" in manifest.text["antenna"]
+    assert len(manifest.text["antenna"]) <= len("Chat clients") + 52
     assert len(manifest.links) == len(manifest.spots)
 
 
