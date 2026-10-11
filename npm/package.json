@@ -1,7 +1,7 @@
 {
   "name": "crewship",
   "version": "0.4.0",
-  "description": "Orchestrate hundreds of agents effortlessly - hardware is the limit.",
+  "description": "Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.",
   "license": "FSL-1.1-ALv2",
   "homepage": "https://github.com/i098/Crewship#readme",
   "repository": {
