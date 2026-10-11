@@ -572,19 +572,60 @@ const originalRows = rows, originalCellH = cellH;
 const canvasSize = [canvas.width, canvas.height];
 for (let i = 0; i < 100; i++) adaptResolution(40, false);
 measure();
-assert(rows < originalRows && cellH > originalCellH, 'slow exterior rendering must reduce the ray grid');
+assert(fields && !shadows, 'slow exterior rendering must switch to fields and drop shadows');
+assert(rows === originalRows && cellH === originalCellH, 'slow exterior rendering must keep the zoomed-out glyph size while walking');
 assert.deepEqual([canvas.width, canvas.height], canvasSize, 'adaptive detail must not grow the canvas memory');
-const coarseCellH = cellH;
 for (let i = 0; i < 100; i++) adaptResolution(1, false);
-measure();
-assert(cellH < coarseCellH, 'fast exterior rendering must restore detail');
-const restoredCellH = cellH;
+assert(!fields, 'fast exterior rendering must return to full rows');
 refreshMs = 1000 / 60;
 paintedLastFrame = true;
 const late = roomFrameLate(1000 / 30);
 assert(late, 'missed exterior frames must count even when render CPU time is low');
 for (let i = 0; i < 21; i++) adaptResolution(1, late);
+assert(fields, 'missed exterior frames must switch to fields');
+"""
+    )
+
+
+def test_touch_outdoor_glyphs_grow_at_most_one_and_a_half_times_when_fields_and_shadows_are_not_enough():
+    _run_ship_scene(
+        r"""
+const slowFrames = () => { for (let i = 0; i < 400; i++) adaptResolution(40, false); measure(); };
+const fastFrames = () => { for (let i = 0; i < 2000; i++) adaptResolution(1, false); measure(); };
+const base = cellH;
+// A desktop never grows glyphs outdoors, however slow the frames are.
+slowFrames();
+assert(fields && !shadows && scale === 1 && cellH === base, 'a desktop must keep its outdoor glyph size');
+fastFrames();
+// A touch device grows only after fields and shadows are already off, and never past 1.5.
+touchFirst.matches = true;
+fields = true; shadows = false; scale = 1; slow = fast = 0;
+slowFrames();
+assert(scale === 1.5 && cellH > base && cellH <= base * 1.5 + 1, 'slow touch frames must grow outdoor glyphs to 1.5 and no further');
+fastFrames();
+assert(scale === 1 && !fields && cellH === base, 'fast touch frames must shrink glyphs back to the base size');
+// Fields and shadows come first.
+fields = false; shadows = true; slow = 0;
+for (let i = 0; i < 21; i++) adaptResolution(40, false);
+assert(fields && shadows && scale === 1, 'fields must come before glyph growth');
+// Leaving a room on a phone must not keep an outdoor scale above 1.5.
+touchFirst.matches = true; interior = HOUSE; scale = 3; measure();
+const inRoom = cellH;
+interior = null; measure();
+assert(cellH <= base * 1.5 + 1 && cellH < inRoom, 'outdoor glyphs on a touch device must clamp to 1.5');
+// A room still grows to 3, on any device.
+touchFirst.matches = false; interior = HOUSE; scale = 1; fields = false; shadows = false; slow = 0;
+slowFrames();
+assert.equal(scale, 3);
+crossInto(null, {x: -5, z: 20.6, yaw: 0});
 measure();
-assert(cellH > restoredCellH, 'missed exterior frames must reduce detail');
+assert(scale === 1 && cellH === base, 'leaving a grown room must start outdoors at the base glyph size');
+crossInto(HOUSE, {x: 0, z: 0.8, yaw: 0});
+measure();
+assert(scale === 1 && cellH < inRoom, 'entering a room must start at the base glyph size');
+touchFirst.matches = true; interior = null; scale = 3; fields = true; shadows = false;
+for (let i = 0; i < 2000; i++) adaptResolution(1, false);
+assert.equal(scale, 1, 'fast frames must unwind a leftover scale outdoors');
+touchFirst.matches = false;
 """
     )

@@ -6,7 +6,7 @@ It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
-The cell count is the cost of a frame, so the page drops shadow rays and then grows the glyphs, up to 3 times, to keep frames short; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
+The cell count is the cost of a frame, so the page casts every other row, then drops shadow rays, then grows the glyphs (up to 3 times in a room, 1.5 times outdoors on a touch device, never outdoors on a desktop), to keep frames short; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
 
 Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
@@ -203,7 +203,7 @@ It includes 320×568 phones in both orientations and landscape heights of 256 an
 The geometry fixtures use fixed normal and coarse grids, independent of host rendering speed.
 The Python checks exercise adaptive detail with controlled render costs and painting delays in the exterior, house, cabin, and gun deck.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
-On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks the canvas DPR limit.
+On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks that the canvas draws at the display pixel ratio.
 It also taps six pixels above and below each stacked link center to check the separate hit regions.
 It also checks feature-link focus with the full map open and an arrival selection pending.
 It fails if rendering stalls.
