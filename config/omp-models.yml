@@ -1,6 +1,6 @@
 providers:
   openai-codex:
-    # See README.md#default-config for context windows and the effective limit.
+    # See docs/default-config.md for context windows and the effective limit.
     modelOverrides:
       gpt-6-astra:
         contextWindow: 272000

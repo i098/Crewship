@@ -61,10 +61,13 @@ def switches(node=SCHEMA, path=()):
         yield from switches(sub, here)
 
 
-def section(summary):
-    text = (ROOT / "README.md").read_text()
-    body = text.split(f"<summary><b>{summary}</b></summary>", 1)[1].split("</details>", 1)[0]
-    return [line for line in body.splitlines() if line.startswith("- ")]
+def section(path):
+    return [line for line in path.read_text().splitlines() if line.startswith("- ")]
+
+
+def relative(link):
+    """A docs/ link as written inside docs/features.md, which lives beside the other docs."""
+    return link.removeprefix("docs/") if link.startswith("docs/") else f"../{link}"
 
 
 def ticks(names):
@@ -74,12 +77,12 @@ def ticks(names):
 def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_default():
     found = dict(switches())
     assert set(found) == FEATURES.keys() | EXCLUDED, "map the new switch in FEATURES or EXCLUDED"
-    lines = section("Show all features")
+    lines = section(ROOT / "docs/features.md")
     text = (ROOT / "README.md").read_text()
-    highlights = text.split("## Features", 1)[1].split("<details>", 1)[0]
+    highlights = text.split("## Features", 1)[1].split("\n## ", 1)[0]
     for path, link in FEATURES.items():
         assert (ROOT / link.split("#")[0]).is_file(), link
-        matches = [line for line in lines if f"]({link})" in line]
+        matches = [line for line in lines if f"]({relative(link)})" in line]
         if f"]({link})" in highlights:
             assert not matches, f"{path}: {link} is a highlight and must not repeat in the list"
             continue
@@ -95,7 +98,10 @@ def test_default_config_lists_the_current_defaults():
         for path, off in switches()
         if off and ".profiles." not in path and path not in EXCLUDED
     ]
-    lines = {line.split(":**")[0].removeprefix("- **"): line for line in section("Default config")}
+    lines = {
+        line.split(":**")[0].removeprefix("- **"): line
+        for line in section(ROOT / "docs/default-config.md")
+    }
 
     on = [name for name, enabled in profiles.items() if enabled]
     assert lines["Profiles on by default"].endswith(ticks(on))

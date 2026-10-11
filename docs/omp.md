@@ -16,7 +16,7 @@ With the `agents` profile on, `./ship.sh launch`:
    Normal apply fails if that parser is unavailable.
    When the merge changes the configuration or creates `models.yml`, it writes JSON, a YAML 1.2 subset, to preserve scalar types.
    It leaves the other source files unchanged.
-   See [Default config](../README.md#default-config) for the Codex context windows.
+   See [Default config](default-config.md) for the Codex context windows.
    omp limits the effective window to the provider's supported input window.
    The config seed enables `extendedContext: true`; existing hosts must enable it in their own config.
 3. Installs the extension `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`, which feeds the Herdr Agent sidebar the session topic, the pane's short name, and the pull request line (pull request, issue and diff size). Every apply rewrites it. See [Herdr sidebar](herdr.md).
@@ -43,7 +43,7 @@ No credentials are installed. You sign in on each host.
    omp
    ```
 
-2. Sign in to each provider you use in `modelRoles` or the [crewmate and gate tiers](../README.md#default-config).
+2. Sign in to each provider you use in `modelRoles` or the [crewmate and gate tiers](default-config.md).
    For Anthropic:
 
    ```text
@@ -182,7 +182,7 @@ When a new no-mistakes release changes the adapter, re-prove the wrapper against
 Select a gate tier for each run with `no-mistakes axi run --model <id> --effort <level>`.
 Without these options, the verified Pi configuration uses the ordinary tier.
 
-See [Default config](../README.md#default-config) for the gate tiers and their model and effort choices.
+See [Default config](default-config.md) for the gate tiers and their model and effort choices.
 
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
