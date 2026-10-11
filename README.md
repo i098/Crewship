@@ -84,17 +84,10 @@ Crewship makes it super easy to start using agents in the cloud.
 
 </details>
 
-After the installer finishes, paste this into your coding agent or `omp` on the new machine. It walks you through the rest ([omp sign-in](docs/omp.md#sign-in), [install layout](docs/install.md)):
+After the installer finishes, paste this into your coding agent or `omp` on the new machine. It does the rest with you ([SETUP.md](SETUP.md)):
 
 ```text
-Finish setting up Crewship on this machine.
-Work in ~/Crewship, run each step yourself, and ask me when you need a choice.
-1. Run `gh auth login` and help me sign in to GitHub.
-2. Start `omp` and help me sign in with `/login` (docs/omp.md#sign-in).
-3. Run `./ship.sh dock`, then open .local/host.yml and ask me which profiles to turn on.
-4. Run `./ship.sh inspect`, then `./ship.sh chart`, and show me the preview.
-5. Run `./ship.sh launch`. If omp was not signed in before the first launch, run it again.
-6. Run `./ship.sh survey` and tell me what passed and what failed.
+Set up Crewship on this machine by following https://raw.githubusercontent.com/i098/Crewship/main/SETUP.md
 ```
 
 ## How it works
@@ -159,7 +152,7 @@ pnpm dlx crewship
 
 The installer downloads and verifies a release artifact; there is no git clone. Run it again to update, and see [Install, update and migrate](docs/install.md) for the layout and for moving an older git install.
 
-Full guide: [crewship.si](https://crewship.si).
+Full guide: [GitHub wiki](https://github.com/i098/Crewship/wiki).
 
 ## More docs
 
