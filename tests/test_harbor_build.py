@@ -78,7 +78,7 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
 def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, capsys):
     readme = (ROOT / "README.md").read_text()
     mapped = [row for row in build.features(readme) if row[1] in build.SCENE]
-    section = readme.split("<summary><b>Show all features</b></summary>", 1)[1].split("</details>", 1)[0]
+    section = readme.split("\n## Features\n", 1)[1].split("</details>", 1)[0]
     only = "\n".join(f"- [{title}]({link}): {desc}" for title, link, desc in mapped)
     readme = readme.replace(section, f"\n{only}\n", 1)
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]

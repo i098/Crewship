@@ -155,7 +155,7 @@ To update a patch, edit its file in a pull request. To drop a patch, delete its 
 
 ## Assumed on the host
 
-The recipe never installs these. The base requirements (Ubuntu, sudo, Python, `git`, `gh`) are in the [Quick start](../README.md#quick-start). Notes on those:
+The recipe never installs these. The base requirements (Ubuntu, sudo, Python, `git`, `gh`) are in the [Working on Crewship itself](../CONTRIBUTING.md#working-on-crewship-itself). Notes on those:
 
 - `onboard.sh` refuses to run without Python 3.12+.
 - The recipe installs the latest gh later, under `agents`; the Quick start needs an authenticated `gh` before that.
