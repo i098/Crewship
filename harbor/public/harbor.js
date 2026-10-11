@@ -1352,8 +1352,8 @@ function castRoom(c, i, odd, dx, dy, dz) {
   else if (interior === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
-// Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests. Like the rest
-// of the gun deck, it holds still between repaints.
+// Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests.
+// The wave pattern stays fixed in room coordinates while the camera sways.
 function portSea(c, dx, dy, dz) {
   const t = cam.y / -dy, x = cam.x + dx * t, z = cam.z + dz * t;
   const wave = Math.sin(x * 1.3 + z * 0.4) + 0.6 * Math.sin(z * 1.9 - x * 0.7) + 0.4 * Math.sin(x * 7 + z * 3);
