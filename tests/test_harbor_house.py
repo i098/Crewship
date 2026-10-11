@@ -29,7 +29,8 @@ assert.equal(blocked(-5, 20.8, 1.2), true);  // the old wall still blocks
 assert.equal(blocked(-0.7, 23, 1.2), false); // side approach
 assert.equal(blocked(-0.8, 23, 1.2), true);
 """
-    subprocess.run(["node", "-e", world + check], check=True, timeout=10)
+    # The world section with the paintings' textures nears the 128 KiB limit for one argument, so it goes in on stdin.
+    subprocess.run(["node", "-"], input=world + check, text=True, check=True, timeout=10)
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
@@ -79,17 +80,16 @@ for (const s of world.filter(s => s.anchor === false)) {
   }
 }
 """
+    # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
     subprocess.run(
-        [
-            "node",
-            "-e",
-            "const spots = {office: {}}; const touchFirst = {matches: false};\n"
-            + scene
-            + shading
-            + put
-            + nearby
-            + check,
-        ],
+        ["node", "-"],
+        input="const spots = {office: {}}; const touchFirst = {matches: false};\n"
+        + scene
+        + shading
+        + put
+        + nearby
+        + check,
+        text=True,
         check=True,
         timeout=10,
     )
