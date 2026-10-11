@@ -98,6 +98,7 @@ def test_changed_paths(tmp_path, old, new, expected):
     (("imessage/bridge.ts", "ansible/site.yml"), "all"),
     (("imessage/bridge.ts", "pyproject.toml"), "all"),
     (("imessage/bridge.ts", ".github/workflows/ci.yml"), "all"),
+    (("imessage/bridge.ts", "harbor/public/harbor.js"), "all"),
     ("imessage-lookalike/bridge.ts", "all"),
     ("docs/imessage.md", "all"),
 ])

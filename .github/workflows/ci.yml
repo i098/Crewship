@@ -64,7 +64,8 @@ jobs:
             while IFS= read -r -d '' path; do
               case "$path" in
                 skills/*|rules/*|config/*) code=true scope=all; break ;;
-                README*|docs/*|changelog.d/*|harbor/*|*.md) ;;
+                README*|docs/*|changelog.d/*|*.md) ;;
+                harbor/*) scope=all ;;
                 # Only the iMessage bridge reads imessage/; the Python tests that cover it are
                 # tests/test_imessage.py and tests/test_bluebubbles_relay.py.
                 imessage/*) code=true ;;
