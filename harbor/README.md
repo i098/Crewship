@@ -53,6 +53,8 @@ The sheets stay taut to the moving sail corners.
 The black flag shows a pale skull and crossbones and has a wavy fly edge; it streams with the masthead pennants in the same wind.
 With reduced motion, the sails stay full but do not move.
 The moored ship sways gently with the wind, under 2 degrees of roll, combining smooth cycles of about 8 and 11 seconds.
+The cabin and gun deck share the hull's roll and a pitch under 1 degree; their hanging lanterns swing slightly.
+Both ship rooms repaint while swaying, even when the player stands still.
 With reduced motion, the ship stays still.
 The sails keep a pale canvas tone at night.
 Outboard lanterns make the gun ports visible.

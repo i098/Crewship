@@ -31,7 +31,7 @@
   They check the depth buffer instead of ray intersections.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
   The sea is a height field of travelling waves, ray marched per cell; the small boats ride it.
-  See the <a href="https://github.com/i098/Crewship/blob/main/harbor/README.md">harbor README</a> for the moored ship's motion.
+  The moored ship follows a gentle, slow sway driven by the wind.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
@@ -95,8 +95,9 @@
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
-  A room redraws only after movement, looking, resizing, or another change that requires a new frame.
-  Reduced motion also stops exterior animation.</li>
+  The house redraws only after movement, looking, resizing, or another change that requires a new frame.
+  The cabin and gun deck also redraw while swaying with the hull.
+  Reduced motion stops exterior animation, room sway, and lantern motion.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
   Each intro frame ends with a black canvas fill at opacity <code>1 - progress * progress</code>.
