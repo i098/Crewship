@@ -1,6 +1,6 @@
-<div align="center">
+<h1 align="center">🚢 Crewship</h1>
 
-# 🚢 Crewship
+<div align="center">
 
 **This makes it super easy to start using agents in the cloud, enjoy!**
 
