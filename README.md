@@ -27,27 +27,20 @@ Crewship makes it super easy to start using agents in the cloud.
 - **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
 - **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
 - **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
-- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) in the terminal.
+- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) in the terminal, and [iMessage](docs/imessage.md) through Photon or a BlueBubbles relay on your own Mac.
 - **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
 - **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 <details>
 <summary><b>Show all features</b></summary>
 
-- [Herdr workspace](docs/herdr.md): a sidebar of spaces and agents, with live status for each lane
 - [omp agents](docs/omp.md): sign-in, model roles, fallbacks, and the advisor
-- [Fleet guards](docs/fleet-guards.md): Docker guard, dev-server reaper, storage guard, spawn memory floor (opt-in)
 - [Shared Postgres](docs/shared-postgres.md): one container, per-project databases and worktree connection strings (opt-in)
-- [Browser ladder](docs/fleet-guards.md#browser-ladder): Obscura, Chrome, and noVNC tiers for agent browsers (opt-in)
 - [Capacity and auto pruners](docs/capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](docs/configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)
 - [Self-hosted CI pool](docs/ci-pool.md): GitHub Actions runners, one job per fresh container (opt-in)
-- [Crew board](docs/board.md): host-local message board for agents on one host (opt-in)
-- [Chat clients](docs/chat.md): Concord (Discord) and slk (Slack) in the terminal
 - [GitHub board](docs/github-board.md): agent work as issues on a Project board, and a shared message board (opt-in)
-- [iMessage bridge](docs/imessage.md): text Firstmate from your phone (opt-in)
 - [Host-move checklist](docs/configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)
-- [Shared credentials](docs/secrets.md): `super.env` in Cloudflare Secrets Store
 - [Google Workspace CLI](docs/google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](docs/dependencies.md): every tool, package, and image the recipe installs
@@ -55,7 +48,6 @@ Crewship makes it super easy to start using agents in the cloud.
 - [Migration and recovery](docs/recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](docs/recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
 - [Tailscale](docs/security.md#remote-access): the Tailscale daemon for remote access (opt-in)
-- [SSH to a Mac](docs/security.md#ssh-to-a-mac): `ssh mac` from the host to your Mac (opt-in)
 - [Agent host move](docs/agent-host-move.md): move the agents to a new host with parity checks
 - [Security](docs/security.md): credential handling and remote access
 </details>
