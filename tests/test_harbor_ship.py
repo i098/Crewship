@@ -565,31 +565,46 @@ assert(!paintedLastFrame, 'the house must remain idle');
     )
 
 
-def test_exterior_adapts_detail_to_slow_rendering_and_missed_frames():
+def test_only_phones_trade_detail_and_never_past_one_and_a_half():
     _run_ship_scene(
         r"""
-const originalRows = rows, originalCellH = cellH;
-const canvasSize = [canvas.width, canvas.height];
-for (let i = 0; i < 100; i++) adaptResolution(40, false);
-measure();
-assert(rows === originalRows && shadows, 'a desktop must keep full detail on slow frames');
+const slowFrames = () => { for (let i = 0; i < 400; i++) adaptResolution(40, false); measure(); };
+const fastFrames = () => { for (let i = 0; i < 2000; i++) adaptResolution(1, false); measure(); };
+const base = cellH, baseRows = rows, canvasSize = [canvas.width, canvas.height];
+// A desktop keeps every cell and every shadow, outdoors and in rooms, however slow its frames are.
+for (const room of [null, HOUSE]) {
+  interior = room; shadows = true; scale = 1;
+  slowFrames();
+  assert(shadows && scale === 1 && cellH === base, 'a desktop must keep full detail on slow frames');
+  refreshMs = 1000 / 60; paintedLastFrame = true;
+  for (let i = 0; i < 21; i++) adaptResolution(1, roomFrameLate(1000 / 30));
+  assert(shadows && scale === 1, 'missed desktop frames must not reduce detail');
+}
+interior = null;
+// A phone turns shadows off first, then grows glyphs up to COARSEST and no further, in any scene.
 touchFirst.matches = true;
-for (let i = 0; i < 100; i++) adaptResolution(40, false);
-measure();
-assert(rows < originalRows && cellH > originalCellH, 'slow exterior rendering on a phone must reduce the ray grid');
-assert(cellH <= originalCellH * COARSEST + 1e-9, 'glyphs must never grow past COARSEST');
-assert.deepEqual([canvas.width, canvas.height], canvasSize, 'adaptive detail must not grow the canvas memory');
-const coarseCellH = cellH;
-for (let i = 0; i < 100; i++) adaptResolution(1, false);
-measure();
-assert(cellH < coarseCellH, 'fast exterior rendering must restore detail');
-const restoredCellH = cellH;
-refreshMs = 1000 / 60;
-paintedLastFrame = true;
+for (const room of [null, HOUSE]) {
+  interior = room; shadows = true; scale = 1; slow = fast = 0;
+  for (let i = 0; i < 21; i++) adaptResolution(40, false);
+  assert(!shadows && scale === 1, 'shadows must go off before glyphs grow');
+  slowFrames();
+  assert(scale === COARSEST && cellH > base && cellH <= base * COARSEST + 1, 'slow phone frames must grow glyphs to COARSEST and no further');
+  assert.deepEqual([canvas.width, canvas.height], canvasSize, 'adaptive detail must not grow the canvas memory');
+  fastFrames();
+  assert(scale === 1 && cellH === base && rows === baseRows, 'fast phone frames must shrink glyphs back to the base size');
+}
+interior = null;
+refreshMs = 1000 / 60; paintedLastFrame = true;
 const late = roomFrameLate(1000 / 30);
-assert(late, 'missed exterior frames must count even when render CPU time is low');
+assert(late, 'missed phone frames must count even when render CPU time is low');
+shadows = false; slow = 0;
 for (let i = 0; i < 21; i++) adaptResolution(1, late);
+assert(scale > 1, 'missed phone frames must reduce detail');
+// Doors start each scene at the base glyph size.
+interior = HOUSE; scale = COARSEST; measure();
+crossInto(null, {x: -5, z: 20.6, yaw: 0});
 measure();
-assert(cellH > restoredCellH, 'missed exterior frames must reduce detail');
+assert(scale === 1 && cellH === base, 'leaving a grown room must start outdoors at the base glyph size');
+touchFirst.matches = false;
 """
     )

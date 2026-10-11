@@ -460,3 +460,70 @@ for (const [R, p, [nx, nz]] of panes) {
 }
 """
     run_rendered(check, 60)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+def test_glyph_grid_zoom_and_cell_cap():
+    source = (ROOT / "harbor/public/harbor.js").read_text()
+    setup = r"""
+const assert = require('node:assert/strict');
+// A glyph is 0.6 times as wide as its font size.
+const context = {
+  font: '10px mono', setTransform() {}, fillRect() {},
+  measureText() { return {width: parseFloat(this.font) * 0.6}; }
+};
+const element = {
+  hidden: false, classList: {add() {}, remove() {}, toggle() {}}, focus() {}, addEventListener() {},
+  firstElementChild: {style: {}}, clientWidth: 1200, clientHeight: 800,
+  style: {setProperty() {}}, replaceChildren() {}, getContext: () => context
+};
+const document = {getElementById: () => element, querySelectorAll: () => [],
+  documentElement: {}, addEventListener() {}, fonts: {load: () => Promise.resolve(), ready: Promise.resolve()}};
+const matchMedia = () => ({matches: false, addEventListener() {}});
+const getComputedStyle = () => ({getPropertyValue: () => 'monospace'});
+let devicePixelRatio = 1, innerWidth = 1200;
+const performance = {now: () => 0};
+const IntersectionObserver = class {observe() {}}, ResizeObserver = class {observe() {}};
+function requestAnimationFrame() {}
+function addEventListener() {}
+function removeEventListener() {}
+const window = {};
+"""
+    check = r"""
+finishIntro();
+interior = null;
+const size = (w, h, ratio) => {
+  element.clientWidth = innerWidth = w; element.clientHeight = h; devicePixelRatio = ratio;
+  measure();
+};
+const whole = v => Math.abs(v - Math.round(v)) < 1e-9;
+const oldGlyph = w => Math.max(6.5, Math.min(11, w * 0.0068));
+for (const [w, h, ratio] of [[1440, 900, 2], [1920, 1080, 1], [2560, 1440, 1], [1280, 720, 1.5]]) {
+  size(w, h, ratio);
+  assert(Math.abs(cellH - 0.9 * oldGlyph(w)) <= 0.5 / ratio + 1e-9, `${w}x${h}: glyph height is 0.9 of the old size`);
+  assert(whole(cellW * ratio) && whole(cellH * ratio), `${w}x${h}: cells are whole device pixels`);
+  assert.equal(canvas.width, w * ratio);
+}
+size(1920, 1080, 1);
+const smallerCells = cols * rows;
+size(3840, 2160, 1);
+assert(cols * rows <= 51000, 'a 4K stage is capped near 51000 cells');
+assert(cellH > 0.9 * oldGlyph(3840) + 1, 'a 4K stage gets taller glyphs');
+assert(cols * rows > smallerCells * 0.9, 'a 4K stage is not coarser than needed');
+assert(whole(cellW) && whole(cellH));
+size(390, 844, 3);
+assert.equal(dpr, 3, 'a phone keeps its pixel ratio');
+assert.equal(canvas.width, 1170);
+"""
+    subprocess.run(
+        ["node", "-"],
+        input="(async () => {\n"
+        + setup
+        + source
+        + "\nawait new Promise(setImmediate);\n"
+        + check
+        + "\n})().catch(error => { console.error(error); process.exit(1); });",
+        text=True,
+        check=True,
+        timeout=20,
+    )

@@ -1757,7 +1757,7 @@ function crossInto(next, place) {
   interior = next;
   Object.assign(me, place, { pitch: 0 });
   probeMs = -1;
-  slow = fast = 0;
+  slow = fast = 0; scale = 1;
   layoutDirty = true;
   doorInputHeld = true;
 
@@ -2636,6 +2636,8 @@ for (const a of Object.values(anchors)) {
   };
 }
 
+const ZOOM = 0.9; // glyph size relative to the old default, like pressing Cmd-minus once: the same view in 1.23 times the cells
+const MAX_CELLS = 76000, FULL_AREA = 2560 * 1440; // rays a frame allowed up to a 2560 by 1440 stage
 let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 0, padY = 0, aspect = 1, viewW = 0, viewH = 0;
 // The grid cell under the pointer while the mouse is free, or -1.
 let hover = -1;
@@ -2661,24 +2663,29 @@ for (const [k, c] of Object.entries(BASE)) {
 const CLASS = {};
 for (const k of Object.keys(BASE)) CLASS[k] = Array.from({ length: 16 }, (_, i) => k + (i > 7 ? "w" : "") + (i & 7));
 function measure() {
-  // Phones and tablets draw at most 2 device pixels per CSS pixel: a 3x canvas costs more memory than it shows.
-  // Cap the backing-store area, not each dimension; large high-DPR windows otherwise exceed browser canvas limits.
+  // Draw at the display's own pixel ratio so the browser never rescales the canvas; only the backing-store area is capped,
+  // because large high-DPR windows otherwise exceed browser canvas limits.
   const w = stage.clientWidth, h = stage.clientHeight;
-  dpr = Math.min(touchFirst.matches ? 2 : Infinity, devicePixelRatio || 1, Math.sqrt(4096 * 4096 / (w * h)));
+  dpr = Math.min(devicePixelRatio || 1, Math.sqrt(4096 * 4096 / (w * h)));
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale;
+  // The 0.9 zoom holds up to FULL_AREA; a bigger stage gets bigger glyphs so the cell cap falls with the square root of its
+  // area (about 51000 cells at 3840 by 2160). A cell is about twice as tall as wide.
+  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale);
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = BACKGROUND; ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-  ctx.font = `${px}px ${MONO}`;
   ctx.textBaseline = "top";
-  cellW = ctx.measureText("M").width; cellH = px;
+  // Whole device pixels per cell, so every glyph lands on the pixel grid: a fractional pitch smears thin strokes at small sizes.
+  ctx.font = `${px}px ${MONO}`;
+  const advance = ctx.measureText("M").width * dpr, across = Math.max(1, Math.round(advance));
+  ctx.font = `${px * across / advance}px ${MONO}`;
+  cellW = across / dpr; cellH = Math.max(1, Math.round(px * dpr)) / dpr;
   cols = Math.max(20, Math.floor(w / cellW));
   rows = Math.max(12, Math.floor(h / cellH));
-  padX = (w - cols * cellW) / 2; padY = (h - rows * cellH) / 2;
+  padX = Math.round((w - cols * cellW) / 2 * dpr) / dpr; padY = Math.round((h - rows * cellH) / 2 * dpr) / dpr;
   const style = getComputedStyle(stage);
   for (const edge of Object.keys(safe)) safe[edge] = parseFloat(style.getPropertyValue(`--safe-${edge}`)) || 0;
   signWidth = 0;

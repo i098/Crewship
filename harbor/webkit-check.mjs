@@ -137,7 +137,7 @@ window.harborCheck = {
       glyphs: window.signGlyphs,
       x: padX + signBox.i * cellW, y: padY + signBox.j * cellH,
       width: signBox.w * cellW, height: signBox.h * cellH,
-      cellH, dpr: canvas.width / stage.clientWidth,
+      cellH, dpr: canvas.width / stage.clientWidth, ratio: devicePixelRatio,
       safe: [safe.top, safe.right, safe.bottom, safe.left], screenWidth: stage.clientWidth, screenHeight: stage.clientHeight,
       pad: pad.offsetParent ? pad.getBoundingClientRect().toJSON() : null,
       map: mapBox ? { x: padX + mapBox.oi * cellW, y: padY + mapBox.oj * cellH,
@@ -290,7 +290,7 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
   // A sign has its title link; the docs board also lists a link per unmapped doc in its body.
   const docLinks = id ? await page.evaluate((id) => document.querySelectorAll(`#manifest li[data-spot="${id}"] a`).length, id) : 3;
   assert.equal(bounds.links.length, docLinks, `${id}: a sign link is missing`);
-  if (touch) assert(bounds.dpr <= 2, `${name}/${id}: touch canvas exceeds DPR 2`);
+  if (touch) assert(Math.abs(bounds.dpr - bounds.ratio) < 0.01, `${name}/${id}: the touch canvas must draw at the display pixel ratio, not be rescaled`);
   if (name === "iphone15pro" && !id) {
     // Title, description, one blank row, one link row, and two frame rows.
     assert(bounds.height <= 6 * bounds.cellH, `${name}: welcome sign has excess vertical spacing`);
