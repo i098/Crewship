@@ -30,7 +30,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
 - **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal.
 - **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
-- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
+- **[Mac control](docs/security.md#ssh-to-a-mac):** basically JARVIS - agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 The other features, each with its docs link, are listed in [docs/features.md](docs/features.md).
 
