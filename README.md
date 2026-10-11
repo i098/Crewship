@@ -2,7 +2,7 @@
 
 # 🚢 Crewship
 
-**Orchestrate hundreds of agents effortlessly - hardware is the limit.**
+**Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
@@ -19,6 +19,17 @@
 
 </div>
 
+## Highlights
+
+- **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent hands out tasks to many coding agents and watches their status files and inboxes. You steer one agent, not hundreds.
+- **[Custom Herdr sidebar](docs/herdr.md):** the sidebar lists each workspace and agent with its state, pull request, and CPU, RAM, and disk use. You see the whole fleet at a glance.
+- **[In-memory message board](docs/board.md):** the `crewboard` daemon lets agents on one host publish and subscribe to topics. History stays in memory and is never written to disk (opt-in).
+- **[Guards](docs/fleet-guards.md):** the host blocks `pkill` and `killall` in agent sessions, runs a [quality gate](docs/omp.md#quality-gate) at each turn end, and cleans up stray containers and idle dev servers. One agent cannot break another.
+- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** agents start with a light browser and move to full Chrome, or to a browser you can see over noVNC, only when needed. All tiers share one cookie jar (opt-in).
+- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) run in the terminal, each in its own Herdr tab. You talk with your team from the same host.
+- **[Credential management](docs/secrets.md):** one `super.env` file holds the fleet's credentials. A new host fetches it through a private Cloudflare Worker, so you do not copy keys by hand.
+- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` from the host to open links in your browser and to control Mac apps. Work on the server can reach your desktop (opt-in).
+
 ## Why Crewship
 
 - **Self-hosted AI coding agents:** one Ubuntu 24.04 or 26.04 machine runs Herdr, the Firstmate orchestrator, and the omp agent fleet. No cloud dependencies.
@@ -33,7 +44,6 @@
 
 - [Herdr workspace](docs/herdr.md): a sidebar of spaces and agents, with live status for each lane
 - [omp agents](docs/omp.md): sign-in, model roles, fallbacks, and the advisor
-- [Private skills](docs/omp.md#skills): host-only skills in `skills/private/` (opt-in)
 - [Fleet guards](docs/fleet-guards.md): Docker guard, dev-server reaper, storage guard, spawn memory floor (opt-in)
 - [Shared Postgres](docs/shared-postgres.md): one container, per-project databases and worktree connection strings (opt-in)
 - [Browser ladder](docs/fleet-guards.md#browser-ladder): Obscura, Chrome, and noVNC tiers for agent browsers (opt-in)
