@@ -25,8 +25,10 @@ on:
 permissions:
   contents: read
 
+# GitHub replaces a pending run in the same group, so pushes to main need
+# their own group (by SHA); pull requests keep per-ref cancelling.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:

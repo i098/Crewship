@@ -76,6 +76,8 @@ case $url in
   https://github.com/*/releases/latest) code=302; redirect=https://github.com/i098/Crewship/releases/tag/$(cat "$MIRROR/latest") ;;
   https://github.com/*/releases/download/*/*)
     if [ -f "$MIRROR/${url##*/}" ]; then cp "$MIRROR/${url##*/}" "$out"; else : >"$out"; code=404; fi ;;
+  https://github.com/*/archive/refs/tags/*.tar.gz)
+    if [ -f "$MIRROR/src-${url##*/}" ]; then cp "$MIRROR/src-${url##*/}" "$out"; else : >"$out"; code=404; fi ;;
   *) code=403; echo '{}' >"$out" ;;
 esac
 case $fmt in *redirect_url*) printf %s "$redirect" ;; *http_code*) printf %s "$code" ;; esac
@@ -110,12 +112,26 @@ class Release:
             git(self.repo, "commit", "-qm", tag)
             git(self.repo, "tag", tag)
             subprocess.run([BASH, str(ROOT / "scripts/build-release-artifact.sh"), tag, str(self.mirror)], cwd=self.repo, check=True)
+            # GitHub's source archive of the tag: a git archive whose header names the commit.
+            subprocess.run(
+                ["git", "archive", "--format=tar.gz", f"--prefix=Crewship-{tag[1:]}/", "-o", str(self.mirror / f"src-{tag}.tar.gz"), tag],
+                cwd=self.repo,
+                check=True,
+            )
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         for name, body in {"curl": CURL_SHIM, "apt-get": "#!/bin/sh\n", "dpkg-query": "#!/bin/sh\nprintf installed\n"}.items():
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
-        self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(self.home), "MIRROR": str(self.mirror)}
+        self.env = {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "HOME": str(self.home),
+            "MIRROR": str(self.mirror),
+            # git ls-remote of the GitHub URL reads the local repo, whose tags stand in for the release tags.
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{self.repo}.insteadOf",
+            "GIT_CONFIG_VALUE_0": "https://github.com/i098/Crewship",
+        }
 
     def install(self, latest, *args):
         (self.mirror / "latest").write_text(latest)
@@ -174,10 +190,31 @@ def test_bad_checksum_leaves_the_install_untouched(release):
     assert [p.name for p in release.releases.iterdir()] == ["v1.0.0"]
 
 
-def test_missing_artifact_says_to_retry_and_never_clones(release):
+def test_release_without_artifact_installs_the_verified_source_archive(release):
+    for name in ("crewship-v1.1.0.tar.gz", "crewship-v1.1.0.tar.gz.sha256"):
+        (release.mirror / name).unlink()
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert "has no install artifact; using GitHub's source archive" in result.stderr
+    assert release.crewship.resolve() == (release.releases / "v1.1.0").resolve()
+    assert (release.crewship / "VERSION").read_text() == "1.1.0"
+    assert not (release.crewship / ".git").exists()
+
+
+def test_source_archive_of_another_commit_is_refused(release):
+    (release.mirror / "crewship-v1.1.0.tar.gz").unlink()
+    # The v1.0.0 archive under the v1.1.0 name: a different commit than the tag's.
+    (release.mirror / "src-v1.1.0.tar.gz").write_bytes((release.mirror / "src-v1.0.0.tar.gz").read_bytes())
+    result = release.install("v1.1.0")
+    assert result.returncode != 0
+    assert "refusing to install" in result.stderr
+    assert not release.crewship.exists()
+
+
+def test_unknown_release_is_an_error_and_never_clones(release):
     result = release.install("v9.9.9")
     assert result.returncode != 0
-    assert "the release v9.9.9 has no install artifact yet; try again in a few minutes" in result.stderr
+    assert "no release v9.9.9" in result.stderr
     assert not release.crewship.exists()
 
 

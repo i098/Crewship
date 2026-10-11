@@ -184,7 +184,7 @@ Without these options, the verified Pi configuration uses the ordinary tier.
 
 See [Default config](../README.md#default-config) for the gate tiers and their model and effort choices.
 
-For a routine run, use `no-mistakes axi run --intent "..." --model openai-codex/gpt-6.1-sol --effort medium`.
+For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
 ## Skills
 
