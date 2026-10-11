@@ -60,10 +60,14 @@
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Clouds.</b> Three cloud layers, with bases at 260, 480 and 900 m, drift downwind; the nearer layers move faster as you walk.
-  Each cloud is a long band of rounded bumps on a flat base, drawn on a billboard that faces you, and haze shrinks distant clouds.
-  Bump edges that face the moon are pale, and so is the flat base when the moon is below it.
-  Cloud density picks glyphs from <code> .:-=+*#</code>; thick cloud hides the stars and the moon, and thin cloud dims the moon.
-  A buffer of 1° sky texels keeps the cloud density and rim of each direction.
+  Each layer is a sheet of fractal value noise, stretched along the wind, with its domain warped by more noise.
+  Cloud fades in above a noise threshold with a soft ramp, so patches thin out to clear sky and dips in the noise leave holes.
+  The ramp widens with distance, and haze hides each sheet beyond 4.5 times its height.
+  A few cumulus clumps with flat bases and lumpy tops drift with the lowest layer, on billboards that face you.
+  Cloud density picks glyphs from <code> .:~-=+*</code> in the dim colour of the empty sky; the star hash of each cell breaks bands of one glyph into grain.
+  Only edges where the cloud thins toward the moon are pale, and those nearest the moon are palest.
+  Thin cloud dims the stars and the moon, and thick cloud hides them.
+  A buffer of 1° sky texels keeps the cloud density and moon-side rim of each direction.
   Without reduced motion, a texel refreshes about ten times a second when a sky cell reads it.
   The elevation rows take turns to spread refresh work across frames.
   Turning reuses fresh texels but computes unseen or expired texels.

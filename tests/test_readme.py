@@ -27,7 +27,6 @@ FEATURES = {
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
     "crewship.mac_ssh": "docs/security.md#ssh-to-a-mac",
-    "crewship.skills": "docs/omp.md#skills",
     "crewship.imessage": "docs/imessage.md",
     "crewship.github_board": "docs/github-board.md",
     "crewship.board": "docs/board.md",
@@ -44,6 +43,8 @@ EXCLUDED = {
     "crewship.fleet.docker_guard",
     "crewship.browsers",
     "crewship.imessage.bluebubbles",
+    # Host-only skills: documented in docs/omp.md, not a README feature.
+    "crewship.skills",
 }
 
 
@@ -78,9 +79,14 @@ def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_defau
     found = dict(switches())
     assert set(found) == FEATURES.keys() | EXCLUDED, "map the new switch in FEATURES or EXCLUDED"
     lines = section("Show all features")
+    text = (ROOT / "README.md").read_text()
+    highlights = text.split("## Features", 1)[1].split("<details>", 1)[0]
     for path, link in FEATURES.items():
         assert (ROOT / link.split("#")[0]).is_file(), link
         matches = [line for line in lines if f"]({link})" in line]
+        if f"]({link})" in highlights:
+            assert not matches, f"{path}: {link} is a highlight and must not repeat in the list"
+            continue
         assert len(matches) == 1, f"{path}: one Features line must link {link}"
         assert matches[0].endswith(" (opt-in)") == found[path], matches[0]
 

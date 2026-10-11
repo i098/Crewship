@@ -27,7 +27,10 @@ Trees and palms bend and flutter in the scene's wind and stay still with reduced
 Broadleaf trunk feet block walking and map routes; their upper limbs, leaves, and palms do not.
 
 Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
-The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.
+Most of the cloud is thin streaks along the wind, with soft, broken edges and holes.
+A few cumulus clumps have lumpy tops and flat bases.
+The moon lights the cloud edges that face it.
+Thin cloud dims the moon and the stars, and thick cloud hides them.
 The layers are at different heights, so they move at different speeds when you walk.
 With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
