@@ -85,7 +85,7 @@ flowchart TB
     agents <-->|messages| issues
 ```
 
-The optional crew board keeps temporary host-local messages; the GitHub board reads backlog and status without changing supervision.
+The optional crew board keeps temporary host-local messages (see [how it is built](../crewboard/README.md)); the GitHub board reads backlog and status without changing supervision.
 
 ## Data boundaries
 
