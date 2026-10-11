@@ -38,13 +38,15 @@ Thin cloud dims the moon and the stars, and thick cloud hides them.
 The layers are at different heights, so they move at different speeds when you walk.
 With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
-Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
+Walk into the framed house door to enter a warm room with a lamp, table, and bed.
+The house windows open into the room: from inside you see the harbor through them, and from outside you see the lit room.
+The view through the house windows changes when you move or look around.
 A fireplace with a fire, a bookcase, chairs, an armchair, crates, a sea chest, potted plants, and a rug furnish the room.
 Four public-domain paintings hang on the walls in moulded frames with brass name plaques.
 The painting above the mantel is by Turner.
 See [CREDITS.md](../CREDITS.md#paintings) for the works, sources, and licences.
 See [art.py](art.py) for the texture conversion command and [how.html](public/how.html) for rendering details.
-The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
+The blue bed stands under a back window and faces the door; darker walls and floor keep the furniture, lamp, and windows clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.
 Release the movement keys and touch pad after a door crossing to move again.
@@ -55,7 +57,7 @@ Its gun ports, railings, figurehead, and warm lanterns follow the hull and deck.
 Walking bounds and the map use the hull's tapered stations; the gangway joins the deck to the dock.
 The stern castle is the cabin, with planked walls, framed windows, a dark strap-hinged door, a glowing wall lantern, and pale roof trim.
 Walk through the cabin door to enter a small furnished room.
-It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and starry windows.
+It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and the cabin's windows, which open both ways like the house windows.
 The cabin uses the house's door transition, collisions, and hidden map; the inside door returns you to the deck, facing the bow.
 A steep companionway ladder connects the main deck to the cabin roof: ten open pale treads between sloped stringers, with a thick pale handrail on posts on each side.
 The ship's wheel stands on a pedestal on the cabin roof, behind the top of the ladder.
@@ -84,7 +86,8 @@ The dark, tapered barrel runs from a rounded breech out through the port to a ri
 A rack of stacked round shot stands beside each gun.
 Dark cross-beams carry the deck planks overhead, and the floor planks show their seams.
 Lanterns hang between the beams beside the walkway and cast pools of dim warm light.
-The open ports show the moonlit sea.
+The open ports show the harbor outside, and from outside they show the lit gun deck.
+The far-shore town has no rooms, so its windows stay lit patterns.
 Walk into the ladder to climb back up beside the hatch, facing aft.
 Keyboard and touch movement share the house door's transition: release the movement keys and touch pad after a crossing to move again.
 The guns, shot racks, and main mast block walking, and the map stays hidden below deck.
