@@ -86,22 +86,6 @@ fn resolve_socket(explicit: Option<OsString>, runtime_dir: Option<OsString>, uid
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn path(explicit: Option<&str>, xdg: Option<&str>) -> PathBuf {
-        resolve_socket(explicit.map(Into::into), xdg.map(Into::into), 1234)
-    }
-
-    #[test]
-    fn default_override_and_missing_runtime_dir() {
-        assert_eq!(path(None, Some("/run/x")), PathBuf::from("/run/x/crewboard.sock"));
-        assert_eq!(path(Some("/tmp/a.sock"), Some("/run/x")), PathBuf::from("/tmp/a.sock"));
-        assert_eq!(path(None, None), PathBuf::from("/run/user/1234/crewboard.sock"));
-    }
-}
-
 /// Sends one request and returns the reply stream.
 fn request(req: Value) -> BufReader<UnixStream> {
     let path = socket_path();
@@ -219,5 +203,21 @@ fn main() {
         "topics" | "stat" if rest.is_empty() => println!("{}", next(&mut request(json!({"op": cmd}))).0),
         "-h" | "--help" | "help" => println!("{USAGE}"),
         _ => usage(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(explicit: Option<&str>, xdg: Option<&str>) -> PathBuf {
+        resolve_socket(explicit.map(Into::into), xdg.map(Into::into), 1234)
+    }
+
+    #[test]
+    fn default_override_and_missing_runtime_dir() {
+        assert_eq!(path(None, Some("/run/x")), PathBuf::from("/run/x/crewboard.sock"));
+        assert_eq!(path(Some("/tmp/a.sock"), Some("/run/x")), PathBuf::from("/tmp/a.sock"));
+        assert_eq!(path(None, None), PathBuf::from("/run/user/1234/crewboard.sock"));
     }
 }
