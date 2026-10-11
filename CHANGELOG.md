@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-11
+
+### Added
+
+- `npx crewship update` installs the newest release over a host, keeping its `.local/` files, and migrates a v0.4.0 host's tool links and removed `host.yml` keys first; the README says so ([#284](https://github.com/i098/Crewship/issues/284)) ([#284](https://github.com/i098/Crewship/issues/284)).
+- The crewship.si harbor plays positional ambient sound after the first click or tap: sea and surf, the fountain, wind in the trees, the ship's creaking timbers, fire in the rooms, and distant gulls, each fading with distance, with a speaker button that mutes it and remembers the choice ([#287](https://github.com/i098/Crewship/issues/287)).
+
+### Changed
+
+- The harbor island now rises into gentle, slope-shaded hills with curving dirt roads, and its grass, sand and roads blend without square patches ([#203](https://github.com/i098/Crewship/issues/203)).
+- The harbor ship's deck stairs are now a steep companionway ladder with thick handrails on posts, and the ship's wheel stands on the cabin roof with eight handled spokes, a hub, and a pedestal.
+  The upright wheel now runs across the ship, with its axle along the keel and its handles and hub cap pointing aft toward the helmsman.
+  Keyboard and touch movement now use short segments so slow frames do not skip the ladder treads.
+  The exterior now reduces glyph detail during slow rendering or missed frames to keep the stern scene responsive.
+  The CI checks now cover exterior and interior detail adaptation and use fixed grids for browser geometry checks ([#222](https://github.com/i098/Crewship/issues/222)).
+- CI runs the Python tests in parallel with pytest-xdist, splits the slow harbor scene test into six parts, overlaps the shared Postgres smoke with the tests, and runs only the iMessage tests, plus a short core, for a pull request that changes only `imessage/` ([#269](https://github.com/i098/Crewship/issues/269)).
+- README setup is one line to paste into your AI, and Opus 5.5 falls back to Fable 5.1 at medium thinking ([#274](https://github.com/i098/Crewship/issues/274)).
+- The harbor scene now starts zoomed out like Cmd-minus once and stays that way while you walk: glyphs are 0.9 times as tall up to 2560 by 1440 stages (larger stages get taller glyphs to cap the cell count) and drawn on whole device pixels, and a slow outdoor frame casts every other row instead of growing the glyphs (only a touch device whose fields and shadows are already off may grow them, up to 1.5 times, and they shrink back when frames are fast) ([#278](https://github.com/i098/Crewship/issues/278)).
+- The README puts How it works below Quick start, and its Show all features and Default config lists moved to docs/features.md and docs/default-config.md ([#280](https://github.com/i098/Crewship/issues/280)).
+- The daily sponsors workflow and its script are removed, because the README has no Sponsors section for them to fill ([#282](https://github.com/i098/Crewship/issues/282)) ([#282](https://github.com/i098/Crewship/issues/282)).
+- The harbor's house windows, ship cabin windows and gun ports are now openings you see through both ways: the outside from inside each room, and the lit room from outside ([#291](https://github.com/i098/Crewship/issues/291)).
+- The README and the crewship.si landing page link each feature and section to its docs page again, and the Architecture page is linked from both ([#293](https://github.com/i098/Crewship/issues/293)) ([#293](https://github.com/i098/Crewship/issues/293)).
+- README tagline is now "This makes it super easy to start using agents in the cloud, enjoy!", and the landing page and npm package descriptions match it ([#296](https://github.com/i098/Crewship/issues/296)).
+- The `pr-preview` skill renders every board in GitHub dark mode only ([#304](https://github.com/i098/Crewship/issues/304)).
+- The harbor's how page now leads with a plain explanation that the scene is drawn natively by a ray caster on a 2D canvas, with a step diagram, the shapes used and measured frame costs ([#311](https://github.com/i098/Crewship/issues/311)).
+- On a desktop, the harbor on crewship.si now casts and draws its rows in web workers on the other cores, so slow frames never cost rows, shadows or glyph size; only a slow phone turns shadows off and then grows glyphs, never past 1.5 times ([#314](https://github.com/i098/Crewship/issues/314)).
+- Sync the recipe with the current host: the home model runs Opus 5.5 at high thinking, OpenAI requests use the priority tier, ordinary crew work goes to Sonnet 5.5 first and to Sol 6.1 only when the Anthropic quota is exhausted, and secondmates run Opus 5.5 at medium thinking ([#334](https://github.com/i098/Crewship/issues/334)).
+
+### Fixed
+
+- The night clouds now use soft, wind-stretched noise with holes, tapered cumulus sides, cached moon-side light, and dim stars through thin cloud ([#223](https://github.com/i098/Crewship/issues/223)).
+- The installer installs GitHub's source archive of the tag, after checking its commit against the tag, when a release has no install artifact; releases are immutable, so the release steps now attach the artifact to the draft before publishing ([#265](https://github.com/i098/Crewship/issues/265)).
+- Pushes to main no longer cancel each other's CI runs, so the README badge reflects the latest run ([#276](https://github.com/i098/Crewship/issues/276)).
+- The pre-rename migration no longer stops `crewship update` on a v0.4.0 host: the share directory the installer already created (releases, tools, lock file) no longer counts as a clash, and the old directory is merged into it ([#284](https://github.com/i098/Crewship/issues/284)) ([#284](https://github.com/i098/Crewship/issues/284)).
+- Fence posts and signs in the harbor scene keep level ground under them again: trees no longer build the ground-seating grid before the rest of the scenery stands ([#288](https://github.com/i098/Crewship/issues/288)).
+- The harbor page footer keeps its Architecture link, and the code-quality gate no longer reports a coupling regression for it ([#298](https://github.com/i098/Crewship/issues/298)).
+- The harbor page now gives every scene object a doc sign, so the iPhone WebKit check passes again, and a sign with no entry no longer throws ([#300](https://github.com/i098/Crewship/issues/300)).
+- Inside the ship's cabin on crewship.si, the ambient sound now comes from the right place: the listener and the cabin lantern use the world position and heading, not the room's own turned frame ([#322](https://github.com/i098/Crewship/issues/322)).
+- CI no longer starts two runs for one PR head when a label is added; the changelog check now runs as its own workflow ([#330](https://github.com/i098/Crewship/issues/330)).
+
 ## [0.4.1] - 2026-10-11
 
 ### Added
@@ -197,7 +237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/i098/Crewship/releases/tag/v0.4.2
 [0.4.1]: https://github.com/i098/Crewship/releases/tag/v0.4.1
 [0.4.0]: https://github.com/i098/Crewship/releases/tag/v0.4.0
 [0.3.0]: https://github.com/i098/Crewship/releases/tag/v0.3.0
