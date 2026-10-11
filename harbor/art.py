@@ -6,9 +6,9 @@ Run it from the repository root; it needs the network and Pillow, which the buil
 
 Each work comes from Wikimedia Commons (CREDITS.md names the sources). The script scales it to
 three texture sizes, then rewrites the ART block of harbor.js. Each texel becomes a glyph from
-ART_GLYPHS in one of a few colours the room can draw: a work's pixels are grouped into colours,
-each group takes the drawable colour nearest in hue, and each texel takes the glyph whose ink, in
-that colour on the night background, comes nearest the pixel's lightness.
+ART_GLYPHS in one of a few colours the room can draw.
+The script groups pixels by colour and selects each group's drawable colour using both hue and glyph lightness.
+Each texel then takes the glyph whose ink on the night background comes nearest the pixel's lightness.
 """
 
 import io
