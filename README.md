@@ -54,28 +54,48 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 ## How it works
 
+For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host:
+
 ```mermaid
-flowchart TD
-    box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]
-    boot --> init["./ship.sh dock: writes .local/host.yml"]
-    init --> check["./ship.sh inspect, then chart"]
-    check --> apply["./ship.sh launch"]
-    lock["toolchain: latest releases, checksum-verified (omp plugins excepted)"] --> apply
-    apply --> profiles["Ansible profiles"]
-    subgraph host["Finished host"]
-        herdr["Herdr workspace"]
-        fm["Firstmate orchestrator"]
-        agents["omp agents"]
-        guards["Fleet guards"]
-        docker["Docker engine"]
-        chat["Concord and slk chat clients"]
+flowchart LR
+    you["You: terminal over SSH<br/>(Concord and slk in tabs beside it)"]
+    phone["You: iMessage"]
+    subgraph host["Crewship host: Herdr panes"]
+        fm["Firstmate"]
+        sm["Second mate (optional)"]
+        files["Status files and inboxes"]
+        board["Crew board (optional)"]
+        bridge["fm-imessage bridge (optional)"]
+        secrets["~/super.env<br/>(from Cloudflare Secrets Store)"]
+        guards["Fleet guards (optional)"]
+        subgraph crew["Crewmate per task"]
+            omp["omp agent in<br/>treehouse worktree"]
+            gate["Quality gate,<br/>no-pattern-kill guard"]
+            pr["GitHub pull request"]
+        end
     end
-    profiles --> herdr
-    profiles --> fm
-    profiles --> agents
-    profiles --> guards
-    profiles --> docker
-    profiles --> chat
+    you --> fm
+    phone <--> bridge
+    secrets --> bridge
+    bridge -->|inbox note| files
+    fm -->|reply| bridge
+    fm -->|spawn, brief| omp
+    fm --> sm -->|spawn, brief| omp
+    fm -->|instructions| files
+    omp -->|status| files
+    files -->|watcher wakes| fm
+    omp <--> board
+    fm -.->|observe| board
+    omp --- gate
+    guards -.->|reap containers, dev servers| omp
+    omp -->|no-mistakes or direct PR| pr
+    subgraph opt["Optional, off by default"]
+        mac["Your Mac: ssh mac opens links, drives apps;<br/>a Mac can also run a BlueBubbles relay"]
+        more["Browser ladder, shared Postgres,<br/>review desktop (noVNC), CI pool"]
+    end
+    omp -.->|SSH over Tailscale| mac
+    bridge -.->|BlueBubbles| mac
+    style opt stroke-dasharray: 5 5
 ```
 
 ## More docs

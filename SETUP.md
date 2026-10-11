@@ -6,6 +6,32 @@ You need Ubuntu 24.04 or 26.04 with systemd, and a non-root account that has sud
 
 Report each result to the user in one line. If a command fails, show its last lines, then fix it or ask. Do not skip a step to hide a failure.
 
+## Setup flow
+
+```mermaid
+flowchart TD
+    box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]
+    boot --> init["./ship.sh dock: writes .local/host.yml"]
+    init --> check["./ship.sh inspect, then chart"]
+    check --> apply["./ship.sh launch"]
+    lock["toolchain: latest releases, checksum-verified (omp plugins excepted)"] --> apply
+    apply --> profiles["Ansible profiles"]
+    subgraph host["Finished host"]
+        herdr["Herdr workspace"]
+        fm["Firstmate orchestrator"]
+        agents["omp agents"]
+        guards["Fleet guards"]
+        docker["Docker engine"]
+        chat["Concord and slk chat clients"]
+    end
+    profiles --> herdr
+    profiles --> fm
+    profiles --> agents
+    profiles --> guards
+    profiles --> docker
+    profiles --> chat
+```
+
 ## 0. Install Crewship
 
 ```bash
