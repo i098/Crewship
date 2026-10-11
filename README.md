@@ -2,7 +2,7 @@
 
 # 🚢 Crewship
 
-**Orchestrate hundreds of agents effortlessly - hardware is the limit.**
+**Set up a VPS and orchestrate hundreds of agents effortlessly - hardware is the limit.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
