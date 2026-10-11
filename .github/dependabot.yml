@@ -5,5 +5,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    # A pin bump has no changelog fragment (ci.yml changelog check).
+    # A pin bump has no changelog fragment (changelog.yml check).
     labels: [dependencies, no changelog]

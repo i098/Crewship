@@ -119,12 +119,11 @@ def test_missing_base_fails_without_skip_output(tmp_path):
     assert output == ""
 
 
-def workflow_context(event, changes, code, changelog):
+def workflow_context(event, changes, code):
     return {
         "github": SimpleNamespace(event_name=event),
         "needs": SimpleNamespace(
             changes=SimpleNamespace(result=changes, outputs=SimpleNamespace(code=code)),
-            changelog=SimpleNamespace(result=changelog),
         ),
         "always": lambda: True,
     }
@@ -149,18 +148,13 @@ def job_runs(job, context):
 
 
 @pytest.mark.parametrize("changes", ["success", "failure", "cancelled", "skipped"])
-@pytest.mark.parametrize("changelog", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("code", ["true", "false", "", "invalid"])
-def test_required_check_rejects_prerequisite_failure(changes, changelog, code):
+def test_required_check_rejects_prerequisite_failure(changes, code):
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
     job = jobs["config-and-python"]
-    context = workflow_context("pull_request", changes, code, changelog)
-    valid = (
-        changes == "success"
-        and code in {"true", "false"}
-        and changelog in {"success", "skipped"}
-    )
-    assert set(job["needs"]) == {"changes", "changelog"}
+    context = workflow_context("pull_request", changes, code)
+    valid = changes == "success" and code in {"true", "false"}
+    assert job["needs"] == "changes"
     assert job_runs(job, context) == (not valid or code == "true")
     if job_runs(job, context):
         step = job["steps"][0]
@@ -177,7 +171,7 @@ def test_required_check_rejects_prerequisite_failure(changes, changelog, code):
 @pytest.mark.parametrize("code", ["true", "false"])
 def test_heavy_job_event_policy(event, code):
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
-    context = workflow_context(event, "success", code, "skipped")
+    context = workflow_context(event, "success", code)
     for name in ["config-and-python", "crewboard", "harbor-webkit", "container-smoke"]:
         assert job_runs(jobs[name], context) == (code == "true")
     assert job_runs(jobs["quality-gate"], context) == (

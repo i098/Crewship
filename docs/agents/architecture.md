@@ -91,11 +91,11 @@ The `changes` job compares the PR merge commit with its base and outputs `code=t
 Documentation-only PRs change only root-level `README*` files, files under `docs/` or `changelog.d/`, or `*.md` files at any depth.
 Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
 Renames check both the old and new paths.
-CI skips heavy jobs on documentation-only PRs when classification succeeds and the changelog check succeeds or skips.
+CI skips heavy jobs on documentation-only PRs when classification succeeds.
 PRs limited to `harbor/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
 Job-level conditions let skipped required checks report instead of remaining pending.
-The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
-The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
+The `changelog fragment` job lives in `changelog.yml`, so label changes re-run only that workflow; `ci.yml` ignores `labeled`/`unlabeled`. It runs on PRs unless they have the `no changelog` label.
+The required `configuration and python checks` job rejects classification failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
 A PR that changes only `imessage/` plus documentation (`scope=imessage`) runs only the iMessage tests and the core tests (changelog, instructions, README, skills) in the Python step; every other change and every push runs the whole suite.
