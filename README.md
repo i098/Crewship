@@ -6,10 +6,9 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
-[![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/FSL--1.1--Apache--2.0-2563eb?style=for-the-badge)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/i098/Crewship?style=for-the-badge&logo=github&color=2563eb)](https://github.com/i098/Crewship/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/i098/Crewship?style=for-the-badge&logo=git&logoColor=white&label=updated&color=2563eb)](https://github.com/i098/Crewship/commits/main)
-[![Sponsor](https://img.shields.io/badge/Sponsor-db61a2?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/i098)
+[![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/FSL--1.1--Apache--2.0-0d9488?style=for-the-badge)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/i098/Crewship?style=for-the-badge&logo=github&color=d97706)](https://github.com/i098/Crewship/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/i098/Crewship?style=for-the-badge&logo=git&logoColor=white&label=updated&color=6b7280)](https://github.com/i098/Crewship/commits/main)
 
 [Docs](#docs) · [Install](#quick-start) · [Changelog](CHANGELOG.md) · [Discussions](https://github.com/i098/Crewship/discussions)
 
@@ -19,41 +18,37 @@
 
 </div>
 
-## Why Crewship
-
-- **Self-hosted AI coding agents:** one Ubuntu 24.04 or 26.04 machine runs Herdr, the Firstmate orchestrator, and the omp agent fleet. No cloud dependencies.
-- **Reproducible with Ansible:** profiles in one host file, a check-mode preview with `./ship.sh chart`, and one `./ship.sh launch` that changes the host. No Nix, no chezmoi.
-- **Checksum-verified toolchain:** every apply installs the latest tool releases and verifies their checksums. The omp and Neovim plugins use upstream Git repositories.
-- **Built for an agent fleet:** fleet guards, auto pruners, a self-hosted CI pool, and the Concord (Discord) and slk (Slack) terminal chat clients.
+Crewship makes it super easy to start using agents in the cloud.
 
 ## Features
+
+- **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent runs many coding agents.
+- **[Custom Herdr sidebar](docs/herdr.md):** every workspace and agent, with its state and load, at a glance.
+- **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
+- **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
+- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
+- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) in the terminal, and [iMessage](docs/imessage.md) through Photon or a BlueBubbles relay on your own Mac.
+- **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
+- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 <details>
 <summary><b>Show all features</b></summary>
 
-- [Herdr workspace](docs/herdr.md): a sidebar of spaces and agents, with live status for each lane
 - [omp agents](docs/omp.md): sign-in, model roles, fallbacks, and the advisor
-- [Private skills](docs/omp.md#skills): host-only skills in `skills/private/` (opt-in)
-- [Fleet guards](docs/fleet-guards.md): Docker guard, dev-server reaper, storage guard, spawn memory floor (opt-in)
 - [Shared Postgres](docs/shared-postgres.md): one container, per-project databases and worktree connection strings (opt-in)
-- [Browser ladder](docs/fleet-guards.md#browser-ladder): Obscura, Chrome, and noVNC tiers for agent browsers (opt-in)
 - [Capacity and auto pruners](docs/capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](docs/configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)
 - [Self-hosted CI pool](docs/ci-pool.md): GitHub Actions runners, one job per fresh container (opt-in)
-- [Crew board](docs/board.md): host-local message board for agents on one host (opt-in)
-- [Chat clients](docs/chat.md): Concord (Discord) and slk (Slack) in the terminal
-- [GitHub board](docs/github-board.md): agent work as issues on a Project board, and a shared message board (opt-in)
-- [iMessage bridge](docs/imessage.md): text Firstmate from your phone (opt-in)
+- [GitHub board](docs/github-board.md): agent work as issues on a Project board (opt-in)
 - [Host-move checklist](docs/configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)
-- [Shared credentials](docs/secrets.md): `super.env` in Cloudflare Secrets Store
 - [Google Workspace CLI](docs/google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](docs/dependencies.md): every tool, package, and image the recipe installs
 - [Neovim with LazyVim](docs/dependencies.md#neovim-and-lazyvim): a terminal editor on every host, with Pyrefly for Python
+- [Install, update and migrate](docs/install.md): release artifact, updates, moving a git install
 - [Migration and recovery](docs/recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](docs/recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
 - [Tailscale](docs/security.md#remote-access): the Tailscale daemon for remote access (opt-in)
-- [SSH to a Mac](docs/security.md#ssh-to-a-mac): `ssh mac` from the host to your Mac (opt-in)
 - [Agent host move](docs/agent-host-move.md): move the agents to a new host with parity checks
 - [Security](docs/security.md): credential handling and remote access
 </details>
@@ -84,10 +79,22 @@
 - omp rules ([TTSR](docs/omp.md#rules)): `always-on-skills`, `asd-ste100`, `use-native-stacked-prs`; with the browser ladder: `drive-the-browser-yourself`, `fleet-browser-default-tier`.
 - Profiles on: `agents`, `development`, `firstmate`, `docker`, `chat`
 - Profiles off (opt-in): `tailscale`, `desktop`, `fleet_guards`, `shared_postgres`, `fleet_browsers`
-- Unset (opt-in): `data_dir`, `firstmate.checklist`, `mac_ssh`, `skills`, `imessage`, `github_board`, `board`, `ci_pool`
+- Unset (opt-in): `data_dir`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `ci_pool`
 - Full files: [`config/default.yml`](config/default.yml), [`config/omp.yml`](config/omp.yml)
 
 </details>
+
+After the installer finishes, paste this into your coding agent or `omp` on the new machine. It walks you through the rest ([omp sign-in](docs/omp.md#sign-in), [install layout](docs/install.md)):
+
+```text
+Finish setting up Crewship on this machine. Work in ~/Crewship, run each step yourself, and ask me when you need a choice.
+1. Run `gh auth login` and help me sign in to GitHub.
+2. Start `omp` and help me sign in with `/login` (docs/omp.md#sign-in).
+3. Run `./ship.sh dock`, then open .local/host.yml and ask me which profiles to turn on.
+4. Run `./ship.sh inspect`, then `./ship.sh chart`, and show me the preview.
+5. Run `./ship.sh launch`. If omp was not signed in before the first launch, run it again.
+6. Run `./ship.sh survey` and tell me what passed and what failed.
+```
 
 ## How it works
 
@@ -149,72 +156,9 @@ With pnpm:
 pnpm dlx crewship
 ```
 
-Sign in to GitHub:
+The installer downloads and verifies a release artifact; there is no git clone. Run it again to update, and see [Install, update and migrate](docs/install.md) for the layout and for moving an older git install.
 
-```bash
-gh auth login
-```
-
-[Sign in to omp](docs/omp.md#sign-in):
-
-```bash
-omp
-```
-
-<details>
-<summary>Manual Quick Start</summary>
-
-You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root account with sudo, Python 3.12+, `git`, and `gh`. [`cloud-init/user-data.yaml`](cloud-init/user-data.yaml) can preinstall the OS packages on first boot.
-
-1. Authenticate GitHub (for private repositories and gh-axi):
-
-   ```bash
-   gh auth login
-   ```
-
-2. Clone the repository:
-
-   ```bash
-   git clone https://github.com/i098/Crewship.git
-   cd Crewship
-   ```
-
-3. Install the repository tooling (the latest uv, then the locked Python environment with Ansible):
-
-   ```bash
-   ./onboard.sh
-   ```
-
-4. Create your host config, then review its profiles, user, and paths:
-
-   ```bash
-   ./ship.sh dock
-   ${EDITOR:-nano} .local/host.yml
-   ```
-
-5. Validate the config and preview the changes.
-   `chart` uses Ansible check mode; the first config read can rewrite old keys and keep a backup:
-
-   ```bash
-   ./ship.sh inspect
-   ./ship.sh chart
-   ```
-
-6. Launch to provision the host; this step may ask for your sudo password. With the `firstmate` profile on, the first successful interactive apply after you sign in to omp opens the [new-host questions](docs/configuration.md#new-host-questions); a fresh host's first apply installs omp, so sign in to omp after it and rerun apply:
-
-   ```bash
-   ./ship.sh launch
-   ```
-
-7. Check the result:
-
-   ```bash
-   ./ship.sh survey
-   ```
-
-Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs/omp.md#sign-in). Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
-
-</details>
+Full guide: [crewship.si](https://crewship.si).
 
 ## More docs
 

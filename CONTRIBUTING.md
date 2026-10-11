@@ -28,6 +28,60 @@ No unconditional restarts, daemon-reloads, or bare commands.
 
 `start_services: false` suppresses every linger, daemon-reload, and systemd start action while still writing unit files and enabling them via static symlinks.
 
+## Working on Crewship itself
+
+Users install Crewship with the one-line installers on [crewship.si](https://crewship.si). Clone the repository only to change Crewship or to run the playbook from a checkout.
+
+You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root account with sudo, Python 3.12+, `git`, and `gh`. [`cloud-init/user-data.yaml`](cloud-init/user-data.yaml) can preinstall the OS packages on first boot.
+
+1. Authenticate GitHub (for private repositories and gh-axi):
+
+   ```bash
+   gh auth login
+   ```
+
+2. Clone the repository:
+
+   ```bash
+   git clone https://github.com/i098/Crewship.git
+   cd Crewship
+   ```
+
+3. Install the repository tooling (the latest uv, then the locked Python environment with Ansible):
+
+   ```bash
+   ./onboard.sh
+   ```
+
+4. Create your host config, then review its profiles, user, and paths:
+
+   ```bash
+   ./ship.sh dock
+   ${EDITOR:-nano} .local/host.yml
+   ```
+
+5. Validate the config and preview the changes.
+   `chart` uses Ansible check mode; the first config read can rewrite old keys and keep a backup:
+
+   ```bash
+   ./ship.sh inspect
+   ./ship.sh chart
+   ```
+
+6. Launch to provision the host; this step may ask for your sudo password. With the `firstmate` profile on, the first successful interactive apply after you sign in to omp opens the [new-host questions](docs/configuration.md#new-host-questions); a fresh host's first apply installs omp, so sign in to omp after it and rerun apply:
+
+   ```bash
+   ./ship.sh launch
+   ```
+
+7. Check the result:
+
+   ```bash
+   ./ship.sh survey
+   ```
+
+Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs/omp.md#sign-in). Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
+
 ## Development
 
 ```bash
