@@ -112,7 +112,7 @@
 1080p  #######                       34,560
 1440p  #############                 61,344
 4K     #########                     41,880</pre>
-<p>Web workers cast and draw bands of rows on the other cores. Desktops keep every row and every shadow, and never grow glyphs. Only a slow phone turns shadows off, then grows glyphs up to 1.5x.</p>
+<p>On a desktop, web workers cast and draw bands of rows on the other cores. Desktops keep every row and every shadow, and never grow glyphs. Only a slow phone turns shadows off, then grows glyphs up to 1.5x.</p>
 </section>
 
 <details>
@@ -133,7 +133,7 @@
   <li>For each frame the page sends the time, the ship's motion, the camera and the room to every worker, then hands out bands of rows to the next free worker. Fast and slow cores share the work.</li>
   <li>The page adds the grass, palms, fountain, rigging, edges, aim and labels, then hands the bands out again. The workers draw the glyphs into bitmaps, and the page paints them, then the map and the sign.</li>
   <li>Two frames are in hand: one draws while the next casts. A worker draws each glyph with the same text renderer as the page, so its pixels match the page's drawing to within 2 levels of 255.</li>
-  <li>Without workers, with fewer than 2 cores, or during the intro, the page casts and draws alone.</li>
+  <li>On a phone, without workers, with fewer than 3 cores, or during the intro, the page casts and draws alone. In iOS Safari the workers were slower than the page alone.</li>
   <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
   <li>Measured at 1440 x 900 over five views: the scene has 444 shapes (275 outside, 169 on the ship). For each list a ray walks, it meets 1.3 to 2.6 candidate shapes, box-tests 0.6 to 1.7 of them, and runs the exact formula 0.3 to 1.2 times. The 5 tree crowns hold 43 leaf clumps in all.</li>
 </ul>

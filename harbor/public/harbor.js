@@ -2731,7 +2731,10 @@ function view(tenths) {
   if (!interior) groundRings();
   openRooms();
 }
+// Casts and draws a frame on the page. It is newer than any frame the ray workers still have in hand, so those are
+// dropped: they would compose an older moment over it.
 function render() {
+  frames.length = 0;
   view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   finish();
@@ -4451,8 +4454,8 @@ function castFrame(late) {
 // details, edges, aim, labels), packs what each cell shows, and hands the bands out again to be drawn into bitmaps,
 // which it paints on the next animation frame. Two frames are in hand, one drawing while the next casts. With fewer
 // than two workers, or once one fails, the page casts alone; when a worker cannot draw text exactly as the page
-// does, the page draws.
-let workerCount = PAGE && typeof Worker !== "undefined" ? Math.min(8, (navigator.hardwareConcurrency || 1) - 1) : 0;
+// does, the page draws. Phones cast alone: in iOS Safari the workers ran at 22 to 26 fps where the page alone holds 60.
+let workerCount = PAGE && typeof Worker !== "undefined" && !touchFirst.matches ? Math.min(8, (navigator.hardwareConcurrency || 1) - 1) : 0;
 const rayWorkers = [];
 // Frames in hand, oldest first: moment, phase, bands ([j0, j1]), next band, bands out, workers, cast and draw buffers,
 // bitmaps, page ms, lateness and middle cell.
