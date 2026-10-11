@@ -61,7 +61,7 @@ jobs:
             while IFS= read -r -d '' path; do
               case "$path" in
                 skills/*|rules/*|config/*) code=true; break ;;
-                README*|docs/*|changelog.d/*|*.md) ;;
+                README*|docs/*|changelog.d/*|harbor/*|*.md) ;;
                 *) code=true; break ;;
               esac
             done < "$RUNNER_TEMP/changed-files"

@@ -33,6 +33,12 @@ def classify(directory, event="pull_request"):
     (None, "docs/nested/example.py", "false"),
     (None, "changelog.d/250.changed.md", "false"),
     (None, "nested/notes.md", "false"),
+    (None, "harbor/public/harbor.js", "false"),
+    (None, ("harbor/public/harbor.js", "scripts/example.py"), "true"),
+    (None, ("docs/probe.md", "harbor/public/harbor.js"), "false"),
+    (None, "harbor-lookalike/example.py", "true"),
+    ("code.py", "harbor/public/code.py", "true"),
+    ("harbor/public/code.py", "code.py", "true"),
     (None, "skills/public/example/SKILL.md", "true"),
     (None, "rules/public/example.md", "true"),
     (None, "config/README.md", "true"),
@@ -61,12 +67,11 @@ def test_changed_paths(tmp_path, old, new, expected):
     git("commit", "--quiet", "--allow-empty", "-m", "base")
     if old:
         source.unlink()
-    if new:
-        target = tmp_path / new
+    paths = [new] if isinstance(new, str) else new or []
+    for path in paths:
+        target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("content\n")
-    # Mix in a docs change so one code path must still run heavy CI.
-    (tmp_path / "README.md").write_text("docs\n")
     git("add", ".")
     git("commit", "--quiet", "-m", "change")
     assert classify(tmp_path) == (0, f"code={expected}\n")

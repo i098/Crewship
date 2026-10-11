@@ -92,6 +92,7 @@ Documentation-only PRs change only root-level `README*` files, files under `docs
 Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
 Renames check both the old and new paths.
 CI skips heavy jobs on documentation-only PRs when classification succeeds and the changelog check succeeds or skips.
+PRs limited to `harbor/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
 Job-level conditions let skipped required checks report instead of remaining pending.
 The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
 The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
