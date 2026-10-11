@@ -2689,8 +2689,10 @@ function project(a, snap = Math.round) {
 // Signs use scene cells.
 const LINE = new Map();
 let signBox = null, signRows = [], signLinks = [], signWidth = "", signInset = 2;
-function signLayout(width, mode, available) {
-  const key = `${width}/${mode}/${available}`;
+// `columns` splits stacked touch links into that many columns, if `room` columns of the screen hold them, for a
+// board too tall for its supports.
+function signLayout(width, mode, available, columns = 1, room = 0) {
+  const key = `${width}/${mode}/${available}/${columns}/${room}`;
   if (key === signWidth) return;
   signWidth = key;
   signInset = mode ? 1 : 2;
@@ -2705,11 +2707,12 @@ function signLayout(width, mode, available) {
     }
     signRows.push([text, cls]);
   };
-  const short = (text) => text.length > width ? text.slice(0, width - 1) + "…" : text;
+  const short = (text, limit = width) => text.length > limit ? text.slice(0, limit - 1) + "…" : text;
   const links = [...card.querySelectorAll("a")];
   const body = mode < 3 || available >= links.length + 4;
   wrap(mode >= 2 ? short(card.querySelector("h3").textContent) : card.querySelector("h3").textContent, "l");
-  if (body) wrap(mode >= 2 ? short(card.querySelector("p").textContent) : card.querySelector("p").textContent, "k");
+  // The docs board's body is its links, which the sign lists as link rows; the text would repeat them.
+  if (body && !card.querySelector("p a")) wrap(mode >= 2 ? short(card.querySelector("p").textContent) : card.querySelector("p").textContent, "k");
   if (touchFirst.matches) {
     signRows.push(["", "t"]);
     const texts = links.map((a) => `[${a.textContent}]`);
@@ -2717,10 +2720,16 @@ function signLayout(width, mode, available) {
     // A stacked link row is at least 12px tall; one blank row makes a 24px target.
     const rowHeight = inline ? 1 : Math.max(1, 12 / cellH);
     const height = inline ? Math.ceil(44 / cellH) : rowHeight * 2;
+    // Columns share the room; a label that does not fit its column is cut short.
+    const fitWidth = Math.floor((room - 2 * signInset - columns + 1) / columns);
+    const split = columns > 1 && !inline && fitWidth >= 6;
+    const colWidth = split ? Math.min(fitWidth, Math.max(...texts.map((text) => short(text).length))) : 0;
+    const perColumn = split ? Math.ceil(links.length / columns) : links.length;
     let left = signInset;
     links.forEach((a, n) => {
-      const text = short(texts[n]);
-      const row = signRows.length + (inline ? 0 : n * height + (rowHeight - 1) / 2);
+      const text = short(texts[n], split ? colWidth : width);
+      const row = signRows.length + (inline ? 0 : (n % perColumn) * height + (rowHeight - 1) / 2);
+      if (split) left = signInset + Math.floor(n / perColumn) * (colWidth + 1);
       signLinks.push({ row, start: row - (height - 1) / 2, height, left, width: text.length, text, a });
       left = inline ? left + text.length + 1 : signInset;
     });
@@ -2780,10 +2789,16 @@ function signPlace(at, areas, span = 0, obstacles = []) {
   }
   return null;
 }
+// A tall sign that does not fit tries more link columns, as many as touch links can fill.
 function signFit(at, i0, j0, i1, j1, mode = 0, span = 0, obstacles = []) {
+  let columns = 1, fit = signFitIn(at, i0, j0, i1, j1, mode, span, obstacles, columns);
+  while (!fit && touchFirst.matches && columns < signLinks.length) fit = signFitIn(at, i0, j0, i1, j1, mode, span, obstacles, ++columns);
+  return fit;
+}
+function signFitIn(at, i0, j0, i1, j1, mode, span, obstacles, columns) {
   const width = Math.min(52, i1 - i0 - (mode ? 2 : 4));
   if (width < 1 || j1 <= j0) return null;
-  signLayout(width, mode, j1 - j0);
+  signLayout(width, mode, j1 - j0, columns, i1 - i0);
   const w = Math.max(span, ...signRows.map(([text]) => text.length + signInset * 2),
     ...signLinks.map((link) => (link.left || signInset) + (link.width || 0) + signInset));
   const h = Math.ceil(Math.max(signRows.length, ...signLinks.map((link) => link.row === undefined ? link.start + link.height : link.row + 1))) + 2;
@@ -3884,6 +3899,7 @@ function node(tag, content, cls) {
 
 let shown;
 function show(id) {
+  if (id && !spots[id]) return;
   const key = id || (moved ? "" : "welcome");
   if (key === shown) return;
   shown = key;
@@ -3934,6 +3950,7 @@ function cellAt(x, y) {
 }
 // A free pointer aims at the object under it, so that object's sign card shows.
 function hoverAim(x, y) {
+  if (signHit(x, y)) return; // A pointer on a sign link keeps that sign, not the object behind it.
   const cell = mapMode ? -1 : cellAt(x, y);
   if (cell !== hover) { hover = cell; dirty = true; }
 }

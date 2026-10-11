@@ -119,7 +119,8 @@ Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `
 
 ## Content from the repository
 
-`build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row.
+`build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row and from `docs/features.md`.
+Every object in the scene needs a `SCENE` entry whose docs link appears in one of them; a test checks this.
 It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and how.html.
 A link with an object in the scene (mapped in `build.py`'s `SCENE`) opens on that object.
 A link with no mapping prints a warning but never blocks the build.

@@ -54,41 +54,10 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
 
-```mermaid
-flowchart TD
-    you["You: phone or laptop<br/>terminal, iMessage, Discord, Slack"]
-    subgraph vps["Your server (VPS)"]
-        env["~/super.env"]
-        subgraph herdr["Herdr panes"]
-            fm["Firstmate"]
-            sm["Second mates (optional)"]
-            board["Crew board (optional)"]
-            gates["Guards and quality gate"]
-            subgraph worker["Worker, one per task"]
-                omp["omp in an isolated worktree"] --> nm["no-mistakes, or direct PR"]
-            end
-        end
-        docker["Docker engine"]
-    end
-    gh["GitHub: pull requests"]
-    models["Model providers: Anthropic, OpenAI"]
-    subgraph opt["Optional routes"]
-        ts["Tailscale"] --> mac["Your Mac: ssh mac,<br/>BlueBubbles relay"]
-        desktop["Review desktop over noVNC"]
-    end
-    you --> fm
-    env --> fm
-    fm --> sm
-    sm --> worker
-    fm <--> worker
-    board <-.-> worker
-    gates --- worker
-    gates -.-> docker
-    worker --> gh
-    worker --> models
-    herdr -.-> opt
-    style opt stroke-dasharray: 5 5
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
+  <img alt="You message Firstmate from a phone or laptop. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. Guards, the crew board and the secrets file are shared on the server. Every agent can optionally reach your Mac over SSH." src="docs/how-it-works-light.svg">
+</picture>
 
 ## More docs
 
