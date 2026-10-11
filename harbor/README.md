@@ -15,9 +15,13 @@ Reduced-motion visitors get the scene immediately.
 Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
-The island has staggered plaza paving, scattered stones and grass tufts, trees and palms, and foam along the shore.
-Tufts of tall grass sway in the wind and grow densest along the path edges and on the dry upper beach slopes.
-Grass is sparse on the dirt trails and never grows on the roads, the dock, the plaza, wet sand, or in buildings.
+The island rises from the beaches into gentle hills behind the town; the ground stays level under buildings, the plaza, and the dock.
+Slopes that face the moon are brighter, and hill crests catch a light outline.
+Curving dirt roads follow the ground, with soft, irregular edges and two worn ruts, and map walks follow their curves.
+Grass, sand, and road blend over soft edges, without square patches.
+The island also has staggered plaza paving, scattered stones and grass tufts, trees and palms, and foam along the shore.
+Tufts of tall grass sway in the wind and grow densest along the path edges, on the hills, and on the dry upper beach slopes.
+Grass is sparse on the footpaths and never grows on the cart road, the dock, the plaza, wet sand, or in buildings.
 Grass does not block walking or map routes, and it stays still with reduced motion.
 
 Oak, lime, and birch trees have tapered trunks that branch into clumps of ragged leaves, with gaps that show the sky.
