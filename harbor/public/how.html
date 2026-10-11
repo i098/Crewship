@@ -60,17 +60,17 @@ The "3D" is only arithmetic: the file never loads a mesh, a texture file or a gr
 <p>A <b>material</b> is not a texture file. It is one letter that names a base colour, for example moss green or lamp yellow. Brightness then chooses one of eight levels of that colour, and a lamp-lit spot is tinted warmer.
 <b>Light</b> is a sum: a dim moon fill that is stronger on slopes facing the moon, plus each nearby lamp, which gets weaker with distance, plus the sweeping lighthouse beam. For each lamp, a shadow ray goes from the spot back to the lamp. If a solid is in the way, that lamp adds nothing. Fog dims what is far away.</p>
 <h2>The frame budget</h2>
-<p>The cost of a frame is the number of cells: one ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall, so a bigger screen has more cells. The numbers below come from <code>harbor.js</code> and from a run of the real page in a Chromium and WebKit container (software drawing, no GPU, on a shared build host) at the camera's default view.
-"Full detail" is the smallest glyphs with shadow rays on. "Settled" is where the page ends up after it adapts.</p>
+<p>The cost of a frame grows with the number of cells: one ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall, so a bigger screen has more cells. The counts below come from the grid code in <code>harbor.js</code>, checked in a real page at the camera's default view.
+"Full detail" is the smallest glyphs. "Largest glyphs" is the coarsest grid the page falls back to, 3 times as big. Frame time depends on the device, so it is not listed here.</p>
 <div class="scroll"><table>
-<tr><th>Screen</th><th>Cells, full detail</th><th>Frame at full detail</th><th>Cells, settled</th><th>Frame, settled</th></tr>
-<tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>32 ms (19 fps)</td><td>40 x 33 = 1,320</td><td>8 ms (50 fps)</td></tr>
-<tr><td>1440 x 900</td><td>294 x 91 = 26,754</td><td>51 ms (17 fps)</td><td>98 x 30 = 2,940</td><td>9 ms (60 fps)</td></tr>
-<tr><td>1920 x 1080</td><td>349 x 98 = 34,202</td><td>67 ms (13 fps)</td><td>116 x 32 = 3,712</td><td>12 ms (57 fps)</td></tr>
-<tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>112 ms (8 fps)</td><td>155 x 43 = 6,665</td><td>16 ms (43 fps)</td></tr>
-<tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>193 ms (5 fps)</td><td>232 x 65 = 15,080</td><td>36 ms (18 fps)</td></tr>
+<tr><th>Screen</th><th>Cells (rays), full detail</th><th>Cells (rays), largest glyphs</th></tr>
+<tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>40 x 33 = 1,320</td></tr>
+<tr><td>1440 x 900</td><td>294 x 91 = 26,754</td><td>98 x 30 = 2,940</td></tr>
+<tr><td>1920 x 1080</td><td>349 x 98 = 34,202</td><td>116 x 32 = 3,712</td></tr>
+<tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>155 x 43 = 6,665</td></tr>
+<tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>232 x 65 = 15,080</td></tr>
 </table></div>
-<p>So a 4K screen at full detail needs about 137,000 rays per frame and is far too much for one JavaScript thread. What keeps the page near 60 fps is that it adapts instead of drawing everything:</p>
+<p>So a 4K screen at full detail needs about 137,000 rays per frame. The page does not draw everything at full detail. It adapts to keep frames short:</p>
 <ul>
   <li>A frame that takes more than 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page first turns shadow rays off.</li>
   <li>If it is still slow, it makes each glyph 15% bigger, up to 3 times as big. That is 9 times fewer cells and rays.</li>
@@ -78,7 +78,6 @@ The "3D" is only arithmetic: the file never loads a mesh, a texture file or a gr
   <li>Phones draw with at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
   <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit. The page does not redraw rows that did not change.</li>
 </ul>
-<p>These runs show the limit honestly. In this GPU-less container the page holds 60 fps at laptop sizes once settled, and it does not hold 60 fps at 4K (18 fps with the biggest glyphs). A machine with a faster single core will do better, but the cost still grows with the cell count, which is why the page trades glyph size for speed. The time includes painting the characters to the canvas.</p>
 <h2>The detail</h2>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.

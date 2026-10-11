@@ -6,7 +6,7 @@ It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
-The cell count is the cost of a frame, so the page drops shadow rays and then grows the glyphs, up to 3 times, to stay near 60 fps; see [how.html](public/how.html) for the diagram, the shapes and measured frame times.
+The cell count is the cost of a frame, so the page drops shadow rays and then grows the glyphs, up to 3 times, to keep frames short; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
 
 Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
