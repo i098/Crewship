@@ -181,20 +181,35 @@ export class Memory {
     private chat: (system: string) => Chat,
     private log: (e: unknown) => void = console.error,
   ) {
-    for (const sub of ["main", "tree"]) {
-      mkdirSync(`${dir}/${sub}`, { recursive: true, mode: 0o700 });
-      for (const f of readdirSync(`${dir}/${sub}`)) {
-        const text = readFileSync(`${dir}/${sub}/${f}`, "utf8");
-        if (text && !text.endsWith("\n")) appendFileSync(`${dir}/${sub}/${f}`, "\n");
-      }
-    }
+    this.prepareLogs();
     ({ msgs: this.msgs, nodes: this.nodes, view: this.view } = load(dir));
-    const retryFile = `${dir}/retry.json`;
+    this.restoreRetry();
+    this.restoreViewTail();
+    this.queueUnfinishedWork();
+    this.pump();
+  }
+
+  private prepareLogs() {
+    for (const sub of ["main", "tree"]) {
+      mkdirSync(`${this.dir}/${sub}`, { recursive: true, mode: 0o700 });
+      this.repairLogTails(sub);
+    }
+  }
+
+  private repairLogTails(sub: string) {
+    for (const f of readdirSync(`${this.dir}/${sub}`)) {
+      const text = readFileSync(`${this.dir}/${sub}/${f}`, "utf8");
+      if (text && !text.endsWith("\n")) appendFileSync(`${this.dir}/${sub}/${f}`, "\n");
+    }
+  }
+
+  private restoreRetry() {
+    const retryFile = `${this.dir}/retry.json`;
     if (existsSync(retryFile)) {
       try {
         const retry = JSON.parse(readFileSync(retryFile, "utf8"));
-        if (!Number.isSafeInteger(retry.failures) || retry.failures < 0 ||
-            !Number.isSafeInteger(retry.nextAllowed) || retry.nextAllowed < 0) throw new Error("invalid compaction retry state");
+        this.validateRetryValue(retry.failures);
+        this.validateRetryValue(retry.nextAllowed);
         this.retry = retry;
       } catch (e) {
         this.log(e);
@@ -202,13 +217,22 @@ export class Memory {
         this.saveRetry();
       }
     }
+  }
+
+  private validateRetryValue(value: number) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("invalid compaction retry state");
+  }
+
+  private restoreViewTail() {
     // A crash between logging a message and saving the view leaves the view short of the newest messages.
     const covered = this.view.reduce((s, [l]) => s + 2 ** l, 0);
     for (let i = covered; i < this.msgs.length; i++) this.view.push([0, i]);
+  }
+
+  private queueUnfinishedWork() {
     // One pass at start finds the unfinished work; from then on each finished node queues its parent.
     for (let i = 0; i < this.msgs.length; i++) if (!this.nodes.has(key([0, i]))) this.enqueue([0, i]);
     for (const n of this.nodes.values()) this.queueParent([n.l, n.i]);
-    this.pump();
   }
 
   // Log one message, append its line to the view, and start its node in the background.
