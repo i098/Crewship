@@ -37,7 +37,7 @@ This export does not rewrite the current host's firewall, SSH policy, account me
 
 ### SSH to a Mac
 
-Agents can reach an operator Mac with `ssh mac`. They use it to open links in the operator's browser and to control Mac apps. This is full control of the Mac as the Mac user: agents can pull things up in front of you, fetch any file, run commands, drive apps, and read and send messages. Turn it on only for a Mac that you accept that for. Crewship configures the host side. You configure the Mac side by hand, one time. Keep the Mac's name, address, and login out of this repository.
+Agents can reach an operator Mac with `ssh mac`. They use it to open links in the operator's browser and to control Mac apps. This is full control of the Mac as the Mac user: agents can pull things up in front of you, fetch any file, run apps and commands, and read and send messages. Turn it on only for a Mac that you accept that for. Crewship configures the host side. You configure the Mac side by hand, one time. Keep the Mac's name, address, and login out of this repository.
 
 #### Host side: what apply does
 

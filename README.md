@@ -56,7 +56,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
-  <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. Optional guards, the optional crew board and the secrets file are shared on the server. The server can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
+  <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. The guards (some optional), the optional crew board and the secrets file are shared on the server. The server can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
 </picture>
 
 ## More docs
