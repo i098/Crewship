@@ -4,6 +4,7 @@
 mod board;
 mod serve;
 
+use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -24,7 +25,7 @@ const USAGE: &str = "usage:
   crewboard stat                          print caps, usage and the boot id
   crewboard serve [--socket PATH] [--cap-bytes 67108864] [--history 256] [--max-msg 65536]
 
-The socket is $CREWBOARD_SOCKET, else $XDG_RUNTIME_DIR/crewboard.sock.
+The socket is $CREWBOARD_SOCKET, else $XDG_RUNTIME_DIR/crewboard.sock, else /run/user/<uid>/crewboard.sock.
 Clients exit 3 with \"board off\" when no daemon answers on it.";
 
 fn usage() -> ! {
@@ -72,15 +73,38 @@ impl<'a> Args<'a> {
     }
 }
 
-fn socket_path() -> Option<PathBuf> {
-    std::env::var_os("CREWBOARD_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("crewboard.sock")))
+/// The socket path: `$CREWBOARD_SOCKET`, else `$XDG_RUNTIME_DIR/crewboard.sock`, else
+/// `/run/user/<uid>/crewboard.sock`. Empty variables count as unset. Daemon and clients share it.
+fn socket_path() -> PathBuf {
+    let var = |k| std::env::var_os(k).filter(|v| !v.is_empty());
+    resolve_socket(var("CREWBOARD_SOCKET"), var("XDG_RUNTIME_DIR"), unsafe { libc::getuid() })
+}
+
+fn resolve_socket(explicit: Option<OsString>, runtime_dir: Option<OsString>, uid: u32) -> PathBuf {
+    explicit.map(PathBuf::from).unwrap_or_else(|| {
+        runtime_dir.map_or_else(|| PathBuf::from(format!("/run/user/{uid}")), PathBuf::from).join("crewboard.sock")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(explicit: Option<&str>, xdg: Option<&str>) -> PathBuf {
+        resolve_socket(explicit.map(Into::into), xdg.map(Into::into), 1234)
+    }
+
+    #[test]
+    fn default_override_and_missing_runtime_dir() {
+        assert_eq!(path(None, Some("/run/x")), PathBuf::from("/run/x/crewboard.sock"));
+        assert_eq!(path(Some("/tmp/a.sock"), Some("/run/x")), PathBuf::from("/tmp/a.sock"));
+        assert_eq!(path(None, None), PathBuf::from("/run/user/1234/crewboard.sock"));
+    }
 }
 
 /// Sends one request and returns the reply stream.
 fn request(req: Value) -> BufReader<UnixStream> {
-    let path = socket_path().unwrap_or_else(|| off());
+    let path = socket_path();
     let mut s = match UnixStream::connect(&path) {
         Ok(s) => s,
         Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) => off(),
@@ -126,7 +150,7 @@ fn serve(rest: &[String]) {
         history: a.opt("--history").unwrap_or(d.history),
         max_msg: a.opt("--max-msg").unwrap_or(d.max_msg),
     };
-    let path = a.opt("--socket").or_else(socket_path).unwrap_or_else(|| fail("no socket path: set XDG_RUNTIME_DIR or --socket"));
+    let path = a.opt("--socket").unwrap_or_else(socket_path);
     serve::run(&path, limits).unwrap_or_else(|e| fail(&e.to_string()));
 }
 

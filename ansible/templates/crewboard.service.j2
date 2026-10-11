@@ -1,6 +1,7 @@
 {{ ansible_managed | comment }}
 # Crew board (docs/board.md): host-local, in-memory message board for agents.
 # History lives only in memory; a restart drops it.
+# %t/crewboard.sock is also the default socket of every crewboard client.
 {% set cap_mb = crewship_cfg.board.cap_mb | default(64) %}
 
 [Unit]
