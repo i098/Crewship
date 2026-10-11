@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 600" width="880" height="600" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title id="t">How Crewship works</title>
-  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the server has full control of your Mac over SSH.</desc>
+  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the agents have full control of your Mac over SSH.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b949e"/></marker>
   </defs>
@@ -17,7 +17,7 @@
     <path d="M156 292V322" marker-end="url(#a)"/>
     <path d="M116 388L110 480" marker-end="url(#a)"/>
     <path d="M216 388L350 480" marker-end="url(#a)"/>
-    <path d="M730 440V480" stroke-dasharray="6 5" marker-start="url(#a)" marker-end="url(#a)"/>
+    <path d="M278 405H710V480" stroke-dasharray="6 5" marker-end="url(#a)"/>
     <path d="M630 350H280" marker-end="url(#a)"/>
     <!-- boxes -->
     <rect x="34" y="140" width="244" height="280" rx="10"/>
@@ -66,7 +66,7 @@
     <text x="735" y="271">optional</text>
     <text x="735" y="333">credentials in one place</text>
     <text x="710" y="521">optional: full control of your Mac from</text>
-    <text x="710" y="537">the server: pull things up in front of you,</text>
+    <text x="710" y="537">the agents: pull things up in front of you,</text>
     <text x="710" y="553">fetch any file, run apps and commands</text>
   </g>
   <g fill="#9198a1" font-size="12.5">
@@ -74,6 +74,7 @@
     <text x="646" y="130" font-weight="600">Shared on the server</text>
     <text x="156" y="412" text-anchor="middle" font-weight="600">Herdr panes</text>
     <text x="507" y="342" text-anchor="middle">shared by every agent</text>
+    <text x="494" y="397" text-anchor="middle">agents control your Mac over SSH (optional)</text>
     <text x="168" y="102" text-anchor="start">SSH</text>
     <text x="512" y="102" text-anchor="start">iMessage</text>
   </g>
