@@ -2627,6 +2627,8 @@ for (const a of Object.values(anchors)) {
   };
 }
 
+const ZOOM = 0.9; // glyph size relative to the old default, like pressing Cmd-minus once: the same view in 1.23 times the cells
+const MAX_CELLS = 76000, FULL_AREA = 2560 * 1440; // rays a frame allowed up to a 2560 by 1440 stage
 let cols = 0, rows = 0, cellW = 8, cellH = 13, scale = 1, target = null, padX = 0, padY = 0, aspect = 1, viewW = 0, viewH = 0;
 // The grid cell under the pointer while the mouse is free, or -1.
 let hover = -1;
@@ -2652,24 +2654,29 @@ for (const [k, c] of Object.entries(BASE)) {
 const CLASS = {};
 for (const k of Object.keys(BASE)) CLASS[k] = Array.from({ length: 16 }, (_, i) => k + (i > 7 ? "w" : "") + (i & 7));
 function measure() {
-  // Phones and tablets draw at most 2 device pixels per CSS pixel: a 3x canvas costs more memory than it shows.
-  // Cap the backing-store area, not each dimension; large high-DPR windows otherwise exceed browser canvas limits.
+  // Draw at the display's own pixel ratio so the browser never rescales the canvas; only the backing-store area is capped,
+  // because large high-DPR windows otherwise exceed browser canvas limits.
   const w = stage.clientWidth, h = stage.clientHeight;
-  dpr = Math.min(touchFirst.matches ? 2 : Infinity, devicePixelRatio || 1, Math.sqrt(4096 * 4096 / (w * h)));
+  dpr = Math.min(devicePixelRatio || 1, Math.sqrt(4096 * 4096 / (w * h)));
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale;
+  // The 0.9 zoom holds up to FULL_AREA; a bigger stage gets bigger glyphs so the cell cap falls with the square root of its
+  // area (about 51000 cells at 3840 by 2160). A cell is about twice as tall as wide.
+  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (interior || touchFirst.matches ? Math.min(scale, growLimit()) : 1));
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = BACKGROUND; ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-  ctx.font = `${px}px ${MONO}`;
   ctx.textBaseline = "top";
-  cellW = ctx.measureText("M").width; cellH = px;
+  // Whole device pixels per cell, so every glyph lands on the pixel grid: a fractional pitch smears thin strokes at small sizes.
+  ctx.font = `${px}px ${MONO}`;
+  const advance = ctx.measureText("M").width * dpr, across = Math.max(1, Math.round(advance));
+  ctx.font = `${px * across / advance}px ${MONO}`;
+  cellW = across / dpr; cellH = Math.max(1, Math.round(px * dpr)) / dpr;
   cols = Math.max(20, Math.floor(w / cellW));
   rows = Math.max(12, Math.floor(h / cellH));
-  padX = (w - cols * cellW) / 2; padY = (h - rows * cellH) / 2;
+  padX = Math.round((w - cols * cellW) / 2 * dpr) / dpr; padY = Math.round((h - rows * cellH) / 2 * dpr) / dpr;
   const style = getComputedStyle(stage);
   for (const edge of Object.keys(safe)) safe[edge] = parseFloat(style.getPropertyValue(`--safe-${edge}`)) || 0;
   signWidth = 0;
@@ -2712,7 +2719,7 @@ function render() {
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
   if (!interior) groundRings();
   openRooms();
-  for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
+  castRows(seenWorld, seenShip);
   // Grass, palms, the fountain, rigging, pennants and gulls show outside, and through the windows of the room you are in.
   if (!interior || OUTSIDE.on) {
     cam = interior ? OUTSIDE : VIEW;
@@ -2741,6 +2748,12 @@ function labelTarget(spot, looked) {
   const span = at && tops && tops.every(Boolean) ? Math.max(...tops.map(p => Math.abs(p[0] - at[0]))) * 2 + 3 : 0;
   if (span) at[1] = Math.max(...tops.map(p => p[1]));
   label(at, span);
+}
+// Every row, or in fields the rows of one parity, alternating each frame.
+function castRows(seenWorld, seenShip) {
+  const step = halfRate() ? 2 : 1;
+  fieldParity ^= 1;
+  for (let j = step === 2 ? fieldParity : 0; j < rows; j += step) castRow(j, seenWorld, seenShip);
 }
 // Each tile of one row by TILE_W columns keeps only the solids whose screen rectangle reaches it. What the windows show
 // keeps only the row's solids.
@@ -4303,18 +4316,29 @@ const resize = new ResizeObserver(() => {
   resizeTimer = setTimeout(() => { layoutDirty = true; dirty = true; }, 120);
 });
 reduced.addEventListener("change", () => { dirty = true; });
-// Adaptive resolution: drop shadows, then grow glyphs; restore detail when frames run short.
-// Leave time for canvas painting within a 60 Hz display period.
+// Adaptive resolution, in this order when frames run long: cast every other row each frame (fields), drop shadows, grow glyphs;
+// detail returns when frames run short. Leave time for canvas painting within a 60 Hz display period.
+// ponytail: turning shows combing between the two fields; a coarser grid or a per-row age would hide it if it ever bothers anyone.
+let fields = false, fieldParity = 0;
+const canField = () => !interior && !reduced.matches; // fields only outdoors: each row refreshes 30 times a second
+const halfRate = () => fields && canField();
+// Glyph growth is the last rung: up to 3 in a room, up to 1.5 outdoors on a touch device, none outdoors elsewhere,
+// so the zoomed-out view holds while you walk on a desktop.
+const growLimit = () => interior ? 3 : touchFirst.matches ? 1.5 : 1;
+function coarsen() {
+  if (!fields && canField()) fields = true;
+  else if (shadows) shadows = false;
+  else { scale = Math.min(growLimit(), scale * 1.15); layoutDirty = dirty = true; }
+}
+function refine() {
+  if (scale > 1 && growLimit() > 1) { scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; }
+  else fields = false;
+}
 function adaptResolution(ms, late) {
   slow = ms > 10 || late ? slow + 1 : 0;
-  fast = ms < 6 && !late ? fast + 1 : 0;
-  if (slow > 20 && (shadows || scale < 3)) {
-    if (shadows) shadows = false;
-    else { scale = Math.min(3, scale * 1.15); layoutDirty = dirty = true; }
-    slow = 0;
-  } else if (fast > 90 && scale > 1) {
-    scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; fast = 0;
-  }
+  fast = ms < (halfRate() ? 4.5 : 6) && !late ? fast + 1 : 0; // a field costs half a frame: restore a full frame once it would cost under 9 ms
+  if (slow > 20 && ((!fields && canField()) || shadows || scale < growLimit())) { coarsen(); slow = 0; }
+  else if (fast > 90 && ((scale > 1 && growLimit() > 1) || fields)) { refine(); fast = 0; }
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;

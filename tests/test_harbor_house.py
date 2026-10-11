@@ -227,16 +227,16 @@ for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
   interior = scene;
   for (const interval of [1000 / 60, 1000 / 30]) {
     refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
-    scale = 1.5; shadows = false; slow = fast = 0;
+    scale = 1.5; shadows = false; slow = fast = 0; fields = true;
     renderCost = 2;
     const runFrame = () => { dirty = true; last = clock; clock += interval; frame(clock); };
     for (let i = 0; i < 91; i++) runFrame();
-    assert(scale < 1.5, 'a cheap render must recover detail at either display refresh rate');
-    scale = 1; shadows = true; slow = fast = 0;
+    assert(scene === null ? !fields : scale < 1.5, 'a cheap render must recover fields outdoors and detail in a room at either display refresh rate');
+    scale = 1; shadows = true; slow = fast = 0; fields = false;
     renderCost = 25;
-    for (let i = 0; i < 42; i++) runFrame();
+    for (let i = 0; i < 63; i++) runFrame(); // outdoors the first 21 slow frames switch to fields, then shadows go; rooms then grow glyphs
     assert.equal(shadows, false, 'expensive rendering must drop shadows');
-    assert(scale > 1, 'expensive rendering must reduce detail in every scene');
+    assert(scene === null ? fields && scale === 1 : scale > 1, 'expensive rendering must use fields outdoors, and larger glyphs in a room');
   }
 }
 renderCost = 2;
@@ -258,12 +258,12 @@ const startYaw = me.yaw;
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native 60 Hz to 30 Hz switch during held turning must not reduce detail');
 assert(me.yaw > startYaw, 'cadence sampling must not interrupt held turning');
-scale = 1.5; slow = fast = 0;
+scale = 1.5; slow = fast = 0; fields = true;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 30);
-assert(scale < 1.5, 'detail must recover at the changed native cadence during held turning');
-scale = 1.5; slow = fast = 0;
+assert(scene === null ? !fields : scale < 1.5, 'detail must recover at the changed native cadence during held turning');
+scale = 1.5; slow = fast = 0; fields = true;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 60);
-assert(scale < 1.5, 'detail must recover when the display returns to 60 Hz');
+assert(scene === null ? !fields : scale < 1.5, 'detail must recover when the display returns to 60 Hz');
 keys.clear();
 scale = 1; shadows = false; slow = fast = 0;
 refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
@@ -272,14 +272,14 @@ for (let i = 0; i < 12; i++) paintFrame(1000 / 60, 1000 / 60);
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native cadence change must clear prior painting-overload evidence before coarsening');
 for (const period of [1000 / 60, 1000 / 30]) {
-  scale = 1; shadows = true; slow = fast = 0;
+  scale = 1; shadows = true; slow = fast = 0; fields = false;
   refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
   paintFrame(period);
-  for (let i = 0; i < 60; i++) paintFrame(period, period);
-  assert(!shadows && scale > 1, 'deferred painting must reduce detail after an unloaded cadence sample');
+  for (let i = 0; i < 84; i++) paintFrame(period, period); // fields, then shadows, then glyphs: 21 slow frames each outdoors
+  assert(!shadows && (scene === null ? fields : scale > 1), 'deferred painting must reduce detail after an unloaded cadence sample');
   const coarseScale = scale;
   for (let i = 0; i < 100; i++) paintFrame(period);
-  assert(scale < coarseScale, 'detail must recover when deferred painting stops dropping frames');
+  assert(scene === null ? !fields : scale < coarseScale, 'detail must recover when deferred painting stops dropping frames');
 }
 }
 for (const period of [1000 / 60, 1000 / 30]) {
@@ -450,3 +450,90 @@ for (const [R, p, [nx, nz]] of panes) {
 }
 """
     run_rendered(check, 60)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+def test_glyph_grid_zoom_and_field_casting():
+    source = (ROOT / "harbor/public/harbor.js").read_text()
+    setup = r"""
+const assert = require('node:assert/strict');
+// A glyph is 0.6 times as wide as its font size.
+const context = {
+  font: '10px mono', setTransform() {}, fillRect() {},
+  measureText() { return {width: parseFloat(this.font) * 0.6}; }
+};
+const element = {
+  hidden: false, classList: {add() {}, remove() {}, toggle() {}}, focus() {}, addEventListener() {},
+  firstElementChild: {style: {}}, clientWidth: 1200, clientHeight: 800,
+  style: {setProperty() {}}, replaceChildren() {}, getContext: () => context
+};
+const document = {getElementById: () => element, querySelectorAll: () => [],
+  documentElement: {}, addEventListener() {}, fonts: {load: () => Promise.resolve(), ready: Promise.resolve()}};
+const matchMedia = () => ({matches: false, addEventListener() {}});
+const getComputedStyle = () => ({getPropertyValue: () => 'monospace'});
+let devicePixelRatio = 1, innerWidth = 1200;
+const performance = {now: () => 0};
+const IntersectionObserver = class {observe() {}}, ResizeObserver = class {observe() {}};
+function requestAnimationFrame() {}
+function addEventListener() {}
+function removeEventListener() {}
+const window = {};
+"""
+    check = r"""
+finishIntro();
+interior = null;
+const size = (w, h, ratio) => {
+  element.clientWidth = innerWidth = w; element.clientHeight = h; devicePixelRatio = ratio;
+  measure();
+};
+const whole = v => Math.abs(v - Math.round(v)) < 1e-9;
+const oldGlyph = w => Math.max(6.5, Math.min(11, w * 0.0068));
+for (const [w, h, ratio] of [[1440, 900, 2], [1920, 1080, 1], [2560, 1440, 1], [1280, 720, 1.5]]) {
+  size(w, h, ratio);
+  assert(Math.abs(cellH - 0.9 * oldGlyph(w)) <= 0.5 / ratio + 1e-9, `${w}x${h}: glyph height is 0.9 of the old size`);
+  assert(whole(cellW * ratio) && whole(cellH * ratio), `${w}x${h}: cells are whole device pixels`);
+  assert.equal(canvas.width, w * ratio);
+}
+size(1920, 1080, 1);
+const smallerCells = cols * rows;
+size(3840, 2160, 1);
+assert(cols * rows <= 51000, 'a 4K stage is capped near 51000 cells');
+assert(cellH > 0.9 * oldGlyph(3840) + 1, 'a 4K stage gets taller glyphs');
+assert(cols * rows > smallerCells * 0.9, 'a 4K stage is not coarser than needed');
+assert(whole(cellW) && whole(cellH));
+size(390, 844, 3);
+assert.equal(dpr, 3, 'a phone keeps its pixel ratio');
+assert.equal(canvas.width, 1170);
+size(1200, 800, 1);
+const mark = () => { G.fill('Q'); D.fill(-1); ID.fill(-1); };
+const row = j => [j * cols, (j + 1) * cols];
+const untouched = j => G.slice(...row(j)).every(g => g === 'Q') && D.slice(...row(j)).every(d => d === -1) && ID.slice(...row(j)).every(id => id === -1);
+Object.assign(me, {x: 0, z: 0, yaw: 0, pitch: 0});
+Object.assign(cam, {x: 0, y: me.eye, z: 0, lx: 0, ly: me.eye, f: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], tanV: 0.62, tanH: 0.62 * aspect});
+fields = false; mark();
+castRows([], []);
+for (let j = 0; j < rows; j++) assert(!untouched(j), `with fields off row ${j} is cast`);
+fields = true;
+for (let n = 0; n < 4; n++) {
+  const parityBefore = fieldParity;
+  mark();
+  castRows([], []);
+  assert.notEqual(fieldParity, parityBefore, 'the parity alternates each frame');
+  for (let j = 0; j < rows; j++) {
+    if (j % 2 === fieldParity) assert(!untouched(j), `row ${j} is cast`);
+    else assert(untouched(j), `row ${j} of the other parity keeps its previous cast`);
+  }
+}
+"""
+    subprocess.run(
+        ["node", "-"],
+        input="(async () => {\n"
+        + setup
+        + source
+        + "\nawait new Promise(setImmediate);\n"
+        + check
+        + "\n})().catch(error => { console.error(error); process.exit(1); });",
+        text=True,
+        check=True,
+        timeout=20,
+    )
