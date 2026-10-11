@@ -12,8 +12,10 @@ export async function checkRedraw(page, origin) {
   const intercept = request => {
     if (request.url() !== `${origin}/harbor.js`) return request.continue();
     return request.respond({ contentType: 'text/javascript', body: source + `
-window.checkRedrawReady = () => introProgress === 1 && cols > 0 && DG[0] !== undefined;
-window.checkRedraw = () => {
+// The page draws alone here (workerCount = 0): this check compares its own row redraws. Ray workers skip the hook.
+if (PAGE) workerCount = 0;
+if (PAGE) window.checkRedrawReady = () => introProgress === 1 && cols > 0 && DG[0] !== undefined;
+if (PAGE) window.checkRedraw = () => {
   const wasVisible = visible;
   visible = false;
   const differences = [];

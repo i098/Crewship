@@ -7,7 +7,10 @@ const pub = new URL("public/", import.meta.url);
 // x, z, eye height, yaw, pitch: south-east of the ship, so the moon, the ship and the house all fit.
 const POSE = [22, -26, 7, -0.45, 0];
 // The scene renders at 1500x788 and the preview keeps its middle 1200x630, a slightly narrower view.
+// The still image renders on the page alone (workerCount = 0); ray workers load this file too and skip the hook.
 const HOOK = `
+if (PAGE) {
+workerCount = 0;
 window.ogPose = (x, z, eye, yaw, pitch) => {
   show = () => { target = null; card.replaceChildren(); };
   minimap = () => { MAPCELLS.clear(); mapBox = null; };
@@ -15,7 +18,8 @@ window.ogPose = (x, z, eye, yaw, pitch) => {
   render = () => { Object.assign(me, { x, z, eye, yaw, pitch }); shadows = true; base(); window.ogDrawn = true; };
   dirty = true;
 };
-window.ogReady = () => cols > 0 && introProgress === 1;`;
+window.ogReady = () => cols > 0 && introProgress === 1;
+}`;
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 750, height: 394 }, deviceScaleFactor: 2, reducedMotion: "reduce" });

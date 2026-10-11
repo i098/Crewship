@@ -223,20 +223,30 @@ for (const channel of ['keyboard', 'touch', 'combined']) {
 keys.clear(); stick.x = stick.y = 0; step(0);
 let renderCost = 2;
 render = () => { clock += renderCost; };
+// A desktop keeps full detail however slow its frames are.
+interior = null; scale = 1; shadows = true; slow = fast = 0;
+refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
+renderCost = 40;
+for (let i = 0; i < 300; i++) { dirty = true; last = clock; clock += 1000 / 60; frame(clock); }
+assert(shadows && scale === 1, 'slow desktop frames must keep shadows and full glyph density');
+// Only phones trade detail for speed, and never past COARSEST.
+touchFirst.matches = true;
 for (const scene of [null, HOUSE, CABIN, GUN_DECK]) {
   interior = scene;
   for (const interval of [1000 / 60, 1000 / 30]) {
     refreshMs = Infinity; paintedLastFrame = false; probeMs = 0;
-    scale = scene === null ? 1 : 1.5; shadows = false; slow = fast = 0; fields = true;
+    scale = 1.5; shadows = false; slow = fast = 0;
     renderCost = 2;
     const runFrame = () => { dirty = true; last = clock; clock += interval; frame(clock); };
     for (let i = 0; i < 91; i++) runFrame();
-    assert(scene === null ? !fields : scale < 1.5, 'a cheap render must recover fields outdoors and detail in a room at either display refresh rate');
-    scale = 1; shadows = true; slow = fast = 0; fields = false;
+    assert(scale < 1.5, 'a cheap render must recover detail at either display refresh rate');
+    scale = 1; shadows = true; slow = fast = 0;
     renderCost = 25;
-    for (let i = 0; i < 63; i++) runFrame(); // outdoors the first 21 slow frames switch to fields, then shadows go; rooms then grow glyphs
+    for (let i = 0; i < 42; i++) runFrame();
     assert.equal(shadows, false, 'expensive rendering must drop shadows');
-    assert(scene === null ? fields && scale === 1 : scale > 1, 'expensive rendering must use fields outdoors, and larger glyphs in a room');
+    assert(scale > 1, 'expensive rendering must reduce detail in every scene');
+    for (let i = 0; i < 500; i++) runFrame();
+    assert.equal(scale, COARSEST, 'glyphs must never grow past COARSEST');
   }
 }
 renderCost = 2;
@@ -258,12 +268,12 @@ const startYaw = me.yaw;
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native 60 Hz to 30 Hz switch during held turning must not reduce detail');
 assert(me.yaw > startYaw, 'cadence sampling must not interrupt held turning');
-scale = scene === null ? 1 : 1.5; slow = fast = 0; fields = true;
+scale = 1.5; slow = fast = 0;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 30);
-assert(scene === null ? !fields : scale < 1.5, 'detail must recover at the changed native cadence during held turning');
-scale = scene === null ? 1 : 1.5; slow = fast = 0; fields = true;
+assert(scale < 1.5, 'detail must recover at the changed native cadence during held turning');
+scale = 1.5; slow = fast = 0;
 for (let i = 0; i < 100; i++) paintFrame(1000 / 60);
-assert(scene === null ? !fields : scale < 1.5, 'detail must recover when the display returns to 60 Hz');
+assert(scale < 1.5, 'detail must recover when the display returns to 60 Hz');
 keys.clear();
 scale = 1; shadows = false; slow = fast = 0;
 refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
@@ -272,14 +282,14 @@ for (let i = 0; i < 12; i++) paintFrame(1000 / 60, 1000 / 60);
 for (let i = 0; i < 126; i++) paintFrame(1000 / 30);
 assert.equal(scale, 1, 'a native cadence change must clear prior painting-overload evidence before coarsening');
 for (const period of [1000 / 60, 1000 / 30]) {
-  scale = 1; shadows = true; slow = fast = 0; fields = false;
+  scale = 1; shadows = true; slow = fast = 0;
   refreshMs = Infinity; paintedLastFrame = false; paintQueued = false; probeMs = 0;
   paintFrame(period);
-  for (let i = 0; i < 84; i++) paintFrame(period, period); // fields, then shadows, then glyphs: 21 slow frames each outdoors
-  assert(!shadows && (scene === null ? fields : scale > 1), 'deferred painting must reduce detail after an unloaded cadence sample');
+  for (let i = 0; i < 60; i++) paintFrame(period, period);
+  assert(!shadows && scale > 1, 'deferred painting must reduce detail after an unloaded cadence sample');
   const coarseScale = scale;
   for (let i = 0; i < 100; i++) paintFrame(period);
-  assert(scene === null ? !fields : scale < coarseScale, 'detail must recover when deferred painting stops dropping frames');
+  assert(scale < coarseScale, 'detail must recover when deferred painting stops dropping frames');
 }
 }
 for (const period of [1000 / 60, 1000 / 30]) {
@@ -453,7 +463,7 @@ for (const [R, p, [nx, nz]] of panes) {
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
-def test_glyph_grid_zoom_and_field_casting():
+def test_glyph_grid_zoom_and_cell_cap():
     source = (ROOT / "harbor/public/harbor.js").read_text()
     setup = r"""
 const assert = require('node:assert/strict');
@@ -504,26 +514,6 @@ assert(whole(cellW) && whole(cellH));
 size(390, 844, 3);
 assert.equal(dpr, 3, 'a phone keeps its pixel ratio');
 assert.equal(canvas.width, 1170);
-size(1200, 800, 1);
-const mark = () => { G.fill('Q'); D.fill(-1); ID.fill(-1); };
-const row = j => [j * cols, (j + 1) * cols];
-const untouched = j => G.slice(...row(j)).every(g => g === 'Q') && D.slice(...row(j)).every(d => d === -1) && ID.slice(...row(j)).every(id => id === -1);
-Object.assign(me, {x: 0, z: 0, yaw: 0, pitch: 0});
-Object.assign(cam, {x: 0, y: me.eye, z: 0, lx: 0, ly: me.eye, f: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], tanV: 0.62, tanH: 0.62 * aspect});
-fields = false; mark();
-castRows([], []);
-for (let j = 0; j < rows; j++) assert(!untouched(j), `with fields off row ${j} is cast`);
-fields = true;
-for (let n = 0; n < 4; n++) {
-  const parityBefore = fieldParity;
-  mark();
-  castRows([], []);
-  assert.notEqual(fieldParity, parityBefore, 'the parity alternates each frame');
-  for (let j = 0; j < rows; j++) {
-    if (j % 2 === fieldParity) assert(!untouched(j), `row ${j} is cast`);
-    else assert(untouched(j), `row ${j} of the other parity keeps its previous cast`);
-  }
-}
 """
     subprocess.run(
         ["node", "-"],

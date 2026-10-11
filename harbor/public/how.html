@@ -106,36 +106,44 @@
 </section>
 
 <section class="post">
-<h2>6. Cost is the cell count</h2>
+<h2>6. Cost is the cell count, on every core</h2>
 <p>Rays per frame at the default glyph size. Bigger screen, more cells, until the cell cap holds 4K down.</p>
 <pre aria-hidden="true">iPhone ###                           15,194
 1080p  #######                       34,560
 1440p  #############                 61,344
 4K     #########                     41,880</pre>
-<p>Frame slow? Fields come first, then shadows go off. A phone may then grow outdoor glyphs up to 1.5x, and a room up to 3x. Frames fast again? Glyphs shrink back.</p>
+<p>On a desktop, web workers cast and draw bands of rows on the other cores. Desktops keep every row and every shadow, and never grow glyphs. Only a slow phone turns shadows off, then grows glyphs up to 1.5x.</p>
 </section>
 
 <details>
 <summary>All the detail (long)</summary>
 <h3>Cells per screen</h3>
-<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 0.9 of the old 6.5 to 11 px range up to 2560 by 1440 CSS pixels, and taller above that, because the cell cap is 76,000 and falls with the square root of the stage area above 2560 by 1440 (about 51,000 cells at 3840 by 2160). Cells are whole device pixels. "Largest glyphs" is the 3 times larger grid a room can fall back to. The counts assume a glyph 0.6 times as wide as tall, a 393 by 852 phone at pixel ratio 3, and desktops at pixel ratio 1. Frame time depends on the device, so it is not listed here.</p>
+<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 0.9 of the old 6.5 to 11 px range up to 2560 by 1440 CSS pixels, and taller above that, because the cell cap is 76,000 and falls with the square root of the stage area above 2560 by 1440 (about 51,000 cells at 3840 by 2160). Cells are whole device pixels. The counts assume a glyph 0.6 times as wide as tall, a 393 by 852 phone at pixel ratio 3, and desktops at pixel ratio 1. Frame time depends on the device, so it is not listed here.</p>
 <div class="scroll"><table>
-<tr><th>Screen</th><th>Cells (rays), full detail</th><th>Cells (rays), largest glyphs</th></tr>
-<tr><td>iPhone 15 Pro</td><td>107 x 142 = 15,194</td><td>36 x 48 = 1,728</td></tr>
-<tr><td>1440 x 900</td><td>288 x 100 = 28,800</td><td>90 x 34 = 3,060</td></tr>
-<tr><td>1920 x 1080</td><td>320 x 108 = 34,560</td><td>106 x 36 = 3,816</td></tr>
-<tr><td>2560 x 1440</td><td>426 x 144 = 61,344</td><td>142 x 48 = 6,816</td></tr>
-<tr><td>3840 x 2160 (4K)</td><td>349 x 120 = 41,880</td><td>213 x 72 = 15,336</td></tr>
+<tr><th>Screen</th><th>Cells (rays)</th></tr>
+<tr><td>iPhone 15 Pro</td><td>107 x 142 = 15,194</td></tr>
+<tr><td>1440 x 900</td><td>288 x 100 = 28,800</td></tr>
+<tr><td>1920 x 1080</td><td>320 x 108 = 34,560</td></tr>
+<tr><td>2560 x 1440</td><td>426 x 144 = 61,344</td></tr>
+<tr><td>3840 x 2160 (4K)</td><td>349 x 120 = 41,880</td></tr>
 </table></div>
-<h3>How the page adapts</h3>
+<h3>How the page spreads the work</h3>
 <ul>
-  <li>A frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row, outdoors, the page casts every other row each frame (fields).</li>
-  <li>If still slow, the page turns shadow rays off.</li>
-  <li>If still slow, glyphs grow 15% at a time: not at all outdoors on a desktop, up to 1.5 times as big outdoors on a touch device, up to 3 times in a room. Crossing a door resets them to the default size.</li>
-  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again, then fields end.</li>
-  <li>Every canvas draws at the display's pixel ratio, and none is bigger than 4096 x 4096 device pixels.</li>
+  <li>With 3 or more cores, the page starts one web worker per core but one, at most 8. Each worker loads the same script and builds the same world.</li>
+  <li>For each frame the page sends the time, the ship's motion, the camera and the room to every worker, then hands out bands of rows to the next free worker. Fast and slow cores share the work.</li>
+  <li>The page adds the grass, palms, fountain, rigging, edges, aim and labels, then hands the bands out again. The workers draw the glyphs into bitmaps, and the page paints them, then the map and the sign.</li>
+  <li>Two frames are in hand: one draws while the next casts. A worker draws each glyph with the same text renderer as the page, so its pixels match the page's drawing to within 2 levels of 255.</li>
+  <li>On a phone, without workers, with fewer than 3 cores, during the intro, or for the first frame after a resize or a door, the page casts and draws alone. In iOS Safari the workers were slower than the page alone.</li>
   <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
   <li>Measured at 1440 x 900 over five views: the scene has 444 shapes (275 outside, 169 on the ship). For each list a ray walks, it meets 1.3 to 2.6 candidate shapes, box-tests 0.6 to 1.7 of them, and runs the exact formula 0.3 to 1.2 times. The 5 tree crowns hold 43 leaf clumps in all.</li>
+</ul>
+<h3>How a phone adapts</h3>
+<ul>
+  <li>Desktops never trade detail for speed.</li>
+  <li>On a phone, a frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page turns shadow rays off; phones start without them.</li>
+  <li>If still slow, each glyph grows 15% at a time, up to 1.5 times as big: 2.25 times fewer rays. Crossing a door resets them to the default size.</li>
+  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again.</li>
+  <li>Every canvas draws at the display's pixel ratio, and none is bigger than 4096 x 4096 device pixels.</li>
 </ul>
 <h3>The rest</h3>
 <ul>
@@ -218,7 +226,9 @@
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
   It stops when no remaining solid can be nearer than its hit.
-  After the intro, the canvas keeps unchanged rows.
+  With web workers, each frame paints the newest frame the workers drew: bitmaps of every row, then the map and the sign.
+  A new frame starts while fewer than two are in hand; time waits for the workers, so a slow desktop shows fewer frames, not a coarser grid.
+  Without workers, the canvas keeps unchanged rows after the intro.
   Devices without <code>(pointer: coarse)</code> draw rows with changed cells again from their full text-run positions.
   Touch devices redraw only each run of changed cells and its neighbouring cells; runs fewer than five cells apart share one redraw.
   Grass and tree wind animation uses a 12 Hz clock; other scene changes can repaint grass and tree cells between wind updates.
@@ -235,12 +245,11 @@
   The intro overlay uses CSS dimensions to cover the transformed canvas at any rendering ratio.
   The first grid measurement waits for fonts; if the requested font fails to load, the scene uses a fallback font.
   Up to 2560 by 1440 CSS pixels the glyph height is 0.9 of the old default, as if you had pressed Cmd-minus once, so the same view uses about 1.23 times as many cells; a larger stage gets taller glyphs because the cell cap falls with the square root of the stage area (about 51000 cells at 3840 by 2160), and each cell is still a whole number of device pixels.
-  On a desktop the outdoor glyph size is fixed by the stage size alone, so walking and turning never change it and the lens never changes. On a touch device it stays fixed unless fields and shadows cannot hold the frame rate; then it may grow up to 1.5 times and shrinks back when frames are fast. Rooms grow their glyphs up to 3 times when they render slowly.
+  On a desktop the glyph size is fixed by the stage size alone, outdoors and in rooms, so walking and turning never change it and the lens never changes. On a phone it stays fixed unless shadows off cannot hold the frame rate; then it may grow up to 1.5 times and shrinks back when frames are fast.
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
-  Slow outdoor rendering first switches to fields: each frame casts and repaints every other row, so each row refreshes 30 times a second, then disables exterior shadow rays, if enabled.
-  Fields stay off with reduced motion and indoors, and end when a full frame would cost under 9 ms for 90 frames.
-  Slow rendering in a room disables shadow rays, if enabled, then uses larger glyphs with fewer cells; fast rendering restores a finer grid.
-  Missed frames also reduce detail relative to the measured display refresh rate.
+  On a phone, slow rendering first disables shadow rays, if enabled, then uses larger glyphs with fewer cells, up to 1.5 times as big.
+  Fast rendering restores a finer grid.
+  Missed frames also reduce a phone's detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
