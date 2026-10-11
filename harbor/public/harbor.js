@@ -35,7 +35,7 @@ const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
 // The scene's one wind: the unit direction it blows toward on the ground plan (x, z). The sails belly before it, the
 // flag and pennants stream along it, and the tall grass bends with it.
-const WIND = { x: -0.92, z: 0.39 };
+const WIND = { x: -0.92, z: 0.39, force: 1 }; // force scales how hard the wind moves the moored ship
 const world = [];
 const ship = [];
 const room = [];
@@ -829,7 +829,7 @@ function shipRope(a, b, cls) {
 function viewPoint(x, y, z, out) {
   x -= cam.x; y -= cam.y; z -= cam.z;
   const d = x * cam.f[0] + y * cam.f[1] + z * cam.f[2], div = Math.max(0.001, d);
-  out[0] = ((x * cam.r[0] + z * cam.r[2]) / div / cam.tanH + 1) * cols / 2;
+  out[0] = ((x * cam.r[0] + y * cam.r[1] + z * cam.r[2]) / div / cam.tanH + 1) * cols / 2;
   out[1] = (1 - (x * cam.u[0] + y * cam.u[1] + z * cam.u[2]) / div / cam.tanV) * rows / 2;
   out[2] = d;
   return out;
@@ -1265,9 +1265,9 @@ function buildCabin() {
   box(cabinRoom, -0.28, 0, 4.05, 0.28, 0.48, 4.55, "o");
   box(cabinRoom, -0.28, 0.48, 4.47, 0.28, 1.1, 4.55, "o");
   beam(cabinRoom, [0, 2.45, 3.2], [0, 2, 3.2], "t", {}, 0.015);
-  box(cabinRoom, -0.15, 1.94, 3.05, 0.15, 2, 3.35, "t", { solid: false });
-  box(cabinRoom, -0.12, 1.64, 3.08, 0.12, 1.94, 3.32, "l", { solid: false });
-  box(cabinRoom, -0.14, 1.58, 3.06, 0.14, 1.64, 3.34, "t", { solid: false });
+  box(cabinRoom, -0.15, 1.94, 3.05, 0.15, 2, 3.35, "t", { solid: false, swing: 0.48 });
+  box(cabinRoom, -0.12, 1.64, 3.08, 0.12, 1.94, 3.32, "l", { solid: false, swing: 0.66 });
+  box(cabinRoom, -0.14, 1.58, 3.06, 0.14, 1.64, 3.34, "t", { solid: false, swing: 0.84 });
   box(cabinRoom, 1.35, 0, 0.9, 2.2, 0.42, 2.9, "o", { tex: (x, y, z) => (Math.abs(y - 0.21) < 0.015 || Math.abs(z - 1.9) < 0.015 ? "-" : null) });
   box(cabinRoom, 1.4, 0.42, 0.95, 2.2, 0.58, 2.85, "r");
   box(cabinRoom, 1.5, 0.58, 2.4, 2.15, 0.7, 2.8, "s");
@@ -1352,8 +1352,8 @@ function castRoom(c, i, odd, dx, dy, dz) {
   else if (interior === GUN_DECK && dy < 0) portSea(c, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
-// Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests. Like the rest
-// of the gun deck, it holds still between repaints.
+// Out through a gun port: the sea at the waterline, level with the gun deck floor, with moonlit crests.
+// The wave pattern stays fixed in room coordinates while the camera sways.
 function portSea(c, dx, dy, dz) {
   const t = cam.y / -dy, x = cam.x + dx * t, z = cam.z + dz * t;
   const wave = Math.sin(x * 1.3 + z * 0.4) + 0.6 * Math.sin(z * 1.9 - x * 0.7) + 0.4 * Math.sin(x * 7 + z * 3);
@@ -1380,7 +1380,7 @@ function shadeRoom(c, odd, dx, dy, dz) {
 }
 
 // ---- Gun deck: a second interior under the main deck, reached by the hatch and its ladder -----------
-// It keeps the ship frame without the swell. Planks floor it and line the overhead between dark cross-beams. The hull
+// It keeps the ship frame and shares the hull's gentle sway. Planks floor it and line the overhead between dark cross-beams. The hull
 // sides lean out as they rise, as outside, and open at the gun ports, where each cannon rests on its carriage with the
 // muzzle run out through the port and a rack of round shot beside it. Lanterns hang between the beams by the walkway;
 // GUN_DECK_LAMPS holds x, y, z of each lantern in a row.
@@ -1460,7 +1460,7 @@ function shotRack(side, z) {
 // sight, so its light pools on the planks overhead; the lanterns are the deck's only light.
 function gunDeckLantern(x, z) {
   beam(gunDeck, [x, 1.78, z], [x, 1.95, z], "t", {}, 0.015);
-  box(gunDeck, x - 0.08, 1.62, z - 0.08, x + 0.08, 1.78, z + 0.08, "l", { solid: false });
+  box(gunDeck, x - 0.08, 1.62, z - 0.08, x + 0.08, 1.78, z + 0.08, "l", { solid: false, swing: 0.25 });
   GUN_DECK_LAMPS.push(x, 1.7, z);
 }
 buildGunDeck();
@@ -1480,6 +1480,15 @@ function gunDeckLight(x, y, z, nx, ny, nz) {
   return warm;
 }
 const GUN_DECK = { solids: gunDeck, floorAt: gunDeckFloorAt, light: gunDeckLight };
+const ROOM_LANTERNS = [...cabinRoom, ...gunDeck].filter(s => s.swing).map(s => ({ s, base: s.P.slice(), bounds: s.bb.slice() }));
+function swingRoomLanterns() {
+  for (const { s, base, bounds } of ROOM_LANTERNS) {
+    const dx = roll * s.swing, dz = roll * 0.25 * s.swing;
+    for (let k = 0; k < s.P.length; k += 4) s.P[k + 3] = base[k + 3] + base[k] * dx + base[k + 2] * dz;
+    s.bb[0] = bounds[0] + dx; s.bb[3] = bounds[3] + dx;
+    s.bb[2] = bounds[2] + dz; s.bb[5] = bounds[5] + dz;
+  }
+}
 // Walking onto the open hatch climbs down to the foot of the ladder, facing aft along the guns; walking into
 // the ladder climbs back up to stand beside the hatch, facing aft along the main deck.
 function crossHatch(x, z) {
@@ -1989,12 +1998,24 @@ function measure() {
 let G, C, ID, D, SP;
 const cam = {};
 let renders = 0; // counts render calls, so textures can do per-frame work once
+function swayRoomCamera() {
+  if (interior === CABIN || interior === GUN_DECK) {
+    swingRoomLanterns();
+    // Trace the room in its own frame around the player, with the hull's roll and a smaller pitch.
+    const pc = Math.cos(roll * 0.25), ps = Math.sin(roll * 0.25);
+    for (const v of [cam.f, cam.r, cam.u]) {
+      const x = rc * v[0] + rs * v[1], y = -rs * v[0] + rc * v[1], z = v[2];
+      v[0] = x; v[1] = pc * y + ps * z; v[2] = -ps * y + pc * z;
+    }
+  }
+}
 function render() {
   renders++;
   const tanV = 0.62, tanH = tanV * aspect;
   const cy = Math.cos(me.yaw), sy = Math.sin(me.yaw), cp = Math.cos(me.pitch), sp = Math.sin(me.pitch);
   const fx = sy * cp, fy = sp, fz = cy * cp, rx = cy, rz = -sy, ux = -sp * sy, uy = cp, uz = -sp * cy;
   Object.assign(cam, { x: me.x, y: me.eye, z: me.z, f: [fx, fy, fz], r: [rx, 0, rz], u: [ux, uy, uz], tanH, tanV });
+  swayRoomCamera();
   // Camera origin in the ship frame (rotate by -roll about the ship's long axis, after the bob).
   cam.lx = rc * (me.x - SX) + rs * (me.eye - bob) + SX; cam.ly = -rs * (me.x - SX) + rc * (me.eye - bob);
   gatherClouds(performance.now() / 100);
@@ -2026,7 +2047,7 @@ function labelTarget(spot, looked) {
 }
 // Each tile of one row by TILE_W columns keeps only the solids whose screen rectangle reaches it.
 function castRow(j, seenWorld, seenShip) {
-  const [fx, fy, fz] = cam.f, [rx, , rz] = cam.r, [ux, uy, uz] = cam.u;
+  const [fx, fy, fz] = cam.f, [rx, ry, rz] = cam.r, [ux, uy, uz] = cam.u;
   const v = (1 - (2 * j + 1) / rows) * cam.tanV;
   const inRowWorld = seenWorld.filter((s) => s.j0 <= j && j <= s.j1), inRowShip = seenShip.filter((s) => s.j0 <= j && j <= s.j1);
   for (let a = 0, c = j * cols; a < cols; a += TILE_W) {
@@ -2039,7 +2060,7 @@ function castRow(j, seenWorld, seenShip) {
         continue;
       }
       const h = ((2 * i + 1) / cols - 1) * cam.tanH;
-      const dx = fx + rx * h + ux * v, dy = fy + uy * v, dz = fz + rz * h + uz * v, n = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const dx = fx + rx * h + ux * v, dy = fy + ry * h + uy * v, dz = fz + rz * h + uz * v, n = Math.sqrt(dx * dx + dy * dy + dz * dz);
       cast(c, i, (i + j) & 1, dx / n, dy / n, dz / n);
     }
   }
@@ -2058,14 +2079,14 @@ function grow(a, u, d) {
 }
 // Puts the corners of box b in boxView and grows `rect` by those in front; returns how many are behind the near plane.
 function viewCorners(b, inShip) {
-  const [f0, f1, f2] = cam.f, [r0, , r2] = cam.r, [u0, u1, u2] = cam.u;
+  const [f0, f1, f2] = cam.f, [r0, r1, r2] = cam.r, [u0, u1, u2] = cam.u;
   let behind = 0;
   for (let k = 0; k < 8; k++) {
     let x = k & 1 ? b[3] : b[0], y = k & 2 ? b[4] : b[1];
     const z = k & 4 ? b[5] : b[2];
     if (inShip) { const lx = x - SX; x = SX + rc * lx - rs * y; y = rs * lx + rc * y + bob; }
     const px = x - cam.x, py = y - cam.y, pz = z - cam.z, d = px * f0 + py * f1 + pz * f2;
-    boxView[k * 3] = px * r0 + pz * r2; boxView[k * 3 + 1] = px * u0 + py * u1 + pz * u2; boxView[k * 3 + 2] = d;
+    boxView[k * 3] = px * r0 + py * r1 + pz * r2; boxView[k * 3 + 1] = px * u0 + py * u1 + pz * u2; boxView[k * 3 + 2] = d;
     if (d < NEAR) behind++;
     else grow(boxView[k * 3], boxView[k * 3 + 1], d);
   }
@@ -3344,12 +3365,12 @@ function frame(now) {
   const still = reduced.matches;
   advanceIntro(now, still);
   if (!still) T += dt;
-  // The ship rides the swell too, gently: it is heavy, so half the wave height and a slow roll.
-  if (still) { bob = 0; roll = 0; } else { seaNormal(SX, -2); bob = 0.5 * seaHeight(SX, -2) + 0.08 * Math.sin(T * 0.7); roll = -0.35 * Math.atan2(seaN[0], seaN[1]); }
+  // Keep the heavy moored ship independent of the steep wave slopes that tilt the small boats.
+  if (still) { bob = 0; roll = 0; } else { roll = WIND.force * (0.02 * Math.sin(T * 0.55) + 0.01 * Math.sin(T * 0.8 + 1.3)); bob = WIND.force * (0.03 * Math.sin(T * 0.55 + 0.8) + 0.015 * Math.sin(T * 0.8 + 2)); }
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);
-  // Interiors have no animated objects; repaint only after movement, looking, or resizing.
-  if (visible && cols && (walked || dirty || (!interior && !still))) {
+  // Ship rooms animate with the hull; the house and reduced-motion views repaint only on input.
+  if (visible && cols && (walked || dirty || (!still && interior !== HOUSE))) {
     if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
       probeMs = frameMs;
       dirty = true;
