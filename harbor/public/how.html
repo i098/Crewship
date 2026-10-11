@@ -70,7 +70,26 @@
 </section>
 
 <section class="post">
-<h2>4. Light picks the character</h2>
+<h2>4. Big things are many small shapes</h2>
+<p>The ship is 169 shapes. The whole scene is 444. A ray still tests about one.</p>
+<pre aria-hidden="true">444 shapes in the scene
+  | behind you or off screen? dropped
+  v
+~2 left near this ray
+  | its box missed? skipped
+  v
+~1 exact formula run</pre>
+<p>Each shape has a box. Nearest first, the ray stops at its first hit.</p>
+<pre aria-hidden="true">+--------------+
+|  (o)  (o)    |  one tree crown,
+|    (o)  (o)  |  one box, ~9 clumps
++--------------+
+  the ray tries only the clumps
+  it enters, nearest first</pre>
+</section>
+
+<section class="post">
+<h2>5. Light picks the character</h2>
 <p>Moon, lamps and the lighthouse beam add up. Brighter spot, denser glyph.</p>
 <pre aria-hidden="true">   *###*+=~
   *%@@@@%%#*+-~,
@@ -87,7 +106,7 @@
 </section>
 
 <section class="post">
-<h2>5. Cost is the cell count</h2>
+<h2>6. Cost is the cell count</h2>
 <p>Rays per frame at the smallest glyphs. Bigger screen, more cells.</p>
 <pre aria-hidden="true">iPhone ##                            12,120
 1080p  #######                       34,202
@@ -115,6 +134,7 @@
   <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again.</li>
   <li>Phones draw at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
   <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
+  <li>Measured at 1440 x 900 over five views: the scene has 444 shapes (275 outside, 169 on the ship). For each list a ray walks, it meets 1.3 to 2.6 candidate shapes, box-tests 0.6 to 1.7 of them, and runs the exact formula 0.3 to 1.2 times. The 5 tree crowns hold 43 leaf clumps in all.</li>
 </ul>
 <h3>The rest</h3>
 <ul>
