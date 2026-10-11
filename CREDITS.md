@@ -70,3 +70,14 @@ The harbor house on [crewship.si](https://crewship.si) shows these public-domain
 - *Entrance to the Port of Palermo by Moonlight*, Claude-Joseph Vernet, 1769, Hermitage Museum: [source](https://commons.wikimedia.org/wiki/File:Entrance_to_the_Port_of_Palermo_by_Moonlight,_1769.jpg). License: public domain (PD-Art, PD-old-100-expired).
 - *Sailing Ship on the Sea at Moonlight*, Ivan Aivazovsky, early 1840s: [source](https://commons.wikimedia.org/wiki/File:Ivan_Aivazovsky_Segelschiff_auf_hoher_See_bei_Mondschein_1840er.jpg). License: public domain (PD-Art, PD-old-100-expired).
 - *Fishermen at Sea*, J. M. W. Turner, 1796, Tate: [source](https://commons.wikimedia.org/wiki/File:Joseph_Mallord_William_Turner_-_Fishermen_at_Sea_-_Google_Art_Project.jpg). License: public domain (PD-Art, PD-old-100-expired).
+
+## Sounds
+
+The harbor on [crewship.si](https://crewship.si) plays short ambient loops cut from these Freesound recordings. Each source page marks the recording as CC0 1.0 (public domain dedication). The loops in `harbor/public/audio/` are trimmed, mixed to mono, crossfaded into seamless loops, and level-matched.
+
+- *Ocean Waves.wav*, Noted451: [source](https://freesound.org/people/Noted451/sounds/531015/), the sea and surf. License: CC0 1.0.
+- *fountain*, martats: [source](https://freesound.org/people/martats/sounds/156969/), the plaza fountain. License: CC0 1.0.
+- *Rustling leaves*, Kinoton: [source](https://freesound.org/people/Kinoton/sounds/347557/), the wind in the trees. License: CC0 1.0.
+- *LargeWoodenShip.mp3*, PimFeijen: [source](https://freesound.org/people/PimFeijen/sounds/195193/), the ship's creaking timbers and rigging. License: CC0 1.0.
+- *Crackling Fire*, samarobryn: [source](https://freesound.org/people/samarobryn/sounds/414767/), the fire and lanterns in the house and ship rooms. License: CC0 1.0.
+- *Seagulls-M.wav*, DaveGould: [source](https://freesound.org/people/DaveGould/sounds/32930/), the distant gulls. License: CC0 1.0.

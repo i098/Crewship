@@ -1,6 +1,13 @@
 # harbor
 
 `harbor/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
+
+It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
+There is no 3D engine, no WebGL and no model files.
+A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
+The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
+The cell count is the cost of a frame, so the page drops shadow rays and then grows the glyphs, up to 3 times, to keep frames short; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
+
 Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
 Selecting a destination on the ASCII mini map walks you there around obstacles; with reduced motion, you jump there instead.
@@ -38,13 +45,15 @@ Thin cloud dims the moon and the stars, and thick cloud hides them.
 The layers are at different heights, so they move at different speeds when you walk.
 With reduced motion, cloud drift stops, but walking still changes your view of the clouds.
 
-Walk into the framed house door to enter a warm room with a lamp, table, bed, and a starry night window.
+Walk into the framed house door to enter a warm room with a lamp, table, and bed.
+The house windows open into the room: from inside you see the harbor through them, and from outside you see the lit room.
+The view through the house windows changes when you move or look around.
 A fireplace with a fire, a bookcase, chairs, an armchair, crates, a sea chest, potted plants, and a rug furnish the room.
 Four public-domain paintings hang on the walls in moulded frames with brass name plaques.
 The painting above the mantel is by Turner.
 See [CREDITS.md](../CREDITS.md#paintings) for the works, sources, and licences.
 See [art.py](art.py) for the texture conversion command and [how.html](public/how.html) for rendering details.
-The blue bed faces the door; darker walls and floor keep the furniture, lamp, and window clear.
+The blue bed stands under a back window and faces the door; darker walls and floor keep the furniture, lamp, and windows clear.
 Walk back through the inside door to return just outside, facing the island.
 Keyboard and touch movement share the door transition; walls and furniture block walking, and the map stays hidden inside.
 Release the movement keys and touch pad after a door crossing to move again.
@@ -55,7 +64,7 @@ Its gun ports, railings, figurehead, and warm lanterns follow the hull and deck.
 Walking bounds and the map use the hull's tapered stations; the gangway joins the deck to the dock.
 The stern castle is the cabin, with planked walls, framed windows, a dark strap-hinged door, a glowing wall lantern, and pale roof trim.
 Walk through the cabin door to enter a small furnished room.
-It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and starry windows.
+It has a chart table under a hanging lantern, a chair, a bunk, a sea chest, and the cabin's windows, which open both ways like the house windows.
 The cabin uses the house's door transition, collisions, and hidden map; the inside door returns you to the deck, facing the bow.
 A steep companionway ladder connects the main deck to the cabin roof: ten open pale treads between sloped stringers, with a thick pale handrail on posts on each side.
 The ship's wheel stands on a pedestal on the cabin roof, behind the top of the ladder.
@@ -84,7 +93,8 @@ The dark, tapered barrel runs from a rounded breech out through the port to a ri
 A rack of stacked round shot stands beside each gun.
 Dark cross-beams carry the deck planks overhead, and the floor planks show their seams.
 Lanterns hang between the beams beside the walkway and cast pools of dim warm light.
-The open ports show the moonlit sea.
+The open ports show the harbor outside, and from outside they show the lit gun deck.
+The far-shore town has no rooms, so its windows stay lit patterns.
 Walk into the ladder to climb back up beside the hatch, facing aft.
 Keyboard and touch movement share the house door's transition: release the movement keys and touch pad after a crossing to move again.
 The guns, shot racks, and main mast block walking, and the map stays hidden below deck.
@@ -105,13 +115,22 @@ Ship bob and roll do not rebuild the graph during a map click.
 If no free viewing spot exists, the map selection stops without moving the player.
 Without reduced motion, a missing clear route also stops the map walk without moving the player.
 
+The harbor plays ambient sound that fades with distance: sea and surf at the nearest waterline or ship side, water at the fountain, wind in the nearest tree, creaking timbers along the ship, and gulls circling far over the bay.
+Inside the house and the ship's rooms, a fire or lantern crackles nearby and the outdoor sounds are muffled; the ship's rooms keep the creaking.
+Sound starts with the first click or tap, as browsers require, and the speaker button in the bottom-left corner turns it off or on.
+The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
+Sound stops while the tab is hidden; reduced motion does not change it.
+The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
+See [how.html](public/how.html) for the audio graph.
+
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
 Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `harbor/`, and the playbook never copies it.
 `tests/test_harbor_isolation.py` checks both.
 
 ## Content from the repository
 
-`build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row.
+`build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row and from `docs/features.md`.
+Every object in the scene needs a `SCENE` entry whose docs link appears in one of them; a test checks this.
 It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and how.html.
 A link with an object in the scene (mapped in `build.py`'s `SCENE`) opens on that object.
 A link with no mapping prints a warning but never blocks the build.

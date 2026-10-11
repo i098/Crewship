@@ -57,7 +57,7 @@ code, kbd { font-family: var(--mono); font-size: 0.9em; }
 .stage.mapping { cursor: default; }
 
 #scene { display: block; width: 100%; height: 100%; }
-.stage.loading .card, .stage.loading .pad { visibility: hidden; }
+.stage.loading .card, .stage.loading .pad, .stage.loading .sound { visibility: hidden; }
 
 .pad {
   display: none;
@@ -71,8 +71,18 @@ code, kbd { font-family: var(--mono); font-size: 0.9em; }
   width: 32px; height: 32px; margin: -16px 0 0 -16px; border-radius: 50%;
   background: rgba(126, 224, 195, 0.4);
 }
+.sound {
+  position: absolute; left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom));
+  width: 44px; height: 44px; padding: 10px; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(126, 224, 195, 0.35);
+  background: rgba(10, 15, 28, 0.25);
+  color: var(--accent);
+}
+.sound svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sound[aria-pressed="true"] .off, .sound[aria-pressed="false"] .on { display: none; }
 @media (pointer: coarse), (max-width: 700px) {
   .pad { display: block; }
+  .sound { left: calc(104px + env(safe-area-inset-left)); }
 }
 
 kbd {
@@ -100,3 +110,22 @@ kbd {
 .how ul { padding-left: 18px; }
 .how li { margin: 0 0 8px; color: var(--muted); }
 .how b { color: var(--fg); }
+.how .lede { margin: 0 0 4px; color: var(--muted); font: 15px/1.4 var(--mono); }
+.how .post { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.how .post h2 { margin: 0 0 6px; font: 700 17px/1.25 var(--mono); color: var(--fg); }
+.how .post p { margin: 0 0 10px; color: var(--muted); }
+.how .post pre { margin: 8px 0 10px; color: var(--accent); font: 12px/1.25 var(--mono); }
+.how .post > :last-child { margin-bottom: 0; }
+.how .shapes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 10px; }
+.how .shapes figure { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.how .shapes pre { margin: 0 0 6px; min-height: 7.5em; }
+.how figcaption { color: var(--muted); font-size: 13px; }
+.how details { margin: 18px 0; }
+.how summary { cursor: pointer; color: var(--accent); font: 700 15px/1.4 var(--mono); }
+.how h3 { margin: 16px 0 6px; font: 700 15px/1.2 var(--mono); color: var(--fg); }
+.how details p { color: var(--muted); }
+.how table { width: 100%; border-collapse: collapse; margin: 8px 0; font: 13px/1.4 var(--mono); }
+.how th, .how td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.how th { color: var(--fg); }
+.how td { color: var(--muted); }
+.how .scroll { overflow-x: auto; }

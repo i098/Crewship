@@ -1,6 +1,6 @@
-<div align="center">
+<h1 align="center">🚢 Crewship</h1>
 
-# 🚢 Crewship
+<div align="center">
 
 **This makes it super easy to start using agents in the cloud, enjoy!**
 
@@ -34,19 +34,15 @@ The other features, each with its docs link, are listed in [docs/features.md](do
 
 ## Quick start
 
-### Get a machine
+1. **Machine:** Ubuntu 24.04 or 26.04 server from any VPS (e.g. Hetzner) or a spare box, 4 vCPU / 16 GB and up; see [Capacity](docs/capacity.md).
 
-Buy an Ubuntu 24.04 or 26.04 server from any VPS or cloud provider, for example [Hetzner Cloud](https://www.hetzner.com/cloud/), [OVHcloud VPS](https://www.ovhcloud.com/en/vps/), or [DigitalOcean Droplets](https://www.digitalocean.com/products/droplets). A spare machine at home works too.
+2. **Paste:** this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
 
-Runs on 4 vCPU / 16 GB and up; a 96 vCPU / 247 GB host ran 37 agents in about 67 GB RAM ([Capacity](docs/capacity.md)).
+   ```text
+   Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
+   ```
 
-### Set up
-
-Paste this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
-
-```text
-Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
-```
+3. **Update:** run `npx crewship update` (or the same install command again)
 
 Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
@@ -56,7 +52,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
-  <img alt="You message Firstmate from a phone or laptop. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. Guards, the crew board and the secrets file are shared on the server. Every agent can optionally reach your Mac over SSH." src="docs/how-it-works-light.svg">
+  <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. Optional guards, the optional crew board and the secrets file are shared on the server. The agents can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
 </picture>
 
 ## More docs

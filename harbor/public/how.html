@@ -18,6 +18,125 @@
 ~~~\_________/~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </pre>
 <h1>How this harbor is built</h1>
+<p class="lede">Drawn natively. Every frame is maths per character.</p>
+
+<section class="post">
+<h2>1. No engine. No WebGL. No 3D models.</h2>
+<p>One plain JS file draws on a 2D canvas. That is all.</p>
+<pre aria-hidden="true">harbor.js  -->  2D canvas  -->  text</pre>
+</section>
+
+<section class="post">
+<h2>2. One ray per character</h2>
+<p>Each character cell asks: what do I see first, looking through me?</p>
+<pre aria-hidden="true">          +---+---+---+
+ eye      | . | : | # |
+  o ----- | - | = | @ |  1 ray
+          | * | + | % |  per cell
+          +---+---+---+
+
+ RAY > HIT > LIGHT > GLYPH > COLOUR</pre>
+</section>
+
+<section class="post">
+<h2>3. Shapes are formulas, not meshes</h2>
+<p>A ray solves each formula to find where it touches. No triangles.</p>
+<div class="shapes">
+<figure><pre aria-hidden="true">  +++++++++++'
+  ------------
+  ------------
+  ------------
+  .-----------</pre><figcaption><b>Plane.</b> Buildings, dock, hull.</figcaption></figure>
+<figure><pre aria-hidden="true">       @+
+      @@*~
+     %@%#=;
+    %@@%#+-:
+   %@@@%#*=~,
+    +@@%#*+'</pre><figcaption><b>Cone.</b> Masts, lighthouse.</figcaption></figure>
+<figure><pre aria-hidden="true">    **+=;
+ %@@@%%#+=~`
+%@@@%%#*+-~,
+*###**+=-;,.
+'~~-~~;:,`.
+   .....</pre><figcaption><b>Ellipsoid.</b> Rocks.</figcaption></figure>
+<figure><pre aria-hidden="true">            %#
+         %@#~
+      #@@*;
+   #@@%+:.
+ @@%#=:.
+-**-,.</pre><figcaption><b>Tapered limb.</b> Trunks, branches.</figcaption></figure>
+</div>
+<p>Sea and island are height fields. Sails are curved cloth. Grass and spray are dots.</p>
+</section>
+
+<section class="post">
+<h2>4. Big things are many small shapes</h2>
+<p>The ship is 169 shapes. The whole scene is 444. A ray still tests about one.</p>
+<pre aria-hidden="true">444 shapes in the scene
+  | behind you or off screen? dropped
+  v
+~2 left near this ray
+  | its box missed? skipped
+  v
+~1 exact formula run</pre>
+<p>Each shape has a box. Nearest first, the ray stops at its first hit.</p>
+<pre aria-hidden="true">+--------------+
+|  (o)  (o)    |  one tree crown,
+|    (o)  (o)  |  one box, ~9 clumps
++--------------+
+  the ray tries only the clumps
+  it enters, nearest first</pre>
+</section>
+
+<section class="post">
+<h2>5. Light picks the character</h2>
+<p>Moon, lamps and the lighthouse beam add up. Brighter spot, denser glyph.</p>
+<pre aria-hidden="true">   *###*+=~
+  *%@@@@%%#*+-~,
+ #%@@@@@@%#*+=-;'
+ +#%@@@@%%#*+=~;,.
+ +##%%%%%##*+=-~:'.
+  -+**##***+=-~;:'..
+   ~-======-~;:,'..
+ moon is at the top left
+
+ .`',:;~-=+*#%@
+ dim ------> bright</pre>
+<p>A shadow ray per lamp. A solid in the way means no light. Colour is the material, in 8 brightness levels.</p>
+</section>
+
+<section class="post">
+<h2>6. Cost is the cell count</h2>
+<p>Rays per frame at the smallest glyphs. Bigger screen, more cells.</p>
+<pre aria-hidden="true">iPhone ##                            12,120
+1080p  #######                       34,202
+1440p  ############                  60,450
+4K     ############################ 136,808</pre>
+<p>Frame slow? Shadows go off, then glyphs grow up to 3x: 9x fewer rays. Frames fast again? Glyphs shrink back.</p>
+</section>
+
+<details>
+<summary>All the detail (long)</summary>
+<h3>Cells per screen</h3>
+<p>One ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall. "Largest glyphs" is the coarsest grid the page falls back to, 3 times as big. Frame time depends on the device, so it is not listed here.</p>
+<div class="scroll"><table>
+<tr><th>Screen</th><th>Cells (rays), full detail</th><th>Cells (rays), largest glyphs</th></tr>
+<tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>40 x 33 = 1,320</td></tr>
+<tr><td>1440 x 900</td><td>294 x 91 = 26,754</td><td>98 x 30 = 2,940</td></tr>
+<tr><td>1920 x 1080</td><td>349 x 98 = 34,202</td><td>116 x 32 = 3,712</td></tr>
+<tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>155 x 43 = 6,665</td></tr>
+<tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>232 x 65 = 15,080</td></tr>
+</table></div>
+<h3>How the page adapts</h3>
+<ul>
+  <li>A frame over 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page turns shadow rays off.</li>
+  <li>If still slow, each glyph grows 15% at a time, up to 3 times as big.</li>
+  <li>After 90 fast frames in a row (under 6 ms) the glyphs shrink again.</li>
+  <li>Phones draw at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
+  <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit.</li>
+  <li>Measured at 1440 x 900 over five views: the scene has 444 shapes (275 outside, 169 on the ship). For each list a ray walks, it meets 1.3 to 2.6 candidate shapes, box-tests 0.6 to 1.7 of them, and runs the exact formula 0.3 to 1.2 times. The 5 tree crowns hold 43 leaf clumps in all.</li>
+</ul>
+<h3>The rest</h3>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
   Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.
@@ -60,7 +179,7 @@
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
   The house's lamp and fire, the cabin's hanging lantern and the gun deck lanterns light nearby surfaces without shadow rays.
-  The cabin's wall lantern glows like the lit windows but lights no other surface.
+  The cabin's wall lantern glows but lights no other surface.
   The sea shows Fresnel reflection, moon and lamp highlights and foam.
   Fog and contact shadows add depth.</li>
   <li><b>Clouds.</b> Three cloud layers, with bases at 260, 480 and 900 m, drift downwind; the nearer layers move faster as you walk.
@@ -91,7 +210,9 @@
   Each texel keeps one glyph from <code> .:-=+*#%@</code> and one of a few colours; room light sets the colour level.
   A painting far from you reads a half or quarter size copy of its texture.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
-  The moonlit sea seen through the gun ports uses still wave glyphs.
+  Windows and gun ports are openings that each room shares with its outside walls.
+  A ray through one goes on in the scene on the other side, from where the room stands in it, so the room shows through its panes and the outside through its openings.
+  Each frame culls the far side only for the screen area of the openings, so no window needs its own rendering pass.
   An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one, and along hill crests.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
@@ -131,6 +252,12 @@
   On a phone, the bottom-left pad walks; drag on the right to look around.
   The pad and map controls respect safe-area insets.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#content-from-the-repository">harbor README</a> for sign links and keyboard access.</li>
+  <li><b>Sound.</b> The first click or tap creates one <code>AudioContext</code> and fetches six mono loops; the speaker button in the bottom-left corner mutes them.
+  Each loop runs through a gain and an HRTF <code>PannerNode</code> with the inverse distance model, so it fades with distance from you.
+  The sea, wind and fire loops move to their nearest emitter: the waterline or a ship side, a tree, or the fireplace or a lantern in the room you are in.
+  The listener and the emitters update at most 20 times a second, not every frame, and move smoothly between updates.
+  Rooms lower the outdoor loops and turn on their fire or lantern.
+  A muted or hidden page suspends the context, so sound costs no CPU then.</li>
   <li><b>Mini map.</b> Outside, M picks a point on the text map in the corner.
   Press M again to fill the screen with the map.
   Use the arrows to choose a point.
@@ -141,6 +268,7 @@
   <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/harbor#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>harbor/</code> reaches a Crewship host or worker image.</li>
 </ul>
+</details>
 <p><a href="https://github.com/i098/Crewship/tree/main/harbor" target="_blank" rel="noopener">The source on GitHub</a> &middot; <a href="./">Back to the harbor</a></p>
 </body>
 </html>

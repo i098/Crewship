@@ -39,11 +39,15 @@ class Manifest(HTMLParser):
             self.inside = False
 
 
-def built(tmp_path, monkeypatch, readme):
+def built(tmp_path, monkeypatch, readme, index=None):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text(readme)
     (root / "CHANGELOG.md").write_text((ROOT / "CHANGELOG.md").read_text())
+    (root / "docs").mkdir()
+    (root / "docs/features.md").write_text(
+        (ROOT / "docs/features.md").read_text() if index is None else index
+    )
     monkeypatch.setattr(build, "ROOT", root)
     manifest = Manifest()
     manifest.feed((build.build(tmp_path / "dist") / "index.html").read_text())
@@ -58,7 +62,8 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
         f"\n## More docs\n- [Brand new]({unmapped})\n",
         1,
     )
-    links = [link for _, link, _ in build.features(readme) if link in build.SCENE]
+    index = (ROOT / "docs/features.md").read_text()
+    links = [link for _, link, _ in build.features(readme, index) if link in build.SCENE]
     manifest = built(tmp_path, monkeypatch, readme)
 
     hrefs = Counter(a["href"] for a in manifest.links)
@@ -75,17 +80,25 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
 
 def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, capsys):
     readme = (ROOT / "README.md").read_text()
-    mapped = [row for row in build.features(readme) if row[1] in build.SCENE]
+    index = (ROOT / "docs/features.md").read_text()
+    mapped = [row for row in build.features(readme, index) if row[1] in build.SCENE]
     section = readme.split("\n## Features\n", 1)[1].split("\n## ", 1)[0]
     only = "\n".join(f"- [{title}]({link}): {desc}" for title, link, desc in mapped)
     readme = readme.replace(section, f"\n{only}\n", 1)
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     readme = readme.replace(more_docs, "", 1)
-    manifest = built(tmp_path, monkeypatch, readme)
+    manifest = built(tmp_path, monkeypatch, readme, index="")
 
     assert "docsboard" not in manifest.spots
     assert {build.SCENE[link][0] for _, link, _ in mapped} <= set(manifest.spots)
     assert capsys.readouterr().err == ""
+
+
+def test_every_scene_object_has_a_manifest_entry(tmp_path, monkeypatch):
+    """harbor.js show() reads the entry of any object the player aims at."""
+    manifest = built(tmp_path, monkeypatch, (ROOT / "README.md").read_text())
+    scene = set(re.findall(r'\bspot: "(\w+)"', (ROOT / "harbor/public/harbor.js").read_text()))
+    assert scene - set(manifest.spots) == set()
 
 
 def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
@@ -98,6 +111,8 @@ def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     root.mkdir()
     (root / "README.md").write_text(readme)
     (root / "CHANGELOG.md").write_text((ROOT / "CHANGELOG.md").read_text())
+    (root / "docs").mkdir()
+    (root / "docs/features.md").write_text((ROOT / "docs/features.md").read_text())
     monkeypatch.setattr(build, "ROOT", root)
     page = (build.build(tmp_path / "dist") / "index.html").read_text()
     manifest = Manifest()

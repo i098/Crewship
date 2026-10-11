@@ -84,6 +84,7 @@ case $fmt in *redirect_url*) printf %s "$redirect" ;; *http_code*) printf %s "$c
 """
 SHIP = """#!/usr/bin/env bash
 echo "$1" >>"$HOME/calls"
+echo "$*" >>"$HOME/args"
 if [ "$1" = dock ]; then mkdir -p .local && echo "dock-v$(cat VERSION)" >.local/host.yml; fi
 """
 
@@ -229,3 +230,98 @@ def test_git_clone_migrates_to_a_release_and_a_backup(release):
     (backup,) = release.home.glob("Crewship.git-backup-*")
     assert (backup / ".git").is_dir()
     assert (backup / ".local/host.yml").read_text() == "mine\n"
+
+
+def test_v040_host_is_migrated_before_the_reapply(release):
+    assert release.install("v1.0.0").returncode == 0
+    # What v0.4.0 left: tools under share/code-factory linked from ~/.local/bin, and removed fleet keys.
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    bin_dir = release.home / ".local/bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "uv").symlink_to(old / "uv")
+    (bin_dir / "mine").write_text("not ours")
+    host = release.crewship / ".local/host.yml"
+    host.write_text("factory:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n")
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert not (bin_dir / "uv").exists() and not (bin_dir / "uv").is_symlink()
+    assert (bin_dir / "mine").read_text() == "not ours"
+    assert (old / "uv").read_text() == "x"
+    assert "factory:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
+    for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
+        assert f"dropped fleet.{key}" in result.stdout
+    assert "supabase_project_id" in (host.parent / "host.yml.v0.4.0").read_text()
+
+
+def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
+    assert release.install("v1.0.0", "update", "--container").returncode == 0
+    assert (release.home / "args").read_text().splitlines()[0] == "dock --container"
+    (release.crewship / ".local/host.yml").write_text("mine\n")
+    result = release.install("v1.1.0", "update", "--container")
+    assert result.returncode == 0, result.stderr
+    assert release.crewship.resolve() == (release.releases / "v1.1.0").resolve()
+    assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
+    assert "dock" not in (release.home / "calls").read_text().split()[4:]
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+@pytest.mark.parametrize(
+    "location, status, output",
+    [
+        ("https://github.com/i098/Crewship/releases/tag/v1.1.0", 0, "ref=v1.1.0 args=--container"),
+        ("https://github.com/i098/Crewship/releases", 1, "no release found"),
+        ("", 1, "no release found"),
+    ],
+)
+def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, status, output):
+    stub = tmp_path / "fetch.js"
+    stub.write_text(
+        "const location = process.env.LATEST_LOCATION;\n"
+        "globalThis.fetch = async (url, options) => {\n"
+        "  if (url.endsWith('/releases/latest')) {\n"
+        "    if (options?.redirect !== 'manual') throw new Error('redirect not manual');\n"
+        "    return new Response(null, { status: 302, headers: location ? { location } : {} });\n"
+        "  }\n"
+        "  const ref = url.split('/')[5];\n"
+        "  return new Response(`echo \"ref=$CREWSHIP_REF args=$*\"; echo \"url-ref=${ref}\"`);\n"
+        "};\n"
+    )
+    result = subprocess.run(
+        [shutil.which("node"), "--require", str(stub), str(ROOT / "npm/crewship.js"), "update", "--container"],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LATEST_LOCATION": location},
+        timeout=10,
+    )
+    assert result.returncode == status
+    assert output in result.stdout + result.stderr
+    if status == 0:
+        assert "url-ref=v1.1.0" in result.stdout
+
+
+def test_v040_links_are_relinked_when_home_is_a_symlink(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    (release.home / ".local/bin").mkdir(parents=True, exist_ok=True)
+    (release.home / ".local/bin/uv").symlink_to(old / "uv")
+    alias = tmp_path / "home-alias"
+    alias.symlink_to(release.home)
+    release.env["HOME"] = str(alias)
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert not (alias / ".local/bin/uv").is_symlink()
+
+
+def test_migration_is_a_noop_on_a_current_host(release):
+    assert release.install("v1.0.0").returncode == 0
+    host = release.crewship / ".local/host.yml"
+    host.write_text("crewship:\n  fleet:\n    keep: 1\n")
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert "dropped" not in result.stdout and "relinking" not in result.stdout
+    assert host.read_text() == "crewship:\n  fleet:\n    keep: 1\n"
+    assert not (host.parent / "host.yml.v0.4.0").exists()
