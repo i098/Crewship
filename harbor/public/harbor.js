@@ -2737,7 +2737,7 @@ function render() {
   frames.length = 0;
   view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
-  finish();
+  draw(compose());
 }
 // Everything after the cast but the drawing: crests, the projected details, the sign and the map. Returns the middle cell.
 function compose() {
@@ -2761,9 +2761,6 @@ function compose() {
   minimap();
   labelTarget(spot, looked);
   return mid;
-}
-function finish() {
-  draw(compose());
 }
 // A hill crest against the sky, the sea or far ground catches the moon: two colour tiers brighter, and a surface id of
 // its own, so the edge pass outlines it. Nearer rows of flat ground are never so far apart. It compares each ground
