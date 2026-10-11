@@ -263,6 +263,24 @@ def test_a_dropped_patch_rebuilds_the_layer_on_a_host_that_has_the_old_one(host)
     assert verify(host).returncode == 0
 
 
+def assert_default_socket(tmp_path, monkeypatch, env, render, enabled):
+    """CREWBOARD_SOCKET unset or empty falls back to $XDG_RUNTIME_DIR/crewboard.sock."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    env["XDG_RUNTIME_DIR"] = str(runtime)
+    with socket.socket(socket.AF_UNIX) as board, monkeypatch.context() as context:
+        # Bind relative to avoid the Unix socket path limit in deep worktrees.
+        context.chdir(runtime)
+        board.bind("crewboard.sock")
+        board.listen()
+        for value in (None, ""):
+            if value is None:
+                env.pop("CREWBOARD_SOCKET", None)
+            else:
+                env["CREWBOARD_SOCKET"] = value
+            assert render() == enabled
+
+
 @pytest.fixture
 def crewboard_firstmate(tmp_path):
     """Exercise the carried patch against a supplied, read-only upstream tree."""
@@ -303,6 +321,8 @@ def test_crewboard_brief_output(crewboard_firstmate, tmp_path, arguments, monkey
     home.mkdir()
     env = {**os.environ, "FM_HOME": str(home)}
     env.pop("CREWBOARD_SOCKET", None)
+    # An absent runtime dir keeps the default socket path from naming the real board.
+    env["XDG_RUNTIME_DIR"] = str(tmp_path / "run")
     brief = home / "data/sample/brief.md"
 
     def render(script):
@@ -330,6 +350,7 @@ def test_crewboard_brief_output(crewboard_firstmate, tmp_path, arguments, monkey
         board.listen()
         env["CREWBOARD_SOCKET"] = str(path)
         enabled = render("fm-brief.sh")
+        assert_default_socket(tmp_path, monkeypatch, env, lambda: render("fm-brief.sh"), enabled)
         section = (
             b"\n\n# Crew board\n"
             b"The board permits direct peer coordination; report task states only to Firstmate through the status file.\n"
@@ -350,6 +371,8 @@ def test_crewboard_supervisor_output(crewboard_firstmate, tmp_path, harness, mon
     checkout = crewboard_firstmate
     env = {**os.environ, "FM_HOME": str(tmp_path / "home")}
     env.pop("CREWBOARD_SOCKET", None)
+    # An absent runtime dir keeps the default socket path from naming the real board.
+    env["XDG_RUNTIME_DIR"] = str(tmp_path / "run")
 
     def render(script, *options):
         return subprocess.run(
@@ -376,6 +399,7 @@ def test_crewboard_supervisor_output(crewboard_firstmate, tmp_path, harness, mon
         board.listen()
         env["CREWBOARD_SOCKET"] = str(path)
         enabled = render("fm-supervision-instructions.sh")
+        assert_default_socket(tmp_path, monkeypatch, env, lambda: render("fm-supervision-instructions.sh"), enabled)
         note = b"- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. The status file remains the durable ledger.\n"
         assert enabled.count(note) == 1
         anchor = baseline.index(b"- Ordinary wake:")

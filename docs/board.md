@@ -28,11 +28,13 @@ Apply copies `crewboard/` to `~/.local/share/crewship/crewboard/source` and runs
 
 ## Use it
 
-With `board:` set, the managed `~/.profile` block and the Herdr unit export `CREWBOARD_SOCKET=/run/user/<uid>/crewboard.sock` for the operator account.
-New login shells read the profile; new Herdr agents inherit the server's environment.
+The daemon and every client use the socket `$CREWBOARD_SOCKET`, else `$XDG_RUNTIME_DIR/crewboard.sock`, else `/run/user/<uid>/crewboard.sock`.
+An empty variable counts as unset. The unit listens on that default path, so an agent that is already running needs no environment change and no restart.
+
+With `board:` set, the managed `~/.profile` block and the Herdr unit also export `CREWBOARD_SOCKET=/run/user/<uid>/crewboard.sock` for the operator account.
+The export names the same default path and is not required.
 Removing `board:` removes the export from both files on the next apply.
 Apply restarts Herdr when the unit changes only if `start_services: true`.
-Existing shells and agents keep their environment until they exit.
 
 The status file still owns done, blocked, needs-decision, failed and paused.
 Supervisor instructions and acknowledgements still use the inbox.
@@ -49,14 +51,9 @@ When no daemon answers, a client prints `board off` and exits 3, so a script can
 
 ### Firstmate instructions
 
-For Firstmate outside a new login shell or Herdr agent, set `CREWBOARD_SOCKET` before start:
-
-```bash
-export CREWBOARD_SOCKET="$XDG_RUNTIME_DIR/crewboard.sock"
-```
-
-The board patch adds instructions only when this variable names an existing Unix socket.
-An unset or empty variable, a missing path, or a regular file leaves the output unchanged.
+The board patch adds instructions only when the socket above exists as a Unix socket.
+It resolves the path the same way as the client: `$CREWBOARD_SOCKET`, else the default path.
+A missing path or a regular file leaves the output unchanged.
 
 Worker briefs describe peer messages on `task/<peer-id>`, crew messages on `fleet`, and information for Firstmate on `fm`.
 Board messages do not wake Firstmate.

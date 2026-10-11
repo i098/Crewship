@@ -4,22 +4,24 @@ Date: Sat, 10 Oct 2026 03:00:00 +0000
 Subject: [PATCH] feat(brief): add opt-in crew board instructions
 
 Show peer coordination instructions and a read-only supervisor firehose
-step only when CREWBOARD_SOCKET names a socket. Keep the steering inbox,
-watcher, and durable status protocol unchanged.
+step only when the board socket exists. The socket is CREWBOARD_SOCKET, else
+$XDG_RUNTIME_DIR/crewboard.sock, else /run/user/<uid>/crewboard.sock. Keep
+the steering inbox, watcher, and durable status protocol unchanged.
 ---
- bin/fm-brief.sh                    | 14 ++++++++++++++
- bin/fm-supervision-instructions.sh |  3 +++
- 2 files changed, 17 insertions(+)
+ bin/fm-brief.sh                    | 15 +++++++++++++++
+ bin/fm-supervision-instructions.sh |  4 ++++
+ 2 files changed, 19 insertions(+)
 
 diff --git a/bin/fm-brief.sh b/bin/fm-brief.sh
-index 2ff9c727762a75961975a8f65738d94f84b4cb89..8d25b7372f534196a9a45f44423839501d9f6d80 100755
+index 2ff9c727..539d55b3 100755
 --- a/bin/fm-brief.sh
 +++ b/bin/fm-brief.sh
-@@ -366,6 +366,20 @@ if [ -e "$CONFIG/wait-no-turns" ]; then
+@@ -366,6 +366,21 @@ if [ -e "$CONFIG/wait-no-turns" ]; then
    INBOX_SECTION+="Do not poll or list the inbox while waiting; a waiting instruction rings."$'\n'
  fi
  INBOX_SECTION=${INBOX_SECTION%$'\n'}
-+if [ -n "${CREWBOARD_SOCKET:-}" ] && [ -S "$CREWBOARD_SOCKET" ]; then
++BOARD_SOCK=${CREWBOARD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/crewboard.sock}
++if [ -S "$BOARD_SOCK" ]; then
 +  IFS= read -r -d '' BOARD_SECTION <<EOF || true
 +
 +# Crew board
@@ -36,16 +38,16 @@ index 2ff9c727762a75961975a8f65738d94f84b4cb89..8d25b7372f534196a9a45f4442383950
  
  # How a crewmate or scout waits. Every model turn resends the whole context, so
  # a wait must cost no turns: a decision wait ends the turn, and an external
-
 diff --git a/bin/fm-supervision-instructions.sh b/bin/fm-supervision-instructions.sh
-index 30e4fbdefcb3365d8551fffd5e92737b05f1048d..4fb8d56e957d601578edc775caa832d62717154d 100755
+index 30e4fbde..4a4e08cb 100755
 --- a/bin/fm-supervision-instructions.sh
 +++ b/bin/fm-supervision-instructions.sh
-@@ -271,6 +271,9 @@ fi
+@@ -271,6 +271,10 @@ fi
  if [ -n "$HOST_SNIPPET" ]; then
    printf '%s\n' '- Supervision host: on; it takes away-posture wakes and, where the dialog mirror is verified, eligible attended wakes itself, and hands the rest to you (protocol at the end of this block).'
  fi
-+if [ -n "${CREWBOARD_SOCKET:-}" ] && [ -S "$CREWBOARD_SOCKET" ]; then
++board_sock=${CREWBOARD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/crewboard.sock}
++if [ -S "$board_sock" ]; then
 +  printf '%s\n' "- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. The status file remains the durable ledger."
 +fi
  ordinary_wake_line
