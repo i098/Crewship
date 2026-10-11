@@ -254,7 +254,7 @@
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#content-from-the-repository">harbor README</a> for sign links and keyboard access.</li>
   <li><b>Sound.</b> The first click or tap creates one <code>AudioContext</code> and fetches six mono loops; the speaker button in the bottom-left corner mutes them.
   Each loop runs through a gain and an HRTF <code>PannerNode</code> with the inverse distance model, so it fades with distance from you.
-  The sea, wind and lantern loops move to their nearest emitter: the waterline or a ship side, a tree, or a gun deck lantern.
+  The sea, wind and fire loops move to their nearest emitter: the waterline or a ship side, a tree, or the fireplace or a lantern in the room you are in.
   The listener and the emitters update at most 20 times a second, not every frame, and move smoothly between updates.
   Rooms lower the outdoor loops and turn on their fire or lantern.
   A muted or hidden page suspends the context, so sound costs no CPU then.</li>
