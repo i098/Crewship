@@ -229,3 +229,38 @@ def test_git_clone_migrates_to_a_release_and_a_backup(release):
     (backup,) = release.home.glob("Crewship.git-backup-*")
     assert (backup / ".git").is_dir()
     assert (backup / ".local/host.yml").read_text() == "mine\n"
+
+
+def test_v040_host_is_migrated_before_the_reapply(release):
+    assert release.install("v1.0.0").returncode == 0
+    # What v0.4.0 left: tools under share/code-factory linked from ~/.local/bin, and removed fleet keys.
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    bin_dir = release.home / ".local/bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "uv").symlink_to(old / "uv")
+    (bin_dir / "mine").write_text("not ours")
+    host = release.crewship / ".local/host.yml"
+    host.write_text("crewship:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n")
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert not (bin_dir / "uv").exists() and not (bin_dir / "uv").is_symlink()
+    assert (bin_dir / "mine").read_text() == "not ours"
+    assert not (release.home / ".local/share/code-factory/tools").exists()
+    assert "crewship:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
+    assert ".local/host.yml.bak" in result.stdout.replace(str(release.crewship) + "/", "")
+    for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
+        assert f"dropped fleet.{key}" in result.stdout
+    assert "supabase_project_id" in (host.parent / "host.yml.bak").read_text()
+
+
+def test_migration_is_a_noop_on_a_current_host(release):
+    assert release.install("v1.0.0").returncode == 0
+    host = release.crewship / ".local/host.yml"
+    host.write_text("crewship:\n  fleet:\n    keep: 1\n")
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert "dropped" not in result.stdout and "relinking" not in result.stdout
+    assert host.read_text() == "crewship:\n  fleet:\n    keep: 1\n"
+    assert not (host.parent / "host.yml.bak").exists()

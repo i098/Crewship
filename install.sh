@@ -116,6 +116,35 @@ carry_host_files() {
   tr '\0' '\n' <"$list" | sed 's/^/  carried /'
 }
 
+# One-time fixes for a v0.4.0 host, run before the re-apply (both are no-ops on a newer one):
+# v0.4.0 kept its tools under share/code-factory; v0.4.1 uses share/crewship and refuses the
+# old ~/.local/bin links. The links go (provisions recreates them) and then the old tree, which
+# nothing links into any more. v0.4.1 also rejects three fleet keys of host.yml; they are dropped,
+# one line each, and the original is kept as host.yml.bak.
+migrate_v040() {
+  local old=$HOME/.local/share/code-factory/tools link
+  if [ -d "$old" ]; then
+    for link in "$HOME"/.local/bin/*; do
+      [ -L "$link" ] && [[ $(readlink -f "$link") == "$old"/* ]] && { echo "  relinking $link"; rm -f "$link"; }
+    done
+    rm -rf "$old"
+  fi
+  [ -f .local/host.yml ] || return 0
+  python3 - <<'PY'
+import shutil, yaml
+path = ".local/host.yml"
+document = yaml.safe_load(open(path))
+fleet = document.get("crewship", {}).get("fleet") if isinstance(document, dict) and isinstance(document.get("crewship"), dict) else None
+dropped = [key for key in ("supabase_project_id", "fixture_archive", "worktree_pools") if isinstance(fleet, dict) and key in fleet]
+if dropped:
+    shutil.copy2(path, path + ".bak")
+    for key in dropped:
+        del fleet[key]
+        print(f"  dropped fleet.{key} from {path} (removed in v0.4.1; the original is {path}.bak)")
+    yaml.safe_dump(document, open(path, "w"), sort_keys=False)
+PY
+}
+
 main() {
   local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
@@ -123,9 +152,9 @@ main() {
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
 
-  # The cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode.
+  # The cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
   local packages=(ca-certificates curl gnupg openssl git rsync tar unzip xz-utils zstd
-    python3 python3-venv python3-apt jq procps acl sudo) missing=() package
+    python3 python3-venv python3-apt python3-yaml jq procps acl sudo) missing=() package
   for package in "${packages[@]}"; do
     dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed ||
       missing+=("$package")
@@ -176,6 +205,7 @@ main() {
   echo "Crewship $ref in $dir"
 
   cd "$dir"
+  migrate_v040
   ./onboard.sh
   [ -f .local/host.yml ] || ./ship.sh dock "$@"
   ./ship.sh inspect
