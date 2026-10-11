@@ -54,7 +54,7 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 ## How it works
 
-For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host:
+For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
 
 ```mermaid
 flowchart TD
