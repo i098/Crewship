@@ -101,6 +101,8 @@ uv run ansible-playbook -i ansible/inventory.yml ansible/site.yml --syntax-check
 ./scripts/ci-local.sh
 ```
 
+See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
+
 ## Adding a new tool
 
 1. Add it to `GITHUB_LATEST` (a GitHub release whose assets carry a SHA-256 digest; when the release publishes its own `<asset>.sha256` files, also list it in `SHA256_FILE` to verify against those) or `NPM_LATEST` in `scripts/provisions.py`. A tool from elsewhere needs its own resolver in `resolve_latest` that reads the checksum its publisher posts for the release.
@@ -161,7 +163,10 @@ Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or th
 
 GitHub rulesets enforce these rules, with no bypass:
 
-- `main` changes only through a pull request. Before a merge, the checks `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass. No approval is necessary.
+- `main` changes only through a pull request.
+  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
+  No approval is necessary.
 - `main` cannot be force-pushed or deleted.
 - GitHub deletes the head branch after the merge.
 - A `v*` tag cannot be deleted or moved.
