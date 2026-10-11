@@ -1415,20 +1415,21 @@ const gangway = solid(world, [[0, 1, 0, 0, 0, 0], [0, -1, 0, 0, 0, 0], [1, 0, 0,
 function roomFloor(x, y, z) {
   return (x + 9) % 0.55 < 0.025 || (z + 9) % 2 < 0.025 ? "-" : null;
 }
-// An axis-aligned wall box bb of `list` with rectangular holes [a, b, y0, y1] cut through it: a and b along the wall's
-// long axis (x or z), in increasing a. Returns each hole as a box through the wall, 0.25 m deeper on both faces.
-function cutWall(list, bb, holes, mat, o) {
+// An axis-aligned wall box bb of `list` with rectangular window holes [a, b, y0, y1], and a door hole if any, cut
+// through it: a and b along the wall's long axis (x or z). Returns each window hole as a box through the wall, 0.25 m
+// deeper on both faces.
+function cutWall(list, bb, windows, door, mat, o) {
   const [x0, y0, z0, x1, y1, z1] = bb, alongX = x1 - x0 > z1 - z0, t0 = alongX ? z0 : x0, t1 = alongX ? z1 : x1;
-  const part = (a, b, c, d, n0 = t0, n1 = t1) => (alongX ? box(list, a, c, n0, b, d, n1, mat, o) : box(list, n0, c, a, n1, d, b, mat, o));
+  const part = (a, b, c, d) => (alongX ? box(list, a, c, t0, b, d, t1, mat, o) : box(list, t0, c, a, t1, d, b, mat, o));
   let u = alongX ? x0 : z0;
-  for (const [a, b, c, d] of holes) {
+  for (const [a, b, c, d] of [...windows, ...(door ? [door] : [])].sort((h, k) => h[0] - k[0])) {
     if (a > u) part(u, a, y0, y1);
     if (c > y0) part(a, b, y0, c);
     if (d < y1) part(a, b, d, y1);
     u = b;
   }
   if (u < (alongX ? x1 : z1)) part(u, alongX ? x1 : z1, y0, y1);
-  return holes.map(([a, b, c, d]) => (alongX ? [a, c, t0 - 0.25, b, d, t1 + 0.25] : [t0 - 0.25, c, a, t1 + 0.25, d, b]));
+  return windows.map(([a, b, c, d]) => ({ bb: alongX ? [a, c, t0 - 0.25, b, d, t1 + 0.25] : [t0 - 0.25, c, a, t1 + 0.25, d, b] }));
 }
 // A cross of glazing bars w wide through the window hole h = [a, b, y0, y1] in wall box bb, and a sill under the hole,
 // w past each end, that stands `out` into the room on side `inward` (+1 or -1 across the wall).
@@ -1621,7 +1622,7 @@ function buildRoom() {
   box(room, -4, 3.4, -0.2, 4, 3.6, 7, "s", plaster);
   for (const [bb, windows, inward, door] of [[[-4, 0, 0, -3.8, 3.4, 7], along, 1], [[3.8, 0, 0, 4, 3.4, 7], along, -1],
     [[-3.8, 0, 6.8, 3.8, 3.4, 7], across, -1], [[-4, 0, -0.2, 4, 3.4, 0], across, 1, [-0.7, 0.7, 0, 2.4]]]) {
-    holes.push(...cutWall(room, bb, door ? [windows[0], door, windows[1]] : windows, "s", plaster).filter((h) => h[1] > 0));
+    holes.push(...cutWall(room, bb, windows, door, "s", plaster));
     for (const h of windows) glazing(room, bb, h, inward, 0.11, 0.15, "o");
   }
   box(room, -0.7, 0, -0.15, 0.7, 2.4, -0.1, "d", { solid: false });
@@ -1673,14 +1674,14 @@ function chartLine(u, v) {
 const CABIN_AT = [SX, DECK, -9];
 function buildCabin() {
   const wood = { dim: 0.36, tex: (x, y) => ((y + 9) % 0.22 < 0.02 ? "-" : null) }, [w, py0, py1] = CABIN_PANES, holes = [];
-  const hole = (c) => [c - w, c + w, py0 - DECK, py1 - DECK], sorted = (list) => list.map(hole).sort((a, b) => a[0] - b[0]);
-  const across = sorted(CABIN_WINDOWS.stern.map((u) => -u)), along = sorted(CABIN_WINDOWS.side.map((z) => CABIN_AT[2] - z));
+  const hole = (c) => [c - w, c + w, py0 - DECK, py1 - DECK];
+  const across = CABIN_WINDOWS.stern.map((u) => hole(-u)), along = CABIN_WINDOWS.side.map((z) => hole(CABIN_AT[2] - z));
   box(cabinRoom, -2.4, -0.2, -0.2, 2.4, 0, 5.4, "o", { tex: roomFloor, dim: 0.4 });
   box(cabinRoom, -2.4, 2.45, -0.2, 2.4, 2.65, 5.4, "o", { dim: 0.28 });
   for (const z of [1.2, 2.5, 3.8]) box(cabinRoom, -2.2, 2.3, z, 2.2, 2.45, z + 0.16, "o", { dim: 0.45 });
   for (const [bb, windows, inward, door] of [[[-2.4, 0, 0, -2.2, 2.45, 5.2], along, 1], [[2.2, 0, 0, 2.4, 2.45, 5.2], along, -1],
-    [[-2.2, 0, 5.2, 2.2, 2.45, 5.4], across, -1], [[-2.2, 0, -0.2, 2.2, 2.45, 0], sorted(CABIN_WINDOWS.front.map((u) => -u)), 1, [-0.55, 0.55, 0, 1.95]]]) {
-    holes.push(...cutWall(cabinRoom, bb, [...windows, ...(door ? [door] : [])].sort((a, b) => a[0] - b[0]), "o", wood).filter((h) => h[1] > 0));
+    [[-2.2, 0, 5.2, 2.2, 2.45, 5.4], across, -1], [[-2.2, 0, -0.2, 2.2, 2.45, 0], CABIN_WINDOWS.front.map((u) => hole(-u)), 1, [-0.55, 0.55, 0, 1.95]]]) {
+    holes.push(...cutWall(cabinRoom, bb, windows, door, "o", wood));
     for (const h of windows) glazing(cabinRoom, bb, h, inward, 0.07, 0.06, "o");
   }
   box(cabinRoom, -0.55, 0, -0.15, 0.55, 1.95, -0.1, "f", { solid: false, tex: (x, y) => ((x + 0.3) ** 2 + (y - 1) ** 2 < 0.0049 ? "y" : null) });
@@ -1715,9 +1716,9 @@ const cabinHoles = buildCabin();
 // `pane` is the texture of their panes on the outside walls. Each frame, `cam` is the camera in the room's frame and
 // `seen` the room's solids that its windows can show (openRooms), and `row` those in the row being cast.
 const HOUSE = { solids: room, floorAt: roomFloorAt, light: roomLight, floor: [-3.55, 3.55, 0.25, 6.55], lights: [-2.2, 1.9, 2.9, 0.85, 9, 0, 0.35, 6.3, 0.55, 3.2],
-  door: [-5, 20.75, 1], exit: [-5, 20.35, Math.PI], at: HOUSE_AT, flip: false, ship: false, holes: houseHoles, pane: "l", cam: {}, seen: null, row: NONE };
+  door: [-5, 20.75, 1], exit: [-5, 20.35, Math.PI], at: HOUSE_AT, holes: houseHoles, pane: "l", cam: {} };
 const CABIN = { solids: cabinRoom, floorAt: roomFloorAt, light: roomLight, floor: [-1.95, 1.95, 0.25, 4.95], lights: [0, 1.79, 3.2, 0.85, 9], door: [SX, -8.75, -1], exit: [SX, -8.35, 0],
-  at: CABIN_AT, flip: true, ship: true, holes: cabinHoles, pane: "l", cam: {}, seen: null, row: NONE };
+  at: CABIN_AT, flip: true, ship: true, holes: cabinHoles, pane: "l", cam: {} };
 officeBox.room = HOUSE;
 cabinBox.room = CABIN;
 
@@ -1798,11 +1799,10 @@ const OUTSIDE = { on: false, seenWorld: NONE, seenShip: NONE, rowWorld: NONE, ro
 // Out through a window of the room you are inside: the ray goes on from where the room stands in the world, so the
 // outside scene shows as it does from there. Its signs do not show inside.
 function lookOut(c, i, odd, dx, dy, dz) {
-  const inside = cam;
-  turn(inside, OUTSIDE, dx, dy, dz);
+  turn(VIEW, OUTSIDE, dx, dy, dz);
   cam = OUTSIDE;
   castOutside(c, i, odd, TURN[0], TURN[1], TURN[2], OUTSIDE.rowWorld, OUTSIDE.rowShip, false);
-  cam = inside;
+  cam = VIEW;
   SP[c] = null;
 }
 // In through a window pane on a room's outside wall (hitS): the ray goes on through the lit room from where it stands
@@ -1813,14 +1813,13 @@ function lookIn(c, i, odd, dx, dy, dz, ldx, ldy, onShip) {
   if (!R.seen || k < 0) return false;
   const ox = onShip ? cam.lx : cam.x, oy = onShip ? cam.ly : cam.y, vx = onShip ? ldx : dx, vy = onShip ? ldy : dy;
   if (s.tex(ox + vx * t, oy + vy * t, cam.z + dz * t, s.P[k], s.P[k + 1], s.P[k + 2]) !== R.pane) return false;
-  const outside = cam;
-  turn(outside, R.cam, dx, dy, dz);
+  turn(VIEW, R.cam, dx, dy, dz);
   cam = R.cam;
   hitT = Infinity; hitS = null;
   trace(R.row, i, cam.x, cam.y, cam.z, TURN[0], TURN[1], TURN[2]);
   // Seen from outside at night, the lit room glows through its windows.
   if (hitS) shadeRoomHit(c, odd, TURN[0], TURN[1], TURN[2], R, ROOM_GLOW);
-  cam = outside;
+  cam = VIEW;
   if (!hitS) {
     nearT = exitT(s.P, ox, oy, cam.z, vx, vy, dz);
     castOutside(c, i, odd, dx, dy, dz, rowWorld, rowShip, false);
@@ -1865,24 +1864,13 @@ function worldView(R, out) {
 }
 // The screen rectangle [i0, i1, j0, j1] that room R's window holes cover, seen with cam in R's frame, or null when
 // none of them is on screen.
-const CLIP = [0, 0, 0, 0];
 function holesRect(R) {
-  CLIP[0] = CLIP[2] = Infinity; CLIP[1] = CLIP[3] = -Infinity;
-  for (const b of R.holes) {
-    rect[0] = rect[2] = Infinity; rect[1] = rect[3] = -Infinity;
-    const behind = viewCorners(b, false);
-    if (behind === 8) continue;
-    const ex = Math.max(b[0] - cam.x, 0, cam.x - b[3]), ey = Math.max(b[1] - cam.y, 0, cam.y - b[4]), ez = Math.max(b[2] - cam.z, 0, cam.z - b[5]);
-    if (ex * ex + ey * ey + ez * ez < 0.04) { rect[0] = rect[2] = -1; rect[1] = cols; rect[3] = rows; } else if (behind) growClipped();
-    CLIP[0] = Math.min(CLIP[0], Math.floor(rect[0]) - 1); CLIP[1] = Math.max(CLIP[1], Math.ceil(rect[1]) + 1);
-    CLIP[2] = Math.min(CLIP[2], Math.floor(rect[2]) - 1); CLIP[3] = Math.max(CLIP[3], Math.ceil(rect[3]) + 1);
-  }
-  return CLIP[1] < 0 || CLIP[0] >= cols || CLIP[3] < 0 || CLIP[2] >= rows ? null : CLIP;
+  const seen = cull(R.holes, false), edge = (k, f) => f(...seen.map((h) => h[k]));
+  return seen.length ? [edge("i0", Math.min), edge("i1", Math.max), edge("j0", Math.min), edge("j1", Math.max)] : null;
 }
 // Culls what the windows show this frame: from inside a room, the outside scene; from outside, each room with a
 // window on screen.
 function openRooms() {
-  const view = cam;
   OUTSIDE.on = false;
   for (const R of ROOMS) R.seen = null;
   if (interior) {
@@ -1892,7 +1880,7 @@ function openRooms() {
     cam = OUTSIDE;
     OUTSIDE.seenWorld = cull(world, false, clip); OUTSIDE.seenShip = cull(ship, true, clip);
     groundRings();
-    cam = view;
+    cam = VIEW;
     OUTSIDE.on = true;
     return;
   }
@@ -1901,7 +1889,7 @@ function openRooms() {
     cam = R.cam;
     const clip = holesRect(R);
     if (clip) R.seen = cull(R.solids, false, clip);
-    cam = view;
+    cam = VIEW;
   }
 }
 // Interior shading skips exterior motion and shadow rays.
@@ -1946,7 +1934,7 @@ function buildGunDeck() {
   column(gunDeck, SX, -3, 0.2, 0.2, 0, 1.95, "o");
   hatchBoards(gunDeck, DECK - 0.1, DECK + 0.3, { fill: 0.4 });
   hatchLadder(gunDeck, [[0, DECK + 0.9, { fill: 0.35 }]], () => ({ dim: 0.8 }));
-  const [w, y0, y1] = PORT, holes = [[x0, 1.95, z0, x1, DECK + 0.4, z1]];
+  const [w, y0, y1] = PORT, holes = [{ bb: [x0, 1.95, z0, x1, DECK + 0.4, z1] }];
   for (const side of [-1, 1]) {
     hullSide(side, -0.1, y0, -7.8, 5.6);
     hullSide(side, y1, 2.05, -7.8, 5.6);
@@ -1954,7 +1942,7 @@ function buildGunDeck() {
     for (const z of GUN_PORTS) {
       hullSide(side, y0, y1, from, z - w);
       from = z + w;
-      holes.push([Math.min(SX + side * 2.1, SX + side * 3), y0, z - w, Math.max(SX + side * 2.1, SX + side * 3), y1, z + w]);
+      holes.push({ bb: [Math.min(SX + side * 2.1, SX + side * 3), y0, z - w, Math.max(SX + side * 2.1, SX + side * 3), y1, z + w] });
       gun(side, z);
       shotRack(side, z + 0.8);
       gunDeckLantern(SX + side * 1.15, z - 2);
@@ -2029,8 +2017,7 @@ function gunDeckLight(x, y, z, nx, ny, nz) {
   }
   return warm;
 }
-const GUN_DECK = { solids: gunDeck, floorAt: gunDeckFloorAt, light: gunDeckLight, at: [0, 0, 0], flip: false, ship: true, holes: gunDeckHoles,
-  pane: "p", cam: {}, seen: null, row: NONE };
+const GUN_DECK = { solids: gunDeck, floorAt: gunDeckFloorAt, light: gunDeckLight, at: [0, 0, 0], ship: true, holes: gunDeckHoles, pane: "p", cam: {} };
 for (const s of ship) if (s.hull) s.room = GUN_DECK;
 const ROOMS = [HOUSE, CABIN, GUN_DECK];
 const ROOM_LANTERNS = [...cabinRoom, ...gunDeck].filter(s => s.swing).map(s => ({ s, base: s.P.slice(), bounds: s.bb.slice() }));
