@@ -19,25 +19,18 @@
 
 </div>
 
-## Highlights
-
-- **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent hands out tasks to many coding agents and watches their status files and inboxes. You steer one agent, not hundreds.
-- **[Custom Herdr sidebar](docs/herdr.md):** the sidebar lists each workspace and agent with its state, pull request, and CPU, RAM, and disk use. You see the whole fleet at a glance.
-- **[In-memory message board](docs/board.md):** the `crewboard` daemon lets agents on one host publish and subscribe to topics. History stays in memory and is never written to disk (opt-in).
-- **[Guards](docs/fleet-guards.md):** the host blocks `pkill` and `killall` in agent sessions, runs a [quality gate](docs/omp.md#quality-gate) at each turn end, and cleans up stray containers and idle dev servers. One agent cannot break another.
-- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** agents start with a light browser and move to full Chrome, or to a browser you can see over noVNC, only when needed. All tiers share one cookie jar (opt-in).
-- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) run in the terminal, each in its own Herdr tab. You talk with your team from the same host.
-- **[Credential management](docs/secrets.md):** one `super.env` file holds the fleet's credentials. A new host fetches it through a private Cloudflare Worker, so you do not copy keys by hand.
-- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` from the host to open links in your browser and to control Mac apps. Work on the server can reach your desktop (opt-in).
-
-## Why Crewship
-
-- **Self-hosted AI coding agents:** one Ubuntu 24.04 or 26.04 machine runs Herdr, the Firstmate orchestrator, and the omp agent fleet. No cloud dependencies.
-- **Reproducible with Ansible:** profiles in one host file, a check-mode preview with `./ship.sh chart`, and one `./ship.sh launch` that changes the host. No Nix, no chezmoi.
-- **Checksum-verified toolchain:** every apply installs the latest tool releases and verifies their checksums. The omp and Neovim plugins use upstream Git repositories.
-- **Built for an agent fleet:** fleet guards, auto pruners, a self-hosted CI pool, and the Concord (Discord) and slk (Slack) terminal chat clients.
+Crewship makes it super easy to start using agents in the cloud.
 
 ## Features
+
+- **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent runs many coding agents.
+- **[Custom Herdr sidebar](docs/herdr.md):** every workspace and agent, with its state and load, at a glance.
+- **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
+- **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
+- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
+- **[Chat clients](docs/chat.md):** Concord (Discord) and slk (Slack) in the terminal.
+- **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
+- **[Mac control](docs/security.md#ssh-to-a-mac):** agents run `ssh mac` to open links and control apps on your Mac (opt-in).
 
 <details>
 <summary><b>Show all features</b></summary>
