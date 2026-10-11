@@ -99,7 +99,6 @@ The required `configuration and python checks` job rejects classification or cha
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
 Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
-The sponsors bot starts CI through manual dispatch, so its documentation-only updates use the manual-run policy.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
