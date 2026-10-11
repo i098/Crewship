@@ -4362,7 +4362,7 @@ function roomFrameLate(frameMs) {
   const late = (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
   probeMs = Math.min(0, probeMs);
   paintedLastFrame = false;
-  return late;
+  return late && touchFirst.matches; // only a phone adapts, so only a phone counts missed frames
 }
 function advanceIntro(now, still) {
   if (introProgress === 1) return;
@@ -4379,9 +4379,9 @@ function moveOutside() {
   swayTrees();
   billow();
 }
-function frame(now) {
-  // The ray workers' newest finished frame paints first (an older finished one is dropped). A new frame starts only
-  // while fewer than two are in hand, and a new layout waits until none is; time waits with it.
+// Paints the ray workers' newest finished frame, while it is still the moment it was cast for; an older finished one
+// is dropped. True while the frames in hand hold a new frame back: two in hand, or a new layout waiting for them all.
+function paintWorkerFrame() {
   let done = 0;
   while (frames[done]?.phase === DONE) done++;
   if (done) {
@@ -4391,7 +4391,14 @@ function frame(now) {
     adaptResolution(f.ms + performance.now() - t0, f.late);
     paintedLastFrame = true;
   }
-  if (frames.length > 1 || (layoutDirty && frames.length)) { requestAnimationFrame(frame); return; }
+  return frames.length > 1 || (layoutDirty && frames.length > 0);
+}
+function frame(now) {
+  // Time waits while frames in hand hold the next one back.
+  if (!paintWorkerFrame()) nextFrame(now);
+  requestAnimationFrame(frame);
+}
+function nextFrame(now) {
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   const probing = probeMs > 0;
@@ -4407,24 +4414,25 @@ function frame(now) {
   soundTick(now);
   // Ship rooms animate with the hull; the house and reduced-motion views repaint only on input.
   if (visible && cols && (walked || dirty || (!still && interior !== HOUSE))) {
-    if (probeMs < 0 || (touchFirst.matches && late && slow % 20 === 0 && !probing)) {
+    if (probeMs < 0 || (late && slow % 20 === 0 && !probing)) {
       probeMs = frameMs;
       dirty = true;
-      requestAnimationFrame(frame);
       return;
     }
     if (layoutDirty) { measure(); layoutDirty = false; }
     dirty = false;
     moveOutside();
     me.eye = floorAt(me.x, me.z) + 1.6;
-    const t0 = performance.now();
-    if (!(introProgress === 1 && castOnWorkers(t0, late))) {
-      render();
-      adaptResolution(performance.now() - t0, late);
-      paintedLastFrame = true;
-    }
+    castFrame(late);
   }
-  requestAnimationFrame(frame);
+}
+// Casts this frame on the ray workers, or on the page without them or during the intro.
+function castFrame(late) {
+  const t0 = performance.now();
+  if (castOnWorkers(t0, late)) return;
+  render();
+  adaptResolution(performance.now() - t0, late);
+  paintedLastFrame = true;
 }
 
 // ---- Ray workers --------------------------------------------------------------------------
@@ -4471,7 +4479,7 @@ function stopWorkers() {
 // Posts this moment to each ready worker and hands out its first bands; false when the page should cast the frame.
 function castOnWorkers(t0, late) {
   const ready = rayWorkers.filter((w) => w.ready);
-  if (ready.length < 2) return false;
+  if (introProgress < 1 || ready.length < 2) return false;
   const band = Math.ceil(rows / (ready.length * 4)), bands = [];
   for (let j = 0; j < rows; j += band) bands.push([j, Math.min(rows, j + band)]);
   const moment = { id: ++castId, T, bob, roll, me: { ...me }, room: ROOMS.indexOf(interior), shadows, still: reduced.matches,
@@ -4619,7 +4627,7 @@ function spritesFor({ font, cellW, cellH, dpr }) {
   padS = Math.ceil(cellW * dpr); spriteW = 3 * padS; spriteH = Math.ceil(cellH * dpr) + 2 * padT;
   spriteCtx = new OffscreenCanvas(spriteW, spriteH).getContext("2d", { willReadFrequently: true });
   spriteCtx.font = font; spriteCtx.textBaseline = "top";
-  canDraw = spriteCtx.font === font && Math.abs(spriteCtx.measureText("M").width - cellW) < 1e-6;
+  canDraw = Math.abs(spriteCtx.measureText("M").width - cellW) < 1e-6;
   // The first pixel row of "@" drawn at a fraction f of a pixel lower: where it moves down is where rounding starts.
   const topRow = (f) => {
     spriteCtx.setTransform(1, 0, 0, 1, 0, 0); spriteCtx.clearRect(0, 0, spriteW, spriteH);
@@ -4650,14 +4658,12 @@ function sprite(code, cls, q) {
   let n = 0;
   for (let p = 3; p < d.length; p += 4) if (d[p]) n++;
   s = { n, x: new Int16Array(n), y: new Int16Array(n), r: new Uint8Array(n), g: new Uint8Array(n), b: new Uint8Array(n), a: new Uint8Array(n),
-    over: new Uint32Array(n), x0: spriteW, x1: -1, y0: spriteH, y1: -1, w: 0, at: null };
+    over: new Uint32Array(n) };
   for (let p = 0, k = 0; p < d.length; p += 4) {
     const a = d[p + 3];
     if (!a) continue;
-    const x = (p >> 2) % spriteW, y = Math.floor((p >> 2) / spriteW);
-    s.x[k] = x; s.y[k] = y; s.a[k] = a;
+    s.x[k] = (p >> 2) % spriteW; s.y[k] = Math.floor((p >> 2) / spriteW); s.a[k] = a;
     s.r[k] = Math.round(d[p] * a / 255); s.g[k] = Math.round(d[p + 1] * a / 255); s.b[k] = Math.round(d[p + 2] * a / 255);
-    s.x0 = Math.min(s.x0, x); s.x1 = Math.max(s.x1, x); s.y0 = Math.min(s.y0, y); s.y1 = Math.max(s.y1, y);
     const f = (255 - a) << 8, over = (c, v) => Math.min(255, c + BLEND[f | v]); // BACKGROUND is 6, 10, 20
     s.over[k] = (0xff000000 | over(s.b[k], 20) << 16 | over(s.g[k], 10) << 8 | over(s.r[k], 6)) >>> 0;
     k++;
@@ -4670,18 +4676,18 @@ const BLEND = new Uint8Array(PAGE ? 0 : 65536);
 for (let f = 0; f < BLEND.length >> 8; f++) for (let v = 0; v < 256; v++) BLEND[f << 8 | v] = Math.round(v * f / 255);
 // A glyph's advance in CSS pixels; a glyph from a fallback font can be wider than the cell.
 const ADVANCE = new Map();
-function advance(code) {
+function glyphAdvance(code) {
   let a = ADVANCE.get(code);
   if (a === undefined) ADVANCE.set(code, a = spriteCtx.measureText(String.fromCharCode(code)).width);
   return a;
 }
 function drawBand(id, j0, j1, buf) {
   const { layout, cols: width } = moments.get(id);
-  if (typeof OffscreenCanvas !== "function" || !spritesFor(layout)) { postMessage({ id, j0, bmp: null }); return; }
+  if (!spritesFor(layout)) { postMessage({ id, j0, bmp: null }); return; }
   const { padX, padY, cellW, cellH, dpr } = layout, n = (j1 - j0) * width, g = new Uint16Array(buf, 0, n), k = new Uint16Array(buf, n * 2, n);
   const X0 = Math.round(padX * dpr), w = Math.round((padX + width * cellW) * dpr) - X0;
   const Y0 = Math.round((padY + j0 * cellH) * dpr), h = Math.round((padY + j1 * cellH) * dpr) - Y0;
-  if (!pixels || pixels.length < w * h * 4) pixels = new Uint8ClampedArray(w * h * 4);
+  if (!(pixels?.length >= w * h * 4)) pixels = new Uint8ClampedArray(w * h * 4);
   const px = new Uint8ClampedArray(pixels.buffer, 0, w * h * 4), px32 = new Uint32Array(pixels.buffer, 0, w * h);
   px32.fill(BACK);
   for (let j = j0, c = 0; j < j1; j++) {
@@ -4693,37 +4699,33 @@ function drawBand(id, j0, j1, buf) {
     for (let i = 0; i < width; i++, c++) {
       if (!layout.runs || k[c] !== run) { run = k[c]; x = (padX + i * cellW) * dpr; }
       const at = x;
-      x += advance(g[c]) * dpr;
+      x += glyphAdvance(g[c]) * dpr;
       if (g[c] === 32) continue;
       let left = Math.floor(at), q = Math.floor((at - left) * 4 + 0.5);
       if (q === 4) { left++; q = 0; }
-      const s = sprite(g[c], k[c], q), ox = left - padS - X0;
-      if (oy + s.y0 >= top && oy + s.y1 < bottom && ox + s.x0 >= 0 && ox + s.x1 < w) {
-        // The whole glyph lies inside its row: offsets into the band, worked out once for its width.
-        if (s.w !== w) { s.w = w; s.at = new Int32Array(s.n); for (let p = 0; p < s.n; p++) s.at[p] = s.y[p] * w + s.x[p]; }
-        const base = oy * w + ox;
-        for (let p = 0; p < s.n; p++) {
-          const o = base + s.at[p];
-          if (px32[o] === BACK) { px32[o] = s.over[p]; continue; } // most glyph pixels land on untouched background
-          const f = (255 - s.a[p]) << 8;
-          px[4 * o] = s.r[p] + BLEND[f | px[4 * o]]; px[4 * o + 1] = s.g[p] + BLEND[f | px[4 * o + 1]]; px[4 * o + 2] = s.b[p] + BLEND[f | px[4 * o + 2]];
-        }
-        continue;
-      }
-      for (let p = 0; p < s.n; p++) {
-        const sy = oy + s.y[p], sx = ox + s.x[p];
-        if (sy < top || sy >= bottom || sx < 0 || sx >= w) continue;
-        const o = sy * w + sx, f = (255 - s.a[p]) << 8;
-        if (px32[o] === BACK) { px32[o] = s.over[p]; continue; }
-        px[4 * o] = s.r[p] + BLEND[f | px[4 * o]]; px[4 * o + 1] = s.g[p] + BLEND[f | px[4 * o + 1]]; px[4 * o + 2] = s.b[p] + BLEND[f | px[4 * o + 2]];
-      }
+      blit(px, px32, w, sprite(g[c], k[c], q), left - padS - X0, oy, top, bottom);
     }
   }
-  bitmapCtx ??= new OffscreenCanvas(w, h).getContext("2d");
-  if (bitmapCtx.canvas.width !== w || bitmapCtx.canvas.height !== h) { bitmapCtx.canvas.width = w; bitmapCtx.canvas.height = h; }
-  bitmapCtx.putImageData(new ImageData(px, w, h), 0, 0);
-  const bmp = bitmapCtx.canvas.transferToImageBitmap();
+  const bmp = bitmapOf(px, w, h);
   postMessage({ id, j0, bmp }, [bmp]);
+}
+// The band's pixels as a bitmap, through one canvas the worker keeps.
+function bitmapOf(px, w, h) {
+  bitmapCtx ??= new OffscreenCanvas(w, h).getContext("2d");
+  const out = bitmapCtx.canvas;
+  if (out.width !== w || out.height !== h) { out.width = w; out.height = h; }
+  bitmapCtx.putImageData(new ImageData(px, w, h), 0, 0);
+  return out.transferToImageBitmap();
+}
+// Blends sprite s over the band with its corner at (ox, oy), clipped to its row (top to bottom) and the band's width.
+function blit(px, px32, w, s, ox, oy, top, bottom) {
+  for (let p = 0; p < s.n; p++) {
+    const sy = oy + s.y[p], sx = ox + s.x[p];
+    if (sy < top || sy >= bottom || sx < 0 || sx >= w) continue;
+    const o = sy * w + sx, f = (255 - s.a[p]) << 8;
+    if (px32[o] === BACK) { px32[o] = s.over[p]; continue; } // most glyph pixels land on untouched background
+    px[4 * o] = s.r[p] + BLEND[f | px[4 * o]]; px[4 * o + 1] = s.g[p] + BLEND[f | px[4 * o + 1]]; px[4 * o + 2] = s.b[p] + BLEND[f | px[4 * o + 2]];
+  }
 }
 
 // The scenery stands now: fill the height grid around it and plant the grass on it. Bob and roll change height,
