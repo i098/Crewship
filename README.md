@@ -58,8 +58,8 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 flowchart LR
     you["You<br/>phone or laptop"]
     subgraph vps["Your server"]
-        direction LR
         secrets["Secrets file"]
+        link["Host access"]
         subgraph herdr["Herdr panes"]
             direction TB
             fm["Firstmate"]
@@ -68,16 +68,17 @@ flowchart LR
             gates["Guards and<br/>quality gate"]
             board["Crew board<br/>(optional)"]
             fm --> sm --> worker
+            fm --> worker
             gates --- worker
             board <-.-> worker
         end
         secrets --> fm
     end
     mac["Your Mac (host)"]
-    gh["Code host<br/>pull requests"]
+    gh["GitHub<br/>(pull requests)"]
     models["Model providers<br/>any provider"]
     you --> fm
-    herdr <-.->|"optional SSH: open links, drive apps<br/>message relay"| mac
+    link <-.->|"optional SSH: open links, drive apps<br/>message relay"| mac
     worker --> gh
     worker --> models
 ```
