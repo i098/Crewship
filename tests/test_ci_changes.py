@@ -78,6 +78,7 @@ def test_non_pr_runs_without_a_checkout(tmp_path, event):
 
 
 def test_missing_base_fails_without_skip_output(tmp_path):
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     code, output = classify(tmp_path)
     assert code != 0
     assert output == ""

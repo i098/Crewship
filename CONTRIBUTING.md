@@ -47,15 +47,7 @@ uv run ansible-playbook -i ansible/inventory.yml ansible/site.yml --syntax-check
 ./scripts/ci-local.sh
 ```
 
-CI skips heavy jobs on documentation-only pull requests.
-Every changed file must match `README*`, `docs/**`, `changelog.d/**`, or `*.md` at any depth.
-Files under `skills/`, `rules/`, and `config/` always count as code, including Markdown files.
-Skipped jobs still report their check names, so required checks do not remain pending.
-The separate `changelog fragment` job still checks documentation PRs unless they have the `no changelog` label.
-The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
-CodeQL keeps running through GitHub's default setup.
-Code PRs run all heavy jobs.
-Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
+See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
 
 ## Adding a new tool
 
@@ -117,7 +109,10 @@ Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or th
 
 GitHub rulesets enforce these rules, with no bypass:
 
-- `main` changes only through a pull request. Before a merge, the checks `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass. No approval is necessary.
+- `main` changes only through a pull request.
+  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
+  No approval is necessary.
 - `main` cannot be force-pushed or deleted.
 - GitHub deletes the head branch after the merge.
 - A `v*` tag cannot be deleted or moved.

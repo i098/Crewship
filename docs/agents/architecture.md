@@ -73,7 +73,8 @@ Host sizing and every auto pruner are listed in [Capacity and pruners](../capaci
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main`, on every pull request, and on manual dispatch:
+GitHub Actions (`.github/workflows/ci.yml`) starts on pushes to `main`, on pull requests, and on manual dispatch.
+When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest`.
 - The [shared Postgres service verification](../shared-postgres.md#verification).
@@ -87,15 +88,17 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main`, on every p
 - The harbor checks in WebKit on iPhone and in desktop Chromium.
 
 The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`.
-Documentation-only PRs change only `README*`, `docs/**`, `changelog.d/**`, or `*.md` files at any depth.
+Documentation-only PRs change only root-level `README*` files, files under `docs/` or `changelog.d/`, or `*.md` files at any depth.
 Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
 Renames check both the old and new paths.
-Each heavy job uses a job-level condition, so skipped required checks still report.
+CI skips heavy jobs on documentation-only PRs when classification succeeds and the changelog check succeeds or skips.
+Job-level conditions let skipped required checks report instead of remaining pending.
 The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
 The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
 Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
+The sponsors bot starts CI through manual dispatch, so its documentation-only updates use the manual-run policy.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
