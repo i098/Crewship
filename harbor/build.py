@@ -1,10 +1,11 @@
 """Builds harbor/dist from harbor/public and fills the points of interest from the repository.
 
-The features come from README's Features list and More docs row, and the release
-from CHANGELOG.md, so the page follows Crewship as it changes. Standard library only.
+The features come from README's Features list and More docs row and from docs/features.md,
+and the release from CHANGELOG.md, so the page follows Crewship as it changes. Standard library only.
 """
 
 import html
+import posixpath
 import re
 import shutil
 import sys
@@ -36,10 +37,21 @@ SCENE = {
 }
 
 
-def features(readme):
-    """(title, link, description) for each README Features or More docs link."""
+def features(readme, index=""):
+    """(title, link, description) for each Features link: README highlights (and the links inside
+    them), the docs/features.md list given as `index`, and the More docs row."""
     section = readme.split("\n## Features\n", 1)[1].split("\n## ", 1)[0]
     rows = re.findall(r"^- \*{0,2}\[([^\]]+)\]\(([^)]+)\):\*{0,2} (.+)$", section, re.M)
+    rows += [
+        (title, link, desc)
+        for _, _, desc in rows
+        for title, link in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", desc)
+    ]
+    rows.extend(
+        # The list sits in docs/, so its links are relative to it.
+        (title, posixpath.normpath(f"docs/{link}"), desc)
+        for title, link, desc in re.findall(r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M)
+    )
     more_docs = readme.split("\n## More docs\n", 1)[1].split("\n## ", 1)[0]
     rows.extend(
         (title, link, "Documentation")
@@ -61,10 +73,10 @@ def first_sentence(markdown):
     return " ".join(prose.replace("**", "").split()).split(". ", 1)[0].rstrip(".") + "."
 
 
-def points(readme, changelog):
+def points(readme, changelog, index=""):
     """(spot, title, href, body HTML) for every point of interest."""
     rows, extra = [], []
-    for title, link, desc in features(readme):
+    for title, link, desc in features(readme, index):
         href = f"{REPO}/blob/main/{link}"
         if link in SCENE:
             rows.append((SCENE[link][0], title, href, inline(desc, 52)))
@@ -122,10 +134,11 @@ def points(readme, changelog):
 def build(dist=HARBOR / "dist"):
     readme = (ROOT / "README.md").read_text()
     changelog = (ROOT / "CHANGELOG.md").read_text()
+    index = (ROOT / "docs/features.md").read_text()
     items = "\n".join(
         f'      <li data-spot="{spot}"><a target="_blank" rel="noopener" href="{href}">'
         f"{html.escape(title)}</a><p>{body}</p></li>"
-        for spot, title, href, body in points(readme, changelog)
+        for spot, title, href, body in points(readme, changelog, index)
     )
     shutil.rmtree(dist, ignore_errors=True)
     shutil.copytree(HARBOR / "public", dist)

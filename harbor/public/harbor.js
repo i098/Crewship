@@ -3877,6 +3877,7 @@ function node(tag, content, cls) {
 
 let shown;
 function show(id) {
+  if (id && !spots[id]) return;
   const key = id || (moved ? "" : "welcome");
   if (key === shown) return;
   shown = key;
