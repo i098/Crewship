@@ -17,7 +17,7 @@ modelRoles:
   Kimi: kimi-code/k3
   task: anthropic/claude-opus-5-5:auto
   subagent: anthropic/claude-opus-5-5:auto
-  default: anthropic/claude-opus-5-5:xhigh
+  default: anthropic/claude-opus-5-5:high
   memory: anthropic/claude-haiku-5-5
 # Off globally on purpose: Firstmate layers config/omp-crew-overlay.yml onto
 # omp crewmate and scout launches, which turns the advisor on for crews only:
@@ -34,6 +34,8 @@ symbolPreset: nerd
 defaultThinkingLevel: auto
 hideThinkingBlock: true
 extendedContext: true
+tier:
+  openai: priority
 autocompleteMaxVisible: 10
 steeringMode: one-at-a-time
 followUpMode: all

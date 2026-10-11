@@ -111,14 +111,14 @@ def test_default_config_lists_the_current_defaults():
         assert f"`{plugin}`" in lines["Plugins and extensions"]
 
     # The Models, Fallbacks and Gates lines name models in words, so pin the ids they stand for.
-    assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:xhigh"
-    assert "Opus 5.5 at extra-high thinking runs the home" in lines["Models"]
+    assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:high"
+    assert "Opus 5.5 at high thinking runs the home" in lines["Models"]
     assert omp["advisor"]["enabled"] is False and "advisor off" in lines["Models"]
     dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
     tiers = [[rule_use["model"] for rule_use in rule["use"]] for rule in dispatch["rules"]]
     assert tiers == [
         ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"],
-        ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"],
+        ["anthropic/claude-sonnet-5-5"],
         ["anthropic/claude-opus-5-5"],
     ], "update the Models line in Default config"
     assert dispatch["default"] == dispatch["rules"][1]["use"]

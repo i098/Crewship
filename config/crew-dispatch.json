@@ -1,5 +1,5 @@
 {
-  "_comment": "Select models by task difficulty; the spawning home chooses the effort, and omp connects directly to each provider.",
+  "_comment": "Select models by task difficulty; the spawning home chooses the effort, and omp connects directly to each provider. Codex models draw on a separate quota pool from Anthropic, so use them when the Anthropic weekly quota is tight (omp usage).",
   "rules": [
     {
       "when": "Mechanical or small, well-specified work: typo and copy fixes, renames, docs-only edits, config or version bumps, moving files, formatting, data collection, simple scripted checks, or a narrow one-file change with an obvious fix.",
@@ -24,14 +24,9 @@
           "harness": "omp",
           "model": "anthropic/claude-sonnet-5-5",
           "provider": "claude"
-        },
-        {
-          "harness": "omp",
-          "model": "openai-codex/gpt-6.1-sol",
-          "provider": "codex"
         }
       ],
-      "why": "The everyday tier; usually medium thinking, high when the change spans several files."
+      "why": "The everyday tier; usually medium thinking, high when the change spans several files. Sonnet 5.5 comes first. gpt-6.1-sol only when the Anthropic quota is exhausted (omp usage)."
     },
     {
       "when": "Genuinely hard work only: architecture or design across many components, security- or money-sensitive code, concurrency, data migrations, client production paths with a large blast radius, a bug whose cause is unknown after a first look, or a task a cheaper model already failed.",
@@ -50,11 +45,6 @@
       "harness": "omp",
       "model": "anthropic/claude-sonnet-5-5",
       "provider": "claude"
-    },
-    {
-      "harness": "omp",
-      "model": "openai-codex/gpt-6.1-sol",
-      "provider": "codex"
     }
   ]
 }
