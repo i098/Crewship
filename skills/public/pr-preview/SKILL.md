@@ -17,6 +17,7 @@ The board is one HTML file. The body comes from GitHub's own Markdown API (`gh a
    - PR that is already pushed, read from the compare API: add `--compare`.
    - Issue: `pr_preview.py issue --repo OWNER/REPO --title "…" --body-file /tmp/body.md`
    - One comment: `pr_preview.py comment --repo OWNER/REPO --body-file /tmp/comment.md`
+   - Open-source target: add `--rules /tmp/rules.json` to any of these modes (see "Contribution rules").
 3. The script prints the HTML path (default `.lavish/pr-preview.html`; use `--out` for a name per topic). Open it: `lavish-axi .lavish/pr-preview.html`.
 4. Give the reader the board. If the reader asks for changes, edit the body file, run the script again and reload.
 
@@ -25,6 +26,16 @@ The board is one HTML file. The body comes from GitHub's own Markdown API (`gh a
 - PR: title, `#N` (`--number`), "wants to merge N commits into `base` from `fork:branch`", and three tabs. Conversation has the body comment and the sidebar. Commits and Files changed come from the real branch, with line numbers and `+`/`-` counts.
 - Issue: title, state, the body comment and the sidebar.
 - Comment: the one comment box.
+- With `--rules`: a "Contribution rules" table above the body, in every mode.
+
+## Contribution rules
+
+An approval board for an open-source PR ALWAYS carries the rules cross-reference. Write one row per rule from the target repository's CONTRIBUTING file, PR template and AGENTS or CLAUDE files. Give each row the source link and a result (`pass`, `fail`, `n/a`, or a short note). Pass the file with `--rules`:
+
+- JSON: `[{"rule": "Conventional Commits", "source": "https://github.com/O/R/blob/main/CONTRIBUTING.md", "result": "pass"}]`
+- Markdown table with the header `| Rule | Source | Result |`. A source can be a URL or `[text](url)`.
+
+The script exits non-zero with a message when the file is missing or malformed.
 
 ## Options
 

@@ -116,6 +116,16 @@ body{margin:0;background:#fff;color:#1f2328;font:14px/1.5 -apple-system,BlinkMac
 .cm .av{border-radius:50%}
 .ini{width:20px;height:20px;border-radius:50%;background:#d1d9e0;display:inline-grid;place-items:center;font-size:11px;font-weight:600}
 .sha{font:12px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;color:#59636e}
+.rules{border:1px solid #d1d9e0;border-radius:6px;margin-bottom:16px;overflow:hidden}
+.rules h2{margin:0;padding:8px 16px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;font-size:14px;font-weight:600}
+.rules table{width:100%;border-collapse:collapse}
+.rules th{text-align:left;color:#59636e;font-size:12px;font-weight:600;padding:6px 16px;border-bottom:1px solid #d1d9e0}
+.rules td{padding:6px 16px;border-top:1px solid #d1d9e0;vertical-align:top;overflow-wrap:anywhere}
+.rules tr:first-child td{border-top:0}
+.rules a{color:#0969da;text-decoration:none}
+.res{display:inline-block;border:1px solid #d1d9e0;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;color:#59636e}
+.res.pass{color:#1a7f37;border-color:#1f883d66;background:#dafbe1}
+.res.fail{color:#d1242f;border-color:#cf222e66;background:#ffebe9}
 """
 
 # ---- commits and files ------------------------------------------------------
@@ -286,6 +296,54 @@ def page_head(title, number, state_html, text):
     num = f' <span class="num">#{e(str(number))}</span>' if number else ""
     return f'<h1 class="title">{e(title)}{num}</h1><div class="meta">{state_html}<span>{text}</span></div>'
 
+RULE_KEYS = ("rule", "source", "result")
+
+
+def load_rules(path):
+    """Read a rules file: JSON list of {rule, source, result}, or a Markdown table with those columns."""
+    try:
+        text = Path(path).read_text()
+    except OSError as err:
+        raise SystemExit(f"--rules: cannot read {path}: {err.strerror}")
+    if text.lstrip().startswith(("[", "{")):
+        try:
+            rows = json.loads(text)
+        except ValueError as err:
+            raise SystemExit(f"--rules: {path} is not valid JSON: {err}")
+        if not isinstance(rows, list):
+            raise SystemExit("--rules: JSON must be a list of objects with rule, source and result")
+    else:
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip().startswith("|")]
+        cells = [[c.strip() for c in ln.strip("|").split("|")] for ln in lines]
+        if len(cells) < 2 or [c.lower() for c in cells[0]] != ["rule", "source", "result"]:
+            raise SystemExit("--rules: a Markdown table needs the header | Rule | Source | Result |")
+        rows = [dict(zip(RULE_KEYS, r)) for r in cells[2:]]  # cells[1] is the --- separator
+        if any(len(r) != 3 for r in cells[2:]):
+            raise SystemExit("--rules: every table row needs exactly three cells")
+    for r in rows:
+        if not isinstance(r, dict) or not all(isinstance(r.get(k), str) and r[k].strip() for k in RULE_KEYS):
+            raise SystemExit("--rules: every row needs non-empty rule, source and result text")
+    if not rows:
+        raise SystemExit("--rules: no rows found")
+    return rows
+
+
+def rule_source(text):
+    m = re.fullmatch(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", text) or re.fullmatch(r"()(https?://\S+)", text)
+    return f'<a href="{e(m[2])}">{e(m[1] or m[2])}</a>' if m else e(text)
+
+
+def rules_section(rows):
+    if not rows:
+        return ""
+    body = "".join(
+        f'<tr><td>{e(r["rule"])}</td><td>{rule_source(r["source"].strip())}</td>'
+        f'<td><span class="res {e(r["result"].strip().lower())}">{e(r["result"].strip())}</span></td></tr>'
+        for r in rows)
+    return ('<div class="rules"><h2>Contribution rules</h2><table><thead><tr><th>Rule</th><th>Source</th>'
+           f'<th>Result</th></tr></thead><tbody>{body}</tbody></table></div>')
+
+
 
 def build_pr(a):
     base_ref = a.base_ref or f"origin/{a.base}"
@@ -299,7 +357,7 @@ def build_pr(a):
     badge = f'<span class="state open">{icon("pr")} Open</span>'
     text = (f' <b class="who">{e(a.author)}</b> wants to merge {n} commit{"s" * (n != 1)} into '
             f'<code class="ref">{e(base_label)}</code> from <code class="ref">{e(a.head)}</code>')
-    body = comment_box(a.author, render_markdown(a.body_file, a.repo), at=a.when)
+    body = rules_section(a.rules_rows) + comment_box(a.author, render_markdown(a.body_file, a.repo), at=a.when)
     fpane, add, dele = files_pane(files, a.max_diff_lines)
     tabs = [("conv", "conv", "Conversation", ""), ("commits", "commit", "Commits", n),
             ("files", "files", "Files changed", len(files))]
@@ -318,13 +376,13 @@ def build_pr(a):
 def build_issue(a):
     badge = f'<span class="state open">{icon("issue")} Open</span>'
     text = f' <b class="who">{e(a.author)}</b> opened this issue {e(a.when)}'
-    body = comment_box(a.author, render_markdown(a.body_file, a.repo), at=a.when)
+    body = rules_section(a.rules_rows) + comment_box(a.author, render_markdown(a.body_file, a.repo), at=a.when)
     return (page_head(a.title, a.number, badge, text) + '<hr class="rule">'
             f'<section class="grid"><div>{body}</div>{sidebar("issue")}</section>'), a.title
 
 
 def build_comment(a):
-    body = comment_box(a.author, render_markdown(a.body_file, a.repo), label="Member", at=a.when)
+    body = rules_section(a.rules_rows) + comment_box(a.author, render_markdown(a.body_file, a.repo), label="Member", at=a.when)
     return f'<section class="single">{body}</section>', "Comment preview"
 
 
@@ -344,6 +402,7 @@ def main():
     common.add_argument("--author", help="login shown as author (default: the gh login)")
     common.add_argument("--when", default="now", help='age text, for example "3 days ago"')
     common.add_argument("--out", default=".lavish/pr-preview.html")
+    common.add_argument("--rules", help="contribution rules cross-reference: JSON list or Markdown table of Rule, Source, Result")
     sub = p.add_subparsers(dest="kind", required=True)
     for kind in ("pr", "issue"):
         s = sub.add_parser(kind, parents=[common])
@@ -360,6 +419,7 @@ def main():
     s.add_argument("--max-diff-lines", type=int, default=600, help="diff lines shown per file")
     sub.add_parser("comment", parents=[common])
     a = p.parse_args()
+    a.rules_rows = load_rules(a.rules) if a.rules else []
     a.author = a.author or run("gh", "api", "user", "--jq", ".login").strip()
     inner, title = {"pr": build_pr, "issue": build_issue, "comment": build_comment}[a.kind](a)
     out = Path(a.out)
