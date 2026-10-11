@@ -117,12 +117,12 @@ carry_host_files() {
 }
 
 # One-time fixes for a v0.4.0 host, run before the re-apply (both are no-ops on a newer one):
-# v0.4.0 kept its tools under share/code-factory; v0.4.1 uses share/crewship and refuses the
+# v0.4.0 kept its tools under share/code-factory (tools/, omp, npm packages); v0.4.1 uses share/crewship and refuses the
 # old ~/.local/bin links. The links go (provisions recreates them) and then the old tree, which
 # nothing links into any more. v0.4.1 also rejects three fleet keys of host.yml; they are dropped,
-# one line each, and the original is kept as host.yml.bak.
+# one line each, and the original is kept as host.yml.v0.4.0.
 migrate_v040() {
-  local old=$HOME/.local/share/code-factory/tools link
+  local old=$HOME/.local/share/code-factory link
   if [ -d "$old" ]; then
     for link in "$HOME"/.local/bin/*; do
       [ -L "$link" ] && [[ $(readlink -f "$link") == "$old"/* ]] && { echo "  relinking $link"; rm -f "$link"; }
@@ -134,13 +134,15 @@ migrate_v040() {
 import shutil, yaml
 path = ".local/host.yml"
 document = yaml.safe_load(open(path))
-fleet = document.get("crewship", {}).get("fleet") if isinstance(document, dict) and isinstance(document.get("crewship"), dict) else None
+# v0.4.0 names the root "factory"; ship.sh renames it to "crewship" and needs host.yml.bak free for that.
+root = next((document[k] for k in ("factory", "crewship") if isinstance(document, dict) and isinstance(document.get(k), dict)), {})
+fleet = root.get("fleet")
 dropped = [key for key in ("supabase_project_id", "fixture_archive", "worktree_pools") if isinstance(fleet, dict) and key in fleet]
 if dropped:
-    shutil.copy2(path, path + ".bak")
+    shutil.copy2(path, path + ".v0.4.0")
     for key in dropped:
         del fleet[key]
-        print(f"  dropped fleet.{key} from {path} (removed in v0.4.1; the original is {path}.bak)")
+        print(f"  dropped fleet.{key} from {path} (removed in v0.4.1; the original is {path}.v0.4.0)")
     yaml.safe_dump(document, open(path, "w"), sort_keys=False)
 PY
 }

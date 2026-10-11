@@ -242,17 +242,16 @@ def test_v040_host_is_migrated_before_the_reapply(release):
     (bin_dir / "uv").symlink_to(old / "uv")
     (bin_dir / "mine").write_text("not ours")
     host = release.crewship / ".local/host.yml"
-    host.write_text("crewship:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n")
+    host.write_text("factory:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n")
     result = release.install("v1.1.0")
     assert result.returncode == 0, result.stderr
     assert not (bin_dir / "uv").exists() and not (bin_dir / "uv").is_symlink()
     assert (bin_dir / "mine").read_text() == "not ours"
-    assert not (release.home / ".local/share/code-factory/tools").exists()
-    assert "crewship:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
-    assert ".local/host.yml.bak" in result.stdout.replace(str(release.crewship) + "/", "")
+    assert not (release.home / ".local/share/code-factory").exists()
+    assert "factory:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
     for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
         assert f"dropped fleet.{key}" in result.stdout
-    assert "supabase_project_id" in (host.parent / "host.yml.bak").read_text()
+    assert "supabase_project_id" in (host.parent / "host.yml.v0.4.0").read_text()
 
 
 def test_migration_is_a_noop_on_a_current_host(release):
@@ -263,4 +262,4 @@ def test_migration_is_a_noop_on_a_current_host(release):
     assert result.returncode == 0, result.stderr
     assert "dropped" not in result.stdout and "relinking" not in result.stdout
     assert host.read_text() == "crewship:\n  fleet:\n    keep: 1\n"
-    assert not (host.parent / "host.yml.bak").exists()
+    assert not (host.parent / "host.yml.v0.4.0").exists()
