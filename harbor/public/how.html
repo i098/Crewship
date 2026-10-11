@@ -41,7 +41,11 @@
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
   The sea is a height field of travelling waves, ray marched per cell; the small boats ride it.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the ship's wind-driven sway.
-  Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
+  Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.
+  The island is a smooth height field of rolling hills from value noise, levelled under the objects that stand on it.
+  The page samples it once on a 25 cm grid, and each ray starts its march where it can first reach the highest ground nearby.
+  The roads are curves through control points.
+  A 50 cm grid stores the centre-line distance and half width for the road whose edge is nearest.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
   Exterior solids cast shadows when shadow rays are enabled, except the thin raised cabin trim.
   A shadow ray skips the solid being lit, because a convex solid cannot shade its own lit face.
@@ -52,7 +56,7 @@
   Crowns cast no lamp shadows because the lamps are below them.
   Lamplight on leaves is compressed to prevent flat bright patches.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the trees' appearance and motion.
-  The lighthouse beam sweeps; the moon gives a dim fill.
+  The lighthouse beam sweeps; the moon gives a dim fill that is stronger on slopes facing it.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
   The house's lamp and fire, the cabin's hanging lantern and the gun deck lanterns light nearby surfaces without shadow rays.
@@ -69,13 +73,14 @@
   Turning reuses fresh texels but computes unseen or expired texels.
   With reduced motion, each render refreshes the texels it reads, including after movement or a change to the motion setting.</li>
   <li><b>Characters.</b> Brightness usually picks a glyph from the density ramp <code> .`',:;~-=+*#%@▒▓█</code> and one of eight colour levels per material.
-  Grass uses blade glyphs.
+  Ground grass uses mostly short marks and sparse tall blades; shade increases gaps and reduces tall blades.
   The renderer caps each tuft's projected height at 1/14 of the screen height before rounding blades to whole cells.
   Blades use <code>| ( ) \ /</code> with pale moonlit tips.
   Far tufts are dimmer.
   Leaves pick glyphs from <code>,.:;&amp;%@</code> by brightness, one for each 20 cm patch, and draw no outline edges.
   Bark uses strokes that follow its limb on screen, with <code>( )</code> on the sides of upright trunks; palm rings and birch marks cross the limb.
-  Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
+  Road dirt, muted earth, pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
+  Random 2 cm specks vary ground blade lean and blend the greens and the edges between grass, sand and road.
   The fountain pool and upper bowl use animated texture glyphs instead of the density ramp.
   Fountain droplets use <code>: ' ,</code>; spray and splashes also use <code>.</code>, and mist uses <code>. `</code>.
   The house's paintings are glyph textures that <code>harbor/art.py</code> converts ahead of time from public-domain works.
@@ -83,7 +88,7 @@
   A painting far from you reads a half or quarter size copy of its texture.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
   The moonlit sea seen through the gun ports uses still wave glyphs.
-  An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one.</li>
+  An edge glyph (<code>| - / \ _</code>) is drawn wherever one surface meets a farther one, and along hill crests.</li>
   <li id="frame-loop"><b>Frame loop.</b> <code>requestAnimationFrame</code> moves you, the sea, the ship and its sails, and redraws the grid on a canvas.
   A ray tests solids whose screen box reaches its tile of cells, nearest first.
   It stops when no remaining solid can be nearer than its hit.

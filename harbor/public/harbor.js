@@ -1,6 +1,6 @@
 // Crewship harbor: a first-person 3D scene ray cast into a grid of text.
-// Plain JavaScript, no dependencies. The world is a list of convex solids (sets of planes)
-// plus the water plane; the ship's solids live in a frame that bobs and rolls at the dock.
+// Plain JavaScript, no dependencies. The world combines solids with island and sea height fields.
+// The ship's solids use a frame that bobs and rolls at the dock.
 const stage = document.getElementById("stage");
 const canvas = document.getElementById("scene");
 const ctx = canvas.getContext("2d");
@@ -170,32 +170,126 @@ function painted(text, u0, u1, v0, v1) {
   };
 }
 const hash = (a, b) => { const h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return h - Math.floor(h); };
+const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+// An integer hash of a lattice point in [0, 2^32): cheap, and free of the sine hash's patterns at large inputs.
+function latticeBits(i, j) {
+  let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+// Smooth value noise in [0, 1): no edges, and it changes by at most 1.5 per lattice step along either axis.
+function noise(x, z) {
+  const i = Math.floor(x), j = Math.floor(z), u = smooth(x - i), w = smooth(z - j);
+  const a = latticeBits(i, j), b = latticeBits(i + 1, j), c = latticeBits(i, j + 1), d = latticeBits(i + 1, j + 1);
+  return (a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w) / 4294967296;
+}
+// Random bits for each 2 cm of ground, less than a character cell even at your feet: they dither material edges
+// and pick grass blades, so no ground texture holds still over a square.
+const specks = (x, z) => latticeBits(Math.floor(x * 50), Math.floor(z * 50));
+// Ground-plan tiles: a Map from tile key to the things that reach the tile, so a point checks only those near it;
+// NONE stands in for an empty tile.
+const NONE = [];
+function tileKey(size, x, z) {
+  return Math.floor(x / size) * 1000 + Math.floor(z / size);
+}
+function fileByTile(grid, size, x0, z0, x1, z1, item) {
+  for (let i = Math.floor(x0 / size); i <= Math.floor(x1 / size); i++) {
+    for (let k = Math.floor(z0 / size); k <= Math.floor(z1 / size); k++) {
+      const key = i * 1000 + k;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(item);
+    }
+  }
+}
 
 // Harbor: quay, breakwater, the dock and what stands on them.
-// The road network: junctions and the links between them. It is drawn on the island and is the route
-// the mini map walks you along (deck, gangway, dock, avenue, plaza, breakwater path).
+// The walk graph: junctions and the links between them, which the mini map walks you along (deck, gangway, dock,
+// then the island roads below, whose curves add the points between the junctions). Detours use the junctions only.
 const NODES = [[-0.3, -6], [-0.3, -1.2], [0.3, 5.5], [1.9, -1.2], [4.2, -1.2], [5, 13.5], [5, 19.6], [7.1, 24.6], [-5, 19.6],
   [-16, 19.6], [-28, 19.6], [-30, 10], [-30, -14], [14, 19.6], [20, 19.6], [7.1, 21.7]];
-const LINKS = [[0, 1], [1, 2], [1, 3], [3, 4], [4, 5], [5, 6], [6, 15], [6, 8], [8, 9], [9, 10], [10, 11], [11, 12], [6, 13], [13, 14], [15, 7]];
-// Island ways (the links past the dock): concrete from the dock head to the plaza and along the centre of
-// the avenue, narrow dirt trails beyond. [ax, az, dx, dz, length², concrete, length]
-const CONCRETE = new Set(["5,6", "6,15", "15,7", "6,8", "6,13"]);
-const ROADS = LINKS.slice(5).map(([a, b]) => {
-  const [ax, az] = NODES[a], dx = NODES[b][0] - ax, dz = NODES[b][1] - az;
-  const l2 = dx * dx + dz * dz;
-  return [ax, az, dx, dz, l2, CONCRETE.has(`${a},${b}`), Math.sqrt(l2)];
-});
-// Distance from (x, z) to the nearest way, how far along it you are, and whether it is concrete.
-function roadAt(x, z) {
-  let best = Infinity, along = 0, concrete = false;
-  for (const [ax, az, dx, dz, l2, c, length] of ROADS) {
-    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2)), ex = x - ax - t * dx, ez = z - az - t * dz;
-    const d = ex * ex + ez * ez;
-    if (d < best) { best = d; along = t * length; concrete = c; }
-  }
-  return [Math.sqrt(best), along, concrete];
+const JUNCTIONS = NODES.length, LINKS = [[0, 1], [1, 2], [1, 3], [3, 4], [4, 5]];
+// Island roads: worn dirt curving through control points [x, z, half width]; a junction also names its node.
+// A cart road runs from the dock head to the plaza and along the quay; footpaths go on to the breakwater and
+// loop over the hill behind the town.
+const junction = (n, w) => [...NODES[n], w, n];
+const WAYS = [
+  [junction(5, 1.2), [4.3, 16.6, 1.25], junction(6, 1.3)],
+  [junction(6, 1.3), [6.4, 20.5, 1.2], junction(15, 1.15), junction(7, 1.1)],
+  [junction(6, 1.3), [9.5, 19.1, 1.15], junction(13, 0.95), [17.5, 18.9, 0.75], junction(14, 0.6)],
+  [junction(6, 1.3), [0.5, 19.1, 1.2], junction(8, 1.1), [-10.5, 18.9, 0.9], junction(9, 0.7), [-22, 18.7, 0.62],
+    junction(10, 0.6), [-31.2, 15.2, 0.6], junction(11, 0.6), [-29.6, 5.5, 0.6], [-31.8, 1.5, 0.6], [-31, -4, 0.6],
+    [-29.4, -9, 0.6], junction(12, 0.6)],
+  [junction(10, 0.6), [-31.5, 25, 0.55], [-34.5, 30.5, 0.55], [-34.8, 35.8, 0.55], [-30.5, 39.6, 0.55],
+    [-24.4, 38.6, 0.55], [-20, 33.8, 0.55], [-18.8, 27.5, 0.55], [-17.6, 23, 0.6], junction(9, 0.7)],
+];
+// The point a fraction t along span i of a way: Catmull-Rom, so the curve passes every control point smoothly.
+function wayPoint(P, i, t) {
+  const a = P[Math.max(0, i - 1)], b = P[i], c = P[i + 1], d = P[Math.min(P.length - 1, i + 2)], t2 = t * t, t3 = t2 * t;
+  return [0, 1, 2].map((k) => b[k] + 0.5 * ((c[k] - a[k]) * t + (2 * a[k] - 5 * b[k] + 4 * c[k] - d[k]) * t2 + (3 * b[k] - a[k] - 3 * c[k] + d[k]) * t3));
 }
-const trailHalfWidth = (along) => 0.5 + 0.12 * Math.sin(along * 1.7) + 0.08 * hash(Math.floor(along * 3), 7);
+// Points about `step` metres apart along a way, its control points included.
+function wayPoints(P, step) {
+  const points = [];
+  for (let i = 0; i + 1 < P.length; i++) {
+    const n = Math.ceil(Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) / step);
+    for (let j = 0; j < n; j++) points.push(j ? wayPoint(P, i, j / n) : P[i]);
+  }
+  return [...points, P[P.length - 1]];
+}
+// Map walks follow the curves: points 2.5 m apart join the walk graph between the junctions.
+for (const way of WAYS) {
+  let last = -1;
+  for (const p of wayPoints(way, 2.5)) {
+    const n = p.length > 3 ? p[3] : NODES.push([p[0], p[1]]) - 1;
+    if (last >= 0) LINKS.push([last, n]);
+    last = n;
+  }
+}
+// The drawn roads: segments [ax, az, bx, bz, half width at a, at b] about 0.8 m long, filed by 2 m tile in reach of
+// the ground up to 3 m outside them.
+const WAYGRID = new Map();
+for (const way of WAYS) {
+  const points = wayPoints(way, 0.8);
+  for (let i = 1; i < points.length; i++) {
+    const [ax, az, aw] = points[i - 1], [bx, bz, bw] = points[i], reach = Math.max(aw, bw) + 3;
+    fileByTile(WAYGRID, 2, Math.min(ax, bx) - reach, Math.min(az, bz) - reach, Math.max(ax, bx) + reach, Math.max(az, bz) + reach, [ax, az, bx, bz, aw, bw]);
+  }
+}
+// The road whose edge is nearest (x, z), from the segments: [distance to its centre line, its half width there].
+function wayAt(x, z) {
+  let edge = Infinity, d = Infinity, w = 0;
+  for (const [ax, az, bx, bz, aw, bw] of WAYGRID.get(tileKey(2, x, z)) || NONE) {
+    const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    const ex = x - ax - t * dx, ez = z - az - t * dz, dist = Math.sqrt(ex * ex + ez * ez), half = aw + (bw - aw) * t;
+    if (dist - half < edge) { edge = dist - half; d = dist; w = half; }
+  }
+  return [d, w];
+}
+// The same, sampled every 0.5 m once and read back bilinear (9 m and 0 more than 3 m outside every road) into the
+// shared pair WAY: the renderer asks for every ground cell, and a grid read costs less than the segments.
+const WG = 2, WGW = 130 * WG + 1, WGH = 110 * WG + 1, WAY_CENTRE = new Float32Array(WGW * WGH), WAY_HALF = new Float32Array(WGW * WGH), WAY = [0, 0];
+function fillWays() {
+  for (let k = 0; k < WGH; k++) {
+    for (let i = 0; i < WGW; i++) {
+      const [d, w] = wayAt(HX0 + i / WG, HZ0 + k / WG), near = d < w + 3;
+      WAY_CENTRE[k * WGW + i] = near ? d : 9; WAY_HALF[k * WGW + i] = near ? w : 0;
+    }
+  }
+}
+function wayNear(x, z) {
+  const u = (x - HX0) * WG, v = (z - HZ0) * WG;
+  WAY[0] = bilinear(WAY_CENTRE, WGW, WGH, u, v, 9); WAY[1] = bilinear(WAY_HALF, WGW, WGH, u, v, 0);
+  return WAY;
+}
+// How much road covers the ground: 1 on it, 0 off it, over a soft edge that wanders by about 10 cm.
+function pathCover(x, z, d, w) {
+  return d > w + 0.5 ? 0 : smooth((w - d) / 0.3 + 0.5 + 0.8 * (noise(x * 1.3, z * 1.3) - 0.5));
+}
+function pathMask(x, z) {
+  const way = wayNear(x, z);
+  return pathCover(x, z, way[0], way[1]);
+}
 // Staggered paving joints and individually divided stones around the round plaza.
 function plazaCurb(x, z) {
   return (Math.atan2(z - 24.6, x - 5) + Math.PI) * 12 % 1 < 0.12 ? "t:" : "s=";
@@ -209,30 +303,46 @@ function plazaStone(x, z) {
 function plazaPaving(x, z, radius) {
   return radius > 2.96 ? plazaCurb(x, z) : plazaStone(x, z);
 }
-// Island ground as material and glyph: a 3 m concrete road with kerbs and joints every 3 m, a tiled plaza,
-// a 1 m dirt trail with uneven edges, ruts and footprints, and grass with a few flowers elsewhere.
-function ground(x, y, z, nx, ny) {
+// Island ground as material and glyph: the tiled plaza, worn dirt roads whose soft edges are dithered into the
+// grass, and grass with a few flowers and stones elsewhere.
+function ground(x, y, z, nx, ny, r) {
   if (ny < 0.5) return null;
-  const [d, along, concrete] = roadAt(x, z), plaza = Math.hypot(x - 5, z - 24.6);
+  const plaza = Math.sqrt((x - 5) * (x - 5) + (z - 24.6) * (z - 24.6));
   if (plaza < 3.2) return plazaPaving(x, z, plaza);
-  if (concrete && d < 1.5) return d > 1.38 ? along % 0.8 < 0.08 ? "t:" : "s_" : along % 3 < 0.12 ? "t:" : "t.";
-  if (!concrete && d < trailHalfWidth(along)) {
-    if (Math.abs(d - 0.22) < 0.06) return "o:";
-    return hash(Math.floor(along * 2.5), Math.floor(d * 6)) < 0.18 ? "o," : "o.";
-  }
-  const cx = Math.floor(x * 2), cz = Math.floor(z * 2), h = hash(cx, cz);
-  if (h < 0.025 && Math.hypot(x * 2 - cx - 0.5, z * 2 - cz - 0.5) < 0.18) return ["r*", "b*", "s*"][Math.floor(h * 120)];
+  const way = wayNear(x, z), d = way[0], w = way[1];
+  if (pathCover(x, z, d, w) > r) return dirt(x, z, d, w);
+  return flower(x, z) || grass(x, y, z);
+}
+// Packed dirt, paler where dust gathers, with two faint wheel ruts. textureColor keeps these glyphs over a pale
+// floor, so roads read as worn paths in the dark; the ruts are sparser glyphs in the same colour, so a row of
+// road stays one text run.
+function dirt(x, z, d, w) {
+  const r = (specks(x, z) >>> 20) / 4096;
+  if (Math.abs(d / w - 0.55) < 0.07 + 0.06 * tint(x, z)) return r < 0.45 ? "o " : "o.";
+  return r < 0.5 ? "o:" : r < 0.8 ? "o;" : "o'";
+}
+// Small round flowers and speckled earth with irregular edges, at most one patch in each half-metre cell.
+function flower(x, z) {
+  const cx = Math.floor(x * 2), cz = Math.floor(z * 2), h = latticeBits(cx, cz) / 4294967296, fx = x * 2 - cx - 0.5, fz = z * 2 - cz - 0.5;
+  if (h < 0.025 && fx * fx + fz * fz < 0.0324) return ["r*", "b*", "s*"][Math.floor(h * 120)];
   if (h >= 0.025 && h < 0.13) {
-    const dx = x * 2 - cx - 0.3 - h * 3, dz = z * 2 - cz - 0.3 - hash(cz, cx) * 0.4;
-    if (dx * dx * 1.6 + dz * dz < 0.025 + h * 0.2) return h < 0.08 ? "t_" : "G'";
+    const dx = fx + 0.2 - h * 3, dz = fz + 0.2 - (latticeBits(cz, cx) / 4294967296) * 0.4, r = (specks(x, z) >>> 20) / 4096;
+    if (dx * dx * 1.6 + dz * dz < (0.025 + h * 0.2) * (0.6 + 0.8 * r)) return h < 0.08 ? r < 0.5 ? "n," : r < 0.8 ? "n." : "n_" : "G'";
   }
-  // Grass in three greens mixed blade by blade; shadeSolid draws it as blades swaying in the wind.
-  const v = hash(Math.floor(x * 5), Math.floor(z * 5) + 50);
-  return (v < 0.3 ? "M" : v < 0.65 ? "G" : "g") + "'";
+  return null;
+}
+// A smooth tint about 30 cm across: it shifts each green's boundary and the wheel ruts a little, so patches blend
+// with a ragged edge, without breaking every text run into single cells.
+const tint = (x, z) => noise(x * 3.1 + 17.3, z * 3.1 - 5.9);
+// Grass in three greens that drift over a few metres, mostly the middle green, paler up hills and darker in hollows.
+// Each green dithers into the next over a few centimetres; shadeLitSolid draws mostly short marks with sparse tall blades.
+function grass(x, y, z) {
+  const v = 0.75 * noise(x * 0.55, z * 0.55) + 0.25 * tint(x, z) + (y - 1.2) * 0.07 + (((specks(x, z) >>> 8) & 63) / 63 - 0.5) * 0.08;
+  return v < 0.3 ? "M'" : v < 0.72 ? "g'" : "G'";
 }
 // The island is one height field: a plateau at 1.2 m whose edges slope down through sand beaches into the sea
 // all the way round, with a wobbly coastline, and a steep stone harbour wall only where the dock needs deep water.
-const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+// Rolling hills rise from the plateau inland.
 // Signed distance from (x, z) to a rounded rectangle; Math.sqrt, not Math.hypot, as it runs many times per ray.
 function roundedBox(x, z, cx, cz, hx, hz, r) {
   const qx = Math.abs(x - cx) - hx + r, qz = Math.abs(z - cz) - hz + r, ox = Math.max(qx, 0), oz = Math.max(qz, 0);
@@ -241,34 +351,121 @@ function roundedBox(x, z, cx, cz, hx, hz, r) {
 function landDistance(x, z) {
   return Math.min(roundedBox(x, z, -8, 31, 53, 23, 12), roundedBox(x, z, -36, -11, 16, 31, 9)) + 0.6 * Math.sin(x * 0.19 + z * 0.07) + 0.45 * Math.sin(z * 0.23 - x * 0.13);
 }
-function terrainY(x, z) {
-  const h = 1.2 - 2.8 * smooth((landDistance(x, z) + 6) / 7.5);
-  const wall = smooth((x + 8) / 1.5) * smooth((9 - x) / 1.5), wallY = 1.2 - (14 - z) * 1.6;
+const wallBlend = (x) => smooth((x + 8) / 1.5) * smooth((9 - x) / 1.5);
+// The plateau, beaches and harbour wall, without the hills.
+function shoreY(x, z, land = landDistance(x, z)) {
+  const h = 1.2 - 2.8 * smooth((land + 6) / 7.5);
+  const wall = wallBlend(x), wallY = 1.2 - (14 - z) * 1.6;
   return Math.max(-1.6, wall > 0 && wallY < h ? h + (wallY - h) * wall : h);
 }
-// The ray march, the shoreline and the water depth read the island from a 0.25 m height grid, bilinear, filled a
-// row at a time on first use. Above the waves it is within 6 cm of terrainY, which slope normals still use.
-const HG = 4, HX0 = -70, HZ0 = -50, HW = 130 * HG + 1, HH = 110 * HG + 1, HEIGHTS = new Float32Array(HW * HH), HREADY = new Uint8Array(HH);
-function heightRow(k) {
-  for (let i = 0; i < HW; i++) HEIGHTS[k * HW + i] = terrainY(HX0 + i / HG, HZ0 + k / HG);
-  HREADY[k] = 1;
+function terrainY(x, z) {
+  const land = landDistance(x, z);
+  return shoreY(x, z, land) + relief(x, z, land);
 }
-function marchY(x, z) {
-  const u = (x - HX0) * HG, w = (z - HZ0) * HG, i = Math.floor(u), k = Math.floor(w);
-  if (i < 0 || k < 0 || i >= HW - 1 || k >= HH - 1) return -1.6;
-  if (!HREADY[k]) heightRow(k);
-  if (!HREADY[k + 1]) heightRow(k + 1);
-  const fu = u - i, fw = w - k, p = k * HW + i;
-  return (HEIGHTS[p] * (1 - fu) + HEIGHTS[p + 1] * fu) * (1 - fw) + (HEIGHTS[p + HW] * (1 - fu) + HEIGHTS[p + HW + 1] * fu) * fw;
+// The ground grids cover x from HX0 and z from HZ0, 130 m by 110 m. Bilinear sample of a row-major grid at
+// fractional index (u, w), or `outside` beyond its edge.
+const HX0 = -70, HZ0 = -50, SW = 131, SH = 111;
+function bilinear(grid, width, height, u, w, outside) {
+  const i = Math.floor(u), k = Math.floor(w);
+  if (i < 0 || k < 0 || i >= width - 1 || k >= height - 1) return outside;
+  return lerpCell(grid, width, k * width + i, u - i, w - k);
 }
-// The stone harbour wall, only where the dock needs deep water.
-const harbourWall = (x, y, z) => x > -8.5 && x < 9.5 && z < 14.3 && y < 1.15;
-// Ground texture by where you are: the stone harbour wall, sand on the beaches, ground on the plateau.
+// The grid cell whose first corner is at index p, read at fractions (fu, fw) of its width and depth.
+const lerpCell = (grid, width, p, fu, fw) => (grid[p] * (1 - fu) + grid[p + 1] * fu) * (1 - fw) + (grid[p + width] * (1 - fu) + grid[p + width + 1] * fu) * fw;
+// Relief stays off what stands on the plateau: buildings, the plaza, lamps, trees, fences and signs keep their
+// footing, and the ground rises back into the hills over SEAT_BLEND metres. The blend is sampled on a 1 m grid
+// once the scenery stands, so a ground height needs no search.
+const SEAT_PAD = 0.3, SEAT_BLEND = 5;
+let seatBlend = null;
+function seatGrid() {
+  const tiles = new Map(), reach = SEAT_PAD + SEAT_BLEND, grid = new Float32Array(SW * SH);
+  for (const { bb: b } of world) {
+    if (b[1] >= 0.9 && b[1] <= 1.5 && shoreY((b[0] + b[3]) / 2, (b[2] + b[5]) / 2) > 1.15) fileByTile(tiles, 4, b[0] - reach, b[2] - reach, b[3] + reach, b[5] + reach, b);
+  }
+  for (let k = 0; k < SH; k++) for (let i = 0; i < SW; i++) grid[k * SW + i] = smooth((seatDistance(tiles, HX0 + i, HZ0 + k) - SEAT_PAD) / SEAT_BLEND);
+  return grid;
+}
+function seatDistance(tiles, x, z) {
+  let d2 = Infinity;
+  for (const b of tiles.get(tileKey(4, x, z)) || NONE) {
+    const ex = Math.max(b[0] - x, 0, x - b[3]), ez = Math.max(b[2] - z, 0, z - b[5]);
+    d2 = Math.min(d2, ex * ex + ez * ez);
+  }
+  return Math.sqrt(d2);
+}
+function unseated(x, z) {
+  seatBlend ??= seatGrid();
+  return bilinear(seatBlend, SW, SH, x - HX0, z - HZ0, 1);
+}
+// Rolling hills from two octaves of value noise: up to 6 m high inland and behind the town, a swell of up to
+// 0.6 m in the town, none on the beaches.
+const hills = (x, z) => 0.72 * noise(x / 24, z / 24) + 0.28 * noise(x / 12 + 7.3, z / 12 - 3.1);
+const townDistance = (x, z) => roundedBox(x, z, -2, 22, 26, 8, 4);
+const hillScale = (town, z) => (0.6 + 5.4 * smooth((town - 1) / 14)) * (0.3 + 0.7 * smooth((z - 4) / 14));
+const inland = (land) => smooth((-land - 5) / 12);
+function relief(x, z, land) {
+  const fade = inland(land);
+  return fade && fade * hills(x, z) * hillScale(townDistance(x, z), z) * unseated(x, z);
+}
+// The lowest and highest relief within r of (x, z). The ramps only grow with townDistance, z and -landDistance,
+// which change by at most 1, 1 and 1.25 per metre; the noise changes by at most 0.12 per metre, and the bilinear
+// seat blend by at most sqrt(2) times its smoothstep's slope. TOP is the highest the ground can be.
+const TOP = 1.2 + 6, SEAT_CHANGE = Math.SQRT2 * 1.5 / SEAT_BLEND;
+function reliefRange(x, z, r) {
+  const town = townDistance(x, z), land = landDistance(x, z), h = hills(x, z), u = unseated(x, z);
+  const low = hillScale(town - r, z - r) * inland(land + 1.25 * r) * Math.max(0, h - 0.12 * r) * Math.max(0, u - SEAT_CHANGE * r);
+  const high = hillScale(town + r, z + r) * inland(land - 1.25 * r) * Math.min(1, h + 0.12 * r) * Math.min(1, u + SEAT_CHANGE * r);
+  return [low, high];
+}
+// The ray march, the shoreline and the water depth read the island from a 0.25 m height grid, filled once the
+// scenery stands. Each 2 m tile also keeps its highest point, so rays skip the air above the ground.
+const HG = 4, HW = 130 * HG + 1, HH = 110 * HG + 1, HEIGHTS = new Float32Array(HW * HH);
+const PEAK_TILE = 2, PW = Math.ceil(130 / PEAK_TILE), PH = Math.ceil(110 / PEAK_TILE), PEAKS = new Float32Array(PW * PH);
+function fillGround() {
+  for (let k = 0; k < HH; k++) for (let i = 0; i < HW; i++) HEIGHTS[k * HW + i] = terrainY(HX0 + i / HG, HZ0 + k / HG);
+  for (let tk = 0; tk < PH; tk++) for (let ti = 0; ti < PW; ti++) PEAKS[tk * PW + ti] = tilePeak(ti, tk);
+  fillWays();
+}
+// The highest grid point of a tile, edges included: the bilinear ground between them is never higher.
+function tilePeak(ti, tk) {
+  const s = PEAK_TILE * HG;
+  let top = -1.6;
+  for (let k = tk * s; k <= Math.min(HH - 1, tk * s + s); k++) {
+    for (let i = ti * s; i <= Math.min(HW - 1, ti * s + s); i++) top = Math.max(top, HEIGHTS[k * HW + i]);
+  }
+  return top;
+}
+// Ground queries for what grows on the island: height, slope (the rise per metre) and pathMask's road cover.
+function groundHeight(x, z) {
+  return bilinear(HEIGHTS, HW, HH, (x - HX0) * HG, (z - HZ0) * HG, -1.6);
+}
+// The height change per metre along x and z: central differences one grid step either side, read at the same
+// fraction of their cells, so slopes vary smoothly and shade without facets.
+const GRADIENT = [0, 0];
+function groundGradient(x, z) {
+  const u = (x - HX0) * HG, w = (z - HZ0) * HG, i = Math.floor(u), k = Math.floor(w), p = k * HW + i;
+  const inside = i > 0 && k > 0 && i < HW - 2 && k < HH - 2, fu = u - i, fw = w - k;
+  GRADIENT[0] = inside ? (lerpCell(HEIGHTS, HW, p + 1, fu, fw) - lerpCell(HEIGHTS, HW, p - 1, fu, fw)) * HG / 2 : 0;
+  GRADIENT[1] = inside ? (lerpCell(HEIGHTS, HW, p + HW, fu, fw) - lerpCell(HEIGHTS, HW, p - HW, fu, fw)) * HG / 2 : 0;
+  return GRADIENT;
+}
+function groundSlope(x, z) {
+  const [hx, hz] = groundGradient(x, z);
+  return Math.sqrt(hx * hx + hz * hz);
+}
+// The stone harbour wall, only where the dock needs deep water; specks above `r` dither its ends.
+const harbourWall = (x, y, z, r = 0) => z < 14.3 && y < 1.15 && wallBlend(x) > r;
+// Ground texture by where you are: the stone harbour wall, sand on the beaches, grass and roads on the plateau.
+// The random specks dither each edge between them, so no material stops on a straight line; sand thins out over
+// a ragged band and is gone 3 cm below the plateau.
 function landTex(x, y, z, nx, ny) {
-  if (harbourWall(x, y, z)) return "t:";
-  return y < 1.12 ? sand(x, y, z, nx, ny) : ground(x, y, z, nx, ny);
+  const r = (specks(x, z) & 1023) / 1024;
+  if (harbourWall(x, y, z, r)) return "t:";
+  return y < 1.17 && smooth((1.17 - y) / 0.1 + 0.9 * (noise(x * 0.7, z * 0.7) - 1)) > r ? sand(x, y, z, nx, ny) : ground(x, y, z, nx, ny, r);
 }
-const TERRAIN = { id: 4000, P: new Float64Array(0), bb: [-70, -1.6, -50, 60, 1.2, 60], mat: "g", spot: null, solid: false, tex: landTex };
+const TERRAIN = { id: 4000, P: new Float64Array(0), bb: [-70, -1.6, -50, 60, TOP, 60], mat: "g", spot: null, solid: false, tex: landTex };
+// The surface id of a hill crest's cells; the other ground cells get TERRAIN.id * 16 + 17, as shadeLand hits face -5.
+const CREST_ID = TERRAIN.id * 16 + 18;
 // Sand: light and dotted when dry, darker and wet by the waterline, where the wash comes and goes, with a few shells.
 function wetSand(x, y, z) {
   const wash = 0.12 + 0.08 * Math.sin(T * 0.9 + x * 0.3 + z * 0.2);
@@ -279,11 +476,12 @@ function sand(x, y, z, nx, ny) {
   if (ny < 0.5) return null;
   const wet = wetSand(x, y, z);
   if (wet) return wet;
-  if (hash(Math.floor(x * 5), Math.floor(z * 5)) < 0.02) return "s*"; // a shell
-  return hash(Math.floor(x * 6), Math.floor(z * 6)) < 0.15 ? "y:" : hash(Math.floor(x * 3), Math.floor(z * 3)) < 0.5 ? "y." : "y,";
+  const r = (specks(x, z) >>> 20) / 4096;
+  if (r < 0.006) return "s*"; // a shell
+  return r < 0.1 ? "y:" : r < 0.1 + 0.5 * noise(x * 0.8, z * 0.8) ? "y," : "y.";
 }
-// Rounded, weathered rocks with pebbles at their feet, and driftwood, on the sand.
-const beachY = terrainY;
+// Rounded, weathered rocks with pebbles at their feet, and driftwood, on the sand, where no hill rises.
+const beachY = shoreY;
 for (const [x, z, r] of [[-14, 10.1, 0.8], [-9, 10.8, 0.5], [-18, 10.4, 0.6], [15, 11, 0.9], [19, 10.4, 0.5], [26, 10.1, 0.7], [-23.6, -4, 0.8], [-23, -20, 0.6], [-24.4, 5, 0.5]]) {
   const y = beachY(x, z);
   blob(world, x, y + r * 0.25, z, r, r * 0.6, r * 0.85, "t", { dim: 2.2, tex: (x, y) => (hash(Math.floor(x * 6), Math.floor(y * 6)) < 0.25 ? "-" : null) });
@@ -1695,6 +1893,8 @@ function floorAt(x, z) {
   const y = terrainY(x, z);
   return y > 0.1 ? y : null;
 }
+// On the ship's deck or stern roof, rather than the island, dock or gangway.
+const aboard = (x, z) => shipFloor(x, z) !== null;
 const walkBound = (b, k) => b[k] + (k < 3 ? -0.25 : 0.25);
 const walkingSolid = (s, fy, lift = 0) => s.solid && s.bb[1] + lift < fy + 1.7 && s.bb[4] + lift > fy + 0.3;
 function blocked(x, z, fy) {
@@ -1711,19 +1911,19 @@ function blocked(x, z, fy) {
 }
 
 // ---- Tall grass ---------------------------------------------------------------------------
-// Grass reads the ground only here: [height, metres outside the nearest way (negative on it), whether that way is
-// paved, rise per metre], or null on wet sand, the harbour wall and in the sea. Dry sand above the wash carries
-// dune grass.
+// Grass reads the ground only here: [height, pathMask's road cover, metres outside the nearest way or the plaza
+// (negative inside), whether that is paving to grass (the plaza and the wide cart road), rise per metre], or null
+// on wet sand, the harbour wall and in the sea. Dry sand above the wash carries dune grass.
 function grassGround(x, z) {
-  const y = terrainY(x, z), e = 0.5;
+  const y = groundHeight(x, z);
   if (y < 0.55 || harbourWall(x, y, z)) return null;
-  const [way, along, concrete] = roadAt(x, z), road = way - (concrete ? 1.5 : trailHalfWidth(along)), plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
-  const slope = Math.hypot(terrainY(x + e, z) - terrainY(x - e, z), terrainY(x, z + e) - terrainY(x, z - e)) / (2 * e);
-  return [y, Math.min(road, plaza), concrete || plaza < road, slope];
+  const way = wayNear(x, z), road = way[0] - way[1], wide = way[1] > 1, plaza = Math.hypot(x - 5, z - 24.6) - 3.2;
+  return [y, pathMask(x, z), Math.min(road, plaza), plaza < road || wide, groundSlope(x, z)];
 }
-// Chance of a clump: none on paving, few on trails, most along the edges of the ways and on slopes, patches elsewhere.
-function grassChance(x, z, edge, paved, slope) {
-  if (edge < (paved ? 0.3 : 0)) return paved ? 0 : 0.1;
+// Chance of a clump: none on paving, few on footpaths, most along the edges of the ways and on slopes, patches
+// elsewhere.
+function grassChance(x, z, cover, edge, paved, slope) {
+  if (paved ? edge < 0.3 : cover > 0.5) return paved ? 0 : 0.1;
   const patch = smooth(Math.sin(x * 0.29 + Math.sin(z * 0.21) * 2) * Math.sin(z * 0.33 - x * 0.12) * 2 + 0.3);
   return Math.min(1, 0.06 + 0.8 * patch + 1.2 * Math.exp(-edge * edge) + 3 * slope);
 }
@@ -1735,13 +1935,14 @@ function plantGrass() {
   for (let gx = -62; gx < 46; gx += 0.9) {
     for (let gz = -43; gz < 55; gz += 0.9) {
       const x = gx + hash(gx, gz) * 0.9, z = gz + hash(gz, gx) * 0.9, g = grassGround(x, z);
-      const p = g ? grassChance(x, z, g[1], g[2], g[3]) : 0;
+      const p = g ? grassChance(x, z, g[1], g[2], g[3], g[4]) : 0;
       if (hash(x * 1.7, z * 2.3) < p && grassFree(solids, x, g[0], z)) clumps.push(x, g[0], z, 0.4 + 0.6 * p * hash(z, x * 1.3), hash(x * 3.3, z));
     }
   }
   return Float32Array.from(clumps);
 }
-const GRASS = plantGrass();
+// Planted once the ground grids are filled, at the end of the file.
+let GRASS = new Float32Array(0);
 // Colour classes by brightness: dark roots, green blades and pale moonlit tips.
 const grassTones = (mat) => Array.from({ length: 8 }, (_, i) => mat + i);
 const GRASS_ROOT = grassTones("M"), GRASS_BLADE = grassTones("g"), GRASS_TIP = grassTones("G"), GP = [0, 0, 0];
@@ -2161,15 +2362,8 @@ const BEAM = { x: -36, y: 13.8, z: -24, reach: 95 };
 const TILE = 8, LIGHTGRID = new Map();
 for (const L of LIGHTS) {
   const r = Math.sqrt(L.r2) + 1;
-  for (let i = Math.floor((L.x - r) / TILE); i <= Math.floor((L.x + r) / TILE); i++) {
-    for (let k = Math.floor((L.z - r) / TILE); k <= Math.floor((L.z + r) / TILE); k++) {
-      const key = i * 1000 + k;
-      if (!LIGHTGRID.has(key)) LIGHTGRID.set(key, []);
-      LIGHTGRID.get(key).push(L);
-    }
-  }
+  fileByTile(LIGHTGRID, TILE, L.x - r, L.z - r, L.x + r, L.z + r, L);
 }
-const NONE = [];
 // Moves the ship's lights with the ship and turns the beam, once per frame.
 function moveLights() {
   for (const L of LIGHTS) {
@@ -2183,7 +2377,7 @@ function moveLights() {
 function lightAt(x, y, z, nx, ny, nz, shade = shadows) {
   const moon = 0.035 + 0.17 * Math.max(0, nx * MOON[0] + ny * MOON[1] + nz * MOON[2]) + 0.04 * Math.max(0, ny);
   let warm = 0;
-  for (const L of LIGHTGRID.get(Math.floor(x / TILE) * 1000 + Math.floor(z / TILE)) || NONE) {
+  for (const L of LIGHTGRID.get(tileKey(TILE, x, z)) || NONE) {
     const lx = L.wx - x, ly = L.wy - y, lz = L.wz - z, d2 = lx * lx + ly * ly + lz * lz;
     if (d2 > L.r2) continue;
     const d = Math.sqrt(d2), ndl = (nx * lx + ny * ly + nz * lz) / d, f = 1 - d2 / L.r2;
@@ -2331,6 +2525,7 @@ function render() {
   gatherClouds(performance.now() / 100);
   const scenery = interior ? interior.solids : world, vessel = interior ? NONE : ship;
   const seenWorld = cull(scenery, false), seenShip = cull(vessel, true);
+  if (!interior) groundRings();
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   if (!interior) {
     drawGrass();
@@ -2614,13 +2809,12 @@ function mapFrame() {
   [...(full ? tip + "   M or Esc closes" : tip).slice(0, iw)].forEach((ch, i) => mapPut(i + 1, h - 2, ch, "h"));
   if (touchFirst.matches) mapPut(w - 2, 0, full ? "x" : "+", "h");
 }
-// The island seen from above: plateau with roads and grass, beach and shallow-water bands, deep sea.
 function mapTerrain() {
   for (let j = 0; j < mapBox.ih; j++) {
     for (let i = 0; i < mapBox.iw; i++) {
-      const [x, z] = fromMap(i + 0.5, j + 0.5), y = terrainY(x, z);
+      const [x, z] = fromMap(i + 0.5, j + 0.5), y = groundHeight(x, z);
       let cell = [(i + j) % 6 ? " " : "~", "d"];
-      if (y > 1.12) cell = roadAt(x, z)[0] < 1.4 || Math.hypot(x - 5, z - 24.6) < 3.2 ? ["+", "s"] : [",", "g"];
+      if (y > 1.12) cell = pathMask(x, z) > 0.5 || Math.hypot(x - 5, z - 24.6) < 3.2 ? ["+", "s"] : [",", "g"];
       else if (y > 0) cell = [".", "y"];
       else if (y > -1.2) cell = ["~", "w"];
       mapPut(i + 1, j + 1, ...cell);
@@ -2685,7 +2879,7 @@ function standFor(a) {
   for (const r of [2.5, 4, 6, 8, 12, 16].filter((r) => a.ship || r >= Math.min(a.r * 2.5, 16))) {
     for (let k = 0; k < 8; k++) {
       const x = a.x + r * Math.sin(k * 0.785), z = a.z - r * Math.cos(k * 0.785), fy = floorAt(x, z);
-      if (fy !== null && (fy > 1.6) === !!a.ship && !blocked(x, z, fy)) return [x, z];
+      if (fy !== null && aboard(x, z) === !!a.ship && !blocked(x, z, fy)) return [x, z];
     }
   }
   return null;
@@ -2778,9 +2972,11 @@ function floorCuts(a, c, enter = 0, exit = 1) {
   }
   return cuts.sort((a, b) => a - b);
 }
-function terrainRange(a, c) {
+// The lowest and highest ground along a segment: the shore's from its monotone ramps, plus the relief's bound when
+// the walking height matters. Relief never lowers the ground, so coverage checks skip it.
+function terrainRange(a, c, withRelief = true) {
   const x = (a[0] + c[0]) / 2, z = (a[1] + c[1]) / 2;
-  const radius = Math.hypot(c[0] - a[0], c[1] - a[1]) / 2;
+  const radius = Math.hypot(c[0] - a[0], c[1] - a[1]) / 2, [rise, peak] = withRelief ? reliefRange(x, z, radius) : [0, 0];
   const distance = landDistance(x, z), spread = radius * 1.25;
   const low = 1.2 - 2.8 * smooth((distance + spread + 6) / 7.5);
   const high = 1.2 - 2.8 * smooth((distance - spread + 6) / 7.5);
@@ -2789,10 +2985,10 @@ function terrainRange(a, c) {
   const wallMax = smooth((x1 + 8) / 1.5) * smooth((9 - x0) / 1.5);
   const y0 = 1.2 - (14 - Math.min(a[1], c[1])) * 1.6;
   const y1 = 1.2 - (14 - Math.max(a[1], c[1])) * 1.6;
-  return [Math.max(-1.6, low + Math.min(0, y0 - low) * wallMax),
-    Math.max(-1.6, high + Math.min(0, y1 - high) * wallMin)];
+  return [Math.max(-1.6, low + Math.min(0, y0 - low) * wallMax) + rise,
+    Math.max(-1.6, high + Math.min(0, y1 - high) * wallMin) + peak];
 }
-function floorRange(a, c) {
+function floorRange(a, c, withRelief = true) {
   const [x, z] = alongSegment(a, c, 0.5);
   const f = FLOORS.find(([x0, x1, z0, z1]) => x >= x0 && x < x1 && z >= z0 && z < z1);
   let y0, y1;
@@ -2802,11 +2998,11 @@ function floorRange(a, c) {
     const roof = z >= -14.6 && z < -9 && Math.abs(x - SX) <= 2.1 + (z + 14.6) * 0.08 - 0.25;
     y0 = bob + (roof ? 4.8 : shipProfile(a[1])[1]) * rc + rs * (a[0] - SX);
     y1 = bob + (roof ? 4.8 : shipProfile(c[1])[1]) * rc + rs * (c[0] - SX);
-  } else return terrainRange(a, c);
+  } else return terrainRange(a, c, withRelief);
   return [Math.min(y0, y1), Math.max(y0, y1)];
 }
 function floorIntervalCovered(a, c) {
-  if (floorRange(a, c)[0] > 0.1) return true;
+  if (floorRange(a, c, false)[0] > 0.1) return true;
   const middle = alongSegment(a, c, 0.5);
   if (floorAt(...middle) === null || Math.hypot(c[0] - a[0], c[1] - a[1]) < 1e-7) return false;
   return floorIntervalCovered(a, middle) && floorIntervalCovered(middle, c);
@@ -2878,7 +3074,7 @@ function clearLinks(nodes, obstacles) {
 }
 let approachGraph;
 function rebuildRoutes() {
-  const obstacles = routeObstacles(), nodes = NODES.filter(walkable);
+  const obstacles = routeObstacles(), nodes = NODES.slice(0, JUNCTIONS).filter(walkable);
   nodes.push(...[[5, -15], [5, 0], [5, 10],
     [SX + 1.7, -5.4], [SX + 1.7, -9.2], [SX, -12]].filter(walkable));
   for (const { bb } of obstacles) nodes.push(...detourCorners(bb));
@@ -3009,23 +3205,35 @@ function cast(c, i, odd, dx, dy, dz) {
   else if (tw < Infinity) shadeWater(c, tw, dx, dy, dz);
   else shadeSky(c, dx, dy, dz);
 }
-// The island under a ray: its normal from the slope of the height field, then shaded like any solid. The plateau
-// top (the height grid at 1.2 m all round) is flat, so only slopes sample the height field.
+// The island under a ray: its normal from the slope of the height field, then shaded like any solid.
 function shadeLand(c, odd, t, dx, dy, dz) {
-  const x = cam.x + dx * t, z = cam.z + dz * t, e = 0.15, flat = marchY(x, z) > 1.2 - 1e-6;
-  const hx = flat ? 0 : (terrainY(x + e, z) - terrainY(x - e, z)) / (2 * e), hz = flat ? 0 : (terrainY(x, z + e) - terrainY(x, z - e)) / (2 * e), l = Math.sqrt(hx * hx + 1 + hz * hz);
+  const [hx, hz] = groundGradient(cam.x + dx * t, cam.z + dz * t), l = Math.sqrt(hx * hx + 1 + hz * hz);
   hitS = TERRAIN; hitK = -5; hitT = t; hitN[0] = -hx / l; hitN[1] = 1 / l; hitN[2] = -hz / l;
   shadeSolid(c, odd, false, dx, dy, dz, dx, dy);
+  // A hill crest against the sky, the sea or far ground catches the moon: two colour tiers brighter, and a
+  // surface id of its own, so the edge pass outlines it. Nearer rows of flat ground are never so far apart.
+  if (introProgress === 1 && c >= cols && t < 70 && D[c - cols] > t * 2 + 5) {
+    C[c] = C[c].slice(0, -1) + Math.min(7, Number(C[c].slice(-1)) + 2);
+    ID[c] = CREST_ID;
+  }
 }
-// Brightness changes the ground textures ask for: kerbs and flowers brighter, joints, ruts and wet sand darker.
 const GRAIN = { _: 1.35, "=": 1.3, "*": 1.5, "~": 1.25, "+": 1.1, "-": 1.1, ".": 1, ",": 0.85, ":": 0.7, ";": 0.8, '"': 0.9, "'": 0.95, "`": 0.9, " ": 1 };
-const paleGroundMark = (tex) => tex === "s|" || tex === "s-" || tex === "s=" || tex === "k~";
+// Ground marks keep their glyph and the least brightness returned here, which decreases in fog: road dirt,
+// muted tan earth at grass brightness, foam and paving joints. Other textures shade like the rest of their surface.
+function markFloor(s, tex) {
+  if (s !== TERRAIN || !tex) return 0;
+  return tex[0] === "n" ? 0.04 : tex[0] === "o" ? 0.28 : tex === "k~" ? 0.5 : tex === "s|" || tex === "s-" || tex === "s=" ? 0.35 : 0;
+}
 function textureColor(s, tex, b, fog, warm) {
   if (s.tex === fountainWater) return tex[0] + tier(Math.max(0.34, b), 0);
-  if (s === TERRAIN && paleGroundMark(tex)) {
-    return tex[0] + tier(Math.max(b, (tex === "k~" ? 0.5 : 0.35) * fog), warm);
-  }
-  return null;
+  const floor = markFloor(s, tex);
+  return floor ? tex[0] + tier(Math.max(b, floor * fog), warm) : null;
+}
+// Brightness change for a texture's glyph. Ground marks keep one brightness whatever their glyph, so a stretch of
+// road or paving stays one text run; road dirt is paler than the grass beside it.
+function grainOf(s, tex) {
+  if (!tex || tex.length !== 2) return 1;
+  return markFloor(s, tex) ? (tex[0] === "o" ? 1.4 : 1) : GRAIN[tex[1]] || 1;
 }
 function shipFill(s, tex, b, fog) {
   return s.fill ? Math.max(b, s.fill * fog * (tex === "-" ? 0.65 : 1)) : b;
@@ -3064,7 +3272,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   const nx = onShip ? rc * lnx - rs * lny : lnx, ny = onShip ? rs * lnx + rc * lny : lny;
   const px = onShip ? cam.lx + ldx * t : cam.x + dx * t, py = onShip ? cam.ly + ldy * t : cam.y + dy * t, pz = cam.z + dz * t;
   const tex = s.tex && s.tex(px, py, pz, lnx, lny, nz);
-  const mat = tex && tex !== "-" ? tex[0] : s.mat, grain = tex && tex.length === 2 ? GRAIN[tex[1]] || 1 : 1;
+  const mat = tex && tex !== "-" ? tex[0] : s.mat, grain = grainOf(s, tex);
   let ch, cls = mat;
   if (mat === "l") {
     const flash = s === beacon ? Math.cos(T * 2.2 + Math.atan2(dx, dz) * 2) > 0.3 : s !== antennaLamp || Math.sin(T * 3) > 0;
@@ -3072,27 +3280,49 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   } else {
     const wx = onShip ? SX + rc * (px - SX) - rs * py : px, wy = onShip ? rs * (px - SX) + rc * py + bob : py;
     const dim = (tex === "-" ? 0.55 : 1) * (s.dim || 1) * grain;
-    const [lit, warm] = lightAt(wx, wy, pz, nx, ny, nz, shadows && !s.dry);
+    const [moonAndLamps, warm] = lightAt(wx, wy, pz, nx, ny, nz, shadows && !s.dry), lit = groundLight(s, moonAndLamps, warm, nx, ny, nz);
     // Contact shadow: walls darken toward the ground they stand on.
-    const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : floorAt(wx, pz) ?? 0)));
+    const ao = ny > 0.7 ? 1 : Math.min(1, 0.55 + 0.5 * (wy - (onShip ? bob + DECK : standing(s, wy))));
     const fog = Math.exp(-t * 0.016);
     const b = shipFill(s, tex, (lit * dim * ao * (0.8 + 0.2 * Math.max(0, -(nx * dx + ny * dy + nz * dz)))) * fog + 0.02 * (1 - fog), fog);
-    cls = mat + tier(b, warm);
-    // Grass blades lean with the wind; fountain water keeps its texture glyphs below.
-    const grass = ny > 0.7 && (mat === "g" || mat === "G" || mat === "M") && s === TERRAIN;
-    ch = grass && b > 0.03 ? blade(px, pz, odd) : s.limb ? barkGlyph(s, tex, b, odd, nx, nz) : glyph(b, odd);
+    // Ground marks and fountain water keep their texture glyphs.
     const texture = textureColor(s, tex, b, fog, warm);
-    if (texture) {
-      ch = tex[1];
-      cls = texture;
-    }
+    cls = texture || mat + tier(b, warm);
+    ch = texture ? tex[1] : s.limb ? barkGlyph(s, tex, b, odd, nx, nz) : surfaceGlyph(s, mat, b, ny, px, pz, odd);
   }
   // Floors get a negative id: they outline what stands on them but draw no edges themselves.
   put(c, ch, cls, (ny > 0.7 ? -1 : 1) * (s.id * 16 + (k >= 0 ? k >> 2 : 12 - k)), t);
   SP[c] = s.spot;
 }
+// The height a solid stands on, for its contact shadow, read once under its centre; steep ground is its own floor.
+function standing(s, y) {
+  return s === TERRAIN ? y : (s.ground ??= floorAt((s.bb[0] + s.bb[3]) / 2, (s.bb[2] + s.bb[5]) / 2) ?? 0);
+}
+// The glyph of an untextured cell: blades that lean with the wind on the grass, else one from the density ramp.
+function surfaceGlyph(s, mat, b, ny, x, z, odd) {
+  const grass = ny > 0.7 && (mat === "g" || mat === "G" || mat === "M") && s === TERRAIN;
+  return grass && b > 0.03 ? blade(x, z, odd, b) : glyph(b, odd);
+}
 // Glyph for a brightness from the long ramp; the darkest cells thin out to a dither.
 const glyph = (b, odd) => (b < 0.035 ? (odd ? " " : b > 0.02 ? "." : " ") : RAMP[Math.min(RAMP.length - 1, 1 + Math.floor(b * (RAMP.length - 2)))]);
+// Exaggerated slope lighting makes the hills visible at night.
+// The multiplier also brightens flat ground; the warm-light fraction blends it back toward 1.
+function groundLight(s, lit, warm, nx, ny, nz) {
+  if (s !== TERRAIN) return lit;
+  const facing = nx * MOON[0] + ny * MOON[1] + nz * MOON[2] - MOON[1];
+  return lit * (warm + (1 - warm) * 1.5 * Math.max(0.5, Math.min(2, 1 + 3.2 * facing)));
+}
+// Grass uses mostly short marks, fewer gaps and sparse tall blades that lean left or right in the island's gusts.
+// Speck bits dither the lean blade by blade; shade increases gaps and reduces tall blades.
+function blade(x, z, odd, b) {
+  const bits = specks(x, z);
+  const t = swayTime(), h = ((bits >>> 20) & 63) / 64, lit = smooth((b - 0.03) / 0.1);
+  const gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3) + ((bits & 63) / 63 - 0.5) * 1.6;
+  const sparse = 0.06 + 0.3 * (1 - lit), tall = sparse + 0.16 * (0.6 + 0.4 * lit), short = 1 - tall;
+  if (h < sparse) return odd ? " " : ",";
+  if (h < tall) return gust > 0.6 ? "/" : gust < -0.6 ? "\\" : "|";
+  return h < tall + short * 0.5 ? "'" : h < tall + short * 0.85 ? "," : '"';
+}
 // Leaves of the crown's clump that the ray met, near side or far side (inside): the moon lights the tops of the clumps,
 // their undersides and the inside of the crown stay dark, and bumps in the leaf noise catch the light while its dips
 // stay dark. Lamplight needs no shadow rays here and is compressed, so a lamp under a crown warms the leaves without a
@@ -3133,18 +3363,11 @@ function barkStroke(L, across) {
   if (Math.abs(y) < 0.4 * Math.abs(x)) return across ? "|" : "-";
   return (x * y > 0) !== across ? "/" : "\\";
 }
-// A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island.
-function blade(x, z, odd) {
-  const t = swayTime(), h = hash(Math.floor(x * 5), Math.floor(z * 5)), gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3);
-  if (h < 0.18) return odd ? " " : ",";
-  if (h < 0.55) return gust > 0.6 ? "/" : gust < -0.6 ? "\\" : "|";
-  return h < 0.75 ? "'" : h < 0.9 ? '"' : ";";
-}
 // Colour level (0 to 7) for a brightness, warmed when lamplight dominates.
 const tier = (b, warm) => (warm > 0.55 && b > 0.2 ? "w" : "") + Math.min(7, Math.floor(b * 9));
 // How close water at (x, z) is to the shore, from 0 (deep, the bed 1.6 m down) to 1 (the waterline).
 function shallows(x, z) {
-  return Math.min(1, Math.max(0, (marchY(x, z) + 1.6) / 1.6));
+  return Math.min(1, Math.max(0, (groundHeight(x, z) + 1.6) / 1.6));
 }
 
 // ---- The sea: a height field of summed travelling waves (amplitude, direction, wave number, speed, phase),
@@ -3170,23 +3393,57 @@ function seaNormal(x, z) {
 // Infinity if a solid at `limit` comes first. Steps grow with distance; a crossing is refined by bisection.
 let onLand = false;
 // Is the point below the island or the sea? Waves never rise above SEA, so higher points skip them.
-const under = (x, y, z) => y < marchY(x, z) || (y < SEA && y < seaHeight(x, z));
+const under = (x, y, z) => y < groundHeight(x, z) || (y < SEA && y < seaHeight(x, z));
+// The highest ground or wave crest within each ring around you, from the tile peaks, once per frame, and GROUND_RISE,
+// the steepest upward slope (rise over run) at which a ray can still meet any of it.
+const RINGS = [2, 4, 8, 14, 24, 40, 70, 120, 260], RINGTOP = new Float64Array(RINGS.length);
+let GROUND_RISE = Infinity;
+function groundRings() {
+  RINGTOP.fill(SEA);
+  for (let tk = 0; tk < PH; tk++) {
+    for (let ti = 0; ti < PW; ti++) {
+      const x0 = HX0 + ti * PEAK_TILE, z0 = HZ0 + tk * PEAK_TILE;
+      const ex = Math.max(x0 - cam.x, 0, cam.x - x0 - PEAK_TILE), ez = Math.max(z0 - cam.z, 0, cam.z - z0 - PEAK_TILE);
+      let k = 0;
+      while (k < RINGS.length && RINGS[k] * RINGS[k] < ex * ex + ez * ez) k++;
+      if (k < RINGS.length) RINGTOP[k] = Math.max(RINGTOP[k], PEAKS[tk * PW + ti]);
+    }
+  }
+  GROUND_RISE = RINGTOP[0] >= cam.y ? Infinity : -Infinity;
+  for (let k = 1; k < RINGS.length; k++) {
+    RINGTOP[k] = Math.max(RINGTOP[k], RINGTOP[k - 1]);
+    GROUND_RISE = Math.max(GROUND_RISE, (RINGTOP[k] - cam.y) / RINGS[k - 1]);
+  }
+}
+// How far along the ray the march can start: inside each ring the ray stays above the ring's highest point
+// until then. Infinity when it never comes down to any of them.
+function marchStart(dy, hd) {
+  let near = 0;
+  for (let k = 0; k < RINGS.length; k++) {
+    const far = RINGS[k] / hd;
+    if (RINGTOP[k] >= cam.y + dy * (dy < 0 ? far : near)) return dy < 0 ? Math.max(near, (RINGTOP[k] - cam.y) / dy) : near;
+    near = far;
+  }
+  return Infinity;
+}
 function surfaceHit(dx, dy, dz, limit) {
-  if (dy > -1e-4) return Infinity;
-  let a = Math.max(0, (1.3 - cam.y) / dy);
-  const end = Math.min(limit, 260);
-  for (let i = 0; i < 56 && a < end; i++) {
+  const hd = Math.sqrt(dx * dx + dz * dz);
+  // A level ray never reaches the sea, and one rising faster than GROUND_RISE passes over all the ground.
+  if (dy > -1e-4 && dy > GROUND_RISE * hd) return Infinity;
+  const end = Math.min(limit, 260, dy > 0 ? (RINGTOP[RINGS.length - 1] - cam.y) / dy : Infinity);
+  for (let a = marchStart(dy, hd), i = 0; i < 56 && a < end; i++) {
     let b = Math.min(end, a + 0.25 + a * 0.08);
     if (under(cam.x + b * dx, cam.y + b * dy, cam.z + b * dz)) {
       for (let k = 0; k < 5; k++) { const m = (a + b) / 2; if (under(cam.x + m * dx, cam.y + m * dy, cam.z + m * dz)) b = m; else a = m; }
       const x = cam.x + b * dx, z = cam.z + b * dz;
-      onLand = marchY(x, z) >= seaHeight(x, z);
+      onLand = groundHeight(x, z) >= seaHeight(x, z);
       return b;
     }
     a = b;
   }
-  const t = -cam.y / dy; // beyond the march the sea is flat enough
   onLand = false;
+  if (dy > -1e-4) return Infinity;
+  const t = -cam.y / dy; // beyond the march the sea is flat enough
   return t < limit && t >= end ? t : Infinity;
 }
 function waterLampSpec(x, h, z, rx, ry, rz) {
@@ -3747,7 +4004,10 @@ function frame(now) {
   }
   requestAnimationFrame(frame);
 }
-// Bob and roll change height, not walking topology. Build the corner graph before animation starts.
+// The scenery stands now: fill the height grid around it and plant the grass on it. Bob and roll change height,
+// not walking topology, so build the corner graph once before animation starts.
+fillGround();
+GRASS = plantGrass();
 rebuildRoutes();
 // A font that fails to load does not stop the scene.
 document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => {
