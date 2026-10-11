@@ -301,6 +301,21 @@ def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, 
         assert "url-ref=v1.1.0" in result.stdout
 
 
+def test_v040_links_are_relinked_when_home_is_a_symlink(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    (release.home / ".local/bin").mkdir(parents=True, exist_ok=True)
+    (release.home / ".local/bin/uv").symlink_to(old / "uv")
+    alias = tmp_path / "home-alias"
+    alias.symlink_to(release.home)
+    release.env["HOME"] = str(alias)
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert not (alias / ".local/bin/uv").is_symlink()
+
+
 def test_migration_is_a_noop_on_a_current_host(release):
     assert release.install("v1.0.0").returncode == 0
     host = release.crewship / ".local/host.yml"

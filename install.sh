@@ -122,7 +122,8 @@ carry_host_files() {
 # left for ansible's rename step, since running units still use it. v0.4.1 also rejects three fleet keys
 # of host.yml; they are dropped, one line each, and the original is kept as host.yml.v0.4.0.
 migrate_v040() {
-  local old=$HOME/.local/share/code-factory link
+  local old link
+  old=$(readlink -f "$HOME/.local/share/code-factory")
   if [ -d "$old" ]; then
     for link in "$HOME"/.local/bin/*; do
       [ -L "$link" ] && [[ $(readlink -f "$link") == "$old"/* ]] && { echo "  relinking $link"; rm -f "$link"; }
