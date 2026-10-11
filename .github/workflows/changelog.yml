@@ -1,0 +1,45 @@
+# Changelog fragment check, split from ci.yml so label changes re-run only this
+# workflow. ci.yml ignores labeled/unlabeled; otherwise a label added at PR
+# creation started a second ci run that cancelled the first one, and the
+# cancelled jobs showed as a red X.
+name: changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# One group per PR, never cancelling: a run is either skipped by its job
+# condition or finishes, so no run ends as `cancelled`.
+concurrency:
+  group: changelog-${{ github.event.pull_request.number }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    name: changelog fragment
+    # A label event for any label but `no changelog` changes nothing here.
+    if: >-
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled' ||
+       github.event.label.name == 'no changelog') &&
+      !contains(github.event.pull_request.labels.*.name, 'no changelog')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # On a pull request HEAD is the merge commit; HEAD^1 is the base.
+          fetch-depth: 2
+
+      - name: Install latest uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Changelog fragment
+        run: uv run --locked --only-group dev towncrier check --compare-with HEAD^1
