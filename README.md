@@ -34,21 +34,15 @@ The other features, each with its docs link, are listed in [docs/features.md](do
 
 ## Quick start
 
-### Get a machine
+1. **Machine:** Ubuntu 24.04 or 26.04 server from any VPS (e.g. Hetzner) or a spare box, 4 vCPU / 16 GB and up; see [Capacity](docs/capacity.md).
 
-Buy an Ubuntu 24.04 or 26.04 server from any VPS or cloud provider, for example [Hetzner Cloud](https://www.hetzner.com/cloud/), [OVHcloud VPS](https://www.ovhcloud.com/en/vps/), or [DigitalOcean Droplets](https://www.digitalocean.com/products/droplets). A spare machine at home works too.
+2. **Paste:** this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
 
-Runs on 4 vCPU / 16 GB and up; a 96 vCPU / 247 GB host ran 37 agents in about 67 GB RAM ([Capacity](docs/capacity.md)).
+   ```text
+   Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
+   ```
 
-### Set up
-
-Paste this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
-
-```text
-Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
-```
-
-Update: run `npx crewship update` (or the same install command again)
+3. **Update:** run `npx crewship update` (or the same install command again)
 
 Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
