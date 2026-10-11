@@ -118,16 +118,15 @@ carry_host_files() {
 
 # One-time fixes for a v0.4.0 host, run before the re-apply (both are no-ops on a newer one):
 # v0.4.0 kept its tools under share/code-factory (tools/, omp, npm packages); v0.4.1 uses share/crewship and refuses the
-# old ~/.local/bin links. The links go (provisions recreates them) and then the old tree, which
-# nothing links into any more. v0.4.1 also rejects three fleet keys of host.yml; they are dropped,
-# one line each, and the original is kept as host.yml.v0.4.0.
+# old ~/.local/bin links. The links into that tree go (provisions recreates them); the tree itself is
+# left for ansible's rename step, since running units still use it. v0.4.1 also rejects three fleet keys
+# of host.yml; they are dropped, one line each, and the original is kept as host.yml.v0.4.0.
 migrate_v040() {
   local old=$HOME/.local/share/code-factory link
   if [ -d "$old" ]; then
     for link in "$HOME"/.local/bin/*; do
       [ -L "$link" ] && [[ $(readlink -f "$link") == "$old"/* ]] && { echo "  relinking $link"; rm -f "$link"; }
     done
-    rm -rf "$old"
   fi
   [ -f .local/host.yml ] || return 0
   python3 - <<'PY'

@@ -84,6 +84,7 @@ case $fmt in *redirect_url*) printf %s "$redirect" ;; *http_code*) printf %s "$c
 """
 SHIP = """#!/usr/bin/env bash
 echo "$1" >>"$HOME/calls"
+echo "$*" >>"$HOME/args"
 if [ "$1" = dock ]; then mkdir -p .local && echo "dock-v$(cat VERSION)" >.local/host.yml; fi
 """
 
@@ -247,11 +248,57 @@ def test_v040_host_is_migrated_before_the_reapply(release):
     assert result.returncode == 0, result.stderr
     assert not (bin_dir / "uv").exists() and not (bin_dir / "uv").is_symlink()
     assert (bin_dir / "mine").read_text() == "not ours"
-    assert not (release.home / ".local/share/code-factory").exists()
+    assert (old / "uv").read_text() == "x"
     assert "factory:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
     for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
         assert f"dropped fleet.{key}" in result.stdout
     assert "supabase_project_id" in (host.parent / "host.yml.v0.4.0").read_text()
+
+
+def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
+    assert release.install("v1.0.0", "update", "--container").returncode == 0
+    assert (release.home / "args").read_text().splitlines()[0] == "dock --container"
+    (release.crewship / ".local/host.yml").write_text("mine\n")
+    result = release.install("v1.1.0", "update", "--container")
+    assert result.returncode == 0, result.stderr
+    assert release.crewship.resolve() == (release.releases / "v1.1.0").resolve()
+    assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
+    assert "dock" not in (release.home / "calls").read_text().split()[4:]
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+@pytest.mark.parametrize(
+    "location, status, output",
+    [
+        ("https://github.com/i098/Crewship/releases/tag/v1.1.0", 0, "ref=v1.1.0 args=--container"),
+        ("https://github.com/i098/Crewship/releases", 1, "no release found"),
+        ("", 1, "no release found"),
+    ],
+)
+def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, status, output):
+    stub = tmp_path / "fetch.js"
+    stub.write_text(
+        "const location = process.env.LATEST_LOCATION;\n"
+        "globalThis.fetch = async (url, options) => {\n"
+        "  if (url.endsWith('/releases/latest')) {\n"
+        "    if (options?.redirect !== 'manual') throw new Error('redirect not manual');\n"
+        "    return new Response(null, { status: 302, headers: location ? { location } : {} });\n"
+        "  }\n"
+        "  const ref = url.split('/')[5];\n"
+        "  return new Response(`echo \"ref=$CREWSHIP_REF args=$*\"; echo \"url-ref=${ref}\"`);\n"
+        "};\n"
+    )
+    result = subprocess.run(
+        [shutil.which("node"), "--require", str(stub), str(ROOT / "npm/crewship.js"), "update", "--container"],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LATEST_LOCATION": location},
+        timeout=10,
+    )
+    assert result.returncode == status
+    assert output in result.stdout + result.stderr
+    if status == 0:
+        assert "url-ref=v1.1.0" in result.stdout
 
 
 def test_migration_is_a_noop_on_a_current_host(release):
