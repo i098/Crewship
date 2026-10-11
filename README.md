@@ -94,6 +94,7 @@ flowchart TD
 
 ## More docs
 
+- [Architecture](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Report a bug](../../issues/new?template=bug_report.yml)
