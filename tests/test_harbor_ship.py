@@ -13,7 +13,7 @@ def _run_ship_scene(checks):
 const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');
 const element = {
-  hidden: false, classList: { add() {}, toggle() {} }, focus() {}, addEventListener() {}, replaceChildren() {},
+  hidden: false, classList: { add() {}, remove() {}, toggle() {} }, focus() {}, addEventListener() {}, replaceChildren() {},
   firstElementChild: {}, clientWidth: 600, clientHeight: 400,
   style: {setProperty() {}}, replaceChildren() {},
   getContext: () => ({setTransform() {}, fillRect() {}, measureText: () => ({width: 6})})
@@ -30,7 +30,7 @@ const context = vm.createContext({
   getComputedStyle: () => ({getPropertyValue: () => 'monospace'}),
   devicePixelRatio: 1, innerWidth: 600, performance: {now: () => 0},
   IntersectionObserver: class {observe() {}}, ResizeObserver: class {observe() {}},
-  requestAnimationFrame() {}, console, window: {}, assert, addEventListener() {}
+  requestAnimationFrame() {}, console, window: {}, assert, addEventListener() {}, removeEventListener() {}
 });
 vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nmeasure();\n' + process.argv[3], context);
 """,
@@ -435,5 +435,62 @@ for (const [x0, x1, z0, z1] of STERN_STEPS) {
   previous = height;
 }
 assert(Math.abs(previous - 4.8) < 1e-9, 'the top step must be level with the stern roof');
+"""
+    )
+
+
+def test_ship_interiors_repaint_with_gentle_sway_and_stop_for_reduced_motion():
+    _run_ship_scene(
+        r"""
+Object.assign(ctx, {save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, fillText() {}});
+finishIntro();
+let now = 2000;
+function tick() {
+  dirty = false; layoutDirty = false; probeMs = 0; slow = fast = 0;
+  frame(now += 16);
+}
+for (const [room, place] of [[CABIN, {x: 0, z: 0.8, yaw: 0}], [GUN_DECK, {x: SX, z: 3.45, yaw: Math.PI}]]) {
+  crossInto(room, place); step(0);
+  const lamp = room.solids.find(s => s.mat === 'l');
+  const bounds = lamp.bb.slice();
+  for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    me.yaw = yaw; me.pitch = 0.2;
+    T = 1; tick();
+    assert(paintedLastFrame, 'a stationary ship room must repaint while swaying');
+    const first = Array.from(D), firstBasis = cam.u.slice();
+    const firstLamp = lamp.bb.slice();
+    T = 6; tick();
+    assert(Math.abs(roll) < 2 * Math.PI / 180, 'the hull roll must stay gentle');
+    assert(Math.abs(roll * 0.25) < Math.PI / 180, 'the room pitch must stay below one degree');
+    assert.notDeepEqual(cam.u, firstBasis, 'the stationary view must follow the hull');
+    assert.notDeepEqual(Array.from(D), first, 'the room must rock around the player');
+    assert.notDeepEqual(lamp.bb, firstLamp, 'the room lantern must swing');
+    for (const v of [cam.f, cam.r, cam.u]) assert(Math.abs(Math.hypot(...v) - 1) < 1e-12);
+    for (let j = 0; j < rows; j += 5) for (let i = 0; i < cols; i += 5) {
+      const h = ((2 * i + 1) / cols - 1) * cam.tanH, v = (1 - (2 * j + 1) / rows) * cam.tanV;
+      const ray = cam.f.map((f, k) => f + cam.r[k] * h + cam.u[k] * v);
+      const length = Math.hypot(...ray);
+      const distance = Math.min(...room.solids.map(s => hit(s, cam.x, cam.y, cam.z, ...ray.map(n => n / length))));
+      if (Number.isFinite(distance)) assert(Math.abs(D[j * cols + i] - distance) < 1e-4, 'rolled rays and culling must agree with the complete room');
+    }
+  }
+  reduced.matches = true; dirty = true; frame(now += 16);
+  assert.equal(roll, 0);
+  assert.deepEqual(lamp.bb, bounds, 'reduced motion must restore the lantern');
+  const still = Array.from(D), time = T;
+  tick(); tick();
+  assert(!paintedLastFrame, 'a stationary reduced-motion room must not repaint');
+  assert.deepEqual(Array.from(D), still);
+  assert.equal(T, time);
+  reduced.matches = false;
+  WIND.force = 0; tick();
+  assert(roll === 0, 'calm wind must stop the room sway');
+  WIND.force = 1;
+  crossInto(null, {x: SX, z: -8.35, yaw: 0}); step(0);
+  assert.equal(interior, null, 'the room must still exit to the deck');
+}
+crossInto(HOUSE, {x: 0, z: 0.8, yaw: 0}); step(0);
+dirty = true; frame(now += 16); tick();
+assert(!paintedLastFrame, 'the house must remain idle');
 """
     )

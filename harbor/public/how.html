@@ -30,7 +30,8 @@
   Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines, tall grass uses projected tufts, and fountain water uses projected droplets.
   They check the depth buffer instead of ray intersections.
   See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the fountain's streams and landing surfaces.
-  The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.
+  The sea is a height field of travelling waves, ray marched per cell; the small boats ride it.
+  See the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for the ship's wind-driven sway.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.
   The island is a smooth height field of rolling hills from value noise, levelled under the objects that stand on it.
   The page samples it once on a 25 cm grid, and each ray starts its march where it can first reach the highest ground nearby.
@@ -99,8 +100,9 @@
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
-  A room redraws only after movement, looking, resizing, or another change that requires a new frame.
-  Reduced motion also stops exterior animation.</li>
+  The house redraws only after movement, looking, resizing, or another change that requires a new frame.
+  The cabin and gun deck also redraw while swaying with the hull.
+  Reduced motion stops exterior animation and idle ship-room redraws; see the <a href="https://github.com/i098/Crewship/tree/main/harbor#harbor">harbor README</a> for ship motion.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
   Each intro frame ends with a black canvas fill at opacity <code>1 - progress * progress</code>.
