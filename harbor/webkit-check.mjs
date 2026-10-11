@@ -120,10 +120,10 @@ window.harborCheck = {
       x: stage.scrollLeft, y: stage.scrollTop
     };
   },
-  focusLink(selector, pendingId) {
+  focusLink(selector, pendingId, n = 0) {
     walkPath = [[me.x, me.z]];
     walkTo = pendingId;
-    document.querySelector(selector).focus();
+    document.querySelectorAll(selector)[n].focus();
     return this.focusState();
   },
   bounds() {
@@ -200,7 +200,8 @@ assert.equal(indoor.focus.target, "docsboard", `${name}: indoor manifest focus s
 assert(indoor.focus.drawn, `${name}: indoor focused sign did not draw`);
 const indoorBounds = await page.evaluate(() => window.harborCheck.bounds());
 assert.equal(indoorBounds.map, null, `${name}: indoor sign retained a map exclusion rectangle`);
-assert.equal(indoorBounds.links.length, 1, `${name}: indoor sign link is missing`);
+assert.equal(indoorBounds.links.length, await page.evaluate(() => document.querySelectorAll('#manifest [data-spot="docsboard"] a').length),
+  `${name}: indoor sign link is missing`);
 for (const link of indoorBounds.links) {
   assert.equal(link.hit, link.href, `${name}: indoor sign link is not hit-testable`);
   assert(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.getElementById("scene"),
@@ -280,7 +281,9 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
     assert(!overlaps(bounds, bounds.map), `${name}/${id}: sign covers the map`);
     assert(!overlaps(bounds, bounds.pad), `${name}/${id}: sign covers the move pad`);
   }
-  assert.equal(bounds.links.length, id ? 1 : 3, `${id}: a sign link is missing`);
+  // A sign has its title link; the docs board also lists a link per unmapped doc in its body.
+  const docLinks = id ? await page.evaluate((id) => document.querySelectorAll(`#manifest li[data-spot="${id}"] a`).length, id) : 3;
+  assert.equal(bounds.links.length, docLinks, `${id}: a sign link is missing`);
   if (touch) assert(bounds.dpr <= 2, `${name}/${id}: touch canvas exceeds DPR 2`);
   if (name === "iphone15pro" && !id) {
     // Title, description, one blank row, one link row, and two frame rows.
@@ -309,7 +312,7 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
   }
   for (let n = 0; n < bounds.links.length; n++) {
     const focus = await page.evaluate(({ n, id }) =>
-      window.harborCheck.focusLink("#card a:nth-of-type(" + (n + 1) + ")", window.harborCheck.ids.find((other) => other !== id)),
+      window.harborCheck.focusLink("#card a", window.harborCheck.ids.find((other) => other !== id), n),
       { n, id });
     assert.equal(focus.x, 0, `${name}/${id}: keyboard focus scrolled the stage horizontally`);
     assert.equal(focus.y, 0, `${name}/${id}: keyboard focus scrolled the stage vertically`);
@@ -354,7 +357,7 @@ for (const id of await page.evaluate(() => window.harborCheck.ids)) {
   assert.equal(focus.x, 0, `${name}/${id}: manifest focus scrolled the stage horizontally`);
   assert.equal(focus.y, 0, `${name}/${id}: manifest focus scrolled the stage vertically`);
 }
-await page.locator('#manifest [data-spot="docsboard"] a').focus();
+await page.locator('#manifest [data-spot="docsboard"] a').first().focus();
 const keyboardPopup = page.waitForEvent("popup");
 await page.keyboard.press("Enter");
 const opened = await keyboardPopup;
