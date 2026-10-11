@@ -54,35 +54,10 @@ Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the
 
 For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is what runs on a finished host, and how its parts connect is in [Architecture](docs/architecture.md):
 
-```mermaid
-flowchart LR
-    you["You<br/>phone or laptop"]
-    subgraph vps["Your server"]
-        secrets["Secrets file"]
-        link["Host access"]
-        subgraph herdr["Herdr panes"]
-            direction TB
-            fm["Firstmate"]
-            sm["Second mates<br/>(optional)"]
-            worker["Worker per task<br/>isolated worktree"]
-            gates["Guards and<br/>quality gate"]
-            board["Crew board<br/>(optional)"]
-            fm --> sm --> worker
-            fm --> worker
-            gates --- worker
-            board <-.-> worker
-        end
-        secrets --> fm
-    end
-    mac["Your Mac (host)"]
-    gh["GitHub<br/>(pull requests)"]
-    models["Model providers<br/>any provider"]
-    you --> fm
-    link <-.->|"optional SSH: open links, drive apps<br/>message relay"| mac
-    worker --> gh
-    worker --> models
-    linkStyle default stroke:#8b949e,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
+  <img alt="You message Firstmate from a phone or laptop. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. Guards, the crew board and the secrets file are shared on the server. Every agent can optionally reach your Mac over SSH." src="docs/how-it-works-light.svg">
+</picture>
 
 ## More docs
 
