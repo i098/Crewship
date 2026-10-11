@@ -21,14 +21,18 @@
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
   Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.
-  Masts, barrels, tree trunks and the lighthouse are true cones with smooth normals, and so are the gun barrels and carriage wheels, on horizontal axes.
-  Rocks and tree canopies are ellipsoids.
+  Masts, barrels, the feet of tree trunks and the lighthouse are true cones with smooth normals, and so are the gun barrels and carriage wheels, on horizontal axes.
+  Rocks are ellipsoids.
+  Above its trunk's foot, a tree's trunk and branches are tapered round limbs along any axis, and a broadleaf crown is one solid of 7 to 11 leaf clumps.
+  A clump is a sphere that smooth 3D noise moves in and out, so its outline is ragged; where the noise dips there are no leaves, and the ray goes on to the far side of the clump, or out through a gap to the sky.
+  One or two noise samples find where a ray meets a clump.
+  A ray tests a crown's clumps only inside the crown's box, nearest first, and stops at the first hit.
   Sails and the flag are curved cloth.
   Inside the cloth's box, a ray samples the gap between the ray and the cloth.
   Near-parallel rays subdivide intervals that can contain crossings and select the nearest crossing inside the cloth's outline.
   Each bracketed crossing uses a halving and straight-line steps.
-  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines; tall grass uses projected tufts.
-  Both check the depth buffer instead of ray intersections.
+  Ship rigging, the masthead pennants and the cabin stair hand rails use projected lines; tall grass uses projected tufts, and palm fronds use projected spines with a leaflet on each side at each step.
+  These check the depth buffer instead of ray intersections.
   The sea is a height field of travelling waves, ray marched per cell; the ship and the boats ride it.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.</li>
   <li><b>Light.</b> Exterior lamps, lit windows, the ship's lanterns and the beacon light nearby surfaces, with brightness that decreases with distance.
@@ -37,6 +41,8 @@
   Only hatch parts above the deck form the grouped shadow caster, with one bounding box.
   The hatch boards and ladder receive light without shadow rays.
   The hatch lantern emits light without shadow rays.
+  Leaves receive lamplight without shadow rays, and crowns cast no lamp shadows, because the lamps are below them; the inside of a crown is darker instead.
+  The moon lights the tops of leaf clumps and leaves their undersides dark; lamplight on leaves is compressed, so a lamp under a crown gives no flat bright patch.
   The lighthouse beam sweeps; the moon gives a dim fill.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
@@ -58,6 +64,8 @@
   The renderer caps each tuft's projected height at 1/14 of the screen height before rounding blades to whole cells.
   Blades use <code>| ( ) \ /</code> with pale moonlit tips.
   Far tufts are dimmer.
+  Leaves pick glyphs from <code>,.:;&amp;%@</code> by brightness, one for each 20 cm patch, and draw no outline edges.
+  Bark uses strokes that follow its limb on screen, with <code>( )</code> on the sides of upright trunks; palm rings and birch marks cross the limb.
   Pale paving marks and foam keep their texture glyphs with a minimum brightness that decreases in fog.
   Fountain water uses animated texture glyphs instead of the density ramp.
   Flames in the house use fixed glyphs from an orange base to pale tips, so the idle house needs no redraws.
@@ -69,7 +77,8 @@
   After the intro, the canvas keeps unchanged rows.
   Devices without <code>(pointer: coarse)</code> draw rows with changed cells again from their full text-run positions.
   Touch devices redraw only each run of changed cells and its neighbouring cells; runs fewer than five cells apart share one redraw.
-  Grass wind animation uses a 12 Hz clock; other scene changes can repaint grass cells between wind updates.
+  Grass and tree wind animation uses a 12 Hz clock; other scene changes can repaint grass and tree cells between wind updates.
+  The wind bends each tree a little before the scene's one wind direction, more toward its top, and its leaf clumps flutter across it.
   The mini map draws again each frame, even when its cells do not change.
   The pop-up sign also draws again each frame; the cells it covered draw again when it moves or closes.
   Devices with <code>(pointer: coarse)</code> draw one glyph per <code>fillText</code> call to limit WebKit's text cache.
