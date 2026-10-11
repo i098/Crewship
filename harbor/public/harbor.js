@@ -1762,7 +1762,7 @@ function crossInto(next, place) {
   doorInputHeld = true;
 
   walkPath = []; walkTo = jumped = null;
-  setMap(0); mapBox = null; MAPCELLS.clear(); LINE.clear();
+  setMap(0); mapBox = null; MAPCELLS = new Map(); LINE.clear();
   moved = dirty = true;
   show(null);
   return true;
@@ -2734,6 +2734,7 @@ function view(tenths) {
 // Casts and draws a frame on the page. It is newer than any frame the ray workers still have in hand, so those are
 // dropped: they would compose an older moment over it.
 function render() {
+  if (frames.some((f) => f.settled)) DG.fill(undefined);
   frames.length = 0;
   view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
@@ -3043,10 +3044,10 @@ function signHit(x, y) {
 const ORDER = Object.keys(spots).filter((id) => anchors[id]);
 if (ORDER.length < Object.keys(spots).length) console.warn("harbor: no scene object for", Object.keys(spots).filter((id) => !anchors[id]).join(", "));
 const WORLD = { x0: -62, x1: 48, z0: -44, z1: 56 };
-const MAPCELLS = new Map();
+let MAPCELLS = new Map();
 let mapMode = 0, pick = 0, jumped = null, mapBox = null; // mapMode: 0 idle, 1 picking, 2 full screen
 function minimap() {
-  MAPCELLS.clear();
+  MAPCELLS = new Map();
   if (interior) { mapBox = null; return; }
   const left = Math.max(1, Math.ceil((safe.left - padX) / cellW)), right = Math.max(1, Math.ceil((safe.right - padX) / cellW));
   const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom - padY) / cellH));
@@ -4426,17 +4427,18 @@ function nextFrame(now) {
       dirty = true;
       return;
     }
-    if (layoutDirty) { measure(); layoutDirty = false; }
+    const measured = layoutDirty;
+    if (measured) { measure(); layoutDirty = false; }
     dirty = false;
     moveOutside();
     me.eye = floorAt(me.x, me.z) + 1.6;
-    castFrame(late);
+    castFrame(late, measured);
   }
 }
-// Casts this frame on the ray workers, or on the page without them or during the intro.
-function castFrame(late) {
+// Casts this frame on the ray workers, or on the page without them, during the intro or after a new layout.
+function castFrame(late, measured) {
   const t0 = performance.now();
-  if (castOnWorkers(t0, late)) return;
+  if (!measured && castOnWorkers(t0, late)) return;
   render();
   adaptResolution(performance.now() - t0, late);
   paintedLastFrame = true;
@@ -4452,7 +4454,7 @@ function castFrame(late) {
 // which it paints on the next animation frame. Two frames are in hand, one drawing while the next casts. With fewer
 // than two workers, or once one fails, the page casts alone; when a worker cannot draw text exactly as the page
 // does, the page draws. Phones cast alone: in iOS Safari the workers ran at 22 to 26 fps where the page alone holds 60.
-let workerCount = PAGE && typeof Worker !== "undefined" && !touchFirst.matches ? Math.min(8, (navigator.hardwareConcurrency || 1) - 1) : 0;
+let workerCount = PAGE && typeof Worker !== "undefined" && !touchFirst.matches && navigator.hardwareConcurrency > 2 ? Math.min(8, navigator.hardwareConcurrency - 1) : 0;
 const rayWorkers = [];
 // Frames in hand, oldest first: moment, phase, bands ([j0, j1]), next band, bands out, workers, cast and draw buffers,
 // bitmaps, page ms, lateness and middle cell.
@@ -4491,7 +4493,7 @@ function castOnWorkers(t0, late) {
   for (let j = 0; j < rows; j += band) bands.push([j, Math.min(rows, j + band)]);
   const moment = { id: ++castId, T, bob, roll, me: { ...me }, room: ROOMS.indexOf(interior), shadows, still: reduced.matches,
     tenths: performance.now() / 100, cols, rows, aspect,
-    layout: { padX, padY, cellW, cellH, dpr, font: ctx.font, advance: ctx.measureText("M").width, runs: !touchFirst.matches } };
+    layout: { padX, padY, cellW, cellH, dpr, font: ctx.font, advance: ctx.measureText("M").width } };
   const f = { moment, phase: CAST, bands, next: 0, out: 0, workers: ready, cast: [], draw: null, bitmaps: [], ms: 0, late };
   frames.push(f);
   for (const w of ready) w.postMessage(moment);
@@ -4540,6 +4542,7 @@ function composeCast(f) {
   }
   f.cast = null;
   f.mid = compose();
+  f.overlay = { signBox, signRows, signLinks, signInset, mapBox, MAPCELLS };
   if (workersDraw) {
     for (let j = 0, c = 0; j < rows; j++) {
       const onMap = mapBox && j >= mapBox.oj && j < mapBox.oj + mapBox.h;
@@ -4568,6 +4571,8 @@ function drawn({ id, j0, bmp }) {
   if (f.next >= f.bands.length && !f.out) f.phase = DONE;
 }
 function paintCast(f) {
+  const live = { signBox, signRows, signLinks, signInset, mapBox, MAPCELLS };
+  ({ signBox, signRows, signLinks, signInset, mapBox, MAPCELLS } = f.overlay);
   if (f.bitmaps.length && workersDraw) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -4581,6 +4586,7 @@ function paintCast(f) {
     draw(f.mid);
   }
   for (const [, bmp] of f.bitmaps) bmp.close();
+  ({ signBox, signRows, signLinks, signInset, mapBox, MAPCELLS } = live);
 }
 // Sets the world to a frame's moment: time, ship motion, camera, room and shadows, then the motion and the view.
 function useMoment(m) {
@@ -4701,11 +4707,11 @@ function drawBand(id, j0, j1, buf) {
   for (let j = j0, c = 0; j < j1; j++) {
     const y = (padY + j * cellH) * dpr, top = Math.round(y) - Y0, bottom = Math.round((padY + (j + 1) * cellH) * dpr) - Y0;
     const oy = Math.floor(y) + (y - Math.floor(y) >= lowerFrom ? 1 : 0) - padT - Y0;
-    // Desktop text runs (one colour each) place each glyph at the previous glyph's advance from the run's start, so a
-    // wider fallback glyph pushes the rest of its run along; touch draws each glyph at its own cell.
+    // Text runs (one colour each) place each glyph at the previous glyph's advance from the run's start, so a wider
+    // fallback glyph pushes the rest of its run along.
     let run = -1, x = 0;
     for (let i = 0; i < width; i++, c++) {
-      if (!layout.runs || k[c] !== run) { run = k[c]; x = (padX + i * cellW) * dpr; }
+      if (k[c] !== run) { run = k[c]; x = (padX + i * cellW) * dpr; }
       const at = x;
       x += glyphAdvance(g[c]) * dpr;
       if (g[c] === 32) continue;
