@@ -92,6 +92,7 @@ Documentation-only PRs change only root-level `README*` files, files under `docs
 Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
 Renames check both the old and new paths.
 CI skips heavy jobs on documentation-only PRs when classification succeeds and the changelog check succeeds or skips.
+PRs limited to `harbor/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
 Job-level conditions let skipped required checks report instead of remaining pending.
 The separate `changelog fragment` job runs on PRs unless they have the `no changelog` label.
 The required `configuration and python checks` job rejects classification or changelog failure before it starts heavy work.
@@ -103,6 +104,8 @@ The sponsors bot starts CI through manual dispatch, so its documentation-only up
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
 `.github/workflows/npm-publish.yml` runs when a `vX.Y.Z` GitHub release is published. It sets the version of the `crewship` npm package (`npm/`) to the tag and publishes it with npm trusted publishing: the job's OIDC token (`id-token: write`, its only other permission is `contents: read`) replaces a stored npm token, and npm adds a provenance attestation. The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment. Each publish shows under Deployments with the package page as its URL. The package holds only `npm/crewship.js`, which fetches and runs `install.sh` from the release with the same version; `tests/test_npm_package.py` fails if anything else enters the tarball.
+
+`.github/workflows/release-artifact.yml` runs on the same event and attaches `crewship-<tag>.tar.gz` (a `git archive` of the tag, built by `scripts/build-release-artifact.sh`) and its `.sha256` to the release, with `contents: write` as its only permission. `install.sh` installs that artifact instead of cloning ([Install, update and migrate](../install.md)).
 
 ## Primary sources
 

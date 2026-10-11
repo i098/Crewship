@@ -34,7 +34,7 @@ for (const li of document.querySelectorAll("#manifest li[data-spot]")) {
 const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
 // The scene's one wind: the unit direction it blows toward on the ground plan (x, z). The sails belly before it, the
-// flag and pennants stream along it, and the tall grass bends with it.
+// flag and pennants stream along it, and the tall grass and the trees bend with it.
 const WIND = { x: -0.92, z: 0.39, force: 1 }; // force scales how hard the wind moves the moored ship
 const world = [];
 const ship = [];
@@ -57,7 +57,7 @@ function box(list, x0, y0, z0, x1, y1, z1, mat, o) {
   return solid(list, [[1, 0, 0, x1, 0, 0], [-1, 0, 0, x0, 0, 0], [0, 1, 0, 0, y1, 0],
     [0, -1, 0, 0, y0, 0], [0, 0, 1, 0, 0, z1], [0, 0, -1, 0, 0, z0]], [x0, y0, z0, x1, y1, z1], mat, o);
 }
-// A round column around a vertical axis, tapered from r0 at y0 to r1 at y1: masts, barrels, trunks, the lighthouse.
+// A round column around a vertical axis, tapered from r0 at y0 to r1 at y1: masts, barrels, the lighthouse.
 // Rays hit the true cone (smooth normals); the eight planes only serve the walking test and the culling box.
 function column(list, cx, cz, r0, r1, y0, y1, mat, o) {
   const pl = [[0, 1, 0, 0, y1, 0], [0, -1, 0, 0, y0, 0]];
@@ -69,7 +69,7 @@ function column(list, cx, cz, r0, r1, y0, y1, mat, o) {
   const r = Math.max(r0, r1) * 1.09, b = (r1 - r0) / (y1 - y0);
   return solid(list, pl, [cx - r, y0, cz - r, cx + r, y1, cz + r], mat, { cone: [cx, cz, r0 - b * y0, b, y0, y1, r0, r1], ...o });
 }
-// An ellipsoid: rocks, pebbles and leafy canopies. Rays hit the true surface; the box planes serve walking and culling.
+// An ellipsoid: rocks, pebbles, a palm's heart. Rays hit the true surface; the box planes serve walking and culling.
 function blob(list, cx, cy, cz, rx, ry, rz, mat, o) {
   const s = box(list, cx - rx, cy - ry, cz - rz, cx + rx, cy + ry, cz + rz, mat, o);
   s.blob = [cx, cy, cz, rx, ry, rz];
@@ -418,18 +418,6 @@ boat(-8, 3.6, 1.3, 3.6, "r", "lifeboat");
 boat(-11.5, 3, 1.2, 3.2, "b", "tender");
 boat(9.5, 3, 1.4, 4, "o");
 for (let z = -32; z < 12; z += 5.5) column(world, -26.6, z + hash(z, 4) * 2, 0.9 + hash(z, 5) * 0.5, 0.35, 0.2, 1.3 + hash(z, 6) * 0.8, "t");
-// Palms: curved-looking trunks (two leaning segments) with drooping fronds, on the quay and along the beaches.
-for (const [x, z, y0] of [[21, 24, 1.2], [-16, 23.5, 1.2], [-30, 2, 1], [-20, 12.6, beachY(-20, 12.6)], [23, 12.4, beachY(23, 12.4)], [-24, -14, beachY(-24, -14)]]) {
-  const lean = 0.6 * hash(x, z) - 0.3, tx = x + lean * 1.4, top = y0 + 6;
-  const rings = (px, py) => (py * 4 + 99) % 1 < 0.18 ? "-" : "o.";
-  beam(world, [x, y0, z], [x + lean * 0.5, y0 + 3.2, z], "o", { tex: rings }, 0.2);
-  beam(world, [x + lean * 0.5, y0 + 3.2, z], [tx, top, z + 0.2], "o", { tex: rings }, 0.15);
-  for (let a = 0; a < 7; a++) {
-    const c = Math.cos(a * 0.9), s = Math.sin(a * 0.9);
-    beam(world, [tx, top, z + 0.2], [tx + 1.5 * c, top + 0.5, z + 0.2 + 1.5 * s], "g");
-    beam(world, [tx + 1.5 * c, top + 0.5, z + 0.2 + 1.5 * s], [tx + 2.8 * c, top - 0.7, z + 0.2 + 2.8 * s], "G");
-  }
-}
 for (const x of [-4, 12]) {
   box(world, x, 1.2, 14.4, x + 0.16, 4.2, 14.56, "t");
   box(world, x - 0.16, 4.2, 14.26, x + 0.32, 4.65, 14.7, "l");
@@ -600,33 +588,209 @@ function drawFountain() {
   if (now !== partsTime) { partsTime = now; updateWater(now); }
   for (let o = 0; o < parts; o += 5) waterDot(PARTS[o], PARTS[o + 1], PARTS[o + 2], WATER_GLYPHS[PARTS[o + 3]], PARTS[o + 4]);
 }
-// Landscaping: hedges round the plaza, round trees, lamps along the avenue, a fence on the quay front.
+// Landscaping: hedges round the plaza, lamps along the avenue, a fence on the quay front.
 const plazaHedges = [];
 for (const [x0, x1, z0, z1] of [[1, 2.2, 22, 27.4], [7.8, 9, 22, 27.4], [2.2, 3.4, 27.6, 28.4], [6.6, 7.8, 27.6, 28.4]]) {
   const hedge = box(world, x0, 1.2, z0, x1, 1.9, z1, "g", { tex: (x, y, z) => (hash(Math.floor(x * 3), Math.floor(z * 3 + y * 3)) < 0.3 ? "-" : null) });
   plazaHedges.push(hedge);
 }
-// Broadleaf trees: a barked trunk, three branches and a layered canopy of leafy ellipsoids that sway.
-const canopies = [];
-const leaves = (x, y, z) => { const h = hash(Math.floor(x * 4), Math.floor(y * 4 + z * 4)); return h < 0.3 ? "-" : h > 0.88 ? "G" : null; };
-for (const [x, z, h] of [[-10, 23, 6.5], [0, 25, 5.5], [11, 24, 6], [17, 27, 7], [-22, 24, 6.2]]) {
-  const width = h / 6 * (0.85 + hash(x, z) * 0.3), angle = hash(z, x) * 6.28, c = Math.cos(angle), sn = Math.sin(angle);
-  const bark = (px, py, pz) => Math.sin(Math.atan2(pz - z, px - x) * 13 + Math.sin(py * 2) * 0.6) > 0.25 ? "-" : "o,";
-  column(world, x, z, 0.3 * width, 0.17 * width, 1.2, 1.2 + h * 0.72, "o", { tex: bark });
-  for (let a = 0; a < 3; a++) beam(world, [x, 1.2 + h * 0.45, z], [x + 1.3 * width * Math.cos(a * 2.1 + angle), 1.2 + h * 0.72, z + 1.3 * width * Math.sin(a * 2.1 + angle)], "o", { tex: bark }, 0.07);
-  for (const [ox, oy, oz, r] of [[0, 0.85, 0, 1.7], [1, 0.72, 0.4, 1.1], [-0.8, 0.75, 0.7, 1.15], [0.2, 0.74, -1, 1.05], [0, 1.02, 0.1, 1]]) {
-    const cx = x + (ox * c - oz * sn) * width, cz = z + (ox * sn + oz * c) * width, radius = r * width;
-    const s = blob(world, cx, 1.2 + h * oy, cz, radius, radius * (0.6 + hash(x, oy) * 0.25), radius * (0.8 + hash(z, oy) * 0.35), oy < 0.8 ? "M" : oy > 1 ? "G" : "g", { dim: oy < 0.8 ? 0.8 : 1.25, tex: leaves });
-    s.bb[0] -= 0.25; s.bb[3] += 0.25; s.bb[2] -= 0.25; s.bb[5] += 0.25;
-    canopies.push({ s, x: cx, z: cz, phase: hash(x, oz) * 6 });
+// ---- Trees ---------------------------------------------------------------------------------
+// A broadleaf tree has a trunk foot that blocks walking. Trees and palms have round limbs (limbEntry).
+// Broadleaf crowns group leaf clumps (plantCrown, crownEntry). Each tree keeps its parts' rest positions and relative heights.
+// Parts hold a limb solid (s) or a clump or heart centre (c). swayTrees moves them with the wind.
+// `top` is the top's gust displacement in metres.
+const TREES = [], PALMS = [];
+function growTree(x, z, height, top) {
+  const t = { y0: terrainY(x, z), height, top, phase: hash(x, z) * 6.28, gust: 0, parts: [], clumps: [], eye: null, eyeAt: new Float64Array(4).fill(NaN) };
+  TREES.push(t);
+  return t;
+}
+const treeShare = (t, y) => Math.max(0, (y - t.y0) / t.height);
+// Limb data: the start, the unit axis, the length, the start radius, the radius change per metre, and two unit vectors
+// across the axis (the first one level where it can be), which bark patterns measure the way round from.
+function setLimb(L, ax, ay, az, bx, by, bz, ra, rb) {
+  const len = Math.hypot(bx - ax, by - ay, bz - az), wx = (bx - ax) / len, wy = (by - ay) / len, wz = (bz - az) / len;
+  const flat = Math.abs(wx) < 0.9, along = flat ? wx : wz, ux = (flat ? 1 : 0) - along * wx, uy = -along * wy, uz = (flat ? 0 : 1) - along * wz;
+  const ul = Math.hypot(ux, uy, uz);
+  L[0] = ax; L[1] = ay; L[2] = az; L[3] = wx; L[4] = wy; L[5] = wz; L[6] = len; L[7] = ra; L[8] = (rb - ra) / len;
+  L[9] = ux / ul; L[10] = uy / ul; L[11] = uz / ul;
+  L[12] = wy * L[11] - wz * L[10]; L[13] = wz * L[9] - wx * L[11]; L[14] = wx * L[10] - wy * L[9];
+}
+// A round limb of tree t from a to b that tapers from radius ra to rb, barked like `kind`; the pattern runs on from
+// `from` metres along the limbs below it. Its box allows for the wind; it never blocks walking. Returns how far along
+// the next limb starts.
+function treeLimb(t, a, b, ra, rb, kind, from) {
+  const L = new Float64Array(15), hb = treeShare(t, b[1]), r = Math.max(ra, rb) + 1.2 * t.top * hb * hb;
+  setLimb(L, ...a, ...b, ra, rb);
+  const bb = [...a.map((c, i) => Math.min(c, b[i]) - r), ...a.map((c, i) => Math.max(c, b[i]) + r)];
+  const s = solid(world, [], bb, kind.bark, { solid: false, thin: true, tex: barkTexture(L, kind.grain, from), limb: L, grain: kind.grain });
+  t.parts.push({ s, rest: [...a, ...b], ha: treeShare(t, a[1]), hb, ra, rb });
+  return from + L[6];
+}
+// Leaf clumps of tree t over `clumps` [x, y, z, r, brightness]: spheres of radius r that leaf noise moves in by up to
+// 40% of r and out by up to 24%, with gaps where the noise dips below the kind's gap level (clumpEntry). Each holds its
+// centre, r, the depth, the noise scale and offset, the gap level, its brightness, its offset from the crown's centre
+// over the crown's reach, by which shadeLeaf darkens the inside of the crown, and its outer radius.
+function treeCrown(t, clumps, kind) {
+  const mid = [0, 1, 2].map((i) => clumps.reduce((a, c) => a + c[i], 0) / clumps.length);
+  const reach = Math.max(...clumps.map((c) => Math.hypot(c[0] - mid[0], c[1] - mid[1], c[2] - mid[2]) + c[3]));
+  for (const [i, [x, y, z, r, tone]] of clumps.entries()) {
+    const c = Float64Array.of(x, y, z, r, 0.4 * r, 2.6, (x * 7.31 + i * 3.7) % 89, kind.gap, tone,
+      (x - mid[0]) / reach, (y - mid[1]) / reach, (z - mid[2]) / reach, 1 / reach, 1.24 * r);
+    t.clumps.push(c);
+    t.parts.push({ c, rest: [x, y, z], h: treeShare(t, y), phase: c[6] });
+  }
+  t.eye = new Float64Array(5 * clumps.length);
+}
+// The crown of tree t: one solid for its leaf clumps, whose box allows for the wind, so a ray tries the clumps it reaches
+// nearest first (crownEntry). A crown never blocks walking, and casts no lamp shadows: the lamps stand below the crowns.
+function plantCrown(t, kind) {
+  const margin = 1.2 * t.top + 0.06, ends = t.clumps.map((k) => [k[0], k[1], k[2], k[13]]);
+  const bb = [0, 1, 2, 0, 1, 2].map((i, n) => (n < 3 ? Math.min(...ends.map((e) => e[i] - e[3])) - margin : Math.max(...ends.map((e) => e[i] + e[3])) + margin));
+  solid(world, [], bb, kind.leaves[1], { solid: false, shadow: false, leaves: kind.leaves, crown: t, leafN: 0 });
+}
+// Bark patterns by the distance along the limbs from the ground (m) and the angle round the limb: long cracks that
+// wander up oak and lime trunks, dark marks across birch, and leaf-scar rings on palms. "-" darkens, "p" marks birch.
+const BARK = {
+  fissure: (a, r) => (Math.abs(Math.sin(r * 4 + 0.9 * Math.sin(a * 2.3) + 0.4 * Math.sin(a * 5.7 + r))) < 0.3 ? "-" : null),
+  birch: (a, r) => ((a * 4.5 + 9 + 0.3 * Math.sin(r * 3)) % 1 < 0.13 && Math.sin(r * 2 + a * 1.3) > -0.3 ? "p" : null),
+  ring: (a) => ((a * 3.4) % 1 < 0.22 ? "-" : null),
+};
+function barkTexture(L, grain, from) {
+  const pattern = BARK[grain];
+  return (x, y, z) => {
+    const qx = x - L[0], qy = y - L[1], qz = z - L[2];
+    return pattern(from + qx * L[3] + qy * L[4] + qz * L[5], Math.atan2(qx * L[12] + qy * L[13] + qz * L[14], qx * L[9] + qy * L[10] + qz * L[11]));
+  };
+}
+// Broadleaf kinds: where the trunk forks (share of the height), how many main branches, their angle from upright
+// (radians) and reach (share of the height), side twigs per branch, how high the top branch ends (share of the height),
+// the trunk's radius at its foot (m, for a 6.5 m tree), clump radius (share of the height), gap level, leaf colours
+// (shade, middle, moonlit), and bark colour and pattern.
+const BROADLEAF = {
+  oak: { fork: 0.36, branches: 4, spread: 0.95, reach: 0.44, twigs: 1, top: 0.72, trunk: 0.34, radius: 0.19, gap: 0.37, leaves: "MMg", bark: "o", grain: "fissure" },
+  lime: { fork: 0.42, branches: 3, spread: 0.62, reach: 0.38, twigs: 1, top: 0.84, trunk: 0.28, radius: 0.16, gap: 0.37, leaves: "MgG", bark: "t", grain: "fissure" },
+  birch: { fork: 0.4, branches: 5, spread: 0.45, reach: 0.42, twigs: 1, top: 0.88, trunk: 0.18, radius: 0.105, gap: 0.42, leaves: "gGG", bark: "s", grain: "birch" },
+};
+const branchEnd = (p, azimuth, tilt, reach) => [p[0] + Math.sin(tilt) * Math.cos(azimuth) * reach, p[1] + Math.cos(tilt) * reach,
+  p[2] + Math.sin(tilt) * Math.sin(azimuth) * reach];
+// A broadleaf tree: a tapered trunk that rises straight from its foot, leans once and forks into branches, with a leaf
+// clump on every branch end. Branches spread round `away` within `fan` radians, so the trees by the office grow away
+// from its walls. The foot is a column that blocks walking, as a trunk should.
+function broadleaf(x, z, height, kind, away, fan) {
+  const t = growTree(x, z, height, 0.16), seed = hash(z, x), s = height / 6.5, r = kind.trunk * s, y0 = t.y0, tips = [], foot = new Float64Array(15);
+  const lean = fan < 6 ? away : seed * 6.28, lx = 0.35 * s * Math.cos(lean), lz = 0.35 * s * Math.sin(lean);
+  const forkY = y0 + height * kind.fork, fork = [x + lx, forkY, z + lz], knee = y0 + 0.45 * height * kind.fork;
+  setLimb(foot, x, y0 - 0.3, z, x, knee, z, r, 0.85 * r);
+  column(world, x, z, r, 0.85 * r, y0 - 0.3, knee, kind.bark, { tex: barkTexture(foot, kind.grain, 0), limb: foot, grain: kind.grain });
+  const along = treeLimb(t, [x, knee, z], fork, 0.85 * r, 0.62 * r, kind, foot[6]);
+  for (let i = 0; i < kind.branches; i++) {
+    treeBranch(t, kind, fork, away + fan * ((i + 0.5 + 0.6 * (hash(seed, i) - 0.5)) / kind.branches - 0.5), r, along, tips);
+  }
+  const top = [fork[0] + 0.4 * lx, y0 + height * kind.top, fork[2] + 0.4 * lz];
+  treeLimb(t, fork, top, 0.44 * r, 0.2 * r, kind, along);
+  tips.push(top);
+  treeCrown(t, tips.map((tip, i) => {
+    const size = height * kind.radius * (0.85 + 0.3 * hash(seed, i + 9));
+    return [tip[0], tip[1] + 0.3 * size, tip[2], size, 0.65 + 0.45 * (tip[1] - forkY) / (y0 + height - forkY)];
+  }), kind);
+  plantCrown(t, kind);
+}
+// A main branch from `from` toward `azimuth`, as thick as `r` allows (the trunk's foot radius); its end and a side
+// twig's end, inside the crown, join `tips`.
+function treeBranch(t, kind, from, azimuth, r, along, tips) {
+  const tilt = kind.spread * (0.8 + 0.4 * hash(azimuth, 1)), reach = t.height * kind.reach * (0.8 + 0.4 * hash(azimuth, 2));
+  const end = branchEnd(from, azimuth, tilt, reach);
+  treeLimb(t, from, end, 0.38 * r, 0.18 * r, kind, along);
+  tips.push(end);
+  for (let k = 0; k < kind.twigs; k++) {
+    const at = end.map((c, i) => from[i] + (c - from[i]) * 0.55), twig = branchEnd(at, azimuth + (hash(azimuth, 3) < 0.5 ? -0.75 : 0.75), tilt * 0.55, reach * 0.62);
+    tips.push(twig);
   }
 }
-// Canopies sway in the wind, higher leaves more.
-function swayTrees() {
-  for (const { s, x, z, phase } of canopies) {
-    s.blob[0] = x + 0.18 * Math.sin(T * 1.1 + phase);
-    s.blob[2] = z + 0.12 * Math.sin(T * 0.9 + phase * 1.7);
+for (const [x, z, height, kind, away, fan] of [[-22, 24, 6.4, "oak", 0, 6.28], [-10, 23, 7.2, "lime", Math.PI, Math.PI],
+  [0, 25, 6.2, "birch", 0, Math.PI], [11, 24, 6.8, "oak", 0.4, 6.28], [17, 27, 7.6, "lime", 1.1, 6.28]]) {
+  broadleaf(x, z, height, BROADLEAF[kind], away, fan);
+}
+// Palms: a trunk of four tapered limbs with leaf-scar rings that leans toward the shore and curves upright under the
+// crown, a dark heart, and 8 to 14 fronds [direction, length, rise, droop] that drawPalms projects.
+const PALM_BARK = { bark: "n", grain: "ring" };
+function palmTree(x, z) {
+  const height = 5.4 + 1.8 * hash(z, x), t = growTree(x, z, height, 0.3), seed = hash(x, z), fronds = [];
+  const gx = landDistance(x + 1, z) - landDistance(x - 1, z), gz = landDistance(x, z + 1) - landDistance(x, z - 1);
+  const lean = (0.5 + 0.9 * seed) / (Math.hypot(gx, gz) || 1), at = (u) => [x + gx * lean * u * (2 - u), t.y0 - 0.15 + height * u, z + gz * lean * u * (2 - u)];
+  let along = 0;
+  for (let i = 0; i < 4; i++) along = treeLimb(t, at(i / 4), at((i + 1) / 4), 0.25 - 0.025 * i, 0.225 - 0.025 * i, PALM_BARK, along);
+  const c = at(1), heart = blob(world, c[0], c[1] + 0.1, c[2], 0.3, 0.26, 0.3, "M", { solid: false, thin: true, dim: 0.7 });
+  for (const i of [0, 2]) { heart.bb[i] -= 0.4; heart.bb[i + 3] += 0.4; }
+  t.parts.push({ c: heart.blob, rest: heart.blob.slice(0, 3), h: treeShare(t, c[1]), phase: seed * 6.28 });
+  for (let k = 0, n = 8 + Math.floor(7 * hash(seed, 9)); k < n; k++) {
+    fronds.push((k + 0.4 * hash(k, seed)) * 6.283 / n + seed * 6.283, 2.2 + hash(seed, k), 0.25 + 0.55 * hash(k, seed * 3), 0.8 + 0.5 * hash(seed * 5, k));
   }
+  PALMS.push({ t, heart: heart.blob, fronds: Float64Array.from(fronds) });
+}
+for (const [x, z] of [[21, 24], [-16, 23.5], [-30, 2], [-20, 12.6], [23, 12.4], [-24, -14]]) palmTree(x, z);
+// Trees bend before the wind on the grass's 12 Hz clock, more toward the top, and their clumps flutter a little across
+// it; reduced motion stops the clock, so the trees stand still.
+let treesSwayedAt = NaN;
+function swayTrees() {
+  const time = swayTime();
+  if (time === treesSwayedAt) return;
+  treesSwayedAt = time;
+  for (const t of TREES) {
+    t.gust = t.top * (0.6 + 0.3 * Math.sin(time * 0.9 + t.phase) + 0.15 * Math.sin(time * 2.3 + t.phase * 1.7));
+    for (const p of t.parts) swayPart(p, t.gust, time);
+  }
+}
+function swayPart(p, gust, time) {
+  const r = p.rest;
+  if (p.s) {
+    const a = gust * p.ha * p.ha, b = gust * p.hb * p.hb;
+    setLimb(p.s.limb, r[0] + WIND.x * a, r[1], r[2] + WIND.z * a, r[3] + WIND.x * b, r[4], r[5] + WIND.z * b, p.ra, p.rb);
+    return;
+  }
+  const lean = gust * p.h * p.h, flutter = 0.05 * p.h * Math.sin(time * 3.1 + p.phase);
+  p.c[0] = r[0] + WIND.x * lean - WIND.z * flutter;
+  p.c[2] = r[2] + WIND.z * lean + WIND.x * flutter;
+}
+// Fronds use projected lines with paired leaflets, like the rigging, to avoid ray intersections.
+// Fronds that face the moon are brighter; far palms draw fewer leaflets or only spines.
+const FROND_STEPS = 12, FROND_A = [0, 0, 0], FROND_B = [0, 0, 0];
+function drawPalms() {
+  const tall = rows / (2 * cam.tanV);
+  for (const p of PALMS) {
+    const h = p.heart;
+    viewPoint(h[0], h[1], h[2], FROND_A);
+    const d = FROND_A[2], size = 3.2 * tall / Math.max(d, 0.5); // a frond's length in rows
+    if (d < -3.5 || (d > 3.5 && (FROND_A[1] + size < 0 || FROND_A[1] - size > rows || Math.abs(FROND_A[0] - cols / 2) > cols / 2 + 2 * size))) continue;
+    const step = size > 30 ? 1 : size > 12 ? 2 : size > 5 ? 4 : 0;
+    const [lit, warm] = lightAt(h[0], h[1] + 0.4, h[2], 0, 1, 0), light = lit * Math.exp(-Math.max(d, 0) * 0.016);
+    for (let k = 0; k < p.fronds.length; k += 4) drawFrond(p, k, step, light, warm);
+  }
+}
+function drawFrond(p, k, step, light, warm) {
+  const F = p.fronds, h = p.heart, len = F[k + 1], rise = F[k + 2], droop = F[k + 3], cx = Math.cos(F[k]), cz = Math.sin(F[k]);
+  const face = Math.max(0, cx * MOON[0] + cz * MOON[2]), gust = p.t.gust + 0.08 * Math.sin(swayTime() * 3.7 + F[k] * 3);
+  const b = Math.min(0.7, 0.12 + 2.2 * light + 0.22 * face), spine = (face > 0.45 ? "G" : "g") + tier(b, warm), leaf = (face > 0.25 ? "g" : "M") + tier(0.9 * b, warm);
+  let x0 = h[0], y0 = h[1], z0 = h[2];
+  for (let i = 1; i <= FROND_STEPS; i++) {
+    const u = i / FROND_STEPS, w = gust * u * u;
+    const x = h[0] + len * u * cx + WIND.x * w, y = h[1] + len * u * (rise - droop * u), z = h[2] + len * u * cz + WIND.z * w;
+    frondLine(x0, y0, z0, x, y, z, spine);
+    if (step && i % step === 0) frondLeaflets(x, y, z, cx, cz, 0.11 * len * Math.sin(Math.PI * (0.1 + 0.8 * u)), leaf);
+    x0 = x; y0 = y; z0 = z;
+  }
+}
+// Two leaflets hang from a spine point: down, out to the sides and a little toward the tip.
+function frondLeaflets(x, y, z, cx, cz, l, cls) {
+  const ox = -0.45 * l * cz, oz = 0.45 * l * cx, ax = x + 0.35 * l * cx, ay = y - 0.75 * l, az = z + 0.35 * l * cz;
+  frondLine(x, y, z, ax + ox, ay, az + oz, cls);
+  frondLine(x, y, z, ax - ox, ay, az - oz, cls);
+}
+function frondLine(ax, ay, az, bx, by, bz, cls) {
+  viewPoint(ax, ay, az, FROND_A);
+  viewPoint(bx, by, bz, FROND_B);
+  if (FROND_A[2] > 0.2 && FROND_B[2] > 0.2) drawRope(FROND_A, FROND_B, cls);
 }
 for (const x of [-20, -10, 0, 10, 18]) {
   box(world, x, 1.2, 20.9, x + 0.14, 4, 21.04, "t");
@@ -1692,6 +1856,8 @@ function curvedEntry(s, ox, oy, oz, dx, dy, dz) {
   if (s.blob) return blobEntry(s.blob, ox, oy, oz, dx, dy, dz);
   if (s.cone) return coneEntry(s.cone, ox, oy, oz, dx, dy, dz);
   if (s.bar) return barEntry(s, ox, oy, oz, dx, dy, dz);
+  if (s.limb) return limbEntry(s.limb, ox, oy, oz, dx, dy, dz);
+  if (s.crown) return crownEntry(s, ox, oy, oz, dx, dy, dz);
   return solidEntry(s, ox, oy, oz, dx, dy, dz);
 }
 function solidEntry(s, ox, oy, oz, dx, dy, dz) {
@@ -1734,6 +1900,150 @@ function blobEntry(e, ox, oy, oz, dx, dy, dz) {
   if (t <= 1e-3) return Infinity;
   const nx = (qx + t * vx) / e[3], ny = (qy + t * vy) / e[4], nz = (qz + t * vz) / e[5], l = Math.sqrt(nx * nx + ny * ny + nz * nz);
   entryK = -4; entryN[0] = nx / l; entryN[1] = ny / l; entryN[2] = nz / l;
+  return t;
+}
+// Ray against a tapered limb: its round side or an end cap, solved across the limb's axis. Sets entryK (-1 side, -2 far
+// end, -3 near end) and entryN, like coneEntry.
+function limbEntry(L, ox, oy, oz, dx, dy, dz) {
+  const wx = L[3], wy = L[4], wz = L[5], k = L[8], qx = ox - L[0], qy = oy - L[1], qz = oz - L[2];
+  const qa = qx * wx + qy * wy + qz * wz, da = dx * wx + dy * wy + dz * wz;
+  const px = qx - qa * wx, py = qy - qa * wy, pz = qz - qa * wz, ex = dx - da * wx, ey = dy - da * wy, ez = dz - da * wz;
+  const r = L[7] + k * qa, kd = k * da, A = ex * ex + ey * ey + ez * ez - kd * kd, B = px * ex + py * ey + pz * ez - r * kd;
+  const disc = B * B - A * (px * px + py * py + pz * pz - r * r);
+  if (disc < 0) return Infinity; // a ray that never enters the endless cone cannot cross its end caps either
+  let best = limbCaps(L, px, py, pz, ex, ey, ez, qa, da);
+  if (Math.abs(A) < 1e-9) return best;
+  for (let n = -1; n <= 1; n += 2) {
+    const t = (-B + n * Math.sqrt(disc)) / A, s = qa + t * da;
+    if (t > 1e-3 && t < best && s >= 0 && s <= L[6] && r + t * kd >= 0) { best = t; limbNormal(L, px + t * ex, py + t * ey, pz + t * ez); }
+  }
+  return best;
+}
+// The flat ends of limb L, for a ray that starts p across and qa along the axis and moves e across and da along it.
+function limbCaps(L, px, py, pz, ex, ey, ez, qa, da) {
+  let best = Infinity;
+  for (let n = 0; n < 2 && da !== 0; n++) {
+    const s = n ? L[6] : 0, r = L[7] + L[8] * s, t = (s - qa) / da, cx = px + t * ex, cy = py + t * ey, cz = pz + t * ez;
+    if (t > 1e-3 && t < best && cx * cx + cy * cy + cz * cz <= r * r) {
+      best = t; entryK = n ? -2 : -3;
+      entryN[0] = n ? L[3] : -L[3]; entryN[1] = n ? L[4] : -L[4]; entryN[2] = n ? L[5] : -L[5];
+    }
+  }
+  return best;
+}
+// The side normal of limb L where the hit lies c across the axis: out from the axis, tipped by the taper.
+function limbNormal(L, cx, cy, cz) {
+  const l = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1, nx = cx / l - L[8] * L[3], ny = cy / l - L[8] * L[4], nz = cz / l - L[8] * L[5];
+  const m = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  entryK = -1; entryN[0] = nx / m; entryN[1] = ny / m; entryN[2] = nz / m;
+}
+// Smooth 3D value noise in [0, 1], one octave on a unit lattice, for the leaf clumps; LEAF_PERM also picks leaf glyphs.
+const LEAF_PERM = new Uint8Array(512), LEAF_VALUES = new Float32Array(256);
+for (let i = 0; i < 256; i++) { LEAF_PERM[i] = i; LEAF_VALUES[i] = hash(i, 7.3); }
+for (let i = 255; i > 0; i--) {
+  const j = Math.floor(hash(i, 1.9) * (i + 1)), p = LEAF_PERM[i];
+  LEAF_PERM[i] = LEAF_PERM[j]; LEAF_PERM[j] = p;
+}
+LEAF_PERM.copyWithin(256, 0, 256);
+function leafNoise(x, y, z) {
+  const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z), X = fx & 255, Y = fy & 255, Z = fz & 255;
+  let u = x - fx, v = y - fy, w = z - fz;
+  u = u * u * (3 - 2 * u); v = v * v * (3 - 2 * v); w = w * w * (3 - 2 * w);
+  const P = LEAF_PERM, V = LEAF_VALUES, a = P[X] + Y, b = P[X + 1] + Y, aa = P[a] + Z, ab = P[a + 1] + Z, ba = P[b] + Z, bb = P[b + 1] + Z;
+  const c00 = V[P[aa]] + (V[P[ba]] - V[P[aa]]) * u, c10 = V[P[ab]] + (V[P[bb]] - V[P[ab]]) * u;
+  const c01 = V[P[aa + 1]] + (V[P[ba + 1]] - V[P[aa + 1]]) * u, c11 = V[P[ab + 1]] + (V[P[bb + 1]] - V[P[ab + 1]]) * u;
+  const c0 = c00 + (c10 - c00) * v, c1 = c01 + (c11 - c01) * v;
+  return c0 + (c1 - c0) * w;
+}
+let leafN = 0; // the leaf noise at the last clump sample
+// How far clump k reaches toward the point (x, y, z) from its centre; leaves the noise there in leafN.
+function clumpRadius(k, x, y, z) {
+  leafN = leafNoise(x * k[5] + k[6], y * k[5], z * k[5] - k[6]);
+  return k[3] + k[4] * Math.min(2 * leafN - 1, 0.6);
+}
+// Ray against a tree's crown: the leaf clumps the ray reaches, nearest first, until the next one starts beyond the best
+// hit. Sets entryN and entryK, -6 - code, where code is 2 * clump (+ 1 for a clump's far side); the crown keeps the leaf
+// noise at its hit for shadeLeaf.
+const REACH_T = new Float64Array(16), REACH_I = new Int32Array(16), CROWN_N = [0, 0, 0];
+function crownEntry(s, ox, oy, oz, dx, dy, dz) {
+  const t = s.crown;
+  let best = Infinity, code = 0, n = reachClumps(t, ox, oy, oz, dx, dy, dz);
+  for (let j = 0; j < n && REACH_T[j] < best; j++) {
+    const at = clumpEntry(t.clumps[REACH_I[j]], ox, oy, oz, dx, dy, dz);
+    if (at >= best) continue;
+    best = at; code = 2 * REACH_I[j] - 6 - entryK; s.leafN = leafN;
+    CROWN_N[0] = entryN[0]; CROWN_N[1] = entryN[1]; CROWN_N[2] = entryN[2];
+  }
+  entryK = -6 - code; entryN[0] = CROWN_N[0]; entryN[1] = CROWN_N[1]; entryN[2] = CROWN_N[2];
+  return best;
+}
+// Puts the clumps of tree t whose outer sphere the ray enters in REACH_I, ordered by where it enters (REACH_T); returns
+// how many. Rays from the eye reuse its offsets until the eye or wind moves (eyeClumps).
+function reachClumps(t, ox, oy, oz, dx, dy, dz) {
+  if (ox === cam.x && oy === cam.y && oz === cam.z) return reachFromEye(eyeClumps(t), dx, dy, dz);
+  let n = 0;
+  for (let i = 0; i < t.clumps.length; i++) {
+    const k = t.clumps[i], X = ox - k[0], Y = oy - k[1], Z = oz - k[2], tc = -(X * dx + Y * dy + Z * dz);
+    const h = tc * tc - X * X - Y * Y - Z * Z + k[13] * k[13];
+    if (h > 0 && tc > -k[13]) n = keepReach(n, tc - Math.sqrt(h), i);
+  }
+  return n;
+}
+// The same for a ray from the eye, over V [offset x, y, z, squared distance less the outer radius squared, outer radius]
+// for each clump.
+function reachFromEye(V, dx, dy, dz) {
+  let n = 0;
+  for (let i = 0; i < V.length; i += 5) {
+    const tc = -(V[i] * dx + V[i + 1] * dy + V[i + 2] * dz), h = tc * tc - V[i + 3];
+    if (h > 0 && tc > -V[i + 4]) n = keepReach(n, tc - Math.sqrt(h), i / 5);
+  }
+  return n;
+}
+// Inserts clump i, which the ray enters at `at`, into the n sorted so far.
+function keepReach(n, at, i) {
+  let j = n;
+  for (; j > 0 && REACH_T[j - 1] > at; j--) { REACH_T[j] = REACH_T[j - 1]; REACH_I[j] = REACH_I[j - 1]; }
+  REACH_T[j] = at; REACH_I[j] = i;
+  return n + 1;
+}
+// For rays from the eye, each clump of tree t's offset from the eye, its squared distance less its outer radius squared,
+// and its outer radius, kept until the eye or the wind moves.
+function eyeClumps(t) {
+  const at = t.eyeAt;
+  if (at[0] === cam.x && at[1] === cam.y && at[2] === cam.z && at[3] === treesSwayedAt) return t.eye;
+  at[0] = cam.x; at[1] = cam.y; at[2] = cam.z; at[3] = treesSwayedAt;
+  t.clumps.forEach((k, i) => {
+    const x = cam.x - k[0], y = cam.y - k[1], z = cam.z - k[2];
+    t.eye.set([x, y, z, x * x + y * y + z * z - k[13] * k[13], k[13]], 5 * i);
+  });
+  return t.eye;
+}
+// Ray against a leaf clump. One or two noise samples locate the near surface.
+// A gap can cause another sample for the far surface, seen from inside, or let the ray through.
+// Sets entryK (-6 near side, -7 far side) and entryN.
+function clumpEntry(k, ox, oy, oz, dx, dy, dz) {
+  const X = ox - k[0], Y = oy - k[1], Z = oz - k[2], tc = -(X * dx + Y * dy + Z * dz), outer = k[13];
+  const m2 = X * X + Y * Y + Z * Z - tc * tc; // squared distance from the centre to the ray
+  if (m2 >= outer * outer || tc < -outer) return Infinity;
+  let rho = k[3];
+  // A ray that passes well inside the clump meets it nearly head on, so one sample places the hit.
+  for (let i = m2 < 0.36 * rho * rho ? 1 : 0; i < 2; i++) {
+    const t = rho * rho > m2 ? tc - Math.sqrt(rho * rho - m2) : tc;
+    rho = clumpRadius(k, X + t * dx, Y + t * dy, Z + t * dz);
+  }
+  if (rho * rho <= m2) return Infinity;
+  const t = tc - Math.sqrt(rho * rho - m2);
+  return t > 1e-3 && leafN >= k[7] ? leafHit(-6, X, Y, Z, dx, dy, dz, t, rho) : clumpFar(k, X, Y, Z, dx, dy, dz, tc, m2);
+}
+function clumpFar(k, X, Y, Z, dx, dy, dz, tc, m2) {
+  if (k[3] * k[3] <= m2) return Infinity;
+  const t0 = tc + Math.sqrt(k[3] * k[3] - m2), rho = clumpRadius(k, X + t0 * dx, Y + t0 * dy, Z + t0 * dz);
+  if (rho * rho <= m2 || leafN < k[7] + 0.18) return Infinity;
+  const t = tc + Math.sqrt(rho * rho - m2);
+  return t > 1e-3 ? leafHit(-7, X, Y, Z, dx, dy, dz, t, -rho) : Infinity;
+}
+function leafHit(side, X, Y, Z, dx, dy, dz, t, rho) {
+  entryK = side; entryN[0] = (X + t * dx) / rho; entryN[1] = (Y + t * dy) / rho; entryN[2] = (Z + t * dz) / rho;
   return t;
 }
 const RAY = new Float64Array(6); // the ray in the cloth's frame: origin u, v, w, then direction u, v, w
@@ -2024,6 +2334,7 @@ function render() {
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
   if (!interior) {
     drawGrass();
+    drawPalms();
     drawFountain();
     drawRigging();
     drawPennants();
@@ -2333,7 +2644,7 @@ function footprint(s, cls) {
   const b = s.bb;
   if (s.thin || b[3] - b[0] > 40 || b[4] < 0.5) return;
   const [i0, j0] = toMap(b[0], b[5]), [i1, j1] = toMap(b[3], b[2]);
-  const ch = s.blob ? (s.mat === "t" ? "@" : "%") : s.cone ? "@" : s.mat === "o" ? "=" : "#";
+  const ch = s.blob || s.crown ? (s.mat === "t" ? "@" : "%") : s.cone ? "@" : s.mat === "o" ? "=" : "#";
   for (let j = Math.max(0, j0); j <= Math.min(mapBox.ih - 1, j1); j++) {
     for (let i = Math.max(0, i0); i <= Math.min(mapBox.iw - 1, i1); i++) {
       if (s.hull && !mapHullCell(i, j)) continue;
@@ -2744,6 +3055,7 @@ function paintCanvas(c, odd, id, t, s, k, u, v, w, cell) {
 }
 function shadeSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
   if (hitS.cloth) paintShipCloth(c, odd, ldx, ldy, dz);
+  else if (hitS.crown) shadeLeaf(c, dx, dy, dz);
   else shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy);
 }
 function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
@@ -2768,7 +3080,7 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
     cls = mat + tier(b, warm);
     // Grass blades lean with the wind; fountain water keeps its texture glyphs below.
     const grass = ny > 0.7 && (mat === "g" || mat === "G" || mat === "M") && s === TERRAIN;
-    ch = grass && b > 0.03 ? blade(px, pz, odd) : glyph(b, odd);
+    ch = grass && b > 0.03 ? blade(px, pz, odd) : s.limb ? barkGlyph(s, tex, b, odd, nx, nz) : glyph(b, odd);
     const texture = textureColor(s, tex, b, fog, warm);
     if (texture) {
       ch = tex[1];
@@ -2781,6 +3093,46 @@ function shadeLitSolid(c, odd, onShip, dx, dy, dz, ldx, ldy) {
 }
 // Glyph for a brightness from the long ramp; the darkest cells thin out to a dither.
 const glyph = (b, odd) => (b < 0.035 ? (odd ? " " : b > 0.02 ? "." : " ") : RAMP[Math.min(RAMP.length - 1, 1 + Math.floor(b * (RAMP.length - 2)))]);
+// Leaves of the crown's clump that the ray met, near side or far side (inside): the moon lights the tops of the clumps,
+// their undersides and the inside of the crown stay dark, and bumps in the leaf noise catch the light while its dips
+// stay dark. Lamplight needs no shadow rays here and is compressed, so a lamp under a crown warms the leaves without a
+// flat bright patch. Leaf glyphs change from patch to patch and stop short of the solid blocks, and leaves draw no
+// outline edges (a negative id), so gaps and the ragged rim stay soft.
+function shadeLeaf(c, dx, dy, dz) {
+  const s = hitS, t = hitT, ny = hitN[1], code = -6 - hitK, k = s.crown.clumps[code >> 1], inside = code & 1;
+  const x = cam.x + dx * t - k[0], y = cam.y + dy * t - k[1], z = cam.z + dz * t - k[2];
+  const [lit, warm] = lightAt(x + k[0], y + k[1], z + k[2], hitN[0], ny, hitN[2], false), lamp = lit * warm;
+  const deep = Math.sqrt((x * k[12] + k[9]) ** 2 + (y * k[12] + k[10]) ** 2 + (z * k[12] + k[11]) ** 2);
+  const relief = 0.6 + 0.6 * Math.max(0, Math.min(1, (s.leafN - k[7]) / 0.3));
+  const lift = (inside ? 0.4 : 1) * k[8] * relief * (0.35 + 0.65 * smooth((deep - 0.25) / 0.55));
+  const top = inside ? 0.2 : 0.35 + 0.65 * smooth((ny + 0.3) / 1.1);
+  const b = Math.min(0.6, 0.16 + lift * (1.7 * top * (lit - lamp - 0.02) + 0.3 * lamp / (lamp + 0.35))) * Math.exp(-t * 0.016);
+  const tone = s.leaves[inside || b < 0.2 ? 0 : ny > 0.5 && b > 0.42 ? 2 : 1];
+  put(c, leafGlyph(b, x, y, z), tone + tier(b, warm), -(s.id * 16 + 1), t);
+  SP[c] = null;
+}
+// Leaf glyphs from dark to bright, three to a level; the place of a 20 cm patch of leaves picks one, so patches differ.
+const LEAF_GLYPHS = [",.:", ";:,", "&;:", "&%;", "&%&", "&%@", "&@%"];
+function leafGlyph(b, x, y, z) {
+  const P = LEAF_PERM, i = P[P[P[Math.floor(x * 5) & 255] + (Math.floor(y * 5) & 255)] + (Math.floor(z * 5) & 255)];
+  return LEAF_GLYPHS[Math.min(6, Math.floor(b * 10))][i % 3];
+}
+// Bark glyphs follow the limb on screen: cracks and the brightest ridges run along it, rings and birch marks cross it,
+// and the sides of an upright trunk round off with ( and ).
+function barkGlyph(s, tex, b, odd, nx, nz) {
+  if (b < 0.035) return odd ? " " : ".";
+  const along = barkStroke(s.limb, false), side = nx * cam.r[0] + nz * cam.r[2];
+  if (tex) return tex === "p" || s.grain === "ring" ? barkStroke(s.limb, true) : along;
+  if (Math.abs(side) > 0.75 && along === "|") return side < 0 ? "(" : ")";
+  return b > 0.36 ? along : ".:;"[Math.floor(b * 8)];
+}
+// The glyph of a stroke along limb L as it lies on screen, or across it.
+function barkStroke(L, across) {
+  const r = cam.r, u = cam.u, x = L[3] * r[0] + L[5] * r[2], y = L[3] * u[0] + L[4] * u[1] + L[5] * u[2];
+  if (Math.abs(x) < 0.4 * Math.abs(y)) return across ? "=" : "|";
+  if (Math.abs(y) < 0.4 * Math.abs(x)) return across ? "|" : "-";
+  return (x * y > 0) !== across ? "/" : "\\";
+}
 // A grass blade: short tufts and taller blades that lean left or right as gusts roll across the island.
 function blade(x, z, odd) {
   const t = swayTime(), h = hash(Math.floor(x * 5), Math.floor(z * 5)), gust = Math.sin(t * 1.7 + x * 0.35 + z * 0.22) + 0.5 * Math.sin(t * 3.1 + x * 1.3);

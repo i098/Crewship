@@ -15,10 +15,16 @@ Reduced-motion visitors get the scene immediately.
 Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
-The island has staggered plaza paving, scattered stones and grass tufts, varied tree canopies, textured bark, and foam along the shore.
+The island has staggered plaza paving, scattered stones and grass tufts, trees and palms, and foam along the shore.
 Tufts of tall grass sway in the wind and grow densest along the path edges and on the dry upper beach slopes.
 Grass is sparse on the dirt trails and never grows on the roads, the dock, the plaza, wet sand, or in buildings.
 Grass does not block walking or map routes, and it stays still with reduced motion.
+
+Oak, lime, and birch trees have tapered trunks that branch into clumps of ragged leaves, with gaps that show the sky.
+The moon lights the tops of the clumps; their undersides and the inside of each crown stay dark.
+Palms have curved, ringed trunks and drooping fronds of many leaflets.
+Trees and palms bend and flutter in the scene's wind and stay still with reduced motion.
+Broadleaf trunk feet block walking and map routes; their upper limbs, leaves, and palms do not.
 
 Three layers of cloud move slowly across the night sky in the direction of the wind on the sails.
 The moon lights the cloud edges that face it, and thick cloud hides the moon and the stars.

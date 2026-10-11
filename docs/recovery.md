@@ -3,7 +3,7 @@
 ## New-device sequence
 
 1. Start with a supported Ubuntu installation and working SSH/sudo access. `cloud-init/user-data.yaml` installs initial OS prerequisites; it does not create credentials, log in to services, or clone this private repository.
-2. Authenticate GitHub on the new device and clone Crewship. Run the [Working on Crewship itself](../CONTRIBUTING.md#working-on-crewship-itself): `onboard.sh`, then `ship.sh` `dock`, `inspect`, `chart`, `launch`, and `survey`.
+2. Authenticate GitHub on the new device and install Crewship ([Install, update and migrate](install.md)). Run the [Quick start](../README.md#quick-start): `onboard.sh`, then `ship.sh` `dock`, `inspect`, `chart`, `launch`, and `survey`.
 3. Confirm Herdr's user service and executable agree. Both resolve to the versioned release that apply resolved and installed (see [Latest releases](dependencies.md#latest-releases)).
 4. Authenticate agent/provider CLIs under the configured operator account (for omp, see [Sign in](omp.md#sign-in)). Confirm the configured models exist for that account. Recreate per-project approval/trust choices instead of copying a global auto-approval list.
 5. If selected, authenticate Tailscale as a new device and review its ACL/SSH policy. Installation alone does not authorize incoming connections.

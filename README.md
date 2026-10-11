@@ -45,6 +45,7 @@ Crewship makes it super easy to start using agents in the cloud.
 - [herdr-patch](herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](docs/dependencies.md): every tool, package, and image the recipe installs
 - [Neovim with LazyVim](docs/dependencies.md#neovim-and-lazyvim): a terminal editor on every host, with Pyrefly for Python
+- [Install, update and migrate](docs/install.md): release artifact, updates, moving a git install
 - [Migration and recovery](docs/recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](docs/recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
 - [Tailscale](docs/security.md#remote-access): the Tailscale daemon for remote access (opt-in)
@@ -142,6 +143,8 @@ With pnpm:
 ```bash
 pnpm dlx crewship
 ```
+
+The installer downloads and verifies a release artifact; there is no git clone. Run it again to update, and see [Install, update and migrate](docs/install.md) for the layout and for moving an older git install.
 
 Sign in to GitHub:
 
