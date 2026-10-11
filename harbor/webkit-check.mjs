@@ -41,7 +41,6 @@ await page.context().route("**/*", async (route) => {
   const path = url.pathname.slice(1) || "index.html";
   const type = { html: "text/html", js: "text/javascript", css: "text/css" }[path.split(".").pop()];
   if (path === "harbor.js") {
-    // Force slow frames to check that the exterior grid and projection stay fixed.
     const source = await readFile(new URL(path, dist), "utf8");
     return route.fulfill({ contentType: type, body: source + `
 ["top", "right", "bottom", "left"].forEach((side, n) => stage.style.setProperty("--safe-" + side, ${JSON.stringify(expectedInsets)}[n] + "px"));
@@ -60,10 +59,8 @@ drawSign = function() {
 window.frames = [];
 window.introClocks = [];
 window.firstFrameBlack = false;
-window.lateMeasures = 0;
 const measureGrid = measure;
 measure = function() {
-  if (window.frames.length) window.lateMeasures++;
   measureGrid();
   if (${scale} !== 1) {
     cellH *= ${scale};
@@ -79,7 +76,6 @@ measure = function() {
 };
 const renderScene = render;
 render = function() {
-  const start = performance.now();
   renderScene();
   if (!window.frames.length) {
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -87,7 +83,6 @@ render = function() {
   }
   if (introProgress < 1) window.introClocks.push(T);
   window.frames.push([cols, rows, cellW, cellH, cam.tanH, cam.tanV, canvas.width, canvas.height]);
-  while (performance.now() - start < 25) {}
 };
 let signCheckWidth = Infinity;
 const fitSign = signFit;
@@ -179,9 +174,6 @@ if (!page.isClosed() && !errors.length) {
   const { scene, longest } = await page.evaluate(() => ({ scene: !document.getElementById("stage").hidden, longest: window.longest }));
   if (!scene) errors.push("the scene fell back to the plain page");
   if (touch && longest !== 1) errors.push(`fillText drew ${longest} glyphs at once; touch devices must draw one at a time`);
-  const { frames, lateMeasures } = await page.evaluate(() => ({ frames: window.frames, lateMeasures: window.lateMeasures }));
-  if (frames.some((frame) => frame.some((value, i) => value !== frames[0][i]))) errors.push("the grid or field of view changed after the first draw");
-  if (lateMeasures) errors.push(`the canvas layout changed ${lateMeasures} times after the first draw`);
   const { firstFrameBlack, introClocks } = await page.evaluate(() => ({ firstFrameBlack: window.firstFrameBlack, introClocks: window.introClocks }));
   if (!firstFrameBlack) errors.push("the first intro frame was not fully black");
   if (introClocks.length < 2 || introClocks.at(-1) <= introClocks[0]) errors.push("the scene froze during the intro");

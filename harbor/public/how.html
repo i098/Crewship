@@ -103,11 +103,10 @@
   Grid measurement clears the complete canvas, including padding, even when the backing-store size does not change.
   The intro overlay uses CSS dimensions to cover the transformed canvas at any rendering ratio.
   The first grid measurement waits for fonts; if the requested font fails to load, the scene uses a fallback font.
-  For a fixed exterior viewport, the glyph size stays fixed; slow frames can disable shadows without changing the view.
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
-  Slow rendering first disables exterior shadow rays, if enabled, then uses larger room glyphs with fewer cells.
-  Fast room rendering restores a finer grid.
-  Inside a room, missed frames also reduce detail relative to the measured display refresh rate.
+  Slow rendering first disables exterior shadow rays, if enabled, then uses larger glyphs with fewer cells.
+  Fast rendering restores a finer grid.
+  Missed frames also reduce detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.

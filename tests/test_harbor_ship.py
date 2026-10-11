@@ -498,3 +498,28 @@ dirty = true; frame(now += 16); tick();
 assert(!paintedLastFrame, 'the house must remain idle');
 """
     )
+
+
+def test_exterior_adapts_detail_to_slow_rendering_and_missed_frames():
+    _run_ship_scene(
+        r"""
+const originalRows = rows, originalCellH = cellH;
+const canvasSize = [canvas.width, canvas.height];
+for (let i = 0; i < 100; i++) adaptResolution(40, false);
+measure();
+assert(rows < originalRows && cellH > originalCellH, 'slow exterior rendering must reduce the ray grid');
+assert.deepEqual([canvas.width, canvas.height], canvasSize, 'adaptive detail must not grow the canvas memory');
+const coarseCellH = cellH;
+for (let i = 0; i < 100; i++) adaptResolution(1, false);
+measure();
+assert(cellH < coarseCellH, 'fast exterior rendering must restore detail');
+const restoredCellH = cellH;
+refreshMs = 1000 / 60;
+paintedLastFrame = true;
+const late = roomFrameLate(1000 / 30);
+assert(late, 'missed exterior frames must count even when render CPU time is low');
+for (let i = 0; i < 21; i++) adaptResolution(1, late);
+measure();
+assert(cellH > restoredCellH, 'missed exterior frames must reduce detail');
+"""
+    )

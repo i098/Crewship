@@ -2316,7 +2316,7 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * (interior ? scale : 1);
+  const px = Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale;
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3712,16 +3712,13 @@ const resize = new ResizeObserver(() => {
 });
 reduced.addEventListener("change", () => { dirty = true; });
 // Adaptive resolution: drop shadows, then grow glyphs; restore detail when frames run short.
+// Leave time for canvas painting within a 60 Hz display period.
 function adaptResolution(ms, late) {
-  slow = ms > 20 || late ? slow + 1 : 0;
-  fast = ms < 9 && !late ? fast + 1 : 0;
-  if (!interior) {
-    if (slow > 20 && shadows) { shadows = false; slow = 0; dirty = true; }
-    return;
-  }
-  if (slow > 20 && (shadows || scale < 2.2)) {
+  slow = ms > 10 || late ? slow + 1 : 0;
+  fast = ms < 6 && !late ? fast + 1 : 0;
+  if (slow > 20 && (shadows || scale < 3)) {
     if (shadows) shadows = false;
-    else { scale *= 1.15; layoutDirty = dirty = true; }
+    else { scale = Math.min(3, scale * 1.15); layoutDirty = dirty = true; }
     slow = 0;
   } else if (fast > 90 && scale > 1) {
     scale = Math.max(1, scale / 1.1); layoutDirty = dirty = true; fast = 0;
@@ -3729,7 +3726,7 @@ function adaptResolution(ms, late) {
 }
 function roomFrameLate(frameMs) {
   if (frameMs > 0) refreshMs = paintedLastFrame ? Math.min(frameMs, refreshMs * 1.001) : frameMs;
-  const late = !!interior && (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
+  const late = (paintedLastFrame ? frameMs : probeMs) > refreshMs * 1.5;
   probeMs = Math.min(0, probeMs);
   paintedLastFrame = false;
   return late;

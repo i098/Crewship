@@ -164,7 +164,6 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
-The check also fails if the first 30 slow exterior frames change the grid, cell size, field of view, or canvas layout.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
