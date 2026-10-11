@@ -18,6 +18,68 @@
 ~~~\_________/~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </pre>
 <h1>How this harbor is built</h1>
+<h2>Rendered natively</h2>
+<p>There is no game engine, no WebGL and no 3D model files. The harbor is one plain JavaScript file, <code>harbor.js</code>, that draws on an ordinary 2D canvas.
+Every frame it works out, with maths, what each character on the screen should be. Then it prints that character in a colour.
+The "3D" is only arithmetic: the file never loads a mesh, a texture file or a graphics library.</p>
+<p>The method is a <b>ray caster</b>. Think of a grid of characters laid over your view. For each cell the program asks one question: what is the first thing you would see if you looked through this cell?</p>
+<pre class="steps" role="img" aria-label="For each character cell: cast a ray from the eye, find the nearest shape it hits, work out the light on that spot, pick a character by brightness, pick a colour.">
+ for every character cell on screen
+
+ 1 RAY     a line leaves your eye
+           through the middle of the cell
+    |
+    v
+ 2 HIT     test it against the shapes;
+           the nearest hit wins
+    |
+    v
+ 3 LIGHT   moon, lamps, lighthouse beam;
+           a shadow ray checks each lamp
+    |
+    v
+ 4 GLYPH   brightness picks a character
+           from  .`',:;~-=+*#%@▒▓█
+    |
+    v
+ 5 COLOUR  the material's colour,
+           in one of eight brightness levels
+</pre>
+<h2>What the objects are made of</h2>
+<p>Nothing is a mesh of triangles. Each object is a short formula that a ray can be tested against, and the program solves it to find where, if anywhere, the ray touches.</p>
+<ul>
+  <li><b>Planes.</b> Buildings, the dock and the ship's hull are solid blocks bounded by flat planes.</li>
+  <li><b>Cones.</b> Masts, barrels, the lighthouse and the base of broadleaf trunks are cones with smooth sides and flat caps.</li>
+  <li><b>Ellipsoids.</b> Rocks are stretched spheres.</li>
+  <li><b>Tapered limbs.</b> Tree trunks and branches are round rods that get thinner along their length, in any direction.</li>
+  <li><b>Noisy spheres.</b> A leaf clump is a sphere whose radius is changed by noise, so it has ragged edges and gaps.</li>
+  <li><b>Curved cloth.</b> Sails and the flag are a surface that bellies in the wind.</li>
+  <li><b>Height fields.</b> The sea (travelling waves) and the island (rolling hills) are a height at each point. The ray steps along until it passes below the surface.</li>
+  <li><b>Flat marks.</b> Rigging, grass, fountain droplets and palm fronds are lines and dots placed on the screen and checked against the depth of the cells.</li>
+</ul>
+<p>A <b>material</b> is not a texture file. It is one letter that names a base colour, for example moss green or lamp yellow. Brightness then chooses one of eight levels of that colour, and a lamp-lit spot is tinted warmer.
+<b>Light</b> is a sum: a dim moon fill that is stronger on slopes facing the moon, plus each nearby lamp, which gets weaker with distance, plus the sweeping lighthouse beam. For each lamp, a shadow ray goes from the spot back to the lamp. If a solid is in the way, that lamp adds nothing. Fog dims what is far away.</p>
+<h2>The frame budget</h2>
+<p>The cost of a frame is the number of cells: one ray per cell, plus shadow rays for lit cells. Glyphs are 6.5 to 11 px tall, so a bigger screen has more cells. The numbers below come from <code>harbor.js</code> and from a run of the real page in a Chromium and WebKit container (software drawing, no GPU, on a shared build host) at the camera's default view.
+"Full detail" is the smallest glyphs with shadow rays on. "Settled" is where the page ends up after it adapts.</p>
+<div class="scroll"><table>
+<tr><th>Screen</th><th>Cells, full detail</th><th>Frame at full detail</th><th>Cells, settled</th><th>Frame, settled</th></tr>
+<tr><td>iPhone 15 Pro</td><td>120 x 101 = 12,120</td><td>32 ms (19 fps)</td><td>40 x 33 = 1,320</td><td>8 ms (50 fps)</td></tr>
+<tr><td>1440 x 900</td><td>294 x 91 = 26,754</td><td>51 ms (17 fps)</td><td>98 x 30 = 2,940</td><td>9 ms (60 fps)</td></tr>
+<tr><td>1920 x 1080</td><td>349 x 98 = 34,202</td><td>67 ms (13 fps)</td><td>116 x 32 = 3,712</td><td>12 ms (57 fps)</td></tr>
+<tr><td>2560 x 1440</td><td>465 x 130 = 60,450</td><td>112 ms (8 fps)</td><td>155 x 43 = 6,665</td><td>16 ms (43 fps)</td></tr>
+<tr><td>3840 x 2160 (4K)</td><td>698 x 196 = 136,808</td><td>193 ms (5 fps)</td><td>232 x 65 = 15,080</td><td>36 ms (18 fps)</td></tr>
+</table></div>
+<p>So a 4K screen at full detail needs about 137,000 rays per frame and is far too much for one JavaScript thread. What keeps the page near 60 fps is that it adapts instead of drawing everything:</p>
+<ul>
+  <li>A frame that takes more than 10 ms leaves too little of the 16.7 ms display period for painting. After 20 such frames in a row the page first turns shadow rays off.</li>
+  <li>If it is still slow, it makes each glyph 15% bigger, up to 3 times as big. That is 9 times fewer cells and rays.</li>
+  <li>After 90 fast frames in a row (under 6 ms) it makes the glyphs smaller again.</li>
+  <li>Phones draw with at most 2 device pixels per CSS pixel. No canvas is bigger than 4096 x 4096 device pixels.</li>
+  <li>Each ray tests only the shapes whose screen box covers its 8-cell tile, nearest first, and stops at the first hit. The page does not redraw rows that did not change.</li>
+</ul>
+<p>These runs show the limit honestly. In this GPU-less container the page holds 60 fps at laptop sizes once settled, and it does not hold 60 fps at 4K (18 fps with the biggest glyphs). A machine with a faster single core will do better, but the cost still grows with the cell count, which is why the page trades glyph size for speed. The time includes painting the characters to the canvas.</p>
+<h2>The detail</h2>
 <ul>
   <li><b>Renderer.</b> Each rendered frame casts one ray per character cell from your eye, except cells still covered by intro noise.
   Buildings, the dock and the hull are convex solids made of planes; the hull leaves its deck open over the hatch to the gun deck.

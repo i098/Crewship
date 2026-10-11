@@ -100,3 +100,11 @@ kbd {
 .how ul { padding-left: 18px; }
 .how li { margin: 0 0 8px; color: var(--muted); }
 .how b { color: var(--fg); }
+.how h2 { margin: 22px 0 8px; font: 700 17px/1.2 var(--mono); color: var(--accent); }
+.how p { color: var(--muted); }
+.how .steps { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); }
+.how table { width: 100%; border-collapse: collapse; margin: 8px 0; font: 13px/1.4 var(--mono); }
+.how th, .how td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.how th { color: var(--fg); }
+.how td { color: var(--muted); }
+.how .scroll { overflow-x: auto; }
