@@ -170,32 +170,54 @@
 
     # The home paths above moved unless the installer's releases, tools and lock file already
     # hold the new share directory; the old directory's contents then move into it, entry by
-    # entry. The release install.sh runs from is never moved. A tool version both hold stays as
-    # the old directory has it (the bootstrap copy is the same release); any other clash stops here.
+    # entry. The release install.sh runs from is never moved. Nothing moves or is deleted until
+    # every entry is known to be safe: a clash on any entry other than the lock file, or a tool
+    # version both hold with different content, stops here with both directories untouched. A
+    # tool version both hold with identical content (the bootstrap copy of the same release) is
+    # the one thing removed from the old directory.
     - name: Merge the pre-rename share directory into the one the installer made
       ansible.builtin.shell:
         cmd: |
           set -e
+          shopt -s dotglob nullglob
           new="{{ crewship_share_dir }}"
           old="{{ crewship_share_dir | dirname }}/{{ crewship_renamed_word }}"
-          for entry in "$old"/* "$old"/.[!.]*; do
-            [ -e "$entry" ] || continue
+          clash() { echo "Both $old/$1 and $new/$1 exist and differ; merge them by hand, then re-run." >&2; exit 1; }
+          for entry in "$old"/*; do
+            name=${entry##*/}
+            [ -e "$new/$name" ] || continue
+            [ "$name" = .install.lock ] && continue
+            [ "$name" = tools ] && [ -d "$new/tools" ] || clash "$name"
+            for tool in "$entry"/*; do
+              [ -e "$new/tools/${tool##*/}" ] || continue
+              if [ -d "$tool" ] && [ -d "$new/tools/${tool##*/}" ]; then
+                for version in "$tool"/*; do
+                  [ -e "$new/tools/${tool##*/}/${version##*/}" ] || continue
+                  diff -rq "$version" "$new/tools/${tool##*/}/${version##*/}" >/dev/null || clash "tools/${tool##*/}/${version##*/}"
+                done
+              else
+                diff -rq "$tool" "$new/tools/${tool##*/}" >/dev/null || clash "tools/${tool##*/}"
+              fi
+            done
+          done
+          for entry in "$old"/*; do
             name=${entry##*/}
             if [ ! -e "$new/$name" ]; then
               mv "$entry" "$new/"
             elif [ "$name" = .install.lock ]; then
               rm -f "$entry"
-            elif [ "$name" = tools ]; then
+            else
               for tool in "$entry"/*; do
                 if [ ! -e "$new/tools/${tool##*/}" ]; then mv "$tool" "$new/tools/"; continue; fi
+                if [ ! -d "$tool" ]; then rm -f "$tool"; continue; fi
                 for version in "$tool"/*; do
-                  if [ ! -e "$new/tools/${tool##*/}/${version##*/}" ]; then mv "$version" "$new/tools/${tool##*/}/"; fi
+                  if [ ! -e "$new/tools/${tool##*/}/${version##*/}" ]; then mv "$version" "$new/tools/${tool##*/}/"; else rm -rf "$version"; fi
                 done
               done
+              # rmdir fails and keeps the data if anything unexpected is left.
+              rmdir "$entry"/* "$entry"
             fi
           done
-          # Only the tool versions both held are left in the old tools directory.
-          rm -rf "$old/tools"
           rmdir "$old"
         executable: /bin/bash
       become: "{{ crewship_become_target | bool }}"
