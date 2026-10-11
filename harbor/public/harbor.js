@@ -4223,6 +4223,15 @@ function advanceIntro(now, still) {
   introProgress = Math.min(1, (now - introStart) / 1200);
   if (still || introProgress === 1) finishIntro();
 }
+// The outside moves while you see it, from a room through its windows too.
+function moveOutside() {
+  if (interior && !OUTSIDE.on) return;
+  setGangway();
+  moveLights();
+  floatBoats();
+  swayTrees();
+  billow();
+}
 function frame(now) {
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
@@ -4246,14 +4255,7 @@ function frame(now) {
     }
     if (layoutDirty) { measure(); layoutDirty = false; }
     dirty = false;
-    // The outside moves while you see it, from a room through its windows too.
-    if (!interior || OUTSIDE.on) {
-      setGangway();
-      moveLights();
-      floatBoats();
-      swayTrees();
-      billow();
-    }
+    moveOutside();
     me.eye = floorAt(me.x, me.z) + 1.6;
     const t0 = performance.now();
     render();
