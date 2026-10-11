@@ -35,7 +35,7 @@ const SX = -2.4; // ship centre line (x) and roll axis
 const DECK = 2; // deck height in the ship frame
 // The scene's one wind: the unit direction it blows toward on the ground plan (x, z). The sails belly before it, the
 // flag and pennants stream along it, and the tall grass bends with it.
-const WIND = { x: -0.92, z: 0.39 };
+const WIND = { x: -0.92, z: 0.39, force: 1 }; // force scales how hard the wind moves the moored ship
 const world = [];
 const ship = [];
 const room = [];
@@ -3344,8 +3344,8 @@ function frame(now) {
   const still = reduced.matches;
   advanceIntro(now, still);
   if (!still) T += dt;
-  // The ship rides the swell too, gently: it is heavy, so half the wave height and a slow roll.
-  if (still) { bob = 0; roll = 0; } else { seaNormal(SX, -2); bob = 0.5 * seaHeight(SX, -2) + 0.08 * Math.sin(T * 0.7); roll = -0.35 * Math.atan2(seaN[0], seaN[1]); }
+  // The ship sways gently at its mooring: two slow sines (about 11 s and 8 s, under 2 degrees of roll) scaled by the wind.
+  if (still) { bob = 0; roll = 0; } else { roll = WIND.force * (0.02 * Math.sin(T * 0.55) + 0.01 * Math.sin(T * 0.8 + 1.3)); bob = WIND.force * (0.03 * Math.sin(T * 0.55 + 0.8) + 0.015 * Math.sin(T * 0.8 + 2)); }
   rc = Math.cos(roll); rs = Math.sin(roll);
   const walked = step(dt);
   // Interiors have no animated objects; repaint only after movement, looking, or resizing.
