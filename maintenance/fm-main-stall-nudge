@@ -45,16 +45,17 @@ target=$SESSION:$MAIN_PANE
 cd "$FM_HOME" || exit 1
 . bin/fm-backend.sh
 msg="stall watchdog: $reason unhandled. Run bin/fm-wake-drain.sh and answer every operator note now."
-# The herdr helper exits 0 even on a failed send; only the output "empty" confirms
-# delivery. The stamp is written on delivery only, so a failed send retries on the
-# next run. ponytail: an "unknown" or "pending" verdict may leave the text typed, so
-# the retry can type it a second time; add a composer clear if that shows up.
-out=$(fm_backend_send_text_submit herdr "$target" "$msg" 2 0.4 0.3 2>&1)
+# The herdr helper exits 0 even on a failed send; its stdout verdict says what
+# happened. The stamp is written before the send, so the GAP holds on every path.
+echo "$now" > "$STAMP"
+out=$(fm_backend_send_text_submit herdr "$target" "$msg" 2 0.4 0.3)
 rc=$?
-if [ "$rc" -eq 0 ] && [ "$out" = empty ]; then
-  echo "$now" > "$STAMP"
-  nudge_log "nudged $target: $reason"
-else
-  nudge_log "nudge FAILED for $target: $reason: rc=$rc output=${out:-none}" >&2
+verdict=${out##*$'\n'}
+if [ "$rc" -ne 0 ] || [ -z "$verdict" ] || [ "$verdict" = send-failed ]; then
+  nudge_log "nudge FAILED for $target: $reason: rc=$rc verdict=${verdict:-none}" >&2
   exit 1
 fi
+case $verdict in
+  empty) nudge_log "nudged $target: $reason" ;;
+  *) nudge_log "nudge uncertain for $target: $reason: verdict=$verdict, text may be typed" ;;
+esac

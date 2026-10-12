@@ -12,7 +12,7 @@ SCRIPT = Path(__file__).parents[1] / "maintenance/fm-main-stall-nudge"
 
 # The real helper exits 0 and prints its verdict; the stub prints $SEND_OUT.
 BACKEND = """\
-fm_backend_send_text_submit() { echo "$@" >> "$CALLS"; printf '%s' "${SEND_OUT-empty}"; }
+fm_backend_send_text_submit() { echo "$@" >> "$CALLS"; printf '%s' "${SEND_OUT-empty}"; return "${SEND_RC-0}"; }
 """
 HERDR = """\
 #!/bin/sh
@@ -161,11 +161,30 @@ def test_pane_override_skips_discovery(host):
     assert host.sends[0].startswith("herdr alt:w9:p1 ")
 
 
-@pytest.mark.parametrize("verdict", ["send-failed", "unknown", "pending", ""])
-def test_unconfirmed_send_fails_and_retries_next_run(host, verdict):
+@pytest.mark.parametrize(
+    ("env", "code", "log", "stream"),
+    [
+        ({}, 0, "nudged default:w2:pZ", "stdout"),
+        ({"SEND_OUT": "send-failed"}, 1, "nudge FAILED for default:w2:pZ", "stderr"),
+        ({"SEND_OUT": "unknown"}, 0, "nudge uncertain for default:w2:pZ", "stdout"),
+        ({"SEND_OUT": "pending"}, 0, "nudge uncertain for default:w2:pZ", "stdout"),
+        ({"SEND_RC": "3"}, 1, "nudge FAILED for default:w2:pZ", "stderr"),
+        ({"SEND_OUT": ""}, 1, "nudge FAILED for default:w2:pZ", "stderr"),
+    ],
+    ids=["empty", "send-failed", "unknown", "pending", "nonzero-rc", "no-output"],
+)
+def test_send_verdict(host, env, code, log, stream):
     host.note(400)
-    result = host.run(SEND_OUT=verdict)
-    assert result.returncode == 1
-    assert "nudge FAILED for default:w2:pZ" in result.stderr
-    assert not host.stamp_file.exists()
-    assert host.run().returncode == 0 and len(host.sends) == 2
+    result = host.run(**env)
+    assert result.returncode == code
+    assert log in getattr(result, stream)
+    assert len(host.sends) == 1
+    assert int(host.stamp_file.read_text()) > time.time() - 5
+
+
+@pytest.mark.parametrize("env", [{"SEND_OUT": "send-failed"}, {"SEND_RC": "3"}, {"SEND_OUT": "unknown"}])
+def test_no_second_nudge_inside_gap_after_failed_or_uncertain_send(host, env):
+    host.note(400)
+    host.run(**env)
+    assert host.run().returncode == 0
+    assert len(host.sends) == 1
