@@ -1,0 +1,4 @@
+---
+# Crew board (crewship.board, tasks/board.yml, docs/board.md): cargo's target
+# directory and the source checksum of the last build.
+crewship_board_dir: "{{ crewship_share_dir }}/crewboard"

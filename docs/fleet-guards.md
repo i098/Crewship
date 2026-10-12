@@ -35,7 +35,7 @@ looping process writing to `/var/log` can take `/` to 100%.
 `crewship-storage-guard.timer` runs `storage-guard.sh` every 5 minutes. It
 measures the filesystems holding `/`, `/var/log`, the home and Docker's data
 root (`docker info`), each filesystem once. Thresholds are the
-`crewship_storage_guard_*` variables in `ansible/group_vars/all.yml`.
+`crewship_storage_guard_*` variables in `ansible/group_vars/all/fleet.yml`.
 
 | Tier | Trigger (default) | Action |
 | --- | --- | --- |

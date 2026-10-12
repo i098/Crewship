@@ -54,7 +54,7 @@ def apply(
                     "hosts": "localhost",
                     "connection": "local",
                     "gather_facts": False,
-                    "vars_files": [str(ROOT / "ansible/group_vars/all.yml")],
+                    "vars_files": [str(f) for f in sorted((ROOT / "ansible/group_vars/all").glob("*.yml"))],
                     "tasks": (
                         [
                             {

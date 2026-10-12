@@ -1,0 +1,14 @@
+---
+# --- Chrome -----------------------------------------------------------------
+# auto  -> install only when the desktop profile is enabled
+# true  -> always install (headless AXI bridge use without a desktop)
+# false -> never install
+crewship_chrome_install: auto
+crewship_chrome_package: google-chrome-stable
+crewship_chrome_keyring: /usr/share/keyrings/google-chrome.asc
+crewship_chrome_key_url: https://dl.google.com/linux/linux_signing_key.pub
+crewship_chrome_repo_uri: https://dl.google.com/linux/chrome/deb/
+# Optional exact apt version pin. Empty tracks the repository, which is the
+# only workable default: Google removes superseded Chrome versions from the
+# pool, so a hard pin stops resolving after the next release.
+crewship_chrome_version: ""

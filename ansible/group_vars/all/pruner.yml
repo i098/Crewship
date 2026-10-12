@@ -1,0 +1,41 @@
+---
+# Private runtime for the Chrome pruner. The exported pruner calls
+# psutil.Process.net_connections(), which exists from psutil 6 onwards, while
+# Ubuntu 24.04 ships python3-psutil 5.9. Instead of shimming the deprecated
+# API or pip-installing into the distribution interpreter, the pruner runs on
+# an account-owned virtualenv built by the managed uv and filled with the latest
+# psutil, --require-hashes against the digests PyPI publishes for that release
+# (crewship_latest.psutil). The unit references only
+# paths under the account's home, so the timer keeps working after the
+# repository checkout is gone.
+crewship_uv_bin: "{{ crewship_local_bin }}/uv"
+crewship_pruner_script: "{{ crewship_local_bin }}/chrome-autoprune.py"
+crewship_pruner_venv: "{{ crewship_share_dir }}/pruner-venv"
+crewship_pruner_python: "{{ crewship_pruner_venv }}/bin/python"
+# Written after a successful install; carries the digest of the requirements
+# that produced the runtime, so a new psutil release reinstalls and an
+# unchanged one is a no-op on the second apply.
+crewship_pruner_stamp: "{{ crewship_pruner_venv }}/.crewship-runtime.json"
+crewship_pruner_requirements: "{{ crewship_share_dir }}/pruner-requirements.txt"
+crewship_pruner_psutil_version: "{{ crewship_latest.psutil.version }}"
+crewship_pruner_requirements_text: >-
+  psutil=={{ crewship_pruner_psutil_version }}
+  {{ crewship_latest.psutil.sha256 | map('regex_replace', '^', '--hash=sha256:') | join(' ') }}
+crewship_pruner_requirements_digest: "{{ crewship_pruner_requirements_text | hash('sha256') }}"
+# The base interpreter of that virtualenv. Pinned to the distribution
+# interpreter so no managed Python is downloaded behind the operator's back.
+crewship_pruner_base_python: /usr/bin/python3
+crewship_pruner_uv_env:
+  UV_PYTHON_DOWNLOADS: never
+  UV_NO_CONFIG: "1"
+
+# --- Browser pruning --------------------------------------------------------
+# Flags confirmed by Main (owner of maintenance/chrome-autoprune.py): without
+# --apply the script neither keeps state nor prunes.
+crewship_prune_exec_args:
+  - "--apply"
+  - "--idle-seconds"
+  - "{{ crewship_cfg.browser_prune.idle_seconds }}"
+  - "--max-gap-seconds"
+  - "{{ crewship_cfg.browser_prune.max_gap_seconds }}"
+crewship_prune_timeout_seconds: 90
