@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1070 806" width="1070" height="806" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title id="t">How Crewship works</title>
-  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the agents have full control of your Mac over SSH. The secrets file can optionally come from an external Cloudflare Worker and Secrets Store, which a new host fetches it from. The server installs and calls third-party services: Anthropic and OAI model providers, npm / pnpm / bun, no-mistakes, Lavish, Sentrux and fallow, Discord and Slack clients, and Google Workspace; and, optionally, Tailscale, Photon and BlueBubbles.</desc>
+  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the agents have full control of your Mac over SSH. The secrets file can optionally come from an external Cloudflare Worker and Secrets Store, which a new host fetches it from. The server installs and calls third-party services: Anthropic and OAI npm / pnpm / bun, no-mistakes, Lavish, Sentrux and fallow, and Google Workspace; and, optionally, Tailscale. Model providers, the chat clients, Photon and BlueBubbles appear only in their own boxes.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b949e"/></marker>
   </defs>
@@ -24,16 +24,12 @@
     <path d="M890 320H824" stroke-dasharray="6 5" marker-start="url(#a)" marker-end="url(#a)"/>
     <rect x="890" y="281" width="160" height="78" rx="8" stroke="#39c5cf" stroke-dasharray="6 5"/>
     <rect x="20" y="600" width="1030" height="166" rx="14"/>
-    <rect x="32" y="636" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="236" y="636" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="440" y="636" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="644" y="636" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="848" y="636" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="32" y="700" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="236" y="700" width="190" height="52" rx="8" stroke="#39c5cf"/>
-    <rect x="440" y="700" width="190" height="52" rx="8" stroke="#39c5cf" stroke-dasharray="6 5"/>
-    <rect x="644" y="700" width="190" height="52" rx="8" stroke="#39c5cf" stroke-dasharray="6 5"/>
-    <rect x="848" y="700" width="190" height="52" rx="8" stroke="#39c5cf" stroke-dasharray="6 5"/>
+    <rect x="32" y="636" width="326" height="52" rx="8" stroke="#39c5cf"/>
+    <rect x="372" y="636" width="326" height="52" rx="8" stroke="#39c5cf"/>
+    <rect x="712" y="636" width="326" height="52" rx="8" stroke="#39c5cf"/>
+    <rect x="32" y="700" width="326" height="52" rx="8" stroke="#39c5cf"/>
+    <rect x="372" y="700" width="326" height="52" rx="8" stroke="#39c5cf"/>
+    <rect x="712" y="700" width="326" height="52" rx="8" stroke="#39c5cf" stroke-dasharray="6 5"/>
     <!-- boxes -->
     <rect x="34" y="140" width="244" height="280" rx="10"/>
     <rect x="80" y="16" width="460" height="56" rx="8" stroke="#d29922"/>
@@ -63,16 +59,12 @@
     <text x="735" y="316">Secrets file</text>
     <text x="710" y="502">Your Mac</text>
     <text x="970" y="304">Cloudflare Worker</text>
-    <text x="127" y="658">Anthropic, OAI, etc.</text>
-    <text x="331" y="658">npm / pnpm / bun</text>
+    <text x="195" y="658">npm / pnpm / bun</text>
     <text x="535" y="658">no-mistakes</text>
-    <text x="739" y="658">Lavish</text>
-    <text x="943" y="658">Sentrux, fallow</text>
-    <text x="127" y="722">Discord, Slack</text>
-    <text x="331" y="722">Google Workspace</text>
-    <text x="535" y="722">Tailscale</text>
-    <text x="739" y="722">Photon</text>
-    <text x="943" y="722">BlueBubbles</text>
+    <text x="875" y="658">Lavish</text>
+    <text x="195" y="722">Sentrux, fallow</text>
+    <text x="535" y="722">Google Workspace</text>
+    <text x="875" y="722">Tailscale</text>
   </g>
   <g fill="#9198a1" font-size="12.5" text-anchor="middle">
     <text x="310" y="60">terminal over SSH, or iMessage</text>
@@ -85,7 +77,7 @@
     <text x="505" y="217">optional</text>
     <text x="505" y="291">Discord, Slack: terminal tabs</text>
     <text x="505" y="307">used by Firstmate and agents</text>
-    <text x="150" y="525">any provider</text>
+    <text x="150" y="525">Anthropic, OAI, etc.</text>
     <text x="410" y="525">issues, pull requests, projects</text>
     <text x="735" y="197">kill block, quality gate</text>
     <text x="735" y="212">cleanup guards: optional</text>
@@ -97,16 +89,12 @@
     <text x="970" y="321">optional external store:</text>
     <text x="970" y="335">a new host fetches the</text>
     <text x="970" y="349">secrets file from it</text>
-    <text x="127" y="675">model providers</text>
-    <text x="331" y="675">omp and the agent CLIs</text>
+    <text x="195" y="675">omp and the agent CLIs</text>
     <text x="535" y="675">pull-request pipeline</text>
-    <text x="739" y="675">boards and plans</text>
-    <text x="943" y="675">quality gate</text>
-    <text x="127" y="739">chat client releases</text>
-    <text x="331" y="739">gws command line</text>
-    <text x="535" y="739">private network, optional</text>
-    <text x="739" y="739">iMessage line, optional</text>
-    <text x="943" y="739">relay on your Mac, optional</text>
+    <text x="875" y="675">boards and plans</text>
+    <text x="195" y="739">quality gate</text>
+    <text x="535" y="739">gws command line</text>
+    <text x="875" y="739">private network, optional</text>
   </g>
   <g fill="#9198a1" font-size="12.5">
     <text x="860" y="102" font-weight="600" text-anchor="end">Your server</text>
