@@ -159,6 +159,8 @@ Branch names are `type/short-description`, with a type from the list above, for 
 
 Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or the [feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form. Ask questions in the [Discussions Q&A category](https://github.com/i098/Crewship/discussions/categories/q-a) ([SUPPORT.md](.github/SUPPORT.md)).
 
+- Agents file issues with `scripts/new-issue`, which builds the body from these forms and refuses a missing required field.
+
 ## Branch rules
 
 GitHub rulesets enforce these rules, with no bypass:
