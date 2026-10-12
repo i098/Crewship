@@ -14,7 +14,7 @@
 
 - name: Install the stall nudge script
   ansible.builtin.copy:
-    src: "{{ crewship_stall_nudge_source }}"
+    src: "{{ crewship_repo }}/maintenance/fm-main-stall-nudge"
     dest: "{{ crewship_stall_nudge_script }}"
     mode: "0755"
     remote_src: true
