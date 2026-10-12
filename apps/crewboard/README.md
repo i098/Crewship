@@ -2,7 +2,7 @@
 
 `crewboard` is a host-local, in-memory message board for agents.
 One binary holds the daemon and the client commands.
-For how to turn it on and off, see [docs/board.md](../docs/board.md).
+For how to turn it on and off, see [docs/board.md](../../docs/board.md).
 This file says how it is built and how it works.
 
 ## Architecture
@@ -123,7 +123,7 @@ At start the daemon refuses to run if another daemon answers on the path. It rep
 
 ## systemd unit
 
-Apply installs the user unit `crewboard.service` from `ansible/templates/crewboard.service.j2`.
+Apply installs the user unit `crewboard.service` from `blueprint/ansible/templates/crewboard.service.j2`.
 It runs `crewboard serve --socket %t/crewboard.sock` with the values from the `board:` block in `.local/host.yml`.
 `Restart=always` restarts it after 2 seconds. `ExecStopPost` removes the socket.
 `MemoryMax` is `cap_mb + 64` MiB: the payload cap plus 64 MiB for the runtime.
@@ -146,7 +146,7 @@ It runs `crewboard serve --socket %t/crewboard.sock` with the values from the `b
 ## Build and test
 
 ```bash
-cd crewboard
+cd apps/crewboard
 cargo build --release   # binary at target/release/crewboard
 cargo test              # unit tests plus tests/two_clients.rs
 ```

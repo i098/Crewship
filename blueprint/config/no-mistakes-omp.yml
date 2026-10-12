@@ -8,7 +8,7 @@ modelRoles:
   advisor: anthropic/claude-opus-5-5:medium
 advisor:
   enabled: true
-# Same fix config/omp-crew-overlay.yml carries: with the global
+# Same fix blueprint/config/omp-crew-overlay.yml carries: with the global
 # serverSideFallback on, Anthropic rejects every advisor call with a 400.
 providers:
   anthropic:

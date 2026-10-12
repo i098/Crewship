@@ -29,7 +29,7 @@
 
 - name: Seed LazyVim in a missing or empty configuration directory
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/nvim/"
+    src: "{{ crewship_blueprint }}/config/nvim/"
     dest: "{{ crewship_cfg.home }}/.config/nvim/"
     mode: "0644"
     directory_mode: "0755"

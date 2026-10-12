@@ -2,7 +2,7 @@
 # Every key left out keeps the no-mistakes default.
 #
 # The seeded pipeline agent is omp over ACP: acpx runs `omp acp`, mapped in
-# ~/.acpx/config.json (config/acpx.json). acpx and omp both resolve from
+# ~/.acpx/config.json (blueprint/config/acpx.json). acpx and omp both resolve from
 # ~/.local/bin, which is on the daemon's PATH, so no acpx_path is set. Every
 # apply then moves it to Pi-only through omp-as-pi when the installed Pi
 # adapter is verified, so per-run --model and --effort can select gate tiers.

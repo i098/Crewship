@@ -1,6 +1,6 @@
 ---
 # Stall nudge for main Firstmate (docs/architecture.md#stall-nudge): a user
-# timer runs maintenance/fm-main-stall-nudge every minute. Each run is a fresh
+# timer runs blueprint/maintenance/fm-main-stall-nudge every minute. Each run is a fresh
 # process, so a rewritten script needs no restart.
 
 - name: Ensure the stall nudge directories
@@ -14,7 +14,7 @@
 
 - name: Install the stall nudge script
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/maintenance/fm-main-stall-nudge"
+    src: "{{ crewship_blueprint }}/maintenance/fm-main-stall-nudge"
     dest: "{{ crewship_stall_nudge_script }}"
     mode: "0755"
     remote_src: true

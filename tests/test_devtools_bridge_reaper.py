@@ -1,4 +1,4 @@
-"""fleet/doctor/devtools-bridge-reaper.sh against a fixture bridge process tree.
+"""blueprint/fleet/doctor/devtools-bridge-reaper.sh against a fixture bridge process tree.
 
 The fixture is a detached `bash <marker>` run as argv[0] `node`, so its
 command line has the shape of a real bridge, `node <path>/<marker>`. It is
@@ -52,7 +52,7 @@ class Reaper:
         self.session = self.axi / "sessions" / SESSION
         for d in (self.doctor, self.stub, self.session):
             d.mkdir(parents=True)
-        shutil.copy(ROOT / "fleet/doctor/devtools-bridge-reaper.sh", self.doctor)
+        shutil.copy(ROOT / "blueprint/fleet/doctor/devtools-bridge-reaper.sh", self.doctor)
         self.state = self.doctor / "devtools-bridge-reaper.state"
         self.mark = f"fixture-bridge-{uuid.uuid4().hex}.js"
         self.script = self.stub / self.mark

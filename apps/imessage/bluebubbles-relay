@@ -45,5 +45,5 @@ case "${1:-}" in
     no_tunnel
     echo 'Safety check passed: no public tunnel; the local API requires the password.'
     ;;
-  *) echo 'Usage: bash imessage/bluebubbles-relay prepare|check' >&2; exit 2 ;;
+  *) echo 'Usage: bash apps/imessage/bluebubbles-relay prepare|check' >&2; exit 2 ;;
 esac

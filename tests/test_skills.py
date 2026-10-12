@@ -33,7 +33,7 @@ def rule(root, kind, name, body):
 
 
 def test_install_both_sets_private_wins_and_hand_added_skills_stay(tmp_path):
-    source, home = tmp_path / "skills", tmp_path / "home"
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
     skill(source, "public", "shared", "public shared")
     skill(source, "public", "only-public", "public only")
     helper = skill(source, "private", "shared", "private shared") / "run.sh"
@@ -69,7 +69,7 @@ def test_install_both_sets_private_wins_and_hand_added_skills_stay(tmp_path):
 
 
 def test_install_rules_private_wins_and_hand_added_rules_stay(tmp_path):
-    source, home = tmp_path / "rules", tmp_path / "home"
+    source, home = tmp_path / "blueprint/rules", tmp_path / "home"
     rule(source, "public", "shared", "public shared")
     rule(source, "public", "only-public", "public only")
     rule(source, "public", "README", "not a rule")
@@ -108,15 +108,15 @@ def browser_rules_repo(tmp_path):
     script.parent.mkdir(parents=True)
     script.write_bytes((skills.REPO / "scripts/skills.py").read_bytes())
     for name in ("drive-the-browser-yourself", "fleet-browser-default-tier"):
-        rule(repo / "rules", "public", name, f"public {name}")
-        rule(repo / "rules", "private", name, f"private {name}")
-    rule(repo / "rules", "public", "always-on-skills", "general rule")
+        rule(repo / "blueprint/rules", "public", name, f"public {name}")
+        rule(repo / "blueprint/rules", "private", name, f"private {name}")
+    rule(repo / "blueprint/rules", "public", "always-on-skills", "general rule")
     return repo
 
 
 def apply_rules(repo, home, ladder):
     home.mkdir(parents=True, exist_ok=True)
-    tasks = yaml.safe_load((skills.REPO / "ansible/tasks/agents.yml").read_text())
+    tasks = yaml.safe_load((skills.REPO / "blueprint/ansible/tasks/agents.yml").read_text())
     task = next(t for t in tasks if t.get("register") == "crewship_skills_run")
     template = NativeEnvironment()
     template.filters["bool"] = bool
@@ -165,7 +165,7 @@ def test_browser_ladder_off_removes_only_owned_rules(browser_rules_repo, tmp_pat
 
 
 def test_failed_copy_still_records_what_was_installed(tmp_path, monkeypatch):
-    source, home = tmp_path / "skills", tmp_path / "home"
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
     skill(source, "public", "a", "a")
     skill(source, "public", "b", "b")
     real = skills.shutil.copytree
@@ -193,7 +193,7 @@ def git(*argv):
 
 
 def test_no_private_source_fetches_nothing_and_leaves_private_alone(tmp_path, monkeypatch):
-    source, home = tmp_path / "skills", tmp_path / "home"
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
     skill(source, "private", "mine", "mine")
     monkeypatch.setattr(skills.subprocess, "run", lambda *a, **k: pytest.fail("fetched"))
     skills.install(home, tmp_path)
@@ -202,7 +202,7 @@ def test_no_private_source_fetches_nothing_and_leaves_private_alone(tmp_path, mo
 
 
 def test_removing_private_source_removes_only_what_it_filled(tmp_path):
-    source, home, local = tmp_path / "skills", tmp_path / "home", tmp_path / "local"
+    source, home, local = tmp_path / "blueprint/skills", tmp_path / "home", tmp_path / "local"
     skill(local, ".", "filled", "filled")
     rule(local, "rules", "filled", "filled")
     skill(source, "private", "by-hand", "by hand")
@@ -212,7 +212,7 @@ def test_removing_private_source_removes_only_what_it_filled(tmp_path):
     assert result["changed"]
     assert result["installed"] == {"skills": ["by-hand"], "rules": []}
     assert not (source / "private/filled").exists()
-    assert not (tmp_path / "rules/private/filled.md").exists()
+    assert not (tmp_path / "blueprint/rules/private/filled.md").exists()
     assert not (home / RULES / "filled.md").exists()
     assert (source / "private/by-hand/SKILL.md").read_text() == "by hand"
     for root in SKILL_ROOTS:
@@ -222,13 +222,13 @@ def test_removing_private_source_removes_only_what_it_filled(tmp_path):
 
 
 def test_private_git_source_fills_private_and_installs_idempotently(tmp_path):
-    source, home, remote = tmp_path / "skills", tmp_path / "home", tmp_path / "remote"
+    source, home, remote = tmp_path / "blueprint/skills", tmp_path / "home", tmp_path / "remote"
     skill(source, "public", "shared", "public shared")
     skill(source, "private", "by-hand", "by hand")
     skill(remote, ".", "shared", "remote shared")
     skill(remote, ".", "gone-later", "remote gone")
     skill(remote, ".", "by-hand", "remote by hand")
-    rule(tmp_path / "rules", "public", "shared", "public rule")
+    rule(tmp_path / "blueprint/rules", "public", "shared", "public rule")
     rule(remote, "rules", "shared", "remote rule")
     git("init", "-q", "-b", "skills", str(remote))
     git("-C", str(remote), "add", ".")
@@ -247,7 +247,7 @@ def test_private_git_source_fills_private_and_installs_idempotently(tmp_path):
 
     assert not skills.install(home, tmp_path, url, "skills")["changed"]
 
-    # A skill that leaves the source leaves skills/private and every root.
+    # A skill that leaves the source leaves blueprint/skills/private and every root.
     git("-C", str(remote), "rm", "-rq", "gone-later")
     git("-C", str(remote), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "y")
     assert skills.install(home, tmp_path, url, "skills")["changed"]
@@ -258,7 +258,7 @@ def test_private_git_source_fills_private_and_installs_idempotently(tmp_path):
 
 
 def test_private_local_directory_source_fills_private(tmp_path):
-    source, home, local = tmp_path / "skills", tmp_path / "home", tmp_path / "local"
+    source, home, local = tmp_path / "blueprint/skills", tmp_path / "home", tmp_path / "local"
     skill(local, ".", "solo", "local solo")
     result = skills.install(home, tmp_path, str(local))
     assert result["installed"]["skills"] == ["solo"]
@@ -287,8 +287,8 @@ PRIVATE = re.compile(
 # The vendored skills (MIT) link their authors' public repositories or carry their license text.
 # Those are credits, not private details; each exemption covers only its own folder.
 VENDORED_OWNER = {
-    "skills/public/code-clarity/": "github.com/Lakr233",
-    "skills/public/pr-preview/": "sindresorhus@gmail.com",
+    "blueprint/skills/public/code-clarity/": "github.com/Lakr233",
+    "blueprint/skills/public/pr-preview/": "sindresorhus@gmail.com",
 }
 
 
@@ -298,7 +298,7 @@ def test_public_skills_and_rules_are_named_and_hold_no_private_details():
     assert not PRIVATE.search("http://127.0.0.1:9222")
     repo = Path(__file__).parents[1]
     files = [
-        p for d in ("skills/public", "rules/public") for p in (repo / d).rglob("*") if p.is_file()
+        p for d in ("blueprint/skills/public", "blueprint/rules/public") for p in (repo / d).rglob("*") if p.is_file()
     ]
     assert files
     for path in files:

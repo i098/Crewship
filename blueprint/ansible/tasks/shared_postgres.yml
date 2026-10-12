@@ -4,7 +4,7 @@
   ansible.builtin.command:
     argv:
       - /usr/bin/python3
-      - "{{ crewship_repo }}/fleet/bin/crewship-db"
+      - "{{ crewship_blueprint }}/fleet/bin/crewship-db"
       - --check-docker
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
@@ -14,7 +14,7 @@
 
 - name: Install the shared Postgres helper
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/fleet/bin/crewship-db"
+    src: "{{ crewship_blueprint }}/fleet/bin/crewship-db"
     dest: "{{ crewship_local_bin }}/crewship-db"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -26,7 +26,7 @@
 - name: Converge the shared Postgres service
   ansible.builtin.command:
     argv: >-
-      {{ ['/usr/bin/python3', crewship_repo ~ '/fleet/bin/crewship-db', '--apply']
+      {{ ['/usr/bin/python3', crewship_blueprint ~ '/fleet/bin/crewship-db', '--apply']
          + (['--check'] if ansible_check_mode else [])
          + (['--no-start'] if not (crewship_manage_services | bool) else []) }}
   become: "{{ crewship_become_target | bool }}"

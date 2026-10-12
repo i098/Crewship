@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install config/AGENTS.md as the global instructions of Claude Code, omp and Codex.
+"""Install blueprint/config/AGENTS.md as the global instructions of Claude Code, omp and Codex.
 
 The text goes to every target in TARGETS; Claude Code also gets the @RTK.md
 import when ~/.claude/RTK.md exists. A manifest records the SHA-256 of what
@@ -16,7 +16,7 @@ import os
 import time
 from pathlib import Path
 
-TEXT = Path(__file__).resolve().parents[1] / "config/AGENTS.md"
+TEXT = Path(__file__).resolve().parents[1] / "blueprint/config/AGENTS.md"
 TARGETS = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS.md")
 RTK = ".claude/RTK.md"
 MANIFEST = ".local/share/crewship/instructions.json"

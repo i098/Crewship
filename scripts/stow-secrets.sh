@@ -9,7 +9,7 @@ umask 077
 src=$HOME/super.env
 worker=fleet-secrets
 host=fleet-secrets.iterative.sh
-dir=$(cd "$(dirname "$0")/../workers/$worker" && pwd)
+dir=$(cd "$(dirname "$0")/../apps/$worker" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

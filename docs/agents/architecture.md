@@ -30,7 +30,7 @@ Use a Linux host for the native recipe. macOS and other client devices can reach
 
 ### Docker worker
 
-The Dockerfile's `worker` target is an isolated, non-root, devcontainer-style image built by the same recipe. It runs `./ship.sh launch --config containers/crewship.container.yml`, which sets `start_services: false` and `enable_linger: false` and turns off the `docker`, `tailscale`, `desktop`, `firstmate`, and `chat` profiles and the browser pruner. The image carries the agent and development toolchain and the rendered agent configs, with no systemd services, linger, or Docker-in-Docker. The devcontainer, Compose, and CI use the same image.
+The Dockerfile's `worker` target is an isolated, non-root, devcontainer-style image built by the same recipe. It runs `./ship.sh launch --config blueprint/containers/crewship.container.yml`, which sets `start_services: false` and `enable_linger: false` and turns off the `docker`, `tailscale`, `desktop`, `firstmate`, and `chat` profiles and the browser pruner. The image carries the agent and development toolchain and the rendered agent configs, with no systemd services, linger, or Docker-in-Docker. The devcontainer, Compose, and CI use the same image.
 
 ```bash
 docker pull ghcr.io/i098/crewship:latest                  # released image (or :X.Y.Z), published on each release
@@ -42,7 +42,7 @@ docker compose --profile worker --profile data up -d     # + example Postgres an
 
 ## Seeded Firstmate and OMP configuration
 
-The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`ansible/group_vars/all/agent_config.yml`) from this repository's `config/` into the Firstmate checkout's `config/`, which Firstmate gitignores. Preflight requires every source and verify requires every destination. The seeded files:
+The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`blueprint/ansible/group_vars/all/agent_config.yml`) from this repository's `blueprint/config/` into the Firstmate checkout's `config/`, which Firstmate gitignores. Preflight requires every source and verify requires every destination. The seeded files:
 
 | File | Value |
 | --- | --- |
@@ -55,7 +55,7 @@ The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`
 | `herdr-presentation-spaces` | `off`: crewmates and scouts use the flat Herdr layout, not one workspace per task. |
 | `turnend-churn-absorb` | Present (empty): the watcher may also count a pane that changed as work evidence for a bare turn end. |
 
-`config/omp.yml` seeds `~/.omp/agent/config.yml` on first write only. It holds the host's `modelRoles` (`default` is `anthropic/claude-opus-5-5:high`, `task` and `subagent` are `anthropic/claude-opus-5-5:auto`, `memory` is `anthropic/claude-haiku-5-5`, `advisor` is `anthropic/claude-opus-5-5:auto`, `smol` is `anthropic/claude-sonnet-5-5:off`, and `commit` and `tiny` are `anthropic/claude-haiku-5-5`), `tier.openai: priority`, and `retry.fallbackChains` with no `default` chain. Its `advisor` block keeps the global advisor off (`enabled: false`) with `syncBacklog: '1'`; only crews and the omp the no-mistakes daemon spawns turn it on. Crews do it through the overlay above, which also sets `syncBacklog` to `"off"`; the daemon's omp does it through its own overlay ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)). No router or gateway sits between omp and the provider.
+`blueprint/config/omp.yml` seeds `~/.omp/agent/config.yml` on first write only. It holds the host's `modelRoles` (`default` is `anthropic/claude-opus-5-5:high`, `task` and `subagent` are `anthropic/claude-opus-5-5:auto`, `memory` is `anthropic/claude-haiku-5-5`, `advisor` is `anthropic/claude-opus-5-5:auto`, `smol` is `anthropic/claude-sonnet-5-5:off`, and `commit` and `tiny` are `anthropic/claude-haiku-5-5`), `tier.openai: priority`, and `retry.fallbackChains` with no `default` chain. Its `advisor` block keeps the global advisor off (`enabled: false`) with `syncBacklog: '1'`; only crews and the omp the no-mistakes daemon spawns turn it on. Crews do it through the overlay above, which also sets `syncBacklog` to `"off"`; the daemon's omp does it through its own overlay ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)). No router or gateway sits between omp and the provider.
 
 Crews use the dispatch policy above, not the host's `modelRoles.default`.
 See [omp setup](../omp.md#what-the-recipe-sets-up) for model override merging and context configuration.
@@ -66,7 +66,7 @@ Host sizing and every auto pruner are listed in [Capacity and pruners](../capaci
 
 1. Follow [Dependencies](../dependencies.md) for tool release selection, download verification, and exceptions.
 2. Do not copy a live global package directory.
-3. Three locks stay, because they are this repository's own development environment rather than installed tools: change Python dependencies with `uv lock` and commit the lock, change `crewboard/` Rust dependencies with `cargo update` or `cargo add` and commit `crewboard/Cargo.lock` (CI builds with `--locked`), and keep each GitHub Action pinned to the commit SHA of its latest release, which `.github/dependabot.yml` advances weekly.
+3. Three locks stay, because they are this repository's own development environment rather than installed tools: change Python dependencies with `uv lock` and commit the lock, change `apps/crewboard/` Rust dependencies with `cargo update` or `cargo add` and commit `apps/crewboard/Cargo.lock` (CI builds with `--locked`), and keep each GitHub Action pinned to the commit SHA of its latest release, which `.github/dependabot.yml` advances weekly.
 4. Keep machine differences in ignored `.local/host.yml`; schema validation precedes provisioning.
 5. Do not force, stash, reset, or overwrite a modified Firstmate checkout or an unmanaged command. Resolve that conflict explicitly.
 6. Keep authentication and mutable application state outside the recipe. Provider model access must be checked on the destination account.
@@ -78,9 +78,9 @@ When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest -n auto --dist worksteal` (pytest-xdist).
 - The [shared Postgres service verification](../shared-postgres.md#verification), run beside the tests.
-- `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../herdr-patch/README.md) also runs on the operator's computer.
-- `bash config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
-- `./ship.sh inspect` for `config/default.yml` and `containers/crewship.container.yml`.
+- `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../tools/herdr-patch/README.md) also runs on the operator's computer.
+- `bash blueprint/config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
+- `./ship.sh inspect` for `blueprint/config/default.yml` and `blueprint/containers/crewship.container.yml`.
 - Audits of the Dockerfile, devcontainer, and Compose definitions (the image builds from `mirror.gcr.io/library/ubuntu:latest`, Compose services are digest-pinned, no host namespaces or socket, resource caps).
 - On code PRs, the `quality gate` job checks the committed baseline and blocks structural regressions or an unavailable verdict.
   `fallow audit` warns about changed JS/TS ([Quality gate](../omp.md#quality-gate)).
@@ -89,7 +89,7 @@ When classification succeeds and identifies code changes, CI runs these checks:
 
 The `changes` job compares the PR merge commit with its base and outputs `code=true` or `code=false`, and `scope=imessage` or `scope=all`.
 Documentation-only PRs change only root-level `README*` files, files under `docs/` or `changelog.d/`, or `*.md` files at any depth.
-Files under `skills/`, `rules/`, and `config/` count as code, including Markdown files.
+Files under `blueprint/skills/`, `blueprint/rules/`, and `blueprint/config/` count as code, including Markdown files.
 Renames check both the old and new paths.
 CI skips heavy jobs on documentation-only PRs when classification succeeds.
 PRs limited to `site/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
@@ -98,12 +98,12 @@ The `changelog fragment` job lives in `changelog.yml`, so label changes re-run o
 The required `configuration and python checks` job rejects classification failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
-A PR that changes only `imessage/` plus documentation (`scope=imessage`) runs only the iMessage tests and the core tests (changelog, instructions, README, skills) in the Python step; every other change and every push runs the whole suite.
+A PR that changes only `apps/imessage/` plus documentation (`scope=imessage`) runs only the iMessage tests and the core tests (changelog, instructions, README, skills) in the Python step; every other change and every push runs the whole suite.
 Pushes to `main` and manual runs execute heavy jobs except the PR-only quality gate.
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
-`.github/workflows/npm-publish.yml` runs when a `vX.Y.Z` GitHub release is published. It sets the version of the `crewship` npm package (`npm/`) to the tag and publishes it with npm trusted publishing: the job's OIDC token (`id-token: write`, its only other permission is `contents: read`) replaces a stored npm token, and npm adds a provenance attestation. The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment. Each publish shows under Deployments with the package page as its URL. The package holds only `npm/crewship.js`, which fetches and runs `install.sh` from the release with the same version; `tests/test_npm_package.py` fails if anything else enters the tarball.
+`.github/workflows/npm-publish.yml` runs when a `vX.Y.Z` GitHub release is published. It sets the version of the `crewship` npm package (`tools/npm/`) to the tag and publishes it with npm trusted publishing: the job's OIDC token (`id-token: write`, its only other permission is `contents: read`) replaces a stored npm token, and npm adds a provenance attestation. The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment. Each publish shows under Deployments with the package page as its URL. The package holds only `tools/npm/crewship.js`, which fetches and runs `install.sh` from the release with the same version; `tests/test_npm_package.py` fails if anything else enters the tarball.
 
 `.github/workflows/release-artifact.yml` is started by hand with a tag. It attaches `crewship-<tag>.tar.gz` (a `git archive` of the tag, built by `scripts/build-release-artifact.sh`) and its `.sha256` to the draft release of that tag, with `contents: write` as its only permission. It has no `published` trigger: releases are immutable, so assets can only be added to a draft, before it is published (see [Changelog and releases](../../CONTRIBUTING.md#changelog-and-releases)). `install.sh` installs that artifact, or the verified source archive of the tag when a release has none, instead of cloning ([Install, update and migrate](../install.md)).
 

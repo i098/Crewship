@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
-GROUP_VARS_FILES = sorted((ROOT / "ansible/group_vars/all").glob("*.yml"))
+GROUP_VARS_FILES = sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))
 GROUP_VARS_ARGS = [arg for f in GROUP_VARS_FILES for arg in ("-e", f"@{f}")]
 
 
@@ -29,7 +29,7 @@ SPEC.loader.exec_module(ship)
 
 @pytest.fixture
 def configuration():
-    return yaml.safe_load((ROOT / "config/default.yml").read_text())
+    return yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
 
 
 def test_valid_configuration_is_accepted_by_real_schema(configuration):
@@ -268,7 +268,7 @@ def test_bad_polling_window_cannot_disable_idle_accrual(configuration):
 
 def test_init_preserves_existing_local_configuration(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
-        shutil.copytree(ROOT / path, tmp_path / path)
+        shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     args = argparse.Namespace(user="coder", home="/home/coder", container=True, board=False)
     ship.initialize(args)
@@ -284,7 +284,7 @@ def test_init_preserves_existing_local_configuration(tmp_path, monkeypatch):
 
 def test_root_operator_is_rejected_before_config_is_written(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
-        shutil.copytree(ROOT / path, tmp_path / path)
+        shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="non-root"):
         ship.initialize(
@@ -437,14 +437,14 @@ def _verify_firstmate(tmp_path, origin, configured):
                     "connection": "local",
                     "gather_facts": False,
                     "tasks": [
-                        {"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/verify.yml")}
+                        {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/verify.yml")}
                     ],
                 }
             ]
         )
     )
     variables = {
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_account_ready": True,
         "crewship_become_target": False,
         "crewship_user_env": {},
@@ -507,7 +507,7 @@ def _run_agents(tmp_path, start_at, **variables):
                     "connection": "local",
                     "gather_facts": False,
                     "tasks": [
-                        {"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/agents.yml")}
+                        {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/agents.yml")}
                     ],
                     "handlers": [
                         {
@@ -586,7 +586,7 @@ def test_existing_omp_config_gets_the_status_row_keys_once(tmp_path):
 
 def test_omp_config_that_has_the_status_row_keys_is_left_alone(tmp_path):
     config = tmp_path / "config.yml"
-    seed = (ROOT / "config/omp.yml").read_text()
+    seed = (ROOT / "blueprint/config/omp.yml").read_text()
     config.write_text(seed)
     assert _ensure_status_row(tmp_path, config) == 0
     assert config.read_text() == seed
@@ -615,7 +615,7 @@ def test_absent_omp_config_is_not_created_by_the_status_row_step(tmp_path):
 
 def test_acpx_config_that_still_defaults_to_codex_gets_omp_once(tmp_path):
     config = tmp_path / "config.json"
-    seed = json.loads((ROOT / "config/acpx.json").read_text())
+    seed = json.loads((ROOT / "blueprint/config/acpx.json").read_text())
     config.write_text(json.dumps({**seed, "defaultAgent": "codex", "ttl": 900}))
     config.chmod(0o600)
     assert _ensure_acpx_default(tmp_path, config) == 1
@@ -638,7 +638,7 @@ def test_seeded_acpx_config_defaults_to_omp_and_absent_one_is_not_created(tmp_pa
     config = tmp_path / "config.json"
     assert _ensure_acpx_default(tmp_path, config) == 0
     assert not config.exists()
-    seed = (ROOT / "config/acpx.json").read_text()
+    seed = (ROOT / "blueprint/config/acpx.json").read_text()
     config.write_text(seed)
     assert _ensure_acpx_default(tmp_path, config) == 0
     assert config.read_text() == seed
@@ -666,7 +666,7 @@ def _set_pipeline_agent(tmp_path, rc):
 def test_verified_pi_adapter_moves_the_seeded_agent_to_pi_once(tmp_path):
     config = tmp_path / ".no-mistakes/config.yaml"
     config.parent.mkdir()
-    config.write_text((ROOT / "config/no-mistakes.yaml").read_text() + "log_level: info\n")
+    config.write_text((ROOT / "blueprint/config/no-mistakes.yaml").read_text() + "log_level: info\n")
     assert _set_pipeline_agent(tmp_path, rc=0) == 1
     assert yaml.safe_load(config.read_text()) == {
         **PI_AGENT,
@@ -711,7 +711,7 @@ def test_a_pin_mismatch_moves_the_agent_to_acp_omp_alone(tmp_path):
     config.write_text(yaml.safe_dump({**PI_AGENT, "agent_path_override": {"pi": "/w/omp-as-pi"}}))
     assert _set_pipeline_agent(tmp_path, rc=1) == 1
     assert yaml.safe_load(config.read_text())["agent"] == ["acp:omp"]
-    seed = (ROOT / "config/no-mistakes.yaml").read_text()
+    seed = (ROOT / "blueprint/config/no-mistakes.yaml").read_text()
     config.write_text(seed)
     assert _set_pipeline_agent(tmp_path, rc=1) == 0
     assert config.read_text() == seed
@@ -723,7 +723,7 @@ def test_an_inconclusive_adapter_check_leaves_the_agent_setting_alone(tmp_path, 
     config.parent.mkdir()
     for text in (
         yaml.safe_dump({**PI_AGENT, "agent_path_override": {"pi": "/w/omp-as-pi"}}),
-        (ROOT / "config/no-mistakes.yaml").read_text(),
+        (ROOT / "blueprint/config/no-mistakes.yaml").read_text(),
     ):
         config.write_text(text)
         assert _set_pipeline_agent(tmp_path, rc=rc) == 0
@@ -783,13 +783,13 @@ def test_a_new_chrome_devtools_mcp_release_leaves_the_managed_environment_unchan
 def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_out(tmp_path):
     profile_task = next(
         task["ansible.builtin.blockinfile"]
-        for task in yaml.safe_load((ROOT / "ansible/tasks/account.yml").read_text())
+        for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
         if "ansible.builtin.blockinfile" in task
     )
     profile = tmp_path / ".profile"
     unit = tmp_path / "herdr.service"
     variables = {
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_cfg": {
             "home": str(tmp_path),
             "workspace": str(tmp_path),
@@ -804,7 +804,7 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
     }
     modules = [
         ("ansible.builtin.template", {
-            "src": str(ROOT / "ansible/templates/herdr.service.j2"), "dest": str(unit),
+            "src": str(ROOT / "blueprint/ansible/templates/herdr.service.j2"), "dest": str(unit),
         }),
         ("ansible.builtin.blockinfile", {
             **{key: profile_task[key] for key in ("block", "marker", "create", "mode")},
@@ -926,7 +926,7 @@ def _koncreet_settings(tmp_path, tailscale, apply_user):
         "-m",
         "ansible.builtin.template",
         "-a",
-        f"src={ROOT / 'ansible/templates/koncreet.conf.j2'} dest={destination}",
+        f"src={ROOT / 'blueprint/ansible/templates/koncreet.conf.j2'} dest={destination}",
         "-e",
         json.dumps(variables),
     )
@@ -965,7 +965,7 @@ def _run_koncreet_tasks(tmp_path, digest, *flags):
     source = tmp_path / "koncreet.tar.gz"
     with tarfile.open(source, "w:gz") as archive:
         archive.add(payload, arcname="koncreet/koncreet")
-    (tmp_path / "templates").symlink_to(ROOT / "ansible/templates")
+    (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
     playbook = tmp_path / "playbook.yml"
     playbook.write_text(
         yaml.safe_dump(
@@ -975,7 +975,7 @@ def _run_koncreet_tasks(tmp_path, digest, *flags):
                     "connection": "local",
                     "gather_facts": False,
                     "tasks": [
-                        {"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/koncreet.yml")},
+                        {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/koncreet.yml")},
                         {
                             "name": "A later task",
                             "ansible.builtin.file": {
@@ -995,7 +995,7 @@ def _run_koncreet_tasks(tmp_path, digest, *flags):
         "crewship_cfg": {"user": "coder", "profiles": {"tailscale": False}},
         "crewship_latest": {"koncreet": {"version": "9.9.9"}},
         "crewship_koncreet": {"url": source.as_uri(), "sha256": digest},
-        "crewship_koncreet_patch": str(ROOT / "patches/koncreet/ubuntu-26.04.patch"),
+        "crewship_koncreet_patch": str(ROOT / "blueprint/patches/koncreet/ubuntu-26.04.patch"),
         "crewship_koncreet_prefix": str(tmp_path / "prefix"),
         "crewship_koncreet_config": str(tmp_path / "koncreet.conf"),
     }
@@ -1050,7 +1050,7 @@ def test_mac_ssh_keeps_the_existing_key_and_other_host_entries(tmp_path):
                     "connection": "local",
                     "gather_facts": True,
                     "tasks": [
-                        {"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/mac_ssh.yml")}
+                        {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/mac_ssh.yml")}
                     ],
                 }
             ]

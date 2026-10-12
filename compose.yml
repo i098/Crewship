@@ -23,7 +23,7 @@
 #                         (amd64 sha256:9c3ecc609a8087c0f11c494fefaf37a8f7bf9a967631d4a0da8967a9810be354,
 #                          REDIS_VERSION=8.10.1, created 2026-08-18)
 #
-# Copy containers/worker.env.example to .env (ignored) to override the defaults.
+# Copy blueprint/containers/worker.env.example to .env (ignored) to override the defaults.
 
 name: crewship
 
@@ -47,7 +47,7 @@ services:
     command: ["sleep", "infinity"]
     working_dir: ${CREWSHIP_WORKSPACE:-/home/coder/Dev}
     environment:
-      CREWSHIP_CONFIG: /opt/crewship/containers/crewship.container.yml
+      CREWSHIP_CONFIG: /opt/crewship/blueprint/containers/crewship.container.yml
       CREWSHIP_ROOT: /opt/crewship
     volumes:
       - workspace:${CREWSHIP_WORKSPACE:-/home/coder/Dev}

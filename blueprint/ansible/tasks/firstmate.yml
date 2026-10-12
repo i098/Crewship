@@ -1,7 +1,7 @@
 ---
 # Firstmate: a public clone that tracks the default branch `main` of
 # crewship.firstmate.url (upstream Firstmate unless .local/host.yml overrides
-# it), plus the patch layer in patches/firstmate/ and its gitignored dispatch
+# it), plus the patch layer in blueprint/patches/firstmate/ and its gitignored dispatch
 # settings.
 #
 # Every apply fetches `main` and puts the patch layer on top of it, so
@@ -15,7 +15,7 @@
 #   * a fresh clone ends on branch `main` tracking `origin/main` - never a
 #     detached HEAD, which breaks Firstmate's own git handling
 #   * main ends at `origin/main` plus one local commit per patch in
-#     patches/firstmate/, built by scripts/firstmate-patch-layer.sh. A patch
+#     blueprint/patches/firstmate/, built by scripts/firstmate-patch-layer.sh. A patch
 #     upstream already has is skipped; a patch that no longer applies stops
 #     the play and leaves the checkout as it was
 #   * an existing checkout is never force-checked-out, reset, stashed or
@@ -185,7 +185,7 @@
 
     - name: Stat the Firstmate config sources
       ansible.builtin.stat:
-        path: "{{ crewship_repo }}/config/{{ item }}"
+        path: "{{ crewship_blueprint }}/config/{{ item }}"
         get_checksum: false
       loop: "{{ crewship_firstmate_config_names }}"
       register: crewship_fm_src_stat
@@ -205,7 +205,7 @@
     - name: Write the Firstmate dispatch settings
       ansible.builtin.copy:
         # A trailing slash copies directory contents; plain files copy as-is.
-        src: "{{ crewship_repo }}/config/{{ item.0.item }}{{ '/' if item.0.stat.isdir else '' }}"
+        src: "{{ crewship_blueprint }}/config/{{ item.0.item }}{{ '/' if item.0.stat.isdir else '' }}"
         dest: "{{ crewship_firstmate_dir }}/config/{{ item.0.item }}"
         owner: "{{ crewship_cfg.user }}"
         group: "{{ crewship_group }}"

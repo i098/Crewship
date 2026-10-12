@@ -64,12 +64,12 @@ jobs:
             git diff --name-only --no-renames -z HEAD^1 HEAD > "$RUNNER_TEMP/changed-files"
             while IFS= read -r -d '' path; do
               case "$path" in
-                skills/*|rules/*|config/*) code=true scope=all; break ;;
+                blueprint/skills/*|blueprint/rules/*|blueprint/config/*) code=true scope=all; break ;;
                 README*|docs/*|changelog.d/*|*.md) ;;
                 site/*) scope=all ;;
-                # Only the iMessage bridge reads imessage/; the Python tests that cover it are
+                # Only the iMessage bridge reads apps/imessage/; the Python tests that cover it are
                 # tests/test_imessage.py and tests/test_bluebubbles_relay.py.
-                imessage/*) code=true ;;
+                apps/imessage/*) code=true ;;
                 *) code=true scope=all; break ;;
               esac
             done < "$RUNNER_TEMP/changed-files"
@@ -130,7 +130,7 @@ jobs:
       # pytest-xdist: -n auto is one worker per CPU of the runner, and worksteal lets an idle
       # worker take the tail of a busy one's queue, so the long node tests do not set the finish.
       # The Postgres smoke waits on Docker and the network, so it runs beside the tests.
-      # A pull request that changes only imessage/ runs the iMessage tests and the core
+      # A pull request that changes only apps/imessage/ runs the iMessage tests and the core
       # (changelog, instructions, README, skills); every other change and every push runs all.
       - name: Python tests and shared Postgres disposable service smoke
         env:
@@ -157,15 +157,15 @@ jobs:
 
       # Offline: a stub omp records the argv omp-as-pi builds.
       - name: omp-as-pi tests
-        run: bash config/omp-as-pi/test.sh
+        run: bash blueprint/config/omp-as-pi/test.sh
 
       - name: Validate default configuration
-        run: ./ship.sh inspect --config config/default.yml
+        run: ./ship.sh inspect --config blueprint/config/default.yml
 
       - name: Validate container configuration
-        run: ./ship.sh inspect --config containers/crewship.container.yml
+        run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
 
-  # crewboard/ is a Rust crate; its Cargo.lock stays locked like uv.lock.
+  # apps/crewboard/ is a Rust crate; its Cargo.lock stays locked like uv.lock.
   # Rust tracks its latest stable release through the runner's rustup.
   crewboard:
     name: crewboard rust checks
@@ -177,7 +177,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: crewboard
+        working-directory: apps/crewboard
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -262,7 +262,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: sentrux gate
-        run: bun config/omp-quality-gate.ts
+        run: bun blueprint/config/omp-quality-gate.ts
 
       - name: fallow audit (advisory)
         env:

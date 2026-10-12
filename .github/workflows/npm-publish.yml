@@ -1,4 +1,4 @@
-# Publishes the crewship npm package (npm/) for each published vX.Y.Z release.
+# Publishes the crewship npm package (tools/npm/) for each published vX.Y.Z release.
 #
 # npm trusted publishing: the job's GitHub OIDC token authenticates the
 # publish, so no npm token is stored, and npm adds a provenance attestation.
@@ -28,7 +28,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: npm
+        working-directory: tools/npm
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: latest
 
-      # The release PR sets npm/package.json to the release version, so the
+      # The release PR sets tools/npm/package.json to the release version, so the
       # launcher fetches the install.sh of the same release.
       - name: Check the package version matches the tag
         env:
@@ -49,7 +49,7 @@ jobs:
         run: |
           version=$(jq -r .version package.json)
           if [ "v$version" != "$TAG" ]; then
-            echo "::error title=package version::npm/package.json has $version but the release tag is $TAG; set it in the release PR"
+            echo "::error title=package version::tools/npm/package.json has $version but the release tag is $TAG; set it in the release PR"
             exit 1
           fi
 

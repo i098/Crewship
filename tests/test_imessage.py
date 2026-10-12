@@ -1,6 +1,6 @@
 """The iMessage bridge (docs/imessage.md): the send command's options and the service's pure decisions.
 
-No test talks to Photon: curl is a stand-in that records its arguments, imessage/desk.ts holds
+No test talks to Photon: curl is a stand-in that records its arguments, apps/imessage/desk.ts holds
 the decisions bridge.ts makes, free of spectrum-ts, and the outage test runs bridge.ts against a
 fake spectrum-ts whose upstream returns UNAVAILABLE.
 """
@@ -23,7 +23,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
-SEND = ROOT / "imessage/fm-imessage"
+SEND = ROOT / "apps/imessage/fm-imessage"
 
 
 def send(tmp_path, *args):
@@ -115,7 +115,7 @@ def test_image_that_cannot_be_sent_queues_nothing(tmp_path, problem):
     assert calls == []
 
 
-DESK = json.dumps(str(ROOT / "imessage/desk.ts"))
+DESK = json.dumps(str(ROOT / "apps/imessage/desk.ts"))
 
 
 def bun(code):
@@ -296,7 +296,7 @@ console.log(JSON.stringify([
     assert result == [True, False, False, False, False, False, False]
 
 
-MEMORY = json.dumps(str(ROOT / "imessage/memory.ts"))
+MEMORY = json.dumps(str(ROOT / "apps/imessage/memory.ts"))
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -727,14 +727,14 @@ def test_location_carries_the_local_header(tmp_path):
     (tmp_path / "curl").chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
     result = subprocess.run(
-        [str(ROOT / "imessage/fm-location")], capture_output=True, text=True, env=env, timeout=10
+        [str(ROOT / "apps/imessage/fm-location")], capture_output=True, text=True, env=env, timeout=10
     )
     assert result.returncode == 0
     calls = (tmp_path / "calls").read_text().splitlines()
     assert len(calls) == 1 and "-H X-Firstmate: 1" in calls[0] and calls[0].endswith("/location")
 
 
-BB = json.dumps(str(ROOT / "imessage/bluebubbles.ts"))
+BB = json.dumps(str(ROOT / "apps/imessage/bluebubbles.ts"))
 
 # Fake BlueBubbles relays: local Bun servers with the API paths bluebubbles.ts calls, no network, no real
 # password. Relays share `icloud`, the texts the Apple Account sent, as Macs on one account do. A relay can go
@@ -1273,7 +1273,7 @@ def load_ship():
     ],
 )
 def test_config_rejects_a_bridge_it_cannot_run(change, error):
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     document["crewship"]["imessage"] = {"owner": "+10000000000"}
     load_ship().validate_config(document)
     change(document["crewship"])
@@ -1294,7 +1294,7 @@ def test_config_rejects_a_bridge_it_cannot_run(change, error):
     ],
 )
 def test_config_takes_a_bluebubbles_relay_set(change):
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     relays = [{"url": "http://relay-a:1234"}, {"url": "https://relay-b/bb/", "password_env": "RELAY_B_PASSWORD"}]
     document["crewship"]["imessage"] = {
         "owner": "+10000000000",
@@ -1308,7 +1308,7 @@ def test_config_takes_a_bluebubbles_relay_set(change):
         document["crewship"]["imessage"].pop("bluebubbles")
     with pytest.raises(ValueError, match="imessage"):
         load_ship().validate_config(document)
-OUTBOX = json.dumps(str(ROOT / "imessage/outbox.ts"))
+OUTBOX = json.dumps(str(ROOT / "apps/imessage/outbox.ts"))
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -1526,7 +1526,7 @@ def fake_bridge(tmp_path):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers."""
     app, fake, state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
-    shutil.copytree(ROOT / "imessage", app, ignore=shutil.ignore_patterns("fm-*"))
+    shutil.copytree(ROOT / "apps/imessage", app, ignore=shutil.ignore_patterns("fm-*"))
     pkg = app / "node_modules/spectrum-ts"
     pkg.mkdir(parents=True)
     exports = {".": "./index.js", "./providers/imessage": "./index.js"}
@@ -1926,7 +1926,7 @@ class FallbackRig:
 
     def __init__(self, tmp_path, **env):
         self.app, self.fake, self.state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
-        shutil.copytree(ROOT / "imessage", self.app, ignore=shutil.ignore_patterns("fm-*"))
+        shutil.copytree(ROOT / "apps/imessage", self.app, ignore=shutil.ignore_patterns("fm-*"))
         pkg = self.app / "node_modules/spectrum-ts"
         pkg.mkdir(parents=True)
         exports = {".": "./index.js", "./providers/imessage": "./index.js"}
@@ -2484,7 +2484,7 @@ def test_saved_group_chat_cannot_become_a_proactive_destination(tmp_path):
         rig.close()
 
 
-IMAGE = json.dumps(str(ROOT / "imessage/image.ts"))
+IMAGE = json.dumps(str(ROOT / "apps/imessage/image.ts"))
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")

@@ -13,7 +13,7 @@
 
 - name: Seed the chat client configs that are absent
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/{{ item }}.toml"
+    src: "{{ crewship_blueprint }}/config/{{ item }}.toml"
     dest: "{{ crewship_cfg.home }}/.config/{{ item }}/config.toml"
     mode: "0644"
     force: false

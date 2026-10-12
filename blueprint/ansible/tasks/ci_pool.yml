@@ -1,7 +1,7 @@
 # CI pool (crewship.ci_pool, docs/ci-pool.md): just-in-time GitHub Actions
 # runners, one job per fresh container, sized from half of the host's CPU and memory.
 #
-# maintenance/ci-pool.py owns the slots: `apply` writes the one unit template
+# blueprint/maintenance/ci-pool.py owns the slots: `apply` writes the one unit template
 # ci-runner@.service, enables one instance per configured slot and stops and
 # cleans the slots that left the config. Every slot reads the host's gh login
 # at run time; no token is written anywhere.
@@ -20,7 +20,7 @@
 
 - name: Install the CI pool script
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/maintenance/ci-pool.py"
+    src: "{{ crewship_blueprint }}/maintenance/ci-pool.py"
     dest: "{{ crewship_local_bin }}/ci-pool.py"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -32,7 +32,7 @@
 - name: Converge the CI pool slots
   ansible.builtin.command:
     argv: >-
-      {{ ['/usr/bin/python3', crewship_repo ~ '/maintenance/ci-pool.py', 'apply']
+      {{ ['/usr/bin/python3', crewship_blueprint ~ '/maintenance/ci-pool.py', 'apply']
          + (['--check'] if ansible_check_mode else []) }}
     stdin: "{{ crewship_cfg.ci_pool | to_json }}"
   become: "{{ crewship_become_target | bool }}"

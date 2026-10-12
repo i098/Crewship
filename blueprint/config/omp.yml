@@ -3,8 +3,8 @@
 # omp - it pools several accounts of the same provider itself - so needing more
 # than one account is never a reason to reintroduce a gateway. A router,
 # gateway, or gateway-prefixed model id comes back only by explicit operator
-# decision. Keep this note in agreement with config/crew-dispatch.json.
-# See config/crew-dispatch.json for Firstmate's crewmate selection policy.
+# decision. Keep this note in agreement with blueprint/config/crew-dispatch.json.
+# See blueprint/config/crew-dispatch.json for Firstmate's crewmate selection policy.
 modelRoles:
   designer: anthropic/claude-fable-5-1
   smol: anthropic/claude-sonnet-5-5:off
@@ -19,7 +19,7 @@ modelRoles:
   subagent: anthropic/claude-opus-5-5:auto
   default: anthropic/claude-opus-5-5:high
   memory: anthropic/claude-haiku-5-5
-# Off globally on purpose: Firstmate layers config/omp-crew-overlay.yml onto
+# Off globally on purpose: Firstmate layers blueprint/config/omp-crew-overlay.yml onto
 # omp crewmate and scout launches, which turns the advisor on for crews only:
 # fable 5.1 at low thinking, syncBacklog "off" overriding the '1' below so crews
 # never wait on it and turns that land during a review batch into the next

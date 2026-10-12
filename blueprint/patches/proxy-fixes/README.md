@@ -24,7 +24,7 @@ For a new optional proxy installation in predictable user-owned locations:
 ```bash
 uv tool install 'headroom-ai==0.36.3'
 npm install --prefix "$HOME/.local/share/crewship/proxies" --save-exact 'pxpipe-proxy@0.13.1'
-python3 patches/proxy-fixes/install.py \
+python3 blueprint/patches/proxy-fixes/install.py \
   --headroom-python "$HOME/.local/share/uv/tools/headroom-ai/bin/python" \
   --pxpipe-package "$HOME/.local/share/crewship/proxies/node_modules/pxpipe-proxy" \
   --node "$(command -v node)"
@@ -49,8 +49,8 @@ The six pxpipe regression cases cover first-turn adaptive/enabled thinking, empt
 The six Headroom cases exercise both outbound-policy entrypoints, original-body protection after block removal, first-turn protection, and an unprotected compression control:
 
 ```bash
-"$HOME/.local/share/uv/tools/headroom-ai/bin/python" patches/proxy-fixes/headroom/test_preserved_thinking.py
-node patches/proxy-fixes/pxpipe/check.mjs "$HOME/.local/share/crewship/proxies/node_modules/pxpipe-proxy"
+"$HOME/.local/share/uv/tools/headroom-ai/bin/python" blueprint/patches/proxy-fixes/headroom/test_preserved_thinking.py
+node blueprint/patches/proxy-fixes/pxpipe/check.mjs "$HOME/.local/share/crewship/proxies/node_modules/pxpipe-proxy"
 ```
 
 On the source VPS, these cases failed before the fixes and passed afterward. The saved failing request then remained byte-for-byte unchanged offline. Both restarted listeners were healthy, and an isolated three-turn authenticated Fable conversation returned HTTP 200 with `preserved_thinking_context` passthrough recorded. The live arithmetic responses did not emit signed thinking blocks, so exact opaque-block replay is proven by the offline regressions, not overstated as a live signed-block test.

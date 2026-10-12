@@ -20,9 +20,9 @@ crewship_herdr_omp_integration: "{{ crewship_cfg.home }}/.omp/agent/extensions/h
 crewship_omp_as_pi_dir: "{{ crewship_cfg.home }}/.no-mistakes/omp-as-pi"
 crewship_no_mistakes_omp_overlay: "{{ crewship_cfg.home }}/.no-mistakes/omp-config.yml"
 # Stdlib-only reporter that feeds the Spaces sidebar layout, run by herdr-spaces.timer.
-crewship_herdr_spaces_source: "{{ crewship_repo }}/maintenance/herdr-spaces.py"
+crewship_herdr_spaces_source: "{{ crewship_blueprint }}/maintenance/herdr-spaces.py"
 crewship_herdr_spaces_script: "{{ crewship_local_bin }}/herdr-spaces.py"
 # btop: ~/.local/bin/btop is a launcher that picks a preset of the saved config
 # by pane size, so it also loads in a phone's 50-column pane (docs/herdr.md#btop).
-crewship_btop_launcher_source: "{{ crewship_repo }}/maintenance/btop.sh"
+crewship_btop_launcher_source: "{{ crewship_blueprint }}/maintenance/btop.sh"
 crewship_btop_config: "{{ crewship_cfg.home }}/.config/btop/btop.conf"

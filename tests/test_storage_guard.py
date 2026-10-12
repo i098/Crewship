@@ -1,4 +1,4 @@
-"""fleet/doctor/storage-guard.sh against stubbed df, du and docker.
+"""blueprint/fleet/doctor/storage-guard.sh against stubbed df, du and docker.
 
 The stubs model one 100 GiB filesystem per line of `fs` ("mount size used");
 docker's prune commands give back the GiB configured per step, so tier
@@ -56,7 +56,7 @@ class Guard:
         self.stub = tmp / "stub"
         (self.stub / "bin").mkdir(parents=True)
         self.doctor.mkdir()
-        shutil.copy(ROOT / "fleet/doctor/storage-guard.sh", self.doctor)
+        shutil.copy(ROOT / "blueprint/fleet/doctor/storage-guard.sh", self.doctor)
         self._exe(self.doctor / "notify-master.sh", 'echo "$1" >> "$STUB/alerts"')
         for name, body in STUBS.items():
             self._exe(self.stub / "bin" / name, body)

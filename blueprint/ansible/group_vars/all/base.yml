@@ -2,7 +2,7 @@
 # Crewship - native provisioning variables.
 #
 # The CLI passes the whole validated configuration document as extra vars, so
-# `crewship` (and `schema_version`) arrive from config/default.yml or
+# `crewship` (and `schema_version`) arrive from blueprint/config/default.yml or
 # .local/host.yml. Extra vars replace a variable wholesale, so the defaults of
 # the contract document are kept separately in `crewship_defaults` and merged
 # recursively into `crewship_cfg`. Task files consume `crewship_cfg.*`, which is
@@ -11,16 +11,18 @@
 # Nothing in this file may contain a secret, a token, a host identity or a
 # /home/ubuntu literal.
 
-crewship_defaults: "{{ (lookup('ansible.builtin.file', crewship_repo ~ '/config/default.yml') | from_yaml).crewship }}"
+crewship_defaults: "{{ (lookup('ansible.builtin.file', crewship_blueprint ~ '/config/default.yml') | from_yaml).crewship }}"
 
 crewship_cfg: "{{ crewship_defaults | combine(crewship | default({}, true), recursive=True) }}"
 
 # --- Repository layout (Main-owned inputs) ----------------------------------
-# Override crewship_repo if the CLI ever invokes the playbook from outside
-# the checkout.
-crewship_repo: "{{ playbook_dir | dirname }}"
+# Override crewship_repo if the CLI ever invokes the playbook outside the
+# checkout. crewship_blueprint holds the provisioning sources (config, fleet,
+# maintenance, patches, ...); apps/, tools/ and scripts/ stay under crewship_repo.
+crewship_repo: "{{ playbook_dir | dirname | dirname }}"
+crewship_blueprint: "{{ crewship_repo }}/blueprint"
 crewship_installer: "{{ crewship_repo }}/scripts/provisions.py"
-crewship_pruner_source: "{{ crewship_repo }}/maintenance/chrome-autoprune.py"
+crewship_pruner_source: "{{ crewship_blueprint }}/maintenance/chrome-autoprune.py"
 
 # Nothing is pinned: tasks/preflight.yml resolves every tool's latest release
 # once per run into crewship_latest, and that is what the run installs and
@@ -83,7 +85,7 @@ crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
 crewship_user_units: "{{ crewship_cfg.home }}/.config/systemd/user"
 crewship_firstmate_dir: "{{ crewship_cfg.workspace }}/firstmate"
 # One local commit per patch on top of origin/main (tasks/firstmate.yml).
-crewship_firstmate_patch_dir: "{{ crewship_repo }}/patches/firstmate"
+crewship_firstmate_patch_dir: "{{ crewship_blueprint }}/patches/firstmate"
 crewship_vnc_dir: "{{ crewship_cfg.home }}/.vnc"
 # Exactly one persistent Chrome profile for the VNC desktop. Never seeded,
 # copied, cloned or duplicated (docs/security.md).

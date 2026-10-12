@@ -152,11 +152,11 @@ sudo rm /usr/local/bin/herdr-patch
 rm ~/.local/bin/herdr-patch
 ```
 
-Then attach with `mosh <user>@<host> -- herdr` again. On a Crewship host, also remove the install and link tasks in `ansible/tasks/herdr.yml` and the check in `ansible/tasks/verify.yml`.
+Then attach with `mosh <user>@<host> -- herdr` again. On a Crewship host, also remove the install and link tasks in `blueprint/ansible/tasks/herdr.yml` and the check in `blueprint/ansible/tasks/verify.yml`.
 
 ## Tests
 
-[`tests/test_herdr_patch.py`](../tests/test_herdr_patch.py) runs with the rest of the suite (`uv run pytest`). CI also runs it with Python 3.9, the version that macOS ships:
+[`tests/test_herdr_patch.py`](../../tests/test_herdr_patch.py) runs with the rest of the suite (`uv run pytest`). CI also runs it with Python 3.9, the version that macOS ships:
 
 ```bash
 uvx --python 3.9 pytest tests/test_herdr_patch.py

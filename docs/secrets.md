@@ -15,7 +15,7 @@ Never paste a value from this file into a repository, issue, PR, log, or chat. C
 | Gate | Cloudflare Access app `fleet-secrets`, one policy: Service Auth for service token `fleet-secrets-fetch` | The Worker also verifies the Access JWT: issuer, audience, expiry, signature, and the token's client id. Anything else gets `403`. |
 | Fetch credential | `FLEET_SECRETS_ACCESS_CLIENT_ID`, `FLEET_SECRETS_ACCESS_CLIENT_SECRET` at the end of `~/super.env` | Expires one year after creation. |
 
-`workers/fleet-secrets/split.jq` defines the split. The Worker joins its bindings `super_env_0`, `super_env_1`, … in order and decodes them, which gives the file byte for byte.
+`apps/fleet-secrets/split.jq` defines the split. The Worker joins its bindings `super_env_0`, `super_env_1`, … in order and decodes them, which gives the file byte for byte.
 
 Limits: a secret holds at most 65,536 bytes, and an account holds at most 100 secrets during the Secrets Store beta. One chunk holds 49,152 bytes of the file, so the secret count grows by one per 48 KiB of file, not per variable. A push needs room for the old and the new chunks together, and makes that room itself when the store is full (see below).
 

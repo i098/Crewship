@@ -1,4 +1,4 @@
-"""config/omp-status-icons.ts, run under bun with a fake omp extension API.
+"""blueprint/config/omp-status-icons.ts, run under bun with a fake omp extension API.
 
 omp's `status` segment strips every escape sequence from extension statuses
 and paints the whole segment in one color, so a mode's state has to show in
@@ -52,7 +52,7 @@ def row(
     end_event="agent_end",
 ) -> str:
     """The icons row as omp's status segment shows it after the given events."""
-    ext = json.dumps(str(ROOT / "config/omp-status-icons.ts"))
+    ext = json.dumps(str(ROOT / "blueprint/config/omp-status-icons.ts"))
     ctx = f"{{ hasUI: true, cwd: {json.dumps(str(home))}, ui, getSystemPrompt: async () => {json.dumps(prompt)}, sessionManager: {{ getBranch: () => branch }} }}"
     code = f"""
 import ext from {ext};

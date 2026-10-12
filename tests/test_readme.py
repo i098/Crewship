@@ -5,8 +5,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).parents[1]
-SCHEMA = json.loads((ROOT / "schemas/crewship.schema.json").read_text())
-DEFAULT = yaml.safe_load((ROOT / "config/default.yml").read_text())
+SCHEMA = json.loads((ROOT / "blueprint/schemas/crewship.schema.json").read_text())
+DEFAULT = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
 SPEC = importlib.util.spec_from_file_location("provisions", ROOT / "scripts/provisions.py")
 provisions = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(provisions)
@@ -91,7 +91,7 @@ def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_defau
 
 
 def test_default_config_lists_the_current_defaults():
-    omp = yaml.safe_load((ROOT / "config/omp.yml").read_text())
+    omp = yaml.safe_load((ROOT / "blueprint/config/omp.yml").read_text())
     profiles = DEFAULT["crewship"]["profiles"]
     unset = [
         path.removeprefix("crewship.")
@@ -114,7 +114,7 @@ def test_default_config_lists_the_current_defaults():
     assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:high"
     assert "Opus 5.5 at high thinking runs the home" in lines["Models"]
     assert omp["advisor"]["enabled"] is False and "advisor off" in lines["Models"]
-    dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
+    dispatch = json.loads((ROOT / "blueprint/config/crew-dispatch.json").read_text())
     tiers = [[rule_use["model"] for rule_use in rule["use"]] for rule in dispatch["rules"]]
     assert tiers == [
         ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"],
@@ -127,6 +127,6 @@ def test_default_config_lists_the_current_defaults():
         "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
         "anthropic/claude-sonnet-5": ["anthropic/claude-fable-5-1", "anthropic/claude-opus-5"],
     }, "update the Fallbacks line in Default config"
-    gate = yaml.safe_load((ROOT / "config/no-mistakes-omp.yml").read_text())
+    gate = yaml.safe_load((ROOT / "blueprint/config/no-mistakes-omp.yml").read_text())
     assert gate["modelRoles"]["default"] == "anthropic/claude-sonnet-5-5:high"
     assert "Sonnet 5.5 at high thinking, and Opus 5.5 for hard work" in lines["Gates"]

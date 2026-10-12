@@ -18,7 +18,7 @@ def load(name, path):
     return module
 
 
-pool_script = load("ci_pool", "maintenance/ci-pool.py")
+pool_script = load("ci_pool", "blueprint/maintenance/ci-pool.py")
 ship = load("ship_config_ci_pool", "scripts/ship.py")
 
 POOL = {"job_cpus": 4, "job_memory_gb": 8}
@@ -241,7 +241,7 @@ def test_a_failed_apply_keeps_the_old_config_so_the_rerun_restarts_idle_slots(sl
 
 @pytest.fixture
 def configuration():
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     document["crewship"]["ci_pool"] = {
         "data_dir": "/srv/ci",
         "repos": [{"repo": "o/repo", "slots": 2, "labels": ["pool"]}],

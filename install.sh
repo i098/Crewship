@@ -11,7 +11,7 @@
 # Safe to run again: each step skips or reports no change when its work is done.
 set -euo pipefail
 
-# The same text is in npm/crewship.js; tests/test_install.py keeps the two equal.
+# The same text is in tools/npm/crewship.js; tests/test_install.py keeps the two equal.
 USAGE='Usage: crewship [update] [--container] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
@@ -105,14 +105,23 @@ fetch_release() {
 # Copies the host's own files from the current install $1 into the new tree.
 # A git install has no list of them, so every untracked file counts (caches and
 # the .venv, which uv rebuilds, excepted); a release install keeps a fixed set.
+# Before the blueprint/ layout the private skills and rules lived in skills/ and
+# rules/ at the top; both places are carried, and the old one moves to the new one.
 carry_host_files() {
   local old=$1 list=$work/carry
   if [ -d "$old/.git" ]; then
     git -C "$old" ls-files -z --others | { grep -zvE '(^|/)(\.venv|node_modules|__pycache__|\.[a-z_]*cache)(/|$)' || true; } >"$list"
   else
-    (cd "$old" && find .local skills/private rules/private -type f -print0 2>/dev/null) >"$list" || true
+    (cd "$old" && find .local skills/private rules/private blueprint/skills/private blueprint/rules/private -type f -print0 2>/dev/null) >"$list" || true
   fi
   rsync -a --ignore-existing --from0 --files-from="$list" "$old/" "$work/tree/"
+  local kind
+  for kind in skills rules; do
+    [ -d "$work/tree/$kind" ] || continue
+    mkdir -p "$work/tree/blueprint/$kind"
+    rsync -a --ignore-existing "$work/tree/$kind/" "$work/tree/blueprint/$kind/"
+    rm -rf "${work:?}/tree/$kind"
+  done
   tr '\0' '\n' <"$list" | sed 's/^/  carried /'
 }
 
@@ -154,7 +163,7 @@ main() {
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
 
-  # The cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
+  # The blueprint/cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
   local packages=(ca-certificates curl gnupg openssl git rsync tar unzip xz-utils zstd
     python3 python3-venv python3-apt python3-yaml jq procps acl sudo) missing=() package
   for package in "${packages[@]}"; do

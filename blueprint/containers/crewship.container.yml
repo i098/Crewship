@@ -1,8 +1,8 @@
 # Crewship configuration document for container builds.
 #
-# Validated by `./ship.sh inspect --config containers/crewship.container.yml`
-# against schemas/crewship.schema.json, then consumed by `./ship.sh launch` during
-# the Dockerfile `worker` stage. It differs from config/default.yml only where a
+# Validated by `./ship.sh inspect --config blueprint/containers/crewship.container.yml`
+# against blueprint/schemas/crewship.schema.json, then consumed by `./ship.sh launch` during
+# the Dockerfile `worker` stage. It differs from blueprint/config/default.yml only where a
 # container genuinely cannot host a native capability:
 #
 #   start_services: false  no systemd/D-Bus inside an ordinary container, so unit

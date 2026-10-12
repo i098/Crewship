@@ -1,6 +1,6 @@
 ---
 # Optional GitHub board (crewship.github_board, docs/github-board.md): a user
-# timer runs maintenance/github-board.py, which mirrors Firstmate work items to
+# timer runs blueprint/maintenance/github-board.py, which mirrors Firstmate work items to
 # issues and a Project with the host's gh login. No token is written anywhere.
 # Without the key, every apply stops and removes the timer, the unit and the
 # script, so the host makes no GitHub calls for the board.
@@ -19,7 +19,7 @@
 
     - name: Install the GitHub board script
       ansible.builtin.copy:
-        src: "{{ crewship_repo }}/maintenance/github-board.py"
+        src: "{{ crewship_blueprint }}/maintenance/github-board.py"
         dest: "{{ crewship_local_bin }}/github-board.py"
         mode: "0755"
         remote_src: true

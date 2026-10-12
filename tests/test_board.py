@@ -20,13 +20,13 @@ BOARD = {"history": 128, "cap_mb": 32, "max_msg_kb": 16}
 
 @pytest.fixture
 def configuration():
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     document["crewship"]["board"] = dict(BOARD)
     return document
 
 
 def test_the_defaults_leave_the_board_off():
-    assert "board" not in yaml.safe_load((ROOT / "config/default.yml").read_text())["crewship"]
+    assert "board" not in yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())["crewship"]
 
 
 @pytest.mark.parametrize("block", [{}, BOARD])
@@ -53,7 +53,7 @@ def test_the_board_needs_firstmate_and_cargo(configuration, profile):
 
 def test_dock_board_writes_the_block(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
-        shutil.copytree(ROOT / path, tmp_path / path)
+        shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, board=True))
     assert ship.load_config(tmp_path / ".local/host.yml")["crewship"]["board"] == {}
@@ -69,13 +69,13 @@ mkdir -p "$5/release" && printf '#!/bin/sh\\n' > "$5/release/crewboard"
 def _apply(tmp_path, home, board, check=False):
     playbook = tmp_path / "playbook.yml"
     if not playbook.exists():
-        (tmp_path / "templates").symlink_to(ROOT / "ansible/templates")
+        (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
         playbook.write_text(yaml.safe_dump([{
             "hosts": "localhost",
             "connection": "local",
             "gather_facts": False,
             "environment": {"HOME": str(home)},
-            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/board.yml")}],
+            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/board.yml")}],
             "handlers": [{"name": name, "ansible.builtin.debug": {"msg": name}, "listen": name}
                          for name in ("reload user systemd", "restart crewboard")],
         }]))
@@ -87,7 +87,7 @@ def _apply(tmp_path, home, board, check=False):
         "crewship_local_bin": str(home / ".local/bin"),
         "crewship_user_units": str(home / ".config/systemd/user"),
         "crewship_board_dir": str(home / ".local/share/crewship/crewboard"),
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_manage_services": False,
         "crewship_user_systemd_env": {},
     }

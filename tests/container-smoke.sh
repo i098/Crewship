@@ -146,7 +146,7 @@ CREWSHIP_USER_EXPECTED=${CREWSHIP_USER:-coder}
 CREWSHIP_HOME_EXPECTED=${CREWSHIP_HOME:-/home/coder}
 CREWSHIP_WORKSPACE_EXPECTED=${CREWSHIP_WORKSPACE:-${CREWSHIP_HOME_EXPECTED}/Dev}
 CF_ROOT=${CREWSHIP_ROOT:-/opt/crewship}
-CF_CONFIG=${CREWSHIP_CONFIG:-${CF_ROOT}/containers/crewship.container.yml}
+CF_CONFIG=${CREWSHIP_CONFIG:-${CF_ROOT}/blueprint/containers/crewship.container.yml}
 
 CHECKS_TOTAL=0
 CHECKS_RUN=0
@@ -429,7 +429,7 @@ check_herdr_config() {
 
     # ...and the values it accepted must be the ones the Crewship document asks
     # for, so a silently ignored key cannot pass as "configured".
-    cf_python - "${cfg}" "${CF_ROOT}/config/default.yml" "${CF_CONFIG}" <<'PY'
+    cf_python - "${cfg}" "${CF_ROOT}/blueprint/config/default.yml" "${CF_CONFIG}" <<'PY'
 import sys
 import tomllib
 
@@ -713,12 +713,12 @@ check_ansible_second_pass_idempotent() {
 }
 
 # A host installed before the Crewship rename. The old name comes from the
-# migration table in ansible/tasks/rename.yml, so no path is listed twice.
+# migration table in blueprint/ansible/tasks/rename.yml, so no path is listed twice.
 # ansible-second-pass runs next and proves the second apply changes nothing.
 check_rename_migration() {
     local old units share state out rc link path renamed unit bridge bridge_pid other_pid
     old=$(cf_python -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))[0]["vars"]["crewship_renamed_word"])' \
-        "${CF_ROOT}/ansible/tasks/rename.yml") || fail "cannot read the old name from ansible/tasks/rename.yml"
+        "${CF_ROOT}/blueprint/ansible/tasks/rename.yml") || fail "cannot read the old name from blueprint/ansible/tasks/rename.yml"
     units="${HOME}/.config/systemd/user"
     share="${HOME}/.local/share"
     state="${HOME}/.local/state"

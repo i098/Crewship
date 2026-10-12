@@ -60,7 +60,7 @@
 - name: Merge shipped overrides into omp models
   vars:
     current: "{{ crewship_omp_models_parsed.stdout | default('null') | from_json | default({}, true) }}"
-    overrides: "{{ lookup('ansible.builtin.file', crewship_repo ~ '/config/omp-models.yml') | from_yaml }}"
+    overrides: "{{ lookup('ansible.builtin.file', crewship_blueprint ~ '/config/omp-models.yml') | from_yaml }}"
     wanted: "{{ current | combine(overrides, recursive=true) }}"
   ansible.builtin.copy:
     content: "{{ wanted | to_nice_json(indent=2, sort_keys=false) }}"

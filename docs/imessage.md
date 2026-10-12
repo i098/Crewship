@@ -20,14 +20,14 @@ When the owner edits a text on the Photon line, the service files a new note, `[
 
 If the desk fails or times out after 45 seconds, the service sends nothing: Firstmate has the note. The service appends the outcome of each desk turn (time, message id, `skip`, `react <emoji>`, or the reply text) to `~/.local/state/fm-imessage/desk.log`, which is private to the account, so Firstmate can read what the desk did.
 
-The desk's system prompt is `deskPrompt` in `imessage/desk.ts`. The owner's name and the two model names come from the config.
+The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
 
 The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, the newest of them is his latest text again, so replies, tapbacks, and typing still go to the right text. A file from before the time was kept counts as the oldest.
 The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
 
 ## Upstream outages
 
-The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503. The service keeps every message through such an outage. The code is `imessage/outbox.ts`.
+The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503. The service keeps every message through such an outage. The code is `apps/imessage/outbox.ts`.
 
 - **The outbox.** Each send and tapback goes to `~/.local/state/fm-imessage/outbox/` first, as one file. This covers the answers of Firstmate, the desk's text and tapback, and the "firstmate did not get that" reply, so they all keep one order. The service writes the file to a temporary name, syncs it to disk, and renames it. The file name is a sequence number that only goes up. The service answers `fm-imessage` only after the file is on disk. A desk message that waited out an outage is still sent, late.
 - **Delivery.** One loop sends the oldest file, then deletes it.
@@ -45,7 +45,7 @@ Only an item that is provably bad leaves the queue: a message or an attachment t
 
 ## Desk memory
 
-The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `imessage/memory.ts`.
+The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `apps/imessage/memory.ts`.
 
 - **The log.** The service appends one record for each text from the owner, each send and tapback from Firstmate, and each desk text and tapback. The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`. The service never edits or deletes a record.
 - **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
@@ -114,7 +114,7 @@ A relay is a Mac that runs [BlueBubbles server](https://bluebubbles.app) and is 
 3. Disconnect the Mac from all networks, then run this command from the repository:
 
    ```bash
-   bash imessage/bluebubbles-relay prepare
+   bash apps/imessage/bluebubbles-relay prepare
    ```
 
    The command creates `bluebubbles.yml` in the account's home directory with a random password and `proxy_service: "lan-url"` (all tunnels off).
@@ -131,7 +131,7 @@ A relay is a Mac that runs [BlueBubbles server](https://bluebubbles.app) and is 
    Read the password from `bluebubbles.yml`, then run this one-command check and enter the password at its hidden prompt:
 
    ```bash
-   bash imessage/bluebubbles-relay check
+   bash apps/imessage/bluebubbles-relay check
    ```
 
    The check requires no `cloudflared`, `ngrok`, or `zrok` process.

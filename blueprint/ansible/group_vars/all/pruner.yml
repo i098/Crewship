@@ -30,7 +30,7 @@ crewship_pruner_uv_env:
   UV_NO_CONFIG: "1"
 
 # --- Browser pruning --------------------------------------------------------
-# Flags confirmed by Main (owner of maintenance/chrome-autoprune.py): without
+# Flags confirmed by Main (owner of blueprint/maintenance/chrome-autoprune.py): without
 # --apply the script neither keeps state nor prunes.
 crewship_prune_exec_args:
   - "--apply"

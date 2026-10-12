@@ -5,7 +5,7 @@
 #   * no systemd, no user manager, no `loginctl enable-linger`
 #   * no SSH server, no Tailscale daemon, no XFCE/TigerVNC/noVNC desktop
 #   * no host Docker socket, no host PID/network namespace, no credential binds
-# Those live only on a real host provisioned by ansible/** with
+# Those live only on a real host provisioned by blueprint/ansible/** with
 # crewship.start_services=true. Inside this image the Crewship configuration sets
 # start_services=false and disables the docker/tailscale/desktop profiles, so the
 # playbook performs file/tool convergence only.
@@ -100,7 +100,7 @@ RUN set -eux; \
     # Ansible become for the unprivileged Crewship user. The container publishes no
     # ports by default, mounts no host socket and holds no host credentials, so the
     # blast radius of this sudoers entry is the container itself. A real host keeps
-    # its own sudo policy; this file is never applied by ansible/**.
+    # its own sudo policy; this file is never applied by blueprint/ansible/**.
     printf '%s ALL=(ALL) NOPASSWD:ALL\n' "${CREWSHIP_USER}" > /etc/sudoers.d/90-crewship; \
     chmod 0440 /etc/sudoers.d/90-crewship; \
     visudo -cf /etc/sudoers.d/90-crewship
@@ -122,7 +122,7 @@ FROM base AS worker
 ARG CREWSHIP_USER=coder
 ARG CREWSHIP_HOME=/home/coder
 ARG CREWSHIP_WORKSPACE=/home/coder/Dev
-ARG CREWSHIP_CONFIG_FILE=containers/crewship.container.yml
+ARG CREWSHIP_CONFIG_FILE=blueprint/containers/crewship.container.yml
 
 COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} . /opt/crewship
 
@@ -150,7 +150,7 @@ RUN set -eux; ./ship.sh inspect --config "${CREWSHIP_CONFIG_FILE}"
 # A valid document is not automatically the right document: this guard parses it
 # and compares it with the live image account, then refuses any capability an
 # ordinary container cannot host.
-RUN set -eux; uv run --project . --locked python containers/assert-image-config.py "${CREWSHIP_CONFIG_FILE}"
+RUN set -eux; uv run --project . --locked python blueprint/containers/assert-image-config.py "${CREWSHIP_CONFIG_FILE}"
 
 # The real convergence run. `launch` installs the latest, checksum-verified
 # agent and development toolchain (the three omp marketplace plugins are the one

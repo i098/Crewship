@@ -19,7 +19,7 @@ Download and checks happen in a temporary directory first; a failure leaves the 
 
 Run `npx crewship update` (it takes the newest release, whatever the version of the npm package), or run the installer again: `npx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
 
-- copies the host's own files into it: `.local/` (including `host.yml`), `skills/private/` and `rules/private/`;
+- copies the host's own files into it: `.local/` (including `host.yml`), `blueprint/skills/private/` and `blueprint/rules/private/`; a release from before the `blueprint/` folder kept the private files in `skills/private/` and `rules/private/`, and the installer moves them to the new place;
 - switches `~/Crewship` to the new release in one step (`mv -T` of a new symlink);
 - removes the release it replaced, after the switch worked.
 

@@ -1,4 +1,4 @@
-// Installed by Crewship from config/omp-quality-gate.ts; `./ship.sh launch`
+// Installed by Crewship from blueprint/config/omp-quality-gate.ts; `./ship.sh launch`
 // overwrites it. The structural and code-health gate at the end of every
 // agent turn (docs/omp.md#quality-gate):
 //   - Blocking: in a git repository with .sentrux/baseline.json, a turn that
@@ -12,7 +12,7 @@
 //     (when package.json or tsconfig.json exists) run in the background. A
 //     failing check is shown to the agent at the start of its next prompt.
 // A missing tool, no baseline, a timeout or unparseable output never blocks.
-// `bun config/omp-quality-gate.ts` runs the blocking check once in the current
+// `bun blueprint/config/omp-quality-gate.ts` runs the blocking check once in the current
 // directory and exits 1 on a block (the CI job in .github/workflows/ci.yml).
 // That entry point fails closed: a missing baseline or sentrux, a timeout or
 // no parseable verdict also exits 1, naming the cause.

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[1] / "herdr-patch" / "herdr-patch"
+SCRIPT = Path(__file__).parents[1] / "tools/herdr-patch/herdr-patch"
 loader = importlib.machinery.SourceFileLoader("herdr_patch", str(SCRIPT))
 spec = importlib.util.spec_from_loader("herdr_patch", loader)
 mosh = importlib.util.module_from_spec(spec)

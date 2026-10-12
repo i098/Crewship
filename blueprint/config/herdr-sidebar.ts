@@ -1,4 +1,4 @@
-// Installed by Crewship from config/herdr-sidebar.ts; `./ship.sh launch`
+// Installed by Crewship from blueprint/config/herdr-sidebar.ts; `./ship.sh launch`
 // overwrites it. Feeds the Herdr Agents sidebar layout described in
 // docs/herdr.md:
 //   - terminal title: the bare session topic, without omp's "π" and spinner;
@@ -39,7 +39,7 @@ export function titleFor(topic: string): string {
   return (taskId ? "└ " : "") + topic;
 }
 
-// Same mapping as maintenance/herdr-spaces.py short_name; "" means none.
+// Same mapping as blueprint/maintenance/herdr-spaces.py short_name; "" means none.
 export function shortName(label = ""): string {
   if (label.includes("-afk-daemon-")) return "☾ afk";
   if (label.startsWith("└")) return label.split(" · ")[0];

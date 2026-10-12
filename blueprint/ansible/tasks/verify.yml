@@ -458,7 +458,7 @@
           Firstmate in {{ crewship_firstmate_dir }} is on main at
           {{ crewship_verify_fm_head.stdout | trim }}: {{ crewship_firstmate_target }},
           the revision origin/main of {{ crewship_cfg.firstmate.url }} resolved to
-          during this run, plus the patch layer in patches/firstmate/.
+          during this run, plus the patch layer in blueprint/patches/firstmate/.
       when: crewship_cfg.profiles.firstmate | bool
 
     # --- runtime state, only where services are managed ---------------------

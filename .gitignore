@@ -27,11 +27,11 @@ artifacts/
 .claude/
 .codex/
 .ssh/
-# Private skills and rules stay on the host (skills/private/README.md, rules/private/README.md).
-skills/private/*
-!skills/private/README.md
-rules/private/*
-!rules/private/README.md
+# Private skills and rules stay on the host (blueprint/skills/private/README.md, blueprint/rules/private/README.md).
+blueprint/skills/private/*
+!blueprint/skills/private/README.md
+blueprint/rules/private/*
+!blueprint/rules/private/README.md
 target/
 pr-body.md
 .lavish/

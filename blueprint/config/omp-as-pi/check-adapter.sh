@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks that the pi adapter sources of one no-mistakes release still match the
 # sources omp-as-pi was proven against (no-mistakes v1.85.3).
-# Usage: check-adapter.sh <tag>   (ansible/tasks/agents.yml runs it on every apply)
+# Usage: check-adapter.sh <tag>   (blueprint/ansible/tasks/agents.yml runs it on every apply)
 # Exit 0: every source matches its pin.
 # Exit 1: a source differs from its pin, or is gone from the tag (HTTP 404); the
 #         adapter moved, so omp-as-pi must be re-proven against this release.

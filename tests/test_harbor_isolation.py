@@ -47,8 +47,9 @@ def test_harbor_never_reaches_an_image_or_a_host():
     assert [p for p in HARBOR if not _docker_excludes(p, patterns)] == []
 
     # Hosts: the playbook copies named paths out of the checkout, never the checkout itself.
-    variables = {k: v for f in sorted((ROOT / "ansible/group_vars/all").glob("*.yml")) for k, v in yaml.safe_load(f.read_text()).items()}
+    variables = {k: v for f in sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml")) for k, v in yaml.safe_load(f.read_text()).items()}
     variables["crewship_repo"] = "REPO"
+    variables["crewship_blueprint"] = "REPO/blueprint"
 
     def expand(value):
         for _ in range(5):
@@ -61,7 +62,7 @@ def test_harbor_never_reaches_an_image_or_a_host():
 
     sources = [
         expand(src)
-        for task_file in sorted((ROOT / "ansible").rglob("*.yml"))
+        for task_file in sorted((ROOT / "blueprint/ansible").rglob("*.yml"))
         for src in _ansible_sources(yaml.safe_load(task_file.read_text()))
     ]
     from_checkout = [s[len("REPO") :].strip("/") for s in sources if s.startswith("REPO")]

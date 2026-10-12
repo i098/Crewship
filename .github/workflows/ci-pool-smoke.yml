@@ -57,10 +57,10 @@ jobs:
         run: uvx --python 3.9 pytest tests/test_herdr_patch.py
 
       - name: omp-as-pi tests
-        run: bash config/omp-as-pi/test.sh
+        run: bash blueprint/config/omp-as-pi/test.sh
 
       - name: Validate default configuration
-        run: ./ship.sh inspect --config config/default.yml
+        run: ./ship.sh inspect --config blueprint/config/default.yml
 
       - name: Validate container configuration
-        run: ./ship.sh inspect --config containers/crewship.container.yml
+        run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml

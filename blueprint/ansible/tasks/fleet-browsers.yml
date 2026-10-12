@@ -1,7 +1,7 @@
 ---
 # Fleet browsers: obscura -> chrome -> vnc tier ladder, shared session jar.
 # profiles.fleet_browsers or profiles.fleet_guards turns it on.
-# docs/fleet-guards.md owns the design; fleet/browsers/fleet-browser owns the
+# docs/fleet-guards.md owns the design; blueprint/fleet/browsers/fleet-browser owns the
 # runtime. The obscura tier needs its latest binary + unit and the vnc tier its
 # apt packages; chrome and vnc are started on demand by the operator or the
 # fleet-browser CLI and gc'd after idle_timeout_min. The Herdr unit carries

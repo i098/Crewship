@@ -1,4 +1,4 @@
-"""fleet/doctor/docker-guard.sh against a stubbed docker.
+"""blueprint/fleet/doctor/docker-guard.sh against a stubbed docker.
 
 The stub serves `docker inspect` lines from a fixture file, one container per
 line in the guard's own format, and records every call, so the selection rules
@@ -49,7 +49,7 @@ class Guard:
         self.stub = tmp / "stub"
         (self.stub / "bin").mkdir(parents=True)
         self.doctor.mkdir()
-        shutil.copy(ROOT / "fleet/doctor/docker-guard.sh", self.doctor)
+        shutil.copy(ROOT / "blueprint/fleet/doctor/docker-guard.sh", self.doctor)
         for path, body in (
             (self.stub / "bin/docker", DOCKER),
             (self.doctor / "notify-master.sh", 'echo "$1" >> "$STUB/alerts"'),

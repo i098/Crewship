@@ -1,4 +1,4 @@
-"""config/omp-no-pattern-kill.ts, run under bun: which commands it blocks."""
+"""blueprint/config/omp-no-pattern-kill.ts, run under bun: which commands it blocks."""
 
 import json
 import shutil
@@ -27,7 +27,7 @@ ALLOWED = [
 
 
 def blocked(tool: str, command: str) -> bool:
-    ext = json.dumps(str(ROOT / "config/omp-no-pattern-kill.ts"))
+    ext = json.dumps(str(ROOT / "blueprint/config/omp-no-pattern-kill.ts"))
     code = f"""
 import ext from {ext};
 let handler;

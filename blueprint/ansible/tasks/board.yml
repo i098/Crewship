@@ -1,10 +1,10 @@
 ---
-# Optional crew board (crewship.board, docs/board.md): builds crewboard/ with
+# Optional crew board (crewship.board, docs/board.md): builds apps/crewboard/ with
 # cargo and runs `crewboard serve` as a user service on %t/crewboard.sock.
 # Without the key, every apply stops and removes the service, the binary and
 # the build directory, so turning the board off is one apply.
 #
-#   * the build runs from a copy of crewboard/ under the account's home, and
+#   * the build runs from a copy of apps/crewboard/ under the account's home, and
 #     only when the source checksum differs from the one recorded after the
 #     last good build, so a second apply reports changed=0
 #   * cargo comes from the development profile (validate_config enforces it)
@@ -24,7 +24,7 @@
 
     - name: Copy the crew board source
       ansible.builtin.copy:
-        src: "{{ crewship_repo }}/crewboard/{{ item }}"
+        src: "{{ crewship_repo }}/apps/crewboard/{{ item }}"
         dest: "{{ crewship_board_dir }}/source/"
         mode: preserve
         remote_src: true
@@ -36,7 +36,7 @@
           set -o pipefail &&
           find Cargo.toml Cargo.lock src -type f -print0 | sort -z
           | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
-        chdir: "{{ crewship_repo }}/crewboard"
+        chdir: "{{ crewship_repo }}/apps/crewboard"
         executable: /bin/bash
       register: crewship_board_source
       changed_when: false

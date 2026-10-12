@@ -55,7 +55,7 @@ GLYPH = re.compile(r"([⚑▶◷⎇✎]) ")
 
 
 def short_name(label: str) -> str:
-    """Same mapping as config/herdr-sidebar.ts shortName; "" means none."""
+    """Same mapping as blueprint/config/herdr-sidebar.ts shortName; "" means none."""
     if "-afk-daemon-" in label:
         return "☾ afk"
     if label.startswith("└"):

@@ -19,8 +19,8 @@ Apply writes each config file one time, when the file does not exist:
 
 | File | Source | Setting |
 | --- | --- | --- |
-| `~/.config/concord/config.toml` | [`config/concord.toml`](../config/concord.toml) | `[display] image_protocol = "kitty"` |
-| `~/.config/slk/config.toml` | [`config/slk.toml`](../config/slk.toml) | `[appearance] image_protocol = "kitty"` |
+| `~/.config/concord/config.toml` | [`blueprint/config/concord.toml`](../blueprint/config/concord.toml) | `[display] image_protocol = "kitty"` |
+| `~/.config/slk/config.toml` | [`blueprint/config/slk.toml`](../blueprint/config/slk.toml) | `[appearance] image_protocol = "kitty"` |
 
 After that, the client owns the file, and apply does not change it. slk adds a `[workspaces.<name>]` block for each workspace that you sign in to. These blocks belong to the operator and stay out of this repository. To get the recipe settings again, remove the file and run apply.
 

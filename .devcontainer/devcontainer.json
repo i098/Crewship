@@ -4,11 +4,11 @@
   // Same Dockerfile target as compose and CI: an isolated non-root container with
   // the latest, checksum-verified agent/development toolchain (the three omp
   // marketplace plugins are the one unverified exception) already converged by
-  // `./ship.sh launch --config containers/crewship.container.yml`.
+  // `./ship.sh launch --config blueprint/containers/crewship.container.yml`.
   //
   // Not provided, by design: systemd, user-manager linger, SSH server, Tailscale
   // and the XFCE/TigerVNC/noVNC desktop. Those are native host capabilities
-  // provisioned by ansible/**.
+  // provisioned by blueprint/ansible/**.
   "name": "Crewship worker",
   "build": {
     "context": "..",
@@ -47,7 +47,7 @@
 
   "containerEnv": {
     "CREWSHIP_ROOT": "/opt/crewship",
-    "CREWSHIP_CONFIG": "/opt/crewship/containers/crewship.container.yml"
+    "CREWSHIP_CONFIG": "/opt/crewship/blueprint/containers/crewship.container.yml"
   },
 
   // Version probes only: no agent login, no first-run profile creation, no

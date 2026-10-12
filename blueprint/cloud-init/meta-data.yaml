@@ -5,8 +5,8 @@
 # `meta-data` next to `user-data`. Clouds and hypervisors that supply their
 # own metadata service ignore this file entirely - paste only user-data there.
 #
-#   cp cloud-init/meta-data.yaml seed/meta-data
-#   cp cloud-init/user-data.yaml seed/user-data
+#   cp blueprint/cloud-init/meta-data.yaml seed/meta-data
+#   cp blueprint/cloud-init/user-data.yaml seed/user-data
 #   genisoimage -output seed.iso -volid CIDATA -joliet -rock seed/
 #
 # instance-id identifies this deployment to cloud-init: changing it makes

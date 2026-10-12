@@ -23,7 +23,7 @@ SCENE = {
     "docs/dependencies.md": ("hold", "The cargo hold"),
     "docs/fleet-guards.md": ("lantern", "The bow lantern"),
     "docs/herdr.md": ("nest", "The crow's nest"),
-    "herdr-patch/README.md": ("spyglass", "The spyglass"),
+    "tools/herdr-patch/README.md": ("spyglass", "The spyglass"),
     "docs/omp.md": ("mast", "The mast"),
     "docs/chat.md": ("antenna", "The radio mast"),
     "docs/imessage.md": ("bell", "The ship's bell"),

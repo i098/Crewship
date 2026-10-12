@@ -1,12 +1,12 @@
 ---
 # --- Fleet guards -----------------------------------------------------------
-# Sources live under fleet/. Installed files stay under the account's home.
+# Sources live under blueprint/fleet/. Installed files stay under the account's home.
 # Disabling a profile stops managing its files and units without removing them.
-crewship_fleet_sources: "{{ crewship_repo }}/fleet"
+crewship_fleet_sources: "{{ crewship_blueprint }}/fleet"
 crewship_fleet_dir: "{{ crewship_cfg.home }}/oss-fleet"
 crewship_fleet_doctor_dir: "{{ crewship_fleet_dir }}/doctor"
 
-# Storage guard (fleet/doctor/storage-guard.sh, every 5 min). Use% of the
+# Storage guard (blueprint/fleet/doctor/storage-guard.sh, every 5 min). Use% of the
 # filesystems holding /, /var/log, the home and Docker's data root: WARN alerts
 # once per episode, re-armed below WARN - hysteresis; CRIT prunes build cache,
 # dangling images and unused images created more than image_age_hours ago

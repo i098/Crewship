@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 SPEC = importlib.util.spec_from_file_location(
-    "pr_preview", Path(__file__).parents[1] / "skills/public/pr-preview/pr_preview.py"
+    "pr_preview", Path(__file__).parents[1] / "blueprint/skills/public/pr-preview/pr_preview.py"
 )
 pr_preview = importlib.util.module_from_spec(SPEC)
 # The public-skill privacy scan reads every file in the skill folder: leave no .pyc there.

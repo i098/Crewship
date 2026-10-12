@@ -3,7 +3,7 @@
 # self-hosted BlueBubbles relays (docs/imessage.md). Runs only when
 # crewship.imessage is set, which belongs in .local/host.yml only.
 #
-#   * the service runs from a copy of imessage/ under the account's home, with
+#   * the service runs from a copy of apps/imessage/ under the account's home, with
 #     the latest spectrum-ts, so it keeps working without the checkout
 #   * the Photon project id and secret, or the relay passwords, are read from
 #     ~/super.env when the unit starts; they are never written by this playbook
@@ -21,7 +21,7 @@
 
 - name: Install the iMessage bridge service
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/imessage/{{ item }}"
+    src: "{{ crewship_repo }}/apps/imessage/{{ item }}"
     dest: "{{ crewship_imessage_dir }}/{{ item }}"
     mode: "0644"
     remote_src: true
@@ -30,7 +30,7 @@
 
 - name: Install the iMessage commands
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/imessage/{{ item }}"
+    src: "{{ crewship_repo }}/apps/imessage/{{ item }}"
     dest: "{{ crewship_local_bin }}/{{ item }}"
     mode: "0755"
     remote_src: true

@@ -22,10 +22,10 @@
 # How to use it
 #   Provider "user data" field: paste this file's contents.
 #   NoCloud seed (ISO or vfat labelled CIDATA), filenames must be exact:
-#     cp cloud-init/user-data.yaml seed/user-data
-#     cp cloud-init/meta-data.yaml seed/meta-data
+#     cp blueprint/cloud-init/user-data.yaml seed/user-data
+#     cp blueprint/cloud-init/meta-data.yaml seed/meta-data
 #   Local re-run for testing on a disposable machine:
-#     sudo cloud-init schema --config-file cloud-init/user-data.yaml
+#     sudo cloud-init schema --config-file blueprint/cloud-init/user-data.yaml
 #
 # After first boot, as the account that will own Crewship:
 #   git clone <your private remote> ~/Dev/Crewship

@@ -62,7 +62,7 @@
 # The PR-review gate wrapper; it runs the ponytail plugin's own prompt on omp.
 - name: Install ponytail-review
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/maintenance/ponytail-review"
+    src: "{{ crewship_blueprint }}/maintenance/ponytail-review"
     dest: "{{ crewship_local_bin }}/ponytail-review"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -70,10 +70,10 @@
     remote_src: true
   become: true
 
-# skills/public and skills/private for omp and Claude Code, and rules/public and
-# rules/private for omp (docs/omp.md#skills, docs/omp.md#rules). With
-# skills.private_source set, the installer first fills skills/private and
-# rules/private from it, signed in as the account's own git and GitHub login.
+# blueprint/skills/public and blueprint/skills/private for omp and Claude Code, and blueprint/rules/public and
+# blueprint/rules/private for omp (docs/omp.md#skills, docs/omp.md#rules). With
+# skills.private_source set, the installer first fills blueprint/skills/private and
+# blueprint/rules/private from it, signed in as the account's own git and GitHub login.
 # It replaces or removes only the items its manifest records, and prints one
 # JSON object whose `changed` is the only changed signal.
 - name: Install the Crewship skills for omp and Claude Code, and its omp rules
@@ -92,7 +92,7 @@
   changed_when: (crewship_skills_run.stdout_lines | last | from_json).changed | bool
   when: not ansible_check_mode
 
-# config/AGENTS.md as ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md and
+# blueprint/config/AGENTS.md as ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md and
 # ~/.codex/AGENTS.md (docs/omp.md#global-instructions). A file the user changed
 # since the last apply is moved to a timestamped .bak beside it first.
 - name: Install the global agent instructions
@@ -125,7 +125,7 @@
 
 - name: Install the Herdr sidebar omp extension
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/herdr-sidebar.ts"
+    src: "{{ crewship_blueprint }}/config/herdr-sidebar.ts"
     dest: "{{ crewship_omp_sidebar_extension }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -137,7 +137,7 @@
 # icons on the status line (docs/omp.md). Managed: every apply rewrites it.
 - name: Install the status icons omp extension
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/omp-status-icons.ts"
+    src: "{{ crewship_blueprint }}/config/omp-status-icons.ts"
     dest: "{{ crewship_omp_status_icons_extension }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -150,7 +150,7 @@
 # other workers (docs/omp.md). Managed: every apply rewrites it.
 - name: Install the pattern-kill guard omp extension
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/omp-no-pattern-kill.ts"
+    src: "{{ crewship_blueprint }}/config/omp-no-pattern-kill.ts"
     dest: "{{ crewship_omp_no_pattern_kill_extension }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -162,7 +162,7 @@
 # every agent turn (docs/omp.md#quality-gate). Managed: every apply rewrites it.
 - name: Install the quality gate omp extension
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/omp-quality-gate.ts"
+    src: "{{ crewship_blueprint }}/config/omp-quality-gate.ts"
     dest: "{{ crewship_omp_quality_gate_extension }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -173,7 +173,7 @@
 # --- no-mistakes pipeline agent (docs/omp.md#no-mistakes-pipeline-agent) ----
 - name: Install omp-as-pi, the wrapper that runs omp as the no-mistakes pi agent
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/omp-as-pi/"
+    src: "{{ crewship_blueprint }}/config/omp-as-pi/"
     dest: "{{ crewship_omp_as_pi_dir }}/"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -184,7 +184,7 @@
 
 - name: Install the omp overlay that only daemon-spawned omp loads
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/config/no-mistakes-omp.yml"
+    src: "{{ crewship_blueprint }}/config/no-mistakes-omp.yml"
     dest: "{{ crewship_no_mistakes_omp_overlay }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
@@ -232,7 +232,7 @@
   ansible.builtin.command:
     argv:
       - bash
-      - "{{ crewship_repo }}/config/omp-as-pi/check-adapter.sh"
+      - "{{ crewship_blueprint }}/config/omp-as-pi/check-adapter.sh"
       - "v{{ crewship_latest['no-mistakes'].version }}"
   become: true
   register: crewship_pi_adapter

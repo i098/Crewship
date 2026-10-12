@@ -89,7 +89,7 @@ crewship:
     idle_timeout_min: 30
   firstmate:
     # Upstream Firstmate's main, fetched on every apply and kept as origin/main
-    # plus the patch layer in patches/firstmate/, so a host stays current - which
+    # plus the patch layer in blueprint/patches/firstmate/, so a host stays current - which
     # is also why it must not be re-pinned to a sha.
     # Override url in .local/host.yml to track a fork instead.
     url: https://github.com/kunchenguid/firstmate.git

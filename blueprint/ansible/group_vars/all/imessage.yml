@@ -1,6 +1,6 @@
 ---
 # iMessage bridge (crewship.imessage, tasks/imessage.yml, docs/imessage.md).
-# The service runs from this copy of imessage/ with the latest spectrum-ts,
+# The service runs from this copy of apps/imessage/ with the latest spectrum-ts,
 # resolved once per run (crewship_latest). Photon and relay credentials stay in ~/super.env.
 crewship_imessage_dir: "{{ crewship_share_dir }}/imessage"
 crewship_imessage_desk_model: "{{ crewship_cfg.imessage.desk_model | default('claude-haiku-5-5') }}"
