@@ -9,7 +9,7 @@ ConditionPathExists={{ crewship_stall_nudge_script }}
 
 [Service]
 Type=oneshot
-Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HERDR_BIN_PATH={{ crewship_herdr_bin }}
 Environment=HERDR_SESSION={{ crewship_stall_nudge_session }}
 Environment=FM_HOME={{ crewship_firstmate_dir }}

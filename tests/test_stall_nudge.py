@@ -115,8 +115,8 @@ def test_nothing_waiting_sends_nothing(host):
 @pytest.mark.parametrize(
     ("kind", "age", "sent"),
     [
-        ("note", 170, False),
-        ("note", 190, True),
+        ("note", 40, False),
+        ("note", 50, True),
         ("wake", 590, False),
         ("wake", 610, True),
     ],
@@ -128,9 +128,9 @@ def test_thresholds(host, kind, age, sent):
 
 
 def test_threshold_variables_override_defaults(host):
-    host.note(60)
+    host.note(20)
     assert host.run().returncode == 0 and host.sends == []
-    assert host.run(NOTE_MAX="30").returncode == 0 and len(host.sends) == 1
+    assert host.run(NOTE_MAX="10").returncode == 0 and len(host.sends) == 1
 
 
 def test_sends_to_discovered_pane_with_session_prefix(host):
@@ -143,9 +143,9 @@ def test_sends_to_discovered_pane_with_session_prefix(host):
 
 def test_rate_limit(host):
     host.note(400)
-    host.stamp(100)
+    host.stamp(110)
     assert host.run().returncode == 0 and host.sends == []
-    host.stamp(400)
+    host.stamp(130)
     assert host.run().returncode == 0 and len(host.sends) == 1
     assert int(host.stamp_file.read_text()) > time.time() - 5
 
