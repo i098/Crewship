@@ -114,6 +114,11 @@
                    | map('regex_replace', '^', crewship_user_units ~ '/')
                    | list)
                 if (crewship_fleet_browsers_enabled | bool) else [])
+             + ([crewship_stall_nudge_script,
+                 crewship_user_units ~ '/fm-main-stall-nudge.service',
+                 crewship_user_units ~ '/fm-main-stall-nudge.timer',
+                 crewship_user_units ~ '/timers.target.wants/fm-main-stall-nudge.timer']
+                if (crewship_cfg.profiles.firstmate | bool) else [])
              + ([crewship_local_bin ~ '/concord',
                  crewship_local_bin ~ '/slk',
                  crewship_cfg.home ~ '/.config/concord/config.toml',
@@ -471,6 +476,7 @@
                   and (crewship_cfg.browser_prune.enabled | bool)) else [])
            + (['crewship-vnc.service', 'crewship-novnc.service']
               if (crewship_cfg.profiles.desktop | bool) else [])
+           + (['fm-main-stall-nudge.timer'] if (crewship_cfg.profiles.firstmate | bool) else [])
            + (['crewboard.service'] if (crewship_cfg.board is defined) else []) }}
       register: crewship_verify_units
       changed_when: false
