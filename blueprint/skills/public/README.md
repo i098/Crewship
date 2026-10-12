@@ -14,4 +14,5 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`progress-bars`](progress-bars/SKILL.md): a fixed ASCII progress-bar format with percentages from real counts.
 - [`quality-gates`](quality-gates/SKILL.md): sentrux and fallow gates and the pull-based codex advisor.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
+- [`usage-card`](usage-card/SKILL.md): answer usage, quota, resource, load and disk questions with the `fm-usage-brief --png` card; notes the hourly `fm-usage-remind` reminder.
 - [`tooling-conventions`](tooling-conventions/SKILL.md): bun, gh-axi, lavish, no-mistakes, herdr, skillspector, caveman and ponytail.
