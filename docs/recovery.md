@@ -49,7 +49,7 @@ The included PostgreSQL/Redis Compose services are empty development examples. T
 
 For `thinking`/`redacted_thinking` replay errors, inspect the complete request path. Prefix-bound reasoning can fail even when the opaque thinking fields are unchanged: an intermediary may have rewritten earlier messages, system text, or tool schemas. Preserve request bodies, route affinity, and signer identity; do not strip reasoning as a generic workaround.
 
-The inspected local Headroom/pxpipe fixes, version/hash guards, and offline regressions are in [proxy-fixes](../proxy-fixes/README.md). Default fresh Crewship agent configuration does not import machine-specific proxy URLs. Providers can be used directly; installing the optional proxies and their credentials is a separate, deliberate operation.
+The inspected local Headroom/pxpipe fixes, version/hash guards, and offline regressions are in [proxy-fixes](../patches/proxy-fixes/README.md). Default fresh Crewship agent configuration does not import machine-specific proxy URLs. Providers can be used directly; installing the optional proxies and their credentials is a separate, deliberate operation.
 
 Never upload a raw failed HTTP request to a public issue or this repository. Such files contain prompts and may include secrets in tool output. Share only sanitized block shapes, lengths, hashes, provider/version information, and error classifications.
 

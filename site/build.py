@@ -1,4 +1,4 @@
-"""Builds harbor/dist from harbor/public and fills the points of interest from the repository.
+"""Builds site/dist from site/public and fills the points of interest from the repository.
 
 The features come from README's Features list and More docs row and from docs/features.md,
 and the release from CHANGELOG.md, so the page follows Crewship as it changes. Standard library only.
@@ -14,8 +14,8 @@ from pathlib import Path
 HARBOR = Path(__file__).resolve().parent
 ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
-MARK = "<!-- points: harbor/build.py fills this list from README.md and CHANGELOG.md -->"
-FOOT_MARK = "<!-- footer: harbor/build.py fills the architecture link -->"
+MARK = "<!-- points: site/build.py fills this list from README.md and CHANGELOG.md -->"
+FOOT_MARK = "<!-- footer: site/build.py fills the architecture link -->"
 
 # Each Features link maps to its scene object; unmapped docs share a summary and index link.
 SCENE = {

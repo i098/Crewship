@@ -157,7 +157,7 @@ Branch names are `type/short-description`, with a type from the list above, for 
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
 
-Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or the [feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form. Ask questions in the [Discussions Q&A category](https://github.com/i098/Crewship/discussions/categories/q-a) ([SUPPORT.md](SUPPORT.md)).
+Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or the [feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form. Ask questions in the [Discussions Q&A category](https://github.com/i098/Crewship/discussions/categories/q-a) ([SUPPORT.md](.github/SUPPORT.md)).
 
 ## Branch rules
 

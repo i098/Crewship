@@ -1,4 +1,4 @@
-// Runs the WebKit browser checks documented in README.md. Run harbor/build.py first.
+// Runs the WebKit browser checks documented in README.md. Run site/build.py first.
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { webkit, devices } from "playwright";

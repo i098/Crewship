@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_tall_grass_keeps_off_paving_and_crowds_edges_and_slopes():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     world = source[source.index("const SX =") : source.index("const me =")]
     check = r"""
 const assert = require('node:assert/strict');

@@ -8,7 +8,7 @@ ROOT = Path(__file__).parents[1]
 
 def _run_ship_scene(checks):
     subprocess.run(
-        ["node", "-", str(ROOT / "harbor/public/harbor.js"), checks],
+        ["node", "-", str(ROOT / "site/public/harbor.js"), checks],
         input=r"""
 const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');

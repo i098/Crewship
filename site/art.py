@@ -2,7 +2,7 @@
 
 Run it from the repository root; it needs the network and Pillow, which the build does not:
 
-    uv run --no-project --with pillow python harbor/art.py
+    uv run --no-project --with pillow python site/art.py
 
 Each work comes from Wikimedia Commons (CREDITS.md names the sources). The script scales it to
 three texture sizes, then rewrites the ART block of harbor.js. Each texel becomes a glyph from

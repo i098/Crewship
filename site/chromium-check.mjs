@@ -1,7 +1,7 @@
 // Loads the built page (dist/) in Playwright Chromium as a large high-DPR desktop window and fails on
 // a fallback to the plain page, a black canvas 3 s after load, a canvas backing store over the size
 // limit, or a console error. A browser add-on's failing image and rejected promise are injected:
-// errors outside the scene must not show the plain page. Run harbor/build.py first.
+// errors outside the scene must not show the plain page. Run site/build.py first.
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 

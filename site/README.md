@@ -1,6 +1,6 @@
 # harbor
 
-`harbor/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
+`site/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
 
 It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
 There is no 3D engine, no WebGL and no model files.
@@ -124,7 +124,7 @@ The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for br
 See [how.html](public/how.html) for the audio graph.
 
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
-Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `harbor/`, and the playbook never copies it.
+Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `site/`, and the playbook never copies it.
 `tests/test_harbor_isolation.py` checks both.
 
 ## Content from the repository
@@ -163,8 +163,8 @@ See [how.html](public/how.html) for the movement and Enter controls.
 ## Preview
 
 ```bash
-python3 harbor/build.py
-python3 -m http.server --directory harbor/dist 8000
+python3 site/build.py
+python3 -m http.server --directory site/dist 8000
 ```
 
 Then open <http://localhost:8000>.
@@ -178,9 +178,9 @@ It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
 After a scene, preview layout, metadata tagline, or favicon change, regenerate both PNGs in the Playwright container and commit them:
 
 ```bash
-python3 harbor/build.py
-npm install --no-save --no-package-lock --prefix harbor playwright@1.64.0
-docker run --rm --ipc=host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/harbor:/harbor" -w /harbor \
+python3 site/build.py
+npm install --no-save --no-package-lock --prefix site playwright@1.64.0
+docker run --rm --ipc=host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/site:/site" -w /site \
   mcr.microsoft.com/playwright:v1.64.0-noble node og-image.mjs
 ```
 
@@ -217,7 +217,7 @@ It also fails if the backing-store area exceeds the [canvas limit](public/how.ht
 To run the checks locally:
 
 ```bash
-python3 harbor/build.py
+python3 site/build.py
 cd harbor
 npm install --no-save --no-package-lock --prefix . playwright
 npx playwright install --with-deps webkit chromium
@@ -232,7 +232,7 @@ Cloudflare Workers serves `dist/` as static assets; `wrangler.jsonc` is the conf
 To deploy by hand with a token that can edit the `crewship` Worker:
 
 ```bash
-python3 harbor/build.py
+python3 site/build.py
 cd harbor
 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 ```

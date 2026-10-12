@@ -1,3 +1,3 @@
 tests/** linguist-documentation
 # The crewship.si landing page is the project's website, not the recipe: keep it off the language bar.
-harbor/** linguist-documentation
+site/** linguist-documentation

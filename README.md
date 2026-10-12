@@ -59,12 +59,12 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 - [Architecture](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md)
-- [Support](SUPPORT.md)
+- [Support](.github/SUPPORT.md)
 - [Report a bug](../../issues/new?template=bug_report.yml)
 - [Request a feature](../../issues/new?template=feature_request.yml)
 - [Pull request template](.github/PULL_REQUEST_TEMPLATE.md)
-- [Security](SECURITY.md)
-- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Security](.github/SECURITY.md)
+- [Code of conduct](.github/CODE_OF_CONDUCT.md)
 - [Default config](docs/default-config.md)
 
 ## Built with
