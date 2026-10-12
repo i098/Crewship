@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Managed by Crewship (docs/architecture.md#stuck-composer-guard).
+# Clears a second mate's input box when stale typed text blocks its steering.
+# fm-send skips its doorbell while the composer holds text, so an inbox message
+# can wait unread. For each second mate with an inbox message older than
+# {{ crewship_stuck_composer_msg_age }} s whose composer line has held the SAME text for
+# {{ crewship_stuck_composer_hold }} s or more (live typing changes it), save the text to
+# state/.stuck-composer/<mate>.<epoch>.txt, clear the line (ctrl+u), ring the
+# doorbell, and print one line so main can tell the operator. Runs every watcher
+# cycle; reads panes at most every {{ crewship_stuck_composer_poll }} s.
+home={{ crewship_firstmate_dir | quote }}
+dir=$home/state/.stuck-composer
+mkdir -p "$dir"
+[ -n "$(find "$dir/last-run" -newermt '-{{ crewship_stuck_composer_poll }} seconds' 2>/dev/null)" ] && exit 0
+: > "$dir/last-run"
+now=$(date +%s)
+cd "$home" || exit 0
+. bin/fm-backend.sh
+. bin/fm-task-inbox-lib.sh
+for meta in state/*.meta; do
+  grep -q '^kind=secondmate' "$meta" || continue
+  id=$(basename "$meta" .meta)
+  pane=$(sed -n 's/^window=//p' "$meta")
+  [ -n "$pane" ] || continue
+  msg=$(find "state/$id.inbox" -maxdepth 1 -name '*.msg' ! -newermt '-{{ crewship_stuck_composer_msg_age }} seconds' 2>/dev/null | sort | tail -1)
+  if [ -z "$msg" ]; then rm -f "$dir/$id.seen"; continue; fi
+  text=$(herdr pane read "${pane#default:}" 2>/dev/null | grep '^❯ ' | tail -1 | sed 's/^❯ //; s/[[:space:]]*$//')
+  if [ -z "$text" ]; then rm -f "$dir/$id.seen"; continue; fi
+  sum=$(printf '%s' "$text" | sha1sum | cut -c1-12)
+  { read -r old at < "$dir/$id.seen"; } 2>/dev/null || { old=; at=0; }
+  if [ "$old" != "$sum" ]; then echo "$sum $now" > "$dir/$id.seen"; continue; fi
+  [ $((now - at)) -lt {{ crewship_stuck_composer_hold }} ] && continue
+  printf '%s\n' "$text" > "$dir/$id.$now.txt"
+  herdr pane send-keys "${pane#default:}" ctrl+u >/dev/null 2>&1
+  sleep 1
+  fm_backend_send_text_submit herdr "$pane" "$(fm_task_inbox_doorbell_line "$msg")" 2 0.4 0.3 >/dev/null 2>&1
+  rm -f "$dir/$id.seen"
+  echo "stuck composer cleared: $id held unsent text for $((now - at))s ($(printf '%s' "$text" | wc -c) chars, saved in state/.stuck-composer/$id.$now.txt); doorbell rung"
+done

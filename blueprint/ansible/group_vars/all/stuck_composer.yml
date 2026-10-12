@@ -1,0 +1,10 @@
+---
+# Stuck-composer guard: a registered Firstmate check (docs/architecture.md#stuck-composer-guard)
+# that clears stale unsent text from a second mate's input box and rings its doorbell.
+# Seconds an inbox message must wait, seconds the composer text must stay unchanged,
+# and the minimum gap between pane reads.
+crewship_stuck_composer_id: stuck-composer
+crewship_stuck_composer_script: "{{ crewship_firstmate_dir }}/state/{{ crewship_stuck_composer_id }}.check.sh"
+crewship_stuck_composer_msg_age: 120
+crewship_stuck_composer_hold: 120
+crewship_stuck_composer_poll: 30

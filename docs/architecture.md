@@ -61,6 +61,10 @@ A main Firstmate session can go idle after a context compaction and never start 
 
 It finds main as the pane in the Herdr session `default` that runs an agent in the Firstmate home. With no such pane, it logs a line and stops. A failed send is logged and the next try waits for the gap. Override the thresholds (`crewship_stall_nudge_note_max`, `crewship_stall_nudge_wake_max`, `crewship_stall_nudge_board_max`, `crewship_stall_nudge_gap`), the session, or pin a pane id (`crewship_stall_nudge_pane`) in `blueprint/ansible/group_vars/all/stall_nudge.yml`.
 
+### Stuck-composer guard
+
+`fm-send` skips its doorbell while a second mate's input box holds text, so a half-typed line can leave an inbox message unread. Hosts with the `firstmate` profile install `state/stuck-composer.check.sh` in the Firstmate home and bind it with `bin/fm-check-register.sh`, so the watcher runs it every cycle. For each second mate with an inbox message older than 120 s, the check reads the last composer line. If that text has not changed for 120 s, it saves the text to `state/.stuck-composer/<mate>.<epoch>.txt`, clears the line, rings the doorbell and prints one line for main. It reads panes at most every 30 s. A changed script is registered again on the next apply. Override the values (`crewship_stuck_composer_msg_age`, `crewship_stuck_composer_hold`, `crewship_stuck_composer_poll`) in `blueprint/ansible/group_vars/all/stuck_composer.yml`.
+
 ### GitHub reply alerts
 
 Set `crewship_gh_replies_account` (the host's GitHub login) in `blueprint/ansible/group_vars/all/gh_replies.yml` to wake main when someone else replies on GitHub. An empty account installs nothing. The playbook installs `~/.local/bin/fm-gh-replies`, writes `state/gh-replies.check.sh` in the Firstmate home and registers it with `bin/fm-check-register.sh`, so the watcher polls it on its normal check cadence.
