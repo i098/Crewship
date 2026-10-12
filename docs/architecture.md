@@ -65,6 +65,12 @@ It finds main as the pane in the Herdr session `default` that runs an agent in t
 
 `fm-send` skips its doorbell while a second mate's input box holds text, so a half-typed line can leave an inbox message unread. Hosts with the `firstmate` profile install `state/stuck-composer.check.sh` in the Firstmate home and bind it with `bin/fm-check-register.sh`, so the watcher runs it every cycle. For each second mate with an inbox message older than 120 s, the check reads the last composer line. If that text has not changed for 120 s, it saves the text to `state/.stuck-composer/<mate>.<epoch>.txt`, clears the line, rings the doorbell and prints one line for main. It reads panes at most every 30 s. A changed script is registered again on the next apply. Override the values (`crewship_stuck_composer_msg_age`, `crewship_stuck_composer_hold`, `crewship_stuck_composer_poll`) in `blueprint/ansible/group_vars/all/stuck_composer.yml`.
 
+### GitHub reply alerts
+
+Set `crewship_gh_replies_account` (the host's GitHub login) in `blueprint/ansible/group_vars/all/gh_replies.yml` to wake main when someone else replies on GitHub. An empty account installs nothing. The playbook installs `~/.local/bin/fm-gh-replies`, writes `state/gh-replies.check.sh` in the Firstmate home and registers it with `bin/fm-check-register.sh`, so the watcher polls it on its normal check cadence.
+
+The script reads `GET /notifications` through `gh` (REST only; the host's `gh` login supplies the token) at most every `crewship_gh_replies_interval` seconds (60). For each new comment or review by another person it prints one line with repository, kind, author and URL, never the body. It ignores the account itself and bots. `state/.gh-replies/` holds the poll time, the `since` mark and the seen ids; the first run only seeds the mark.
+
 ## iMessage
 
 ```mermaid

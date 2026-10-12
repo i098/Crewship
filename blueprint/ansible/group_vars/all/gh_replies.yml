@@ -1,0 +1,8 @@
+---
+# GitHub reply alerts (docs/architecture.md#github-reply-alerts): a registered
+# Firstmate check wakes main when someone else comments on or reviews a PR or
+# issue the account takes part in. An empty account installs nothing.
+crewship_gh_replies_account: ""
+crewship_gh_replies_interval: 60
+crewship_gh_replies_script: "{{ crewship_local_bin }}/fm-gh-replies"
+crewship_gh_replies_state: "{{ crewship_firstmate_dir }}/state/.gh-replies"

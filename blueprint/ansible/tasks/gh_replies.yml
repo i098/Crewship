@@ -1,0 +1,33 @@
+---
+# GitHub reply alerts (docs/architecture.md#github-reply-alerts): the script lives in
+# ~/.local/bin; a thin check in the Firstmate state directory sets its config and is
+# bound to its bytes with bin/fm-check-register.sh. REST only; gh uses the host's login.
+
+- name: Ensure the GitHub reply directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_firstmate_dir }}/state"
+
+- name: Install the GitHub reply script
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/fm-gh-replies"
+    dest: "{{ crewship_gh_replies_script }}"
+    mode: "0755"
+    remote_src: true
+
+- name: Write the GitHub reply check
+  ansible.builtin.template:
+    src: gh-replies.check.sh.j2
+    dest: "{{ crewship_firstmate_dir }}/state/gh-replies.check.sh"
+    mode: "0700"
+
+- name: Register the GitHub reply check with Firstmate
+  ansible.builtin.command:
+    cmd: "{{ crewship_firstmate_dir }}/bin/fm-check-register.sh gh-replies"
+  environment:
+    FM_HOME: "{{ crewship_firstmate_dir }}"
+  changed_when: false

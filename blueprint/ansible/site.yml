@@ -116,6 +116,17 @@
         - crewship_cfg.profiles.firstmate | bool
       tags: [firstmate, stuck_composer]
 
+    - name: GitHub reply alerts for main Firstmate
+      ansible.builtin.import_tasks: tasks/gh_replies.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.profiles.firstmate | bool
+        - crewship_gh_replies_account | length > 0
+      tags: [firstmate, gh_replies]
+
     - name: Optional iMessage bridge to Firstmate over Photon or BlueBubbles
       ansible.builtin.import_tasks: tasks/imessage.yml
       become: "{{ crewship_become_target | bool }}"
