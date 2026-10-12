@@ -58,7 +58,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 ## Repository layout
 
 - [`blueprint/`](blueprint/): what provisions a host. The Ansible playbook, config seeds, schemas, cloud-init and container configs, patches, rules, skills, fleet guards, and maintenance scripts.
-- [`apps/`](apps/): services Crewship builds and runs: the crew board (`crewboard`), the iMessage bridge (`imessage`), and the secrets Worker (`fleet-secrets`).
+- [`apps/`](apps/): services Crewship builds and runs: the crew board (`crewboard`), the iMessage bridge (`imessage`), and the secrets Worker (`fleet-secrets`). The bridge's front desk remembers the whole thread after [Victor Taelin's OptChat gist](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
 - [`tools/`](tools/): stand-alone helpers: the `crewship` npm launcher (`npm`), `herdr-patch`, and `dia-debug`.
 - [`scripts/`](scripts/): the `ship.sh` CLI code, the release artifact build, and secrets helpers.
 - [`site/`](site/): the crewship.si landing page.
