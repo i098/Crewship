@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Wakes main Firstmate when someone else replies on GitHub where the host's
+# account takes part: a new comment or review on any PR or issue in that
+# account's notifications. Run by the registered state/gh-replies.check.sh.
+# Polls GET /notifications at most once per INTERVAL seconds, REST only. Prints
+# one line per reply: repo, kind, author, html URL; never the body. Ignores the
+# account itself and bots. State: $DIR/{last-poll,since,seen}; a missing since
+# is seeded silently with the current time.
+#
+# Environment (set by the registered check): GH_REPLIES_ACCOUNT and
+# GH_REPLIES_DIR are required; GH_REPLIES_INTERVAL defaults to 60.
+set -u
+account=${GH_REPLIES_ACCOUNT:?GH_REPLIES_ACCOUNT is not set}
+dir=${GH_REPLIES_DIR:?GH_REPLIES_DIR is not set}
+interval=${GH_REPLIES_INTERVAL:-60}
+mkdir -p "$dir"
+[ -n "$(find "$dir/last-poll" -newermt "-$interval seconds" 2>/dev/null)" ] && exit 0
+: > "$dir/last-poll"
+now=$(date -u +%FT%TZ)
+if [ ! -s "$dir/since" ]; then printf '%s' "$now" > "$dir/since"; exit 0; fi
+since=$(cat "$dir/since")
+touch "$dir/seen"
+notes=$(gh api -X GET "notifications?all=true&since=$since&per_page=50" 2>/dev/null) || exit 0
+printf '%s' "$now" > "$dir/since"
+SINCE="$since" SEEN="$dir/seen" ACCOUNT="$account" python3 -c '
+import json, os, subprocess, sys
+since, seen_path, account = os.environ["SINCE"], os.environ["SEEN"], os.environ["ACCOUNT"]
+seen = set(open(seen_path).read().split())
+def api(url):
+    r = subprocess.run(["gh", "api", "-X", "GET", url], capture_output=True, text=True)
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+def human(u):
+    login = (u or {}).get("login", "")
+    return login and login != account and not login.endswith("[bot]") and (u or {}).get("type") != "Bot"
+out = []
+for n in json.loads(sys.stdin.read() or "[]"):
+    repo, subj = n["repository"]["full_name"], n["subject"]
+    items = []
+    lc = subj.get("latest_comment_url") or ""
+    if "/comments/" in lc:
+        c = api(lc)
+        if c and c.get("updated_at", "") >= since:
+            items.append(("comment", c.get("user"), c.get("html_url"), lc))
+    if subj.get("type") == "PullRequest" and subj.get("url"):
+        for r in (api(subj["url"] + "/reviews?per_page=100") or [])[-5:]:
+            if r.get("submitted_at", "") >= since:
+                items.append(("review " + r.get("state", "").lower(), r.get("user"), r.get("html_url"), str(r.get("id"))))
+    for kind, user, url, key in items:
+        if key in seen or not human(user):
+            continue
+        seen.add(key)
+        out.append("github reply: %s %s by %s %s" % (repo, kind, user["login"], url))
+open(seen_path, "a").write("".join(k + "\n" for k in seen - set(open(seen_path).read().split())))
+print("\n".join(out)) if out else None
+' <<<"$notes"

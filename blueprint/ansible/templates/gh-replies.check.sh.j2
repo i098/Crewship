@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Registered Firstmate check (docs/architecture.md#github-reply-alerts).
+export GH_REPLIES_ACCOUNT={{ crewship_gh_replies_account | quote }}
+export GH_REPLIES_INTERVAL={{ crewship_gh_replies_interval | quote }}
+export GH_REPLIES_DIR={{ crewship_gh_replies_state | quote }}
+exec {{ crewship_gh_replies_script | quote }}
