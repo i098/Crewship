@@ -12,17 +12,20 @@
 //   fails. Measured on the free shared line: plain sends into the owner's own conversation work, while a
 //   conversation the service opened itself was refused. That text's conversation and message ids are kept in the
 //   state directory, so a restart can still reach him.
+// Photos: POST a multipart form to /image (fm-imessage --image). image.ts checks and downscales it, and the file waits in
+//   the state directory while its outbox item is delivered. Photon only: the bridge has no BlueBubbles attachment send.
 // Location: when he shares his location with the Photon line in Find My, GET /location (the fm-location command).
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
-import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, fsyncSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
-import { Spectrum } from "spectrum-ts";
+import { attachment, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { type Attachment, bubbles, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, isSkip, type LineMessage, localCommand, notSent, parseReact, type Route, typingPause } from "./desk.ts";
+import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { type Chat, type Kind, Memory } from "./memory.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
 
@@ -77,7 +80,8 @@ const ATTACH_DIR = `${STATE}/attachments`; // his files, for Firstmate to open
 const MEMORY_DIR = `${STATE}/memory`; // the desk's memory: the whole chat, word for word (memory.ts)
 const OUTBOX_DIR = `${STATE}/outbox`; // sends and tapbacks not delivered yet, one file each (outbox.ts)
 const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment not saved yet
-for (const dir of [STATE, DESK_DIR, ATTACH_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
+for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 let burstFrom: number | undefined; // the memory id of his first text the desk has not answered yet
 const recent: Ref[] = []; // his last texts, newest last, for a threaded reply to one a few bubbles up
 const said = new Map<string, string>(); // his last 100 texts by message id, for the "was:" part of an edit note
@@ -96,10 +100,12 @@ let deskRun: Bun.Subprocess | undefined;
 // were transports has no `line` and is Photon's.
 type Ref = { line?: string; space: string; id: string };
 // One outbox item for his text `id`: a tapback, or bubbles (`done` of them sent so far), the first one threaded to
-// his text `reply` when set. `kind` is whose memory line it makes (Firstmate's unless "desk"); `silent` makes none.
+// his text `reply` when set. A photo, when `image` is set, is bubble 0 and the text bubbles follow it. `kind` is whose
+// memory line it makes (Firstmate's unless "desk"); `silent` makes none.
 // `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
 // where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
-type Out = Ref & { react?: string; bubbles?: string[]; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number };
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number };
+type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
 // `latest` is his latest text on it.
@@ -109,6 +115,7 @@ type Line = {
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
   send(space: string, text: string, reply?: string, guid?: string): Promise<unknown>;
+  sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sent?(space: string, text: string, since: number): Promise<boolean>;
   react(ref: Ref, emoji: string): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
@@ -169,6 +176,11 @@ for (const name of TRANSPORTS) {
     return message;
   };
   const photon = raw;
+  // A reply target that is gone sends the bubble unthreaded.
+  const threadOf = async (space: string, reply?: string) => reply ? await find({ space, id: reply }).catch((e) => {
+    if (!permanent(e)) throw e;
+    console.error(`fm-imessage: reply target ${reply} gone, sending unthreaded: ${brief(e)}`);
+  }) : undefined;
   lines.push({
     name,
     messages: (async function* () {
@@ -181,12 +193,13 @@ for (const name of TRANSPORTS) {
       return !!last && last !== id;
     },
     async send(space, text, reply) {
-      // A reply target that is gone sends the bubble unthreaded.
-      const thread = reply ? await find({ space, id: reply }).catch((e) => {
-        if (!permanent(e)) throw e;
-        console.error(`fm-imessage: reply target ${reply} gone, sending unthreaded: ${brief(e)}`);
-      }) : undefined;
+      const thread = await threadOf(space, reply);
       return thread ? thread.reply(text) : (await imessage(app).space.get(space)).send(text);
+    },
+    async sendImage(space, picture, reply) {
+      const content = attachment(picture.path, { name: picture.name, mimeType: picture.mimeType });
+      const thread = await threadOf(space, reply);
+      return thread ? thread.reply(content) : (await imessage(app).space.get(space)).send(content);
     },
     react: async (ref, emoji) => (await find(ref)).react(emoji),
   });
@@ -250,7 +263,7 @@ Bun.serve({
         return new Response(`no location: ${e instanceof Error ? e.message : String(e)}; he shares it with the line in Find My\n`, { status: 503 });
       }
     }
-    if (req.method !== "POST" || !["/send", "/typing", "/react"].includes(url.pathname)) return new Response("not found", { status: 404 });
+    if (req.method !== "POST" || !["/send", "/image", "/typing", "/react"].includes(url.pathname)) return new Response("not found", { status: 404 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
@@ -267,8 +280,12 @@ Bun.serve({
       if (!emoji) return new Response("no emoji", { status: 400 });
       return queue({ ...ref, react: emoji }, `tapback ${emoji}`);
     }
-    const parts = bubbles(await req.text());
-    if (!parts.length) return new Response("empty message", { status: 400 });
+    // /image is a multipart form: the file `image` and the optional text `caption`, sent as bubbles after the photo.
+    const form = url.pathname === "/image" ? await req.formData().catch(() => new FormData()) : undefined;
+    const photo = form && await photoOf(form);
+    if (photo instanceof Response) return photo;
+    const parts = bubbles(form ? String(form.get("caption") ?? "") : await req.text());
+    if (!parts.length && !photo) return new Response("empty message", { status: 400 });
     // ?reply=N targets his Nth latest text. ?no-thread forces plain, even with an explicit target.
     const replyTo = Number(url.searchParams.get("reply") ?? 0);
     const target = replyTo > 0 ? recent[recent.length - replyTo] : undefined;
@@ -276,9 +293,24 @@ Bun.serve({
     // A threaded reply goes out on the transport and in the conversation of the text it replies to.
     const destination = target ?? proactiveRef;
     if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
-    return queue({ ...destination, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, `${parts.length} bubble(s)`);
+    const image = photo && stage(photo);
+    const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
+    return queue({ ...destination, image, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
   },
 });
+
+// The photo of an /image request, checked and downscaled, or the refusal to answer with.
+async function photoOf(form: FormData): Promise<PreparedImage | Response> {
+  const file = form.get("image");
+  if (!(file instanceof File)) return new Response("nothing queued: no image in the request\n", { status: 400 });
+  if (!lines.some((line) => line.sendImage)) return new Response("nothing queued: photos need the photon transport, which is not running\n", { status: 503 });
+  try {
+    return await prepareImage(await file.bytes(), file.name);
+  } catch (e) {
+    if (e instanceof ImageError) return new Response(`nothing queued: ${e.message}\n`, { status: 400 });
+    throw e;
+  }
+}
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
 
 // Puts one item in the outbox and answers once the item is on disk.
@@ -286,6 +318,19 @@ function queue(item: Out, what: string) {
   if (stopping) return new Response("stopping\n", { status: 503 });
   put(item);
   return new Response(`queued ${what}; the bridge sends in order and retries while the upstream fails\n`);
+}
+
+// Saves a photo for the outbox. The file is synced to disk before the item that names it is queued.
+function stage(photo: PreparedImage): Picture {
+  const path = `${OUTGOING_DIR}/${crypto.randomUUID()}-${photo.name}`;
+  const fd = openSync(path, "w", 0o600);
+  try {
+    writeSync(fd, photo.bytes);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  return { path, name: photo.name, mimeType: photo.mimeType };
 }
 
 // Puts one item in the outbox with a client GUID of its own.
@@ -307,21 +352,22 @@ async function deliver(o: Out, save: (o: Out) => void) {
     remember(kind, `tapback ${o.react} on his last text`);
     return;
   }
-  const parts = o.bubbles ?? [];
+  const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   for (let i = o.done ?? 0; i < parts.length; i++) {
-    if (i > 0) {
+    const part = parts[i]!;
+    if (i > 0 && typeof part === "string") {
       if (latest) typing(latest.space, true);
-      await Bun.sleep(typingPause(parts[i]!));
+      await Bun.sleep(typingPause(part));
     }
     if (latest) typing(latest.space, false);
-    await sendBubble(o, i, save);
+    await sendBubble(o, i, part, save);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
-  if (!o.silent) remember(kind, parts.join("\n\n"));
+  if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
+  if (o.image) rmSync(o.image.path, { force: true });
 }
 
-async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
-  const text = o.bubbles![i]!;
+async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
   const maybe: Record<string, string> = {};
   for (const [name, space] of Object.entries(o.maybe ?? {})) {
     const line = lines.find((l) => l.name === name);
@@ -329,12 +375,13 @@ async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
       if (TRANSPORTS.includes(name)) maybe[name] = space;
       continue;
     }
-    if (!line.sent) maybe[name] = space;
-    else if (await line.sent(space, text, o.since ?? 0)) return;
+    // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
+    if (!line.sent || typeof bubble !== "string") maybe[name] = space;
+    else if (await line.sent(space, bubble, o.since ?? 0)) return;
   }
   const since = o.since ?? Date.now();
   try {
-    const via = await failover(routes(o, i, maybe), text, (line) => console.error(`fm-imessage: outbox ${line}`));
+    const via = await failover(routes(o, i, maybe), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
     if (via !== (o.line ?? "photon")) console.error(`fm-imessage: sent bubble ${i + 1} on the ${via} fallback`);
   } catch (e) {
     if (Object.keys(maybe).length) save({ ...o, maybe, since });
@@ -342,20 +389,29 @@ async function sendBubble(o: Out, i: number, save: (o: Out) => void) {
   }
 }
 
-// Plain sends stay on their queued chat's transport, including --no-thread replies and desk responses.
-// An uncertain attempt stays in its original chat, even when a newer inbound text changes line.latest.
-function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
+// The transports to try for bubble `i`, in order. Plain sends stay on their queued chat's transport, including
+// --no-thread replies and desk responses. An uncertain attempt (`retry`) may use any transport: `routes` keeps it in
+// its original chat, even when a newer inbound text changes line.latest. A photo whose chat's transport cannot send
+// it goes to any transport that can.
+function candidates(o: Out, i: number, retry: boolean): Line[] {
+  const photo = o.image !== undefined && i === 0;
+  const pool = photo ? lines.filter((line) => line.sendImage) : lines;
+  const queued = lineOf(o);
+  const preferred = (!o.reply || i === 0) && queued && pool.includes(queued) ? queued : undefined;
+  if (retry || (photo && !preferred)) return pool;
+  if (!o.reply) return preferred ? [preferred] : [];
+  return preferred ? [preferred, ...pool.filter((line) => line !== preferred)] : pool;
+}
+
+function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>[] {
   const guid = o.guid && `${o.guid}-${i}`;
   const only = Object.keys(maybe);
-  const preferred = !o.reply || i === 0 ? lineOf(o) : undefined;
-  const ordered = only.length ? lines : !o.reply ? (preferred ? [preferred] : []) :
-    preferred ? [preferred, ...lines.filter((line) => line !== preferred)] : lines;
-  return ordered.flatMap((line) => {
+  return candidates(o, i, only.length > 0).flatMap((line) => {
     const own = line === lineOf(o);
     const space = maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
-    return [{ name: line.name, send: async (text: string) => {
+    return [{ name: line.name, send: async (bubble: Bubble) => {
       if (stopping) throw new Error("bridge stopping");
       // A read-only lookup cannot have sent text, so its failure can use a fallback.
       const separated = reply ? await line.separated(space, reply).catch((e: unknown) => {
@@ -364,7 +420,8 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route[] {
       const thread = separated ? reply : undefined;
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
-        await line.send(space, text, thread, guid);
+        if (typeof bubble === "string") await line.send(space, bubble, thread, guid);
+        else await line.sendImage!(space, bubble, thread);
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
         throw e;

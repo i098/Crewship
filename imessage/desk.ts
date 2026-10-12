@@ -80,8 +80,8 @@ export type LineMessage = Pick<Message, "id" | "content" | "direction"> & {
   read(): Promise<unknown>;
 };
 
-// One way to send a bubble to the owner: a transport's name and its send.
-export type Route = { name: string; send(text: string): Promise<unknown> };
+// One way to send a bubble (`P`: its text, or a photo) to the owner: a transport's name and its send.
+export type Route<P = string> = { name: string; send(bubble: P): Promise<unknown> };
 
 // True when a failed send surely did not reach the line, so another transport may send it without a double: a
 // BlueBubbles call that never reached a relay, a refused connection, or a Photon (gRPC) UNAVAILABLE that says the
@@ -96,15 +96,15 @@ export function notSent(e: unknown): boolean {
   return (code === 14 || /\bUNAVAILABLE\b/.test(e.message)) && /No connection established|Please retry/.test(e.message);
 }
 
-// Send `text` on the first route that takes it, in order. A failure that surely did not send moves on to the next
+// Send `bubble` on the first route that takes it, in order. A failure that surely did not send moves on to the next
 // route and is logged as one line; any other failure stops, so a text is never sent twice. Returns the route's
 // name. An unsure failure is thrown unchanged. When every failure surely did not send, the first route's error
 // decides whether the outbox retries the item or moves it to the dead-letter folder.
-export async function failover(routes: Route[], text: string, log: (line: string) => void): Promise<string> {
+export async function failover<P = string>(routes: Route<P>[], bubble: P, log: (line: string) => void): Promise<string> {
   const errors: unknown[] = [];
   for (const route of routes) {
     try {
-      await route.send(text);
+      await route.send(bubble);
       return route.name;
     } catch (e) {
       errors.push(e);

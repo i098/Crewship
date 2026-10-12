@@ -12,8 +12,10 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import time
+import zlib
 from pathlib import Path
 
 import pytest
@@ -69,6 +71,46 @@ def test_help_sends_nothing(tmp_path, option):
     result, calls = send(tmp_path, option)
     assert result.returncode == 0
     assert "Usage: fm-imessage" in result.stdout
+    assert calls == []
+
+
+def png(width, height):
+    """A black grayscale PNG of that size, built by hand so no image tool is needed."""
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    rows = (b"\0" * (width + 1)) * height
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def test_image_goes_to_image_with_its_caption_and_thread_options(tmp_path):
+    photo = tmp_path / "my \"shot\".PNG"
+    photo.write_bytes(png(2, 2))
+    result, calls = send(tmp_path, "--reply", "2", "--image", str(photo), "look", "here")
+    assert result.returncode == 0
+    assert len(calls) == 1 and calls[0].endswith("http://127.0.0.1:8765/image?reply=2")
+    assert f'-F image=@"{str(photo).replace(chr(34), chr(92) + chr(34))}" --form-string caption=look here' in calls[0]
+
+
+def test_image_without_a_caption_sends_an_empty_one(tmp_path):
+    photo = tmp_path / "a.jpg"
+    photo.write_bytes(b"x")
+    result, calls = send(tmp_path, "--image", str(photo))
+    assert result.returncode == 0 and "--form-string caption= " in calls[0]
+
+
+@pytest.mark.parametrize("problem", ["missing", "type", "size", "no path"])
+def test_image_that_cannot_be_sent_queues_nothing(tmp_path, problem):
+    photo = tmp_path / ("a.gif" if problem == "type" else "a.png")
+    if problem != "missing":
+        photo.write_bytes(b"x")
+    if problem == "size":
+        os.truncate(photo, 25 * 1024 * 1024 + 1)
+    result, calls = send(tmp_path, "--image", *([] if problem == "no path" else [str(photo)]), "caption")
+    assert result.returncode == 2
+    assert "nothing sent" in result.stderr
     assert calls == []
 
 
@@ -1377,13 +1419,18 @@ function sent(line, chat) {
   appendFileSync(`${dir}/sent`, `${line}\\n`);
   if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
 }
+async function shown(content) {
+  if (typeof content === "string") return content;
+  const { width, height } = await new Bun.Image(readFileSync(content.attachment)).metadata();
+  return `[image ${content.name} ${content.mimeType} ${width}x${height}]`;
+}
 const load = (id) => message(JSON.parse(readFileSync(`${dir}/messages/${id}.json`, "utf8")));
 function space(id) {
   return {
     id,
     startTyping: typing,
     stopTyping: typing,
-    async send(text) { call("send"); sent(`send ${text}`, id); appendFileSync(`${dir}/send-targets`, `${id}\\n`); },
+    async send(content) { call("send"); sent(`send ${await shown(content)}`, id); appendFileSync(`${dir}/send-targets`, `${id}\\n`); },
     async getMessage(mid) {
       call("getMessage");
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
@@ -1402,7 +1449,7 @@ function message(m) {
       ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
     async react(emoji) { call("react"); sent(`react ${m.id} ${emoji}`); },
-    async reply(text) { call("reply"); sent(`reply ${m.id} ${text}`, m.space); },
+    async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
     async read() {},
   };
 }
@@ -1441,6 +1488,7 @@ export const Spectrum = async () => {
   return { messages: messages(), __internal: { platforms: new Map([["imessage", { client: existsSync(`${dir}/raw-missing`) ? [] : [{ client: line }] }]]) } };
 };
 export const imessage = Object.assign(() => ({ space: { get: async (id) => space(id) } }), { config: () => ({}) });
+export const attachment = (path, options) => ({ attachment: path, ...options });
 """
 
 
@@ -1509,8 +1557,11 @@ def fake_bridge(tmp_path):
         publish_json(fake / "inbound" / f"{mid}.json", record)
         wait_for(lambda: f"photon-{mid} " in text(notes), f"the note for {mid}")
 
-    def cli(*args):
+    def cli(*args, fails=False):
         result = subprocess.run([str(SEND), *args], capture_output=True, text=True, env=env, timeout=30)
+        if fails:
+            assert result.returncode != 0
+            return result.stdout + result.stderr
         assert result.returncode == 0, result.stderr
         return result.stdout
 
@@ -2417,3 +2468,86 @@ def test_saved_group_chat_cannot_become_a_proactive_destination(tmp_path):
         assert not read_text(rig.fake / "relay-sent")
     finally:
         rig.close()
+
+
+IMAGE = json.dumps(str(ROOT / "imessage/image.ts"))
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_photo_is_checked_by_content_and_downscaled_only_when_large(tmp_path):
+    (tmp_path / "big.png").write_bytes(png(4000, 1500))
+    (tmp_path / "small.png").write_bytes(png(800, 600))
+    (tmp_path / "words.png").write_text("not an image at all")
+    (tmp_path / "pixel.gif").write_bytes(
+        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+        b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+    )
+    result = bun(f"""
+import {{ prepareImage }} from {IMAGE};
+const read = (n) => Bun.file(`{tmp_path}/${{n}}`).bytes();
+const big = await read("big.png");
+const small = await read("small.png");
+const cases = {{
+  big: [big, "my shot.PNG"],
+  small: [small, "small.png"],
+  jpegNamedPng: [await new Bun.Image(big).jpeg().bytes(), "a.png"],
+  webpNamedJpg: [await new Bun.Image(small).webp().bytes(), "b.jpg"],
+  words: [await read("words.png"), "words.png"],
+  gif: [await read("pixel.gif"), "pixel.png"],
+  huge: [new Uint8Array(26 * 1024 * 1024), "huge.png"],
+}};
+const out = {{}};
+for (const [key, [bytes, name]] of Object.entries(cases)) {{
+  try {{
+    const p = await prepareImage(bytes, name);
+    const {{ width, height, format }} = await new Bun.Image(p.bytes).metadata();
+    out[key] = {{ name: p.name, mimeType: p.mimeType, resized: p.resized, width, height, format, same: p.bytes === bytes }};
+  }} catch (e) {{
+    out[key] = {{ error: e.constructor.name + ": " + e.message }};
+  }}
+}}
+console.log(JSON.stringify(out));
+""")
+    assert result["big"] == {"name": "my_shot.png", "mimeType": "image/png", "resized": True,
+                             "width": 2048, "height": 768, "format": "png", "same": False}
+    assert result["small"] == {"name": "small.png", "mimeType": "image/png", "resized": False,
+                               "width": 800, "height": 600, "format": "png", "same": True}
+    assert result["jpegNamedPng"] == {"name": "a.jpg", "mimeType": "image/jpeg", "resized": True,
+                                      "width": 2048, "height": 768, "format": "jpeg", "same": False}
+    assert result["webpNamedJpg"] == {"name": "b.webp", "mimeType": "image/webp", "resized": False,
+                                      "width": 800, "height": 600, "format": "webp", "same": True}
+    for key in ("words", "gif"):
+        assert result[key]["error"].startswith("ImageError: ") and "not a png, jpg or webp image" in result[key]["error"]
+    assert result["huge"]["error"] == "ImageError: image is 26.0 MB; the limit is 25.0 MB"
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_bridge_sends_a_photo_then_its_caption_through_an_outage_and_a_restart(tmp_path):
+    """The photo is downscaled, queued like text, survives the outage and a restart, goes out before its caption,
+    is remembered as "[image: name]", and its staged file is deleted once the item is sent."""
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(png(4000, 1500))
+    (tmp_path / "words.png").write_text("not an image at all")
+    bridge = start(1)
+    try:
+        inbound("m1", text="send me a photo")
+        assert "not a png, jpg or webp image" in cli("--image", str(tmp_path / "words.png"), fails=True)
+        assert not list((state / "outgoing").iterdir())
+        (fake / "down").write_text("1000000")
+        assert cli("--image", str(shot), "here it is").startswith("queued image shot.png (downscaled) and 1 bubble(s)")
+        wait_for(lambda: "outbox item 1 failed (try 2)" in text(err), "an outbox retry")
+        bridge.terminate()
+        bridge.wait(10)
+        assert len(list((state / "outbox").glob("*.json"))) == 1 and len(list((state / "outgoing").iterdir())) == 1
+        (fake / "down").write_text("2")
+        bridge = start(2)
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 2 and not list((state / "outbox").glob("*.json")),
+                 "the photo and its caption, delivered and dequeued")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+    assert text(fake / "sent").splitlines() == ["send [image shot.png image/png 2048x768]", "send here it is"]
+    assert not list((state / "outgoing").iterdir())
+    records = [json.loads(line) for f in (state / "memory/main").glob("*.jsonl") for line in f.read_text().splitlines()]
+    assert "[image: shot.png]\n\nhere it is" in [r["text"] for r in records]

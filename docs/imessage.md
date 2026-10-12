@@ -272,6 +272,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
 | `fm-imessage --reply N 'text'` | Targets the owner's Nth most recent text (1 is the latest). The first bubble sends plain if the target is still the last bubble in its chat at delivery. It threads only when a later bubble exists from either side; tapbacks do not count. See [Reply separation](#how-the-relay-set-behaves) for checks across BlueBubbles relays. A transport that cannot thread sends plain. The command picks the target when it runs, and the queued message keeps that target's id through retries and restarts. The service keeps at most 10 texts received since it started that were the newest text at that time. A text that arrives late (see [Inbound](#choose-the-transports)) is not kept. If the Nth text is not kept, nothing is queued and the command exits non-zero. Any other value of N queues nothing and exits with code 2. |
 | `fm-imessage --no-thread 'text'` | Forces a plain send, even with `--reply N`, regardless of option order. |
+| `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
 | `fm-imessage --typing` | Shows the typing bubble, best effort. The next send removes it. A typing error is only logged, so the command exits 0. |
 | `fm-imessage --react '👍'` | Queues a tapback in the outbox, in order with the sends. The tapback goes on the text that was his latest when the command ran. |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
@@ -287,6 +288,16 @@ Plain Photon sends still use the public SDK.
 Explicit threaded replies can use a configured fallback because the bridge cannot check the latest bubble.
 
 `fm-imessage` exits 0 only when the message is on disk in the outbox, and prints that it is queued. It exits non-zero when it queues nothing. An unknown option queues nothing and exits with code 2.
+
+## Send a photo
+
+`fm-imessage --image PATH ['caption']` sends one photo. The command gives the file to the service, which sends it with the spectrum-ts attachment path (`attachment()` in `space.send`). The caption is optional. Blank lines in it make separate bubbles, as in a text. The photo goes first, and the caption bubbles follow it.
+
+- **Checks.** The command checks that the file is readable, that its name ends in `.png`, `.jpg`, `.jpeg` or `.webp`, and that it is 25 MB or less. The service checks the content, not the name, so a renamed GIF or a text file is refused. A refused photo queues nothing, and the command exits non-zero with the reason.
+- **Downscale.** A photo with a side over 2048 px (for example, a 4K screenshot) is downscaled to fit 2048 px, in the same format and with the same proportions. The EXIF orientation is applied. Smaller photos go out unchanged. The service uses Bun's built-in `Bun.Image`, so the bridge has no new dependency and the host needs no image tool. If the result is still over 10 MB, the photo is refused.
+- **Queue.** The photo is an outbox item like a text. The service saves the downscaled file in `~/.local/state/fm-imessage/outgoing/` (mode `0700`) and queues the item after the file is on disk. The retries, the order, the restarts, and the dead-letter folder work as in [Upstream outages](#upstream-outages). The service deletes the file after the last bubble of the item is sent. A photo that moves to `outbox-dead/` keeps its file.
+- **Memory.** The desk memory records the send as `[image: name]`, then the caption. The name has the extension of the real format.
+- **Transport.** Photos go over the Photon line only. The BlueBubbles code of the bridge has no attachment send. When the owner's chat is on BlueBubbles, the photo uses the Photon line's latest chat. If the Photon line is not running, the command exits non-zero with HTTP 503.
 
 ## Plain messages and the shared line
 
