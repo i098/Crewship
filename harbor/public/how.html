@@ -115,6 +115,58 @@
 <p>On a desktop, web workers cast and draw bands of rows on the other cores. Desktops keep every row and every shadow, and never grow glyphs. Only a slow phone turns shadows off, then grows glyphs up to 1.5x.</p>
 </section>
 
+<section class="post">
+<h2>7. How you move</h2>
+<p>You walk in 10 cm hops. Before each hop the page asks two questions.</p>
+<pre aria-hidden="true">  hop 10 cm
+  o --> o --> o --> |#### wall
+  floor +0.4 m: step up
+  floor +0.7 m: stop
+
+     +-----+  box of a solid
+  +--+-----+--+  + 25 cm all round
+  |  |     |  |  your feet stop at the edge
+  +--+-----+--+</pre>
+<p>Is there ground, and is it no more than 0.6 m above or below the last hop? Is a solid in the way between 0.3 m and 1.7 m above your feet? Each solid is an invisible box, 25 cm wider on every side. A yes to either stops you on the spot.</p>
+</section>
+
+<section class="post">
+<h2>8. Where everything lives</h2>
+<p>In one fixed list in memory. The page loads no models and no pictures. Only the sound loops are fetched.</p>
+<pre aria-hidden="true">harbor.js starts
+  |  code builds the list, once
+  v
+[ 275 outside ][ 169 ship ] = 444 shapes
+  +  formulas: sea, hills, roads, clouds
+  |
+  v  every frame: ask them again</pre>
+<p>Each shape is a box plus a formula. The list is built once and never reloaded. The sea and the clouds are formulas, worked out for each ray. The hills and roads are formulas sampled once onto a grid. Trees and grass come from fixed seeds, so they stand in the same place on every visit.</p>
+</section>
+
+<section class="post">
+<h2>9. See-through windows</h2>
+<p>A window is an opening that a room shares with the wall around it. A ray goes through it and carries on.</p>
+<pre aria-hidden="true">  outside      wall        room
+               |#|
+  eye o ------ [ ] ------> table
+               |#|    the ray goes on
+                         in the room
+
+  room's window --------> harbor
+  the ray goes on, out into the scene</pre>
+<p>The ray carries on from where the room stands in the scene. So a room shows through its panes and the outside shows through its openings. The page looks at the far side only for the screen area of the openings. No window has its own drawing pass.</p>
+</section>
+
+<section class="post">
+<h2>10. Zoom changes the detail</h2>
+<p>Zoom out with <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>&minus;</kbd> for more, finer characters. Zoom in with <kbd>+</kbd> for bigger ones and a lighter load. Chromium and WebKit behave the same.</p>
+<pre aria-hidden="true">zoom   50%  ######################  72,000
+zoom  100%  ###########              36,000
+zoom  200%  #####                    18,000
+zoom  300%  ##                        8,000</pre>
+<p>Cells at a 1440 x 900 window. From 100% to 150% the cell count stays the same: the glyphs keep to whole device pixels. The cell cap holds the zoom-out end at 76,000.</p>
+</section>
+
 <details>
 <summary>All the detail (long)</summary>
 <h3>Cells per screen</h3>
