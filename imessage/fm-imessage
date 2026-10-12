@@ -1,24 +1,39 @@
 #!/bin/bash
 # Send iMessage to the owner from the Firstmate line (docs/imessage.md).
-# Usage: fm-imessage [--reply N] [--no-thread] [--] 'text' | fm-imessage --typing | fm-imessage --react '👍'
+# Usage: fm-imessage [--reply N] [--no-thread] [--] 'text' | fm-imessage [--reply N] [--no-thread] --image PATH ['caption']
+#        fm-imessage --typing | fm-imessage --react '👍'
 # Blank-line-separated paragraphs become separate bubbles; a list stays one bubble. Sends are plain by default.
 # --reply N threads the first bubble only across later bubbles; --no-thread forces plain even with --reply N.
+# --image sends a photo (png, jpg or webp, up to 25 MB), then the caption as text bubbles. The bridge downscales a
+# photo with a side over 2048 px and checks it by content. Photos go over the Photon line only.
 # --typing shows the typing bubble while you compose (best effort); --react puts a tapback on his latest text.
 # Exit 0 = queued: the bridge sends in order and retries while the upstream is down. Exit non-zero = nothing queued.
 url=http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}
 B=(curl -sS --fail-with-body --max-time 60 -H 'X-Firstmate: 1')
 q=
+image=
+fail() { echo "fm-imessage: $1 (nothing sent)" >&2; exit 2; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) sed -n '2,7p' "$0" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0" | cut -c3-; exit 0 ;;
     --typing) "${B[@]}" -X POST "$url/typing"; exit ;;
     --react) printf '%s' "${2:?emoji}" | "${B[@]}" --data-binary @- "$url/react"; exit ;;
     --reply) case "${2:-}" in [1-9]|10) ;; *) echo "fm-imessage: --reply needs a number from 1 to 10 (nothing sent)" >&2; exit 2 ;; esac
              q="${q:+$q&}reply=$2"; shift 2 ;;
     --no-thread) q="${q:+$q&}no-thread=1"; shift ;;
+    --image) [ -n "${2:-}" ] || fail "--image needs a file path"; image=$2; shift 2 ;;
     --) shift; break ;;
     -*) echo "fm-imessage: unknown option $1 (nothing sent)" >&2; exit 2 ;;
     *) break ;;
   esac
 done
+if [ -n "$image" ]; then
+  # The bridge checks the content and the size again; these checks only give the quick answer.
+  [ -f "$image" ] && [ -r "$image" ] || fail "$image is not a readable file"
+  case "${image,,}" in *.png|*.jpg|*.jpeg|*.webp) ;; *) fail "$image is not a png, jpg or webp file" ;; esac
+  [ "$(stat -c %s -- "$image")" -le 26214400 ] || fail "$image is over 25 MB"
+  p=${image//\\/\\\\}
+  p=${p//\"/\\\"}
+  exec "${B[@]}" -F "image=@\"$p\"" --form-string "caption=$*" "$url/image${q:+?$q}"
+fi
 if [ $# -gt 0 ]; then printf '%s' "$*"; else cat; fi | "${B[@]}" --data-binary @- "$url/send${q:+?$q}"
