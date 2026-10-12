@@ -88,3 +88,9 @@ def test_rules_section_sits_above_body_and_is_absent_without_rules(monkeypatch):
     a.rules_rows = [{"rule": "r", "source": "s", "result": "fail"}]
     with_rules, _ = pr_preview.build_comment(a)
     assert with_rules.index("Contribution rules") < with_rules.index("BODY")
+
+
+def test_approval_form_carries_question_and_label():
+    out = pr_preview.approval_form('q<1>', "PR text")
+    assert 'data-lavish-question="q&lt;1&gt;"' in out
+    assert "'PR text: '" in out and "QUESTION" not in out and "LABEL" not in out

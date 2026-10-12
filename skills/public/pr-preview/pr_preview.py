@@ -123,9 +123,19 @@ body{color-scheme:dark;margin:0;background:#0d1117;color:#f0f6fc;font:14px/1.5 -
 .rules td{padding:6px 16px;border-top:1px solid #3d444d;vertical-align:top;overflow-wrap:anywhere}
 .rules tr:first-child td{border-top:0}
 .rules a{color:#4493f8;text-decoration:none}
-.res{display:inline-block;border:1px solid #3d444d;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;color:#9198a1}
+.res{display:inline-block;white-space:nowrap;border:1px solid #3d444d;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;color:#9198a1}
 .res.pass{color:#3fb950;border-color:#2ea04366;background:#2ea04326}
 .res.fail{color:#f85149;border-color:#f8514966;background:#f851491a}
+  .fm-approve{max-width:880px;margin:24px auto;padding:16px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#e6edf3;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+  .fm-approve h3{margin:0 0 12px;font-size:16px;font-weight:600}
+  .fm-approve .opt{display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer}
+  .fm-approve input[type=radio]{margin:0;accent-color:#238636}
+  .fm-approve textarea{display:block;box-sizing:border-box;width:100%;min-height:96px;margin:12px 0 0;padding:8px 12px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#e6edf3;font:inherit;resize:vertical}
+  .fm-approve textarea[hidden]{display:none}
+  .fm-approve .actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:12px}
+  .fm-approve button{padding:5px 16px;border:1px solid rgba(240,246,252,.1);border-radius:6px;background:#238636;color:#fff;font:inherit;font-weight:500;cursor:pointer}
+  .fm-approve button:disabled{opacity:.5;cursor:not-allowed}
+  .fm-approve .sent{color:#3fb950}
 """
 
 # ---- commits and files ------------------------------------------------------
@@ -345,6 +355,39 @@ def rules_section(rows):
 
 
 
+APPROVAL_FORM = """<form class="fm-approve" data-lavish-question="QUESTION">
+  <h3>Your decision</h3>
+  <label class="opt"><input type="radio" name="decision" value="approve"> Approve this exact text and post it</label>
+  <label class="opt"><input type="radio" name="decision" value="changes"> Request changes</label>
+  <textarea name="note" maxlength="300" placeholder="What should change?" hidden></textarea>
+  <div class="actions"><span class="sent" hidden>Sent.</span><button type="submit" disabled>Send</button></div>
+</form>"""
+APPROVAL_JS = """(() => {
+  const f = document.querySelector('form.fm-approve');
+  const note = f.querySelector('textarea'), btn = f.querySelector('button'), sent = f.querySelector('.sent');
+  f.addEventListener('change', () => {
+    const c = new FormData(f).get('decision');
+    note.hidden = c !== 'changes';
+    btn.disabled = !c;
+  });
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const d = new FormData(f), c = d.get('decision');
+    if (!c) return;
+    const n = (d.get('note') || '').trim().slice(0, 300);
+    const text = 'LABEL: ' + c + (n ? ' | note: ' + n : '');
+    window.lavish.queuePrompt(text, { tag: 'choice', text, element: f, data: { schema: 'fm-bearings-answer.v1', question: f.dataset.lavishQuestion, selection: c, note: n, close: 'release' } });
+    sent.hidden = false;
+  });
+})();
+"""
+
+
+def approval_form(question, label):
+    form = APPROVAL_FORM.replace("QUESTION", e(question))
+    return form + "<script>" + APPROVAL_JS.replace("LABEL", label) + "</script>"
+
+
 def build_pr(a):
     base_ref = a.base_ref or f"origin/{a.base}"
     head_ref = a.head_ref or "HEAD"
@@ -386,12 +429,12 @@ def build_comment(a):
     return f'<section class="single">{body}</section>', "Comment preview"
 
 
-def document(inner, title):
+def document(inner, title, question, label):
     css = (HERE / "github-markdown-dark.css").read_text()
     return (f'<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{e(title)}</title><style>{css}</style><style>{PAGE_CSS}</style></head>'
-            f'<body><div class="wrap">{inner}</div></body></html>')
+            f'<body><div class="wrap">{inner}</div>{approval_form(question, label)}</body></html>')
 
 
 def main():
@@ -403,6 +446,7 @@ def main():
     common.add_argument("--when", default="now", help='age text, for example "3 days ago"')
     common.add_argument("--out", default=".lavish/pr-preview.html")
     common.add_argument("--rules", help="contribution rules cross-reference: JSON list or Markdown table of Rule, Source, Result")
+    common.add_argument("--question", default="pr-preview", help="task id the approval answer carries")
     sub = p.add_subparsers(dest="kind", required=True)
     for kind in ("pr", "issue"):
         s = sub.add_parser(kind, parents=[common])
@@ -424,7 +468,7 @@ def main():
     inner, title = {"pr": build_pr, "issue": build_issue, "comment": build_comment}[a.kind](a)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(document(inner, title))
+    out.write_text(document(inner, title, a.question, {"pr": "PR text", "issue": "Issue text", "comment": "Comment text"}[a.kind]))
     print(out)
 
 

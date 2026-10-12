@@ -26,6 +26,7 @@ The board is one HTML file. It renders in GitHub dark mode only. The body comes 
 - PR: title, `#N` (`--number`), "wants to merge N commits into `base` from `fork:branch`", and three tabs. Conversation has the body comment and the sidebar. Commits and Files changed come from the real branch, with line numbers and `+`/`-` counts.
 - Issue: title, state, the body comment and the sidebar.
 - Comment: the one comment box.
+- Every mode ends with an approval form: stacked "Approve" and "Request changes" choices, a full-width comment box that shows for "Request changes", and a right-aligned Send. Send queues the answer (`schema: fm-bearings-answer.v1`, fields `question`, `selection`, `note`). `--question ID` sets the `question` value (default `pr-preview`).
 - With `--rules`: a "Contribution rules" table above the body, in every mode.
 
 ## Contribution rules
