@@ -18,4 +18,7 @@ Environment=WAKE_MAX={{ crewship_stall_nudge_wake_max }}
 Environment=BOARD_MAX={{ crewship_stall_nudge_board_max }}
 Environment=GAP={{ crewship_stall_nudge_gap }}
 Environment=MAIN_PANE={{ crewship_stall_nudge_pane }}
-ExecStart={{ crewship_stall_nudge_script }}
+Environment=EVERY={{ crewship_usage_remind_every }}
+Environment="USAGE_DISKS={{ crewship_usage_disks | join(' ') }}"
+ExecStart=-{{ crewship_stall_nudge_script }}
+ExecStart=-{{ crewship_local_bin }}/fm-usage-remind

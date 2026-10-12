@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# While the owner is texting (an iMessage note filed in the last 2 min), send the
+# fm-usage-brief card at most once per EVERY seconds. Runs as a second ExecStart of
+# fm-main-stall-nudge.service, every 15 s.
+# Environment (set by the unit): FM_HOME is required; EVERY (default 3600).
+# fm-usage-brief and fm-imessage must be on PATH.
+set -u
+: "${FM_HOME:?FM_HOME is not set}"
+FM_HOME=${FM_HOME%/}
+EVERY=${EVERY:-3600}
+STAMP=$FM_HOME/state/.usage-remind-last
+now=$(date +%s)
+last=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((now - last)) -lt "$EVERY" ] && exit 0
+recent=$(find "$FM_HOME/state/inbox" -name '*.note' -newermt '-120 seconds' 2>/dev/null \
+  | xargs -r grep -l '^\[iMessage from the owner' 2>/dev/null | head -1)
+[ -z "$recent" ] && exit 0
+echo "$now" > "$STAMP"
+# The card is a throwaway: render to a temp file and delete it as soon as the send returns.
+f=$(mktemp --suffix=.png) || exit 1
+trap 'rm -f "$f"' EXIT
+fm-usage-brief --png "$f" && fm-imessage --image "$f"

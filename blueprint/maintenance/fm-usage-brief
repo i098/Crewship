@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+# Usage summary: Claude and Codex 5 h / 7 day use averaged across accounts, each with
+# its soonest reset, plus this server's load, RAM and disks.
+# Usage: fm-usage-brief            -> text
+#        fm-usage-brief --png OUT  -> an 840 px wide card (headless Chrome, see fm-text-card)
+# OUT is the caller's: render to mktemp and delete it after the send; nothing persists.
+# Environment: USAGE_DISKS = space-separated mount points to show (default "/"; skipped when not mounted),
+# OMP_BIN = omp binary (default omp on PATH), CHROME = headless Chrome binary.
+import html, importlib.machinery, importlib.util, json, os, shutil, subprocess, sys, time
+
+
+def left(ms, now):
+    s = max(0, ms / 1000 - now)
+    h = int(s // 3600)
+    return f"{h // 24}d {h % 24}h" if h >= 24 else f"{h}h {int(s % 3600 // 60)}m"
+
+
+def usage(now=None):
+    now = now or time.time()
+    out = subprocess.run([os.environ.get("OMP_BIN", "omp"), "usage", "--json"], capture_output=True, text=True, timeout=30).stdout
+    win = {}
+    for r in json.loads(out)["reports"]:
+        if r["provider"] not in ("anthropic", "openai-codex"):
+            continue
+        name = "Codex" if r["provider"] == "openai-codex" else "Claude"
+        for l in r["limits"]:
+            if l.get("scope", {}).get("tier"):
+                continue
+            w = win.setdefault((name, l.get("scope", {}).get("windowId", "")), {"used": [], "resets": []})
+            w["used"].append(l["amount"]["used"])
+            if l.get("window", {}).get("resetsAt"):
+                w["resets"].append(l["window"]["resetsAt"])
+    rows = []
+    for name in ("Claude", "Codex"):
+        for wid in ("5h", "7d"):
+            w = win.get((name, wid))
+            if w:
+                rows.append((name, wid, round(sum(w["used"]) / len(w["used"])), left(min(w["resets"]), now) if w["resets"] else ""))
+    return rows
+
+
+def server():
+    load = float(open("/proc/loadavg").read().split()[1])
+    cores = os.cpu_count()
+    mem = {k: int(v.split()[0]) for k, v in (l.split(":", 1) for l in open("/proc/meminfo"))}
+    used_g, total_g = (mem["MemTotal"] - mem["MemAvailable"]) / 1048576, mem["MemTotal"] / 1048576
+    disks = []
+    for m in os.environ.get("USAGE_DISKS", "/").split():
+        if os.path.ismount(m):
+            u = shutil.disk_usage(m)
+            disks.append(("Disk" if m == "/" else f"Disk {m}", round(u.used / u.total * 100), ""))
+    return [("CPU", round(load / cores * 100), f"{load:.0f} of {cores} cores"),
+            ("RAM", round(used_g / total_g * 100), f"{used_g:.0f} / {total_g:.0f} GB")] + disks
+
+
+def text():
+    lines = ["usage"]
+    rows = usage()
+    for name in ("Claude", "Codex"):
+        parts = [f"{wid} {p}%" + (f", resets in {r}" if r else "") for n, wid, p, r in rows if n == name]
+        if parts:
+            lines.append(f"{name.lower()}: " + " · ".join(parts))
+    lines.append("server: " + ", ".join(f"{k.lower()} {p}%" for k, p, _ in server()))
+    return "\n".join(lines)
+
+
+def color(p):
+    return "#e5534b" if p >= 90 else "#d29922" if p >= 70 else "#57ab5a"
+
+
+def bar(label, pct, note):
+    return (f'<div class="row"><div class="lbl">{html.escape(label)}</div>'
+            f'<div class="track"><div class="fill" style="width:{min(pct, 100)}%;background:{color(pct)}"></div></div>'
+            f'<div class="pct">{pct}%</div><div class="note">{html.escape(note)}</div></div>')
+
+
+def png(out):
+    rows = "".join(bar(f"{n} {wid}", p, f"resets in {r}" if r else "") for n, wid, p, r in usage())
+    srv = "".join(bar(k, p, note) for k, p, note in server())
+    page = f"""<html><head><style>
+body{{margin:0;background:#0d1117;color:#e6edf3;font:28px DejaVu Sans,sans-serif}}
+.card{{padding:36px 40px;width:760px}} h2{{font-size:26px;color:#8b949e;margin:28px 0 14px;font-weight:normal;letter-spacing:2px}}
+h2:first-child{{margin-top:0}} .row{{display:flex;align-items:center;margin:14px 0}}
+.lbl{{width:190px}} .track{{flex:1;height:26px;background:#21262d;border-radius:13px;overflow:hidden}}
+.fill{{height:100%;border-radius:13px}} .pct{{width:80px;text-align:right;font-weight:bold}}
+.note{{width:200px;text-align:right;color:#8b949e;font-size:22px}}
+</style></head><body><div class="card"><h2>MODEL USAGE</h2>{rows}<h2>SERVER</h2>{srv}</div></body></html>"""
+    height = 150 + 47 * (rows.count('class="row"') + srv.count('class="row"'))
+    card = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fm-text-card")  # installed side by side
+    spec = importlib.util.spec_from_loader("fm_text_card", importlib.machinery.SourceFileLoader("fm_text_card", card))
+    shoot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shoot)
+    shoot.shoot(page, height, out)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--png":
+        png(sys.argv[2])
+    else:
+        print(text())

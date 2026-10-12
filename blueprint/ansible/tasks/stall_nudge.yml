@@ -19,6 +19,14 @@
     mode: "0755"
     remote_src: true
 
+- name: Install the usage card scripts
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/{{ item }}"
+    dest: "{{ crewship_local_bin }}/{{ item }}"
+    mode: "0755"
+    remote_src: true
+  loop: "{{ crewship_usage_scripts }}"
+
 - name: Render the stall nudge unit and timer
   ansible.builtin.template:
     src: "{{ item }}.j2"

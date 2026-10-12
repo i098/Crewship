@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+# Render a short update as an image card (CARD_WIDTH x at least CARD_MIN_HEIGHT) for the iMessage line.
+# Usage: fm-text-card OUT.png < text   (first line = title; "- x" = bullet;
+#        "k: v" = row; "# x" = section; blank line = gap)
+# Then: fm-imessage --image OUT.png, and delete OUT.png. Render to mktemp and delete after the send; nothing persists.
+# Needs headless Chrome: CHROME, else google-chrome, google-chrome-stable or chromium on PATH, else omp's puppeteer Chrome
+# under ~/.omp/puppeteer (the desktop profile installs google-chrome; crewship_chrome_install: true installs it without a desktop).
+import glob, html, os, shutil, subprocess, sys, tempfile
+
+# iMessage crops a card narrower or flatter than about 4:3; keep these two values.
+CARD_WIDTH = 840
+CARD_MIN_HEIGHT = 630
+
+
+def chrome():
+    found = (os.environ.get("CHROME") or next(filter(None, map(shutil.which, ("google-chrome", "google-chrome-stable", "chromium"))), None)
+             or max(glob.glob(os.path.expanduser("~/.omp/puppeteer/chrome/linux-*/chrome-linux64/chrome")), default=None))
+    if not found:
+        sys.exit("fm-text-card: no headless Chrome found (set CHROME)")
+    return found
+
+
+def render(text):
+    lines = text.strip().splitlines()
+    title, body = (lines[0], lines[1:]) if lines else ("", [])
+    parts = []
+    for l in body:
+        s = l.strip()
+        if not s:
+            parts.append('<div class="gap"></div>')
+        elif s.startswith("# "):
+            parts.append(f"<h2>{html.escape(s[2:])}</h2>")
+        elif s.startswith(("- ", "• ")):
+            parts.append(f'<div class="b"><span class="dot">•</span>{html.escape(s[2:])}</div>')
+        elif ": " in s and len(s.split(": ", 1)[0]) <= 28:
+            k, v = s.split(": ", 1)
+            parts.append(f'<div class="kv"><span class="k">{html.escape(k)}</span><span>{html.escape(v)}</span></div>')
+        else:
+            parts.append(f"<p>{html.escape(s)}</p>")
+    page = f"""<html><head><style>
+body{{margin:0;background:#0d1117;color:#e6edf3;font:30px/1.4 DejaVu Sans,sans-serif}}
+.card{{padding:40px 44px;width:752px}} h1{{font-size:40px;margin:0 0 22px}}
+h2{{font-size:24px;color:#8b949e;letter-spacing:2px;margin:26px 0 10px;font-weight:normal;text-transform:uppercase}}
+p{{margin:10px 0}} .b{{margin:10px 0;padding-left:34px;text-indent:-34px}} .dot{{display:inline-block;width:34px;text-indent:0;color:#57ab5a}}
+.kv{{display:flex;gap:24px;margin:10px 0}} .k{{width:300px;flex:none;color:#8b949e}} .gap{{height:14px}}
+</style></head><body><div class="card" id="c"><h1>{html.escape(title)}</h1>{''.join(parts)}</div></body></html>"""
+    # ponytail: height estimated from line count and length; switch to a CDP full-page capture if cards get cut off.
+    height = 150 + sum(52 * max(1, len(l) // 40 + 1) for l in body)
+    return page, height
+
+
+def shoot(page, height, out):
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "card.html")
+        open(f, "w").write(page)
+        subprocess.run([chrome(), "--headless=new", "--no-sandbox", "--hide-scrollbars", f"--screenshot={out}",
+                        f"--window-size={CARD_WIDTH},{max(height, CARD_MIN_HEIGHT)}", f"file://{f}"], capture_output=True, timeout=60, check=True)
+
+
+if __name__ == "__main__":
+    shoot(*render(sys.stdin.read()), sys.argv[1])
