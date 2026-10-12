@@ -1,6 +1,6 @@
 # Herdr sidebar
 
-Crewship renders `~/.config/herdr/config.toml` from [`ansible/templates/herdr.toml.j2`](../ansible/templates/herdr.toml.j2) and the `herdr` block of `.local/host.yml`. This guide covers the two sidebar layouts it ships, Spaces and Agents, and the two feeders that report their `$` tokens: an omp extension for Agents and a reporter timer for Spaces.
+Crewship renders `~/.config/herdr/config.toml` from [`blueprint/ansible/templates/herdr.toml.j2`](../blueprint/ansible/templates/herdr.toml.j2) and the `herdr` block of `.local/host.yml`. This guide covers the two sidebar layouts it ships, Spaces and Agents, and the two feeders that report their `$` tokens: an omp extension for Agents and a reporter timer for Spaces.
 
 The sidebar is 46 columns wide (`sidebar_width`; it may grow to `sidebar_max_width`, 56). That fits the widest pull request line: a 4-digit pull request and issue, 5-digit line counts and a 3-digit file count. There is no status word: the state icon already shows it. The recipe sets `[ui] status_indicators = "symbols"`, so the state icon is a different symbol for each agent state, not only a different color. This guide calls it the state dot.
 
@@ -54,7 +54,7 @@ Without a `machine` workspace, the machine line is the primary home's `$host` li
 
 ### The reporter
 
-[`maintenance/herdr-spaces.py`](../maintenance/herdr-spaces.py) is installed as `~/.local/bin/herdr-spaces.py` and run by the user timer `herdr-spaces.timer` every second. It uses only the Python standard library.
+[`blueprint/maintenance/herdr-spaces.py`](../blueprint/maintenance/herdr-spaces.py) is installed as `~/.local/bin/herdr-spaces.py` and run by the user timer `herdr-spaces.timer` every second. It uses only the Python standard library.
 
 For every Herdr workspace it finds the home from its panes' directories: the nearest git top-level that holds both `state/` and `data/`. It then reports the tokens above as workspace metadata under the source `crewship:spaces`, with `herdr workspace report-metadata`, and clears every token that has no value. Helper spaces and per-task spaces (`└ …`) get `short` only. A space with no home gets `short` and CPU and RAM only. The `machine` workspace gets `machine` only; without one, the primary home gets `host`. It also writes the same data where the phone layout shows it (see [On a phone](#on-a-phone)).
 
@@ -106,7 +106,7 @@ The issue comes from the worker's task record in its home first: the first `issu
 
 ### The omp extension
 
-Herdr configuration alone cannot drop the `π` (omp puts it at the start of every terminal title) or know about pull requests. With the `agents` profile on, `./ship.sh launch` installs [`config/herdr-sidebar.ts`](../config/herdr-sidebar.ts) as `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`. omp loads it at startup. Every apply rewrites it, so do not edit the installed copy.
+Herdr configuration alone cannot drop the `π` (omp puts it at the start of every terminal title) or know about pull requests. With the `agents` profile on, `./ship.sh launch` installs [`blueprint/config/herdr-sidebar.ts`](../blueprint/config/herdr-sidebar.ts) as `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`. omp loads it at startup. Every apply rewrites it, so do not edit the installed copy.
 
 The extension does nothing outside Herdr (`HERDR_ENV` is not `1`) or in an omp started from another omp's shell (`OMPCODE=1`). Inside a Herdr pane it:
 
@@ -139,7 +139,7 @@ Set these keys under `crewship.herdr` in `.local/host.yml`, then run `./ship.sh 
 | `sidebar_agent_rows` | the Agents layout above | TOML array written as `[ui.sidebar.agents] rows`. |
 | `sidebar_bg` | `reset` | `[theme.custom] sidebar_bg`. `reset` is Herdr's alias for the terminal's own background, so the sidebar follows a transparent terminal; set a color such as `#1e1e2e` to pin it. |
 
-Token syntax: [Herdr configuration](https://herdr.dev/docs/configuration/). Copy the default rows from [`config/default.yml`](../config/default.yml) and edit them:
+Token syntax: [Herdr configuration](https://herdr.dev/docs/configuration/). Copy the default rows from [`blueprint/config/default.yml`](../blueprint/config/default.yml) and edit them:
 
 - To turn a part off, delete its entry, for example `{ token = "$queue", … }` or the `$files` entry. Delete a whole row, such as the `$res` row, to drop that line.
 - To change a color, edit its `fg`, `bold` or `dim`.
@@ -200,13 +200,13 @@ What the mobile layout forces, compared with the desktop sidebar:
 
 btop draws nothing in a pane smaller than its shown boxes need; it shows `Terminal size too small` instead. All four boxes need 80x24 in btop 1.4 (the cpu box is 60 columns wide, the proc box 44 beside the 36 of mem and net), so a 50-column phone pane is too small.
 
-`./ship.sh launch` installs the latest btop release as `~/.local/bin/btop-bin`, [`config/btop.conf`](../config/btop.conf) as `~/.config/btop/btop.conf`, and [`maintenance/btop.sh`](../maintenance/btop.sh) as `~/.local/bin/btop`. The launcher starts btop with preset 0 (all four boxes) in a pane of at least 80x24, and otherwise with preset 4 (processes only, which needs 44x16). When a phone attaches to the same session and the pane crosses 80x24, the launcher restarts btop with the other preset. Quitting btop ends the launcher.
+`./ship.sh launch` installs the latest btop release as `~/.local/bin/btop-bin`, [`blueprint/config/btop.conf`](../blueprint/config/btop.conf) as `~/.config/btop/btop.conf`, and [`blueprint/maintenance/btop.sh`](../blueprint/maintenance/btop.sh) as `~/.local/bin/btop`. The launcher starts btop with preset 0 (all four boxes) in a pane of at least 80x24, and otherwise with preset 4 (processes only, which needs 44x16). When a phone attaches to the same session and the pane crosses 80x24, the launcher restarts btop with the other preset. Quitting btop ends the launcher.
 
-btop saves its config on exit, including the last preset's boxes; the launcher always passes a preset, so that never changes what it shows. Every apply rewrites the config, so make lasting changes in `config/btop.conf`, and keep preset 4 there.
+btop saves its config on exit, including the last preset's boxes; the launcher always passes a preset, so that never changes what it shows. Every apply rewrites the config, so make lasting changes in `blueprint/config/btop.conf`, and keep preset 4 there.
 
 ## Viewing from another machine
 
-Sidebar layouts are client-side: Herdr draws the sidebar from the config of the machine you view from, even over `herdr --remote`. The host still reports every token, but the viewing machine needs the host's layout to show them. `./ship.sh launch` installs [`maintenance/herdr-sidebar-to-client.py`](../maintenance/herdr-sidebar-to-client.py) as `~/.local/bin/herdr-sidebar-to-client.py`. On the viewing machine, run it against the host with Python 3 and ssh access, where `<host>` is anything `ssh` accepts, such as `user@host`:
+Sidebar layouts are client-side: Herdr draws the sidebar from the config of the machine you view from, even over `herdr --remote`. The host still reports every token, but the viewing machine needs the host's layout to show them. `./ship.sh launch` installs [`blueprint/maintenance/herdr-sidebar-to-client.py`](../blueprint/maintenance/herdr-sidebar-to-client.py) as `~/.local/bin/herdr-sidebar-to-client.py`. On the viewing machine, run it against the host with Python 3 and ssh access, where `<host>` is anything `ssh` accepts, such as `user@host`:
 
 ```bash
 ssh <host> cat .local/bin/herdr-sidebar-to-client.py | python3 - <host>
@@ -218,7 +218,7 @@ Pane state (the sidebar dots) is reported on the host by the omp integration `./
 
 ## Over mosh
 
-Over mosh, Herdr 0.9.3 can paint an opaque fill over older panes ([herdr#3773](https://github.com/herdrdev/herdr/issues/3773)), and mosh drops the images in the panes. `./ship.sh launch` installs [`herdr-patch/herdr-patch`](../herdr-patch/herdr-patch) as `~/.local/bin/herdr-patch`, which fixes both. `mosh-server` starts its command with the system `PATH`, which has no `~/.local/bin`, so apply also links `/usr/local/bin/herdr-patch` and `/usr/local/bin/herdr` to the installed files.
+Over mosh, Herdr 0.9.3 can paint an opaque fill over older panes ([herdr#3773](https://github.com/herdrdev/herdr/issues/3773)), and mosh drops the images in the panes. `./ship.sh launch` installs [`tools/herdr-patch/herdr-patch`](../tools/herdr-patch/herdr-patch) as `~/.local/bin/herdr-patch`, which fixes both. `mosh-server` starts its command with the system `PATH`, which has no `~/.local/bin`, so apply also links `/usr/local/bin/herdr-patch` and `/usr/local/bin/herdr` to the installed files.
 
 On your computer, install the same script and attach with real images:
 
@@ -226,7 +226,7 @@ On your computer, install the same script and attach with real images:
 herdr-patch <user>@<host>
 ```
 
-In a mobile mosh app, or with plain mosh, set the host command to `herdr-patch` (`mosh <user>@<host> -- herdr-patch`). The [herdr-patch README](../herdr-patch/README.md) has the install steps for your computer, the images, the `HERDR_PATCH_FILL` fill list, the limits, and the removal steps.
+In a mobile mosh app, or with plain mosh, set the host command to `herdr-patch` (`mosh <user>@<host> -- herdr-patch`). The [herdr-patch README](../tools/herdr-patch/README.md) has the install steps for your computer, the images, the `HERDR_PATCH_FILL` fill list, the limits, and the removal steps.
 
 Retired: `herdr-mosh` is now `herdr-patch`. An apply on a host that still has `~/.local/bin/herdr-mosh` or `/usr/local/bin/herdr-mosh` removes both, so a saved mosh command that runs `herdr-mosh` must change to `herdr-patch`.
 

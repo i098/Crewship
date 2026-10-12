@@ -35,7 +35,7 @@ looping process writing to `/var/log` can take `/` to 100%.
 `crewship-storage-guard.timer` runs `storage-guard.sh` every 5 minutes. It
 measures the filesystems holding `/`, `/var/log`, the home and Docker's data
 root (`docker info`), each filesystem once. Thresholds are the
-`crewship_storage_guard_*` variables in `ansible/group_vars/all/fleet.yml`.
+`crewship_storage_guard_*` variables in `blueprint/ansible/group_vars/all/fleet.yml`.
 
 | Tier | Trigger (default) | Action |
 | --- | --- | --- |
@@ -78,10 +78,10 @@ To keep a container, start it with `--label crewship.keep` or `--restart unless-
 Three browser tiers share one cookie jar. The `fleet_browsers` profile, or
 `fleet_guards`, installs them under `~/oss-fleet/browsers/`, and puts their
 environment in shell profiles and the Herdr unit. Sources of truth:
-`fleet/browsers/fleet-browser` (runtime, `alive` probe),
-`fleet/browsers/env.sh` (defaults every shell inherits),
-`fleet/browsers/cookie-sync.ts` (jar), `ansible/tasks/fleet-browsers.yml` and
-`ansible/templates/fleet-browser-*.{service,timer}.j2` (units, cadences).
+`blueprint/fleet/browsers/fleet-browser` (runtime, `alive` probe),
+`blueprint/fleet/browsers/env.sh` (defaults every shell inherits),
+`blueprint/fleet/browsers/cookie-sync.ts` (jar), `blueprint/ansible/tasks/fleet-browsers.yml` and
+`blueprint/ansible/templates/fleet-browser-*.{service,timer}.j2` (units, cadences).
 The playbook tag `fleet_browsers` (or `fleet`) narrows a run to the ladder;
 `--skip-tags journald` also leaves out its host-wide journald cap.
 Those runs leave the Herdr unit alone. The unit gets the ladder environment

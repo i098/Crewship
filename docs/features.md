@@ -9,7 +9,7 @@
 - [GitHub board](github-board.md): agent work as issues on a Project board (opt-in)
 - [Host-move checklist](configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)
 - [Google Workspace CLI](google-workspace.md): `gws` with several Google accounts on a headless host
-- [herdr-patch](../herdr-patch/README.md): Herdr over mosh with real images
+- [herdr-patch](../tools/herdr-patch/README.md): Herdr over mosh with real images
 - [Checksum-verified toolchain](dependencies.md): every tool, package, and image the recipe installs
 - [Neovim with LazyVim](dependencies.md#neovim-and-lazyvim): a terminal editor on every host, with Pyrefly for Python
 - [Install, update and migrate](install.md): release artifact, updates, moving a git install

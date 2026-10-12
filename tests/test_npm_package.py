@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-PACKAGE = Path(__file__).parents[1] / "npm"
+PACKAGE = Path(__file__).parents[1] / "tools/npm"
 
 
 @pytest.mark.skipif(not shutil.which("npm"), reason="needs npm")

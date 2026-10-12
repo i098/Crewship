@@ -1,4 +1,4 @@
-"""tasks/firstmate.yml keeps the checkout at origin/main plus patches/firstmate/.
+"""tasks/firstmate.yml keeps the checkout at origin/main plus blueprint/patches/firstmate/.
 
 Patch-layer tests drive the real task file with ansible-playbook against
 throwaway repositories and two generated patches.
@@ -23,7 +23,7 @@ import yaml
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/firstmate-patch-layer.sh"
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
-OLD_NAME = yaml.safe_load((ROOT / "ansible/tasks/rename.yml").read_text())[0]["vars"]["crewship_renamed_word"]
+OLD_NAME = yaml.safe_load((ROOT / "blueprint/ansible/tasks/rename.yml").read_text())[0]["vars"]["crewship_renamed_word"]
 
 
 def git(repo, *args):
@@ -76,7 +76,7 @@ def apply(host):
                     "connection": "local",
                     "gather_facts": False,
                     "tasks": [
-                        {"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/firstmate.yml")}
+                        {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/firstmate.yml")}
                     ],
                 }
             ]
@@ -85,7 +85,7 @@ def apply(host):
     variables = {
         # The dispatch-settings tasks ask for root; nothing here needs it.
         "ansible_become": False,
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_become_target": False,
         "crewship_user_env": {},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
@@ -297,7 +297,7 @@ def crewboard_firstmate(tmp_path):
     scripts = ("fm-brief.sh", "fm-supervision-instructions.sh")
     for script in scripts:
         shutil.copyfile(checkout / "bin" / script, checkout / "bin" / f"baseline-{script}")
-    patch = ROOT / "patches/firstmate/0003-brief-crewboard.patch"
+    patch = ROOT / "blueprint/patches/firstmate/0003-brief-crewboard.patch"
     # Keep git apply from finding a parent repository and skipping these paths.
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
     subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)

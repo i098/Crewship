@@ -1,4 +1,4 @@
-"""Herdr sidebar feeders: config/herdr-sidebar.ts and maintenance/herdr-spaces.py.
+"""Herdr sidebar feeders: blueprint/config/herdr-sidebar.ts and blueprint/maintenance/herdr-spaces.py.
 
 The reporter runs against a fixture home and a stub `herdr` command that
 records what would be reported, so the live Herdr session is never touched.
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-REPORTER = ROOT / "maintenance/herdr-spaces.py"
+REPORTER = ROOT / "blueprint/maintenance/herdr-spaces.py"
 BLANK = "\u2800"
 
 spec = importlib.util.spec_from_file_location("herdr_spaces", REPORTER)
@@ -36,7 +36,7 @@ LABELS = {
 
 def ts(expr: str):
     """Evaluate an expression against the extension's exports with bun."""
-    code = f"import * as m from {json.dumps(str(ROOT / 'config/herdr-sidebar.ts'))};"
+    code = f"import * as m from {json.dumps(str(ROOT / 'blueprint/config/herdr-sidebar.ts'))};"
     code += f"console.log(JSON.stringify({expr}));"
     env = {k: v for k, v in os.environ.items() if k != "FM_TASK_ID"}
     out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, env=env)
@@ -732,7 +732,7 @@ def worker_log(tmp_path, origin_head=True, commit=True, setup=None, live=""):
     write(tmp_path / "stub/gh", "#!/bin/sh\necho '[]'\n", 0o755)
     ctx = "{hasUI: true, cwd: work, ui: {setTitle() {}}}"
     code = f"""
-import ext from {json.dumps(str(ROOT / "config/herdr-sidebar.ts"))};
+import ext from {json.dumps(str(ROOT / "blueprint/config/herdr-sidebar.ts"))};
 import {{ appendFileSync, readFileSync, rmSync, writeFileSync }} from "node:fs";
 const work = {json.dumps(str(work))};
 const fail = {json.dumps(str(fail))};
@@ -879,7 +879,7 @@ await settled();
 
 
 client_spec = importlib.util.spec_from_file_location(
-    "sidebar_to_client", ROOT / "maintenance/herdr-sidebar-to-client.py"
+    "sidebar_to_client", ROOT / "blueprint/maintenance/herdr-sidebar-to-client.py"
 )
 to_client = importlib.util.module_from_spec(client_spec)
 client_spec.loader.exec_module(to_client)
@@ -939,7 +939,7 @@ def test_client_script_creates_the_config_dir_and_surfaces_ssh_errors(tmp_path):
     target = tmp_path / "fresh" / "herdr" / "config.toml"
     script = [
         "python3",
-        str(ROOT / "maintenance" / "herdr-sidebar-to-client.py"),
+        str(ROOT / "blueprint/maintenance/herdr-sidebar-to-client.py"),
         "host",
         str(target),
     ]

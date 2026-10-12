@@ -17,7 +17,7 @@ def load(name, path):
     return module
 
 
-board = load("github_board", "maintenance/github-board.py")
+board = load("github_board", "blueprint/maintenance/github-board.py")
 ship = load("ship_config_github_board", "scripts/ship.py")
 
 BOARD = {"repo": "owner/board", "project": 3}
@@ -25,7 +25,7 @@ BOARD = {"repo": "owner/board", "project": 3}
 
 @pytest.fixture
 def configuration():
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     document["crewship"]["github_board"] = dict(BOARD)
     return document
 
@@ -195,12 +195,12 @@ def test_a_status_option_missing_from_the_project_stops_before_any_status_change
 def _apply(tmp_path, home, github_board):
     playbook = tmp_path / "playbook.yml"
     if not playbook.exists():
-        (tmp_path / "templates").symlink_to(ROOT / "ansible/templates")
+        (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
         playbook.write_text(yaml.safe_dump([{
             "hosts": "localhost",
             "connection": "local",
             "gather_facts": False,
-            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/github_board.yml")}],
+            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/github_board.yml")}],
             "handlers": [{"name": "Reload", "ansible.builtin.debug": {"msg": "reload"},
                           "listen": "reload user systemd"}],
         }]))
@@ -212,7 +212,7 @@ def _apply(tmp_path, home, github_board):
         "crewship_local_bin": str(home / ".local/bin"),
         "crewship_user_units": str(home / ".config/systemd/user"),
         "crewship_firstmate_dir": str(home / "Dev/firstmate"),
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_manage_services": False,
         "crewship_user_systemd_env": {},
     }

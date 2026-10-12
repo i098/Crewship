@@ -46,7 +46,7 @@ def apply(
     playbook = home.parent / "units.yml"
     # Like site.yml, the playbook directory carries templates/.
     if not (home.parent / "templates").exists():
-        (home.parent / "templates").symlink_to(ROOT / "ansible/templates")
+        (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
     playbook.write_text(
         yaml.safe_dump(
             [
@@ -54,16 +54,16 @@ def apply(
                     "hosts": "localhost",
                     "connection": "local",
                     "gather_facts": False,
-                    "vars_files": [str(f) for f in sorted((ROOT / "ansible/group_vars/all").glob("*.yml"))],
+                    "vars_files": [str(f) for f in sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))],
                     "tasks": (
                         [
                             {
-                                "ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/fleet_guards.yml"),
+                                "ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/fleet_guards.yml"),
                                 "when": "crewship_cfg.profiles.fleet_guards | bool",
                             },
                         ] if scripts else []
                     ) + [{
-                        "ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/fleet_units.yml"),
+                        "ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/fleet_units.yml"),
                         "when": "crewship_cfg.profiles.fleet_guards | bool",
                     }],
                     "handlers": [
@@ -76,7 +76,7 @@ def apply(
     )
     variables = {
         "ansible_become": False,
-        "crewship_repo": str(ROOT),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_become_target": False,
         "crewship": {

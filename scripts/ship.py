@@ -25,7 +25,7 @@ OLD_ROOT, NEW_ROOT = "factory", "crewship"
 
 
 def validate_document(document, schema_name):
-    schema = json.loads((ROOT / "schemas" / schema_name).read_text())
+    schema = json.loads((ROOT / "blueprint/schemas" / schema_name).read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
     try:
         jsonschema.Draft202012Validator(schema).validate(document)
@@ -88,7 +88,7 @@ def validate_config(document):
             raise ValueError("the CI pool requires the docker profile")
         if ".." in Path(pool["data_dir"]).parts:
             raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        # Unit instance names; the same rule as slug() in maintenance/ci-pool.py.
+        # Unit instance names; the same rule as slug() in blueprint/maintenance/ci-pool.py.
         slugs = [re.sub(r"[^a-z0-9]+", "-", e["repo"].lower()).strip("-") for e in pool["repos"]]
         if len(set(slugs)) != len(slugs):
             raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
@@ -156,7 +156,7 @@ def load_config(path):
 
 
 def initialize(args):
-    config = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     current = pwd.getpwuid(os.getuid())
     user = args.user or (current.pw_name if current.pw_uid != 0 else "coder")
     home = args.home or (
@@ -190,12 +190,12 @@ def provision(document, check):
             "~/oss-fleet/shared-supabase, then remove those units, the CLI shim and scripts; "
             "keep all Docker volumes. Use docs/shared-postgres.md for the replacement."
         )
-    environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "ansible/ansible.cfg")}
+    environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "blueprint/ansible/ansible.cfg")}
     argv = [
         "ansible-playbook",
         "-i",
-        str(ROOT / "ansible/inventory.yml"),
-        str(ROOT / "ansible/site.yml"),
+        str(ROOT / "blueprint/ansible/inventory.yml"),
+        str(ROOT / "blueprint/ansible/site.yml"),
         "--extra-vars",
         json.dumps(document),
     ]
@@ -421,7 +421,7 @@ def main():
     path = args.config or (
         ROOT / ".local/host.yml"
         if (ROOT / ".local/host.yml").exists()
-        else ROOT / "config/default.yml"
+        else ROOT / "blueprint/config/default.yml"
     )
     path = path.resolve()
     document = load_config(path)

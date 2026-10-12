@@ -55,6 +55,19 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
   <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. Optional guards, the optional crew board and the secrets file are shared on the server. The agents can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
 </picture>
 
+## Repository layout
+
+- [`blueprint/`](blueprint/): what provisions a host. The Ansible playbook, config seeds, schemas, cloud-init and container configs, patches, rules, skills, fleet guards, and maintenance scripts.
+- [`apps/`](apps/): services Crewship builds and runs: the crew board (`crewboard`), the iMessage bridge (`imessage`), and the secrets Worker (`fleet-secrets`).
+- [`tools/`](tools/): stand-alone helpers: the `crewship` npm launcher (`npm`), `herdr-patch`, and `dia-debug`.
+- [`scripts/`](scripts/): the `ship.sh` CLI code, the release artifact build, and secrets helpers.
+- [`site/`](site/): the crewship.si landing page.
+- [`docs/`](docs/): the guides.
+- [`tests/`](tests/): the test suite.
+- [`changelog.d/`](changelog.d/): changelog fragments, one per pull request.
+
+`install.sh`, `ship.sh`, and `onboard.sh` stay at the top, because the install URL and the release tarball depend on them.
+
 ## More docs
 
 - [Architecture](docs/architecture.md)

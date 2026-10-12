@@ -1,4 +1,4 @@
-"""dia-debug/dia-debug: when it relaunches the browser with the CDP port flag."""
+"""tools/dia-debug/dia-debug: when it relaunches the browser with the CDP port flag."""
 
 import os
 import subprocess
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[1] / "dia-debug" / "dia-debug"
+SCRIPT = Path(__file__).parents[1] / "tools/dia-debug/dia-debug"
 STUBS = {
     "lsappinfo": "echo '\"pid\"=4242'",
     "ps": 'case "$2" in command=) echo "$CMD" ;; etime=) echo "$ETIME" ;; esac',

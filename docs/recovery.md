@@ -2,7 +2,7 @@
 
 ## New-device sequence
 
-1. Start with a supported Ubuntu installation and working SSH/sudo access. `cloud-init/user-data.yaml` installs initial OS prerequisites; it does not create credentials, log in to services, or clone this private repository.
+1. Start with a supported Ubuntu installation and working SSH/sudo access. `blueprint/cloud-init/user-data.yaml` installs initial OS prerequisites; it does not create credentials, log in to services, or clone this private repository.
 2. Authenticate GitHub on the new device and install Crewship ([Install, update and migrate](install.md)). Run the [Quick start](../README.md#quick-start): `onboard.sh`, then `ship.sh` `dock`, `inspect`, `chart`, `launch`, and `survey`.
 3. Confirm Herdr's user service and executable agree. Both resolve to the versioned release that apply resolved and installed (see [Latest releases](dependencies.md#latest-releases)).
 4. Authenticate agent/provider CLIs under the configured operator account (for omp, see [Sign in](omp.md#sign-in)). Confirm the configured models exist for that account. Recreate per-project approval/trust choices instead of copying a global auto-approval list.
@@ -20,7 +20,7 @@ Do not point two machines at the same live session, task registry, browser profi
 ```
 
 - **`fleet guards require the docker and firstmate profiles`**: enable both profiles in `.local/host.yml`.
-- **Spawn refused by the memory floor**: wait for a lane to finish, or lower the floor in this repository's `config/spawn-memory-floor-mb` and rerun `./ship.sh launch`. Every apply rewrites the Firstmate checkout's copy, so an edit made only there is reverted.
+- **Spawn refused by the memory floor**: wait for a lane to finish, or lower the floor in this repository's `blueprint/config/spawn-memory-floor-mb` and rerun `./ship.sh launch`. Every apply rewrites the Firstmate checkout's copy, so an edit made only there is reverted.
 
 ## Desktop access
 
@@ -49,7 +49,7 @@ The included PostgreSQL/Redis Compose services are empty development examples. T
 
 For `thinking`/`redacted_thinking` replay errors, inspect the complete request path. Prefix-bound reasoning can fail even when the opaque thinking fields are unchanged: an intermediary may have rewritten earlier messages, system text, or tool schemas. Preserve request bodies, route affinity, and signer identity; do not strip reasoning as a generic workaround.
 
-The inspected local Headroom/pxpipe fixes, version/hash guards, and offline regressions are in [proxy-fixes](../patches/proxy-fixes/README.md). Default fresh Crewship agent configuration does not import machine-specific proxy URLs. Providers can be used directly; installing the optional proxies and their credentials is a separate, deliberate operation.
+The inspected local Headroom/pxpipe fixes, version/hash guards, and offline regressions are in [proxy-fixes](../blueprint/patches/proxy-fixes/README.md). Default fresh Crewship agent configuration does not import machine-specific proxy URLs. Providers can be used directly; installing the optional proxies and their credentials is a separate, deliberate operation.
 
 Never upload a raw failed HTTP request to a public issue or this repository. Such files contain prompts and may include secrets in tool output. Share only sanitized block shapes, lengths, hashes, provider/version information, and error classifications.
 
@@ -63,7 +63,7 @@ A second unchanged provisioning pass should report `changed=0`. Runtime applicat
 
 ### Upgrade from a pre-rename install
 
-The first `./ship.sh launch` after the Crewship rename migrates a host installed before it, once. It stops the old desktop units and deletes their files and links. It stops the chrome-devtools-axi bridges that run from the old install directory, because the browser timer cannot stop them after the move. It moves each old path to its new name, for example `~/.local/share/crewship`, and points command links and user unit files at the new paths. It restarts each running user service whose unit file or drop-in it changed, except the no-mistakes daemon: restart that daemon by hand when no pipeline run is active. The desktop tasks then install and enable `crewship-vnc.service` and `crewship-novnc.service`. [`ansible/tasks/rename.yml`](../ansible/tasks/rename.yml) holds the full old-to-new table. Run that apply when no agent session is active, because running tools lose their old paths, and do not run `./onboard.sh` before it. If an old path and its new name both exist, the apply stops before it changes anything; merge or remove one by hand and run it again. The one exception is the share directory when the new one holds only what `install.sh` and `onboard.sh` create (`releases`, `tools`, `.install.lock`): the old directory then merges into it, and the apply stops without changes if an entry differs in both. A second apply reports `changed=0`.
+The first `./ship.sh launch` after the Crewship rename migrates a host installed before it, once. It stops the old desktop units and deletes their files and links. It stops the chrome-devtools-axi bridges that run from the old install directory, because the browser timer cannot stop them after the move. It moves each old path to its new name, for example `~/.local/share/crewship`, and points command links and user unit files at the new paths. It restarts each running user service whose unit file or drop-in it changed, except the no-mistakes daemon: restart that daemon by hand when no pipeline run is active. The desktop tasks then install and enable `crewship-vnc.service` and `crewship-novnc.service`. [`blueprint/ansible/tasks/rename.yml`](../blueprint/ansible/tasks/rename.yml) holds the full old-to-new table. Run that apply when no agent session is active, because running tools lose their old paths, and do not run `./onboard.sh` before it. If an old path and its new name both exist, the apply stops before it changes anything; merge or remove one by hand and run it again. The one exception is the share directory when the new one holds only what `install.sh` and `onboard.sh` create (`releases`, `tools`, `.install.lock`): the old directory then merges into it, and the apply stops without changes if an entry differs in both. A second apply reports `changed=0`.
 
 The Compose project is now `crewship`, so Compose and the devcontainer use new volume names. The old volumes stay; copy their data by hand if you need it. The containers of the project under the old name keep their ports, so stop them before the first `up` under the new name: run `docker compose ls` to find the old project name, then run `docker compose -p <old project> down`.
 

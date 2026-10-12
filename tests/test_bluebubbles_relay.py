@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
-HELPER = ROOT / "imessage/bluebubbles-relay"
+HELPER = ROOT / "apps/imessage/bluebubbles-relay"
 PASSWORD = "bb-" + "a" * 64
 
 

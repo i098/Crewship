@@ -1,0 +1,25 @@
+{
+  "name": "crewship",
+  "version": "0.4.2",
+  "description": "This makes it super easy to start using agents in the cloud, enjoy!",
+  "license": "FSL-1.1-ALv2",
+  "homepage": "https://github.com/i098/Crewship#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/i098/Crewship.git",
+    "directory": "tools/npm"
+  },
+  "bugs": "https://github.com/i098/Crewship/issues",
+  "bin": {
+    "crewship": "crewship.js"
+  },
+  "files": [
+    "crewship.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux"
+  ]
+}

@@ -33,7 +33,7 @@ SPEC.loader.exec_module(ship)
          "project-only", "archive-only", "pools-only"],
 )
 def test_removed_switch_reports_replacement_without_traceback(tmp_path, enabled, fleet):
-    document = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     if enabled is not None:
         document["crewship"]["profiles"][ship.REMOVED_PROFILE] = enabled
     document["crewship"]["fleet"].update(fleet)
@@ -106,14 +106,14 @@ def test_apply_preserves_running_retired_stack_and_volume(tmp_path, capsys, monk
         apply(home, scripts=True)
         # Route the CLI apply through the same real task consumer inside this lab.
         repo = tmp_path / "repo"
-        ansible = repo / "ansible"
+        ansible = repo / "blueprint/ansible"
         ansible.mkdir(parents=True)
         (ansible / "site.yml").write_bytes((tmp_path / "units.yml").read_bytes())
         (ansible / "inventory.yml").write_text("all:\n  hosts:\n    localhost:\n")
-        (ansible / "templates").symlink_to(ROOT / "ansible/templates")
+        (ansible / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
         monkeypatch.setattr(ship, "ROOT", repo)
         document = {
-            "ansible_become": False, "crewship_repo": str(ROOT),
+            "ansible_become": False, "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
             "crewship_group": "root", "crewship_become_target": False,
             "crewship": {"home": str(home), "user": "root", "start_services": False,
                          "profiles": {"fleet_guards": True}},

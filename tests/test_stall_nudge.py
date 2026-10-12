@@ -1,4 +1,4 @@
-"""maintenance/fm-main-stall-nudge decision logic, with herdr and the send helper stubbed."""
+"""blueprint/maintenance/fm-main-stall-nudge decision logic, with herdr and the send helper stubbed."""
 
 import json
 import os
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[1] / "maintenance/fm-main-stall-nudge"
+SCRIPT = Path(__file__).parents[1] / "blueprint/maintenance/fm-main-stall-nudge"
 
 # The real helper exits 0 and prints its verdict; the stub prints $SEND_OUT.
 BACKEND = """\

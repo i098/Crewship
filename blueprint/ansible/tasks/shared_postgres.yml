@@ -1,0 +1,86 @@
+---
+# Disabled profiles leave the container, volume, secrets and units unmanaged.
+- name: Check explicit target-account Docker access
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ crewship_blueprint }}/fleet/bin/crewship-db"
+      - --check-docker
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_systemd_env | combine({'HOME': crewship_cfg.home}) }}"
+  changed_when: false
+  check_mode: false
+
+- name: Install the shared Postgres helper
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/fleet/bin/crewship-db"
+    dest: "{{ crewship_local_bin }}/crewship-db"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+    remote_src: true
+  become: true
+
+# Use the checkout's copy so check mode also works before the first install.
+- name: Converge the shared Postgres service
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/python3', crewship_blueprint ~ '/fleet/bin/crewship-db', '--apply']
+         + (['--check'] if ansible_check_mode else [])
+         + (['--no-start'] if not (crewship_manage_services | bool) else []) }}
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: >-
+    {{ crewship_user_systemd_env | combine({
+         'HOME': crewship_cfg.home,
+         'CREWSHIP_PROJECTS_DIR': crewship_firstmate_dir ~ '/projects'}) }}
+  register: crewship_postgres_apply
+  changed_when: crewship_postgres_apply.stdout | length > 0
+  check_mode: false
+
+- name: Ensure the Postgres seeder unit directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+  become: true
+  loop:
+    - "{{ crewship_user_units }}"
+    - "{{ crewship_user_units }}/timers.target.wants"
+
+- name: Render the Postgres worktree seeder units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+  become: true
+  loop:
+    - crewship-postgres-env-seed.service
+    - crewship-postgres-env-seed.timer
+  notify: reload user systemd
+
+- name: Statically enable the Postgres worktree seeder
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/crewship-postgres-env-seed.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/crewship-postgres-env-seed.timer"
+    state: link
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    follow: false
+  become: true
+
+- name: Start the Postgres worktree seeder timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: crewship-postgres-env-seed.timer
+    state: started
+    enabled: true
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_systemd_env }}"
+  when: crewship_manage_services | bool

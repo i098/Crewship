@@ -1,4 +1,4 @@
-"""fleet/browsers/cookie-sync.ts never fans Google cookies out between tiers.
+"""blueprint/fleet/browsers/cookie-sync.ts never fans Google cookies out between tiers.
 
 Three file-only tiers run the real sync without a browser. The vnc tier holds a
 Google sign-in and a GitHub session; the canonical jar still carries a Google
@@ -66,7 +66,7 @@ def test_google_cookies_stay_in_their_tier(tmp_path: Path) -> None:
     subprocess.run(
         [
             "bun",
-            str(ROOT / "fleet/browsers/cookie-sync.ts"),
+            str(ROOT / "blueprint/fleet/browsers/cookie-sync.ts"),
             "--state",
             str(state),
             f"obscura=file://{obscura}",
@@ -125,7 +125,7 @@ def test_replayed_google_copy_in_running_obscura_asks_for_a_stop(tmp_path: Path)
     server = subprocess.Popen(["bun", str(fake)], stdout=subprocess.PIPE, text=True)
     try:
         port = server.stdout.readline().strip()
-        sync = ["bun", str(ROOT / "fleet/browsers/cookie-sync.ts"), "--state", str(state)]
+        sync = ["bun", str(ROOT / "blueprint/fleet/browsers/cookie-sync.ts"), "--state", str(state)]
         running = subprocess.run(
             [*sync, f"obscura=http://127.0.0.1:{port}|file://{obscura}", f"vnc=file://{vnc}"],
             capture_output=True,

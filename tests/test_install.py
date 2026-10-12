@@ -54,7 +54,7 @@ def test_launcher_help_matches_install_without_fetch(tmp_path):
     stub = tmp_path / "no-fetch.js"
     stub.write_text("globalThis.fetch = () => { throw new Error('fetch called'); };\n")
     result = subprocess.run(
-        [shutil.which("node"), "--require", str(stub), str(ROOT / "npm/crewship.js"), "--help"],
+        [shutil.which("node"), "--require", str(stub), str(ROOT / "tools/npm/crewship.js"), "--help"],
         capture_output=True,
         text=True,
         env=env,
@@ -232,6 +232,24 @@ def test_git_clone_migrates_to_a_release_and_a_backup(release):
     assert (backup / ".local/host.yml").read_text() == "mine\n"
 
 
+@pytest.mark.parametrize("old_layout", ["", "blueprint/"], ids=["before-blueprint", "blueprint"])
+@pytest.mark.parametrize("from_git", [False, True], ids=["release", "git-clone"])
+def test_update_carries_private_skills_and_rules_into_the_blueprint(release, old_layout, from_git):
+    if from_git:
+        subprocess.run(["git", "clone", "-q", str(release.repo), str(release.crewship)], check=True)
+    else:
+        assert release.install("v1.0.0").returncode == 0
+    for kind, name in (("skills", "mine/SKILL.md"), ("rules", "mine.md")):
+        path = release.crewship / f"{old_layout}{kind}/private/{name}"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"{kind}\n")
+    result = release.install("v1.1.0")
+    assert result.returncode == 0, result.stderr
+    assert (release.crewship / "blueprint/skills/private/mine/SKILL.md").read_text() == "skills\n"
+    assert (release.crewship / "blueprint/rules/private/mine.md").read_text() == "rules\n"
+    assert not (release.crewship / "skills").exists() and not (release.crewship / "rules").exists()
+
+
 def test_v040_host_is_migrated_before_the_reapply(release):
     assert release.install("v1.0.0").returncode == 0
     # What v0.4.0 left: tools under share/code-factory linked from ~/.local/bin, and removed fleet keys.
@@ -289,7 +307,7 @@ def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, 
         "};\n"
     )
     result = subprocess.run(
-        [shutil.which("node"), "--require", str(stub), str(ROOT / "npm/crewship.js"), "update", "--container"],
+        [shutil.which("node"), "--require", str(stub), str(ROOT / "tools/npm/crewship.js"), "update", "--container"],
         capture_output=True,
         text=True,
         env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LATEST_LOCATION": location},

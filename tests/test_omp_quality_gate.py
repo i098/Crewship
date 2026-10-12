@@ -1,4 +1,4 @@
-"""config/omp-quality-gate.ts, run under bun with a fake omp extension API.
+"""blueprint/config/omp-quality-gate.ts, run under bun with a fake omp extension API.
 
 Fake `sentrux` and `fallow` commands on PATH print canned output and log each
 call, so no real tool and no network is involved.
@@ -92,7 +92,7 @@ def drive(repo, steps, gate="", env=None, tools=("sentrux", "fallow")):
         **(env or {}),
     }
     code = DRIVER % {
-        "ext": json.dumps(str(ROOT / "config/omp-quality-gate.ts")),
+        "ext": json.dumps(str(ROOT / "blueprint/config/omp-quality-gate.ts")),
         "cwd": json.dumps(str(repo)),
         "steps": json.dumps(steps),
     }
@@ -187,7 +187,7 @@ def ci(repo, gate, rc=0, tools=True):
         "FAKE_SENTRUX_RC": str(rc),
     }
     return subprocess.run(
-        [BUN, str(ROOT / "config/omp-quality-gate.ts")],
+        [BUN, str(ROOT / "blueprint/config/omp-quality-gate.ts")],
         cwd=repo,
         capture_output=True,
         text=True,

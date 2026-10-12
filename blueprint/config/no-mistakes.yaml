@@ -1,0 +1,14 @@
+# no-mistakes global configuration, written once to ~/.no-mistakes/config.yaml.
+# Every key left out keeps the no-mistakes default.
+#
+# The seeded pipeline agent is omp over ACP: acpx runs `omp acp`, mapped in
+# ~/.acpx/config.json (blueprint/config/acpx.json). acpx and omp both resolve from
+# ~/.local/bin, which is on the daemon's PATH, so no acpx_path is set. Every
+# apply then moves it to Pi-only through omp-as-pi when the installed Pi
+# adapter is verified, so per-run --model and --effort can select gate tiers.
+#
+# Never add acp_registry_overrides for omp here. no-mistakes refuses an
+# overridden omp as a gate agent in repos with disable_project_settings: true,
+# because only its own default omp launch provably hides the target repo's
+# AGENTS.md and CLAUDE.md from the reviewer.
+agent: [acp:omp]

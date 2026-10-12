@@ -1,0 +1,121 @@
+---
+# Fail fast, before anything is touched: configuration shape, supported
+# platform, and the presence of every Main-owned input this run consumes.
+
+- name: Assert the configuration document matches the contract
+  ansible.builtin.assert:
+    that:
+      - (schema_version | default(1) | int) == 1
+      - crewship_cfg.user is string
+      - crewship_cfg.user | length > 0
+      - crewship_cfg.home is match('^/')
+      - crewship_cfg.workspace is match('^/')
+      - crewship_cfg.home not in ['/', '/root', '/home']
+      - crewship_cfg.profiles is mapping
+      - crewship_cfg.herdr is mapping
+      - crewship_cfg.browser_prune is mapping
+      - crewship_cfg.firstmate is mapping
+      - crewship_cfg.desktop is mapping
+    fail_msg: >-
+      The `crewship` extra vars are not a valid Crewship configuration
+      document (schema_version 1, absolute home/workspace, profile mapping).
+      Run `./ship.sh inspect` first.
+    quiet: true
+
+- name: Assert the host is a supported Ubuntu release
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version in crewship_supported_ubuntu_releases
+    fail_msg: >-
+      Crewship targets Ubuntu {{ crewship_supported_ubuntu_releases | join(' / ') }};
+      this host reports {{ ansible_distribution }} {{ ansible_distribution_version }}.
+      Set crewship_allow_unsupported_os=true to override deliberately.
+    quiet: true
+  when: not (crewship_allow_unsupported_os | bool)
+
+- name: Assert the CPU architecture has toolchain assets
+  ansible.builtin.assert:
+    that:
+      - crewship_platform | length > 0
+      - crewship_deb_arch | length > 0
+    fail_msg: >-
+      Architecture {{ ansible_architecture }} is not supported. The toolchain
+      ships linux-x86_64 and linux-aarch64 assets only.
+    quiet: true
+
+- name: Build the list of Main-owned inputs this run requires
+  ansible.builtin.set_fact:
+    crewship_required_inputs: >-
+      {{ [crewship_installer, crewship_herdr_spaces_source, crewship_koncreet_patch]
+         + (crewship_agent_config_files
+            | map(attribute='src')
+            | map('regex_replace', '^', crewship_repo ~ '/')
+            | list
+            if (crewship_cfg.profiles.agents | bool) else [])
+         + ([crewship_pruner_source]
+            if ((crewship_cfg.profiles.agents | bool)
+                and (crewship_cfg.browser_prune.enabled | bool)) else [])
+         + (crewship_firstmate_config_names
+            | map('regex_replace', '^', crewship_blueprint ~ '/config/')
+            | list
+            if (crewship_cfg.profiles.firstmate | bool) else []) }}
+
+- name: Stat every required input
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: "{{ crewship_required_inputs }}"
+  loop_control:
+    label: "{{ item | relpath(crewship_repo) }}"
+  register: crewship_input_stat
+  check_mode: false
+
+- name: Fail when a contract input is missing
+  ansible.builtin.assert:
+    that:
+      - crewship_input_stat.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      Missing Main-owned contract inputs:
+      {{ crewship_input_stat.results | rejectattr('stat.exists')
+         | map(attribute='item') | list | join(', ') }}.
+      These are supplied by the repository, not by this playbook; provisioning
+      stops rather than degrading silently.
+    quiet: true
+
+# Resolved once per run, in plan too, so a release landing mid-run cannot
+# split what is installed from what the unit runs and verify asserts. Only the
+# releases this host installs are resolved (crewship_installer_selection and
+# crewship_installer_also), so a source it never uses cannot fail the run. The
+# installer refuses a native release whose publisher lists no SHA-256 for the
+# asset.
+- name: Resolve the latest tool releases
+  ansible.builtin.command:
+    argv: >-
+      {{ ['python3', crewship_installer, '--home', crewship_cfg.home,
+          '--also', crewship_installer_also | join(','), '--resolve']
+         + crewship_installer_selection }}
+  register: crewship_latest_run
+  changed_when: false
+  check_mode: false
+
+- name: Record the resolved releases
+  ansible.builtin.set_fact:
+    crewship_latest: "{{ crewship_latest_run.stdout | from_json }}"
+
+- name: Warn about optional tools skipped by the lookup
+  ansible.builtin.debug:
+    msg: "{{ crewship_latest_run.stderr_lines }}"
+  when: crewship_latest_run.stderr | length > 0
+
+- name: Show the resolved provisioning plan
+  ansible.builtin.debug:
+    msg:
+      - "account            : {{ crewship_cfg.user }} (home {{ crewship_cfg.home }}, workspace {{ crewship_cfg.workspace }})"
+      - "platform           : {{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }} -> {{ crewship_platform }} / {{ crewship_deb_arch }}"
+      - "herdr              : {{ crewship_herdr_version }} (latest release) at {{ crewship_herdr_bin }}"
+      - "omp                : {{ crewship_omp_version if (crewship_cfg.profiles.agents | bool) else 'not installed' }} (latest release)"
+      - "profiles           : {{ crewship_cfg.profiles | dict2items | selectattr('value') | map(attribute='key') | list | join(', ') | default('none', true) }}"
+      - "services           : start_services={{ crewship_cfg.start_services }} linger={{ crewship_manage_linger }}"
+      - "pruner runtime     : {{ ('psutil ' ~ crewship_pruner_psutil_version ~ ' in ' ~ crewship_pruner_venv) if ((crewship_cfg.profiles.agents | bool) and (crewship_cfg.browser_prune.enabled | bool)) else 'disabled' }}"
+      - "check mode         : {{ ansible_check_mode }}"

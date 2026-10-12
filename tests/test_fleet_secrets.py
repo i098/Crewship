@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-WORKER = ROOT / "workers/fleet-secrets"
+WORKER = ROOT / "apps/fleet-secrets"
 FAKE_ENV = (
     "# fake super.env\n"
     "A=plain value with = and # inside\n"

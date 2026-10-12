@@ -92,8 +92,8 @@ compose.*.yml
 .dockerignore
 
 # Private skills and rules stay on the host; never bake them into an image.
-skills/private/
-rules/private/
+blueprint/skills/private/
+blueprint/rules/private/
 
 # The crewship.si landing page is a website, never part of a host or an image
 site

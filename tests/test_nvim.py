@@ -18,12 +18,12 @@ def apply(tmp_path, home, check=False):
         "hosts": "localhost",
         "connection": "local",
         "gather_facts": False,
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/nvim.yml")}],
+        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/nvim.yml")}],
     }]))
     result = subprocess.run(
         [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
          "--extra-vars", json.dumps({"crewship_cfg": {"home": str(home)},
-                                    "crewship_repo": str(ROOT)}),
+                                    "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint")}),
          *(["--check"] if check else [])],
         cwd=tmp_path, capture_output=True, text=True,
     )
@@ -48,9 +48,9 @@ def test_seed_and_repeat_preserve_user_changes(tmp_path, private_parent, empty_d
     apply(tmp_path, home)
     if private_parent:
         assert config.parent.stat().st_mode & 0o777 == 0o700
-    assert (config / "init.lua").read_bytes() == (ROOT / "config/nvim/init.lua").read_bytes()
+    assert (config / "init.lua").read_bytes() == (ROOT / "blueprint/config/nvim/init.lua").read_bytes()
     assert (config / "lua/plugins/pyrefly.lua").read_bytes() == (
-        ROOT / "config/nvim/lua/plugins/pyrefly.lua"
+        ROOT / "blueprint/config/nvim/lua/plugins/pyrefly.lua"
     ).read_bytes()
     assert not (home / ".local/share/nvim").exists()  # No plugin sync during apply.
     (config / "init.lua").write_text("-- user configuration\n")

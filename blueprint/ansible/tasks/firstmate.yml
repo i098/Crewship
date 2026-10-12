@@ -1,0 +1,221 @@
+---
+# Firstmate: a public clone that tracks the default branch `main` of
+# crewship.firstmate.url (upstream Firstmate unless .local/host.yml overrides
+# it), plus the patch layer in blueprint/patches/firstmate/ and its gitignored dispatch
+# settings.
+#
+# Every apply fetches `main` and puts the patch layer on top of it, so
+# tracking it is how a host stays current - which is also why it must not be
+# re-pinned to a sha.
+#
+# Safety rules (contract + docs/security.md):
+#   * `origin/main` is resolved once per run; that captured sha is what this
+#     run installs and what tasks/verify.yml asserts, so a push landing
+#     mid-run cannot turn a correct apply into a failed verification
+#   * a fresh clone ends on branch `main` tracking `origin/main` - never a
+#     detached HEAD, which breaks Firstmate's own git handling
+#   * main ends at `origin/main` plus one local commit per patch in
+#     blueprint/patches/firstmate/, built by scripts/firstmate-patch-layer.sh. A patch
+#     upstream already has is skipped; a patch that no longer applies stops
+#     the play and leaves the checkout as it was
+#   * an existing checkout is never force-checked-out, reset, stashed or
+#     cleaned. Dirty trees, other branches and local commits without the
+#     Crewship-Patch trailer are refused and the play stops so a human can
+#     look; commits with it are the old layer and are rebuilt
+#   * an unchanged host is a no-op: the layer commits take their author, date
+#     and message from the patch files, so they get the same sha every run
+#   * provisioning never runs Firstmate startup or fleet restore
+
+- name: Check for an existing Firstmate checkout
+  ansible.builtin.stat:
+    path: "{{ crewship_firstmate_dir }}/.git"
+    get_checksum: false
+  become: true
+  register: crewship_fm_git
+  changed_when: false
+  check_mode: false
+
+- name: Report the Firstmate clone that check mode cannot preview
+  ansible.builtin.debug:
+    msg: >-
+      check mode: would clone {{ crewship_cfg.firstmate.url }} into
+      {{ crewship_firstmate_dir }} on branch main, tracking origin/main.
+  when:
+    - ansible_check_mode
+    - not crewship_fm_git.stat.exists
+
+# --- fresh clone ------------------------------------------------------------
+
+- name: Clone Firstmate on its default branch
+  ansible.builtin.git:
+    repo: "{{ crewship_cfg.firstmate.url }}"
+    dest: "{{ crewship_firstmate_dir }}"
+    version: main
+    update: false
+    force: false
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_fm_clone
+  when:
+    - not crewship_fm_git.stat.exists
+    - not ansible_check_mode
+
+# The clone was created moments ago by this task run and contains no work, so
+# naming the branch here cannot destroy anything.
+- name: Put the fresh clone on branch main at origin/main
+  ansible.builtin.command:
+    argv: [git, -C, "{{ crewship_firstmate_dir }}", checkout, -B, main, origin/main]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  changed_when: true
+  when: crewship_fm_clone.changed | default(false)
+
+- name: Track origin/main from the fresh clone
+  ansible.builtin.command:
+    argv: [git, -C, "{{ crewship_firstmate_dir }}", branch, --set-upstream-to=origin/main, main]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  changed_when: true
+  failed_when: false
+  when: crewship_fm_clone.changed | default(false)
+
+# --- existing checkout: refuse a dirty tree, then refresh the remote ---------
+
+- name: Inspect the existing checkout
+  when: crewship_fm_git.stat.exists
+  block:
+    - name: Read the working tree status
+      ansible.builtin.command:
+        argv: [git, -C, "{{ crewship_firstmate_dir }}", status, --porcelain, --untracked-files=no]
+      register: crewship_fm_status
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse to touch a dirty checkout
+      ansible.builtin.assert:
+        that:
+          - (crewship_fm_status.stdout | trim) | length == 0
+        fail_msg: >-
+          {{ crewship_firstmate_dir }} has uncommitted changes. Provisioning
+          never resets, stashes or cleans existing work. Commit, push or move
+          the changes, then re-run.
+        quiet: true
+
+    - name: Fetch origin so origin/main is current
+      ansible.builtin.command:
+        argv: [git, -C, "{{ crewship_firstmate_dir }}", fetch, --quiet, origin]
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      # A fetch updates remote-tracking refs only; the working tree and local
+      # branches are untouched, so this is not a change to report.
+      changed_when: false
+      check_mode: false
+
+# --- resolve the target revision once ---------------------------------------
+# The patch layer and tasks/verify.yml both use this captured sha instead of
+# re-reading origin/main later in the run.
+
+- name: Resolve the target revision from origin/main
+  ansible.builtin.command:
+    argv: [git, -C, "{{ crewship_firstmate_dir }}", rev-parse, origin/main]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_fm_origin_main
+  changed_when: false
+  check_mode: false
+  when: crewship_fm_git.stat.exists or (crewship_fm_clone.changed | default(false))
+
+- name: Record the target revision this run installs
+  ansible.builtin.set_fact:
+    crewship_firstmate_target: "{{ crewship_fm_origin_main.stdout | trim }}"
+  when: crewship_fm_origin_main.stdout is defined
+
+- name: Report the target revision this run installs
+  ansible.builtin.debug:
+    msg: >-
+      origin/main of {{ crewship_cfg.firstmate.url }} resolves to
+      {{ crewship_firstmate_target }}. That revision is what this run installs
+      in {{ crewship_firstmate_dir }} and what verification asserts.
+  when: crewship_firstmate_target is defined
+
+# --- put the patch layer on the target revision -----------------------------
+
+- name: Put the Firstmate patch layer on the target revision
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "{{ crewship_repo }}/scripts/firstmate-patch-layer.sh"
+      - "{{ 'check' if ansible_check_mode else 'apply' }}"
+      - "{{ crewship_firstmate_dir }}"
+      - "{{ crewship_firstmate_target }}"
+      - "{{ crewship_firstmate_patch_dir }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_fm_layer
+  # check mode builds the layer to report it, but moves nothing.
+  check_mode: false
+  changed_when: (crewship_fm_layer.stdout_lines | last | default('')) == 'changed'
+  when: crewship_firstmate_target is defined
+
+- name: Report the Firstmate patch layer
+  ansible.builtin.debug:
+    msg: "{{ crewship_fm_layer.stdout_lines[:-1] }}"
+  when: crewship_fm_layer.stdout_lines is defined
+
+# --- gitignored dispatch settings ------------------------------------------
+# Firstmate already ignores these paths inside its own checkout, so writing
+# them leaves the working tree clean and no .gitignore is edited.
+
+- name: Deploy Firstmate dispatch settings
+  when: crewship_fm_git.stat.exists or not ansible_check_mode
+  block:
+    - name: Ensure the Firstmate config directory
+      ansible.builtin.file:
+        path: "{{ crewship_firstmate_dir }}/config"
+        state: directory
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+      become: true
+
+    - name: Stat the Firstmate config sources
+      ansible.builtin.stat:
+        path: "{{ crewship_blueprint }}/config/{{ item }}"
+        get_checksum: false
+      loop: "{{ crewship_firstmate_config_names }}"
+      register: crewship_fm_src_stat
+      changed_when: false
+      check_mode: false
+
+    - name: Stat the Firstmate config destinations
+      ansible.builtin.stat:
+        path: "{{ crewship_firstmate_dir }}/config/{{ item }}"
+        get_checksum: false
+      become: true
+      loop: "{{ crewship_firstmate_config_names }}"
+      register: crewship_fm_dest_stat
+      changed_when: false
+      check_mode: false
+
+    - name: Write the Firstmate dispatch settings
+      ansible.builtin.copy:
+        # A trailing slash copies directory contents; plain files copy as-is.
+        src: "{{ crewship_blueprint }}/config/{{ item.0.item }}{{ '/' if item.0.stat.isdir else '' }}"
+        dest: "{{ crewship_firstmate_dir }}/config/{{ item.0.item }}"
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "{{ '0600' if not item.0.stat.isdir else omit }}"
+        directory_mode: "{{ '0700' if item.0.stat.isdir else omit }}"
+        remote_src: true
+      become: true
+      loop: "{{ crewship_fm_src_stat.results | zip(crewship_fm_dest_stat.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item }}"
+      when: >-
+        not (crewship_firstmate_config_first_write | bool)
+        or not (item.1.stat.exists | default(false))

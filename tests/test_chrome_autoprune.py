@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "maintenance/chrome-autoprune.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "blueprint/maintenance/chrome-autoprune.py"
 BRIDGE = "node_modules/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js"
 
 

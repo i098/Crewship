@@ -8,7 +8,7 @@ Optional Koncreet failures produce a warning instead.
 The omp marketplace plugins and Neovim plugins use upstream Git repositories without publisher checksums.
 Neovim downloads its plugins on first start, not during apply.
 The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
-`ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
+`blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
 `./ship.sh chart` installs none of this.
 
 ## Repository tooling
@@ -31,7 +31,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 - `agents` profile, native: gws, the Google Workspace CLI ([googleworkspace/cli](https://github.com/googleworkspace/cli/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes. Signing in Google accounts is manual: see [Google Workspace CLI](google-workspace.md).
 - `agents` profile, no-mistakes ([kunchenguid/no-mistakes](https://github.com/kunchenguid/no-mistakes/releases)): the one tool that tracks the prerelease channel. Each apply resolves the newest non-draft release, betas included (not only the latest stable one), and verifies it against the GitHub release-asset digest.
 - `agents` profile, npm: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6.
-- `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
+- `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `blueprint/config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
   Apply installs them once and runs `omp plugin upgrade` on later applies.
@@ -52,7 +52,7 @@ The token never enters the image.
 ## Neovim and LazyVim
 
 Every host gets Neovim.
-Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `config/nvim/` when `~/.config/nvim` is missing or an empty real directory.
+Apply copies the vendored [LazyVim starter](https://github.com/LazyVim/starter) from `blueprint/config/nvim/` when `~/.config/nvim` is missing or an empty real directory.
 Apply leaves nonempty directories, files, and symlinks unchanged, including dangling symlinks.
 Apply also leaves directories unchanged when it cannot complete the directory scan.
 It never merges files or installs plugins during apply.
@@ -71,7 +71,7 @@ The Pyrefly configuration is the only added runtime file.
 
 ## Ubuntu packages
 
-`ansible/group_vars/all/packages.yml`, `ansible/tasks/packages.yml`. Distribution versions, not pinned.
+`blueprint/ansible/group_vars/all/packages.yml`, `blueprint/ansible/tasks/packages.yml`. Distribution versions, not pinned.
 
 - Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
   gcc and libc6-dev let LazyVim compile Treesitter parsers even when the `development` profile is disabled.
@@ -81,11 +81,11 @@ The Pyrefly configuration is the only added runtime file.
 - `docker`: docker.io, docker-compose-v2 (Ubuntu's packages, never Docker CE).
 - `desktop`: xfce4, xfce4-terminal, dbus-x11, xauth, x11-xserver-utils, fonts-dejavu-core, tigervnc-standalone-server, tigervnc-common, tigervnc-tools, novnc, websockify, iproute2.
 - `tailscale`: `tailscale` from pkgs.tailscale.com, stable track. `crewship_tailscale_version` pins it; empty by default.
-- Google Chrome: `google-chrome-stable` from dl.google.com (`ansible/tasks/browser.yml`). Installed when `crewship_chrome_install` is `true`, or `auto` (the default) with the `desktop` profile. `crewship_chrome_version` pins it; empty by default.
+- Google Chrome: `google-chrome-stable` from dl.google.com (`blueprint/ansible/tasks/browser.yml`). Installed when `crewship_chrome_install` is `true`, or `auto` (the default) with the `desktop` profile. `crewship_chrome_version` pins it; empty by default.
 
 ## Optional fleet browsers
 
-- `fleet_browsers` or `fleet_guards` profile: Obscura, the latest [h4ckf0r0day/obscura release](https://github.com/h4ckf0r0day/obscura/releases/latest) for the host's platform, verified against the GitHub release-asset digest (`ansible/tasks/fleet-browsers.yml`). Each release extracts into its own `~/oss-fleet/browsers/obscura-<version>/`. The `vnc` tier's Ubuntu packages: tigervnc-standalone-server, websockify, novnc, xfwm4.
+- `fleet_browsers` or `fleet_guards` profile: Obscura, the latest [h4ckf0r0day/obscura release](https://github.com/h4ckf0r0day/obscura/releases/latest) for the host's platform, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/fleet-browsers.yml`). Each release extracts into its own `~/oss-fleet/browsers/obscura-<version>/`. The `vnc` tier's Ubuntu packages: tigervnc-standalone-server, websockify, novnc, xfwm4.
 
 ## Optional shared Postgres
 
@@ -96,35 +96,35 @@ See [Shared Postgres](shared-postgres.md) for setup, backups and removal.
 
 Every host that starts services (`start_services: true`); the container worker image skips it.
 
-- [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
+- [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `blueprint/patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
 
 ## Chrome autopruner
 
 `agents` profile with `browser_prune.enabled`.
 
-- psutil, the latest PyPI release, installed into a private venv with `uv pip install --require-hashes` against the SHA-256 digests PyPI publishes for that release (`ansible/tasks/browser_prune.yml`).
+- psutil, the latest PyPI release, installed into a private venv with `uv pip install --require-hashes` against the SHA-256 digests PyPI publishes for that release (`blueprint/ansible/tasks/browser_prune.yml`).
 
 ## iMessage bridge
 
 `crewship.imessage` set ([iMessage bridge](imessage.md)).
 
-- spectrum-ts, the npm registry's latest release, installed with `bun add --exact` into `~/.local/share/crewship/imessage` (`ansible/tasks/imessage.yml`). bun is a core tool.
+- spectrum-ts, the npm registry's latest release, installed with `bun add --exact` into `~/.local/share/crewship/imessage` (`blueprint/ansible/tasks/imessage.yml`). bun is a core tool.
 
 ## Crew board
 
 `crewship.board` set ([Crew board](board.md)).
 
-- crewboard, built from `crewboard/` in this repository with `cargo build --release --locked` by the Rust toolchain of the `development` profile (`ansible/tasks/board.yml`). Its crates are the versions in `crewboard/Cargo.lock`, verified by cargo against the checksums in that file.
+- crewboard, built from `apps/crewboard/` in this repository with `cargo build --release --locked` by the Rust toolchain of the `development` profile (`blueprint/ansible/tasks/board.yml`). Its crates are the versions in `apps/crewboard/Cargo.lock`, verified by cargo against the checksums in that file.
 
 ## Firstmate
 
 `firstmate` profile.
 
-- `git clone` of `crewship.firstmate.url` (upstream `https://github.com/kunchenguid/firstmate.git` by default), tracking `origin/main`, never pinned. Every apply fetches `origin/main` and puts `main` at that revision plus the patch layer below (`ansible/tasks/firstmate.yml`).
+- `git clone` of `crewship.firstmate.url` (upstream `https://github.com/kunchenguid/firstmate.git` by default), tracking `origin/main`, never pinned. Every apply fetches `origin/main` and puts `main` at that revision plus the patch layer below (`blueprint/ansible/tasks/firstmate.yml`).
 
 ### Firstmate patch layer
 
-`patches/firstmate/` holds fixes that upstream Firstmate does not have yet. Apply builds one local commit per patch on top of `origin/main`, in file-name order. Each commit takes its author, date, and message from the patch file, plus a `Crewship-Patch: <file name>` trailer, so an unchanged host gets the same commits again and the apply changes nothing.
+`blueprint/patches/firstmate/` holds fixes that upstream Firstmate does not have yet. Apply builds one local commit per patch on top of `origin/main`, in file-name order. Each commit takes its author, date, and message from the patch file, plus a `Crewship-Patch: <file name>` trailer, so an unchanged host gets the same commits again and the apply changes nothing.
 
 | Patch | What it does |
 | --- | --- |
@@ -149,7 +149,7 @@ To update a patch, edit its file in a pull request. To drop a patch, delete its 
 
 - Worker base `ubuntu:latest` (the newest Ubuntu LTS), pulled from `mirror.gcr.io/library/ubuntu:latest`, Google's Docker Hub mirror with no anonymous pull limit, plus apt: bash, build-essential, ca-certificates, curl, git, iproute2, jq, less, libssl-dev, openssh-client, pkg-config, procps, python3, python3-apt, python3-venv, sudo, tar, unzip, xz-utils, zstd.
 - Optional compose backing services, never installed by apply: `postgres:18-bookworm`, `redis:8-alpine`, from the same mirror, digest-pinned because a floating Postgres tag would move a data volume across major versions it cannot read.
-- CI pool job containers (`maintenance/ci-pool.py`, only with `crewship.ci_pool`): the official `ghcr.io/actions/actions-runner:latest`, pulled again when a new image is available. It is the runner GitHub publishes, so it is not checksum-verified here; see [CI pool](ci-pool.md).
+- CI pool job containers (`blueprint/maintenance/ci-pool.py`, only with `crewship.ci_pool`): the official `ghcr.io/actions/actions-runner:latest`, pulled again when a new image is available. It is the runner GitHub publishes, so it is not checksum-verified here; see [CI pool](ci-pool.md).
 - Shared Postgres (`profiles.shared_postgres` only): the official `postgres:latest`, pulled once per apply with Compose, like the CI pool's latest-image pattern.
   A new major version needs a manual database upgrade; see [Shared Postgres](shared-postgres.md#data-and-upgrades).
 

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Offline preparation and a local safety check; this never launches BlueBubbles.
+set -uo pipefail
+
+fail() { echo "BlueBubbles safety check failed: $*. Keep the relay disconnected; do not continue setup." >&2; exit 1; }
+absent() {
+  local status=0
+  pgrep -f "$1" >/dev/null || status=$?
+  [ "$status" = 1 ] || {
+    [ "$status" = 0 ] && fail "$2 is running; quit it first"
+    fail "cannot inspect processes"
+  }
+}
+no_tunnel() { absent '(^|/)(cloudflared|ngrok|zrok)([[:space:]]|$)' 'a public tunnel'; }
+
+case "${1:-}" in
+  prepare)
+    absent '[B]lueBubbles' BlueBubbles
+    no_tunnel
+    password=$(openssl rand -hex 32) || fail 'cannot generate a password'
+    [[ "$password" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid generated password'
+    # Non-persistent overrides update the in-memory settings synchronously before services start.
+    # Do not seed config.db: its existence disables upstream schema creation on a fresh install.
+    umask 077
+    set -C
+    printf 'persist-config: false\npassword: "bb-%s"\nproxy_service: "lan-url"\nsocket_port: 1234\n' "$password" > "$HOME/bluebubbles.yml" || fail 'cannot create bluebubbles.yml (an existing file is not overwritten)'
+    echo 'Offline settings ready. Keep bluebubbles.yml for every launch.'
+    ;;
+  check)
+    no_tunnel
+    IFS= read -r -s -p 'Server password: ' password || fail 'cannot read the password'
+    echo >&2
+    [ -n "$password" ] || fail 'the password is empty'
+    url=http://127.0.0.1:1234/api/v1/server/info
+    request() {
+      curl --disable --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' \
+        --connect-timeout 3 --max-time 10 "$@" "$url"
+    }
+    code=$(request) || fail 'the local API is unreachable'
+    [ "$code" = 401 ] || fail 'the API must return 401 without a password'
+    code=$(printf '%s' "invalid-$password" | request --get --data-urlencode 'password@-') || fail 'the local API is unreachable'
+    [ "$code" = 401 ] || fail 'the API must return 401 with a wrong password'
+    code=$(printf '%s' "$password" | request --get --data-urlencode 'password@-') || fail 'the local API is unreachable'
+    [ "$code" = 200 ] || fail 'the API must return 200 with the password'
+    no_tunnel
+    echo 'Safety check passed: no public tunnel; the local API requires the password.'
+    ;;
+  *) echo 'Usage: bash apps/imessage/bluebubbles-relay prepare|check' >&2; exit 2 ;;
+esac

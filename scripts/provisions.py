@@ -86,7 +86,7 @@ GITHUB_LATEST = {
         {"uv": "uv-*/uv", "uvx": "uv-*/uvx"},
     ),
     # Linked as btop-bin: ~/.local/bin/btop is the launcher that fits it to the
-    # pane (maintenance/btop.sh, installed by ansible/tasks/herdr.yml).
+    # pane (blueprint/maintenance/btop.sh, installed by blueprint/ansible/tasks/herdr.yml).
     "btop": (
         "aristocratos/btop",
         "v",
@@ -114,14 +114,14 @@ GITHUB_LATEST = {
         {"concord": "concord-*/concord"},
     ),
     "slk": ("gammons/slk", "v", "slk_{v}_linux_{goreleaser}.tar.gz", {"slk": "slk"}),
-    # Resolved for the fleet browser ladder (ansible/tasks/fleet-browsers.yml), not installed here.
+    # Resolved for the fleet browser ladder (blueprint/ansible/tasks/fleet-browsers.yml), not installed here.
     "obscura": (
         "h4ckf0r0day/obscura",
         "v",
         "obscura-{gnu}-linux.tar.gz",
         {"obscura": "obscura", "obscura-worker": "obscura-worker"},
     ),
-    # Resolved for host hardening (ansible/tasks/koncreet.yml), installed there as root.
+    # Resolved for host hardening (blueprint/ansible/tasks/koncreet.yml), installed there as root.
     "koncreet": ("jimididit/koncreet", "v", "koncreet.tar.gz", {"koncreet": "koncreet/koncreet"}),
     # Google Workspace CLI, verified against the .sha256 file the release publishes.
     "gws": (

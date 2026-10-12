@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep a Firstmate checkout on branch main at upstream origin/main plus the
-# patch layer in patches/firstmate/ (docs/dependencies.md#firstmate-patch-layer).
+# patch layer in blueprint/patches/firstmate/ (docs/dependencies.md#firstmate-patch-layer).
 #
 # usage: firstmate-patch-layer.sh apply|check|verify <checkout> <target> <patch-dir>
 #   apply   move main to <target> + layer when needed; the last line is
@@ -63,7 +63,7 @@ for patch in "${patches[@]}"; do
     { gi read-tree "$layer" && gi apply --cached --check --reverse "$patch" 2>/dev/null; }; then
     echo "skipped, upstream already has it: $name"
   else
-    die "patches/firstmate/$name no longer applies to origin/main ($target)." \
+    die "blueprint/patches/firstmate/$name no longer applies to origin/main ($target)." \
       "The checkout is unchanged. Update the patch for the new upstream code," \
       "or delete it if upstream fixed the problem another way, then re-run."
   fi

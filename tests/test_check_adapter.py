@@ -1,4 +1,4 @@
-"""config/omp-as-pi/check-adapter.sh run against a stub curl: exit codes and messages."""
+"""blueprint/config/omp-as-pi/check-adapter.sh run against a stub curl: exit codes and messages."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-SCRIPT = ROOT / "config/omp-as-pi/check-adapter.sh"
+SCRIPT = ROOT / "blueprint/config/omp-as-pi/check-adapter.sh"
 
 # Answers like curl -sSL -o FILE -w '%{http_code}' for one pinned file, as picked
 # by STUB_PLAN ("pi.go=404 fallback.go=503") or else STUB_DEFAULT.

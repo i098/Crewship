@@ -19,7 +19,7 @@ Before convergence, give the configured target account explicit Docker access by
 The helper requires a writable `/var/run/docker.sock` or working `sudo -n docker` access, and a running Docker daemon.
 Both options give root-equivalent access; Crewship grants neither by default.
 If you explicitly configure `crewship_docker_group_users`, start a new login session before you apply this profile.
-Run `python3 fleet/bin/crewship-db --check-docker` from the repository as the target account to check access without changing resources.
+Run `python3 blueprint/fleet/bin/crewship-db --check-docker` from the repository as the target account to check access without changing resources.
 The profile checks this prerequisite before convergence, including previews and deferred service starts.
 Project creation and automatic seeding use the same account and require the same access.
 

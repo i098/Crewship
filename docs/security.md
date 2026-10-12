@@ -41,7 +41,7 @@ Agents can reach an operator Mac with `ssh mac`. They use it to open links in th
 
 #### Host side: what apply does
 
-Set the Mac's address and login in `.local/host.yml` only, never in `config/default.yml`:
+Set the Mac's address and login in `.local/host.yml` only, never in `blueprint/config/default.yml`:
 
 ```yaml
 crewship:
@@ -76,14 +76,14 @@ The line holds only a public key. Do not put the private key `~/.ssh/id_ed25519_
 
 With remote debugging turned on in `chrome://inspect`, a Chromium browser shows an "Allow remote debugging?" prompt for each new CDP connection. Only a person can click it. A browser started with `--remote-debugging-port` serves CDP on 127.0.0.1 with no prompt. Dia, a non-Google Chromium browser, allows the flag on its main profile.
 
-[`dia-debug/dia-debug`](../dia-debug/dia-debug) runs every 15 seconds from a user LaunchAgent. When the browser runs without the flag and started less than 90 seconds ago (from the Dock, a link, login, or a self-update), the script quits it with SIGTERM and opens it again with the flag. SIGTERM is Chromium's graceful quit, so the browser restores the session. The script tries one time per browser process, so it never takes away a window that is in use. `dia-debug --now` relaunches the browser at any age. Another non-Google Chromium browser works after you change `BUNDLE` at the top of the script.
+[`tools/dia-debug/dia-debug`](../tools/dia-debug/dia-debug) runs every 15 seconds from a user LaunchAgent. When the browser runs without the flag and started less than 90 seconds ago (from the Dock, a link, login, or a self-update), the script quits it with SIGTERM and opens it again with the flag. SIGTERM is Chromium's graceful quit, so the browser restores the session. The script tries one time per browser process, so it never takes away a window that is in use. `dia-debug --now` relaunches the browser at any age. Another non-Google Chromium browser works after you change `BUNDLE` at the top of the script.
 
 To install, run this on the Mac from a copy of this repository:
 
 ```bash
 mkdir -p ~/.local/bin ~/Library/LaunchAgents
-cp dia-debug/dia-debug ~/.local/bin/
-cp dia-debug/local.dia-debug.plist ~/Library/LaunchAgents/
+cp tools/dia-debug/dia-debug ~/.local/bin/
+cp tools/dia-debug/local.dia-debug.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.dia-debug.plist
 ~/.local/bin/dia-debug --now
 ```
@@ -160,7 +160,7 @@ mosh <alias> -- herdr-patch
 
 Every apply on a host that starts services (not the container worker image) installs [Koncreet](https://github.com/jimididit/koncreet) as `/usr/local/bin/koncreet` and renders `/etc/koncreet.conf` once, but nothing runs it. Koncreet is optional: when its release lookup, checksum, or download fails, apply prints a warning, skips it, and finishes the rest; a release installed earlier stays in place. It is a first-hour hardening toolkit: a sudo user with SSH keys, sysctl, swap, a journald cap, time sync, a ufw default-deny firewall, fail2ban on SSH, unattended security updates, and finally SSH with password and root login turned off.
 
-Upstream supports Debian 12/13 and Ubuntu 22.04/24.04 only. `patches/koncreet/ubuntu-26.04.patch` adds Ubuntu 26.04: it opens the OS gate and doctor, and restores the last fallback Koncreet uses to find your SSH client address for the fail2ban whitelist: 26.04 keeps no utmp, so `who -m` prints nothing, and the patch asks logind instead. The Ubuntu 26.04 change now lives in that patch file, which is the source of truth; upstream is [jimididit/koncreet](https://github.com/jimididit/koncreet). Apply layers the patch on each new release and prints which case it hit: applied; skipped because the release already supports 26.04; or skipped because it no longer applies, in which case Koncreet installs as released and refuses to run on 26.04 until the patch is refreshed. The patch never fails the apply.
+Upstream supports Debian 12/13 and Ubuntu 22.04/24.04 only. `blueprint/patches/koncreet/ubuntu-26.04.patch` adds Ubuntu 26.04: it opens the OS gate and doctor, and restores the last fallback Koncreet uses to find your SSH client address for the fail2ban whitelist: 26.04 keeps no utmp, so `who -m` prints nothing, and the patch asks logind instead. The Ubuntu 26.04 change now lives in that patch file, which is the source of truth; upstream is [jimididit/koncreet](https://github.com/jimididit/koncreet). Apply layers the patch on each new release and prints which case it hit: applied; skipped because the release already supports 26.04; or skipped because it no longer applies, in which case Koncreet installs as released and refuses to run on 26.04 until the patch is refreshed. The patch never fails the apply.
 
 `/etc/koncreet.conf` makes the account that ran `./ship.sh launch` the sudo user, installs the SSH keys it logs in with, and keeps SSH open (Koncreet always allows the ports sshd listens on). With the `tailscale` profile it also opens 41641/udp for Tailscale's direct connections. When apply ran as root, or as the Crewship account (which runs the agents and must not gain sudo), no sudo user is set: `user=` and `pubkey_file=` stay commented out until you fill in the operator's login. Apply never overwrites it; edit it there.
 

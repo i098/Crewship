@@ -21,12 +21,12 @@ def run_model_merge(home, check=False, local_bin=None):
         "gather_facts": False,
         "vars": {
             "ansible_become": False,
-            "crewship_repo": str(ROOT),
+            "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
             "crewship_local_bin": str(local_bin or Path(shutil.which("bun")).parent),
             "crewship_cfg": {"home": str(home), "user": pwd.getpwuid(os.getuid()).pw_name},
             "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         },
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/omp_models.yml")}],
+        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/omp_models.yml")}],
     }]))
     return subprocess.run(
         [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
@@ -96,7 +96,7 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
     assert all(source.read_bytes() == content for source, content in originals.items())
     assert merge_models(tmp_path) == 1
     merged = read_models(target)
-    shipped = yaml.safe_load((ROOT / "config/omp-models.yml").read_text())
+    shipped = yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text())
     overrides = merged["providers"]["openai-codex"]["modelOverrides"]
     for model, values in shipped["providers"]["openai-codex"]["modelOverrides"].items():
         assert overrides[model].items() >= values.items()
@@ -119,7 +119,7 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
 def test_model_merge_migrates_even_when_overrides_are_already_present(tmp_path, extension):
     target = tmp_path / ".omp/agent/models.yml"
     target.parent.mkdir(parents=True)
-    shipped = yaml.safe_load((ROOT / "config/omp-models.yml").read_text())
+    shipped = yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text())
     source = target.with_suffix(f".{extension}")
     source.write_text(json.dumps(shipped) if extension == "json" else yaml.safe_dump(shipped))
     original = source.read_bytes()
@@ -207,7 +207,7 @@ def test_shipped_model_configuration_schema():
     from jsonschema import validate
 
     window = {"type": "integer", "minimum": 1}
-    validate(yaml.safe_load((ROOT / "config/omp-models.yml").read_text()), {
+    validate(yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text()), {
         "type": "object", "required": ["providers"], "additionalProperties": False,
         "properties": {"providers": {
             "type": "object", "required": ["openai-codex"], "additionalProperties": False,
@@ -224,7 +224,7 @@ def test_shipped_model_configuration_schema():
             }},
         }},
     })
-    dispatch = json.loads((ROOT / "config/crew-dispatch.json").read_text())
+    dispatch = json.loads((ROOT / "blueprint/config/crew-dispatch.json").read_text())
     for tier in [dispatch["default"], *(rule["use"] for rule in dispatch["rules"])]:
         assert isinstance(tier, list)
         for model in tier:

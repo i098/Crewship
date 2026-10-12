@@ -1,0 +1,20 @@
+---
+# Terminal chat clients (docs/chat.md). tasks/tools.yml installs the latest
+# Concord and slk releases and tasks/packages.yml their shared libraries; this
+# file seeds each client's config once. The clients own the files afterwards
+# (slk adds a block per signed-in workspace), so an existing file is never
+# rewritten. Logins stay with each client and are never part of the recipe.
+
+- name: Ensure the chat client config directories
+  ansible.builtin.file:
+    path: "{{ crewship_cfg.home }}/.config/{{ item }}"
+    state: directory
+  loop: [concord, slk]
+
+- name: Seed the chat client configs that are absent
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/{{ item }}.toml"
+    dest: "{{ crewship_cfg.home }}/.config/{{ item }}/config.toml"
+    mode: "0644"
+    force: false
+  loop: [concord, slk]

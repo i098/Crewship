@@ -109,9 +109,9 @@ The playbook is not necessary for the pool. On a host where you do not want a fu
 
 ```bash
 sudo install -d -o "$USER" -g "$USER" -m 0755 /mnt/data/ci
-install -m 0755 maintenance/ci-pool.py ~/.local/bin/ci-pool.py
+install -m 0755 blueprint/maintenance/ci-pool.py ~/.local/bin/ci-pool.py
 echo '{"data_dir": "/mnt/data/ci", "repos": [{"repo": "owner/name", "slots": 2, "labels": ["my-label"]}]}' \
-  | python3 maintenance/ci-pool.py apply --check   # preview; then run it without --check
+  | python3 blueprint/maintenance/ci-pool.py apply --check   # preview; then run it without --check
 ```
 
 `apply` prints one line for each change and nothing when the pool already matches the config.

@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
-HELPER = ROOT / "fleet/bin/crewship-db"
+HELPER = ROOT / "blueprint/fleet/bin/crewship-db"
 SPEC = importlib.util.spec_from_file_location("ship_postgres", ROOT / "scripts/ship.py")
 ship = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ship)
@@ -47,7 +47,7 @@ def connection_url(home, project):
 
 @pytest.mark.parametrize("enabled", [True, False, None])
 def test_schema_and_legacy_profile(enabled):
-    config = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     assert config["crewship"]["profiles"]["shared_postgres"] is False
     if enabled is None:
         config["crewship"]["profiles"].pop("shared_postgres")
@@ -58,7 +58,7 @@ def test_schema_and_legacy_profile(enabled):
 
 @pytest.mark.parametrize("value", ["true", 1, None])
 def test_schema_rejects_non_boolean(value):
-    config = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     config["crewship"]["profiles"]["shared_postgres"] = value
     with pytest.raises(ValueError, match="profiles.shared_postgres"):
         ship.validate_config(config)
@@ -66,7 +66,7 @@ def test_schema_rejects_non_boolean(value):
 
 @pytest.mark.parametrize("dependency", ["docker", "firstmate"])
 def test_runtime_dependencies(dependency):
-    config = yaml.safe_load((ROOT / "config/default.yml").read_text())
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     config["crewship"]["profiles"]["shared_postgres"] = True
     config["crewship"]["profiles"][dependency] = False
     with pytest.raises(ValueError, match="shared Postgres requires"):
@@ -195,7 +195,7 @@ def test_seeder_keeps_other_values_and_shares_one_database(service):
 def test_ansible_on_off_and_idempotence(service, tmp_path):
     home = service
     variables = {
-        "crewship_repo": str(ROOT), "crewship_local_bin": str(home / ".local/bin"),
+        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"), "crewship_local_bin": str(home / ".local/bin"),
         "crewship_user_units": str(home / ".config/systemd/user"),
         "crewship_firstmate_dir": str(home / "custom-workspace/firstmate"),
         "crewship_cfg": {"home": str(home), "user": "root", "profiles": {"shared_postgres": True}},
@@ -204,12 +204,12 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
     }
     (home / ".local/bin").mkdir(parents=True)
     # Use the real task consumer, but never start host services.
-    (tmp_path / "templates").symlink_to(ROOT / "ansible/templates")
+    (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
     playbook = tmp_path / "playbook.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars": variables,
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "ansible/tasks/shared_postgres.yml"),
+        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/shared_postgres.yml"),
                    "when": "crewship_cfg.profiles.shared_postgres | bool"}],
         "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "deferred"}}],
     }]))
