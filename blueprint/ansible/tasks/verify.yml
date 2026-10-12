@@ -114,7 +114,9 @@
                    | map('regex_replace', '^', crewship_user_units ~ '/')
                    | list)
                 if (crewship_fleet_browsers_enabled | bool) else [])
-             + ([crewship_stall_nudge_script,
+             + ([crewship_stall_nudge_script]
+                + (crewship_usage_scripts | map('regex_replace', '^', crewship_local_bin ~ '/') | list)
+                + [
                  crewship_user_units ~ '/fm-main-stall-nudge.service',
                  crewship_user_units ~ '/fm-main-stall-nudge.timer',
                  crewship_user_units ~ '/timers.target.wants/fm-main-stall-nudge.timer']

@@ -10,3 +10,9 @@ crewship_stall_nudge_board_max: 300
 crewship_stall_nudge_gap: 120
 crewship_stall_nudge_session: default
 crewship_stall_nudge_pane: ""
+# Usage card: fm-usage-remind (second ExecStart of the stall nudge service) texts the card from
+# fm-usage-brief at most once per this many seconds while the owner is texting. The card shows these mounts.
+# The card renders with headless Chrome: the desktop profile or crewship_chrome_install: true provides it.
+crewship_usage_remind_every: 3600
+crewship_usage_disks: ["/"]
+crewship_usage_scripts: [fm-usage-brief, fm-usage-remind, fm-text-card]
