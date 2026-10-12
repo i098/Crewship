@@ -12,6 +12,16 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
+GROUP_VARS_FILES = sorted((ROOT / "ansible/group_vars/all").glob("*.yml"))
+GROUP_VARS_ARGS = [arg for f in GROUP_VARS_FILES for arg in ("-e", f"@{f}")]
+
+
+def test_group_vars_files_define_disjoint_keys():
+    seen: dict[str, str] = {}
+    for f in GROUP_VARS_FILES:
+        for key in yaml.safe_load(f.read_text()):
+            assert key not in seen, f"{key} is in {seen[key]} and {f.name}"
+            seen[key] = f.name
 SPEC = importlib.util.spec_from_file_location("ship_config", ROOT / "scripts/ship.py")
 ship = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ship)
@@ -227,8 +237,7 @@ def _data_disk_vars(tmp_path, data_dir):
         "ansible.builtin.debug",
         "-a",
         "msg={{ [crewship_data_cache_env, crewship_docker_data_root] }}",
-        "-e",
-        f"@{ROOT / 'ansible/group_vars/all.yml'}",
+        *GROUP_VARS_ARGS,
         "-e",
         json.dumps({"crewship_cfg": {"data_dir": data_dir}}),
     )
@@ -746,8 +755,7 @@ def _managed_environment(tmp_path, fleet_guards, release="1.0.0"):
             "ansible.builtin.debug",
             "-a",
             "var=crewship_managed_shell_env",
-            "-e",
-            f"@{ROOT / 'ansible/group_vars/all.yml'}",
+            *GROUP_VARS_ARGS,
             "-e",
             json.dumps(variables),
         ],
@@ -813,7 +821,7 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
                 result = _ansible(
                     tmp_path, "ansible", "localhost", "-i", "localhost,", "-c", "local",
                     "-m", module, "-a", json.dumps(arguments),
-                    "-e", f"@{ROOT / 'ansible/group_vars/all.yml'}",
+                    *GROUP_VARS_ARGS,
                     "-e", json.dumps(variables),
                 )
                 assert result.returncode == 0, result.stdout + result.stderr
@@ -873,8 +881,7 @@ def _installer_also(
         "ansible.builtin.debug",
         "-a",
         "var=crewship_installer_also",
-        "-e",
-        f"@{ROOT / 'ansible/group_vars/all.yml'}",
+        *GROUP_VARS_ARGS,
         "-e",
         json.dumps(variables),
     )

@@ -1,0 +1,11 @@
+---
+# Stall nudge: fm-main-stall-nudge.timer types into main Firstmate's herdr pane
+# when an operator note or a wake waits too long (docs/architecture.md#stall-nudge).
+# Seconds a note, a wake-queue row and the gap between nudges. An empty pane
+# discovers main's pane in the Firstmate home; set a pane id such as w2:pZ to pin it.
+crewship_stall_nudge_script: "{{ crewship_local_bin }}/fm-main-stall-nudge"
+crewship_stall_nudge_note_max: 180
+crewship_stall_nudge_wake_max: 600
+crewship_stall_nudge_gap: 300
+crewship_stall_nudge_session: default
+crewship_stall_nudge_pane: ""

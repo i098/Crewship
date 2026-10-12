@@ -71,7 +71,7 @@ The Pyrefly configuration is the only added runtime file.
 
 ## Ubuntu packages
 
-`ansible/group_vars/all.yml`, `ansible/tasks/packages.yml`. Distribution versions, not pinned.
+`ansible/group_vars/all/packages.yml`, `ansible/tasks/packages.yml`. Distribution versions, not pinned.
 
 - Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
   gcc and libc6-dev let LazyVim compile Treesitter parsers even when the `development` profile is disabled.

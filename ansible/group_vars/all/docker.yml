@@ -1,0 +1,13 @@
+---
+# --- Docker -----------------------------------------------------------------
+# Ubuntu's docker.io + docker-compose-v2 only; never mixed with Docker CE.
+# Docker group membership equals passwordless root on the host, so it is an
+# explicit opt-in list, never the Crewship account by default.
+crewship_docker_group_users: []
+# Engine settings merged into /etc/docker/daemon.json (existing keys are kept,
+# nothing is removed). `init` puts docker-init as PID 1 in every container so
+# orphaned children are reaped when an image uses a bare process as PID 1.
+# `live-restore` keeps containers running across dockerd restarts.
+# The merge itself happens inside one Jinja expression in tasks/docker.yml so
+# the booleans stay booleans in the written JSON.
+crewship_docker_daemon_json: /etc/docker/daemon.json

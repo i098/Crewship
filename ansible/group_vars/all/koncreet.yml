@@ -1,0 +1,12 @@
+---
+# --- Koncreet (install only; the operator runs it by hand) ------------------
+# The latest jimididit/koncreet release, verified against the SHA-256 GitHub
+# publishes for the asset, with Crewship's Ubuntu 26.04 patch layered on.
+# Root runs it, so the release and its configuration are root-owned, never in
+# the account's home. docs/security.md has the manual run. Optional: it is
+# resolved only when start_services is true (never in the container image), and
+# a failed lookup, digest, or download skips it with a warning.
+crewship_koncreet: "{{ crewship_latest.koncreet.assets[crewship_platform] }}"
+crewship_koncreet_patch: "{{ crewship_repo }}/patches/koncreet/ubuntu-26.04.patch"
+crewship_koncreet_prefix: /usr/local/lib/crewship/koncreet
+crewship_koncreet_config: /etc/koncreet.conf

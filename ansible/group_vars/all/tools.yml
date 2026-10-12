@@ -1,0 +1,21 @@
+---
+# --- Tool installer ---------------------------------------------------------
+crewship_core_tools: [herdr, node, bun, uv, btop, sentrux, fallow, pyrefly, nvim]
+# The terminal chat clients of the chat profile (docs/chat.md).
+crewship_chat_tools: [concord, slk]
+# The installer flags that choose which tools a run covers. tasks/preflight.yml
+# resolves exactly this set (plus the sources Ansible installs itself) and
+# tasks/tools.yml installs it, so a host never resolves, and never fails on, a
+# release it does not install.
+crewship_installer_selection: >-
+  {{ ['--tools', (crewship_core_tools
+                  + (crewship_chat_tools if (crewship_cfg.profiles.chat | bool) else []))
+                 | join(',')]
+     + (['--npm'] if (crewship_cfg.profiles.agents | bool) else [])
+     + (['--development'] if (crewship_cfg.profiles.development | bool) else []) }}
+crewship_installer_also: >-
+  {{ (['koncreet'] if (crewship_cfg.start_services | bool) else [])
+     + (['psutil'] if ((crewship_cfg.profiles.agents | bool)
+                       and (crewship_cfg.browser_prune.enabled | bool)) else [])
+     + (['obscura'] if (crewship_fleet_browsers_enabled | bool) else [])
+     + (['spectrum-ts'] if (crewship_cfg.imessage is defined) else []) }}

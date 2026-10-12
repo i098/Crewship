@@ -1,0 +1,29 @@
+---
+# --- Fleet browsers (profiles.fleet_browsers, or fleet_guards) ---------------
+crewship_fleet_browsers_enabled: "{{ (crewship_cfg.profiles.fleet_guards | bool) or (crewship_cfg.profiles.fleet_browsers | bool) }}"
+crewship_fleet_browsers_dir: "{{ crewship_fleet_dir }}/browsers"
+# The latest Obscura release for this platform, with the SHA-256 GitHub
+# publishes for the asset; each release extracts into its own directory.
+crewship_browser_obscura: "{{ crewship_latest.obscura.assets[crewship_platform] }}"
+crewship_browser_obscura_dir: "{{ crewship_fleet_browsers_dir }}/obscura-{{ crewship_latest.obscura.version }}"
+# The vnc tier's own packages, so it works without the desktop profile:
+# /usr/bin/tigervncserver, websockify, the noVNC web root /usr/share/novnc, and
+# xfwm4, the window manager the tier's xstartup runs so Chrome maximizes and
+# its pop-ups can be moved and closed.
+crewship_fleet_browser_vnc_packages:
+  - tigervnc-standalone-server
+  - websockify
+  - novnc
+  - xfwm4
+crewship_fleet_browser_units:
+  - fleet-browser-obscura.service
+  - fleet-browser-chrome.service
+  - fleet-browser-vnc.service
+  - fleet-browser-sync.service
+  - fleet-browser-sync.timer
+  - fleet-browser-gc.service
+  - fleet-browser-gc.timer
+crewship_fleet_browser_enabled_units:
+  - { unit: fleet-browser-obscura.service, wants: default.target.wants }
+  - { unit: fleet-browser-sync.timer, wants: timers.target.wants }
+  - { unit: fleet-browser-gc.timer, wants: timers.target.wants }

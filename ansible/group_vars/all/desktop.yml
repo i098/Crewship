@@ -1,0 +1,8 @@
+---
+# --- Desktop ----------------------------------------------------------------
+# VNC requires an operator-created credential plus loopback/SSH transport.
+# noVNC binds 127.0.0.1 only and still prompts for the RFB password.
+crewship_vnc_password_file: "{{ crewship_vnc_dir }}/passwd"
+crewship_vnc_rfb_port: "{{ 5900 + (crewship_cfg.desktop.display | int) }}"
+crewship_novnc_web_root: /usr/share/novnc/
+crewship_desktop_strict_symlink_check: true

@@ -1,0 +1,76 @@
+---
+# --- apt package sets -------------------------------------------------------
+crewship_apt_cache_valid_time: 3600
+crewship_base_packages:
+  - ca-certificates
+  - curl
+  - git
+  - gcc
+  - libc6-dev
+  - gnupg
+  - jq
+  - tar
+  - unzip
+  - xz-utils
+  - zstd
+  - procps
+  - acl
+  - python3
+  - python3-venv
+  - openssl
+  - rsync
+  # The only sentrux release binary links GTK 3 (its GUI), even for `sentrux gate`.
+  - libgtk-3-0t64
+  # mosh-server, for `mosh <host>` from the operator's devices (docs/security.md#from-a-mac-to-the-host).
+  - mosh
+# Shared libraries and a font the chrome-headless-shell that omp's browser tool and
+# puppeteer download needs on a minimal Ubuntu; installed without recommends.
+# The t64 names exist on 24.04 and 26.04.
+crewship_headless_browser_packages:
+  - libxcomposite1
+  - libxdamage1
+  - libxfixes3
+  - libxrandr2
+  - libasound2t64
+  - libatk1.0-0t64
+  - libatk-bridge2.0-0t64
+  - libatspi2.0-0t64
+  - libgbm1
+  - libnss3
+  - libnspr4
+  - libxkbcommon0
+  - fonts-dejavu-core
+# Shared libraries the Concord release binary links or loads (its README's
+# Debian list, without xdg-desktop-portal, which only screen capture uses);
+# installed without recommends. libasound2t64 is in the headless set above.
+crewship_chat_packages:
+  - libegl1
+  - libpipewire-0.3-0t64
+  - libva2
+  - libva-drm2
+crewship_development_packages:
+  - build-essential
+  - pkg-config
+  - libssl-dev
+  - python3-dev
+  - cmake
+  - ripgrep
+# No python3-psutil here on purpose: the pruner runs on its own hash-verified
+# virtualenv (crewship_pruner_venv), not on the distribution interpreter.
+crewship_docker_packages:
+  - docker.io
+  - docker-compose-v2
+crewship_desktop_packages:
+  - xfce4
+  - xfce4-terminal
+  - dbus-x11
+  - xauth
+  - x11-xserver-utils
+  - fonts-dejavu-core
+  - tigervnc-standalone-server
+  - tigervnc-common
+  - tigervnc-tools
+  - novnc
+  - websockify
+  # `ss` is how tasks/verify.yml proves both listeners stayed on loopback.
+  - iproute2
