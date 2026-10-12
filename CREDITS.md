@@ -42,6 +42,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Ruff](https://github.com/astral-sh/ruff): lint and format. License: MIT.
 - [psutil](https://github.com/giampaolo/psutil) (`psutil`): process data for the Chrome autopruner. License: BSD-3-Clause.
 - [spectrum-ts](https://github.com/photon-hq/spectrum-ts) (`spectrum-ts`): the iMessage bridge SDK. License: MIT.
+- [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) by Victor Taelin: the design of the iMessage front desk's long-running memory (`apps/imessage/memory.ts`). License: none stated on the gist.
 - [Docker Engine](https://github.com/moby/moby): containers for the worker and the CI pool. License: Apache-2.0.
 - [Docker Compose](https://github.com/docker/compose): the worker and backing services. License: Apache-2.0.
 - [GitHub Actions Runner](https://github.com/actions/runner): the image of the self-hosted CI pool. License: MIT.
