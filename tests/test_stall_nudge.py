@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,7 @@ def host(tmp_path):
     herdr.chmod(0o755)
     calls = tmp_path / "calls"
     pane_file = tmp_path / "panes.json"
+    lavish = tmp_path / "lavish.json"
     pane_file.write_text(panes(("w2:pZ", str(home), True)))
 
     class Host:
@@ -58,6 +60,19 @@ def host(tmp_path):
 
         def stamp(self, age):
             (home / "state/.stall-nudge-last").write_text(str(int(time.time() - age)))
+
+        def board(self, role="user", age=400, session="b1"):
+            at = datetime.fromtimestamp(time.time() - age, timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            sessions = json.loads(lavish.read_text())["sessions"] if lavish.exists() else {}
+            sessions[session] = {"chat": [{"role": "agent", "at": at}, {"role": role, "at": at}]}
+            lavish.write_text(json.dumps({"sessions": sessions}))
+
+        @property
+        def latch(self):
+            path = home / "state/.stall-nudge-boards"
+            return path.read_text().split() if path.exists() else []
 
         def panes(self, *rows):
             pane_file.write_text(panes(*rows))
@@ -83,6 +98,7 @@ def host(tmp_path):
                     "HERDR_BIN_PATH": str(herdr),
                     "CALLS": str(calls),
                     "PANES": str(pane_file),
+                    "LAVISH_STATE": str(lavish),
                     **env,
                 },
             )
@@ -190,3 +206,63 @@ def test_no_second_nudge_inside_gap_after_failed_or_uncertain_send(host, env):
     host.run(**env)
     assert host.run().returncode == 0
     assert len(host.sends) == 1
+
+
+@pytest.mark.parametrize(
+    ("age", "sent"), [(250, False), (310, True), (86000, True), (86500, False)]
+)
+def test_board_answer_age_window(host, age, sent):
+    host.board(age=age)
+    assert host.run().returncode == 0
+    assert bool(host.sends) is sent
+
+
+def test_board_answer_from_the_agent_is_not_waiting(host):
+    host.board(role="agent")
+    assert host.run().returncode == 0 and host.sends == []
+
+
+def test_board_threshold_variable(host):
+    host.board(age=60)
+    assert host.run().returncode == 0 and host.sends == []
+    assert host.run(BOARD_MAX="30").returncode == 0 and len(host.sends) == 1
+
+
+def test_board_answer_nudges_once_per_answer(host):
+    host.board()
+    result = host.run()
+    assert "an answer on Lavish board b1 has no reply" in result.stdout
+    assert len(host.latch) == 1
+    host.stamp(400)
+    assert host.run().returncode == 0 and len(host.sends) == 1
+    host.board(age=350)  # a new answer on the same board has a new timestamp
+    host.stamp(400)
+    assert host.run().returncode == 0 and len(host.sends) == 2
+    assert len(host.latch) == 2
+
+
+def test_board_answer_inside_gap_stays_unlatched(host):
+    host.board()
+    host.stamp(100)
+    assert host.run().returncode == 0 and host.sends == []
+    assert host.latch == []
+    host.stamp(400)
+    assert host.run().returncode == 0 and len(host.sends) == 1
+
+
+def test_board_answer_stays_unlatched_without_a_main_pane(host):
+    host.board()
+    host.panes()
+    assert host.run().returncode == 1
+    assert host.latch == []
+
+
+def test_missing_lavish_state_is_not_an_error(host):
+    assert host.run().returncode == 0 and host.sends == []
+
+
+def test_note_nudge_leaves_board_unlatched(host):
+    host.note(400)
+    host.board()
+    assert host.run().returncode == 0 and len(host.sends) == 1
+    assert host.latch == []

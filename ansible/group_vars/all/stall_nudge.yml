@@ -6,6 +6,7 @@
 crewship_stall_nudge_script: "{{ crewship_local_bin }}/fm-main-stall-nudge"
 crewship_stall_nudge_note_max: 180
 crewship_stall_nudge_wake_max: 600
+crewship_stall_nudge_board_max: 300
 crewship_stall_nudge_gap: 300
 crewship_stall_nudge_session: default
 crewship_stall_nudge_pane: ""

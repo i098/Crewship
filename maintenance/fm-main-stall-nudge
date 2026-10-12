@@ -2,34 +2,70 @@
 # Wakes a stalled main Firstmate. After a context compaction omp can hold every
 # watcher wake as a queued follow-up and never start a turn; typed input in
 # main's pane is what starts the next one. Run by fm-main-stall-nudge.timer.
-# Types a short nudge when an operator note waits more than NOTE_MAX seconds or
-# a wake waits more than WAKE_MAX seconds, at most once per GAP seconds.
+# Types a short nudge when an operator note waits more than NOTE_MAX seconds, a
+# wake waits more than WAKE_MAX seconds, or a Lavish board's newest chat entry is
+# a user answer older than BOARD_MAX seconds (and younger than 24 h), at most
+# once per GAP seconds. Each board answer is nudged once; a latch file in the
+# state directory records it.
 #
-# Environment (set by the unit): FM_HOME is required. NOTE_MAX, WAKE_MAX, GAP,
-# HERDR_SESSION and HERDR_BIN_PATH have defaults. MAIN_PANE (a pane id such as
-# w2:pZ) skips pane discovery.
+# Environment (set by the unit): FM_HOME is required. NOTE_MAX, WAKE_MAX,
+# BOARD_MAX, GAP, LAVISH_STATE, HERDR_SESSION and HERDR_BIN_PATH have defaults.
+# MAIN_PANE (a pane id such as w2:pZ) skips pane discovery.
 set -u
 : "${FM_HOME:?FM_HOME is not set}"
 FM_HOME=${FM_HOME%/}
 NOTE_MAX=${NOTE_MAX:-180}
 WAKE_MAX=${WAKE_MAX:-600}
+BOARD_MAX=${BOARD_MAX:-300}
 GAP=${GAP:-300}
+LAVISH_STATE=${LAVISH_STATE:-$HOME/.lavish-axi/state.json}
 SESSION=${HERDR_SESSION:-default}
 HERDR=${HERDR_BIN_PATH:-herdr}
 MAIN_PANE=${MAIN_PANE:-}
 STATE=$FM_HOME/state
 STAMP=$STATE/.stall-nudge-last
+LATCH=$STATE/.stall-nudge-boards
 now=$(date +%s)
 nudge_log() { echo "$(date -u +%FT%TZ) $*"; }
+
+# The gap check runs first, so a latched board answer is never spent on a skipped run.
+last=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((now - last)) -lt "$GAP" ] && exit 0
 
 oldest_note=$(stat -c %Y "$STATE"/inbox/*.note 2>/dev/null | sort -n | head -1)
 oldest_wake=$(cut -f1 "$STATE/.wake-queue" 2>/dev/null | sort -n | head -1)
 reason=
+board_key=
 [ -n "$oldest_note" ] && [ $((now - oldest_note)) -gt "$NOTE_MAX" ] && reason="an operator note waits $((now - oldest_note))s"
 [ -z "$reason" ] && [ -n "$oldest_wake" ] && [ $((now - oldest_wake)) -gt "$WAKE_MAX" ] && reason="a wake waits $((now - oldest_wake))s"
+if [ -z "$reason" ]; then
+  # First board whose newest chat entry is an unlatched user answer, as "<session> <key>".
+  read -r board board_key < <(BOARD_MAX=$BOARD_MAX LATCH=$LATCH LAVISH_STATE=$LAVISH_STATE python3 - <<'PY'
+import json, os, time
+from datetime import datetime
+latch = os.environ["LATCH"]
+seen = set(open(latch).read().split()) if os.path.exists(latch) else set()
+try:
+    sessions = json.load(open(os.environ["LAVISH_STATE"]))["sessions"]
+except (OSError, ValueError, KeyError):
+    raise SystemExit
+for sid, s in sessions.items():
+    chat = s.get("chat") or []
+    if not chat or chat[-1].get("role") != "user":
+        continue
+    at = chat[-1].get("at", "")
+    try:
+        age = time.time() - datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        continue
+    if f"{sid}@{at}" not in seen and int(os.environ["BOARD_MAX"]) < age < 86400:
+        print(sid, f"{sid}@{at}")
+        break
+PY
+)
+  [ -n "$board_key" ] && reason="an answer on Lavish board $board has no reply"
+fi
 [ -z "$reason" ] && exit 0
-last=$(cat "$STAMP" 2>/dev/null || echo 0)
-[ $((now - last)) -lt "$GAP" ] && exit 0
 
 # Main is the herdr pane with an agent whose foreground cwd is the Firstmate home.
 if [ -z "$MAIN_PANE" ]; then
@@ -44,10 +80,12 @@ target=$SESSION:$MAIN_PANE
 
 cd "$FM_HOME" || exit 1
 . bin/fm-backend.sh
-msg="stall watchdog: $reason unhandled. Run bin/fm-wake-drain.sh and answer every operator note now."
+msg="stall watchdog: $reason. Run bin/fm-wake-drain.sh, answer every operator note and reply to any answered Lavish board now."
 # The herdr helper exits 0 even on a failed send; its stdout verdict says what
-# happened. The stamp is written before the send, so the GAP holds on every path.
+# happened. The stamp and the board latch are written before the send, so the GAP
+# holds on every path and a board answer is nudged once.
 echo "$now" > "$STAMP"
+[ -n "$board_key" ] && echo "$board_key" >> "$LATCH"
 out=$(fm_backend_send_text_submit herdr "$target" "$msg" 2 0.4 0.3)
 rc=$?
 verdict=${out##*$'\n'}
