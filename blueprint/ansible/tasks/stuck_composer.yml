@@ -1,0 +1,41 @@
+---
+# Stuck-composer guard (docs/architecture.md#stuck-composer-guard): installs the
+# check in the Firstmate state directory and binds it with fm-check-register.sh.
+# Firstmate runs only checks whose bytes match their trust file, so a changed
+# script is registered again.
+
+- name: Ensure the Firstmate state directory
+  ansible.builtin.file:
+    path: "{{ crewship_firstmate_dir }}/state"
+    state: directory
+    mode: "0755"
+
+- name: Install the stuck-composer check
+  ansible.builtin.template:
+    src: stuck-composer.check.sh.j2
+    dest: "{{ crewship_stuck_composer_script }}"
+    mode: "0700"
+  register: crewship_stuck_composer_file
+
+- name: Read the stuck-composer check registration
+  ansible.builtin.command:
+    argv:
+      - bash
+      - -c
+      - '. bin/fm-pr-lib.sh && . bin/fm-check-lib.sh && fm_custom_check_registered state "$1"'
+      - _
+      - "{{ crewship_stuck_composer_id }}"
+    chdir: "{{ crewship_firstmate_dir }}"
+  register: crewship_stuck_composer_trust
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Register the stuck-composer check
+  ansible.builtin.command:
+    argv: [bin/fm-check-register.sh, "{{ crewship_stuck_composer_id }}"]
+    chdir: "{{ crewship_firstmate_dir }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - crewship_stuck_composer_trust.rc != 0
