@@ -3,9 +3,9 @@
 # Usage: fm-text-card OUT.png < text   (first line = title; "- x" = bullet;
 #        "k: v" = row; "# x" = section; blank line = gap)
 # Then: fm-imessage --image OUT.png
-# Needs headless Chrome: CHROME, else google-chrome, google-chrome-stable or chromium on PATH
-# (the desktop profile installs google-chrome; crewship_chrome_install: true installs it without a desktop).
-import html, os, shutil, subprocess, sys, tempfile
+# Needs headless Chrome: CHROME, else google-chrome, google-chrome-stable or chromium on PATH, else omp's puppeteer Chrome
+# under ~/.omp/puppeteer (the desktop profile installs google-chrome; crewship_chrome_install: true installs it without a desktop).
+import glob, html, os, shutil, subprocess, sys, tempfile
 
 # iMessage crops a card narrower or flatter than about 4:3; keep these two values.
 CARD_WIDTH = 840
@@ -13,7 +13,8 @@ CARD_MIN_HEIGHT = 630
 
 
 def chrome():
-    found = os.environ.get("CHROME") or next(filter(None, map(shutil.which, ("google-chrome", "google-chrome-stable", "chromium"))), None)
+    found = (os.environ.get("CHROME") or next(filter(None, map(shutil.which, ("google-chrome", "google-chrome-stable", "chromium"))), None)
+             or max(glob.glob(os.path.expanduser("~/.omp/puppeteer/chrome/linux-*/chrome-linux64/chrome")), default=None))
     if not found:
         sys.exit("fm-text-card: no headless Chrome found (set CHROME)")
     return found

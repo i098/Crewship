@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import jinja2
 import pytest
 
 MAINT = Path(__file__).parents[1] / "blueprint/maintenance"
@@ -120,3 +121,35 @@ def test_text_card_maps_line_kinds():
     assert "<h2>Sec</h2>" in page and 'class="b"' in page and 'class="k">key' in page
     assert "plain &lt;b&gt;" in page and 'class="gap"' in page
     assert height > 0
+
+
+def test_chrome_falls_back_to_omp_puppeteer(tmp_path, monkeypatch):
+    card = load("fm-text-card")
+    old, new = (tmp_path / ".omp/puppeteer/chrome" / v / "chrome-linux64/chrome" for v in ("linux-1.0", "linux-2.0"))
+    for path in (old, new):
+        path.parent.mkdir(parents=True)
+        path.touch()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CHROME", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert card.chrome() == str(new)
+    monkeypatch.setenv("CHROME", "/custom/chrome")
+    assert card.chrome() == "/custom/chrome"
+    monkeypatch.delenv("CHROME")
+    monkeypatch.setenv("HOME", str(tmp_path / "none"))
+    with pytest.raises(SystemExit):
+        card.chrome()
+
+
+def test_stall_nudge_service_runs_usage_remind_after_nudge_failure():
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(MAINT.parents[1] / "blueprint/ansible/templates"))
+    env.filters["comment"] = lambda s: "# " + s
+    unit = env.get_template("fm-main-stall-nudge.service.j2")
+    text = unit.render(
+        ansible_managed="", crewship_stall_nudge_script="/bin/nudge", crewship_local_bin="/bin", crewship_herdr_bin="h",
+        crewship_stall_nudge_session="s", crewship_firstmate_dir="f", crewship_stall_nudge_note_max=1,
+        crewship_stall_nudge_wake_max=1, crewship_stall_nudge_board_max=1, crewship_stall_nudge_gap=1,
+        crewship_stall_nudge_pane="p", crewship_usage_remind_every=1, crewship_usage_disks=["/"],
+    )
+    execs = [line.partition("=")[2] for line in text.splitlines() if line.startswith("ExecStart=")]
+    assert execs == ["-/bin/nudge", "-/bin/fm-usage-remind"]

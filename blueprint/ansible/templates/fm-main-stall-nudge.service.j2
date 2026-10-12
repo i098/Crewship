@@ -20,5 +20,5 @@ Environment=GAP={{ crewship_stall_nudge_gap }}
 Environment=MAIN_PANE={{ crewship_stall_nudge_pane }}
 Environment=EVERY={{ crewship_usage_remind_every }}
 Environment=USAGE_DISKS={{ crewship_usage_disks | join(' ') }}
-ExecStart={{ crewship_stall_nudge_script }}
-ExecStart={{ crewship_local_bin }}/fm-usage-remind
+ExecStart=-{{ crewship_stall_nudge_script }}
+ExecStart=-{{ crewship_local_bin }}/fm-usage-remind
