@@ -7,8 +7,8 @@ These tests also run on Python 3.9, the version macOS ships.
 import base64
 import importlib.machinery
 import importlib.util
-import re
 import os
+import re
 import select
 import shutil
 import socket
