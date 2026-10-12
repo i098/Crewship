@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""File a Crewship issue that follows the issue forms in .github/ISSUE_TEMPLATE.
+
+scripts/new-issue <feature|bug> --title "..." --field problem=@file|text --field proposal=...
+scripts/new-issue feature --json input.json    # {"title": "...", "fields": {"problem": "..."}}
+--dry-run prints the title, the labels and the body; without it the issue is created with gh api.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+TEMPLATES = Path(__file__).parents[1] / ".github/ISSUE_TEMPLATE"
+KINDS = {"feature": "feature_request.yml", "bug": "bug_report.yml"}
+PREFIX = re.compile(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]*\))?!?:", re.I)
+
+
+def build(kind, title, values):
+    """Return (labels, body); raise ValueError when the input does not fit the form."""
+    form = yaml.safe_load((TEMPLATES / KINDS[kind]).read_text())
+    if not title.strip():
+        raise ValueError("title is empty")
+    if PREFIX.match(title.strip()):
+        raise ValueError("title must not have a conventional-commit prefix")
+    fields = [f for f in form["body"] if f["type"] != "markdown"]
+    unknown = set(values) - {f["id"] for f in fields}
+    if unknown:
+        raise ValueError(f"unknown field: {', '.join(sorted(unknown))}")
+    parts, missing = [], []
+    for f in fields:
+        text = str(values.get(f["id"], "")).strip()
+        if not text:
+            if f.get("validations", {}).get("required"):
+                missing.append(f["id"])
+            text = "_No response_"
+        elif f["attributes"].get("render"):
+            text = f"```{f['attributes']['render']}\n{text}\n```"
+        parts.append(f"### {f['attributes']['label']}\n\n{text}")
+    if missing:
+        raise ValueError(f"required field missing or empty: {', '.join(missing)}")
+    return form.get("labels", []), "\n\n".join(parts) + "\n"
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("kind", choices=KINDS)
+    p.add_argument("--title")
+    p.add_argument("--field", action="append", default=[], metavar="ID=@file|text")
+    p.add_argument("--json", metavar="FILE", help="input as JSON; --title and --field override it")
+    p.add_argument("--dry-run", action="store_true")
+    a = p.parse_args(argv)
+    data = json.loads(Path(a.json).read_text()) if a.json else {}
+    title, values = a.title or data.get("title", ""), dict(data.get("fields", {}))
+    for item in a.field:
+        key, _, val = item.partition("=")
+        values[key] = Path(val[1:]).read_text() if val.startswith("@") else val
+    try:
+        labels, body = build(a.kind, title, values)
+    except ValueError as e:
+        sys.exit(f"new-issue: {e}")
+    if a.dry_run:
+        print(f"title: {title}\nlabels: {', '.join(labels)}\n\n{body}", end="")
+        return
+    cmd = ["gh", "api", "repos/{owner}/{repo}/issues", "-f", f"title={title}", "-f", f"body={body}"]
+    for label in labels:
+        cmd += ["-f", f"labels[]={label}"]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    print(json.loads(out)["html_url"])
+
+
+if __name__ == "__main__":
+    main()
