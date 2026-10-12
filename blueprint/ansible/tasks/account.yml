@@ -187,10 +187,12 @@
     mode: "0644"
     marker: "# {mark} crewship managed environment"
     block: |
-      case ":$PATH:" in
-        *":$HOME/.local/bin:"*) ;;
-        *) PATH="$HOME/.local/bin:$PATH" ;;
-      esac
+      for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
+        case ":$PATH:" in
+          *":$dir:"*) ;;
+          *) PATH="$dir:$PATH" ;;
+        esac
+      done
       export PATH
       {% if crewship_cfg.profiles.agents | bool %}
       {% for key, value in crewship_managed_shell_env | dictsort %}

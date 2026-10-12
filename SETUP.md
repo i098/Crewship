@@ -38,7 +38,7 @@ flowchart TD
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
-`npx crewship` does the same when Node is installed. Do not clone the repository.
+`bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
 
 The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` with the default profiles ([Install, update and migrate](docs/install.md)). The later steps sign in and change the profiles, then apply again.
 

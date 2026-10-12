@@ -21,7 +21,7 @@ async function latestTag() {
 
 if (args.some((arg) => arg === "-h" || arg === "--help")) {
   console.log(`Usage: crewship [update] [--container] [--user NAME] [--home DIR]
-Installs Crewship on this Ubuntu 24.04 or 26.04 machine (npx crewship or install.sh).
+Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
   update      install the newest release over this host, keeping its .local/ files
   -h, --help  print this help and exit`);

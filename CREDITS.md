@@ -29,7 +29,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.
 - [Koncreet](https://github.com/jimididit/koncreet) (`koncreet`): host hardening, patched by Crewship. License: MIT.
 - [Bun](https://github.com/oven-sh/bun) (`bun`): the JavaScript runtime and package manager. License: MIT.
-- [Node.js](https://github.com/nodejs/node) (`node`): the runtime of the npm tools. License: MIT.
+- [Node.js](https://github.com/nodejs/node) (`node`): the runtime of `npx crewship` and the chrome-devtools-axi bridge. License: MIT.
 - [uv](https://github.com/astral-sh/uv) (`uv`): the Python bootstrap and environments. License: MIT OR Apache-2.0.
 - [btop](https://github.com/aristocratos/btop) (`btop`): the resource monitor pane. License: Apache-2.0.
 - [Neovim](https://github.com/neovim/neovim) (`nvim`): the terminal editor installed on every host. License: Apache-2.0.

@@ -42,7 +42,7 @@ The other features, each with its docs link, are listed in [docs/features.md](do
    Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
    ```
 
-3. **Update:** run `npx crewship update` (or the same install command again)
+3. **Update:** run `bunx crewship update` (`npx crewship update` and `pnpm dlx crewship update` work too), or the same install command again
 
 Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
