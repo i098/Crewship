@@ -82,10 +82,10 @@ cd "$FM_HOME" || exit 1
 . bin/fm-backend.sh
 msg="stall watchdog: $reason. Run bin/fm-wake-drain.sh, answer every operator note and reply to any answered Lavish board now."
 # The herdr helper exits 0 even on a failed send; its stdout verdict says what
-# happened. The stamp and the board latch are written before the send, so the GAP
-# holds on every path and a board answer is nudged once.
+# happened. The stamp is written before the send, so the GAP holds on every
+# path. The board latch is written only after a send that did not fail, so a
+# failed send retries the same board answer.
 echo "$now" > "$STAMP"
-[ -n "$board_key" ] && echo "$board_key" >> "$LATCH"
 out=$(fm_backend_send_text_submit herdr "$target" "$msg" 2 0.4 0.3)
 rc=$?
 verdict=${out##*$'\n'}
@@ -93,6 +93,7 @@ if [ "$rc" -ne 0 ] || [ -z "$verdict" ] || [ "$verdict" = send-failed ]; then
   nudge_log "nudge FAILED for $target: $reason: rc=$rc verdict=${verdict:-none}" >&2
   exit 1
 fi
+[ -n "$board_key" ] && echo "$board_key" >> "$LATCH"
 case $verdict in
   empty) nudge_log "nudged $target: $reason" ;;
   *) nudge_log "nudge uncertain for $target: $reason: verdict=$verdict, text may be typed" ;;

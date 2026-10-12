@@ -250,6 +250,22 @@ def test_board_answer_inside_gap_stays_unlatched(host):
     assert host.run().returncode == 0 and len(host.sends) == 1
 
 
+@pytest.mark.parametrize("env", [{"SEND_OUT": "send-failed"}, {"SEND_RC": "3"}, {"SEND_OUT": ""}])
+def test_failed_send_leaves_board_unlatched(host, env):
+    host.board()
+    assert host.run(**env).returncode == 1
+    assert host.latch == []
+    host.stamp(400)
+    assert host.run().returncode == 0 and len(host.sends) == 2
+    assert len(host.latch) == 1
+
+
+def test_uncertain_send_latches_board(host):
+    host.board()
+    assert host.run(SEND_OUT="unknown").returncode == 0
+    assert len(host.latch) == 1
+
+
 def test_board_answer_stays_unlatched_without_a_main_pane(host):
     host.board()
     host.panes()
