@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_sound_emitters_and_rooms():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     setup = r"""
 const assert = require('node:assert/strict');
 const element = {

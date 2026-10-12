@@ -66,7 +66,7 @@ jobs:
               case "$path" in
                 skills/*|rules/*|config/*) code=true scope=all; break ;;
                 README*|docs/*|changelog.d/*|*.md) ;;
-                harbor/*) scope=all ;;
+                site/*) scope=all ;;
                 # Only the iMessage bridge reads imessage/; the Python tests that cover it are
                 # tests/test_imessage.py and tests/test_bluebubbles_relay.py.
                 imessage/*) code=true ;;
@@ -196,9 +196,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
-  # harbor/ (crewship.si) as an iPhone in WebKit: harbor/webkit-check.mjs fails on a crash,
+  # site/ (crewship.si) as an iPhone in WebKit: site/webkit-check.mjs fails on a crash,
   # an uncaught error, or text drawn in a way that grows iOS Safari until it kills the tab.
-  # harbor/chromium-check.mjs loads it in desktop Chromium in a large DPR 2 window and fails on
+  # site/chromium-check.mjs loads it in desktop Chromium in a large DPR 2 window and fails on
   # the plain-page fallback, a black canvas after 3 s, or a console error.
   # Playwright tracks its latest release, like the other tools.
   harbor-webkit:
@@ -216,17 +216,17 @@ jobs:
           persist-credentials: false
 
       - name: Build the page
-        run: python3 harbor/build.py
+        run: python3 site/build.py
 
       - name: Install Playwright WebKit and Chromium
-        working-directory: harbor
+        working-directory: site
         run: npm install --no-save --no-package-lock --prefix . playwright && npx playwright install --with-deps webkit chromium
 
       - name: WebKit iPhone check
-        run: node harbor/webkit-check.mjs
+        run: node site/webkit-check.mjs
 
       - name: Chromium desktop high-DPR check
-        run: node harbor/chromium-check.mjs
+        run: node site/chromium-check.mjs
 
   # The repository's own quality gate (docs/omp.md#quality-gate): the same
   # blocking rule the omp extension applies at turn end, against the committed

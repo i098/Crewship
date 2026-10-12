@@ -12,7 +12,7 @@ ROOT = Path(__file__).parents[1]
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_clouds_drift_light_cover_and_refresh():
     subprocess.run(
-        ["node", "-", str(ROOT / "harbor/public/harbor.js")],
+        ["node", "-", str(ROOT / "site/public/harbor.js")],
         input=r"""
 const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');

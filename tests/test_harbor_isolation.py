@@ -1,4 +1,4 @@
-"""harbor/ is the crewship.si website: it must never reach a host or an image."""
+"""site/ is the crewship.si website: it must never reach a host or an image."""
 
 import re
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).parents[1]
-HARBOR = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "harbor").rglob("*") if p.is_file())
+HARBOR = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "site").rglob("*") if p.is_file())
 
 
 def _docker_excludes(path, patterns):
@@ -36,9 +36,9 @@ def _ansible_sources(node):
 
 
 def test_harbor_never_reaches_an_image_or_a_host():
-    assert HARBOR, "harbor/ has no files"
+    assert HARBOR, "site/ has no files"
 
-    # Images: the Dockerfile copies the whole build context, so .dockerignore must drop harbor/.
+    # Images: the Dockerfile copies the whole build context, so .dockerignore must drop site/.
     patterns = [
         line.strip()
         for line in (ROOT / ".dockerignore").read_text().splitlines()
@@ -67,4 +67,4 @@ def test_harbor_never_reaches_an_image_or_a_host():
     from_checkout = [s[len("REPO") :].strip("/") for s in sources if s.startswith("REPO")]
     assert from_checkout, "no playbook source resolved to the checkout"
     assert "" not in from_checkout
-    assert [s for s in from_checkout if s == "harbor" or s.startswith("harbor/")] == []
+    assert [s for s in from_checkout if s == "site" or s.startswith("site/")] == []

@@ -64,7 +64,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 
 ## Paintings
 
-The harbor house on [crewship.si](https://crewship.si) shows these public-domain works as glyph textures that `harbor/art.py` converts. Each artist died more than 100 years ago, and each source page marks the image as public domain.
+The harbor house on [crewship.si](https://crewship.si) shows these public-domain works as glyph textures that `site/art.py` converts. Each artist died more than 100 years ago, and each source page marks the image as public domain.
 
 - *The Great Wave off Kanagawa*, Katsushika Hokusai, about 1830–1832, Metropolitan Museum of Art: [source](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg). License: public domain (PD-Art, PD-old-100-expired).
 - *Entrance to the Port of Palermo by Moonlight*, Claude-Joseph Vernet, 1769, Hermitage Museum: [source](https://commons.wikimedia.org/wiki/File:Entrance_to_the_Port_of_Palermo_by_Moonlight,_1769.jpg). License: public domain (PD-Art, PD-old-100-expired).
@@ -73,7 +73,7 @@ The harbor house on [crewship.si](https://crewship.si) shows these public-domain
 
 ## Sounds
 
-The harbor on [crewship.si](https://crewship.si) plays short ambient loops cut from these Freesound recordings. Each source page marks the recording as CC0 1.0 (public domain dedication). The loops in `harbor/public/audio/` are trimmed, mixed to mono, crossfaded into seamless loops, and level-matched.
+The harbor on [crewship.si](https://crewship.si) plays short ambient loops cut from these Freesound recordings. Each source page marks the recording as CC0 1.0 (public domain dedication). The loops in `site/public/audio/` are trimmed, mixed to mono, crossfaded into seamless loops, and level-matched.
 
 - *Ocean Waves.wav*, Noted451: [source](https://freesound.org/people/Noted451/sounds/531015/), the sea and surf. License: CC0 1.0.
 - *fountain*, martats: [source](https://freesound.org/people/martats/sounds/156969/), the plaza fountain. License: CC0 1.0.

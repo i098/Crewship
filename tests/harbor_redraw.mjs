@@ -1,4 +1,4 @@
-// Run through the browser harness after building and serving harbor/dist:
+// Run through the browser harness after building and serving site/dist:
 // await tab.run(async ({ page }) => {
 //   const { checkRedraw } = await import(process.cwd() + '/tests/harbor_redraw.mjs');
 //   return await checkRedraw(page, 'http://127.0.0.1:8317');

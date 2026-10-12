@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_every_droplet_flies_clear_of_stone_and_lands_well_inside_its_basin():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     scene = source[source.index("const SX =") : source.index("// ---- Night lighting")]
     check = r"""
 const assert = require('node:assert/strict');

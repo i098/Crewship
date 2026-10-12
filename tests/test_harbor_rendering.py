@@ -51,7 +51,7 @@ assert.equal(waterReflection(0.15, 0.2), "m");
 assert.equal(waterReflection(0.1, 0.1), null);
 `].join("\n"), { assert });
 """,
-            str(ROOT / "harbor/public/harbor.js"),
+            str(ROOT / "site/public/harbor.js"),
         ],
         check=True,
         capture_output=True,
@@ -96,7 +96,7 @@ assert(painted.every(([x, y]) => y === 1), "unchanged rows were repainted");
 assert(!painted.some(([x]) => x >= 10 && x <= 25), "cells far from any change were repainted");
 `].join("\n"), { assert });
 """,
-            str(ROOT / "harbor/public/harbor.js"),
+            str(ROOT / "site/public/harbor.js"),
         ],
         check=True,
         capture_output=True,

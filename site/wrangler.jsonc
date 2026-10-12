@@ -1,5 +1,5 @@
 // Cloudflare Workers static assets for the crewship.si landing page.
-// There is no Worker script: Cloudflare serves dist/ as it is. Run harbor/build.py first;
+// There is no Worker script: Cloudflare serves dist/ as it is. Run site/build.py first;
 // it copies public/ to dist/ and fills in the points of interest.
 {
   "name": "crewship",

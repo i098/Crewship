@@ -1538,7 +1538,7 @@ function rug(x0, z0, x1, z1) {
     return Math.abs((x + 9) * 2 % 1 - 0.5) + Math.abs((z + 9) * 2 % 1 - 0.5) < 0.2 ? "y" : null;
   } });
 }
-// Framed public-domain paintings; CREDITS.md names each work and its source. harbor/art.py writes ART: per work a
+// Framed public-domain paintings; CREDITS.md names each work and its source. site/art.py writes ART: per work a
 // palette (a material and a colour level per colour), the texture size, then the texture at full, half and quarter
 // size. A texel is one character: its palette colour times the ART_GLYPHS length plus its glyph.
 const ART_GLYPHS = " .:-=+*#%@";

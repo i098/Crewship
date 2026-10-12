@@ -1,4 +1,4 @@
-# Builds harbor/ (the crewship.si landing page) from the repository and deploys it to
+# Builds site/ (the crewship.si landing page) from the repository and deploys it to
 # Cloudflare Workers static assets, on every push to main and on each published
 # release, so the page follows Crewship as it changes.
 #
@@ -41,10 +41,10 @@ jobs:
           persist-credentials: false
 
       - name: Build the page from README.md and CHANGELOG.md
-        run: python3 harbor/build.py
+        run: python3 site/build.py
 
       - name: Deploy
-        working-directory: harbor
+        working-directory: site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

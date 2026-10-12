@@ -1,4 +1,4 @@
-"""harbor/build.py fills the landing page's points of interest from the repository."""
+"""site/build.py fills the landing page's points of interest from the repository."""
 
 import importlib.util
 import re
@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).parents[1]
-SPEC = importlib.util.spec_from_file_location("harbor_build", ROOT / "harbor/build.py")
+SPEC = importlib.util.spec_from_file_location("harbor_build", ROOT / "site/build.py")
 build = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build)
 
@@ -97,7 +97,7 @@ def test_mapped_rows_get_their_own_spot_and_no_board(tmp_path, monkeypatch, caps
 def test_every_scene_object_has_a_manifest_entry(tmp_path, monkeypatch):
     """harbor.js show() reads the entry of any object the player aims at."""
     manifest = built(tmp_path, monkeypatch, (ROOT / "README.md").read_text())
-    scene = set(re.findall(r'\bspot: "(\w+)"', (ROOT / "harbor/public/harbor.js").read_text()))
+    scene = set(re.findall(r'\bspot: "(\w+)"', (ROOT / "site/public/harbor.js").read_text()))
     assert scene - set(manifest.spots) == set()
 
 

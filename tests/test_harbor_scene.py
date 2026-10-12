@@ -21,13 +21,13 @@ def test_fountain_stops_walking_and_leaves_room_to_pass(part):
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required to run the JavaScript scene")
-    builder = runpy.run_path(str(ROOT / "harbor/build.py"))
+    builder = runpy.run_path(str(ROOT / "site/build.py"))
     points = builder["points"](
         (ROOT / "README.md").read_text(), (ROOT / "CHANGELOG.md").read_text()
     )
     point_data = json.dumps([[spot, title] for spot, title, *_ in points])
     subprocess.run(
-        [node, "-", str(ROOT / "harbor/public/harbor.js"), point_data, part],
+        [node, "-", str(ROOT / "site/public/harbor.js"), point_data, part],
         input=r"""
 const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');

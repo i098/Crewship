@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_house_panes_and_approach():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     # Run the real world and collision code without the browser and rendering loop.
     world = source[source.index("const SX =") : source.index("const me =")]
     check = r"""
@@ -35,7 +35,7 @@ assert.equal(blocked(-0.8, 23, 1.2), true);
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_house_trim_targets_office_without_moving_anchor():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     scene = source[source.index("const SX =") : source.index("const MONO =")]
     shading = source[source.index("const GRAIN =") : source.index("// ---- The sea:")]
     put = source[source.index("function put(") : source.index("// Is neighbour")]
@@ -97,7 +97,7 @@ for (const s of world.filter(s => s.anchor === false)) {
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_house_entry_exit_and_room_collisions():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     setup = r"""
 const assert = require('node:assert/strict');
 const element = {
@@ -365,7 +365,7 @@ const window = {};
 
 
 def run_rendered(check, timeout):
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     # The script is larger than the 128 KiB limit for one command-line argument, so it goes in on stdin.
     subprocess.run(
         ["node", "-"],
@@ -464,7 +464,7 @@ for (const [R, p, [nx, nz]] of panes) {
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 def test_glyph_grid_zoom_and_cell_cap():
-    source = (ROOT / "harbor/public/harbor.js").read_text()
+    source = (ROOT / "site/public/harbor.js").read_text()
     setup = r"""
 const assert = require('node:assert/strict');
 // A glyph is 0.6 times as wide as its font size.
