@@ -4,6 +4,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -149,7 +150,10 @@ def test_stall_nudge_service_runs_usage_remind_after_nudge_failure():
         ansible_managed="", crewship_stall_nudge_script="/bin/nudge", crewship_local_bin="/bin", crewship_herdr_bin="h",
         crewship_stall_nudge_session="s", crewship_firstmate_dir="f", crewship_stall_nudge_note_max=1,
         crewship_stall_nudge_wake_max=1, crewship_stall_nudge_board_max=1, crewship_stall_nudge_gap=1,
-        crewship_stall_nudge_pane="p", crewship_usage_remind_every=1, crewship_usage_disks=["/"],
+        crewship_stall_nudge_pane="p", crewship_usage_remind_every=1, crewship_usage_disks=["/", "/data"],
     )
     execs = [line.partition("=")[2] for line in text.splitlines() if line.startswith("ExecStart=")]
     assert execs == ["-/bin/nudge", "-/bin/fm-usage-remind"]
+    # systemd splits an Environment= line on unquoted whitespace, so a multi-disk value must survive that split.
+    env_vars = dict(a.split("=", 1) for line in text.splitlines() if line.startswith("Environment=") for a in shlex.split(line.partition("=")[2]))
+    assert env_vars["USAGE_DISKS"] == "/ /data"
