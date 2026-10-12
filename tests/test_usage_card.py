@@ -157,3 +157,20 @@ def test_stall_nudge_service_runs_usage_remind_after_nudge_failure():
     # systemd splits an Environment= line on unquoted whitespace, so a multi-disk value must survive that split.
     env_vars = dict(a.split("=", 1) for line in text.splitlines() if line.startswith("Environment=") for a in shlex.split(line.partition("=")[2]))
     assert env_vars["USAGE_DISKS"] == "/ /data"
+
+
+def test_cards_tmpfiles_rule_prunes_after_max_age():
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(MAINT.parents[1] / "blueprint/ansible/templates"))
+    env.filters["comment"] = lambda s: "# " + s
+    text = env.get_template("crewship-cards.tmpfiles.conf.j2").render(
+        ansible_managed="", crewship_cards_dir="/h/.cache/crewship/cards", crewship_cards_max_age="1d"
+    )
+    assert "d /h/.cache/crewship/cards 0755 - - 1d" in text.splitlines()
+
+
+def test_remind_deletes_card_even_when_send_fails(host):
+    host.note()
+    sent = host.home.parent / "sent"
+    (host.home.parent / "bin/fm-imessage").write_text(f'#!/bin/sh\necho "$2" > {sent}\nexit 1\n')
+    host.run()
+    assert not Path(sent.read_text().strip()).exists()

@@ -27,6 +27,21 @@
     remote_src: true
   loop: "{{ crewship_usage_scripts }}"
 
+- name: Ensure the card directory and its age rule
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_cards_dir }}"
+    - "{{ crewship_cfg.home }}/.config/user-tmpfiles.d"
+
+- name: Prune cards older than the max age
+  ansible.builtin.template:
+    src: crewship-cards.tmpfiles.conf.j2
+    dest: "{{ crewship_cfg.home }}/.config/user-tmpfiles.d/crewship-cards.conf"
+    mode: "0644"
+
 - name: Render the stall nudge unit and timer
   ansible.builtin.template:
     src: "{{ item }}.j2"

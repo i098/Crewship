@@ -16,4 +16,7 @@ recent=$(find "$FM_HOME/state/inbox" -name '*.note' -newermt '-120 seconds' 2>/d
   | xargs -r grep -l '^\[iMessage from the owner' 2>/dev/null | head -1)
 [ -z "$recent" ] && exit 0
 echo "$now" > "$STAMP"
-f=$(mktemp --suffix=.png) && fm-usage-brief --png "$f" && fm-imessage --image "$f"; rm -f "$f"
+# The card is a throwaway: render to a temp file and delete it as soon as the send returns.
+f=$(mktemp --suffix=.png) || exit 1
+trap 'rm -f "$f"' EXIT
+fm-usage-brief --png "$f" && fm-imessage --image "$f"

@@ -3,6 +3,7 @@
 # its soonest reset, plus this server's load, RAM and disks.
 # Usage: fm-usage-brief            -> text
 #        fm-usage-brief --png OUT  -> an 840 px wide card (headless Chrome, see fm-text-card)
+# OUT is the caller's: use mktemp and delete it after the send, or put it under ~/.cache/crewship/cards (pruned daily).
 # Environment: USAGE_DISKS = space-separated mount points to show (default "/"; skipped when not mounted),
 # OMP_BIN = omp binary (default omp on PATH), CHROME = headless Chrome binary.
 import html, importlib.machinery, importlib.util, json, os, shutil, subprocess, sys, time

@@ -2,7 +2,8 @@
 # Render a short update as an image card (CARD_WIDTH x at least CARD_MIN_HEIGHT) for the iMessage line.
 # Usage: fm-text-card OUT.png < text   (first line = title; "- x" = bullet;
 #        "k: v" = row; "# x" = section; blank line = gap)
-# Then: fm-imessage --image OUT.png
+# Then: fm-imessage --image OUT.png, and delete OUT.png. Render to mktemp, or under ~/.cache/crewship/cards,
+# which a tmpfiles.d rule prunes after a day (crewship_cards_dir, crewship_cards_max_age).
 # Needs headless Chrome: CHROME, else google-chrome, google-chrome-stable or chromium on PATH, else omp's puppeteer Chrome
 # under ~/.omp/puppeteer (the desktop profile installs google-chrome; crewship_chrome_install: true installs it without a desktop).
 import glob, html, os, shutil, subprocess, sys, tempfile
