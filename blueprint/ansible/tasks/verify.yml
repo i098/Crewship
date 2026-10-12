@@ -119,7 +119,8 @@
                 + [crewship_cfg.home ~ '/.config/user-tmpfiles.d/crewship-cards.conf',
                  crewship_user_units ~ '/fm-main-stall-nudge.service',
                  crewship_user_units ~ '/fm-main-stall-nudge.timer',
-                 crewship_user_units ~ '/timers.target.wants/fm-main-stall-nudge.timer']
+                 crewship_user_units ~ '/timers.target.wants/fm-main-stall-nudge.timer',
+                crewship_stuck_composer_script]
                 if (crewship_cfg.profiles.firstmate | bool) else [])
              + ([crewship_gh_replies_script,
                  crewship_firstmate_dir ~ '/state/gh-replies.check.sh']
