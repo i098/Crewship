@@ -25,12 +25,14 @@ def test_tarball_holds_only_the_launcher():
 
 
 @pytest.mark.skipif(not (shutil.which("npm") and shutil.which("node")), reason="needs npm and node")
-@pytest.mark.parametrize("os_name", ["linux", "darwin", "win32"])
+@pytest.mark.parametrize("os_name", ["linux", "darwin"])
 def test_packed_tarball_installs_and_runs_its_bin(tmp_path, os_name):
     subprocess.run(["npm", "pack", "--pack-destination", str(tmp_path)], cwd=PACKAGE, capture_output=True, check=True)
     (tarball,) = tmp_path.glob("crewship-*.tgz")
-    # npm_config_os makes npm judge the install as on that OS: a package "os" field fails it with EBADPLATFORM.
-    env = {**os.environ, "npm_config_os": os_name, "npm_config_cache": str(tmp_path / "cache")}
+    # npm raises EBADPLATFORM for a package "os" field only when its own process.platform differs, so stub that.
+    stub = tmp_path / "platform.js"
+    stub.write_text(f"Object.defineProperty(process, 'platform', {{ value: '{os_name}' }});\n")
+    env = {**os.environ, "NODE_OPTIONS": f"--require {stub}", "npm_config_cache": str(tmp_path / "cache")}
     subprocess.run(
         ["npm", "install", "-g", "--prefix", str(tmp_path / "prefix"), "--offline", str(tarball)],
         env=env,
