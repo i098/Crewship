@@ -1,0 +1,45 @@
+---
+# Stall nudge for main Firstmate (docs/architecture.md#stall-nudge): a user
+# timer runs maintenance/fm-main-stall-nudge every minute. Each run is a fresh
+# process, so a rewritten script needs no restart.
+
+- name: Ensure the stall nudge directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_user_units }}/timers.target.wants"
+
+- name: Install the stall nudge script
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/maintenance/fm-main-stall-nudge"
+    dest: "{{ crewship_stall_nudge_script }}"
+    mode: "0755"
+    remote_src: true
+
+- name: Render the stall nudge unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop: [fm-main-stall-nudge.service, fm-main-stall-nudge.timer]
+  notify: reload user systemd
+
+- name: Statically enable the stall nudge timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/fm-main-stall-nudge.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/fm-main-stall-nudge.timer"
+    state: link
+    force: true
+    follow: false
+
+- name: Enable and start the stall nudge timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: fm-main-stall-nudge.timer
+    enabled: true
+    state: started
+  environment: "{{ crewship_user_systemd_env }}"
+  when: crewship_manage_services | bool

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Wakes a stalled main Firstmate. After a context compaction omp can hold every
+# watcher wake as a queued follow-up and never start a turn; typed input in
+# main's pane is what starts the next one. Run by fm-main-stall-nudge.timer.
+# Types a short nudge when an operator note waits more than NOTE_MAX seconds or
+# a wake waits more than WAKE_MAX seconds, at most once per GAP seconds.
+#
+# Environment (set by the unit): FM_HOME is required. NOTE_MAX, WAKE_MAX, GAP,
+# HERDR_SESSION and HERDR_BIN_PATH have defaults. MAIN_PANE (a pane id such as
+# w2:pZ) skips pane discovery.
+set -u
+: "${FM_HOME:?FM_HOME is not set}"
+FM_HOME=${FM_HOME%/}
+NOTE_MAX=${NOTE_MAX:-180}
+WAKE_MAX=${WAKE_MAX:-600}
+GAP=${GAP:-300}
+SESSION=${HERDR_SESSION:-default}
+HERDR=${HERDR_BIN_PATH:-herdr}
+MAIN_PANE=${MAIN_PANE:-}
+STATE=$FM_HOME/state
+STAMP=$STATE/.stall-nudge-last
+now=$(date +%s)
+nudge_log() { echo "$(date -u +%FT%TZ) $*"; }
+
+oldest_note=$(stat -c %Y "$STATE"/inbox/*.note 2>/dev/null | sort -n | head -1)
+oldest_wake=$(cut -f1 "$STATE/.wake-queue" 2>/dev/null | sort -n | head -1)
+reason=
+[ -n "$oldest_note" ] && [ $((now - oldest_note)) -gt "$NOTE_MAX" ] && reason="an operator note waits $((now - oldest_note))s"
+[ -z "$reason" ] && [ -n "$oldest_wake" ] && [ $((now - oldest_wake)) -gt "$WAKE_MAX" ] && reason="a wake waits $((now - oldest_wake))s"
+[ -z "$reason" ] && exit 0
+last=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((now - last)) -lt "$GAP" ] && exit 0
+
+# Main is the herdr pane with an agent whose foreground cwd is the Firstmate home.
+if [ -z "$MAIN_PANE" ]; then
+  MAIN_PANE=$(HERDR_SESSION=$SESSION "$HERDR" pane list --session "$SESSION" 2>/dev/null \
+    | jq -r --arg home "$FM_HOME" '[.result.panes[] | select(.agent and .foreground_cwd == $home) | .pane_id][0] // empty' 2>/dev/null)
+fi
+if [ -z "$MAIN_PANE" ]; then
+  nudge_log "no main pane: no herdr pane in session $SESSION runs an agent in $FM_HOME; $reason" >&2
+  exit 1
+fi
+target=$SESSION:$MAIN_PANE
+
+cd "$FM_HOME" || exit 1
+. bin/fm-backend.sh
+msg="stall watchdog: $reason unhandled. Run bin/fm-wake-drain.sh and answer every operator note now."
+# The herdr helper exits 0 even on a failed send; its stdout verdict says what
+# happened. The stamp is written before the send, so the GAP holds on every path.
+echo "$now" > "$STAMP"
+out=$(fm_backend_send_text_submit herdr "$target" "$msg" 2 0.4 0.3)
+rc=$?
+verdict=${out##*$'\n'}
+if [ "$rc" -ne 0 ] || [ -z "$verdict" ] || [ "$verdict" = send-failed ]; then
+  nudge_log "nudge FAILED for $target: $reason: rc=$rc verdict=${verdict:-none}" >&2
+  exit 1
+fi
+case $verdict in
+  empty) nudge_log "nudged $target: $reason" ;;
+  *) nudge_log "nudge uncertain for $target: $reason: verdict=$verdict, text may be typed" ;;
+esac

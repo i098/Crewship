@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Check for a stalled main Firstmate every minute (Crewship managed)
+
+[Timer]
+Unit=fm-main-stall-nudge.service
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
