@@ -1,4 +1,0 @@
-{{ ansible_managed | comment }}
-# Image cards (docs/architecture.md#usage-card) are throwaway. The user systemd-tmpfiles-clean timer
-# removes files here once they are older than the max age.
-d {{ crewship_cards_dir }} 0755 - - {{ crewship_cards_max_age }}

@@ -159,15 +159,6 @@ def test_stall_nudge_service_runs_usage_remind_after_nudge_failure():
     assert env_vars["USAGE_DISKS"] == "/ /data"
 
 
-def test_cards_tmpfiles_rule_prunes_after_max_age():
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(MAINT.parents[1] / "blueprint/ansible/templates"))
-    env.filters["comment"] = lambda s: "# " + s
-    text = env.get_template("crewship-cards.tmpfiles.conf.j2").render(
-        ansible_managed="", crewship_cards_dir="/h/.cache/crewship/cards", crewship_cards_max_age="1d"
-    )
-    assert "d /h/.cache/crewship/cards 0755 - - 1d" in text.splitlines()
-
-
 def test_remind_deletes_card_even_when_send_fails(host):
     host.note()
     sent = host.home.parent / "sent"

@@ -15,7 +15,4 @@ crewship_stall_nudge_pane: ""
 # The card renders with headless Chrome: the desktop profile or crewship_chrome_install: true provides it, else omp's puppeteer Chrome.
 crewship_usage_remind_every: 3600
 crewship_usage_disks: ["/"]
-# Cards that must persist go only under crewship_cards_dir; a user tmpfiles.d rule deletes files older than the max age.
-crewship_cards_dir: "{{ crewship_cfg.home }}/.cache/crewship/cards"
-crewship_cards_max_age: 1d
 crewship_usage_scripts: [fm-usage-brief, fm-usage-remind, fm-text-card]
