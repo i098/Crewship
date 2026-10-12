@@ -15,9 +15,10 @@ The chart is an 840 px wide PNG (630 px minimum tall) for iMessage. It has a tim
    `[{"label": "0.4.3 release", "group": "Crewship", "start": "2026-10-12T16:30", "end": "2026-10-12T17:30", "state": "planned"}]`
    `state` is `planned`, `done` or `moved`. A time without an offset is read in the operator's timezone.
 2. Run the script that sits next to this file. It needs headless Chrome (`CHROME` overrides the path):
-   `eta_timeline.py /tmp/eta.json --tz America/Los_Angeles --out /tmp/eta.png`
+   `eta_timeline.py /tmp/eta.json --tz America/Los_Angeles`
+   It prints the path of a temp PNG. Delete that file after you use it. Do not keep these images: pass `--out` only when a file must persist.
    Add `--now ISO` to fix the now line (default: the current time).
-3. Look at the PNG before you send it. Then show it to the operator. To send it over iMessage, add `--send "caption"`. The script then runs `fm-imessage --image` and stops with a message when that command does not exist.
+3. Look at the PNG before you send it. Then show it to the operator. To send it over iMessage, run the script with `--send "caption"` and no `--out`. It renders to a temp file, runs `fm-imessage --image`, and deletes the file right after. It stops with a message when `fm-imessage` does not exist. With `--send` you cannot look first: render once without it to check.
 
 ## Install
 

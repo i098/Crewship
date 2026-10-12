@@ -2,6 +2,7 @@
 """Render an ETA timeline PNG (840 px wide, dark) from JSON items with headless Chrome.
 
 eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] [--send [CAPTION]]
+Without --out the PNG goes to a temp file; --send deletes it right after fm-imessage returns.
 items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved"}]
 An ISO time without an offset is read in --tz. start == end draws a dot; done always draws a dot at its end.
 """
@@ -103,7 +104,7 @@ def main():
     p.add_argument("items", help="JSON file of items")
     p.add_argument("--tz", required=True, help="IANA timezone of the operator, e.g. America/Los_Angeles")
     p.add_argument("--now", help="ISO time for the now line (default: the current time)")
-    p.add_argument("--out", default="eta-timeline.png")
+    p.add_argument("--out", help="keep the PNG here (default: a temp file, deleted after --send)")
     p.add_argument("--send", nargs="?", const="", metavar="CAPTION", help="send the PNG with fm-imessage --image")
     a = p.parse_args()
     tz = ZoneInfo(a.tz)
@@ -117,12 +118,18 @@ def main():
                       "start": parse(r["start"], tz), "end": parse(r["end"], tz)})
     if not items:
         sys.exit("no items")
-    render(items, tz, now, a.out)
-    print(a.out)
-    if a.send is not None:
+    out = a.out or tempfile.mkstemp(suffix=".png", prefix="eta-timeline-")[1]
+    render(items, tz, now, out)
+    if a.send is None:
+        print(out)
+        return
+    try:
         if not shutil.which("fm-imessage"):
-            sys.exit("fm-imessage not found: the PNG is saved, send it another way")
-        subprocess.run(["fm-imessage", "--image", a.out, *([a.send] if a.send else [])], check=True)
+            sys.exit("fm-imessage not found: send the PNG another way")
+        subprocess.run(["fm-imessage", "--image", out, *([a.send] if a.send else [])], check=True)
+    finally:
+        if not a.out:
+            os.unlink(out)
 
 
 if __name__ == "__main__":

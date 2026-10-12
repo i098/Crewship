@@ -12,10 +12,10 @@ The card is an 840 px wide image (630 px minimum tall). It shows the 5 h and 7 d
 ## Steps
 
 1. Run the helper that the Crewship `firstmate` profile installs in `~/.local/bin/`:
-   `fm-usage-brief --png /tmp/usage.png`
+   `f=$(mktemp --suffix=.png) && fm-usage-brief --png "$f"`
    Without `--png` it prints the same figures as text.
-2. Look at the PNG. Then send it with `fm-imessage --image /tmp/usage.png`, or show it to the operator.
-3. To card any other short update, run `fm-text-card OUT.png < text`.
+2. Look at the PNG. Then send it with `fm-imessage --image "$f"`, and delete it right after: `rm -f "$f"`. Do not keep these images.
+3. To card any other short update, run `fm-text-card "$f" < text`, with a temp file the same way.
 
 ## Hourly reminder
 
