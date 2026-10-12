@@ -6,6 +6,7 @@ fake spectrum-ts whose upstream returns UNAVAILABLE.
 """
 
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -1499,6 +1500,22 @@ def wait_for(check, what, timeout=30):
         time.sleep(0.05)
 
 
+_ports = itertools.count()
+
+
+def free_port():
+    # Each xdist worker walks its own slice below Linux's ephemeral range (32768+). An OS-assigned port can be taken by
+    # another process's outgoing connection, and random picks collide across workers; either made the bridge exit at start.
+    worker = int(os.environ.get("PYTEST_XDIST_WORKER", "gw0")[2:] or 0)
+    while True:
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", 20000 + worker * 100 + next(_ports) % 100))
+            except OSError:
+                continue
+            return s.getsockname()[1]
+
+
 def publish_json(path, record):
     pending = path.parent.parent / path.name
     pending.write_text(json.dumps(record))
@@ -1527,9 +1544,7 @@ def fake_bridge(tmp_path):
     for name, body in stubs.items():
         (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
         (bin_dir / name).chmod(0o755)
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
+    port = free_port()
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -1924,11 +1939,7 @@ class FallbackRig:
         for name, body in {"omp": "cat >/dev/null; echo SKIP", "fm-inbox": f'printf "%s\\n" "$*" >> {self.notes}'}.items():
             (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
             (bin_dir / name).chmod(0o755)
-        ports = []
-        for _ in range(2):
-            with socket.socket() as s:
-                s.bind(("127.0.0.1", 0))
-                ports.append(s.getsockname()[1])
+        ports = [free_port(), free_port()]
         self.hook_port = ports[1]
         self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_DIR": str(self.fake)}
         self.relay = subprocess.Popen(["bun", "-e", FAKE_RELAY], env=self.env)
@@ -1956,7 +1967,10 @@ class FallbackRig:
         self.starts += 1
         with self.out.open("a") as o, self.err.open("a") as e:
             self.bridge = subprocess.Popen(["bun", "bridge.ts"], cwd=self.app, env=self.env, stdout=o, stderr=e)
-        wait_for(lambda: read_text(self.out).count("listening") == self.starts, "bridge start")
+        def up():
+            assert self.bridge.poll() is None, f"bridge exited {self.bridge.returncode}: {read_text(self.err)[-1500:]}"
+            return read_text(self.out).count("listening") == self.starts
+        wait_for(up, "bridge start")
 
     def stop(self):
         if self.bridge:
