@@ -3,6 +3,15 @@
 # ~/.local/bin; a thin check in the Firstmate state directory sets its config and is
 # bound to its bytes with bin/fm-check-register.sh. REST only; gh uses the host's login.
 
+- name: Ensure the GitHub reply directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_firstmate_dir }}/state"
+
 - name: Install the GitHub reply script
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/maintenance/fm-gh-replies"
@@ -15,12 +24,10 @@
     src: gh-replies.check.sh.j2
     dest: "{{ crewship_firstmate_dir }}/state/gh-replies.check.sh"
     mode: "0700"
-  register: crewship_gh_replies_check
 
 - name: Register the GitHub reply check with Firstmate
   ansible.builtin.command:
     cmd: "{{ crewship_firstmate_dir }}/bin/fm-check-register.sh gh-replies"
   environment:
     FM_HOME: "{{ crewship_firstmate_dir }}"
-  changed_when: true
-  when: crewship_gh_replies_check is changed
+  changed_when: false
