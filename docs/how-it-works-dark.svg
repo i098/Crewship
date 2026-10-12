@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1070 806" width="1070" height="806" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title id="t">How Crewship works</title>
-  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the agents have full control of your Mac over SSH. The secrets file can optionally come from an external Cloudflare Worker and Secrets Store, which a new host fetches it from. The server installs and calls third-party services: Anthropic, OpenAI and Kimi model providers, the npm registry, no-mistakes, Lavish, Sentrux and fallow, Discord and Slack clients, and Google Workspace; and, optionally, Tailscale, Photon and BlueBubbles.</desc>
+  <desc id="d">You reach Firstmate from a phone or laptop: a terminal over SSH, or iMessage. Everything else runs on your server. The optional iMessage bridge on the server connects to Firstmate; it uses Photon or an optional BlueBubbles relay on your Mac. Discord and Slack run as terminal chat clients in Herdr tabs on the server, used by Firstmate and agents. Firstmate hands work to second mates, who lead workers. Each worker runs in its own isolated copy. Workers use model providers and GitHub issues, pull requests and projects. The guards (some optional), the optional crew board and the secrets file are shared on the server. Optionally, the agents have full control of your Mac over SSH. The secrets file can optionally come from an external Cloudflare Worker and Secrets Store, which a new host fetches it from. The server installs and calls third-party services: Anthropic, OpenAI and Kimi model providers, bun, no-mistakes, Lavish, Sentrux and fallow, Discord and Slack clients, and Google Workspace; and, optionally, Tailscale, Photon and BlueBubbles.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b949e"/></marker>
   </defs>
@@ -64,7 +64,7 @@
     <text x="710" y="502">Your Mac</text>
     <text x="970" y="304">Cloudflare Worker</text>
     <text x="127" y="658">Anthropic, OAI, etc.</text>
-    <text x="331" y="658">npm</text>
+    <text x="331" y="658">bun</text>
     <text x="535" y="658">no-mistakes</text>
     <text x="739" y="658">Lavish</text>
     <text x="943" y="658">Sentrux, fallow</text>
