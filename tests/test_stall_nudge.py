@@ -182,7 +182,9 @@ def test_send_verdict(host, env, code, log, stream):
     assert int(host.stamp_file.read_text()) > time.time() - 5
 
 
-@pytest.mark.parametrize("env", [{"SEND_OUT": "send-failed"}, {"SEND_RC": "3"}, {"SEND_OUT": "unknown"}])
+@pytest.mark.parametrize(
+    "env", [{"SEND_OUT": "send-failed"}, {"SEND_RC": "3"}, {"SEND_OUT": "unknown"}]
+)
 def test_no_second_nudge_inside_gap_after_failed_or_uncertain_send(host, env):
     host.note(400)
     host.run(**env)
