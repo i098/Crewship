@@ -29,6 +29,19 @@ function finishIntro() {
 }
 if (PAGE) for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) addEventListener(event, finishIntro, { capture: true, passive: true });
 
+// One-time hint that browser zoom changes the detail (measure() reads innerWidth and devicePixelRatio). Keyboards only:
+// a phone has no Cmd or Ctrl. It shows once, then a stored flag keeps it away; a click hides it, and CSS fades it after 14 s.
+const zoomHint = PAGE && document.getElementById("zoomhint");
+if (PAGE && !touchFirst.matches) {
+  let seen = null;
+  try { seen = localStorage.getItem("harbor-zoom-hint"); } catch { /* blocked storage: shows every visit */ }
+  if (!seen) {
+    zoomHint.hidden = false;
+    zoomHint.onclick = () => { zoomHint.hidden = true; };
+    try { localStorage.setItem("harbor-zoom-hint", "seen"); } catch { /* not remembered */ }
+  }
+}
+
 // The features come from the plain list, so the scene and the list never disagree. A ray worker gets their ids from the
 // page as its worker name.
 const spots = {};

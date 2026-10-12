@@ -58,6 +58,7 @@ addEventListener("unhandledrejection", (e) => String(e.reason?.stack).includes("
 <section id="stage" class="stage" hidden tabindex="0" role="application" aria-roledescription="3D harbor" aria-label="The ship at the dock, a walkable 3D scene. The feature list before it has the same content.">
   <canvas id="scene" aria-hidden="true"></canvas>
   <div id="card" class="sr-only" aria-live="polite"></div>
+  <p id="zoomhint" class="zoomhint" role="status" hidden>Browser zoom changes the detail. Press <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>&minus;</kbd> for finer characters, <kbd>+</kbd> for bigger ones and a lighter load.</p>
   <div id="pad" class="pad" aria-hidden="true"><span></span></div>
   <button id="sound" class="sound" type="button" aria-label="Sound" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3z"/><path class="on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg></button>
 </section>
