@@ -1,6 +1,6 @@
 {{ ansible_managed | comment }}
 # Triggered by fm-main-stall-nudge.timer; not enabled on its own. Types a nudge
-# into main Firstmate's herdr pane when an operator note or a wake waits too long
+# into main Firstmate's herdr pane when an operator note, a wake or a Lavish board answer waits too long
 # (docs/architecture.md#stall-nudge).
 
 [Unit]
@@ -9,12 +9,13 @@ ConditionPathExists={{ crewship_stall_nudge_script }}
 
 [Service]
 Type=oneshot
-Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HERDR_BIN_PATH={{ crewship_herdr_bin }}
 Environment=HERDR_SESSION={{ crewship_stall_nudge_session }}
 Environment=FM_HOME={{ crewship_firstmate_dir }}
 Environment=NOTE_MAX={{ crewship_stall_nudge_note_max }}
 Environment=WAKE_MAX={{ crewship_stall_nudge_wake_max }}
+Environment=BOARD_MAX={{ crewship_stall_nudge_board_max }}
 Environment=GAP={{ crewship_stall_nudge_gap }}
 Environment=MAIN_PANE={{ crewship_stall_nudge_pane }}
 ExecStart={{ crewship_stall_nudge_script }}
