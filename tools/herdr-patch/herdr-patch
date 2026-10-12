@@ -85,8 +85,8 @@ APC = re.compile(rb"\x1b_G([^;\x1b]*)(?:;([^\x1b]*))?\x1b\\")
 APC_MAX = 1 << 20  # an unterminated APC longer than this goes out as text
 # herdr's text: CUP, other CSI, OSC, ESC 7/8, other ESC, and printed runs.
 TOKEN = re.compile(
-    rb"\x1b\[(\d*)(?:;(\d*))?[Hf]|\x1b\[[0-?]*[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
-    rb"|\x1b([78])|\x1b[ -/]*[0-Z\\^-~]?|([^\x1b]+)"
+    rb"\x1b\[(\d*)(?:;(\d*))?[Hf]|\x1b\[[\x30-\x3f]*[\x20-\x2f]*([\x40-\x7e])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    rb"|\x1b([78])|\x1b[\x20-\x2f]*[\x30-\x5a\x5c\x5e-\x7e]?|([^\x1b]+)"
 )
 CUP_END = re.compile(rb"\x1b\[(\d*)(?:;(\d*))?[Hf]\Z")
 CONTROL = re.compile(rb"[\x00-\x1f\x7f]")
@@ -100,8 +100,8 @@ DELETE_ALL = b"\x1b_Ga=d,d=A,q=2\x1b\\"
 # sequence, or text.
 GRAPHIC = re.compile(rb"(?:\x1b\[\d+;\d+H)?\x1b_G([^;\x1b]*)(?:;[^\x1b]*)?\x1b\\")
 PIECE = re.compile(
-    rb"\x1b\[[0-?]*[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P_^X][^\x1b]*\x1b\\"
-    rb"|\x1b[ -/]*[0-OQ-WYZ\\`-~]|[^\x1b]+"
+    rb"\x1b\[[\x30-\x3f]*[\x20-\x2f]*([\x40-\x7e])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P_^X][^\x1b]*\x1b\\"
+    rb"|\x1b[\x20-\x2f]*[\x30-\x4f\x51-\x57\x59\x5a\x5c\x60-\x7e]|[^\x1b]+"
 )
 ERASE = b"KXJLMSTP@r"  # CSI finals after which the terminal may have lost image cells
 TAIL_MAX = 1 << 16  # an unterminated sequence longer than this is not waited for

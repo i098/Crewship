@@ -7,6 +7,7 @@ These tests also run on Python 3.9, the version macOS ships.
 import base64
 import importlib.machinery
 import importlib.util
+import re
 import os
 import select
 import shutil
@@ -508,3 +509,35 @@ def test_a_restore_waits_for_a_safe_point():
     splicer.restore = True  # a resize
     assert splicer.splice(b"b", images) == b"b"
     assert splicer.splice(b"\x07", images) == b"\x07\x1b7" + channel_place(1, 3) + b"\x1b8"
+
+
+OLD_TOKEN = re.compile(
+    rb"\x1b\[(\d*)(?:;(\d*))?[Hf]|\x1b\[[0-?]*[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    rb"|\x1b([78])|\x1b[ -/]*[0-Z\\^-~]?|([^\x1b]+)"
+)
+OLD_PIECE = re.compile(
+    rb"\x1b\[[0-?]*[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P_^X][^\x1b]*\x1b\\"
+    rb"|\x1b[ -/]*[0-OQ-WYZ\\`-~]|[^\x1b]+"
+)
+
+
+def forms(b: int) -> list[bytes]:
+    c = bytes([b])
+    return [b"\x1b[" + c, b"\x1b[1;2" + c, b"\x1b[1;2 " + c, b"\x1b" + c, b"\x1b " + c, b"\x1b[ " + c, b"\x1b[" + c + b"m"]
+
+
+def test_escape_regex_ranges_match_the_old_ones_for_every_byte():
+    for b in range(256):
+        for seq in forms(b):
+            for old, new in ((OLD_TOKEN, mosh.TOKEN), (OLD_PIECE, mosh.PIECE)):
+                assert [m.span() for m in old.finditer(seq)] == [m.span() for m in new.finditer(seq)], seq
+                assert [m.groups() for m in old.finditer(seq)] == [m.groups() for m in new.finditer(seq)], seq
+
+
+def test_escape_regex_samples_and_rejects_out_of_range_bytes():
+    for seq in (b"\x1b[5;7H", b"\x1b[1;31m", b"\x1b]0;t\x07", b"\x1b7", b"\x1b8",):
+        assert mosh.TOKEN.match(seq).group(0) == seq
+        assert mosh.PIECE.match(seq).group(0) == seq
+    assert mosh.PIECE.match(b"\x1b_Gi=1;AAAA\x1b\\").group(0) == b"\x1b_Gi=1;AAAA\x1b\\"
+    assert mosh.TOKEN.match(b"\x1b[1\x80").group(0) == b"\x1b"  # not a CSI final byte
+    assert mosh.PIECE.match(b"\x1b\x7f") is None  # DEL is not an ESC final byte
