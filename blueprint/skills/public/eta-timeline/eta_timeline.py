@@ -42,11 +42,18 @@ def tick_label(t):
 def build_page(items, tz, now):
     """Return (html, height). items: dicts with datetime start/end."""
     times = [i[k] for i in items for k in ("start", "end")] + [now]
-    step = next((s for s in STEPS if (max(times) - min(times)).total_seconds() / 60 / s <= 5), STEPS[-1])
+    step = next(
+        (s for s in STEPS if (max(times) - min(times)).total_seconds() / 60 / s <= 5), STEPS[-1]
+    )
     t0 = min(times).replace(second=0, microsecond=0)
-    t0 -= timedelta(minutes=(t0.hour * 60 + t0.minute) % step)  # tick on a multiple of step from midnight
+    t0 -= timedelta(
+        minutes=(t0.hour * 60 + t0.minute) % step
+    )  # tick on a multiple of step from midnight
     span = max(step, -(-int((max(times) - t0).total_seconds() // 60) // step) * step)
-    x = lambda t: LEFT + (t - t0).total_seconds() / 60 / span * (W - LEFT)
+
+    def x(t):
+        return LEFT + (t - t0).total_seconds() / 60 / span * (W - LEFT)
+
     rows, y, last = [], 80, None
     for it in items:
         if it["group"] != last:
@@ -55,10 +62,14 @@ def build_page(items, tz, now):
         col = COLORS[it["state"]]
         rows.append(f'<div class="lbl" style="top:{y}px">{html.escape(it["label"])}</div>')
         if it["state"] == "done" or it["start"] == it["end"]:
-            rows.append(f'<div class="dot" style="top:{y + 6}px;left:{x(it["end"]) - 8}px;background:{col}"></div>')
+            rows.append(
+                f'<div class="dot" style="top:{y + 6}px;left:{x(it["end"]) - 8}px;background:{col}"></div>'
+            )
         else:
             left, mins = x(it["start"]), round((it["end"] - it["start"]).total_seconds() / 60)
-            rows.append(f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{duration(mins)}</div>')
+            rows.append(
+                f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{duration(mins)}</div>'
+            )
         y += 40
     ticks = "".join(
         f'<div class="tick" style="left:{x(t)}px">{tick_label(t)}</div><div class="vline" style="left:{x(t)}px;height:{y - 50}px"></div>'
@@ -82,9 +93,21 @@ h1{{font-size:30px;margin:0;position:absolute;top:18px;left:24px}}
 
 
 def chrome():
-    found = os.environ.get("CHROME") or next(
-        iter(sorted(glob.glob(os.path.expanduser("~/.omp/puppeteer/chrome/linux-*/chrome-linux64/chrome")), reverse=True)), None
-    ) or next(filter(None, map(shutil.which, ("google-chrome", "chromium", "chrome"))), None)
+    found = (
+        os.environ.get("CHROME")
+        or next(
+            iter(
+                sorted(
+                    glob.glob(
+                        os.path.expanduser("~/.omp/puppeteer/chrome/linux-*/chrome-linux64/chrome")
+                    ),
+                    reverse=True,
+                )
+            ),
+            None,
+        )
+        or next(filter(None, map(shutil.which, ("google-chrome", "chromium", "chrome"))), None)
+    )
     if not found:
         sys.exit("no Chrome found: set CHROME to a Chrome binary")
     return found
@@ -95,17 +118,38 @@ def render(items, tz, now, out):
     with tempfile.TemporaryDirectory() as d:
         src = Path(d, "timeline.html")
         src.write_text(page)
-        subprocess.run([chrome(), "--headless=new", "--no-sandbox", "--hide-scrollbars", f"--screenshot={out}",
-                        f"--window-size=840,{max(y + 90, 630)}", src.as_uri()], capture_output=True, check=True)
+        subprocess.run(
+            [
+                chrome(),
+                "--headless=new",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                f"--screenshot={out}",
+                f"--window-size=840,{max(y + 90, 630)}",
+                src.as_uri(),
+            ],
+            capture_output=True,
+            check=True,
+        )
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("items", help="JSON file of items")
-    p.add_argument("--tz", required=True, help="IANA timezone of the operator, e.g. America/Los_Angeles")
+    p.add_argument(
+        "--tz", required=True, help="IANA timezone of the operator, e.g. America/Los_Angeles"
+    )
     p.add_argument("--now", help="ISO time for the now line (default: the current time)")
     p.add_argument("--out", help="keep the PNG here (default: a temp file, deleted after --send)")
-    p.add_argument("--send", nargs="?", const="", metavar="CAPTION", help="send the PNG with fm-imessage --image")
+    p.add_argument(
+        "--send",
+        nargs="?",
+        const="",
+        metavar="CAPTION",
+        help="send the PNG with fm-imessage --image",
+    )
     a = p.parse_args()
     tz = ZoneInfo(a.tz)
     now = parse(a.now, tz) if a.now else datetime.now(tz)
@@ -114,8 +158,15 @@ def main():
     for r in raw:
         if r.get("state", "planned") not in COLORS:
             sys.exit(f"bad state {r.get('state')!r}: use planned, done or moved")
-        items.append({"label": r["label"], "group": r["group"], "state": r.get("state", "planned"),
-                      "start": parse(r["start"], tz), "end": parse(r["end"], tz)})
+        items.append(
+            {
+                "label": r["label"],
+                "group": r["group"],
+                "state": r.get("state", "planned"),
+                "start": parse(r["start"], tz),
+                "end": parse(r["end"], tz),
+            }
+        )
     if not items:
         sys.exit("no items")
     out = a.out or tempfile.mkstemp(suffix=".png", prefix="eta-timeline-")[1]
