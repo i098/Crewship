@@ -218,9 +218,9 @@ zoom  300%  ##                        8,000</pre>
   Tall grass uses projected tufts, and fountain water uses projected droplets.
   Palm fronds use projected spines with paired leaflets; distant palms show fewer leaflets or only spines.
   They check the depth buffer instead of ray intersections.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#harbor">harbor README</a> for the fountain's streams and landing surfaces.
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor">harbor README</a> for the fountain's streams and landing surfaces.
   The sea is a height field of travelling waves, ray marched per cell; the small boats ride it.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#harbor">harbor README</a> for the ship's wind-driven sway.
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor">harbor README</a> for the ship's wind-driven sway.
   Low, dark hills rise from the sea on part of the horizon, just lighter than the sky.
   The island is a smooth height field of rolling hills from value noise, levelled under the objects that stand on it.
   The page samples it once on a 25 cm grid, and each ray starts its march where it can first reach the highest ground nearby.
@@ -235,7 +235,7 @@ zoom  300%  ##                        8,000</pre>
   Leaves receive lamplight without shadow rays.
   Crowns cast no lamp shadows because the lamps are below them.
   Lamplight on leaves is compressed to prevent flat bright patches.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#harbor">harbor README</a> for the trees' appearance and motion.
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor">harbor README</a> for the trees' appearance and motion.
   The lighthouse beam sweeps; the moon gives a dim fill that is stronger on slopes facing it.
   Ship sails and the flag bypass lamp and shadow calculations; sails are brightest where they belly out farthest, and fog still dims them.
   The black flag draws only its outline, its folds and its pale skull and crossbones.
@@ -307,7 +307,7 @@ zoom  300%  ##                        8,000</pre>
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
   The house redraws only after movement, looking, resizing, or another change that requires a new frame.
   The cabin and gun deck also redraw while swaying with the hull.
-  Reduced motion stops exterior animation and idle ship-room redraws; see the <a href="https://github.com/i098/Crewship/tree/main/site#harbor">harbor README</a> for ship motion.</li>
+  Reduced motion stops exterior animation and idle ship-room redraws; see the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor">harbor README</a> for ship motion.</li>
   <li><b>Intro rendering.</b> The sweep shifts a single cached 8x8 glyph tile over cells that still hide the scene.
   It uses the same canvas without a cached scene.
   Each intro frame ends with a black canvas fill at opacity <code>1 - progress * progress</code>.
@@ -316,7 +316,7 @@ zoom  300%  ##                        8,000</pre>
   <li><b>Controls.</b> WASD or arrows walk and turn, R and F look up and down, the mouse looks around, Enter opens what you point at.
   On a phone, the bottom-left pad walks; drag on the right to look around.
   The pad and map controls respect safe-area insets.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#content-from-the-repository">harbor README</a> for sign links and keyboard access.</li>
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#content-from-the-repository">harbor README</a> for sign links and keyboard access.</li>
   <li><b>Sound.</b> The first click or tap creates one <code>AudioContext</code> and fetches six mono loops; the speaker button in the bottom-left corner mutes them.
   Each loop runs through a gain and an HRTF <code>PannerNode</code> with the inverse distance model, so it fades with distance from you.
   The sea, wind and fire loops move to their nearest emitter: the waterline or a ship side, a tree, or the fireplace or a lantern in the room you are in.
@@ -327,13 +327,13 @@ zoom  300%  ##                        8,000</pre>
   Press M again to fill the screen with the map.
   Use the arrows to choose a point.
   Enter or a tap selects a destination.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
-  See the <a href="https://github.com/i098/Crewship/tree/main/site#harbor" target="_blank" rel="noopener">house, cabin and gun deck guidance</a> for door and hatch crossings and controls inside.</li>
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor" target="_blank" rel="noopener">map travel guidance</a> for routes and reduced motion.
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor" target="_blank" rel="noopener">house, cabin and gun deck guidance</a> for door and hatch crossings and controls inside.</li>
   <li><b>Content.</b> <code>site/build.py</code> builds the points of interest with the README's Features list and More docs row, and the changelog.</li>
-  <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/site#deploy" target="_blank" rel="noopener">deployment guidance</a>.
+  <li><b>Deploy.</b> See the <a href="https://github.com/i098/Crewship/tree/main/site/#deploy" target="_blank" rel="noopener">deployment guidance</a>.
   The page has no runtime dependencies; nothing in <code>site/</code> reaches a Crewship host or worker image.</li>
 </ul>
 </details>
-<p><a href="https://github.com/i098/Crewship/tree/main/site" target="_blank" rel="noopener">The source on GitHub</a> &middot; <a href="./">Back to the harbor</a></p>
+<p><a href="https://github.com/i098/Crewship/tree/main/site/" target="_blank" rel="noopener">The source on GitHub</a> &middot; <a href="./">Back to the harbor</a></p>
 </body>
 </html>
