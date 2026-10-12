@@ -1,6 +1,6 @@
 ---
 # Stall nudge for main Firstmate (docs/architecture.md#stall-nudge): a user
-# timer runs maintenance/fm-main-stall-nudge every minute. Each run is a fresh
+# timer runs maintenance/fm-main-stall-nudge every 15 s. Each run is a fresh
 # process, so a rewritten script needs no restart.
 
 - name: Ensure the stall nudge directories
