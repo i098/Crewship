@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-13
+
+### Added
+
+- `fm-imessage --image PATH [caption]` sends a photo (png, jpg or webp) over the Photon line, downscaling a side over 2048 px and queueing it like a text bubble ([#340](https://github.com/i098/Crewship/issues/340)).
+- Hosts with the `firstmate` profile now install a user timer that types a nudge into main Firstmate's herdr pane when an operator note or a wake waits too long, so an idle main session starts a turn again ([#346](https://github.com/i098/Crewship/issues/346)).
+- The stall nudge also wakes main Firstmate once for each Lavish board answer that nobody replied to within 300 s, and now nudges after an operator note waits 45 s, checking every 15 s with at least 120 s between nudges ([#349](https://github.com/i098/Crewship/issues/349)).
+- The `firstmate` profile installs a registered Firstmate check that clears stale unsent text from a second mate input box and rings its doorbell ([#356](https://github.com/i098/Crewship/issues/356)).
+- Hosts that set `crewship_gh_replies_account` get a registered Firstmate check that wakes main when someone else comments on or reviews a GitHub PR or issue ([#357](https://github.com/i098/Crewship/issues/357)).
+- Hosts with the `firstmate` profile now install `fm-usage-brief`, `fm-usage-remind` and `fm-text-card`: while the owner texts Firstmate, the stall nudge service sends an image card of Claude and Codex use, server load, RAM and disks at most once an hour, and `fm-text-card` renders any short update as an image card ([#358](https://github.com/i098/Crewship/issues/358)).
+- Add `scripts/new-issue`, which files issues that follow the issue forms ([#360](https://github.com/i098/Crewship/issues/360)).
+- The new public skill `eta-timeline` answers an ETA question with a timeline chart: an 840 px wide PNG in the operator's local time, with one bar per item, done dots, moved items in amber and a "now" line, rendered by headless Chrome (#375).
+  The new public skill `usage-card` answers usage, quota, resource, server load and disk questions with the `fm-usage-brief --png` card (#375) ([#375](https://github.com/i098/Crewship/issues/375)).
+- The new public skill `manim` explains math and diagrams with Manim animations: a scene template and `render.py`, which renders mp4 or gif into one cache dir pruned after 1 day and can send the gif with `fm-imessage --image` (#381) ([#381](https://github.com/i098/Crewship/issues/381)).
+- Added the public `instagram-dm` skill: it reads the agent Instagram DMs with `instagrapi` and passes each shared post link, normalised to the `/reel/` form, to yt-dlp. It is read-only by default ([#382](https://github.com/i098/Crewship/issues/382)).
+- The `instagram-dm` skill now uses `instagrapi` (saved session, email-code login). With `crewship_instagram_dm_operator` set, a `firstmate` host keeps a realtime listener and a backstop poll timer that file each new DM from the operator with the Firstmate inbox (read receipt included), and installs `fm-insta-reply` to answer by text, reaction or typing indicator. No media is downloaded ([#385](https://github.com/i098/Crewship/issues/385)).
+
+### Changed
+
+- The how page explains movement, the shape list, windows and zoom, and the harbor shows a one-time zoom hint ([#338](https://github.com/i098/Crewship/issues/338)).
+- The landing page folder `harbor/` is now `site/`, `proxy-fixes/` is now `blueprint/patches/proxy-fixes/`, and `SECURITY.md`, `SUPPORT.md`, and `CODE_OF_CONDUCT.md` are now in `.github/` ([#348](https://github.com/i098/Crewship/issues/348)).
+- Split `blueprint/ansible/group_vars/all.yml` into one file per topic under `blueprint/ansible/group_vars/all/`, with the same variables and values ([#352](https://github.com/i098/Crewship/issues/352)).
+- The top level is grouped into `blueprint/` (the Ansible playbook and everything it provisions), `apps/` (`crewboard`, `imessage`, `fleet-secrets`), and `tools/` (`npm`, `herdr-patch`, `dia-debug`); `install.sh` moves private skills and rules from an older install into `blueprint/skills/private/` and `blueprint/rules/private/` ([#354](https://github.com/i098/Crewship/issues/354)).
+- The installer puts omp and the agent CLIs in place with `bun add -g` instead of npm, `~/.bun/bin` is on the `PATH` of shells and user units, and the docs show `bunx crewship` first with `npx crewship` and `pnpm dlx crewship` as the other ways to run the package ([#367](https://github.com/i098/Crewship/issues/367)).
+- The worker image drops the package-manager caches (npm, uv, bun, pip, cargo), the rustup docs, the onnxruntime-node binaries for other operating systems and CPU architectures, and the onnxruntime CUDA and TensorRT providers, which makes it smaller with the same tools; `.dockerignore` also keeps `docs/`, `changelog.d/` and all tests except `tests/container-smoke.sh` out of the build context ([#377](https://github.com/i098/Crewship/issues/377)).
+
+### Fixed
+
+- Every `pr-preview` board now ends with a roomy approval form: stacked choices, a full-width comment box for "Request changes", a right-aligned Send, and pass badges that no longer wrap (#342) ([#342](https://github.com/i098/Crewship/issues/342)).
+- The iMessage bridge tests pick their ports without collisions under xdist, so the bridge no longer exits at start with EADDRINUSE ([#344](https://github.com/i098/Crewship/issues/344)).
+- The `herdr-patch` escape-sequence patterns spell their byte ranges as explicit hex escapes, which closes CodeQL alerts #6 and #7; the bytes they match do not change ([#365](https://github.com/i098/Crewship/issues/365)).
+- `npx crewship` and `npm i -g crewship` no longer fail with EBADPLATFORM on macOS and Windows (#368): the package has no `os` restriction, `crewship --version` prints the package version, and off Ubuntu the launcher prints one line saying to run it on the server ([#368](https://github.com/i098/Crewship/issues/368)).
+- Two iMessage tests no longer fail at random: the fake Photon's outage counter was overwritten by the bridge (#374) ([#374](https://github.com/i098/Crewship/issues/374)).
+
 ## [0.4.2] - 2026-10-11
 
 ### Added
@@ -237,7 +271,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/i098/Crewship/releases/tag/v0.4.3
 [0.4.2]: https://github.com/i098/Crewship/releases/tag/v0.4.2
 [0.4.1]: https://github.com/i098/Crewship/releases/tag/v0.4.1
 [0.4.0]: https://github.com/i098/Crewship/releases/tag/v0.4.0
