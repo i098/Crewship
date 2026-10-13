@@ -264,6 +264,10 @@ def test_server_logout_signs_out_every_device(stack):
     assert request("POST", "/_gateway/login", other, "password=right-pass")[0].status == 303
     phone = {"CF-Connecting-IP": "198.51.100.9", "Cookie": cookie}
     assert request("GET", f"/{port}/", phone)[0].status == 200
+    stranger = {"CF-Connecting-IP": "192.0.2.50", "Content-Type": "application/x-www-form-urlencoded"}
+    assert request("POST", "/_gateway/logout", stranger, "")[0].status == 401
+    for visitor in (headers, other, phone):
+        assert request("GET", f"/{port}/", visitor)[0].status == 200
     response, _ = request("POST", "/_gateway/logout", phone, "")
     assert "Max-Age=0" in response.getheader("Set-Cookie")
     for visitor in (headers, other, phone):

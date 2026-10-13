@@ -268,12 +268,12 @@ class Handler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path == "/_gateway/login" and self.command == "POST":
             return self.login(gate, now)
-        if path == "/_gateway/logout" and self.command == "POST":
-            gate.revoke(now)
-            return self.page(200, login_body("/", "Signed out."), f"{COOKIE}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict")
         cookies = dict(p.strip().partition("=")[::2] for p in self.headers.get("Cookie", "").split(";"))
         if not gate.admitted(self.ip, cookies.get(COOKIE), now):
             return self.page(401, login_body(self.path))
+        if path == "/_gateway/logout" and self.command == "POST":
+            gate.revoke(now)
+            return self.page(200, login_body("/", "Signed out."), f"{COOKIE}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict")
         match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
         if match and self.port_ok(int(match[1])):
             port = int(match[1])
