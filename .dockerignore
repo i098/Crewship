@@ -97,3 +97,10 @@ blueprint/rules/private/
 
 # The crewship.si landing page is a website, never part of a host or an image
 site
+
+# The image never reads these: the tests, the docs and the changelog fragments.
+# The smoke target runs tests/container-smoke.sh, so that one script stays.
+docs
+changelog.d
+tests/*
+!tests/container-smoke.sh
