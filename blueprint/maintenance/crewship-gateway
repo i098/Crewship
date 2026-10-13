@@ -238,6 +238,7 @@ def login_body(target, note=""):
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "crewship-gateway"
+    timeout = 30  # a client that stops sending mid-request loses its thread after 30 s
     ip = None
 
     def address_string(self):
@@ -358,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
         head = f"{self.command} {rest} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items())
         upstream.sendall((head + "\r\n").encode("latin-1"))
         upstream.settimeout(None)
+        self.connection.settimeout(None)  # an open WebSocket may be idle for long
         self.close_connection = True
 
         def copy(source, sink):

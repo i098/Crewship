@@ -207,3 +207,5 @@ def test_server_logout_forgets_the_address(stack):
     response, _ = request("POST", "/_gateway/logout", headers, "")
     assert "Max-Age=0" in response.getheader("Set-Cookie")
     assert request("GET", f"/{port}/", headers)[0].status == 401
+
+
