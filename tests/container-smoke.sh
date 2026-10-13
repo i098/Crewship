@@ -873,6 +873,16 @@ check_agent_gate() {
     printf 'gate agent omp (omp-as-pi or acp:omp), ponytail-review on omp, omp plugins installed\n'
 }
 
+# omp, acpx and chrome-devtools-mcp are trimmed in the image (source maps,
+# declarations, native-addon symbols, omp's AVX2 addon); each must still start.
+check_agent_tools_run() {
+    local name
+    for name in omp acpx chrome-devtools-mcp; do
+        timeout 60 "${HOME}/.local/bin/${name}" --version >/dev/null 2>&1 || fail "${name} --version exited nonzero"
+    done
+    printf 'omp, acpx and chrome-devtools-mcp run\n'
+}
+
 container_mode() {
     SMOKE_TMP=$(mktemp -d -t crewship-smoke.XXXXXX)
     trap 'rm -rf "${SMOKE_TMP}"' EXIT
@@ -893,6 +903,7 @@ container_mode() {
     run_check development-toolchain        check_development_toolchain
     run_check login-shell-environment      check_login_shell_environment
     run_check agent-gate                   check_agent_gate
+    run_check agent-tools-run              check_agent_tools_run
     run_check no-baked-credentials         check_no_baked_credentials
     run_check herdr-config                 check_herdr_config
     run_check herdr-server-headless        check_herdr_server_headless
