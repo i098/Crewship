@@ -43,10 +43,11 @@ Never let an agent read, print, or relay the password.
 The host keeps only an scrypt hash of it, in `~/.config/crewship/gateway/password.hash` (directory `700`, file `600`).
 The hash stays on this host: each host has its own password, and [`scripts/fetch-secrets.sh`](secrets.md) does not touch it.
 
-To set a new password, run this in your own terminal on the host. It prints the new password one time, removes `initial-password`, and signs out every address and every browser:
+To set a new password, run this in your own terminal on the host. It writes the new password to `initial-password` in the same way, prints only the path of that file, and signs out every address and every browser:
 
 ```bash
 crewship-gateway password
+cat ~/.config/crewship/gateway/initial-password
 ```
 
 ## Settings

@@ -33,7 +33,7 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   echo "hello from port 8000" > /tmp/site/index.html
   (cd /tmp/site && python3 -m http.server 8000 --bind 127.0.0.1 >/dev/null 2>&1 &)
 
-  password=$(crewship-gateway password)
+  password=$(cat "$(crewship-gateway password)")
   hash=~/.config/crewship/gateway/password.hash
   grep -q "^scrypt\\$" "$hash"
   if grep -q "$password" "$hash"; then false; fi

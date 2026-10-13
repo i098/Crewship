@@ -33,7 +33,7 @@ def test_hash_lives_in_a_private_host_file(gate):
     assert gate.hash_file.parent.stat().st_mode & 0o777 == 0o700
 
 
-def test_installer_password_goes_to_a_file_never_to_stdout(tmp_path, monkeypatch, capsys):
+def test_password_goes_to_a_file_never_to_stdout(tmp_path, monkeypatch, capsys):
     hash_file = tmp_path / "gateway/password.hash"
     monkeypatch.setenv("CREWSHIP_GATEWAY_HASH", str(hash_file))
     monkeypatch.setenv("CREWSHIP_GATEWAY_STATE", str(tmp_path / "state/gateway.json"))
@@ -46,8 +46,9 @@ def test_installer_password_goes_to_a_file_never_to_stdout(tmp_path, monkeypatch
     assert gw.main(["password", "--if-missing"]) == 0
     assert capsys.readouterr().out == "" and initial.read_text().strip() == secret
     assert gw.main(["password"]) == 0
-    assert gw.check_password(capsys.readouterr().out.strip(), hash_file.read_text().strip())
-    assert not initial.exists()
+    assert capsys.readouterr().out.strip() == str(initial)
+    assert initial.read_text().strip() != secret
+    assert gw.check_password(initial.read_text().strip(), hash_file.read_text().strip())
 
 
 def test_right_password_admits_ip_for_the_window(gate):

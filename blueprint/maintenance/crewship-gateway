@@ -13,10 +13,10 @@ goes, unchanged, to the port of the page that asked for it (Referer, else PORT_C
 hash is kept, in ~/.config/crewship/gateway/password.hash on this host alone.
 
   crewship-gateway serve                   run the gateway (crewship-gateway.service)
-  crewship-gateway password                set a new password, print it once, sign everyone out
-  crewship-gateway password --if-missing   for the installer: when no password is set, write a
-                                           new one to the mode-600 file initial-password beside
-                                           the hash and print only that file's path
+  crewship-gateway password                set a new password, write it to the mode-600 file
+                                           initial-password beside the hash, print only that
+                                           file's path, and sign everyone out
+  crewship-gateway password --if-missing   the same, only when no password is set (the installer)
   crewship-gateway url                     print the tunnel's public URL
 """
 
@@ -199,6 +199,11 @@ def safe_next(target):
     return target if re.fullmatch(r"/(?![/\\])[^\\\s]*", target) else "/"
 
 
+def one_line(text):
+    """A header name or value without CR or LF: http.server writes it as given."""
+    return text.replace("\r", "").replace("\n", "")
+
+
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Crewship</title><style>
@@ -248,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def redirect(self, location, cookie=None):
         self.send_response(303)
-        self.send_header("Location", location)
+        self.send_header("Location", one_line(location))
         self.send_header("Content-Length", "0")
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
@@ -349,7 +354,7 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             if name.lower() == "location":
                 value = re.sub(rf"^(https?://(127\.0\.0\.1|localhost):{port})?(?=/(?!/))", f"/{port}", value)
-            self.send_header(name, value)
+            self.send_header(one_line(name), one_line(value))
         dest = self.headers.get("Sec-Fetch-Dest")
         if remember and (dest == "document" or dest is None and
                          (response.getheader("Content-Type") or "").startswith("text/html")):
@@ -412,7 +417,7 @@ def main(argv=None):
     commands.add_parser("serve")
     password = commands.add_parser("password")
     password.add_argument("--if-missing", action="store_true",
-                          help="only when none is set; write it to initial-password and print that path")
+                          help="only when none is set")
     commands.add_parser("url")
     args = parser.parse_args(argv)
     gate = Gate(
@@ -429,12 +434,8 @@ def main(argv=None):
         gate.set_hash(hash_password(secret))
         gate.revoke(time.time())
         initial = gate.hash_file.with_name("initial-password")
-        if args.if_missing:
-            write_private(initial, secret + "\n")
-            print(initial)
-        else:
-            initial.unlink(missing_ok=True)
-            print(secret)
+        write_private(initial, secret + "\n")
+        print(initial)
     elif args.command == "url":
         try:
             with urllib.request.urlopen(f"http://{METRICS}/quicktunnel", timeout=5) as response:
