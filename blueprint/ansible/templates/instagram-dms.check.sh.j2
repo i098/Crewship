@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Registered Firstmate check (docs/architecture.md#instagram-dm-alerts).
+export INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state | quote }}
+export INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log | quote }}
+exec python3 {{ crewship_instagram_dm_script | quote }} wake

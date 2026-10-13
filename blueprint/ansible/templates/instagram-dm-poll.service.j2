@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+# Triggered by instagram-dm-poll.timer; not enabled on its own.
+
+[Unit]
+Description=Poll the agent Instagram DMs (Crewship managed)
+ConditionPathExists={{ crewship_instagram_dm_session }}
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator }}
+Environment=INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session }}
+Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
+Environment=INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log }}
+Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
+ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script }} poll

@@ -1,0 +1,14 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Poll the agent Instagram DMs (Crewship managed)
+
+[Timer]
+Unit=instagram-dm-poll.service
+OnBootSec=1min
+OnUnitActiveSec={{ crewship_instagram_dm_interval }}s
+RandomizedDelaySec=40
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+---
+# Instagram DM alerts (docs/architecture.md#instagram-dm-alerts): a user timer polls the agent
+# Instagram account with the instagram-dm skill script, and a registered Firstmate check wakes main
+# once per new DM from the operator. An empty operator installs nothing.
+# The operator is his numeric Instagram user id: only his message requests are accepted and only his
+# messages are logged. The session file comes from `instagram_dm.py login` (see the skill).
+crewship_instagram_dm_operator: ""
+crewship_instagram_dm_interval: 120
+crewship_instagram_dm_script: "{{ crewship_local_bin }}/instagram_dm.py"
+crewship_instagram_dm_session: "{{ crewship_cfg.home }}/.config/crewship/instagram/session.json"
+crewship_instagram_dm_state: "{{ crewship_firstmate_dir }}/state/.instagram-dms"
+crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jsonl"
+crewship_instagram_dm_check: "{{ crewship_firstmate_dir }}/state/instagram-dms.check.sh"
