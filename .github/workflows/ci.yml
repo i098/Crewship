@@ -310,9 +310,10 @@ jobs:
               if not match:
                   continue
               ref, alias = expand(match.group(1)), match.group(2)
-              # The base tracks the newest Ubuntu LTS from mirror.gcr.io (no pull limit).
-              if ref not in stages and ref != "mirror.gcr.io/library/ubuntu:latest":
-                  problems.append(f"FROM {ref} is neither a previous stage nor mirror.gcr.io/library/ubuntu:latest")
+              # The base tracks the newest Ubuntu LTS from mirror.gcr.io (no pull limit);
+              # the worker stage starts from scratch and copies the builder's filesystem.
+              if ref not in stages and ref not in ("mirror.gcr.io/library/ubuntu:latest", "scratch"):
+                  problems.append(f"FROM {ref} is neither a previous stage, scratch nor mirror.gcr.io/library/ubuntu:latest")
               if alias:
                   stages.add(alias)
 

@@ -13,12 +13,15 @@
 # Base image: ubuntu:latest, the newest Ubuntu LTS, pulled from mirror.gcr.io
 # (Google's Docker Hub mirror: the same official image, no anonymous pull
 # limit). Nothing is pinned; the registry's content digests verify the layers
-# that are pulled.
+# that are pulled. It is already the minimal Ubuntu image; the playbook's
+# preflight accepts only Ubuntu, so a Debian, Alpine or distroless base is out.
 #
 # Build targets:
-#   base    OS packages and the Crewship account only (no repository content)
-#   worker  provisioned worker image; devcontainer and compose default
-#   smoke   worker + tests/container-smoke.sh as CMD (behavior smoke)
+#   base     OS packages and the Crewship account only (no repository content)
+#   builder  base + the provisioning run, its caches and its build-only files
+#   worker   the builder's filesystem without them, as one layer; devcontainer
+#            and compose default
+#   smoke    worker + tests/container-smoke.sh as CMD (behavior smoke)
 #
 # Distribution packages are intentionally not version-frozen: docs/security.md
 # treats operating-system security updates as an OS responsibility rather than
@@ -115,16 +118,14 @@ ENV LANG=C.UTF-8 \
     PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.bun/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ---------------------------------------------------------------------------
-# worker: provisioned image built through the repository's own CLI interfaces.
+# builder: provisioned through the repository's own CLI interfaces.
 # ---------------------------------------------------------------------------
-FROM base AS worker
+FROM base AS builder
 
 ARG CREWSHIP_USER=coder
 ARG CREWSHIP_HOME=/home/coder
 ARG CREWSHIP_WORKSPACE=/home/coder/Dev
 ARG CREWSHIP_CONFIG_FILE=blueprint/containers/crewship.container.yml
-
-COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} . /opt/crewship
 
 RUN set -eux; \
     printf 'role=worker\nsource=/opt/crewship\nuser=%s\nhome=%s\nworkspace=%s\nconfig=%s\nsystemd=absent\ntailscale=absent\ndesktop=absent\n' \
@@ -135,14 +136,20 @@ RUN set -eux; \
 USER ${CREWSHIP_USER}
 WORKDIR /opt/crewship
 
+# Manifests before source: the locked Python environment depends only on these
+# files, so a change elsewhere in the repository reuses this layer. Latest uv
+# bootstrap + locked Python dependencies (no provisioning yet). The one uv
+# lookup takes the same optional `github_token` secret as `launch`.
+COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} pyproject.toml uv.lock onboard.sh /opt/crewship/
+COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} scripts/provisions.py /opt/crewship/scripts/
+RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
+    set -eux; bash ./onboard.sh
+
+COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} . /opt/crewship
+
 # Executable bits are part of the interface: ./onboard.sh, ./ship.sh and the
 # smoke script are invoked directly, including from a context that lost them.
 RUN set -eux; chmod +x onboard.sh ship.sh tests/container-smoke.sh
-
-# Latest uv bootstrap + locked Python dependencies (no provisioning yet). The
-# one uv lookup takes the same optional `github_token` secret as `launch`.
-RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
-    set -eux; ./onboard.sh; rm -rf "${CREWSHIP_HOME}/.cache/uv"
 
 # Schema validation through the repository's own validator.
 RUN set -eux; ./ship.sh inspect --config "${CREWSHIP_CONFIG_FILE}"
@@ -160,27 +167,69 @@ RUN set -eux; uv run --project . --locked python blueprint/containers/assert-ima
 # lookups (shared CI runner IPs exhaust the unauthenticated API budget). It is
 # exposed to the lookup steps only (onboard.sh and this one), never as an ARG,
 # ENV, layer file or history entry; without it the lookup runs unauthenticated.
-# Size: package-manager caches, rustup docs, the onnxruntime-node binaries for
-# other operating systems and CPU architectures, and the CUDA/TensorRT execution
-# providers (614 MB across omp's two onnxruntime-node copies; a container with no
-# GPU runs the CPU provider) are deleted in this same RUN, so no layer keeps them.
 RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
-    set -eux; \
-    ./ship.sh launch --config "${CREWSHIP_CONFIG_FILE}"; \
-    rm -rf "${CREWSHIP_HOME}/.npm/_cacache" "${CREWSHIP_HOME}/.cache/uv" \
+    set -eux; ./ship.sh launch --config "${CREWSHIP_CONFIG_FILE}"
+
+# Size: files no worker process reads. The worker stage copies the filesystem
+# without the layers, so what is deleted here is gone from the image.
+#   * package-manager caches, the apt indexes (the next apply refreshes them),
+#     rustup docs, and node's C headers (node-gyp downloads its own)
+#   * in each npm tool prefix: packages no installed package requires (npm
+#     prune; omp's copy of onnxruntime-node 1.21), source maps, and TypeScript
+#     declarations outside omp's own packages
+#   * in omp: onnxruntime-web (only the browser build of transformers.js loads
+#     it; the Node build loads onnxruntime-node), the AVX2 build of pi-natives
+#     (its loader falls back to the baseline build, which runs on every x86-64
+#     CPU), onnxruntime-node binaries for other platforms, and the CUDA/TensorRT
+#     providers (a container with no GPU runs the CPU provider)
+RUN set -eux; \
+    share="${CREWSHIP_HOME}/.local/share/crewship"; \
+    for prefix in "${share}"/*/[0-9]*/; do npm prune --prefix "${prefix}" --no-audit --no-fund; done; \
+    sudo rm -rf /var/lib/apt/lists/*; \
+    rm -rf "${CREWSHIP_HOME}/.npm" "${CREWSHIP_HOME}/.cache/uv" \
         "${CREWSHIP_HOME}/.bun/install/cache" "${CREWSHIP_HOME}/.cache/pip" \
         "${CREWSHIP_HOME}/.cargo/registry" "${CREWSHIP_HOME}/.cargo/git" \
-        "${CREWSHIP_HOME}"/.rustup/toolchains/*/share/doc; \
+        "${CREWSHIP_HOME}"/.rustup/toolchains/*/share/doc \
+        "${share}"/tools/node/*/*/*/include \
+        "${share}"/omp/*/node_modules/onnxruntime-web \
+        "${share}"/omp/*/node_modules/@oh-my-pi/pi-natives-*/pi_natives.*-modern.node; \
+    find "${share}"/*/[0-9]*/node_modules -type f \( -name '*.map' -o \
+        \( \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \) ! -path '*/@oh-my-pi/*' \) \) -delete; \
     case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) arch= ;; esac; \
     if [ -n "${arch}" ]; then \
-        find "${CREWSHIP_HOME}/.local/share/crewship" -type d -path '*/onnxruntime-node/bin/napi-v*' -prune -print | \
+        find "${share}" -type d -path '*/onnxruntime-node/bin/napi-v*' -prune -print | \
         while read -r dir; do \
             find "${dir}" -mindepth 1 -maxdepth 1 ! -name linux -exec rm -rf {} +; \
             find "${dir}/linux" -mindepth 1 -maxdepth 1 ! -name "${arch}" -exec rm -rf {} + 2>/dev/null || true; \
         done; \
     fi; \
-    find "${CREWSHIP_HOME}/.local/share/crewship" -path '*/onnxruntime-node/bin/*' \
+    find "${share}" -path '*/onnxruntime-node/bin/*' \
         \( -name 'libonnxruntime_providers_cuda.so*' -o -name 'libonnxruntime_providers_tensorrt.so*' \) -delete
+
+# ---------------------------------------------------------------------------
+# worker: the builder's final filesystem as one layer. A file a later builder
+# step changed or deleted is stored once or not at all, instead of once per
+# layer. FROM scratch inherits no configuration, so the base ENV is restated.
+# ---------------------------------------------------------------------------
+FROM scratch AS worker
+
+ARG CREWSHIP_USER=coder
+ARG CREWSHIP_HOME=/home/coder
+ARG CREWSHIP_WORKSPACE=/home/coder/Dev
+ARG CREWSHIP_CONFIG_FILE=blueprint/containers/crewship.container.yml
+
+COPY --from=builder / /
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    CREWSHIP_USER=${CREWSHIP_USER} \
+    CREWSHIP_HOME=${CREWSHIP_HOME} \
+    HOME=${CREWSHIP_HOME} \
+    CREWSHIP_WORKSPACE=${CREWSHIP_WORKSPACE} \
+    CREWSHIP_ROOT=/opt/crewship \
+    PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+USER ${CREWSHIP_USER}
 
 ENV CREWSHIP_IMAGE=worker \
     CREWSHIP_CONFIG=/opt/crewship/${CREWSHIP_CONFIG_FILE}
