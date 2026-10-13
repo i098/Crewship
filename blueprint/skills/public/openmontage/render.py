@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Render an OpenMontage Remotion props file to mp4 in one cache dir that is pruned after 1 day.
 
-render.py PROPS [--seconds N] [--send "caption"]
+render.py PROPS|SCENE.tsx [--seconds N] [--send "caption"]
 PROPS is a props .json path or the name of a checked-in demo (code-to-screen, world-in-numbers, focusflow-pitch).
+SCENE.tsx is a self-contained Remotion entry with composition "Scene" (see scenes/moon.tsx; three.js needs @remotion/three).
 Prints the mp4 path. --send also sends a poster PNG with `fm-imessage --image` (iMessage takes no mp4).
 """
 
@@ -28,7 +29,10 @@ def prune(cache=CACHE, now=None):
 
 
 def command(props, out, seconds=None):
-    cmd = ["npx", "remotion", "render", "src/index.tsx", "Explainer", str(out), "--props", str(props), "--codec", "h264"]
+    if Path(props).suffix == ".tsx":  # a scene: its own entry file; swangle gives WebGL on a host with no GPU
+        cmd = ["npx", "remotion", "render", str(props), "Scene", str(out), "--codec", "h264", "--gl=swangle"]
+    else:
+        cmd = ["npx", "remotion", "render", "src/index.tsx", "Explainer", str(out), "--props", str(props), "--codec", "h264"]
     return cmd + ([f"--frames=0-{int(seconds * FPS) - 1}"] if seconds else [])
 
 
@@ -44,10 +48,13 @@ def main(argv=None):
     props = Path(a.props)
     if not props.suffix:
         props = composer / "public/demo-props" / f"{a.props}.json"
+    elif props.suffix == ".tsx":  # the bundler resolves imports from the install, so the scene must live in it
+        (composer / "src/scenes").mkdir(exist_ok=True)
+        props = Path(shutil.copy(props, composer / "src/scenes" / props.name)).relative_to(composer)
     CACHE.mkdir(parents=True, exist_ok=True)
     prune()
     out = CACHE / f"{props.stem}-{int(time.time())}.mp4"
-    subprocess.run(command(props.resolve(), out, a.seconds), cwd=composer, check=True, stdout=sys.stderr)
+    subprocess.run(command(props if props.suffix == ".tsx" else props.resolve(), out, a.seconds), cwd=composer, check=True, stdout=sys.stderr)
     print(out)
     if a.send:
         if not shutil.which("fm-imessage"):

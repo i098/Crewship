@@ -32,6 +32,22 @@ For a short zero-key clip, write a props file like those in `remotion-composer/p
 `render.py code-to-screen --seconds 3` renders the first 3 s of a checked-in demo.
 `render.py /tmp/props.json` renders your own props in full.
 
+## Web and three.js scenes, and recording a live site
+
+Web and three.js scenes render through Remotion, which draws every frame from the frame number, so a render is frame-exact and never drops frames. Add three.js once in the install:
+
+`cd ~/.local/share/openmontage/remotion-composer && npm install --save-exact @remotion/three@$(node -p "require('remotion/package.json').version") three@0.170.0 @react-three/fiber@8.17.10`
+
+Then `render.py <skill dir>/scenes/moon.tsx` renders the sample scene (a rotating moon and an eclipse, 4 s). A scene is one file with `registerRoot` and a composition with id `Scene`; copy `scenes/moon.tsx` and change it. A host with no GPU has no WebGL, so `render.py` passes `--gl=swangle` (software GL) for scenes.
+
+To record a real live site, use `screencast.mjs`, next to this file:
+
+`screencast.mjs https://example.com ~/.cache/crewship/videos/site.mp4 5` records 5 s (width and height are optional: `1280 720`).
+
+It uses CDP `Page.startScreencast` on a running Chrome, by default the shared `chrome` tier of `fleet-browser` (`CDP_URL` overrides), then encodes the frames with `ffmpeg`. It opens its own tab and closes it. It needs a page that changes while it records, and it fails when the page stays still. A recording is real time, so a heavy page can drop frames; for a frame-exact result, build the scene in Remotion.
+
+## Output
+
 It writes to one cache dir, `~/.cache/crewship/videos/` (`XDG_CACHE_HOME` moves it), prunes anything older than 1 day on each run, and prints the mp4 path. A systemd user tmpfiles rule (`d %C/crewship/videos 0755 - - 1d`) prunes it too. Do not keep renders anywhere else, and delete large intermediate files.
 
 ## Send

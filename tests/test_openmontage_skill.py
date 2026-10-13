@@ -25,3 +25,8 @@ def test_command_limits_frames_only_when_seconds_given():
     full = render.command("p.json", "o.mp4")
     assert not any(a.startswith("--frames") for a in full)
     assert "--frames=0-89" in render.command("p.json", "o.mp4", 3)
+
+
+def test_scene_renders_through_its_own_entry_and_software_gl():
+    cmd = render.command("src/scenes/moon.tsx", "o.mp4", 3)
+    assert cmd[3:5] == ["src/scenes/moon.tsx", "Scene"] and "--gl=swangle" in cmd and "--frames=0-89" in cmd
