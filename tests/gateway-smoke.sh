@@ -62,6 +62,9 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   echo "ok: the tunnel URL answers with the login page"
 
   [ "$(code -d password=wrong "$public/_gateway/login")" = 401 ]
+  # Cloudflare refuses a visitor that sends its own CF-Connecting-IP (error 1000), so it never reaches the gateway.
+  [ "$(code -H "CF-Connecting-IP: 192.0.2.77" -d "password=$password" "$public/_gateway/login")" = 403 ]
+  ! grep -q 192.0.2.77 /tmp/gateway.log
   [ "$(code -c /tmp/jar -d "password=$password" -d next=/8000/ "$public/_gateway/login")" = 303 ]
   grep -q "#HttpOnly_.*__Host-crewship" /tmp/jar
   [ "$(code "$public/8000/")" = 200 ]; grep -q "hello from port 8000" /tmp/body

@@ -209,3 +209,10 @@ def test_server_logout_forgets_the_address(stack):
     assert request("GET", f"/{port}/", headers)[0].status == 401
 
 
+
+
+def test_server_answers_400_for_a_bad_content_length(stack):
+    request, _, _ = stack
+    for value in ("abc", "-5"):
+        response, _ = request("POST", "/_gateway/login", {"CF-Connecting-IP": "203.0.113.5", "Content-Length": value})
+        assert response.status == 400
