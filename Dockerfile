@@ -182,10 +182,18 @@ RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
 #     (its loader falls back to the baseline build, which runs on every x86-64
 #     CPU), onnxruntime-node binaries for other platforms, and the CUDA/TensorRT
 #     providers (a container with no GPU runs the CPU provider)
+#   * Mesa's GPU driver and its LLVM (libgbm1, which chrome-headless-shell links,
+#     depends on them, but libgbm loads the driver only to open a GPU device;
+#     the shell renders with its own bundled SwiftShader).
+#     `sudo apt-get install --reinstall mesa-libgallium libllvm21` restores them
+#   * symbol tables in the rustup toolchain and the npm tools' native addons.
+#     The release binaries under tools/ keep their bytes: the installer checks
+#     their SHA-256 again on every run
 RUN set -eux; \
     share="${CREWSHIP_HOME}/.local/share/crewship"; \
     for prefix in "${share}"/*/[0-9]*/; do npm prune --prefix "${prefix}" --no-audit --no-fund; done; \
-    sudo rm -rf /var/lib/apt/lists/*; \
+    sudo rm -rf /var/lib/apt/lists/* /usr/lib/*/libLLVM*.so* /usr/lib/*/libgallium-*.so \
+        /usr/lib/*/dri/*_drv_video.so /usr/lib/*/gbm/dri_gbm.so; \
     rm -rf "${CREWSHIP_HOME}/.npm" "${CREWSHIP_HOME}/.cache/uv" \
         "${CREWSHIP_HOME}/.bun/install/cache" "${CREWSHIP_HOME}/.cache/pip" \
         "${CREWSHIP_HOME}/.cargo/registry" "${CREWSHIP_HOME}/.cargo/git" \
@@ -204,7 +212,15 @@ RUN set -eux; \
         done; \
     fi; \
     find "${share}" -path '*/onnxruntime-node/bin/*' \
-        \( -name 'libonnxruntime_providers_cuda.so*' -o -name 'libonnxruntime_providers_tensorrt.so*' \) -delete
+        \( -name 'libonnxruntime_providers_cuda.so*' -o -name 'libonnxruntime_providers_tensorrt.so*' \) -delete; \
+    find "${CREWSHIP_HOME}"/.rustup/toolchains "${share}"/*/[0-9]*/node_modules -type f \
+        \( -name '*.so' -o -name '*.so.*' -o -name '*.node' -o -perm -u+x \) \
+        ! -path '*/lib/rustlib/*/lib/*' -print | \
+    while read -r file; do \
+        if [ "$(head -c 4 "${file}" | tail -c 3)" = ELF ]; then \
+            strip --strip-unneeded "${file}" || true; \
+        fi; \
+    done
 
 # ---------------------------------------------------------------------------
 # worker: the builder's final filesystem as one layer. A file a later builder
