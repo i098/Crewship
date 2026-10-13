@@ -18,15 +18,14 @@
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
-import { appendFileSync, closeSync, fsyncSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { attachment, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
-import { type Attachment, bubbles, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, isSkip, type LineMessage, localCommand, notSent, parseReact, type Route, typingPause } from "./desk.ts";
+import { type Attachment, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, spawnDesk, typingPause, verdict } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
-import { type Chat, type Kind, Memory } from "./memory.ts";
+import { type Kind, Memory } from "./memory.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
 
 let stopping = false;
@@ -92,7 +91,7 @@ const log = (what: string) => (e: unknown) =>
 const typing = (space: LineMessage["space"], on: boolean) =>
   !stopping && void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
 // This service is the memory's one writer: systemd runs one instance of the unit.
-const memory = new Memory(MEMORY_DIR, compactChat, log("memory"));
+const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch(log("desk failed")));
 let deskRun: Bun.Subprocess | undefined;
 
@@ -452,50 +451,18 @@ async function runDesk(current: () => boolean) {
   // The view of the chat before his burst, then the per-turn state, then his burst, all under the ceiling.
   const from = burstFrom ?? memory.msgs.length;
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, memory.msgs.slice(from).map((m) => `${m.kind}: ${m.text}`).join("\n"));
-  const proc = track(Bun.spawn(
-    ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
-      "--thinking=off", "--model", DESK_MODEL, "--system-prompt", DESK_PROMPT],
-    { cwd: DESK_DIR, env: { ...env, FM_DESK_MEMORY: MEMORY_DIR, FM_DESK_SPENT: String(spent) }, stdin: new Blob([prompt]), stdout: "pipe", stderr: "ignore", timeout: 45_000 },
-  ));
+  const proc = track(spawnDesk({ model: DESK_MODEL, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
   deskRun = proc;
-  const drafted = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
-  const ok = (await proc.exited) === 0 && drafted !== "";
+  const { ok, drafted } = await readDesk(proc);
   if (deskRun !== proc) return; // cancelled while drafting
   deskRun = undefined;
   typing(target.space, false);
   if (stopping || !current()) return;
   burstFrom = undefined;
-  const skip = !ok || isSkip(drafted); // a failed desk stays quiet; Firstmate still has the note
-  const tapback = skip ? undefined : parseReact(drafted);
+  const { skip, tapback, outcome } = verdict(ok, drafted);
   if (tapback) put({ ...at, react: tapback, kind: "desk" });
   else if (!skip) put({ ...at, bubbles: [drafted], kind: "desk" });
-  const outcome = !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ");
   appendFileSync(DESK_LOG, `${new Date().toISOString()} ${target.id} ${outcome}\n`, { mode: 0o600 });
-}
-
-// One compaction conversation: a private temporary cwd and session, which end() removes.
-// Request Luna 6 with thinking off and the priority (Fast) service tier; keep the desk model unchanged.
-function compactChat(system: string): Chat {
-  if (stopping) throw new Error("bridge stopping");
-  const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
-  // --no-extensions does not disable omp's native memory backend or its teardown work.
-  writeFileSync(`${dir}/config.yml`, "memory:\n  backend: off\n", { mode: 0o600 });
-  let turns = 0;
-  return {
-    async say(text) {
-      if (stopping) throw new Error("bridge stopping");
-      const proc = track(Bun.spawn(
-        ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
-          "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
-        { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
-      ));
-      const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
-      const exit = await proc.exited;
-      if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
-      return line;
-    },
-    end: () => rmSync(dir, { recursive: true, force: true }),
-  };
 }
 
 async function saveAttachment(c: Attachment, id: string) {

@@ -16,3 +16,10 @@ crewship_instagram_dm_state: "{{ crewship_firstmate_dir }}/state/.instagram-dms"
 crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jsonl"
 # Command that takes `--request-id ID -- TEXT` and tells main (the request id makes a repeat harmless).
 crewship_instagram_dm_notify: "{{ crewship_firstmate_dir }}/bin/fm-inbox.sh note"
+# The front desk (docs/imessage.md#instagram-front-desk): when main has not answered a DM for
+# crewship_instagram_desk_quiet_ms, a one-shot model answers or reacts through fm-insta-reply.
+crewship_instagram_desk_dir: "{{ crewship_share_dir }}/instagram-desk"
+crewship_instagram_desk_model: claude-haiku-5-5
+crewship_instagram_desk_owner_name: the owner
+crewship_instagram_desk_supervisor_model: ""
+crewship_instagram_desk_quiet_ms: 8000

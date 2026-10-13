@@ -81,6 +81,8 @@ A poll accepts a message request only from a thread that holds the operator alon
 
 After a failed call the next calls wait 2, 4, 8 ... times the interval, up to 30 min, and every command refuses to call Instagram meanwhile. A challenge, a feedback block, a suspension or a bad password halts them: main gets one note and nothing calls Instagram until `instagram_dm.py resume`.
 
+A front desk, `instagram-desk.service`, answers a DM that main leaves alone for 8 s, the way the iMessage desk does: see [Instagram front desk](imessage.md#instagram-front-desk).
+
 ### Usage card
 
 The stall nudge service has a second `ExecStart`, `~/.local/bin/fm-usage-remind`. While the owner texts (an iMessage note in `state/inbox` younger than 2 min), it runs `fm-usage-brief --png` and sends the card with `fm-imessage --image`, at most once per `crewship_usage_remind_every` seconds (default 3600). The card shows the 5 h and 7 d use of Claude and Codex, averaged across accounts, each with its soonest reset (from `omp usage --json`), plus server load, RAM and the mounts in `crewship_usage_disks` (default `/`). `fm-usage-brief` alone prints the same figures as text. `fm-text-card OUT.png < text` renders any short update as a card 840 px wide and at least 630 px high (about 4:3, so iMessage does not crop it; the constants `CARD_WIDTH` and `CARD_MIN_HEIGHT` in `fm-text-card`, which `fm-usage-brief` shares): the first line is the title, `# x` a section, `- x` a bullet, `k: v` a row. The scripts take their settings from `blueprint/ansible/group_vars/all/stall_nudge.yml`.

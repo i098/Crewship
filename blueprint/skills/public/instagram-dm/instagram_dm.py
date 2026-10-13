@@ -15,6 +15,8 @@ Settings come from the environment:
   INSTAGRAM_DM_SESSION    session file (default ~/.config/crewship/instagram/session.json)
   INSTAGRAM_DM_DIR        state: seen ids, failure count, lock (default ~/.local/state/instagram-dm)
   INSTAGRAM_DM_LOG        JSON lines of every new message (default $INSTAGRAM_DM_DIR/messages.jsonl)
+  INSTAGRAM_DM_SENT       JSON lines of every `reply` send, tapback and typing (default $INSTAGRAM_DM_DIR/sent.jsonl);
+                          INSTAGRAM_DM_ACTOR names who made it (default firstmate; the front desk sets desk)
   INSTAGRAM_DM_OPERATOR   numeric user id of the operator: his message requests are accepted, only his messages are
                           logged, and `reply` writes only to him; empty does none of these
   INSTAGRAM_DM_NOTIFY     command that takes `--request-id ID -- TEXT` and tells the agent (for Firstmate:
@@ -324,6 +326,19 @@ def operator_thread(cl, thread, operator):
     return t
 
 
+def record_sent(kind, thread, text=""):
+    """Append one row per send, tapback or typing to INSTAGRAM_DM_SENT: the front desk reads it to stand down
+    when Firstmate answers. `by` is INSTAGRAM_DM_ACTOR ("desk" for the desk's own calls). Best effort."""
+    log = Path(conf("INSTAGRAM_DM_SENT", str(state_dir() / "sent.jsonl")))
+    row = {"at": int(time.time()), "thread": thread, "kind": kind, "by": conf("INSTAGRAM_DM_ACTOR", "firstmate")}
+    if text:
+        row["text"] = text
+    with contextlib.suppress(OSError):
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as f:
+            f.write(json.dumps(row) + "\n")
+
+
 def send_actions(cl, state, t, operator, text, emoji, typing):
     """Typing indicator, reaction to his latest message, then the text, each at least REPLY_GAP after the last send."""
 
@@ -332,6 +347,7 @@ def send_actions(cl, state, t, operator, text, emoji, typing):
 
     if typing:
         cl.realtime_connect().direct_indicate_activity(t.id, True)
+        record_sent("typing", t.id)
         time.sleep(min(4, 1 + len(text) / 25) if text else 3)  # typing time grows with the text
     if emoji:
         latest = next(
@@ -343,10 +359,12 @@ def send_actions(cl, state, t, operator, text, emoji, typing):
         pause()
         cl.direct_send_reaction(t.id, latest.id, emoji)
         state["sent"] = time.time()
+        record_sent("react", t.id, emoji)
     if text:
         pause()
         cl.direct_send(text, thread_ids=[int(t.id)])
         state["sent"] = time.time()
+        record_sent("text", t.id, text)
 
 
 def reply(text, thread, emoji, typing):

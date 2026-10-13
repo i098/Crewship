@@ -3,6 +3,8 @@
 # to ~/.local/bin; a user service listens on Instagram's realtime channel and a user timer polls as
 # a backstop. Both file new DMs with the Firstmate inbox. The session file is not written here: log
 # in once with `instagram_dm.py login`. The units stay idle until that file exists.
+# instagram-desk.service is the front desk (docs/imessage.md#instagram-front-desk): it runs from a copy of the
+# iMessage desk code and follows the listener's logs.
 
 - name: Ensure the Instagram DM directories
   ansible.builtin.file:
@@ -14,6 +16,7 @@
     - "{{ crewship_firstmate_dir }}/state"
     - "{{ crewship_user_units }}/timers.target.wants"
     - "{{ crewship_user_units }}/default.target.wants"
+    - "{{ crewship_instagram_desk_dir }}"
 
 - name: Install the Instagram DM script
   ansible.builtin.copy:
@@ -28,6 +31,15 @@
     dest: "{{ crewship_instagram_dm_reply }}"
     mode: "0755"
 
+- name: Install the Instagram front desk
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/imessage/{{ item }}"
+    dest: "{{ crewship_instagram_desk_dir }}/{{ item }}"
+    mode: "0644"
+    remote_src: true
+  loop: [instagram-desk.ts, desk.ts, memory.ts, zoom.ts]
+  notify: restart instagram-desk
+
 - name: Render the Instagram DM listener, poll unit and timer
   ansible.builtin.template:
     src: "{{ item }}.j2"
@@ -35,6 +47,15 @@
     mode: "0644"
   loop: [instagram-dm-listen.service, instagram-dm-poll.service, instagram-dm-poll.timer]
   notify: reload user systemd
+
+- name: Render the Instagram front desk unit
+  ansible.builtin.template:
+    src: instagram-desk.service.j2
+    dest: "{{ crewship_user_units }}/instagram-desk.service"
+    mode: "0644"
+  notify:
+    - reload user systemd
+    - restart instagram-desk
 
 - name: Statically enable the Instagram DM poll timer
   ansible.builtin.file:
@@ -59,5 +80,22 @@
     enabled: true
     state: started
   loop: [instagram-dm-listen.service, instagram-dm-poll.timer]
+  environment: "{{ crewship_user_systemd_env }}"
+  when: crewship_manage_services | bool
+
+- name: Statically enable the Instagram front desk
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-desk.service"
+    dest: "{{ crewship_user_units }}/default.target.wants/instagram-desk.service"
+    state: link
+    force: true
+    follow: false
+
+- name: Enable and start the Instagram front desk
+  ansible.builtin.systemd_service:
+    scope: user
+    name: instagram-desk.service
+    enabled: true
+    state: started
   environment: "{{ crewship_user_systemd_env }}"
   when: crewship_manage_services | bool

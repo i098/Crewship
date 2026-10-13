@@ -49,6 +49,8 @@ fm-insta-reply "On it." --typing                # show typing, then send
 fm-insta-reply "text" --thread THREAD_ID        # a given thread; it must hold the operator alone
 ```
 
+Every send, tapback and typing indicator is also appended to `INSTAGRAM_DM_SENT` (`sent.jsonl` in the state directory). A front desk on the host reads it to answer a DM that main left alone for about 8 s, and stands down on any row that is not from the desk (`INSTAGRAM_DM_ACTOR=desk`): see [Instagram front desk](../../../../docs/imessage.md#instagram-front-desk).
+
 `--typing` publishes a typing indicator over the realtime channel for a few seconds (longer for a longer text) before it sends. The call returns without error when the broker takes the indicator. Instagram does not report whether the other side saw it.
 
 Every send waits 3 s after the last one. After an Instagram error, `poll`, `listen` and `reply` share one exponential backoff (2, 4, 8 ... times the base, up to 30 min) and refuse to call Instagram until it passes. A challenge, a feedback block, a suspension or a bad password halts them instead: one note goes to the agent, nothing calls Instagram again, and the operator fixes the account and runs `instagram_dm.py resume`. Do not log in again by hand to get past a halt.

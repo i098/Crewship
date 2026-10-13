@@ -84,6 +84,19 @@ The memory holds the owner's texts word for word, on the host only. The director
 
 A memory error never stops a send, a tapback, or the inbox note: the service logs it and goes on. At start, the service skips a log line that does not parse (a torn last line after a crash).
 
+## Instagram front desk
+
+The same front desk answers Instagram DMs. `instagram-desk.service` runs `apps/imessage/instagram-desk.ts`, which reuses `desk.ts` and `memory.ts`: the prompt names the channel (`deskPrompt(..., "Instagram")`), and the rules, the model, the zoom tool and the 180,000-byte input cap are the same. It has no Instagram client. It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-dm/SKILL.md) listener:
+
+- `state/instagram-dms.jsonl` (`INSTAGRAM_DM_LOG`): one row for each new DM from the operator. Each DM restarts the quiet period, 8 seconds (`crewship_instagram_desk_quiet_ms`).
+- `state/.instagram-dms/sent.jsonl` (`INSTAGRAM_DM_SENT`): one row for each `fm-insta-reply` text, tapback, and typing indicator, with `by`, the value of `INSTAGRAM_DM_ACTOR` (`firstmate` by default). Any row that is not `by: desk` stops the desk for that burst of DMs, like a Firstmate send on iMessage.
+
+When the quiet period ends and Firstmate stayed silent, the desk gets one turn for the whole burst. It answers `SKIP`, `REACT:` and one emoji, or a short text, and the service sends it with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`, so the desk's own send does not stop it for the next DM. If a DM or a Firstmate action arrives while the desk writes, the service kills the call and drops the draft. If the desk fails or times out after 45 seconds, it sends nothing: Firstmate has the note.
+
+The Instagram thread has its own memory in `~/.local/state/instagram-desk/memory/`, with the design in [Desk memory](#desk-memory), and the outcome of each turn (time, message id, `skip`, `react <emoji>`, or the text) is in `~/.local/state/instagram-desk/desk.log`. The service saves how far it read each log. After a restart, rows from the last 60 seconds act on the desk, and older rows only fill the memory, so a DM from before the restart is never answered late. With no saved position, the service starts at the end of both logs. The desk shows no typing indicator.
+
+Set `crewship_instagram_dm_operator`, and the playbook installs the unit with the listener. The settings are the `crewship_instagram_desk_*` variables in `blueprint/ansible/group_vars/all/instagram_dm.yml`: `model` (default `claude-haiku-5-5`), `owner_name`, `supervisor_model`, and `quiet_ms`.
+
 ## Set up the Photon project
 
 Skip this section when `transports` is `[bluebubbles]`.
