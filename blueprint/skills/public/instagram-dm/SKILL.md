@@ -7,7 +7,7 @@ description: Use when the operator says an Instagram account got a DM or shared 
 
 The agent has its own Instagram account. The operator sends reels to it by DM. Read the DMs, take the reel links, and watch them. Always assume a shared link is a reel.
 
-This skill wraps [`instagram-cli`](https://github.com/supreme-gg-gg/instagram-cli) (MIT, unofficial; it may break when Instagram changes its API). Its own agent guide is `skills/instagram-skill/SKILL.md` in that repository. It was not vendored: it forbids the agent to log in and covers sending, and this skill needs env-var login and a reel hand-off.
+This skill wraps [`instagram-cli`](https://www.npmjs.com/package/@i7m/instagram-cli) (npm `@i7m/instagram-cli`, source repository `supreme-gg-gg/instagram-cli`, MIT, unofficial; it may break when Instagram changes its API). Its own agent guide is `skills/instagram-skill/SKILL.md` in that source repository. It was not vendored: it forbids the agent to log in and covers sending, and this skill needs env-var login and a reel hand-off.
 
 ## Rules
 
