@@ -32,12 +32,11 @@ await page.route("http://harbor.test/**", async (route) => {
 });
 await page.goto("http://harbor.test/");
 await page.waitForFunction(() => window.ogReady?.());
-await page.addStyleTag({ content: "#pad { display: none !important; }" });
+await page.addStyleTag({ content: "#pad, #zoomhint { display: none !important; }" });
 await page.evaluate((pose) => window.ogPose(...pose), POSE);
 await page.waitForFunction(() => window.ogDrawn);
 const scene = (await page.locator("#scene").screenshot()).toString("base64");
 
-const tagline = (await readFile(new URL("index.html", dist), "utf8")).match(/property="og:description" content="([^"]+)"/)[1];
 const card = await browser.newPage({ viewport: { width: 1200, height: 630 } });
 await card.setContent(`<!doctype html><style>
   body { margin: 0; width: 1200px; height: 630px; position: relative; overflow: hidden; background: #060a14; }
@@ -45,9 +44,8 @@ await card.setContent(`<!doctype html><style>
   .shade { position: absolute; inset: 0; background: radial-gradient(ellipse 52% 56% at 80% 80%, #060a14fa 0%, #060a14f0 45%, #060a14b0 72%, #060a1400 100%); }
   .text { position: absolute; right: 56px; bottom: 46px; text-align: right; color: #f2f5fc; }
   h1 { margin: 0; font: 700 100px/1 "Liberation Mono", monospace; }
-  p { margin: 16px 0 0; font: 400 30px/1.3 "Liberation Mono", monospace; color: #d3dcef; }
   </style><img src="data:image/png;base64,${scene}"><div class="shade"></div>
-  <div class="text"><h1>Crewship</h1><p>${tagline.replace(" - ", "<br>- ")}</p></div>`);
+  <div class="text"><h1>Crewship</h1></div>`);
 await card.screenshot({ path: new URL("og.png", pub).pathname });
 
 // iOS rounds the corners itself, so the icon fills the whole square.

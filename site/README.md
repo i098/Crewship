@@ -173,7 +173,7 @@ Then open <http://localhost:8000>.
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
-`og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title and the tagline over the scene.
+`og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
 After a scene, preview layout, metadata tagline, or favicon change, regenerate both PNGs in the Playwright container and commit them:
 
