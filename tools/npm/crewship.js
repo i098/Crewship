@@ -28,6 +28,19 @@ The options go to ./ship.sh dock, which writes the host config on the first run.
   process.exit(0);
 }
 
+if (args.some((arg) => arg === "--version" || arg === "-v")) {
+  console.log(version);
+  process.exit(0);
+}
+
+// The package installs on any OS (no "os" field, so npm never refuses it); only Ubuntu can run the install.
+if (process.platform !== "linux") {
+  console.error(
+    `crewship: Crewship installs on an Ubuntu 24.04 or 26.04 server, not on ${process.platform}. Run \`npx crewship\` on that server, for example over ssh.`,
+  );
+  process.exit(1);
+}
+
 (async () => {
   const ref = update ? await latestTag() : `v${version}`;
   const url = `https://raw.githubusercontent.com/${repo}/${ref}/install.sh`;

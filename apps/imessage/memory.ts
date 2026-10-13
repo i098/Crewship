@@ -312,9 +312,9 @@ export class Memory {
         .catch((e) => {
           this.retry.failures++;
           this.retry.nextAllowed = Date.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(this.retry.failures - 1, 4));
+          this.log(e);
           this.saveRetry();
           this.queue.push(x);
-          this.log(e);
         })
         .finally(() => {
           this.running--;
