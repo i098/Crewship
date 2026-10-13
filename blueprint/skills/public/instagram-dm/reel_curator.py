@@ -207,7 +207,7 @@ def judge(cfg, caption, speech, info):
 
 
 def compose(info, link):
-    return " ".join(f"{info['what'].rstrip('.')}. {link} {info['why'].rstrip('.')}.".split())[:300]
+    return " ".join(f"{info['what'].rstrip('.')}. {link} - {info['why'].rstrip('.')}.".split())[:300]
 
 
 def send(cl, thread, media, line):
