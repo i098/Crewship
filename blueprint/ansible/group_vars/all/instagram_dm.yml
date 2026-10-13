@@ -1,0 +1,18 @@
+---
+# Instagram DM alerts (docs/architecture.md#instagram-dm-alerts): a user service keeps Instagram's
+# realtime channel open and files every new DM from the operator with the Firstmate inbox, which
+# wakes main within about a second. A user timer polls as a backstop, and fm-insta-reply answers.
+# An empty operator installs nothing.
+# The operator is his numeric Instagram user id: only his message requests are accepted, only his
+# messages are logged, and replies go only to him. The session file comes from
+# `instagram_dm.py login` (see the skill).
+crewship_instagram_dm_operator: ""
+# Seconds between backstop polls, and the base of the backoff after a failure.
+crewship_instagram_dm_interval: 300
+crewship_instagram_dm_script: "{{ crewship_local_bin }}/instagram_dm.py"
+crewship_instagram_dm_reply: "{{ crewship_local_bin }}/fm-insta-reply"
+crewship_instagram_dm_session: "{{ crewship_cfg.home }}/.config/crewship/instagram/session.json"
+crewship_instagram_dm_state: "{{ crewship_firstmate_dir }}/state/.instagram-dms"
+crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jsonl"
+# Command that takes `--request-id ID -- TEXT` and tells main (the request id makes a repeat harmless).
+crewship_instagram_dm_notify: "{{ crewship_firstmate_dir }}/bin/fm-inbox.sh note"

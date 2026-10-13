@@ -124,6 +124,14 @@
              + ([crewship_gh_replies_script,
                  crewship_firstmate_dir ~ '/state/gh-replies.check.sh']
                 if (crewship_cfg.profiles.firstmate | bool and crewship_gh_replies_account | length > 0) else [])
+             + ([crewship_instagram_dm_script,
+                 crewship_instagram_dm_reply,
+                 crewship_user_units ~ '/instagram-dm-listen.service',
+                 crewship_user_units ~ '/default.target.wants/instagram-dm-listen.service',
+                 crewship_user_units ~ '/instagram-dm-poll.service',
+                 crewship_user_units ~ '/instagram-dm-poll.timer',
+                 crewship_user_units ~ '/timers.target.wants/instagram-dm-poll.timer']
+                if (crewship_cfg.profiles.firstmate | bool and crewship_instagram_dm_operator | length > 0) else [])
              + ([crewship_local_bin ~ '/concord',
                  crewship_local_bin ~ '/slk',
                  crewship_cfg.home ~ '/.config/concord/config.toml',

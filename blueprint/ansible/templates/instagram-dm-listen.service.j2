@@ -1,0 +1,23 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Instagram DM realtime listener (Crewship managed)
+After=network-online.target
+ConditionPathExists={{ crewship_instagram_dm_session }}
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FM_HOME={{ crewship_firstmate_dir }}
+Environment=INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator }}
+Environment=INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session }}
+Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
+Environment=INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log }}
+Environment="INSTAGRAM_DM_NOTIFY={{ crewship_instagram_dm_notify }}"
+Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
+ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script }} listen
+# A halted account (challenge, block) exits 0 and stays down until `instagram_dm.py resume` and a restart.
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

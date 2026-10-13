@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# DM the operator from the agent Instagram account (docs/architecture.md#instagram-dm-alerts).
+# fm-insta-reply [TEXT] [--thread ID] [--react EMOJI] [--typing]
+export INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator | quote }}
+export INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session | quote }}
+export INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state | quote }}
+export INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval | quote }}
+exec {{ crewship_uv_bin | quote }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script | quote }} reply "$@"

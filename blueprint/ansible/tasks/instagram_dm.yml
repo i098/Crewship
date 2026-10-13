@@ -1,0 +1,63 @@
+---
+# Instagram DM alerts (docs/architecture.md#instagram-dm-alerts): the script and fm-insta-reply go
+# to ~/.local/bin; a user service listens on Instagram's realtime channel and a user timer polls as
+# a backstop. Both file new DMs with the Firstmate inbox. The session file is not written here: log
+# in once with `instagram_dm.py login`. The units stay idle until that file exists.
+
+- name: Ensure the Instagram DM directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_firstmate_dir }}/state"
+    - "{{ crewship_user_units }}/timers.target.wants"
+    - "{{ crewship_user_units }}/default.target.wants"
+
+- name: Install the Instagram DM script
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/skills/public/instagram-dm/instagram_dm.py"
+    dest: "{{ crewship_instagram_dm_script }}"
+    mode: "0755"
+    remote_src: true
+
+- name: Install the Instagram DM reply command
+  ansible.builtin.template:
+    src: fm-insta-reply.j2
+    dest: "{{ crewship_instagram_dm_reply }}"
+    mode: "0755"
+
+- name: Render the Instagram DM listener, poll unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop: [instagram-dm-listen.service, instagram-dm-poll.service, instagram-dm-poll.timer]
+  notify: reload user systemd
+
+- name: Statically enable the Instagram DM poll timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-dm-poll.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/instagram-dm-poll.timer"
+    state: link
+    force: true
+    follow: false
+
+- name: Statically enable the Instagram DM listener
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-dm-listen.service"
+    dest: "{{ crewship_user_units }}/default.target.wants/instagram-dm-listen.service"
+    state: link
+    force: true
+    follow: false
+
+- name: Enable and start the Instagram DM listener and poll timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [instagram-dm-listen.service, instagram-dm-poll.timer]
+  environment: "{{ crewship_user_systemd_env }}"
+  when: crewship_manage_services | bool
