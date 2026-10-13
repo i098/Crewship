@@ -55,7 +55,7 @@ def test_dock_board_writes_the_block(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
-    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, board=True))
+    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, board=True, no_gateway=False))
     assert ship.load_config(tmp_path / ".local/host.yml")["crewship"]["board"] == {}
 
 

@@ -23,6 +23,7 @@ flowchart TD
         guards["Fleet guards"]
         docker["Docker engine"]
         chat["Concord and slk chat clients"]
+        gateway["Password gateway and Cloudflare tunnel"]
     end
     profiles --> herdr
     profiles --> fm
@@ -30,6 +31,7 @@ flowchart TD
     profiles --> guards
     profiles --> docker
     profiles --> chat
+    profiles --> gateway
 ```
 
 ## 0. Install Crewship
@@ -44,6 +46,7 @@ The installer installs the OS packages, downloads and verifies the latest releas
 
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
+- STOP: the launch summary shows the gateway password one time, and the last line shows the web address ([Web pages from anywhere](docs/gateway.md)). Give both to the user and tell them to keep the password in a password manager. Never write the password to a file.
 - Then run `cd ~/Crewship` for every later step.
 
 ## 1. Sign in to GitHub
@@ -77,10 +80,11 @@ omp models --json
 | Profile | Default | Adds |
 | --- | --- | --- |
 | `agents`, `development`, `firstmate`, `docker`, `chat` | on | omp, build tools, the Firstmate orchestrator, Docker, Discord and Slack terminal clients |
+| `gateway` | on | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)) |
 | `fleet_guards` | off | Docker guard, dev-server reaper, storage guard, browser ladder |
 | `shared_postgres` | off | one shared Postgres container for many projects |
 | `fleet_browsers` | off | the browser ladder only |
-| `tailscale` | off | the Tailscale daemon (login is manual) |
+| `tailscale` | off | the Tailscale daemon (login is manual); an option beside the gateway |
 | `desktop` | off | a loopback-only XFCE desktop over noVNC |
 
 The full list and the rules between profiles are in [Profiles](docs/configuration.md#profiles).
@@ -125,6 +129,7 @@ The installer already applied the default profiles. This run applies your change
 ```
 
 - Check: each expected tool runs, and `gh` shows as authenticated.
+- Check: `crewship-gateway url` prints an `https://….trycloudflare.com` address, unless the user turned the gateway off.
 - Tell the user what passed and what failed, and which step to repeat for each failure.
 - Do not mark the setup as done while a check fails.
 

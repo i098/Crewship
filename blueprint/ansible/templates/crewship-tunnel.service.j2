@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# Cloudflare Quick Tunnel (docs/gateway.md): a random https://*.trycloudflare.com
+# address, no Cloudflare account. Its only origin is the gateway, so it exposes
+# nothing when the gateway is down. Every start gets a new address;
+# `crewship-gateway url` prints the current one from the metrics on {{ crewship_gateway_metrics }}.
+# --config /dev/null keeps a named-tunnel config in ~/.cloudflared out of it.
+
+[Unit]
+Description=Cloudflare Quick Tunnel to the Crewship gateway (Crewship managed)
+Wants=crewship-gateway.service
+After=crewship-gateway.service network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ crewship_local_bin }}/cloudflared tunnel --config /dev/null --no-autoupdate --metrics {{ crewship_gateway_metrics }} --url http://127.0.0.1:{{ crewship_gateway_port }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

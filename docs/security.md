@@ -27,11 +27,11 @@ The persistent desktop browser uses exactly one profile, `~/.vnc-chrome-profile`
 
 ## Remote access
 
-Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding. Reach them through SSH port forwarding or a configured private network. Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
+Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding. To open the host's web pages from a browser, use the [password gateway](gateway.md), which is on by default: one password, then a Cloudflare Quick Tunnel to the loopback ports. The gateway opens no port on the host. SSH port forwarding and Tailscale are the other ways in. Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
 
 Loopback is shared by local accounts. The optional desktop therefore requires an operator-created private VNC credential in addition to SSH transport. It never offers unauthenticated RFB access. Its service will not kill another desktop to claim an occupied display.
 
-Tailscale installation, authentication, and SSH authorization are separate steps. Join the tailnet interactively, then use `tailscale set --ssh=true` only if Tailscale SSH is wanted. The tailnet must also authorize the connection in its SSH policy. Do not use `tailscale up --reset` to change one setting on an existing machine.
+Tailscale is the private-network option. Its installation, authentication, and SSH authorization are separate steps. Join the tailnet interactively, then use `tailscale set --ssh=true` only if Tailscale SSH is wanted. The tailnet must also authorize the connection in its SSH policy. Do not use `tailscale up --reset` to change one setting on an existing machine.
 
 This export does not rewrite the current host's firewall, SSH policy, account membership, or credentials. Review those changes separately before applying a new-host profile.
 

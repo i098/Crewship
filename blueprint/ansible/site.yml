@@ -167,6 +167,15 @@
       when: crewship_account_ready | bool
       tags: [board]
 
+    # Runs on every host: with profiles.gateway off it removes the gateway and tunnel.
+    - name: Password gateway behind a Cloudflare Quick Tunnel
+      ansible.builtin.import_tasks: tasks/gateway.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when: crewship_account_ready | bool
+      tags: [gateway]
+
     - name: Docker engine and Compose v2 from Ubuntu
       ansible.builtin.import_tasks: tasks/docker.yml
       when: crewship_cfg.profiles.docker | bool
@@ -312,6 +321,29 @@
       environment: "{{ crewship_user_systemd_env }}"
       when: crewship_manage_services | bool
       listen: restart crewboard
+
+    - name: Restart the password gateway
+      ansible.builtin.systemd_service:
+        scope: user
+        name: crewship-gateway.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when: crewship_manage_services | bool
+      listen: restart crewship gateway
+
+    # A restart gives the tunnel a new public URL; the summary prints it.
+    - name: Restart the Cloudflare tunnel
+      ansible.builtin.systemd_service:
+        scope: user
+        name: crewship-tunnel.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when: crewship_manage_services | bool
+      listen: restart crewship tunnel
 
     - name: Restart journald
       ansible.builtin.systemd_service:

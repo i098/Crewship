@@ -30,7 +30,7 @@ Use a Linux host for the native recipe. macOS and other client devices can reach
 
 ### Docker worker
 
-The Dockerfile's `worker` target is an isolated, non-root, devcontainer-style image built by the same recipe. It runs `./ship.sh launch --config blueprint/containers/crewship.container.yml`, which sets `start_services: false` and `enable_linger: false` and turns off the `docker`, `tailscale`, `desktop`, `firstmate`, and `chat` profiles and the browser pruner. The image carries the agent and development toolchain and the rendered agent configs, with no systemd services, linger, or Docker-in-Docker. The devcontainer, Compose, and CI use the same image.
+The Dockerfile's `worker` target is an isolated, non-root, devcontainer-style image built by the same recipe. It runs `./ship.sh launch --config blueprint/containers/crewship.container.yml`, which sets `start_services: false` and `enable_linger: false` and turns off the `docker`, `tailscale`, `desktop`, `firstmate`, `chat`, and `gateway` profiles and the browser pruner. The image carries the agent and development toolchain and the rendered agent configs, with no systemd services, linger, or Docker-in-Docker. The devcontainer, Compose, and CI use the same image.
 
 ```bash
 docker pull ghcr.io/i098/crewship:latest                  # released image (or :X.Y.Z), published on each release

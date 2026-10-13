@@ -1,0 +1,7 @@
+---
+# Password gateway and its Cloudflare Quick Tunnel (profiles.gateway, tasks/gateway.yml,
+# docs/gateway.md). Both listen on loopback only: the gateway on its port, the tunnel's
+# metrics, which carry its public URL, on the other.
+crewship_gateway_script: "{{ crewship_local_bin }}/crewship-gateway"
+crewship_gateway_port: 20240
+crewship_gateway_metrics: 127.0.0.1:20241

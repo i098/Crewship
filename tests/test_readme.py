@@ -15,6 +15,7 @@ SPEC.loader.exec_module(provisions)
 FEATURES = {
     "crewship.profiles.agents": "docs/omp.md",
     "crewship.profiles.chat": "docs/chat.md",
+    "crewship.profiles.gateway": "docs/gateway.md",
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
@@ -38,6 +39,7 @@ EXCLUDED = {
     "crewship.fleet",
     "crewship.fleet.docker_guard",
     "crewship.browsers",
+    "crewship.gateway",
     "crewship.imessage.bluebubbles",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",

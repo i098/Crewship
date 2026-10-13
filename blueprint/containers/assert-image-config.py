@@ -24,7 +24,7 @@ import yaml
 # Capabilities that need a real host: a user manager and D-Bus, the host network
 # stack and a node identity, or an X server. blueprint/containers/crewship.container.yml
 # documents why each one is false.
-HOST_ONLY_PROFILES = ("docker", "tailscale", "desktop")
+HOST_ONLY_PROFILES = ("docker", "tailscale", "desktop", "gateway")
 # The workspace is a named volume (compose) or a bind (devcontainer) at runtime,
 # so anything baked into it - a Firstmate clone above all - is shadowed.
 VOLUME_SHADOWED_PROFILES = ("firstmate",)

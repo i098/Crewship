@@ -165,9 +165,11 @@ def initialize(args):
     config["crewship"].update(user=user, home=home, workspace=str(Path(home) / "Dev"))
     if args.container:
         config["crewship"].update(start_services=False, enable_linger=False)
-        for profile in ("docker", "tailscale", "desktop", "firstmate", "chat"):
+        for profile in ("docker", "tailscale", "desktop", "firstmate", "chat", "gateway"):
             config["crewship"]["profiles"][profile] = False
         config["crewship"]["browser_prune"]["enabled"] = False
+    if args.no_gateway:
+        config["crewship"]["profiles"]["gateway"] = False
     if args.board:
         config["crewship"]["board"] = {}
     destination = ROOT / ".local/host.yml"
@@ -240,6 +242,8 @@ def doctor(document):
         ]
     if config["profiles"]["development"]:
         tools += ["rustc", "cargo"]
+    if config["profiles"].get("gateway", True):  # on unless the host config turns it off
+        tools.append("cloudflared")
     failed = []
     for name in tools:
         path = shutil.which(name, path=environment["PATH"])
@@ -406,6 +410,11 @@ def main():
     dock.add_argument("--home")
     dock.add_argument("--container", action="store_true")
     dock.add_argument("--board", action="store_true", help="turn on the crew board (docs/board.md)")
+    dock.add_argument(
+        "--no-gateway",
+        action="store_true",
+        help="turn off the password gateway and its Cloudflare tunnel (docs/gateway.md)",
+    )
     for name, text in (
         ("inspect", "check the host config against the schema; old config keys are rewritten once"),
         ("chart", "preview provisioning changes; old config keys are rewritten once"),

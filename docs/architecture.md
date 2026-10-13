@@ -5,17 +5,21 @@
 ```mermaid
 flowchart TB
     client[SSH client] --> herdr
+    browser[Browser] -->|password| tunnel
     subgraph host[Ubuntu host]
         manager[User systemd] -->|linger| herdr[Herdr server]
         herdr --> fleet[Agent fleet]
         fleet --> browsers[Host browsers]
         docker[Docker Compose] --> worker[Non-root worker]
         docker --> data[Named data volumes]
+        tunnel[Cloudflare Quick Tunnel] --> gateway[Password gateway]
+        gateway --> pages[Loopback web pages]
+        fleet --> pages
     end
     worker --> toolchain[Agent and dev tools]
 ```
 
-Ansible manages the host; optional containers keep separate process and filesystem lifecycles.
+Ansible manages the host; optional containers keep separate process and filesystem lifecycles. The [password gateway](gateway.md) is the default way to open the agents' web pages from a browser.
 
 ## Provisioning
 

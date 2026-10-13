@@ -52,6 +52,9 @@ crewship:
     shared_postgres: false # Optional container, database helper and env seeder
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: true            # Concord (Discord) and slk (Slack) terminal clients
+    gateway: true         # Password gateway + Cloudflare Quick Tunnel for the web pages
+  gateway:
+    allow_hours: 24       # How long an address stays allowed after the password
   herdr:
     theme: rose-pine
     toast_delivery: terminal  # notifications go to the outer terminal
@@ -140,7 +143,8 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `shared_postgres` | off | One [shared Postgres container](shared-postgres.md), per-project database helper and worktree environment seeder. |
 | `fleet_browsers` | off | The [browser ladder](fleet-guards.md#browser-ladder): the always-on Obscura CDP tier on `127.0.0.1:9222`, the on-demand `chrome` and `vnc` tiers with the `vnc` tier's TigerVNC and noVNC packages, the cookie sync and gc timers, and the ladder environment in shell profiles and the Herdr unit. `fleet_guards` provisions the same ladder, so a `fleet_guards` host needs no change. Needs no other profile; the ladder needs `iproute2` (`ss`) from the base image, which only `desktop` installs. |
 | `chat` | on | The latest [Concord](https://github.com/chojs23/concord) (Discord) and [slk](https://github.com/gammons/slk) (Slack) terminal clients, their shared libraries, and a first-write config for each. Logins stay manual. See [Chat clients](chat.md). |
-| `tailscale` | off | Tailscale daemon only. Authentication is manual; see [Security](security.md#remote-access). |
+| `gateway` | on | The [password gateway](gateway.md) and the latest `cloudflared`: one password opens the host's loopback web pages over a Cloudflare Quick Tunnel. `crewship.gateway.allow_hours` (default 24) sets how long an address stays allowed. The installer's `--no-gateway` turns it off. |
+| `tailscale` | off | Tailscale daemon only, an option beside the gateway. Authentication is manual; see [Security](security.md#remote-access). |
 | `desktop` | off | Loopback-only XFCE + TigerVNC + noVNC operator desktop on `127.0.0.1:6080`, and the Google Chrome apt package. Needs an operator-created VNC password; see [Desktop access](recovery.md#desktop-access). |
 
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).

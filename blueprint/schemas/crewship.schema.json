@@ -66,6 +66,9 @@
             },
             "chat": {
               "type": "boolean"
+            },
+            "gateway": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -339,6 +342,17 @@
             "repo",
             "project"
           ]
+        },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8760
+            }
+          }
         },
         "board": {
           "type": "object",

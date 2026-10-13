@@ -559,6 +559,23 @@
         - crewship_cfg.profiles.desktop | bool
         - crewship_manage_services | bool
 
+    # After the handlers ran, so a restarted tunnel reports its new URL.
+    - name: Read the public URL of the password gateway
+      ansible.builtin.command:
+        argv: ["{{ crewship_gateway_script }}", url]
+      environment:
+        CREWSHIP_TUNNEL_METRICS: "{{ crewship_gateway_metrics }}"
+      register: crewship_gateway_url
+      until: crewship_gateway_url.rc == 0
+      retries: 15
+      delay: 2
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when:
+        - crewship_cfg.profiles.gateway | bool
+        - crewship_manage_services | bool
+
     # --- what provisioning deliberately did not do --------------------------
 
     - name: Report the manual prerequisites provisioning never performs
@@ -571,6 +588,14 @@
              + ['Manual: authenticate every CLI interactively as '
                 ~ crewship_cfg.user
                 ~ ' (gh auth login, OMP provider sign-in); no credential was copied.']
+             + (['Web pages: open ' ~ (crewship_gateway_url.stdout | default('', true)
+                                         or 'the URL that `crewship-gateway url` prints')
+                 ~ ' and enter the gateway password; then /PORT/ opens a local port. A tunnel restart changes the URL;'
+                 ~ ' `crewship-gateway url` prints the current one (docs/gateway.md).']
+                if (crewship_cfg.profiles.gateway | bool) else [])
+             + (['Gateway password, shown only this time (`crewship-gateway password` sets a new one): '
+                 ~ crewship_gateway_password.stdout]
+                if (crewship_gateway_password.stdout | default('') | length > 0) else [])
              + (['Manual: join the tailnet with `sudo tailscale up`; Tailscale SSH and the tailnet ACL stay separate decisions.']
                 if (crewship_cfg.profiles.tailscale | bool) else [])
              + (['Manual: add accounts to the docker group yourself (crewship_docker_group_users); it grants host root.']
