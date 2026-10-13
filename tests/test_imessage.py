@@ -1402,12 +1402,13 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, writ
 const dir = process.env.FAKE_DIR;
 const unavailable = () => Object.assign(new Error("[upstream] Service temporarily unavailable. Please retry."), { name: "ConnectionError", grpcCode: 14 });
 function call(op) {
-  const left = Number(readFileSync(`${dir}/down`, "utf8"));
+  const outage = existsSync(`${dir}/outage`); // set and cleared by the test only, so the bridge never writes it
+  const left = outage ? Infinity : Number(readFileSync(`${dir}/down`, "utf8"));
   appendFileSync(`${dir}/calls`, `${op} ${left > 0 ? "UNAVAILABLE" : "ok"}\\n`);
   if (op === "send" && existsSync(`${dir}/send-unsure`)) throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
   if (op === "last" && existsSync(`${dir}/read-timeout`)) throw Object.assign(new Error("read timed out"), { grpcCode: 4 });
   if (left > 0) {
-    writeFileSync(`${dir}/down`, String(left - 1));
+    if (!outage) writeFileSync(`${dir}/down`, String(left - 1));
     throw unavailable();
   }
 }
@@ -1774,7 +1775,7 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     bridge = start(1)
     try:
         inbound("m1", text="you there")
-        (fake / "down").write_text("1000000")  # the outage begins
+        (fake / "outage").touch()  # the outage begins; a flag, because the bridge rewrites the counter and could overwrite a new value
         assert cli("one\n\ntwo").startswith("queued 2 bubble(s)")
         assert cli("--react", "👍").startswith("queued tapback")
         assert cli("--reply", "1", "three").startswith("queued 1 bubble(s)")
@@ -1795,6 +1796,7 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
         inbound("m3", text="ping")
         inbound("m4", text="ping again")  # nobody answers, so the desk writes a late ack into the queue
         wait_for(lambda: len(list((state / "outbox").glob("*.json"))) == 5, "the desk item in the outbox")
+        (fake / "outage").unlink()
         (fake / "down").write_text("3")  # three more failures, then the upstream recovers
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 6 and "photon-m2-saved" in text(notes), "recovery")
         wait_for(lambda: "photon-m5-lost" in text(notes), "the note for the lost attachment")
@@ -1984,7 +1986,8 @@ class FallbackRig:
         self.relay.wait(10)
 
     def photon_down(self, down):
-        (self.fake / "down").write_text("1000000" if down else "0")
+        # A flag file, not the failure counter: the bridge decrements that counter, and its write could overwrite this one.
+        (self.fake / "outage").touch() if down else (self.fake / "outage").unlink(missing_ok=True)
 
     def relay_mode(self, mode):
         (self.fake / "relay-mode").write_text(mode)
