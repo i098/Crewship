@@ -46,6 +46,21 @@ To record a real live site, use `screencast.mjs`, next to this file:
 
 It uses CDP `Page.startScreencast` on a running Chrome, by default the shared `chrome` tier of `fleet-browser` (`CDP_URL` overrides), then encodes the frames with `ffmpeg`. It opens its own tab and closes it. It needs a page that changes while it records, and it fails when the page stays still. A recording is real time, so a heavy page can drop frames; for a frame-exact result, build the scene in Remotion.
 
+## Motion and sound
+
+Move every element with Remotion `spring({frame, fps, config})`, a closed-form damped spring, or the same formula by hand. Never use CSS easing, transitions or keyframes: they run on the wall clock, not the frame number, so a render drifts. Start each spring at the frame of its trigger (`frame - startFrame`). A low `damping` (8 to 12) overshoots and settles; a high one (20+) does not.
+
+Synthesize sound in code and fix one BPM. Put every cut and every spring trigger on a beat frame: `frame = round(beat * 60 / BPM * fps)`. A 4 s click track at 120 BPM, then mux it:
+
+`ffmpeg -f lavfi -i "aevalsrc='sin(2*PI*1000*t)*exp(-40*mod(t,0.5))':d=4:s=44100" beat.wav`
+`ffmpeg -i video.mp4 -i beat.wav -c:v copy -c:a aac -shortest out.mp4`
+
+`mod(t,0.5)` is the beat period, 60 / BPM. For more than a click, write samples with numpy and `wave`. `scenes/beat.tsx` shows the spring and the beat-frame cut together.
+
+## Self-review
+
+Do this before you send a video. Render with `--frames-every N` (N = fps / 2 gives 2 frames per second); `render.py` prints the folder of png frames. For one segment, use `ffmpeg -ss S -t D -i out.mp4 -vf "select=not(mod(n\,N))" -fps_mode vfr seg%03d.png`. Look at each frame. Score each segment 1 to 10 against the brief: layout, text legibility, motion, and cut on beat. Re-render every segment that scores under 8 with a fix for the stated fault, then review it again. Repeat once, then send the best result and say which segments stayed under 8.
+
 ## Output
 
 It writes to one cache dir, `~/.cache/crewship/videos/` (`XDG_CACHE_HOME` moves it), prunes anything older than 1 day on each run, and prints the mp4 path. A systemd user tmpfiles rule (`d %C/crewship/videos 0755 - - 1d`) prunes it too. Do not keep renders anywhere else, and delete large intermediate files.
