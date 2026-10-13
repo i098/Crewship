@@ -112,41 +112,52 @@ def clean(text, names):
     return html.unescape(text).strip()
 
 
+def in_his_thread(db, m, me):
+    """True when he subscribed to the thread or wrote its root."""
+    if not m["thread_ts"]:
+        return False
+    sub = db.execute("select 1 from thread_subscriptions where workspace_id=? and channel_id=? and thread_ts=? and active=1",
+                     (m["workspace_id"], m["channel_id"], m["thread_ts"])).fetchone()
+    root = db.execute("select 1 from messages where channel_id=? and ts=? and user_id=?", (m["channel_id"], m["thread_ts"], me)).fetchone()
+    return bool(sub or root)
+
+
+def view_of(cfg, db, m, me, ref):
+    """What the model sees of one message. ref holds the users, names, channels and workspaces of the cache."""
+    users, names, chans, ws = ref
+    ch = chans.get(m["channel_id"])
+    ctype = ch["type"] if ch else "channel"
+    kind = {"dm": "dm", "app": "dm", "mpim": "group", "group_dm": "group"}.get(ctype, ctype)
+    who, is_bot = users.get(m["user_id"], (m["user_id"] or "unknown", False))
+    named = bool(ch and ch["name"]) and kind not in ("dm", "group")
+    return {
+        "workspace": cfg["workspaces"].get(m["workspace_id"], {}).get("name") or ws.get(m["workspace_id"], m["workspace_id"]),
+        "channel": ("#" + ch["name"]) if named else ("DM" if kind == "dm" else kind),
+        "type": kind,
+        "from": who,
+        "bot": bool(is_bot or m["subtype"] == "bot_message" or m["user_id"].startswith("B") or ctype == "app"),
+        "mentions_him": f"<@{me}" in m["text"],
+        "in_his_thread": in_his_thread(db, m, me),
+        "text": clean(m["text"], names)[: cfg["text_chars"]],
+    }
+
+
 def candidates(db, cfg, since, seen):
     """New, unseen messages from other people, each with the context the model needs."""
     users = {r["id"]: (r["display_name"] or r["name"], bool(r["is_bot"])) for r in db.execute("select * from users")}
-    names = {k: v[0] for k, v in users.items()}
-    chans = {r["id"]: r for r in db.execute("select id, name, type from channels")}
-    ws = {r["id"]: r["name"] for r in db.execute("select id, name from workspaces")}
+    ref = (
+        users,
+        {k: v[0] for k, v in users.items()},
+        {r["id"]: r for r in db.execute("select id, name, type from channels")},
+        {r["id"]: r["name"] for r in db.execute("select id, name from workspaces")},
+    )
     out = []
-    rows = db.execute("select * from messages where cast(ts as real) > ? and is_deleted = 0 order by ts", (since,))
-    for r in rows:
+    for r in db.execute("select * from messages where cast(ts as real) > ? and is_deleted = 0 order by ts", (since,)):
         m = dict(r)
         me = cfg["self"].get(m["workspace_id"])
         if me is None or m["user_id"] == me or m["subtype"] in SKIP_SUBTYPES or key(m) in seen:
             continue
-        ch = chans.get(m["channel_id"])
-        kind = {"dm": "dm", "app": "dm", "mpim": "group", "group_dm": "group"}.get(ch["type"] if ch else "", ch["type"] if ch else "channel")
-        thread = m["thread_ts"]
-        mine = bool(thread) and (
-            db.execute("select 1 from thread_subscriptions where workspace_id=? and channel_id=? and thread_ts=? and active=1",
-                       (m["workspace_id"], m["channel_id"], thread)).fetchone()
-            or db.execute("select 1 from messages where channel_id=? and ts=? and user_id=?", (m["channel_id"], thread, me)).fetchone()
-        )
-        who, is_bot = users.get(m["user_id"], (m["user_id"] or "unknown", False))
-        out.append({
-            **m,
-            "view": {
-                "workspace": cfg["workspaces"].get(m["workspace_id"], {}).get("name") or ws.get(m["workspace_id"], m["workspace_id"]),
-                "channel": ("#" + ch["name"]) if ch and ch["name"] and kind not in ("dm", "group") else ("DM" if kind == "dm" else kind),
-                "type": kind,
-                "from": who,
-                "bot": bool(is_bot or m["subtype"] == "bot_message" or m["user_id"].startswith("B") or (ch and ch["type"] == "app")),
-                "mentions_him": f"<@{me}" in m["text"],
-                "in_his_thread": bool(mine),
-                "text": clean(m["text"], names)[: cfg["text_chars"]],
-            },
-        })
+        out.append({**m, "view": view_of(cfg, db, m, me, ref)})
     return out
 
 
