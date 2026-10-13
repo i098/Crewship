@@ -16,6 +16,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`process-safety`](process-safety/SKILL.md): kill by pid, not by pattern, and keep test services and worktree ports apart.
 - [`progress-bars`](progress-bars/SKILL.md): a fixed ASCII progress-bar format with percentages from real counts.
 - [`quality-gates`](quality-gates/SKILL.md): sentrux and fallow gates and the pull-based codex advisor.
+- [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): text the operator the important Slack messages (DMs, mentions, threads, decisions, deadlines, asks, incidents) from the slk cache, read-only, filtered by one `omp -p` call, at most one `fm-imessage` text per minute, every decision logged; opt-in `systemd --user` unit.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
 - [`usage-card`](usage-card/SKILL.md): answer usage, quota, resource, load and disk questions with the `fm-usage-brief --png` card; notes the hourly `fm-usage-remind` reminder.
