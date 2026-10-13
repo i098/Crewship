@@ -10,8 +10,8 @@ description: Use when installing dependencies, picking a package manager, or cho
 # On-demand tooling (details live in skills and hooks - do not preload)
 
 - Cross-chat coordination: where a SessionStart hook creates the repo's herdr workspace and this session's pane (ids appear in context as "herdr: workspace=... own_pane=..."), the herdr skill has the peer/messaging API. Never launch the herdr TUI.
-- Visual plans/reports: lavish skill. Build an HTML artifact, open with `npx -y lavish-axi <file>`, user annotates in browser, collect feedback via `npx -y lavish-axi poll`. Plans still show current state AND the planned change.
-- GitHub ops: gh-axi skill (`npx -y gh-axi`) over raw `gh` or GitHub MCP.
+- Visual plans/reports: lavish skill. Build an HTML artifact, open with `bunx lavish-axi <file>`, user annotates in browser, collect feedback via `bunx lavish-axi poll`. Plans still show current state AND the planned change.
+- GitHub ops: gh-axi skill (`bunx gh-axi`) over raw `gh` or GitHub MCP.
 - Pushing work: in repos with a no-mistakes gate, `git push no-mistakes` instead of origin; one-time `no-mistakes init` per repo sets it up.
 - New agent skills: scan with `skillspector scan <skill-dir> --no-llm` BEFORE installing. Scan the installable skill dir, not the whole repo (repo-wide scans false-positive on test fixtures).
 - Caveman governs prose, ponytail governs code. Orthogonal modes, banners injected at SessionStart; setting one never changes the other.

@@ -112,7 +112,7 @@ ENV LANG=C.UTF-8 \
     HOME=${CREWSHIP_HOME} \
     CREWSHIP_WORKSPACE=${CREWSHIP_WORKSPACE} \
     CREWSHIP_ROOT=/opt/crewship \
-    PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.bun/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ---------------------------------------------------------------------------
 # worker: provisioned image built through the repository's own CLI interfaces.

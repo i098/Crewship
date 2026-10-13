@@ -8,8 +8,8 @@ Nothing is pinned: every tool tracks its latest release (no-mistakes its newest
 non-draft one, prereleases included). Native assets are
 verified against the SHA-256 their publisher lists for that exact release (the
 GitHub release-asset digest, or the release's own .sha256 file for gws and Pyrefly, Node's
-SHASUMS256.txt, rustup's .sha256), npm tools
-against the integrity npm records for the resolved version, psutil against the
+SHASUMS256.txt, rustup's .sha256), npm-registry tools (installed by bun)
+against the integrity the registry records for the resolved version, psutil against the
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
 marketplace plugins are the one exception: no publisher checksums them, so they
 track each author's default branch.
@@ -135,7 +135,7 @@ GITHUB_LATEST = {
 OPTIONAL = {"koncreet"}
 # Verified against the `<asset>.sha256` file of the release instead of the GitHub digest.
 SHA256_FILE = {"gws", "pyrefly"}
-# npm tools on the registry's latest version, each installed into its own prefix.
+# npm-registry tools on the registry's latest version, each installed by bun into its own prefix.
 NPM_LATEST = {
     "omp": "@oh-my-pi/pi-coding-agent",
     "chrome-devtools-axi": "chrome-devtools-axi",
@@ -149,8 +149,8 @@ NPM_LATEST = {
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
 PRERELEASE_CHANNEL = {"no-mistakes"}
-# Native tools the agents profile adds.
-AGENT_TOOLS = ["gh", "no-mistakes", "treehouse", "gws"]
+# Native tools the agents profile adds; bun installs the registry tools, so it comes first.
+AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws"]
 # Attempts per download; transient 5xx and connection errors back off 1 s, then 2 s.
 DOWNLOAD_ATTEMPTS = 3
 
@@ -453,7 +453,7 @@ def link_package_bins(home, destination, package_names):
     return changed
 
 
-def npm_latest_install(home, tool, version, environment):
+def bun_latest_install(home, tool, version, environment):
     """Install exactly this version into its own prefix; a new version relinks the tool."""
     package_name = NPM_LATEST[tool]
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*", version):
@@ -470,17 +470,23 @@ def npm_latest_install(home, tool, version, environment):
         with tempfile.TemporaryDirectory(prefix=".install-", dir=final.parent) as temporary:
             staging = Path(temporary) / "prefix"
             staging.mkdir()
+            # `bun add -g` with bun's global directory and bin directory pointed at the
+            # staging prefix: the package lands in <prefix>/node_modules, one version per
+            # prefix, and ~/.bun is untouched.
             command(
                 [
-                    home / ".local/bin/npm",
-                    "install",
-                    "--prefix",
-                    staging,
-                    "--no-audit",
-                    "--no-fund",
+                    home / ".local/bin/bun",
+                    "add",
+                    "--global",
+                    "--exact",
+                    "--no-progress",
                     f"{package_name}@{version}",
                 ],
-                environment,
+                {
+                    **environment,
+                    "BUN_INSTALL_GLOBAL_DIR": str(staging),
+                    "BUN_INSTALL_BIN": str(staging / ".bin"),
+                },
             )
             staging.rename(final)
         changed = True
@@ -658,13 +664,16 @@ def main():
         changed = False
         for name in names:
             changed = install_asset(home, name, latest[name], key) or changed
+        if "bun" in names:
+            # The release zip ships only `bun`; bun runs as `bunx` when invoked under that name.
+            changed = link_binary(home, "bunx", (home / ".local/bin/bun").resolve()) or changed
         if "sentrux" in names:
             version = latest["sentrux-grammars"]["version"]
             store = prefix / "tools/sentrux-grammars" / version / key
             changed = link_grammars(home, store) or changed
         if args.npm:
             for tool in NPM_LATEST:
-                changed = npm_latest_install(home, tool, latest[tool], environment) or changed
+                changed = bun_latest_install(home, tool, latest[tool], environment) or changed
             changed = retire_legacy_npm(home) or changed
             changed = omp_plugins(home, environment) or changed
         if args.development:

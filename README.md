@@ -42,7 +42,7 @@ The other features, each with its docs link, are listed in [docs/features.md](do
    Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
    ```
 
-3. **Update:** run `npx crewship update` (or the same install command again)
+3. **Update:** run `bunx crewship update` (`npx crewship update` and `pnpm dlx crewship update` work too), or the same install command again
 
 Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
@@ -52,7 +52,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
-  <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. Optional guards, the optional crew board and the secrets file are shared on the server; the secrets file can optionally come from an external Cloudflare Worker. A block of third-party services lists what the server installs or calls: npm / pnpm / bun, no-mistakes, Lavish, Sentrux and Google Workspace, and optionally Tailscale. The agents can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
+  <img alt="You reach Firstmate from a phone or laptop with a terminal over SSH or iMessage. On your server, Firstmate hands work to second mates, who lead workers; each worker runs in its own isolated copy. An optional iMessage bridge (Photon, or a BlueBubbles relay on your Mac) and the Discord and Slack terminal chat clients run on the server. Workers use model providers and GitHub. Optional guards, the optional crew board and the secrets file are shared on the server; the secrets file can optionally come from an external Cloudflare Worker. A block of third-party services lists what the server installs or calls: bun, no-mistakes, Lavish, Sentrux and Google Workspace, and optionally Tailscale. The agents can optionally control your Mac over SSH." src="docs/how-it-works-light.svg">
 </picture>
 
 ## Repository layout

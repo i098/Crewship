@@ -333,6 +333,13 @@ check_core_tools() {
         esac
         printf '%-6s %-32s (expected %s)\n' "${tool}" "${version}" "${expected}"
     done
+    # bunx runs the package of `bunx crewship`; ~/.bun/bin holds `bun add -g` tools, after ~/.local/bin.
+    [ "$(command -v bunx)" = "${HOME}/.local/bin/bunx" ] || fail "PATH resolves bunx to $(command -v bunx), expected ${HOME}/.local/bin/bunx"
+    version=$(bunx --version 2>&1) || fail "bunx --version exited nonzero: ${version}"
+    case ":${PATH}:" in
+        *":${HOME}/.bun/bin:"*) ;;
+        *) fail "${HOME}/.bun/bin is not on PATH" ;;
+    esac
 }
 
 # The installed herdr, gh, no-mistakes, treehouse, gws, nvim, omp, AXI tools, acpx and

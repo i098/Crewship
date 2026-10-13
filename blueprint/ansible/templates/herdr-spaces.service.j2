@@ -11,7 +11,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
-Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HERDR_BIN_PATH={{ crewship_herdr_bin }}
 ExecStart=/usr/bin/python3 {{ crewship_herdr_spaces_script }}
 # A run that refreshes the 15-minute disk cache walks every home and worktree

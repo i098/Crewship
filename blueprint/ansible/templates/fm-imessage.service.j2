@@ -10,8 +10,8 @@ After=network-online.target
 
 [Service]
 WorkingDirectory={{ crewship_imessage_dir }}
-# omp (the front desk) starts with "#!/usr/bin/env bun", and bun lives in ~/.local/bin.
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# omp (the front desk) starts with "#!/usr/bin/env bun", and bun lives in ~/.local/bin; ~/.bun/bin holds `bun add -g` tools.
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment="FM_HOME={{ crewship_firstmate_dir }}"
 Environment="FM_IMESSAGE_OWNER={{ crewship_cfg.imessage.owner }}"
 Environment="FM_IMESSAGE_DESK_MODEL={{ crewship_imessage_desk_model }}"
