@@ -142,7 +142,7 @@ RUN set -eux; chmod +x onboard.sh ship.sh tests/container-smoke.sh
 # Latest uv bootstrap + locked Python dependencies (no provisioning yet). The
 # one uv lookup takes the same optional `github_token` secret as `launch`.
 RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
-    set -eux; ./onboard.sh
+    set -eux; ./onboard.sh; rm -rf "${CREWSHIP_HOME}/.cache/uv"
 
 # Schema validation through the repository's own validator.
 RUN set -eux; ./ship.sh inspect --config "${CREWSHIP_CONFIG_FILE}"
@@ -160,8 +160,27 @@ RUN set -eux; uv run --project . --locked python blueprint/containers/assert-ima
 # lookups (shared CI runner IPs exhaust the unauthenticated API budget). It is
 # exposed to the lookup steps only (onboard.sh and this one), never as an ARG,
 # ENV, layer file or history entry; without it the lookup runs unauthenticated.
+# Size: package-manager caches, rustup docs, the onnxruntime-node binaries for
+# other operating systems and CPU architectures, and the CUDA/TensorRT execution
+# providers (614 MB across omp's two onnxruntime-node copies; a container with no
+# GPU runs the CPU provider) are deleted in this same RUN, so no layer keeps them.
 RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
-    set -eux; ./ship.sh launch --config "${CREWSHIP_CONFIG_FILE}"
+    set -eux; \
+    ./ship.sh launch --config "${CREWSHIP_CONFIG_FILE}"; \
+    rm -rf "${CREWSHIP_HOME}/.npm/_cacache" "${CREWSHIP_HOME}/.cache/uv" \
+        "${CREWSHIP_HOME}/.bun/install/cache" "${CREWSHIP_HOME}/.cache/pip" \
+        "${CREWSHIP_HOME}/.cargo/registry" "${CREWSHIP_HOME}/.cargo/git" \
+        "${CREWSHIP_HOME}"/.rustup/toolchains/*/share/doc; \
+    case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) arch= ;; esac; \
+    if [ -n "${arch}" ]; then \
+        find "${CREWSHIP_HOME}/.local/share/crewship" -type d -path '*/onnxruntime-node/bin/napi-v*' -prune -print | \
+        while read -r dir; do \
+            find "${dir}" -mindepth 1 -maxdepth 1 ! -name linux -exec rm -rf {} +; \
+            find "${dir}/linux" -mindepth 1 -maxdepth 1 ! -name "${arch}" -exec rm -rf {} + 2>/dev/null || true; \
+        done; \
+    fi; \
+    find "${CREWSHIP_HOME}/.local/share/crewship" -path '*/onnxruntime-node/bin/*' \
+        \( -name 'libonnxruntime_providers_cuda.so*' -o -name 'libonnxruntime_providers_tensorrt.so*' \) -delete
 
 ENV CREWSHIP_IMAGE=worker \
     CREWSHIP_CONFIG=/opt/crewship/${CREWSHIP_CONFIG_FILE}
