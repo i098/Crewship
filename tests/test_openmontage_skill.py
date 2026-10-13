@@ -30,3 +30,8 @@ def test_command_limits_frames_only_when_seconds_given():
 def test_scene_renders_through_its_own_entry_and_software_gl():
     cmd = render.command("src/scenes/moon.tsx", "o.mp4", 3)
     assert cmd[3:5] == ["src/scenes/moon.tsx", "Scene"] and "--gl=swangle" in cmd and "--frames=0-89" in cmd
+
+
+def test_review_command_selects_every_nth_frame():
+    cmd = render.review_command("o.mp4", Path("f"), 15)
+    assert "select=not(mod(n\\,15))" in cmd and cmd[-1] == "f/%04d.png"
