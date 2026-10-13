@@ -62,7 +62,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("INSTAGRAM_DM_ACTOR", "curator")  # main() sets it; keep it out of the other tests
     monkeypatch.setattr(rc.ig, "operator_thread", lambda cl, thread, op: NS(id="9"))
     monkeypatch.setattr(rc.ig, "message_url", lambda m: f"https://www.instagram.com/reel/{m.code}/")
-    monkeypatch.setattr(rc, "transcribe", lambda cl, m: "a new open source tool")
+    monkeypatch.setattr(rc, "transcribe", lambda cl, m: ("a new open source tool", None))
     monkeypatch.setattr(rc, "score", lambda cfg, m, s: {"score": 8, "what": "A tool", "why": "Useful."})
     monkeypatch.setattr(rc, "resolve", lambda info, caption: "https://github.com/o/r")
     sent = []
@@ -133,3 +133,29 @@ def test_a_429_stops_the_curator_for_a_day_and_is_logged(env, monkeypatch, capsy
     monkeypatch.setattr(rc.ig, "client", lambda: pytest.fail("called Instagram while stopped"))
     with pytest.raises(SystemExit, match="stopped"):
         rc.main()
+
+
+@pytest.mark.parametrize(
+    ("spoken", "speech", "caption", "lang"),
+    [
+        (None, "Se avessero davvero decompilato Photoshop, in Italia sarebbe reato. Non è un dettaglio da nerd.", "", "it"),
+        (None, "Claude trouve toujours ton idée géniale. C'est exactement le problème, et le lien est dans la description.", "", "fr"),
+        ("fr", "this is a free open source tool that you can use", "", "fr"),  # the transcriber's language wins
+        (None, "this is a free open source tool that you can use", "Le skill est gratuit et open source pour tous ceux qui codent", "fr"),
+        (None, "", "これはオープンソースのツールです", "other"),
+        ("en", "this is a free open source tool that you can use", "A free tool for you, with a link in the repo", None),
+        (None, "", "", None),  # nothing to judge
+        (None, "", "#claudecode #ai", None),  # too short to judge
+    ],
+)
+def test_non_english_by_transcriber_speech_or_caption(spoken, speech, caption, lang):
+    assert rc.non_english(spoken, speech, caption) == lang
+
+
+def test_non_english_reel_is_logged_and_never_scored_or_sent(env, monkeypatch):
+    monkeypatch.setattr(rc, "transcribe", lambda cl, m: ("Claude trouve toujours ton idée, et le lien est dans la description.", None))
+    monkeypatch.setattr(rc, "score", lambda *a: pytest.fail("scored a non-English reel"))
+    rc.cycle(Client(user=[reel("fr1")]), CFG, time.time())
+    assert env == []
+    (row,) = rc.read_log()
+    assert (row["action"], row["code"], row["reason"]) == ("reject", "fr1", "non-english:fr")
