@@ -63,23 +63,30 @@ const mm = (x, y) => cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", 
 const key = async (down) => { if (down !== wDown) { await (down ? page.keyboard.down(A.forwardKey ?? "w") : page.keyboard.up(A.forwardKey ?? "w")); wDown = down; } };
 process.on("exit", () => fs.writeFileSync(`${OUT}/log${FROM || TO < Infinity ? `.${FROM}-${TO}` : ""}.json`, JSON.stringify({ ...log, frames: F, fps: 1 / DT })));
 
+// Real input for one frame: mouse-look in whole pixels toward the controller's view, and the forward key for the
+// duty fraction (held all frame, or for part of it through the adapter's move hook).
+async function drive(o) {
+  const dx = Math.round(wrap(o.yaw - pose.yaw) / radPerPx), dy = Math.round(-(o.pitch - pose.pitch) / radPerPx);
+  if (dx || dy) { mouse = [mouse[0] + dx, mouse[1] + dy]; await mm(...mouse); }
+  const partial = o.f > 0.001 && o.f <= 0.999 && A.move;
+  await key(o.f > 0.001);
+  if (partial) { await page.evaluate(([m, d]) => window[m](d), [A.move, o.f * o.clock * DT]); await key(false); }
+}
+// The sound log: a footstep per 0.75 m walked, door crossings and the time spent in each room.
+function record(prev) {
+  if (prev && prev.room === pose.room && (walked += Math.hypot(pose.x - prev.x, pose.z - prev.z)) > 0.75) { walked -= 0.75; log.steps.push(now()); }
+  if (prev && prev.room !== pose.room) { log.doors.push(now()); if (room) { room.b = now(); log.rooms.push(room); } room = pose.room ? { a: now(), kind: pose.room } : null; }
+  log.track.push([+pose.x.toFixed(3), +pose.z.toFixed(3), +pose.yaw.toFixed(4), +pose.pitch.toFixed(4), pose.room ?? null, +(pose.eye ?? 0).toFixed(3)]);
+}
 async function frame(o) {
   const [[x], [y]] = curAt(now());
   if (!locked && (!mouse || Math.round(x) !== mouse[0] || Math.round(y) !== mouse[1])) { mouse = [Math.round(x), Math.round(y)]; await mm(...mouse); }
-  if (o) { // mouse-look in whole pixels toward the controller's view, and the forward key for the duty fraction
-    const dx = Math.round(wrap(o.yaw - pose.yaw) / radPerPx), dy = Math.round(-(o.pitch - pose.pitch) / radPerPx);
-    if (dx || dy) { mouse = [mouse[0] + dx, mouse[1] + dy]; await mm(...mouse); }
-    if (o.f > 0.999 || (o.f > 0.001 && !A.move)) await key(true);
-    else if (o.f > 0.001) { await key(true); await page.evaluate(([m, d]) => window[m](d), [A.move, o.f * o.clock * DT]); await key(false); }
-    else await key(false);
-  }
+  if (o) await drive(o);
   T += DT * (o?.clock ?? 1);
   const prev = pose;
   pose = await page.evaluate(([px, py, age, t, expr]) => { window.__cur(px, py, age); window.__step(t); return eval(expr); }, [x, y, now() - clickT, T * 1000, A.pose]);
   if (F >= FROM && F < TO) fs.writeFileSync(`${OUT}/${String(F).padStart(5, "0")}.png`, Buffer.from((await cdp.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
-  if (prev && prev.room === pose.room && (walked += Math.hypot(pose.x - prev.x, pose.z - prev.z)) > 0.75) { walked -= 0.75; log.steps.push(now()); }
-  if (prev && prev.room !== pose.room) { log.doors.push(now()); if (room) { room.b = now(); log.rooms.push(room); } room = pose.room ? { a: now(), kind: pose.room } : null; }
-  log.track.push([+pose.x.toFixed(3), +pose.z.toFixed(3), +pose.yaw.toFixed(4), +pose.pitch.toFixed(4), pose.room ?? null, +(pose.eye ?? 0).toFixed(3)]);
+  record(prev);
   if (++F >= TO) { await browser.close(); process.exit(0); }
   return prev;
 }

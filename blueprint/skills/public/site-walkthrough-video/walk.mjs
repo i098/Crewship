@@ -11,51 +11,56 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---- grid: walkable flag, clearance (metres to the nearest blocked or soft cell) -----------------------------
+const BACK = [[-1, 0, 1], [0, -1, 1], [-1, -1, Math.SQRT2], [1, -1, Math.SQRT2]]; // neighbours already visited
+const STEPS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 export function grid(g) {
-  const { x0, z0, R, nx, nz } = g, N = nx * nz, S2 = Math.SQRT2;
+  const { x0, z0, R, nx, nz } = g, N = nx * nz;
   const fy = Float32Array.from(g.fy, (v) => (v === null ? NaN : v)), c = new Float32Array(N).fill(1e9);
-  const ok = (k) => g.fy[k] !== null && !g.bl[k];
-  for (let k = 0; k < N; k++) if (!ok(k) || g.soft?.[k]) c[k] = 0;
-  const pass = (j0, j1, dj, i0, i1, di) => { // two-pass chamfer distance
-    for (let j = j0; j !== j1; j += dj) for (let i = i0; i !== i1; i += di) {
-      const k = j * nx + i, pi = i - di, pj = j - dj, inI = pi >= 0 && pi < nx, inJ = pj >= 0 && pj < nz;
-      let v = c[k];
-      if (inI) v = Math.min(v, c[k - di] + 1);
-      if (inJ) { v = Math.min(v, c[k - dj * nx] + 1); if (inI) v = Math.min(v, c[k - dj * nx - di] + S2); if (i + di >= 0 && i + di < nx) v = Math.min(v, c[k - dj * nx + di] + S2); }
-      c[k] = v;
-    }
+  for (let k = 0; k < N; k++) if (g.fy[k] === null || g.bl[k] || g.soft?.[k]) c[k] = 0;
+  const inside = (i, j) => i >= 0 && j >= 0 && i < nx && j < nz;
+  const relax = (k, s) => { // s = 1 forward, -1 backward: the two passes of a chamfer distance
+    const i = k % nx, j = (k - i) / nx;
+    for (const [di, dj, w] of BACK) if (inside(i + s * di, j + s * dj)) c[k] = Math.min(c[k], c[k + s * (dj * nx + di)] + w);
   };
-  pass(0, nz, 1, 0, nx, 1); pass(nz - 1, -1, -1, nx - 1, -1, -1);
+  for (let k = 0; k < N; k++) relax(k, 1);
+  for (let k = N - 1; k >= 0; k--) relax(k, -1);
   for (let k = 0; k < N; k++) c[k] *= R;
-  const idx = (x, z) => { const i = Math.floor((x - x0) / R), j = Math.floor((z - z0) / R); return i < 0 || j < 0 || i >= nx || j >= nz ? -1 : j * nx + i; };
-  return { ...g, fy, c, idx, floor: (x, z) => fy[idx(x, z)] ?? NaN, clear: (x, z) => (idx(x, z) < 0 ? 0 : c[idx(x, z)]) };
+  const idx = (x, z) => { const i = Math.floor((x - x0) / R), j = Math.floor((z - z0) / R); return inside(i, j) ? j * nx + i : -1; };
+  return { ...g, fy, c, idx, inside, floor: (x, z) => fy[idx(x, z)] ?? NaN, clear: (x, z) => (idx(x, z) < 0 ? 0 : c[idx(x, z)]) };
 }
 
 // A* over 8-connected cells; cost rises as clearance drops under `pref` m, so routes keep to open space.
 // A step of more than `step` m between cells is a ledge, not a path.
 export function astar(g, a, b, { pref = 1.6, min = 0.05, K = 10, step = 0.45 } = {}) {
-  const { nx, nz, R, x0, z0, c, fy } = g, N = nx * nz, ia = g.idx(...a), ib = g.idx(...b);
+  const ia = g.idx(...a), ib = g.idx(...b), N = g.c.length;
   if (ia < 0 || ib < 0) throw new Error(`astar: off grid ${a} -> ${b}`);
-  const cost = (k) => 1 + K * Math.max(0, 1 - c[k] / pref) ** 2, gs = new Float64Array(N).fill(Infinity);
-  const from = new Int32Array(N).fill(-1), done = new Uint8Array(N), open = [[0, ia]];
-  const bi = ib % nx, bj = Math.floor(ib / nx), h = (k) => Math.hypot((k % nx) - bi, Math.floor(k / nx) - bj);
-  gs[ia] = 0;
-  while (open.length) {
-    let m = 0; for (let n = 1; n < open.length; n++) if (open[n][0] < open[m][0]) m = n; // ponytail: linear scan, a heap if grids grow past ~1e6 cells
-    const [, k] = open.splice(m, 1)[0];
-    if (done[k]) continue; done[k] = 1;
-    if (k === ib) break;
-    const i = k % nx, j = Math.floor(k / nx);
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      const a2 = i + di, b2 = j + dj, q = b2 * nx + a2;
-      if ((!di && !dj) || a2 < 0 || b2 < 0 || a2 >= nx || b2 >= nz || done[q]) continue;
-      if ((c[q] < min && q !== ib) || Math.abs(fy[q] - fy[k]) > step) continue;
-      const ng = gs[k] + Math.hypot(di, dj) * (cost(k) + cost(q)) / 2;
-      if (ng < gs[q]) { gs[q] = ng; from[q] = k; open.push([ng + h(q), q]); }
-    }
+  const s = { g, ib, pref, min, K, step, gs: new Float64Array(N).fill(Infinity), from: new Int32Array(N).fill(-1), done: new Uint8Array(N), open: [[0, ia]] };
+  s.gs[ia] = 0;
+  for (let k = ia; s.open.length && k !== ib; ) {
+    k = popMin(s.open);
+    if (k !== ib && !s.done[k]) { s.done[k] = 1; expand(s, k); }
   }
-  if (ia !== ib && from[ib] < 0) throw new Error(`astar: no path ${a} -> ${b}`);
-  const pts = [];
+  if (ia !== ib && s.from[ib] < 0) throw new Error(`astar: no path ${a} -> ${b}`);
+  return trace(g, s.from, ib, a, b);
+}
+// ponytail: linear scan for the cheapest open cell, a heap if grids grow past ~1e6 cells
+function popMin(open) {
+  let m = 0;
+  for (let n = 1; n < open.length; n++) if (open[n][0] < open[m][0]) m = n;
+  return open.splice(m, 1)[0][1];
+}
+function expand(s, k) {
+  const { g, ib, gs, from, done, open } = s, { nx, c, fy } = g, i = k % nx, j = (k - i) / nx;
+  const cost = (q) => 1 + s.K * Math.max(0, 1 - c[q] / s.pref) ** 2;
+  for (const [di, dj] of STEPS) {
+    const q = (j + dj) * nx + i + di;
+    if (!g.inside(i + di, j + dj) || done[q] || (c[q] < s.min && q !== ib) || Math.abs(fy[q] - fy[k]) > s.step) continue;
+    const ng = gs[k] + (Math.hypot(di, dj) * (cost(k) + cost(q))) / 2;
+    if (ng < gs[q]) { gs[q] = ng; from[q] = k; open.push([ng + Math.hypot((q % nx) - (ib % nx), Math.floor(q / nx) - Math.floor(ib / nx)), q]); }
+  }
+}
+function trace(g, from, ib, a, b) {
+  const { nx, R, x0, z0 } = g, pts = [];
   for (let k = ib; k >= 0; k = from[k]) pts.unshift([x0 + ((k % nx) + 0.5) * R, z0 + (Math.floor(k / nx) + 0.5) * R]);
   pts[0] = a; pts[pts.length - 1] = b;
   return pts;
@@ -128,47 +133,85 @@ export class Ctl {
   crossed(p) { Object.assign(this, { Y: p.yaw, Yt: p.yaw, P: p.pitch, Pt: p.pitch, Yd: 0, Pd: 0 }); this.next(); }
   step(p) {
     if (this.Y === null) Object.assign(this, { Y: p.yaw, Yt: p.yaw, P: p.pitch, Pt: p.pitch });
-    const leg = this.leg, slew = (cur, to, max) => cur + clamp(to - cur, -max * DT, max * DT);
-    let vt = 0, wY = 3.6, slewY = 2.4, lapse = 1;
-    if (this.done) { /* hold still */ } else if (this.phase === "look") {
-      const L = leg.looks[this.look];
-      const [yawT, pitT] = L.at ? [Math.atan2(L.at[0] - p.x, L.at[2] - p.z), Math.atan2(L.at[1] - p.eye, Math.hypot(L.at[0] - p.x, L.at[2] - p.z))] : [L.yaw, L.pitch];
-      this.Yt = slew(this.Yt, this.Yt + wrap(yawT - this.Yt), slewY);
-      this.Pt = slew(this.Pt, clamp(pitT, -1.15, 1.15), 1.4);
-      if (this.hold > 0 || (Math.abs(wrap(yawT - this.Y)) < 0.04 && Math.abs(clamp(pitT, -1.15, 1.15) - this.P) < 0.04)) this.hold += DT;
-      if (this.hold >= (L.hold ?? 1)) { this.look++; this.hold = 0; if (this.look >= leg.looks.length) this.next(); }
-    } else {
-      const { pts, s: S, len } = leg.path, g = leg.grid;
-      let bi = this.si, bd = Infinity; // progress: nearest path point in a window ahead
-      for (let i = this.si; i < Math.min(pts.length, this.si + 80); i++) { const d = Math.hypot(pts[i][0] - p.x, pts[i][1] - p.z); if (d < bd) { bd = d; bi = i; } }
-      this.si = bi;
-      const s = S[bi], remain = len - s, Lk = 0.9 + 0.3 * this.v;
-      let li = bi; while (li < pts.length - 1 && S[li] - s < Lk) li++;
-      let [tx, tz] = pts[li];
-      if (li === pts.length - 1) { const a = pts[Math.max(0, li - 8)], d = Math.hypot(tx - a[0], tz - a[1]) || 1; tx += ((tx - a[0]) / d) * Lk; tz += ((tz - a[1]) / d) * Lk; }
-      const yawT = Math.atan2(tx - p.x, tz - p.z), err = Math.abs(wrap(yawT - this.Y));
-      let turn = 0, cl = g.clear(p.x, p.z);
-      const head = (i) => { const j = Math.min(pts.length - 1, i + 3); return Math.atan2(pts[j][0] - pts[i][0], pts[j][1] - pts[i][1]); };
-      for (let i = bi, last = head(bi); i < pts.length - 4 && S[i] - s < 2.2; i += 4) { const n = head(i); turn += Math.abs(wrap(n - last)); last = n; if (S[i] - s < 1.6) cl = Math.min(cl, g.clear(...pts[i])); }
-      const V = this.V * this.clock, crossing = leg.end === "cross" && remain < 2.2;
-      const vClear = V * clamp((cl - 0.1) / 1.0, leg.narrow ? 0.62 : 0.3, 1), vTurn = V * clamp(1 - turn / 1.6, 0.25, 1);
-      const vErr = V * clamp(1 - err / 0.5, 0, 1), vStop = leg.end === "stop" ? Math.sqrt(3 * Math.max(0, remain - 0.02)) : Infinity;
-      if (this.phase === "pivot" && err < 0.25 && Math.abs(this.Yd) < 0.6) this.phase = "walk";
-      // a crossing keeps walking pace: the close-up of the door or rungs before the site moves you lasts a few frames
-      if (this.phase === "walk") { vt = crossing ? Math.min(V, vErr, Math.max(3, Math.min(vClear, vTurn))) : Math.min(V, vClear, vTurn, vErr, vStop); wY = 4.6; slewY = 2.2; }
-      else wY = 3.0;
-      this.Yt = slew(this.Yt, this.Yt + wrap(yawT - this.Yt), slewY);
-      const hx = p.x + Math.sin(this.Y), hz = p.z + Math.cos(this.Y), slope = (g.floor(hx, hz) - g.floor(p.x, p.z)) || 0; // follow stairs and ramps, a little
-      this.Pt = slew(this.Pt, crossing ? (leg.crossPitch ?? 0) : -0.05 + clamp(0.3 * Math.atan(clamp(slope, -2, 2)), -0.28, 0.28), 1.4);
-      if (leg.end === "stop" && remain < 0.08 && this.v < 0.1 && this.phase === "walk") { this.v = 0; this.phase = "look"; if (!leg.looks?.length) this.next(); }
-      if (leg.lapse) lapse = 1 + (leg.lapse - 1) * clamp((this.v - 2.6) / 0.8, 0, 1) * clamp((cl - 1.2) / 0.8, 0, 1) * clamp((remain - 6) / 6, 0, 1);
-    }
+    const m = this.done ? { vt: 0, wY: 3.6, lapse: 1 } : this.phase === "look" ? this.lookStep(p) : this.walkStep(p);
     // speed eases up (at most 2 m/s²) and brakes down to the limit exactly (at most 2.4 m/s²)
-    this.v = vt < this.v ? Math.max(vt, this.v - 2.4 * DT) : this.v + Math.min((vt - this.v) * 3 * DT, 2 * DT);
-    this.clock += (lapse - this.clock) * (1 - Math.exp(-DT / 0.6));
-    const spring = (x, v, to, w) => { v += (w * w * (to - x) - 2 * w * v) * DT; return [x + v * DT, v]; }; // critically damped
-    [this.Y, this.Yd] = spring(this.Y, this.Yd, this.Yt, wY);
+    this.v = m.vt < this.v ? Math.max(m.vt, this.v - 2.4 * DT) : this.v + Math.min((m.vt - this.v) * 3 * DT, 2 * DT);
+    this.clock += (m.lapse - this.clock) * (1 - Math.exp(-DT / 0.6));
+    [this.Y, this.Yd] = spring(this.Y, this.Yd, this.Yt, m.wY);
     [this.P, this.Pd] = spring(this.P, this.Pd, this.Pt, 3.0);
     return { yaw: this.Y, pitch: clamp(this.P, -1.19, 1.19), f: clamp(this.v / (this.V * this.clock), 0, 1), clock: this.clock };
   }
+  // Standing still: turn to the look's point or view, hold it, then the next look or leg.
+  lookStep(p) {
+    const leg = this.leg, L = leg.looks[this.look], d = L.at && Math.hypot(L.at[0] - p.x, L.at[2] - p.z);
+    const yawT = L.at ? Math.atan2(L.at[0] - p.x, L.at[2] - p.z) : L.yaw, pitT = clamp(L.at ? Math.atan2(L.at[1] - p.eye, d) : L.pitch, -1.15, 1.15);
+    this.Yt = slew(this.Yt, this.Yt + wrap(yawT - this.Yt), 2.4);
+    this.Pt = slew(this.Pt, pitT, 1.4);
+    if (this.hold > 0 || (Math.abs(wrap(yawT - this.Y)) < 0.04 && Math.abs(pitT - this.P) < 0.04)) this.hold += DT;
+    if (this.hold >= (L.hold ?? 1)) { this.look++; this.hold = 0; if (this.look >= leg.looks.length) this.next(); }
+    return { vt: 0, wY: 3.6, lapse: 1 };
+  }
+  // Walking: aim at a look-ahead point on the path; speed is the lowest of the limits.
+  walkStep(p) {
+    const leg = this.leg, { len } = leg.path, bi = this.nearest(p), s = leg.path.s[bi], remain = len - s;
+    const [tx, tz] = this.lookAhead(bi, s, 0.9 + 0.3 * this.v);
+    const yawT = Math.atan2(tx - p.x, tz - p.z), err = Math.abs(wrap(yawT - this.Y));
+    const { turn, cl } = this.ahead(p, bi, s), crossing = leg.end === "cross" && remain < 2.2;
+    if (this.phase === "pivot" && err < 0.25 && Math.abs(this.Yd) < 0.6) this.phase = "walk";
+    const walking = this.phase === "walk", vt = walking ? this.limit(leg, { cl, turn, err, remain, crossing }) : 0;
+    this.Yt = slew(this.Yt, this.Yt + wrap(yawT - this.Yt), walking ? 2.2 : 2.4);
+    this.Pt = slew(this.Pt, crossing ? (leg.crossPitch ?? 0) : this.slopePitch(p), 1.4);
+    if (walking) this.arrive(remain);
+    return { vt, wY: walking ? 4.6 : 3.0, lapse: this.lapse(cl, remain) };
+  }
+  // A little down while walking, plus a little of the floor's slope ahead: stairs and ramps.
+  slopePitch(p) {
+    const g = this.leg.grid, slope = g.floor(p.x + Math.sin(this.Y), p.z + Math.cos(this.Y)) - g.floor(p.x, p.z) || 0;
+    return -0.05 + clamp(0.3 * Math.atan(clamp(slope, -2, 2)), -0.28, 0.28);
+  }
+  // A stop leg ends standing still at its end, then runs its looks.
+  arrive(remain) {
+    const leg = this.leg;
+    if (leg.end !== "stop" || remain >= 0.08 || this.v >= 0.1) return;
+    this.v = 0; this.phase = "look";
+    if (!leg.looks?.length) this.next();
+  }
+  // The page-clock multiplier: a time-lapse only at full pace, in the open, and well before the end.
+  lapse(cl, remain) {
+    const k = this.leg.lapse;
+    return k ? 1 + (k - 1) * clamp((this.v - 2.6) / 0.8, 0, 1) * clamp((cl - 1.2) / 0.8, 0, 1) * clamp((remain - 6) / 6, 0, 1) : 1;
+  }
+  // Progress: the nearest path point in a window ahead of the last one.
+  nearest(p) {
+    const { pts } = this.leg.path;
+    let bi = this.si, bd = Infinity;
+    for (let i = this.si; i < Math.min(pts.length, this.si + 80); i++) { const d = Math.hypot(pts[i][0] - p.x, pts[i][1] - p.z); if (d < bd) { bd = d; bi = i; } }
+    return (this.si = bi);
+  }
+  // The point Lk metres along the path, or past its end along the last direction.
+  lookAhead(bi, s, Lk) {
+    const { pts, s: S } = this.leg.path;
+    let li = bi; while (li < pts.length - 1 && S[li] - s < Lk) li++;
+    const [tx, tz] = pts[li];
+    if (li < pts.length - 1) return [tx, tz];
+    const a = pts[Math.max(0, li - 8)], d = Math.hypot(tx - a[0], tz - a[1]) || 1;
+    return [tx + ((tx - a[0]) / d) * Lk, tz + ((tz - a[1]) / d) * Lk];
+  }
+  // Heading change over the next 2.2 m and the least clearance over the next 1.6 m.
+  ahead(p, bi, s) {
+    const { pts, s: S } = this.leg.path, g = this.leg.grid;
+    const head = (i) => { const j = Math.min(pts.length - 1, i + 3); return Math.atan2(pts[j][0] - pts[i][0], pts[j][1] - pts[i][1]); };
+    let turn = 0, cl = g.clear(p.x, p.z);
+    for (let i = bi, last = head(bi); i < pts.length - 4 && S[i] - s < 2.2; i += 4) { const n = head(i); turn += Math.abs(wrap(n - last)); last = n; if (S[i] - s < 1.6) cl = Math.min(cl, g.clear(...pts[i])); }
+    return { turn, cl };
+  }
+  // The walking speed: clearance, curvature, heading error and stopping distance each cap it. A crossing keeps
+  // walking pace, so the close-up of the door or rungs before the site moves you lasts a few frames.
+  limit(leg, { cl, turn, err, remain, crossing }) {
+    const V = this.V * this.clock, vClear = V * clamp((cl - 0.1) / 1.0, leg.narrow ? 0.62 : 0.3, 1), vTurn = V * clamp(1 - turn / 1.6, 0.25, 1);
+    const vErr = V * clamp(1 - err / 0.5, 0, 1), vStop = leg.end === "stop" ? Math.sqrt(3 * Math.max(0, remain - 0.02)) : Infinity;
+    return crossing ? Math.min(V, vErr, Math.max(3, Math.min(vClear, vTurn))) : Math.min(V, vClear, vTurn, vErr, vStop);
+  }
 }
+const slew = (cur, to, max) => cur + clamp(to - cur, -max * DT, max * DT);
+const spring = (x, v, to, w) => { v += (w * w * (to - x) - 2 * w * v) * DT; return [x + v * DT, v]; }; // critically damped
