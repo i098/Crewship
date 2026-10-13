@@ -3,7 +3,7 @@
 
 Run it with `uv run --quiet --with instagrapi python reel_curator.py COMMAND`; it imports instagram_dm.py next to it.
 
-reel_curator.py run      # one cycle: pull, skip seen, transcribe, score, share at most the daily cap
+reel_curator.py run      # one cycle: pull, skip seen, transcribe, drop non-English, score, share at most the daily cap
 reel_curator.py follow   # follow every configured account not yet followed, minutes apart
 
 Settings: the instagram_dm.py environment (session, operator, state), plus
@@ -48,6 +48,17 @@ BAIT = re.compile(
     r"\bcomment\b.{0,60}?\b(link|repo|code|guide|send|dm|get)\b|\b(dm|message) me\b|\blink in (my |the )?bio\b|\bfollow (and|&) comment\b",
     re.I | re.S,
 )
+# Common words per language: the language with the most hits in a text wins. Enough to tell English from the usual rest.
+WORDS = {
+    "en": "the and is are was to of in it that this you for with on can as be your not but have from will at or an by all just so what how",
+    "it": "il lo la le di che è un una per non sono con del della dei gli nel nella come più ma anche questo quello se ho hai",
+    "fr": "le la les des est un une que qui pour pas dans sur avec ce cette sont vous nous je tu il elle mais ou et au aux du ton ta",
+    "es": "el los las del que es un una por para con no se su pero como más esto esta muy yo tú te lo al y en",
+    "pt": "o os as do da dos das que é um uma por para com não se seu mas como mais isso esta muito eu você em no na e",
+    "de": "der die das den dem ist und ein eine nicht mit für auf von zu im ich du sie es auch aber wie noch dass",
+    "id": "yang dan di ini itu dengan untuk tidak dari ada pada akan juga saya kamu bisa ke",
+}
+WORDS = {k: set(v.split()) for k, v in WORDS.items()}
 GITHUB = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)", re.I)
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
 SYSTEM = """You pick Instagram reels for one developer. He wants new open-source tools and repos he could use: AI agents, Claude and Codex skills, dev tools, testing, video and motion, landing pages and design, hardware. Real launches count. Tutorials of well-known tools, news recaps, opinions, hype and motivation do not.
@@ -149,14 +160,38 @@ def watch_script():
 
 
 def transcribe(cl, media):
-    """Download the reel and run the watch skill at transcript detail. Returns the speech as plain text."""
+    """Download the reel and run the watch skill at transcript detail. Returns (speech as plain text, spoken language
+    code or None). The skill names a language only for a caption track or a pinned whisperx language."""
     with tempfile.TemporaryDirectory() as d:
         video = cl.video_download_by_url(media.video_url, filename=media.code, folder=Path(d))
         cmd = [sys.executable, watch_script(), str(video), "--detail", "transcript", "--out-dir", d]
         out = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=1200).stdout
     m = re.search(r"^## Transcript\n(.*?)\n---\n", out, re.S | re.M)
     body = [re.sub(r"^\[\d+:\d+\]\s*", "", s) for s in (m.group(1) if m else "").splitlines()]
-    return " ".join(s for s in body if s and not s.startswith(("_Source", "```")))
+    speech = " ".join(s for s in body if s and not s.startswith(("_Source", "```")))
+    lang = re.search(r"captions \(([a-z]{2})\b|language ([a-z]{2})\b", out)
+    return speech, next(filter(None, lang.groups()), None) if lang else None
+
+
+def language(text):
+    """Best guess of a text's language: "en", another code, "other" (non-Latin script) or None (too short to tell)."""
+    letters = [c for c in text if c.isalpha()]
+    if sum(ord(c) > 0x24F for c in letters) > len(letters) / 2:
+        return "other"
+    words = re.findall(r"[^\W\d_]+", text.lower())
+    if len(words) < 5:
+        return None
+    hits = {k: sum(w in v for w in words) for k, v in WORDS.items()}
+    best = max(hits, key=lambda k: (hits[k], k == "en"))
+    return best if hits[best] >= len(words) * 0.1 else None
+
+
+def non_english(spoken, speech, caption):
+    """The language code of the first part that is not English: the transcriber's detected language when it names one,
+    else a word-count guess on the speech, then on the caption. None when all of it is English or too short to tell."""
+    for lang in (spoken or language(speech), language(caption)):
+        if lang and lang != "en":
+            return lang
 
 
 def score(cfg, media, speech):
@@ -234,7 +269,10 @@ def cycle(cl, cfg, now):
         row = {"code": media.code, "user": media.user.username, "source": source}
         caption = media.caption_text or ""
         try:
-            speech = transcribe(cl, media)
+            speech, spoken = transcribe(cl, media)
+            if lang := non_english(spoken, speech, caption):
+                write_log(action="reject", score=None, reason=f"non-english:{lang}", **row)
+                continue
             info = score(cfg, media, speech)
             ok, reason = judge(cfg, caption, speech, info)
             link = resolve(info, caption) if ok else None
