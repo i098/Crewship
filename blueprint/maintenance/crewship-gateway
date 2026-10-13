@@ -76,6 +76,7 @@ class Gate:
         self.state_file = Path(state_file)
         self.allow = allow_seconds
         self.failures = {}  # ip -> (count, last failure, locked until); memory only
+        self.lock = threading.Lock()
 
     # --- the hash, kept in the host's secrets file ----------------------------
 
@@ -160,20 +161,25 @@ class Gate:
         return max(0, int(self.failures.get(ip, (0, 0, 0))[2] - now))
 
     def login(self, ip, password, now):
-        """The cookie value on success; None for a wrong password or a locked-out address."""
-        if self.locked_for(ip, now):
-            return None
+        """The cookie value on success; None for a wrong password or a locked-out address.
+
+        The attempt counts as a failure before the slow password check, under a lock, so
+        guesses sent in parallel cannot get past MAX_FAILURES."""
+        with self.lock:
+            if self.locked_for(ip, now):
+                return None
+            count, last, _ = self.failures.get(ip, (0, 0, 0))
+            count = count + 1 if now - last < LOCK_SECONDS else 1
+            self.failures[ip] = (count, now, now + LOCK_SECONDS if count >= MAX_FAILURES else 0)
+            if len(self.failures) > 10000:  # many addresses: forget the ones that cannot lock out
+                self.failures = {k: v for k, v in self.failures.items() if now - v[1] < LOCK_SECONDS}
         stored = self.stored_hash()
-        if stored and check_password(password, stored):
+        if not (stored and check_password(password, stored)):
+            return None
+        with self.lock:
             self.failures.pop(ip, None)
-            self.update_state(lambda state: state["allowed"].__setitem__(ip, now + self.allow))
-            return self.cookie(now)
-        count, last, _ = self.failures.get(ip, (0, 0, 0))
-        count = count + 1 if now - last < LOCK_SECONDS else 1
-        self.failures[ip] = (count, now, now + LOCK_SECONDS if count >= MAX_FAILURES else 0)
-        if len(self.failures) > 10000:  # many addresses: forget the ones that cannot lock out
-            self.failures = {k: v for k, v in self.failures.items() if now - v[1] < LOCK_SECONDS}
-        return None
+        self.update_state(lambda state: state["allowed"].__setitem__(ip, now + self.allow))
+        return self.cookie(now)
 
 
 def client_ip(headers):

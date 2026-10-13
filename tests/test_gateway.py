@@ -66,6 +66,28 @@ def test_lockout_after_five_wrong_then_release(gate):
     assert gate.login(ip, "right-pass", later)
 
 
+def test_parallel_guesses_get_no_more_than_the_limit(gate):
+    checked = []
+    real = gw.check_password
+
+    def slow(password, stored):
+        checked.append(password)
+        threading.Event().wait(0.05)
+        return real(password, stored)
+
+    gw.check_password = slow
+    try:
+        threads = [threading.Thread(target=gate.login, args=("203.0.113.5", f"guess{i}", T0)) for i in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        gw.check_password = real
+    assert len(checked) == gw.MAX_FAILURES
+    assert gate.locked_for("203.0.113.5", T0) > 0
+
+
 def test_old_failures_are_forgotten(gate):
     ip = "203.0.113.5"
     for i in range(gw.MAX_FAILURES - 1):

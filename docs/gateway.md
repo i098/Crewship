@@ -89,6 +89,7 @@ Run `crewship-gateway url` to see the current address.
 Cloudflare offers Quick Tunnels for testing and development, without an uptime guarantee.
 A Quick Tunnel proxies at most 200 requests at the same time, and it does not support Server-Sent Events (SSE).
 WebSocket connections work.
+The gateway refuses a request body without a `Content-Length` (chunked upload) with 411.
 For a fixed address or SSE, use a named Cloudflare Tunnel on your own account, or Tailscale.
 
 ## Tailscale instead
