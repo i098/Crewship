@@ -1,0 +1,11 @@
+[Unit]
+Description=Relay important Slack messages to iMessage (read-only, from the slk cache)
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/.local/bin/slack_relay.py run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
