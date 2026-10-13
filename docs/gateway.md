@@ -3,7 +3,7 @@
 Agents on the host serve web pages: Lavish boards, dev previews, and other local services.
 These pages listen on loopback, so you cannot open them from a phone or a laptop without help.
 
-The password gateway is the default way in.
+The password gateway is the default way in on a new host.
 It puts one password in front of every local web page and serves the pages over a [Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).
 The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudflare account, no open port, and no DNS change.
 [Tailscale](#tailscale-instead) stays available as an option.
@@ -17,7 +17,7 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
    ```
 
 2. Open the address in any browser and enter the password.
-3. Open a local page as `/PORT/path`. For example, a Lavish board on port 9525 is `https://….trycloudflare.com/9525/`. The start page lists the ports that listen on the host.
+3. Open a local page as `/PORT/path`. For example, a Lavish board on port 9525 is `https://….trycloudflare.com/9525/`.
 
 After the right password, your IP address is allowed for 24 hours.
 The browser also gets a cookie that lasts as long.
@@ -26,17 +26,23 @@ The cookie keeps a phone signed in when its mobile network changes its address.
 ## The password
 
 The first apply makes a random password, for example `k3m9x-4tqhe-p7rwn-a2bcd`.
-The launch summary shows it one time. Keep it in your password manager.
-The host keeps only an scrypt hash of it, as `CREWSHIP_GATEWAY_PASSWORD_HASH` in `~/super.env` (mode `600`).
+It writes the password only to `~/.config/crewship/gateway/initial-password` (mode `600`).
+The launch summary and the installer name that file. They never show the password.
+Read the file yourself over SSH, keep the password in your password manager, then delete the file:
 
-To set a new password, run this on the host. It prints the new password one time and signs out every address and every browser:
+```bash
+cat ~/.config/crewship/gateway/initial-password
+```
+
+Never let an agent read, print, or relay the password.
+The host keeps only an scrypt hash of it, in `~/.config/crewship/gateway/password.hash` (directory `700`, file `600`).
+The hash stays on this host: each host has its own password, and [`scripts/fetch-secrets.sh`](secrets.md) does not touch it.
+
+To set a new password, run this in your own terminal on the host. It prints the new password one time, removes `initial-password`, and signs out every address and every browser:
 
 ```bash
 crewship-gateway password
 ```
-
-[`scripts/fetch-secrets.sh`](secrets.md) replaces `~/super.env`, which removes the hash.
-Then the gateway refuses every password until you run `crewship-gateway password` or the next `./ship.sh launch` sets a new one.
 
 ## Settings
 
@@ -48,19 +54,20 @@ crewship:
     allow_hours: 24    # the default; 1 to 8760
 ```
 
-## Sign out and revoke
+## Sign out
 
 - **Sign out** on the start page removes your address and your cookie.
-- `crewship-gateway revoke 203.0.113.5` removes one address.
-- `crewship-gateway revoke` removes every address and makes every cookie invalid.
+- `crewship-gateway password` sets a new password and signs out every address and every browser.
 
 Five wrong passwords from one address within 15 minutes lock that address out for 15 minutes.
 Other addresses can still sign in.
 
-## Turn it off
+## Turn it on or off
 
-- On a new host, give the installer `--no-gateway`, for example `npx crewship --no-gateway`.
-- On a host that has a config, set `profiles.gateway: false` in `.local/host.yml` and run `./ship.sh launch`. The apply stops and removes both services.
+- A new host gets the gateway: `./ship.sh dock` writes `profiles.gateway: true` into its new `.local/host.yml`.
+- On a new host, give the installer `--no-gateway` to leave it off, for example `npx crewship --no-gateway`.
+- A host that existed before the gateway keeps it off: an update never opens a tunnel. To turn it on, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`.
+- To turn it off, set `profiles.gateway: false` in `.local/host.yml` and run `./ship.sh launch`. The apply stops and removes both services.
 
 ## How it works
 
@@ -75,7 +82,7 @@ flowchart LR
 - `crewship-gateway.service` runs `~/.local/bin/crewship-gateway serve` on `127.0.0.1:20240`. It refuses a peer that is not on loopback. It opens no port to the network.
 - `crewship-tunnel.service` runs `cloudflared tunnel --url http://127.0.0.1:20240`, so the gateway is its only origin. It sends nothing to a local page directly. When the gateway is down, the tunnel answers 502 and shows no page.
 - Cloudflare's edge sets `CF-Connecting-IP` on every request. It refuses a request in which the visitor sends that header (error 1000). Only loopback peers reach the gateway, so a request from off the host comes through the tunnel, and the gateway trusts that header. It never reads `X-Forwarded-For`. A request without a valid `CF-Connecting-IP` gets 400. A local process can send any header, but it already reaches every loopback port directly, so the header gives it nothing more.
-- The password check uses scrypt and a constant-time compare.
+- The password check uses scrypt and a constant-time compare. Each check needs about 16 MiB, so at most two checks run at the same time. Many parallel sign-ins wait in turn and cannot use up the host's memory.
 - The cookie `__Host-crewship` is `HttpOnly`, `Secure`, and `SameSite=Strict`. It is an HMAC of its issue time, with a key from the stored hash, so a new password makes every cookie invalid. The gateway removes the cookie before it sends a request to a local page.
 - The allowed addresses are in `~/.local/state/crewship/gateway.json`, so a restart keeps them. The lockout counts are in memory only.
 - After sign-in, every loopback port from 1024 up is reachable. That is the same access that your account has on the host.

@@ -165,11 +165,10 @@ def initialize(args):
     config["crewship"].update(user=user, home=home, workspace=str(Path(home) / "Dev"))
     if args.container:
         config["crewship"].update(start_services=False, enable_linger=False)
-        for profile in ("docker", "tailscale", "desktop", "firstmate", "chat", "gateway"):
+        for profile in ("docker", "tailscale", "desktop", "firstmate", "chat"):
             config["crewship"]["profiles"][profile] = False
         config["crewship"]["browser_prune"]["enabled"] = False
-    if args.no_gateway:
-        config["crewship"]["profiles"]["gateway"] = False
+    config["crewship"]["profiles"]["gateway"] = not (args.container or args.no_gateway)
     if args.board:
         config["crewship"]["board"] = {}
     destination = ROOT / ".local/host.yml"
@@ -242,7 +241,7 @@ def doctor(document):
         ]
     if config["profiles"]["development"]:
         tools += ["rustc", "cargo"]
-    if config["profiles"].get("gateway", True):  # on unless the host config turns it off
+    if config["profiles"].get("gateway"):  # off unless the host config turns it on
         tools.append("cloudflared")
     failed = []
     for name in tools:

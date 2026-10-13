@@ -1,10 +1,14 @@
 ---
 # Password gateway and Cloudflare Quick Tunnel (profiles.gateway, docs/gateway.md).
-# crewship-gateway.service serves blueprint/maintenance/crewship-gateway on a 0600
-# Unix socket; crewship-tunnel.service runs cloudflared with that socket as its only
-# origin. The first apply sets a password, stores only its scrypt hash in
-# ~/super.env, and prints the password once in the summary. With the profile off,
-# every apply stops and removes both units, so turning it off is one apply.
+# crewship-gateway.service serves blueprint/maintenance/crewship-gateway on TCP
+# 127.0.0.1:{{ crewship_gateway_port }}; crewship-tunnel.service runs cloudflared with that address
+# as its only origin. Any local process can reach that port and send its own
+# CF-Connecting-IP, but it already reaches every loopback port directly. The first
+# apply sets a password, keeps only its scrypt hash in
+# ~/.config/crewship/gateway/password.hash, and writes the password to the mode-600
+# file initial-password beside it; the summary names that file, never the password.
+# With the profile off, every apply stops and removes both units, so turning it
+# off is one apply.
 #
 #   * the tunnel restarts only when its unit changes: each start gets a new URL
 #   * the password step never runs in check mode and never replaces a set password
@@ -56,7 +60,7 @@
         follow: false
       loop: [crewship-gateway.service, crewship-tunnel.service]
 
-    # Prints the new password only when there was none; the summary shows it once.
+    # Prints the initial-password path only when there was no password.
     - name: Set the gateway password when none is set
       ansible.builtin.command:
         argv: ["{{ crewship_gateway_script }}", password, --if-missing]

@@ -593,8 +593,9 @@
                  ~ ' and enter the gateway password; then /PORT/ opens a local port. A tunnel restart changes the URL;'
                  ~ ' `crewship-gateway url` prints the current one (docs/gateway.md).']
                 if (crewship_cfg.profiles.gateway | bool) else [])
-             + (['Gateway password, shown only this time (`crewship-gateway password` sets a new one): '
-                 ~ crewship_gateway_password.stdout]
+             + (['Gateway password: in ' ~ crewship_gateway_password.stdout
+                 ~ ' (mode 600). The operator reads it over SSH; an agent never reads or relays it.'
+                 ~ ' `crewship-gateway password` in your own terminal sets a new one.']
                 if (crewship_gateway_password.stdout | default('') | length > 0) else [])
              + (['Manual: join the tailnet with `sudo tailscale up`; Tailscale SSH and the tailnet ACL stay separate decisions.']
                 if (crewship_cfg.profiles.tailscale | bool) else [])

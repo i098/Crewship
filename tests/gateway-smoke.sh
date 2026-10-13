@@ -34,9 +34,10 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   (cd /tmp/site && python3 -m http.server 8000 --bind 127.0.0.1 >/dev/null 2>&1 &)
 
   password=$(crewship-gateway password)
-  grep -q "^CREWSHIP_GATEWAY_PASSWORD_HASH=scrypt\\$" ~/super.env
-  ! grep -q "$password" ~/super.env
-  [ "$(stat -c %a ~/super.env)" = 600 ]
+  hash=~/.config/crewship/gateway/password.hash
+  grep -q "^scrypt\\$" "$hash"
+  ! grep -q "$password" "$hash"
+  [ "$(stat -c %a "$hash")" = 600 ] && [ "$(stat -c %a "$(dirname "$hash")")" = 700 ]
   start() { "$@" crewship-gateway serve >/tmp/gateway.log 2>&1 & echo $! >/tmp/gateway.pid
             for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:20240/ && return; sleep 0.1; done; return 1; }
   stop() { kill "$(cat /tmp/gateway.pid)"; wait "$(cat /tmp/gateway.pid)" 2>/dev/null || true; }
@@ -83,8 +84,9 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
 
   start
   [ "$(code "$public/8000/")" = 200 ]
-  crewship-gateway revoke
+  crewship-gateway password >/dev/null
+  [ "$(code "$public/8000/")" = 401 ]
   [ "$(code -b /tmp/jar "$public/8000/")" = 401 ]
-  echo "ok: inside the window it is allowed again; revoke signs everyone out"
+  echo "ok: inside the window it is allowed again; a new password signs everyone out"
 '
 echo "gateway smoke: passed"

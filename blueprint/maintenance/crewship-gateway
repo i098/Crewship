@@ -8,12 +8,15 @@ that header and never X-Forwarded-For. A local process can forge the header, but
 it already reaches every loopback port directly. After the right password, the
 visitor's IP address is allowed for ALLOW_HOURS, and a signed cookie admits the
 same browser for the same time when its address changes.
-/<port>/<path> goes to http://127.0.0.1:<port>/<path>.
+/<port>/<path> goes to http://127.0.0.1:<port>/<path>. Only the password's scrypt
+hash is kept, in ~/.config/crewship/gateway/password.hash on this host alone.
 
-  crewship-gateway serve                     run the gateway (crewship-gateway.service)
-  crewship-gateway password [--if-missing]   set a new password, print it once, sign everyone out
-  crewship-gateway url                       print the tunnel's public URL
-  crewship-gateway revoke [IP]               sign out one address, or every address and cookie
+  crewship-gateway serve                   run the gateway (crewship-gateway.service)
+  crewship-gateway password                set a new password, print it once, sign everyone out
+  crewship-gateway password --if-missing   for the installer: when no password is set, write a
+                                           new one to the mode-600 file initial-password beside
+                                           the hash and print only that file's path
+  crewship-gateway url                     print the tunnel's public URL
 """
 
 import argparse
@@ -37,7 +40,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-KEY = "CREWSHIP_GATEWAY_PASSWORD_HASH"
+CHECKS = threading.BoundedSemaphore(2)  # each scrypt check needs 16 MiB: at most two at a time
 COOKIE = "__Host-crewship"
 MAX_FAILURES = 5  # wrong passwords from one address before it is locked out
 LOCK_SECONDS = 900  # how long the lockout lasts; failures older than this are forgotten
@@ -68,38 +71,37 @@ def new_password():
     return "-".join("".join(secrets.choice(ALPHABET) for _ in range(5)) for _ in range(4))
 
 
+def write_private(path, text):
+    """Replace `path` with `text` in one step; only this account can read it."""
+    temporary = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(text)
+    temporary.replace(path)
+
+
 class Gate:
     """The auth decisions. `now` is always passed in, so tests control the clock."""
 
-    def __init__(self, secrets_file, state_file, allow_seconds):
-        self.secrets_file = Path(secrets_file)
+    def __init__(self, hash_file, state_file, allow_seconds):
+        self.hash_file = Path(hash_file)
         self.state_file = Path(state_file)
         self.allow = allow_seconds
         self.failures = {}  # ip -> (count, last failure, locked until); memory only
         self.lock = threading.Lock()
 
-    # --- the hash, kept in the host's secrets file ----------------------------
+    # --- the hash, in a file of this host only ---------------------------------
 
     def stored_hash(self):
         try:
-            lines = self.secrets_file.read_text().splitlines()
+            return self.hash_file.read_text().strip() or None
         except FileNotFoundError:
             return None
-        values = [line.split("=", 1)[1].strip().strip("'\"") for line in lines
-                  if line.startswith(KEY + "=")]
-        return values[-1] if values else None
 
     def set_hash(self, value):
-        try:
-            lines = self.secrets_file.read_text().splitlines()
-        except FileNotFoundError:
-            lines = []
-        lines = [line for line in lines if not line.startswith(KEY + "=")] + [f"{KEY}={value}"]
-        temporary = self.secrets_file.with_name(f".{self.secrets_file.name}.{os.getpid()}")
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as stream:
-            stream.write("\n".join(lines) + "\n")
-        temporary.replace(self.secrets_file)
+        self.hash_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.hash_file.parent.chmod(0o700)
+        write_private(self.hash_file, value + "\n")
 
     # --- allowed addresses, kept on disk so a restart keeps them ----------------
 
@@ -110,11 +112,7 @@ class Gate:
             fcntl.flock(lock, fcntl.LOCK_EX)
             state = self.state()
             change(state)
-            temporary = self.state_file.with_suffix(".tmp")
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as stream:
-                json.dump(state, stream)
-            temporary.replace(self.state_file)
+            write_private(self.state_file, json.dumps(state))
 
     def state(self):
         try:
@@ -174,7 +172,9 @@ class Gate:
             if len(self.failures) > 10000:  # many addresses: forget the ones that cannot lock out
                 self.failures = {k: v for k, v in self.failures.items() if now - v[1] < LOCK_SECONDS}
         stored = self.stored_hash()
-        if not (stored and check_password(password, stored)):
+        with CHECKS:
+            right = bool(stored) and check_password(password, stored)
+        if not right:
             return None
         with self.lock:
             self.failures.pop(ip, None)
@@ -200,23 +200,6 @@ def safe_next(target):
     return target if re.fullmatch(r"/(?![/\\])[^\\\s]*", target) else "/"
 
 
-def loopback_ports():
-    """Ports that something on this host listens on (for the index page)."""
-    ports = set()
-    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
-        try:
-            rows = Path(table).read_text().splitlines()[1:]
-        except OSError:
-            continue
-        for row in rows:
-            fields = row.split()
-            if fields[3] == "0A":  # LISTEN
-                port = int(fields[1].rsplit(":", 1)[1], 16)
-                if port >= 1024:
-                    ports.add(port)
-    return sorted(ports)
-
-
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Crewship</title><style>
@@ -227,8 +210,7 @@ h1{{font-size:1.4rem;margin:0 0 .4rem}} p{{margin:.2rem 0 1rem;opacity:.75}}
 input,button{{box-sizing:border-box;width:100%;font:inherit;font-size:1.05rem;padding:.8rem;border-radius:.6rem}}
 input{{border:1px solid #8889;background:transparent;color:inherit;margin-bottom:.7rem}}
 button{{border:0;background:#2563eb;color:#fff;font-weight:600}}
-.note{{color:#dc2626;opacity:1}} ul{{padding:0;list-style:none}}
-li a{{display:block;padding:.7rem;border:1px solid #8885;border-radius:.6rem;margin-bottom:.5rem;color:inherit}}
+.note{{color:#dc2626;opacity:1}}
 </style></head><body><main>{body}</main></body></html>"""
 
 
@@ -294,10 +276,7 @@ class Handler(BaseHTTPRequestHandler):
         if not gate.admitted(self.ip, cookies.get(COOKIE), now):
             return self.page(401, login_body(self.path))
         if path == "/":
-            hidden = {self.server.server_address[1], int(METRICS.rsplit(":", 1)[1])}  # not web pages
-            links = "".join(f'<li><a href="/{p}/">Port {p}</a></li>' for p in loopback_ports() if p not in hidden)
-            return self.page(200, f"""<h1>Crewship</h1><p>Local web pages on this host.</p>
-<ul>{links or "<li>Nothing is listening.</li>"}</ul>
+            return self.page(200, """<h1>Crewship</h1><p>Open a local page as /PORT/path.</p>
 <form method="post" action="/_gateway/logout"><button type="submit">Sign out</button></form>""")
         match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
         if not match or not 1024 <= int(match[1]) <= 65535 or int(match[1]) == self.server.server_address[1]:
@@ -406,12 +385,12 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve")
     password = commands.add_parser("password")
-    password.add_argument("--if-missing", action="store_true", help="do nothing when a password is set")
+    password.add_argument("--if-missing", action="store_true",
+                          help="only when none is set; write it to initial-password and print that path")
     commands.add_parser("url")
-    commands.add_parser("revoke").add_argument("ip", nargs="?")
     args = parser.parse_args(argv)
     gate = Gate(
-        os.environ.get("CREWSHIP_SECRETS") or Path.home() / "super.env",
+        os.environ.get("CREWSHIP_GATEWAY_HASH") or Path.home() / ".config/crewship/gateway/password.hash",
         os.environ.get("CREWSHIP_GATEWAY_STATE") or Path.home() / ".local/state/crewship/gateway.json",
         int(float(os.environ.get("ALLOW_HOURS") or 24) * 3600),
     )
@@ -423,7 +402,13 @@ def main(argv=None):
         secret = new_password()
         gate.set_hash(hash_password(secret))
         gate.revoke(time.time())
-        print(secret)
+        initial = gate.hash_file.with_name("initial-password")
+        if args.if_missing:
+            write_private(initial, secret + "\n")
+            print(initial)
+        else:
+            initial.unlink(missing_ok=True)
+            print(secret)
     elif args.command == "url":
         try:
             with urllib.request.urlopen(f"http://{METRICS}/quicktunnel", timeout=5) as response:
@@ -434,8 +419,6 @@ def main(argv=None):
             print("crewship-gateway: the tunnel has no URL yet; see journalctl --user -u crewship-tunnel", file=sys.stderr)
             return 1
         print(f"https://{hostname}")
-    elif args.command == "revoke":
-        gate.revoke(time.time(), args.ip)
     return 0
 
 

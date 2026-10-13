@@ -221,8 +221,8 @@ main() {
   ./onboard.sh
   if [ ! -f .local/host.yml ]; then
     ./ship.sh dock "$@"
-  elif [[ " $* " == *" --no-gateway "* ]] && ! grep -Eq '^ +gateway: false' .local/host.yml; then
-    # The options shape a new host config only; launching would turn the gateway on.
+  elif [[ " $* " == *" --no-gateway "* ]] && grep -Eq '^ +gateway: true' .local/host.yml; then
+    # The options shape a new host config only; this config turns the gateway on.
     echo 'install.sh: --no-gateway applies to a new host config; set profiles.gateway: false in .local/host.yml and rerun' >&2
     return 1
   fi
@@ -234,7 +234,7 @@ main() {
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
   local url
   if url=$("$HOME/.local/bin/crewship-gateway" url 2>/dev/null); then
-    echo "Open this host's web pages at $url with the gateway password from the launch summary above; \`crewship-gateway url\` prints the URL again."
+    echo "Open this host's web pages at $url; \`crewship-gateway url\` prints the URL again. The first password is in ~/.config/crewship/gateway/initial-password (mode 600): read it yourself over SSH, or run \`crewship-gateway password\` in your own terminal for a new one."
   fi
 }
 

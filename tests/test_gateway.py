@@ -21,17 +21,33 @@ T0 = 1_800_000_000.0
 
 @pytest.fixture
 def gate(tmp_path):
-    secrets = tmp_path / "super.env"
-    secrets.write_text("OTHER=keep\n")
-    gate = gw.Gate(secrets, tmp_path / "state/gateway.json", DAY)
+    gate = gw.Gate(tmp_path / "gateway/password.hash", tmp_path / "state/gateway.json", DAY)
     gate.set_hash(gw.hash_password("right-pass"))
     return gate
 
 
-def test_hash_lives_in_secrets_file_beside_other_keys(gate):
-    text = gate.secrets_file.read_text()
-    assert "OTHER=keep" in text and "right-pass" not in text
-    assert gate.secrets_file.stat().st_mode & 0o777 == 0o600
+def test_hash_lives_in_a_private_host_file(gate):
+    assert gate.hash_file.read_text().startswith("scrypt$")
+    assert "right-pass" not in gate.hash_file.read_text()
+    assert gate.hash_file.stat().st_mode & 0o777 == 0o600
+    assert gate.hash_file.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_installer_password_goes_to_a_file_never_to_stdout(tmp_path, monkeypatch, capsys):
+    hash_file = tmp_path / "gateway/password.hash"
+    monkeypatch.setenv("CREWSHIP_GATEWAY_HASH", str(hash_file))
+    monkeypatch.setenv("CREWSHIP_GATEWAY_STATE", str(tmp_path / "state/gateway.json"))
+    initial = hash_file.with_name("initial-password")
+    assert gw.main(["password", "--if-missing"]) == 0
+    assert capsys.readouterr().out.strip() == str(initial)
+    secret = initial.read_text().strip()
+    assert initial.stat().st_mode & 0o777 == 0o600
+    assert gw.check_password(secret, hash_file.read_text().strip())
+    assert gw.main(["password", "--if-missing"]) == 0
+    assert capsys.readouterr().out == "" and initial.read_text().strip() == secret
+    assert gw.main(["password"]) == 0
+    assert gw.check_password(capsys.readouterr().out.strip(), hash_file.read_text().strip())
+    assert not initial.exists()
 
 
 def test_right_password_admits_ip_for_the_window(gate):
@@ -48,7 +64,7 @@ def test_wrong_password_admits_nothing(gate):
 
 
 def test_no_stored_hash_refuses_every_password(tmp_path):
-    gate = gw.Gate(tmp_path / "super.env", tmp_path / "state.json", DAY)
+    gate = gw.Gate(tmp_path / "password.hash", tmp_path / "state.json", DAY)
     assert gate.login("203.0.113.5", "", T0) is None
     assert gate.login("203.0.113.5", "anything", T0) is None
 
@@ -88,6 +104,32 @@ def test_parallel_guesses_get_no_more_than_the_limit(gate):
     assert gate.locked_for("203.0.113.5", T0) > 0
 
 
+def test_password_checks_run_at_most_two_at_a_time(gate):
+    running, peak, lock = [0], [0], threading.Lock()
+    real = gw.check_password
+
+    def slow(password, stored):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        threading.Event().wait(0.05)
+        with lock:
+            running[0] -= 1
+        return real(password, stored)
+
+    gw.check_password = slow
+    try:
+        threads = [threading.Thread(target=gate.login, args=(f"2001:db8::{i}", "guess", T0)) for i in range(12)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        gw.check_password = real
+    assert peak[0] == 2
+
+
+
 def test_old_failures_are_forgotten(gate):
     ip = "203.0.113.5"
     for i in range(gw.MAX_FAILURES - 1):
@@ -112,14 +154,6 @@ def test_revoke_all_signs_out_addresses_and_cookies(gate):
     assert not gate.admitted("203.0.113.5", None, T0 + 2)
     assert not gate.admitted("198.51.100.9", cookie, T0 + 2)
     assert gate.login("203.0.113.5", "right-pass", T0 + 3)
-
-
-def test_revoke_one_address_keeps_the_others(gate):
-    gate.login("203.0.113.5", "right-pass", T0)
-    gate.login("203.0.113.6", "right-pass", T0)
-    gate.revoke(T0 + 1, "203.0.113.5")
-    assert not gate.admitted("203.0.113.5", None, T0 + 2)
-    assert gate.admitted("203.0.113.6", None, T0 + 2)
 
 
 def test_new_password_voids_old_cookies(gate):

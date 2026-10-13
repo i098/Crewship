@@ -27,7 +27,7 @@ The persistent desktop browser uses exactly one profile, `~/.vnc-chrome-profile`
 
 ## Remote access
 
-Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding. To open the host's web pages from a browser, use the [password gateway](gateway.md), which is on by default: one password, then a Cloudflare Quick Tunnel to the loopback ports. The gateway opens no port on the host. SSH port forwarding and Tailscale are the other ways in. Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
+Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding. To open the host's web pages from a browser, use the [password gateway](gateway.md), which is on by default for a new host: one password, then a Cloudflare Quick Tunnel to the loopback ports. The gateway opens no port on the host. SSH port forwarding and Tailscale are the other ways in. Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
 
 Loopback is shared by local accounts. The optional desktop therefore requires an operator-created private VNC credential in addition to SSH transport. It never offers unauthenticated RFB access. Its service will not kill another desktop to claim an occupied display.
 
