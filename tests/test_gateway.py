@@ -129,7 +129,6 @@ def test_password_checks_run_at_most_two_at_a_time(gate):
     assert peak[0] == 2
 
 
-
 def test_old_failures_are_forgotten(gate):
     ip = "203.0.113.5"
     for i in range(gw.MAX_FAILURES - 1):
@@ -154,6 +153,14 @@ def test_revoke_all_signs_out_addresses_and_cookies(gate):
     assert not gate.admitted("203.0.113.5", None, T0 + 2)
     assert not gate.admitted("198.51.100.9", cookie, T0 + 2)
     assert gate.login("203.0.113.5", "right-pass", T0 + 3)
+
+
+def test_sign_out_of_one_address_keeps_the_others(gate):
+    gate.login("203.0.113.5", "right-pass", T0)
+    gate.login("203.0.113.6", "right-pass", T0)
+    gate.revoke(T0 + 1, "203.0.113.5")
+    assert not gate.admitted("203.0.113.5", None, T0 + 2)
+    assert gate.admitted("203.0.113.6", None, T0 + 2)
 
 
 def test_new_password_voids_old_cookies(gate):

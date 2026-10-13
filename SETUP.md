@@ -46,7 +46,7 @@ The installer installs the OS packages, downloads and verifies the latest releas
 
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
-- STOP: the installer's last line shows the web address ([Web pages from anywhere](docs/gateway.md)). Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
+- STOP: the installer's output ends with the web address ([Web pages from anywhere](docs/gateway.md)). Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
 - Then run `cd ~/Crewship` for every later step.
 
 ## 1. Sign in to GitHub

@@ -232,9 +232,13 @@ main() {
   ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
-  local url
-  if url=$("$HOME/.local/bin/crewship-gateway" url 2>/dev/null); then
-    echo "Open this host's web pages at $url; \`crewship-gateway url\` prints the URL again. The first password is in ~/.config/crewship/gateway/initial-password (mode 600): read it yourself over SSH, or run \`crewship-gateway password\` in your own terminal for a new one."
+  local url home
+  if url=$(blueprint/maintenance/crewship-gateway url 2>/dev/null); then
+    echo "Open this host's web pages at $url; \`crewship-gateway url\` prints the URL again."
+    home=$(python3 -c 'import yaml; print(yaml.safe_load(open(".local/host.yml"))["crewship"]["home"])')
+    if [ -f "$home/.config/crewship/gateway/initial-password" ]; then
+      echo "The first gateway password is in $home/.config/crewship/gateway/initial-password (mode 600): read it yourself over SSH, then delete the file. \`crewship-gateway password\` in your own terminal sets a new one."
+    fi
   fi
 }
 
