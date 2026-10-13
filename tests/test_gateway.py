@@ -298,6 +298,7 @@ def test_root_absolute_asset_follows_the_last_port_cookie(stack):
     response, _ = request("GET", f"/{port}/", page)
     remembered = [c for c in response.headers.get_all("Set-Cookie") if c.startswith(gw.PORT_COOKIE + "=")]
     assert remembered and all(a in remembered[0] for a in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/"))
+    assert f"Max-Age={DAY}" in remembered[0]
     jar = {**ip, "Cookie": f"app=1; {remembered[0].split(';')[0]}"}
     response, body = request("GET", "/src/main.ts", {**jar, "Referer": "http://127.0.0.1/src/app.ts"})
     assert (response.status, body, seen[-1]["path"]) == (200, "ok", "/src/main.ts")
