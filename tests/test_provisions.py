@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import runpy
+import ssl
 import subprocess
 import tarfile
 import zipfile
@@ -173,6 +174,25 @@ def test_download_never_retries_a_client_error_and_gives_up_after_three_attempts
     with pytest.raises(installer.urllib.error.HTTPError):
         installer.download("https://downloads.example.test/tool", "0" * 64, tmp_path / "download")
     assert len(seen) == calls
+
+
+def test_fetch_retries_a_tls_eof_and_keeps_a_client_error_final(monkeypatch):
+    replies = [ssl.SSLEOFError("EOF"), installer.urllib.error.URLError("reset"), Download(b"ok")]
+
+    def urlopen(*args, **kwargs):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(installer.time, "sleep", lambda seconds: None)
+    assert installer.fetch("https://nodejs.org/dist/index.json", "node release") == b"ok"
+
+    replies[:] = [http_error(403)]
+    with pytest.raises(ValueError, match="HTTP 403"):
+        installer.fetch("https://api.github.com/repos/x/y/releases/latest", "x release")
+    assert replies == []
 
 
 # What each fake GitHub release publishes for linux-x86_64: tag and asset name.

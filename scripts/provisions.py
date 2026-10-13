@@ -179,16 +179,23 @@ def fetch(url, what):
     token = os.environ.get("GITHUB_TOKEN")
     github = url.startswith("https://api.github.com/")
     headers = {"Authorization": f"Bearer {token}"} if token and github else {}
-    try:
-        with urllib.request.urlopen(
-            urllib.request.Request(url, headers=headers), timeout=60
-        ) as response:
-            return response.read()
-    except urllib.error.HTTPError as error:
-        raise ValueError(
-            f"cannot resolve the latest {what} (HTTP {error.code}); "
-            "if rate limited, set GITHUB_TOKEN and re-run"
-        ) from None
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(
+                urllib.request.Request(url, headers=headers), timeout=60
+            ) as response:
+                return response.read()
+        except OSError as error:
+            # Connection resets, TLS EOFs, timeouts and 5xx are transient; a 4xx is final.
+            status = getattr(error, "code", 500)
+            if status < 500 or attempt == DOWNLOAD_ATTEMPTS:
+                if isinstance(error, urllib.error.HTTPError):
+                    raise ValueError(
+                        f"cannot resolve the latest {what} (HTTP {error.code}); "
+                        "if rate limited, set GITHUB_TOKEN and re-run"
+                    ) from None
+                raise
+            time.sleep(attempt)
 
 
 def verified(tool, version, key, name, url, checksum, binaries):
