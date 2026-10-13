@@ -131,7 +131,7 @@ export function follow(desk: InstagramDesk, messages: string, sent: string, offs
     const s = readNew(sent, offsets.sent);
     const rows = [...m.rows.map((r) => ["messages", r] as const), ...s.rows.map((r) => ["sent", r] as const)].sort((a, b) => a[1].at - b[1].at);
     for (const [source, row] of rows) desk.feed(source, row, Date.now() / 1000 - row.at <= FRESH_S);
-    if (rows.length || m.next !== offsets.messages || s.next !== offsets.sent) {
+    if (m.next !== offsets.messages || s.next !== offsets.sent || !existsSync(offsetsFile)) {
       offsets = { messages: m.next, sent: s.next };
       writeFileSync(`${offsetsFile}.tmp`, JSON.stringify(offsets), { mode: 0o600 });
       renameSync(`${offsetsFile}.tmp`, offsetsFile);
