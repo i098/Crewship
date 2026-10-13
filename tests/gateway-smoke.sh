@@ -53,7 +53,11 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   for _ in $(seq 60); do public=$(crewship-gateway url 2>/dev/null) && break; sleep 1; done
   [ -n "$public" ] || { cat /tmp/tunnel.log; exit 1; }
   echo "tunnel: $public"
-  code() { curl -s -o /tmp/body -w "%{http_code}" "$@" || true; }
+  # Resolve the new name once: resolvers that cached its NXDOMAIN fail a later lookup now and then.
+  host=${public#https://}; ip=
+  for _ in $(seq 60); do ip=$(getent ahostsv4 "$host" | sed -n "1s/ .*//p") && [ -n "$ip" ] && break; sleep 1; done
+  [ -n "$ip" ]
+  code() { curl -s --resolve "$host:443:$ip" -o /tmp/body -w "%{http_code}" "$@" || true; }
   # A new trycloudflare name can fail now and then for its first seconds: wait for three answers in a row.
   ok=0
   for _ in $(seq 90); do

@@ -21,7 +21,7 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
    A dev server such as Vite or Next.js loads its files from root paths, for example `/@vite/client` or `/_next/static/…`.
    The gateway sends such a path to the port of the page that asked for it. It takes the port from the `Referer` header, or else from the `__Host-crewship-port` cookie, which lasts as long as the sign-in (24 hours by default).
    Only a page that you open in a tab sets this cookie; the files and requests of a page never change it.
-   The path `/` stays the start page unless the `Referer` names a port.
+   The path `/` stays the start page unless the `Referer` names a port or the request opens a WebSocket.
    With two different dev apps of this kind open in two tabs at once, reload the tab you switch to.
 
 After the right password, your IP address is allowed for 24 hours.
