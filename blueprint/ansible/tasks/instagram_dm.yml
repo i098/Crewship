@@ -1,8 +1,8 @@
 ---
-# Instagram DM alerts (docs/architecture.md#instagram-dm-alerts): the skill script goes to
-# ~/.local/bin, a user timer polls with it, and a thin check in the Firstmate state directory is
-# bound to its bytes with bin/fm-check-register.sh. The session file is not written here: log in
-# once with `instagram_dm.py login`. The unit stays idle until that file exists.
+# Instagram DM alerts (docs/architecture.md#instagram-dm-alerts): the script and fm-insta-reply go
+# to ~/.local/bin; a user service listens on Instagram's realtime channel and a user timer polls as
+# a backstop. Both file new DMs with the Firstmate inbox. The session file is not written here: log
+# in once with `instagram_dm.py login`. The units stay idle until that file exists.
 
 - name: Ensure the Instagram DM directories
   ansible.builtin.file:
@@ -13,6 +13,7 @@
     - "{{ crewship_local_bin }}"
     - "{{ crewship_firstmate_dir }}/state"
     - "{{ crewship_user_units }}/timers.target.wants"
+    - "{{ crewship_user_units }}/default.target.wants"
 
 - name: Install the Instagram DM script
   ansible.builtin.copy:
@@ -21,12 +22,18 @@
     mode: "0755"
     remote_src: true
 
-- name: Render the Instagram DM poll unit and timer
+- name: Install the Instagram DM reply command
+  ansible.builtin.template:
+    src: fm-insta-reply.j2
+    dest: "{{ crewship_instagram_dm_reply }}"
+    mode: "0755"
+
+- name: Render the Instagram DM listener, poll unit and timer
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "{{ crewship_user_units }}/{{ item }}"
     mode: "0644"
-  loop: [instagram-dm-poll.service, instagram-dm-poll.timer]
+  loop: [instagram-dm-listen.service, instagram-dm-poll.service, instagram-dm-poll.timer]
   notify: reload user systemd
 
 - name: Statically enable the Instagram DM poll timer
@@ -37,43 +44,20 @@
     force: true
     follow: false
 
-- name: Enable and start the Instagram DM poll timer
+- name: Statically enable the Instagram DM listener
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-dm-listen.service"
+    dest: "{{ crewship_user_units }}/default.target.wants/instagram-dm-listen.service"
+    state: link
+    force: true
+    follow: false
+
+- name: Enable and start the Instagram DM listener and poll timer
   ansible.builtin.systemd_service:
     scope: user
-    name: instagram-dm-poll.timer
+    name: "{{ item }}"
     enabled: true
     state: started
+  loop: [instagram-dm-listen.service, instagram-dm-poll.timer]
   environment: "{{ crewship_user_systemd_env }}"
   when: crewship_manage_services | bool
-
-- name: Write the Instagram DM check
-  ansible.builtin.template:
-    src: instagram-dms.check.sh.j2
-    dest: "{{ crewship_instagram_dm_check }}"
-    mode: "0700"
-
-# Firstmate runs only checks whose bytes match their trust file, so a changed check is registered again.
-- name: Read the Instagram DM check registration
-  ansible.builtin.command:
-    argv:
-      - bash
-      - -c
-      - '. bin/fm-pr-lib.sh && . bin/fm-check-lib.sh && fm_custom_check_registered state "$1"'
-      - _
-      - instagram-dms
-    chdir: "{{ crewship_firstmate_dir }}"
-  register: crewship_instagram_dm_trust
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-- name: Register the Instagram DM check with Firstmate
-  ansible.builtin.command:
-    argv: [bin/fm-check-register.sh, instagram-dms]
-    chdir: "{{ crewship_firstmate_dir }}"
-  environment:
-    FM_HOME: "{{ crewship_firstmate_dir }}"
-  changed_when: true
-  when:
-    - not ansible_check_mode
-    - crewship_instagram_dm_trust.rc != 0

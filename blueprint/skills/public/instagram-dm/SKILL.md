@@ -11,7 +11,7 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
 
 ## Rules
 
-- Read-only. Do not send, reply or unsend. The only write is accepting a message request from the operator's own account (`poll`).
+- Send only through `fm-insta-reply`, and only to the operator. Do not send to anyone else, and do not unsend. The one other write is accepting a message request from the operator's own account (`poll`) and the read receipt it sends.
 - Read the credentials only from the env vars `INSTAGRAM_FIRSTMATE_USERNAME` and `INSTAGRAM_FIRSTMATE_PASSWORD`. Never print them, and never write them to a file or a message. The session file holds a login token: keep it mode 600 and never print it.
 - Log in once, then reuse the session file. Each fresh login can raise a checkpoint. The script logs in only when there is no session or Instagram rejects it.
 - Rate limits: Instagram flags fast, repeated calls. Do not poll more often than every two minutes. On a failure the poller backs off (2 min, 4 min, ... up to 30 min). On a rate-limit or challenge error, stop and tell the operator. Do not retry in a loop.
@@ -22,7 +22,7 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
 1. Log in once per host: `instagram_dm.py login`. Instagram may ask for a code. The script takes only the email option and refuses SMS. In a terminal it asks for the code. Without one, set `INSTAGRAM_DM_CODE_CMD` to a shell command that prints the newest 6-digit code from the account's mail; it runs every 6 s for 3 min, with `INSTAGRAM_DM_CODE_SINCE` set to the epoch second of the login start so it can ignore older mail. The session is saved to `INSTAGRAM_DM_SESSION` (default `~/.config/crewship/instagram/session.json`, mode 600).
 2. List the threads: `instagram_dm.py inbox`. A message request from a new sender shows as `request` and stays hidden from the inbox until accepted.
 3. List the reel links of one thread: `instagram_dm.py reels THREAD_ID` (add `--mark-seen` only after you handled the thread). Every link prints in the `https://www.instagram.com/reel/CODE/` form, whether the DM held a `/p/`, `/reel/`, `/reels/` or `/tv/` link or a shared reel or post. A `/share/...` link holds no shortcode: it prints unchanged. Open it with `curl -sIL` and use the final URL.
-4. To wake an agent on every new DM, run the poller on a timer (see below).
+4. To wake an agent on every new DM, run `listen` as a service and `poll` on a timer (see below).
 5. Watch each reel with the video-watch path (yt-dlp on the `/reel/` URL):
    ```bash
    cache=~/.cache/instagram-dm; mkdir -p "$cache"; find "$cache" -type f -mtime +0 -delete
@@ -30,13 +30,30 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
    ```
    If yt-dlp needs a login, add `--cookies-from-browser` only with the operator's approval. Delete the file when you finish.
 
-## Poll for new DMs
+## Wake on new DMs, and reply
 
-`instagram_dm.py poll` reads the inbox and the message requests, accepts a request only from the 1:1 thread of `INSTAGRAM_DM_OPERATOR` (his numeric user id; every other sender is ignored and never accepted), and appends one JSON line per new message of the operator to `INSTAGRAM_DM_LOG`: time, thread, message id, sender, type, and the `/reel/` URL or the text. It keeps the seen message ids in `INSTAGRAM_DM_DIR/poll.json`, so no message is logged twice, and it downloads no media. On any error it records the failure and refuses to call Instagram again until the backoff has passed.
+`instagram_dm.py listen` keeps Instagram's realtime channel open (a service that reconnects on its own). Each message event runs `poll`, so a DM reaches the agent in seconds. A timer that runs `poll` every few minutes is the backstop for a missed event. `poll` reads the inbox and the message requests and accepts a request only from the 1:1 thread of `INSTAGRAM_DM_OPERATOR` (his numeric user id; every other sender is ignored and never accepted). For each new message of the operator it:
 
-`instagram_dm.py wake` reads the log from its saved offset and prints one line per new message (`instagram dm from SENDER: URL or text`), nothing when there is no news. Use it as a check for an agent runtime that wakes on a script's output.
+1. runs `INSTAGRAM_DM_NOTIFY --request-id ig-ID -- "[Instagram DM from NAME; answer with fm-insta-reply] URL or text"` (for Firstmate, `fm-inbox.sh note`, which wakes main within about a second; the request id makes a repeat harmless),
+2. appends one JSON line (time, thread, message id, sender, type, `/reel/` URL or text) to `INSTAGRAM_DM_LOG`,
+3. marks the message seen, which is the read receipt.
 
-Crewship wires both on a `firstmate` host when `crewship_instagram_dm_operator` is set: see [Instagram DM alerts](../../../../docs/architecture.md#instagram-dm-alerts).
+It keeps the seen message ids in `INSTAGRAM_DM_DIR/poll.json`, so nothing repeats, and downloads no media. If the hand-over fails, nothing is logged and the next poll retries.
+
+**When a wake says `[Instagram DM from NAME; answer with fm-insta-reply]`, answer on Instagram with `fm-insta-reply`.** Follow the same rules as for iMessage: short plain texts, no reaction spam.
+
+```bash
+fm-insta-reply "Got it, watching now."          # a text (at most 500 characters, whitespace collapsed)
+fm-insta-reply --react "❤️"                      # react to his latest message
+fm-insta-reply "On it." --typing                # show typing, then send
+fm-insta-reply "text" --thread THREAD_ID        # a given thread; it must hold the operator alone
+```
+
+`--typing` publishes a typing indicator over the realtime channel for a few seconds (longer for a longer text) before it sends. The call returns without error when the broker takes the indicator. Instagram does not report whether the other side saw it.
+
+Every send waits 3 s after the last one. After an Instagram error, `poll`, `listen` and `reply` share one exponential backoff (2, 4, 8 ... times the base, up to 30 min) and refuse to call Instagram until it passes. A challenge, a feedback block, a suspension or a bad password halts them instead: one note goes to the agent, nothing calls Instagram again, and the operator fixes the account and runs `instagram_dm.py resume`. Do not log in again by hand to get past a halt.
+
+Crewship wires all of this on a `firstmate` host when `crewship_instagram_dm_operator` is set: see [Instagram DM alerts](../../../../docs/architecture.md#instagram-dm-alerts).
 
 ## Install
 

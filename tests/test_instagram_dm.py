@@ -135,60 +135,162 @@ def test_backoff_doubles_and_caps(fails, wait):
     assert ig.backoff(fails, 120, 1800) == wait
 
 
-def run_poll(monkeypatch, tmp_path, now, client):
+class ChallengeError(Exception):
+    """Same class name as instagrapi's: the poller halts on it by name."""
+
+
+class Fake:
+    """A logged-in client with two threads: the operator's 1:1 and a stranger's."""
+
+    def __init__(self, messages=()):
+        self.user_id = ME
+        self.threads = [thread("7", list(messages))]
+        self.seen, self.sent, self.reacted = [], [], []
+
+    def direct_threads(self, amount):
+        return self.threads
+
+    def direct_pending_inbox(self, amount):
+        return []
+
+    def direct_pending_approve(self, thread_id):
+        return True
+
+    def direct_message_seen(self, thread_id, message_id):
+        self.seen.append((thread_id, message_id))
+
+    def direct_thread(self, thread_id):
+        return next(t for t in self.threads if t.id == str(thread_id))
+
+    def direct_send(self, text, thread_ids):
+        self.sent.append((text, thread_ids))
+
+    def direct_send_reaction(self, thread_id, message_id, emoji):
+        self.reacted.append((thread_id, message_id, emoji))
+
+
+@pytest.fixture
+def host(monkeypatch, tmp_path):
+    """Env for one host: state dir, operator, and a notify command that records its arguments."""
+    notifier = tmp_path / "notify.py"
+    notifier.write_text(
+        "import json, sys, os\n"
+        "if os.path.exists(sys.argv[0] + '.fail'): sys.exit(1)\n"
+        "open(sys.argv[0] + '.out', 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+    )
     monkeypatch.setenv("INSTAGRAM_DM_DIR", str(tmp_path))
     monkeypatch.setenv("INSTAGRAM_DM_OPERATOR", OP)
-    monkeypatch.setattr(ig, "client", client)
+    monkeypatch.setenv("INSTAGRAM_DM_NOTIFY", f"{sys.executable} {notifier}")
+    monkeypatch.setattr(ig.time, "sleep", lambda s: None)
+    return tmp_path
+
+
+def run(monkeypatch, fn, now, *args):
     monkeypatch.setattr(ig.time, "time", lambda: now)
     try:
-        ig.poll()
+        fn(*args)
     except SystemExit as e:
         return str(e)
 
 
-def test_failed_polls_back_off_then_recover_and_never_log_twice(monkeypatch, tmp_path):
+def notified(host):
+    out = host / "notify.py.out"
+    return [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
+
+
+def logged(host):
+    log = host / "messages.jsonl"
+    return [json.loads(line)["id"] for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_failed_polls_back_off_then_recover_and_never_log_twice(monkeypatch, host):
     calls = []
 
     def broken():
         calls.append(1)
         raise RuntimeError("rate limited")
 
-    assert "next try in 120s" in run_poll(monkeypatch, tmp_path, 1000, broken)
-    assert (
-        run_poll(monkeypatch, tmp_path, 1100, broken) is None
-    )  # inside the wait: no request at all
+    monkeypatch.setattr(ig, "client", broken)
+    assert "next try in 120s" in run(monkeypatch, ig.poll, 1000)
+    assert run(monkeypatch, ig.poll, 1100) is None  # inside the wait: no request at all
     assert len(calls) == 1
-    assert "next try in 240s" in run_poll(monkeypatch, tmp_path, 1120, broken)
+    assert "next try in 240s" in run(monkeypatch, ig.poll, 1120)
 
-    threads = [thread("T", [msg("m1", text="hi")])]
-    cl = NS(
-        user_id=ME,
-        direct_threads=lambda amount: threads,
-        direct_pending_inbox=lambda amount: [],
-        direct_pending_approve=lambda i: True,
+    fake = Fake([msg("m1", text="hi")])
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    assert run(monkeypatch, ig.poll, 1400) is None
+    assert run(monkeypatch, ig.poll, 1500) is None
+    assert logged(host) == ["m1"]
+    assert json.loads((host / "poll.json").read_text())["fails"] == 0
+
+
+def test_new_message_is_handed_to_the_agent_once_and_marked_seen(monkeypatch, host):
+    fake = Fake(
+        [msg("m2", code="C2", at=20), msg("m1", text="hello", at=10), msg("m0", text="x", at=5)]
     )
-    assert run_poll(monkeypatch, tmp_path, 1400, lambda: cl) is None
-    assert run_poll(monkeypatch, tmp_path, 1500, lambda: cl) is None
-    rows = [json.loads(line) for line in (tmp_path / "messages.jsonl").read_text().splitlines()]
-    assert [r["id"] for r in rows] == ["m1"]
-    assert json.loads((tmp_path / "poll.json").read_text())["fails"] == 0
-
-
-def test_wake_prints_each_line_once_and_waits_for_a_complete_line(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("INSTAGRAM_DM_DIR", str(tmp_path))
-    log = tmp_path / "messages.jsonl"
-    ig.wake()  # no log: silent
-    log.write_text(
-        json.dumps({"sender": "op", "type": "clip", "url": "https://www.instagram.com/reel/C2/"})
-        + "\n"
-        + json.dumps({"sender": "op", "type": "text", "text": "two\nlines"})
-        + "\n"
-        + '{"sender": "op", "ty'
-    )
-    ig.wake()
-    assert capsys.readouterr().out.splitlines() == [
-        "instagram dm from op: https://www.instagram.com/reel/C2/",
-        "instagram dm from op: two lines",
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    for now in (1000, 1001):
+        assert run(monkeypatch, ig.poll, now) is None
+    assert notified(host) == [
+        ["--request-id", "ig-m0", "--", "[Instagram DM from op; answer with fm-insta-reply] x"],
+        [
+            "--request-id",
+            "ig-m1",
+            "--",
+            "[Instagram DM from op; answer with fm-insta-reply] hello",
+        ],
+        [
+            "--request-id",
+            "ig-m2",
+            "--",
+            "[Instagram DM from op; answer with fm-insta-reply] https://www.instagram.com/reel/C2/",
+        ],
     ]
-    ig.wake()
-    assert capsys.readouterr().out == ""
+    assert fake.seen == [("7", "m2")]  # one receipt per thread, for the newest message
+
+
+def test_failed_hand_over_logs_nothing_and_is_retried(monkeypatch, host):
+    fake = Fake([msg("m1", text="hi")])
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    (host / "notify.py.fail").touch()
+    assert "failed" in run(monkeypatch, ig.poll, 1000)
+    assert logged(host) == [] and fake.seen == []
+    (host / "notify.py.fail").unlink()
+    assert run(monkeypatch, ig.poll, 2000) is None  # past the backoff
+    assert logged(host) == ["m1"] and len(notified(host)) == 1
+
+
+def test_a_flagged_account_halts_everything_until_resume(monkeypatch, host):
+    def flagged():
+        raise ChallengeError("checkpoint")
+
+    monkeypatch.setattr(ig, "client", flagged)
+    assert "halted" in run(monkeypatch, ig.poll, 1000)
+    assert "halted" in notified(host)[0][-1]  # the agent gets one notice
+
+    fake = Fake([msg("m1", text="hi")])
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    assert run(monkeypatch, ig.poll, 9999) is None
+    assert logged(host) == []  # nothing called Instagram
+    assert "not sending: halted" in run(monkeypatch, ig.reply, 9999, "hi", None, None, False)
+    ig.resume()
+    assert run(monkeypatch, ig.poll, 10000) is None
+    assert logged(host) == ["m1"]
+
+
+def test_reply_sends_one_short_plain_text_to_the_operator_only(monkeypatch, host):
+    fake = Fake([msg("m1", text="hi")])
+    fake.threads.append(thread("9", [], user="stranger", pk=9))
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    assert run(monkeypatch, ig.reply, 1000, "ok\n  done", None, None, False) is None
+    assert fake.sent == [("ok done", [7])]
+    assert "keep it under" in run(monkeypatch, ig.reply, 1010, "x" * 501, None, None, False)
+    assert "refusing" in run(monkeypatch, ig.reply, 1020, "hi", "9", None, False)
+    assert len(fake.sent) == 1
+
+
+def test_reply_reacts_to_the_operators_latest_message(monkeypatch, host):
+    fake = Fake([msg("mine", user=ME, sent=True, at=30), msg("m2", at=20), msg("m1", at=10)])
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    assert run(monkeypatch, ig.reply, 1000, None, None, "\u2764", False) is None
+    assert fake.reacted == [("7", "m2", "\u2764")] and fake.sent == []

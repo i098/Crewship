@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
-"""Read Instagram DMs with instagrapi, print shared reels as /reel/ URLs, and poll for new DMs.
+"""Read Instagram DMs with instagrapi, hand new ones to an agent at once, and reply from the agent account.
 
 Run it with `uv run --quiet --with instagrapi python instagram_dm.py ...` (instagrapi is imported only when a command needs it).
 
 instagram_dm.py login                # one login, then the session file is reused; needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
 instagram_dm.py inbox [--limit N]    # thread id, "request" for a message request, title
 instagram_dm.py reels THREAD [--limit N] [--mark-seen]   # one normalised reel URL per line
-instagram_dm.py poll                 # append one JSON line per NEW message to the log (for a timer)
-instagram_dm.py wake                 # print one wake line per log line not yet printed (a Firstmate check)
+instagram_dm.py poll                 # read once: log and hand over every NEW message of the operator, mark it seen
+instagram_dm.py listen               # keep Instagram's realtime channel open and run `poll` on each event (a service)
+instagram_dm.py reply [TEXT] [--thread ID] [--react EMOJI] [--typing]   # DM the operator
+instagram_dm.py resume               # clear a halt (see below) after you fixed the account
 
 Settings come from the environment:
   INSTAGRAM_DM_SESSION    session file (default ~/.config/crewship/instagram/session.json)
-  INSTAGRAM_DM_DIR        poll state and wake offset (default ~/.local/state/instagram-dm)
-  INSTAGRAM_DM_LOG        JSON lines the poller appends and the wake check reads (default $INSTAGRAM_DM_DIR/messages.jsonl)
-  INSTAGRAM_DM_OPERATOR   numeric user id of the operator: his message requests are accepted and only his messages are logged; empty does neither
+  INSTAGRAM_DM_DIR        state: seen ids, failure count, lock (default ~/.local/state/instagram-dm)
+  INSTAGRAM_DM_LOG        JSON lines of every new message (default $INSTAGRAM_DM_DIR/messages.jsonl)
+  INSTAGRAM_DM_OPERATOR   numeric user id of the operator: his message requests are accepted, only his messages are
+                          logged, and `reply` writes only to him; empty does none of these
+  INSTAGRAM_DM_NOTIFY     command that takes `--request-id ID -- TEXT` and tells the agent (for Firstmate:
+                          `<home>/bin/fm-inbox.sh note`); its request id makes a repeat harmless. Empty: log only
   INSTAGRAM_DM_CODE_CMD   shell command that prints the newest 6-digit Instagram email code (see SKILL.md)
-  INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failed poll (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
-Read-only except `poll`, which accepts message requests from the operator. Nothing is sent, and no media is downloaded.
+  INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failure (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
+A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). A challenge, a feedback
+block, a suspension or a bad password halts everything instead: one notice goes to the agent and nothing calls
+Instagram again until `resume`. Nothing but `reply` sends anything, and no media is downloaded.
 """
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 # Any post link (post, reel, tv, or with a username prefix). "Always assume it is a reel."
@@ -35,6 +45,11 @@ LINK = re.compile(
 # A /share/ link holds no shortcode: it only resolves by redirect, so it passes through unchanged.
 SHARE = re.compile(r"https?://(?:www\.)?instagram\.com/share/[\w/-]+")
 SEEN_KEEP = 5000
+REPLY_MAX = 500  # characters: the operator asked for short plain texts
+REPLY_GAP = 3  # seconds between two sends
+REALTIME_GAP = 5  # seconds between two polls caused by realtime events
+# Exception class names that mean the account is flagged: stop, never retry.
+HALT = {"ChallengeError", "FeedbackRequired", "AccountSuspended", "BadPassword", "BadCredentials"}
 
 
 def conf(name, default=""):
@@ -105,38 +120,251 @@ def collect(inbox, pending, me, operator, seen):
     return accept, sorted(rows, key=lambda r: r["at"])
 
 
-def wake_lines(chunk):
-    """One short wake line per complete log line in chunk (bytes); lines that are not JSON are skipped."""
-    out = []
-    for raw in chunk.splitlines():
-        try:
-            row = json.loads(raw)
-        except ValueError:
-            continue
-        what = (
-            row.get("url") or " ".join(row.get("text", "").split())[:200] or f"[{row.get('type')}]"
+def note_text(row):
+    """The one line the agent gets for a log row: sender, then the reel URL or the text."""
+    what = row.get("url") or " ".join(row.get("text", "").split())[:300] or f"[{row.get('type')}]"
+    return f"[Instagram DM from {row['sender']}; answer with fm-insta-reply] {what}"
+
+
+def notify(rows):
+    """Hand each row to INSTAGRAM_DM_NOTIFY. The request id makes a retry after a later failure harmless."""
+    cmd = conf("INSTAGRAM_DM_NOTIFY").split()
+    for row in rows if cmd else ():
+        subprocess.run(
+            [*cmd, "--request-id", f"ig-{row['id']}", "--", note_text(row)],
+            check=True,
+            capture_output=True,
         )
-        out.append(f"instagram dm from {row['sender']}: {what}")
-    return out
 
 
-def wake():
-    """Print the wake lines for log lines past the saved offset. A missing offset starts at 0: the log is ours alone."""
+@contextmanager
+def locked():
+    """Hold the state lock: poll, listen and reply never run their Instagram calls at the same time."""
+    state_dir().mkdir(parents=True, exist_ok=True)
+    with open(state_dir() / "lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def load_state():
+    file = state_dir() / "poll.json"
+    return {
+        "seen": [],
+        "fails": 0,
+        "next": 0,
+        "sent": 0,
+        **(json.loads(file.read_text()) if file.is_file() else {}),
+    }
+
+
+def save_state(state):
+    (state_dir() / "poll.json").write_text(json.dumps(state))
+
+
+def fail(state, e, now):
+    """Record a failure in state and return its one-line report. A flagged account halts; anything else backs off."""
+    secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
+    what = f"{type(e).__name__}: {str(e).replace(secret, '***') if secret else e}"[:300]
+    if any(c.__name__ in HALT for c in type(e).__mro__):
+        state["halted"] = what
+        with contextlib.suppress(Exception):
+            notify(
+                [
+                    {
+                        "id": f"halt-{int(now)}",
+                        "sender": "poller",
+                        "text": f"halted, run `instagram_dm.py resume` after you fix the account: {what}",
+                    }
+                ]
+            )
+        return f"halted ({what})"
+    state["fails"] += 1
+    wait = backoff(
+        state["fails"],
+        int(conf("INSTAGRAM_DM_INTERVAL", "120")),
+        int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
+    )
+    state["next"] = now + wait
+    return f"failed ({what}); next try in {wait}s"
+
+
+def blocked(state, now):
+    """Why Instagram must not be called now, or None."""
+    if state.get("halted"):
+        return f"halted ({state['halted']}); run `instagram_dm.py resume` after you fix the account"
+    if now < state["next"]:
+        return f"backing off for {int(state['next'] - now)}s more"
+    return None
+
+
+def poll_once(cl, state):
+    """Read the inbox and the requests, accept the operator's, hand over and log new messages, mark them seen."""
     log = Path(conf("INSTAGRAM_DM_LOG", str(state_dir() / "messages.jsonl")))
-    offset_file = state_dir() / "wake.offset"
-    if not log.is_file():
-        return
-    off = int(offset_file.read_text()) if offset_file.is_file() else 0
-    data = log.read_bytes()
-    if len(data) < off:  # log was truncated or rotated
-        off = 0
-    end = data.rfind(b"\n") + 1  # a line the poller is still writing waits for the next run
-    if end <= off:
-        return
-    offset_file.parent.mkdir(parents=True, exist_ok=True)
-    offset_file.write_text(str(end))
-    for line in wake_lines(data[off:end]):
-        print(line)
+    accept, rows = collect(
+        cl.direct_threads(amount=20),
+        cl.direct_pending_inbox(amount=20),
+        cl.user_id,
+        conf("INSTAGRAM_DM_OPERATOR"),
+        set(state["seen"]),
+    )
+    for thread_id in accept:
+        cl.direct_pending_approve(thread_id)
+    notify(rows)
+    if rows:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in rows))
+    state.update(seen=(state["seen"] + [r["id"] for r in rows])[-SEEN_KEEP:], fails=0, next=0)
+    save_state(state)  # before the receipts: a failure there must not log the rows twice
+    newest = {r["thread"]: r["id"] for r in rows}  # rows are oldest first
+    for thread_id, message_id in newest.items():
+        with contextlib.suppress(Exception):  # a read receipt is best effort
+            cl.direct_message_seen(thread_id, message_id)
+
+
+def sync(get_client):
+    """One locked poll with the shared backoff. Returns the failure report, or None."""
+    with locked():
+        state, now = load_state(), time.time()
+        if blocked(state, now):
+            return None
+        try:
+            poll_once(get_client(), state)
+            return None
+        except Exception as e:  # any failure backs off; nothing retries by itself
+            err = fail(state, e, now)
+            save_state(state)
+            return err
+
+
+def poll():
+    if err := sync(client):
+        sys.exit(f"poll {err}")
+
+
+def listen():
+    """Keep the realtime channel open; every message event runs a poll. The channel is a doorbell only:
+    the HTTP poll supplies the data, so the private event format is never parsed. A dead channel reconnects
+    with backoff. Return when the account is halted."""
+    fails = 0
+    while True:
+        cl = None
+        try:
+            cl = client()
+            events = []
+            cl.realtime_on("message", events.append)
+            cl.realtime_on("direct", events.append)
+            rt = cl.realtime_connect()
+            rt.direct_subscribe()
+            sync(lambda: cl)  # what arrived while the channel was down
+            fails, last = 0, time.time()
+            while True:
+                try:
+                    cl.realtime_read_once()
+                except TimeoutError:  # idle: the broker must still answer a ping
+                    if not rt.ping():
+                        raise ConnectionError("realtime ping unanswered")
+                if events:
+                    time.sleep(max(0, REALTIME_GAP - (time.time() - last)))
+                    events.clear()
+                    last = time.time()
+                    if err := sync(lambda: cl):
+                        print(f"poll {err}", flush=True)
+                if load_state().get("halted"):
+                    return
+        except Exception as e:
+            fails += 1
+            wait = backoff(
+                fails,
+                int(conf("INSTAGRAM_DM_INTERVAL", "120")),
+                int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
+            )
+            print(f"realtime {type(e).__name__}: {str(e)[:200]}; reconnect in {wait}s", flush=True)
+            if cl:
+                with contextlib.suppress(Exception):
+                    cl.realtime_disconnect()
+            with locked():
+                state = load_state()
+                if any(c.__name__ in HALT for c in type(e).__mro__):
+                    fail(state, e, time.time())
+                    save_state(state)
+            if load_state().get("halted"):
+                return
+            time.sleep(wait)
+
+
+def resume():
+    with locked():
+        state = load_state()
+        state.update(halted=None, fails=0, next=0)
+        save_state(state)
+
+
+def reply(text, thread, emoji, typing):
+    """DM the operator: an optional typing indicator, an optional reaction to his latest message, an optional text."""
+    operator = conf("INSTAGRAM_DM_OPERATOR")
+    text = " ".join((text or "").split())
+    if not operator:
+        sys.exit("set INSTAGRAM_DM_OPERATOR")
+    if len(text) > REPLY_MAX:
+        sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
+    if not (text or emoji or typing):
+        sys.exit("nothing to send: give TEXT, --react or --typing")
+    with locked():
+        state, now = load_state(), time.time()
+        if why := blocked(state, now):
+            sys.exit(f"not sending: {why}")
+        try:
+            cl = client()
+            t = (
+                cl.direct_thread(int(thread))
+                if thread
+                else next(
+                    (
+                        t
+                        for t in cl.direct_threads(amount=20)
+                        if [str(u.pk) for u in t.users] == [operator]
+                    ),
+                    None,
+                )
+            )
+            if t is None or [str(u.pk) for u in t.users] != [operator]:
+                sys.exit("no thread with the operator alone: refusing to send")
+            pause = lambda: time.sleep(max(0, state["sent"] + REPLY_GAP - time.time()))  # noqa: E731
+            if typing:
+                rt = cl.realtime_connect()
+                rt.direct_indicate_activity(t.id, True)
+                time.sleep(
+                    min(4, 1 + len(text) / 25) if text else 3
+                )  # typing time grows with the text
+            if emoji:
+                latest = next(
+                    (
+                        m
+                        for m in t.messages
+                        if str(m.user_id) == operator and m.item_type != "action_log"
+                    ),
+                    None,
+                )
+                if latest is None:
+                    sys.exit("no message of the operator to react to")
+                pause()
+                cl.direct_send_reaction(t.id, latest.id, emoji)
+                state["sent"] = time.time()
+            if text:
+                pause()
+                cl.direct_send(text, thread_ids=[int(t.id)])
+                state["sent"] = time.time()
+        except SystemExit:
+            raise
+        except Exception as e:
+            err = fail(state, e, now)
+            save_state(state)
+            sys.exit(f"reply {err}")
+        finally:
+            with contextlib.suppress(Exception):
+                cl.realtime_disconnect()
+        save_state(state)
 
 
 def code_handler(username, choice):
@@ -198,59 +426,12 @@ def client():
     return cl
 
 
-def poll():
-    state_file = state_dir() / "poll.json"
-    state = json.loads(state_file.read_text()) if state_file.is_file() else {}
-    state = {"seen": [], "fails": 0, "next": 0, **state}
-    now = time.time()
-    if now < state["next"]:
-        return  # still backing off
-    log = Path(conf("INSTAGRAM_DM_LOG", str(state_dir() / "messages.jsonl")))
-    try:
-        cl = client()
-        seen = set(state["seen"])
-        accept, rows = collect(
-            cl.direct_threads(amount=20),
-            cl.direct_pending_inbox(amount=20),
-            cl.user_id,
-            conf("INSTAGRAM_DM_OPERATOR"),
-            seen,
-        )
-        for thread_id in accept:
-            cl.direct_pending_approve(thread_id)
-        if rows:
-            log.parent.mkdir(parents=True, exist_ok=True)
-            with log.open("a") as f:
-                f.write("".join(json.dumps(r) + "\n" for r in rows))
-        state.update(seen=(state["seen"] + [r["id"] for r in rows])[-SEEN_KEEP:], fails=0, next=0)
-        err = None
-    except Exception as e:  # any failure backs off; the loop never retries by itself
-        state["fails"] += 1
-        wait = backoff(
-            state["fails"],
-            int(conf("INSTAGRAM_DM_INTERVAL", "120")),
-            int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
-        )
-        state["next"] = now + wait
-        secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
-        err = (
-            f"poll failed ({type(e).__name__}: {str(e).replace(secret, '***') if secret else e})"[
-                :300
-            ]
-            + f"; next try in {wait}s"
-        )
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state))
-    if err:
-        sys.exit(err)
-
-
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "poll", "wake"):
+    for name in ("login", "poll", "listen", "resume"):
         sub.add_parser(name)
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--limit", type=int, default=20)
@@ -258,11 +439,20 @@ def main():
     reels.add_argument("thread")
     reels.add_argument("--limit", type=int, default=20)
     reels.add_argument("--mark-seen", action="store_true")
+    send = sub.add_parser("reply")
+    send.add_argument("text", nargs="?")
+    send.add_argument("--thread")
+    send.add_argument("--react", metavar="EMOJI")
+    send.add_argument("--typing", action="store_true")
     a = ap.parse_args()
-    if a.cmd == "wake":
-        wake()
-    elif a.cmd == "poll":
+    if a.cmd == "poll":
         poll()
+    elif a.cmd == "listen":
+        listen()
+    elif a.cmd == "resume":
+        resume()
+    elif a.cmd == "reply":
+        reply(a.text, a.thread, a.react, a.typing)
     elif a.cmd == "login":
         from instagrapi import Client
 
