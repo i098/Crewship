@@ -47,9 +47,11 @@ Run the controller offline against the grid before the browser, like the test do
 
 ```bash
 bunx playwright install chromium                       # once; bun installs playwright-core on first import
-for s in "0 4000" "4000 8000" "8000 12000" "12000 Infinity"; do set -- $s
-  CAPFROM=$1 CAPTO=$2 bun capture.mjs adapter.mjs frames > seg.$1.log 2>&1 &
-done; wait; mv frames/log.12000-Infinity.json frames/log.json
+pids=(); for s in "0 4000" "4000 8000" "8000 12000" "12000 Infinity"; do set -- $s
+  CAPFROM=$1 CAPTO=$2 bun capture.mjs adapter.mjs frames > seg.$1.log 2>&1 & pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || { echo "a capture segment failed: see seg.*.log"; exit 1; }; done
+mv frames/log.12000-Infinity.json frames/log.json
 ```
 
 `capture.mjs` puts the page on a virtual clock: `requestAnimationFrame` and `performance.now` advance 1/60 s per frame, so the capture is frame-exact. Make rendering deterministic in `init` (for example, single-threaded workers). Each segment replays the walk from frame 0 and saves only its own range of frames, so the segments run in parallel. Check that their logs agree, then take the last segment's `log.json`.

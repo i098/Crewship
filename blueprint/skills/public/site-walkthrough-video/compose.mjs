@@ -11,6 +11,8 @@ const [dir, out, audio, title] = process.argv.slice(2);
 const names = fs.readdirSync(dir).filter((f) => /^\d{5}\.png$/.test(f)).sort(), frames = names.length;
 if (!frames) throw new Error(`no NNNNN.png frames in ${dir}`);
 const first = +names[0].slice(0, 5);
+// ffmpeg stops quietly at the first missing frame, so a gap (a failed capture segment) must stop the compose
+if (+names[frames - 1].slice(0, 5) - first + 1 !== frames) throw new Error(`${dir}: frames ${first}..${names[frames - 1]} have gaps`);
 const A = `${dir}/_frame`, P = 160, WW = 1700, WH = 984, R = 18; // window: 1700x920 page + 64 px title bar
 fs.mkdirSync(A, { recursive: true });
 const b = await chromium.launch();
