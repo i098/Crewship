@@ -94,6 +94,8 @@ bun compose.mjs frames out.mp4 frames/audio.wav example.com
 
 `synth.py` makes a sound bed (low swell, wind, faint drone) from noise and sines. On top: a footstep per 0.75 m walked, a blip per click, a thud per door, and a muffled bed inside rooms. The sound stays silent until the first click, as a browser's does.
 
+The window is a dark Safari (macOS 26) copied pixel for pixel from a real 1x Safari screenshot, scaled to the 1700 px window and drawn at 2x. The text uses SF Pro when `SF_FONT` points to a local copy (a Mac's own `/System/Library/Fonts/SFNS.ttf`). Do not draw your own idea of a title bar. Compare it with a real screenshot of the same site at the same scale, and show that comparison before you render. A site's focus ring on its canvas is not part of its look: do not focus the stage by script.
+
 `compose.mjs` writes 1920x1080 at 60 fps. It converts sRGB to BT.709 limited-range YUV explicitly and tags the file; an untagged or implicit conversion looks washed out, most of all on an HDR display. Keep the page's own colours: do not brighten a dark scene with curves, because a shadow lift flattens contrast and looks washed out. To check, compare one frame with the raw capture: `ffmpeg -i out.mp4 -vf signalstats,metadata=mode=print -frames:v 1 -f null -`. The video's luma must match the raw frame's (`YMIN` at 16 for true black, the peak at 235 or less).
 
 ## 7. Deliver
