@@ -27,7 +27,7 @@ DEFAULTS = {
     "self": {},  # workspace team id -> the operator's Slack user id (required)
     "operator_name": "the operator",
     "teammates": [],  # names whose messages about the operator's work matter
-    "workspaces": {},  # team id -> {"name": ..., "domain": "<slug>"}; a domain makes a web permalink
+    "workspaces": {},  # team id -> {"name": ...}, a display name for the model
     "model": "anthropic/claude-haiku-5-5",
     "notify": ["fm-imessage", "--"],  # the text is appended as the last argument
     "interval": 15,  # seconds between cache reads
@@ -48,8 +48,10 @@ DROP: chatter, greetings, reactions in words, jokes, bot and app posts, announce
 that does not need him. A bot post that is an incident or a direct ask of him may stay.
 Teammates: {teammates}.
 Answer with only a JSON array, one object per input message, no prose: \
-{{"id": <id>, "keep": true|false, "reason": "<five words>", "line": "<who>, <channel>: <the gist, under 100 characters>"}}. \
-Give "line" only when keep is true; plain text, no link, no markup."""
+{{"id": <id>, "keep": true|false, "reason": "<five words>", "line": "<who>, <where>: <the message or a tight quote>"}}. \
+Give "line" only when keep is true. "where" is DM, group DM, #channel or thread in #channel. The operator reads Slack on \
+his own screen, so the line carries the content itself: the message, or a short quote of it, under 160 characters in \
+all. When he must act, end with the action in a few words, for example "- reply today". Plain text; no link, no markup."""
 
 
 def conf(name, default):
@@ -176,20 +178,12 @@ def verdicts(cfg, batch):
     return {int(v["id"]): v for v in found if isinstance(v, dict) and "id" in v}
 
 
-def link(cfg, m):
-    base = cfg["workspaces"].get(m["workspace_id"], {}).get("domain")
-    if not base:
-        return f"slack://channel?team={m['workspace_id']}&id={m['channel_id']}&message={m['ts']}"
-    url = f"https://{base}.slack.com/archives/{m['channel_id']}/p{m['ts'].replace('.', '')}"
-    return f"{url}?thread_ts={m['thread_ts']}&cid={m['channel_id']}" if m["thread_ts"] else url
-
-
 def decide(cfg, m, v):
     """(keep, reason, line). A message the model skipped is kept only when it is a DM or a mention."""
     if v is None:
         sure = m["view"]["type"] == "dm" or m["view"]["mentions_him"]
         return sure and not m["view"]["bot"], "no verdict from the model", ""
-    return bool(v.get("keep")), str(v.get("reason") or "")[:80], str(v.get("line") or "").strip()[:200]
+    return bool(v.get("keep")), str(v.get("reason") or "")[:80], str(v.get("line") or "").strip()[:240]
 
 
 def process(cfg, batch, st, test=False):
@@ -201,8 +195,8 @@ def process(cfg, batch, st, test=False):
         write_log(key=key(m), ws=m["workspace_id"], channel=m["channel_id"], ts=m["ts"], user=v["from"],
                   decision="kept" if keep else "dropped", reason=reason, **({"test": True} if test else {}))
         if keep:
-            line = line or f"{v['from']}, {v['channel']}: {v['text'][:100]}"
-            st.setdefault("pending", []).append(f"{'[test] ' if test else ''}{line} {link(cfg, m)}")
+            line = line or f"{v['from']}, {v['channel']}: {v['text'][:160]}"
+            st.setdefault("pending", []).append(f"{'[test] ' if test else ''}{line}")
 
 
 def flush(cfg, st, now):

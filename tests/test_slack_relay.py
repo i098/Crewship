@@ -31,7 +31,7 @@ open(n, "a").write("x")
 mode = open(os.environ["STUB_DIR"] + "/omp.mode").read().strip()
 if mode == "garbage":
     print("sorry"); sys.exit(0)
-out = [{"id": v["id"], "keep": "KEEP" in v["text"], "reason": "stub", "line": f"{v['from']}, {v['channel']}: gist"}
+out = [{"id": v["id"], "keep": "KEEP" in v["text"], "reason": "stub", "line": f"{v['from']}, {v['channel']}: {v['text']}"}
        for v in views if not (mode == "skip" and "SKIP" in v["text"])]
 print("Here you go:\\n" + json.dumps(out))
 """
@@ -59,7 +59,7 @@ def env(tmp_path, monkeypatch):
     c.execute("insert into workspaces values (?,?)", (WS, "Acme"))
     c.commit()
     cfg = {"db": str(db), "self": {WS: ME}, "window": 60, "teammates": ["Bob"],
-           "workspaces": {WS: {"domain": "acme"}}, "notify": [str(stub / "notify"), "--"]}
+           "workspaces": {WS: {"name": "Acme"}}, "notify": [str(stub / "notify"), "--"]}
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     monkeypatch.setenv("SLACK_RELAY_CONFIG", str(tmp_path / "config.json"))
     monkeypatch.setenv("SLACK_RELAY_DIR", str(tmp_path / "state"))
@@ -102,7 +102,7 @@ def _run(real, stub):
     return run
 
 
-def test_keeps_and_drops_with_reasons_and_links_and_ignores_own_and_old_messages(env):
+def test_keeps_and_drops_with_reasons_and_ignores_own_and_old_messages(env):
     env.add("90.1", "C1", BOB, "KEEP before the relay started")
     env.run(100)  # first cycle: since = 100, nothing to read
     assert env.calls() == 0
@@ -111,7 +111,7 @@ def test_keeps_and_drops_with_reasons_and_links_and_ignores_own_and_old_messages
     env.add("103.5", "C1", ME, "KEEP my own message")
     env.add("104.5", "C1", BOT, "build ok", subtype="bot_message")
     env.run(110)
-    assert env.texts() == ["Bob, DM: gist https://acme.slack.com/archives/D1/p1015"]
+    assert env.texts() == ["Bob, DM: KEEP can you review?"]
     rows = {r["ts"]: r for r in env.log()}
     assert set(rows) == {"101.5", "102.5", "104.5"}
     assert rows["101.5"]["decision"] == "kept" and rows["102.5"]["decision"] == "dropped"
@@ -140,7 +140,7 @@ def test_a_burst_is_one_text_and_the_next_waits_for_the_window(env):
     assert len(env.texts()) == 1 and len(env.st["pending"]) == 1
     env.run(171)
     assert len(env.texts()) == 2 and not env.st["pending"]
-    assert "three" not in env.texts()[1] and "p1201" in env.texts()[1]
+    assert env.texts()[1] == "Bob, DM: KEEP three"
 
 
 def test_pending_lines_beyond_the_cap_go_in_later_windows(env):
@@ -175,6 +175,9 @@ def test_thread_and_mention_context_reaches_the_model_and_a_skipped_message_fall
     assert rows["101.2"]["decision"] == "kept" and rows["101.4"]["decision"] == "kept"
     assert rows["101.3"]["decision"] == "dropped"
     assert rows["101.2"]["reason"] == "no verdict from the model"
+    # the fallback line carries the message itself, and no text ever holds a link
+    assert "Bob, #dev: @Me SKIP ping" in env.texts()[0]
+    assert "http" not in "".join(env.texts()) and "slack://" not in "".join(env.texts())
 
 
 def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env):
@@ -198,7 +201,7 @@ def test_the_cache_is_opened_read_only(env):
 def test_replay_marks_the_text_and_does_not_block_the_real_message(env):
     env.add("101.1", "D1", BOB, "KEEP replay me")
     sr.replay(env.cfg, WS, "D1", "101.1")
-    assert env.texts()[0].startswith("[test] Bob, DM: gist")
+    assert env.texts() == ["[test] Bob, DM: KEEP replay me"]
     assert env.log()[0]["test"] is True
     env.run(100)
     env.add("150.1", "D1", BOB, "KEEP later")
