@@ -136,7 +136,7 @@ export function zoom(msgs: Msg[], nodes: Map<string, Node>, id: number, n: numbe
 }
 
 // The compaction system prompt (the gist's, for the desk).
-export const COMPACT_PROMPT = `You write the iMessage front desk's memory: one step of a binary tree of summaries of one chat that
+export const COMPACT_PROMPT = `You write the front desk's memory: one step of a binary tree of summaries of one chat that
 never ends, compressing one message into a line or merging two adjacent lines into one. Your line stands in for
 its messages for weeks or years. The desk opens it only when its words show that what it needs is inside: what
 your line omits is lost for good.

@@ -1,13 +1,16 @@
-// Pure decisions of the iMessage bridge (bridge.ts), kept free of spectrum-ts so tests run without it.
+// Pure decisions of the front desk (bridge.ts for iMessage, instagram-desk.ts for Instagram), kept free of spectrum-ts so tests run without it.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { Message } from "spectrum-ts";
-import { CEILING, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
-export function deskPrompt(owner: string, deskModel: string, supervisorModel: string): string {
+// `channel` names the line the desk answers on.
+export function deskPrompt(owner: string, deskModel: string, supervisorModel: string, channel = "iMessage"): string {
   const supervisor = supervisorModel
     ? `Firstmate is ${supervisorModel}.`
     : "you aren't told which model Firstmate runs on, so say you don't know.";
-  return `You're the iMessage front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
+  return `You're the ${channel} front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
 You only step in when Firstmate hasn't answered him for a while. You can't run or send anything; every text he
 sends already went to Firstmate, who answers properly in this thread. If he asks about models: you're ${deskModel},
 ${supervisor}
@@ -46,6 +49,57 @@ export function parseReact(answer: string): string | undefined {
 // True when the desk's whole answer is SKIP (any case, trailing punctuation allowed): send nothing.
 export function isSkip(answer: string): boolean {
   return /^skip\W*$/i.test(answer);
+}
+
+// What a desk turn does with its answer: nothing (SKIP, or a failed call: Firstmate still has the note), a tapback,
+// or a text. `outcome` is the turn's line in the desk log.
+export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?: string; outcome: string } {
+  const skip = !ok || isSkip(drafted);
+  const tapback = skip ? undefined : parseReact(drafted);
+  return { skip, tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
+}
+
+// One desk turn's omp call (a process whose stdout is its answer), with zoom.ts as its only tool; `memoryDir` and
+// `spent` reach zoom.ts through the environment. The caller tracks the process and may kill it.
+export type DeskProc = Bun.Subprocess<any, "pipe", "ignore">;
+export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined> }): DeskProc {
+  return Bun.spawn(
+    ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
+      "--thinking=off", "--model", o.model, "--system-prompt", o.system],
+    { cwd: o.cwd, env: { ...o.env, FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) }, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: "ignore", timeout: 45_000 },
+  );
+}
+
+// What a desk call answered, and whether it exited cleanly with an answer.
+export async function readDesk(proc: DeskProc): Promise<{ ok: boolean; drafted: string }> {
+  const drafted = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
+  return { ok: (await proc.exited) === 0 && drafted !== "", drafted };
+}
+
+// One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
+// Request Luna 6 with thinking off and the priority (Fast) service tier; keep the desk model unchanged.
+// `stopping` says the service is shutting down; `track` registers each child so a stop can kill it.
+export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T): Chat {
+  if (stopping()) throw new Error("bridge stopping");
+  const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
+  // --no-extensions does not disable omp's native memory backend or its teardown work.
+  writeFileSync(`${dir}/config.yml`, "memory:\n  backend: off\n", { mode: 0o600 });
+  let turns = 0;
+  return {
+    async say(text) {
+      if (stopping()) throw new Error("bridge stopping");
+      const proc = track(Bun.spawn(
+        ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
+          "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
+        { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
+      ));
+      const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
+      const exit = await proc.exited;
+      if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
+      return line;
+    },
+    end: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
 // Only the host's own commands may call the service: Host must be the loopback address and port (stops DNS

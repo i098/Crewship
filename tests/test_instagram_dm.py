@@ -294,3 +294,23 @@ def test_reply_reacts_to_the_operators_latest_message(monkeypatch, host):
     monkeypatch.setattr(ig, "client", lambda: fake)
     assert run(monkeypatch, ig.reply, 1000, None, None, "\u2764", False) is None
     assert fake.reacted == [("7", "m2", "\u2764")] and fake.sent == []
+
+
+def test_every_reply_action_is_logged_for_the_front_desk(monkeypatch, host):
+    class Typing(Fake):
+        def realtime_connect(self):
+            return NS(direct_indicate_activity=lambda thread_id, on: None)
+
+    fake = Typing([msg("m1", text="hi")])
+    monkeypatch.setattr(ig, "client", lambda: fake)
+    assert run(monkeypatch, ig.reply, 1000, "ok", None, "\u2764", True) is None
+    monkeypatch.setenv("INSTAGRAM_DM_ACTOR", "desk")
+    assert run(monkeypatch, ig.reply, 1010, "hey", None, None, False) is None
+    rows = [json.loads(line) for line in (host / "sent.jsonl").read_text().splitlines()]
+    assert [(r["kind"], r.get("text"), r["by"]) for r in rows] == [
+        ("typing", None, "firstmate"),
+        ("react", "\u2764", "firstmate"),
+        ("text", "ok", "firstmate"),
+        ("text", "hey", "desk"),
+    ]
+    assert {r["thread"] for r in rows} == {"7"} and rows[0]["at"] == 1000
