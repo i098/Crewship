@@ -39,7 +39,7 @@ for (let f = 0; f < 60 * 40 && !ctl.done; f++) {
   const o = ctl.step(p);
   out.yawStep = Math.max(out.yawStep, Math.abs(Math.atan2(Math.sin(o.yaw - p.yaw), Math.cos(o.yaw - p.yaw))));
   p.yaw = o.yaw; p.pitch = o.pitch;
-  const v = 3.4 * o.f * DT, nx2 = p.x + Math.sin(p.yaw) * v, nz2 = p.z + Math.cos(p.yaw) * v;
+  const v = ctl.V * o.f * DT, nx2 = p.x + Math.sin(p.yaw) * v, nz2 = p.z + Math.cos(p.yaw) * v;
   if (v > 0) {
     if (g.clear(nx2, nz2) > 0) { p.x = nx2; p.z = nz2; } else out.bumps++;
     out.minClear = Math.min(out.minClear, g.clear(p.x, p.z));
