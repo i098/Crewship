@@ -5,11 +5,11 @@ description: Use when an explanation of math, an algorithm, a data flow or a sys
 
 # Explain with a Manim animation
 
-Use [Manim](https://github.com/ManimCommunity/manim) when a still picture cannot show change over time: a proof step, a transform, a graph that grows, a packet that moves between boxes. For a plain chart or table, do not animate.
+Use Manim (Community Edition, https://pypi.org/project/manim/) when a still picture cannot show change over time: a proof step, a transform, a graph that grows, a packet that moves between boxes. For a plain chart or table, do not animate.
 
 ## Install
 
-Prefer Manim Community Edition (`manim` on PyPI). It has the stable API and the docs at https://docs.manim.community. The original [3b1b/manim](https://github.com/3b1b/manim) (`manimgl`, OpenGL, Grant Sanderson's own tool) has a different API: use it only when the operator asks for it.
+Prefer Manim Community Edition (`manim` on PyPI). It has the stable API and the docs at https://docs.manim.community. The original 3b1b Manim (`manimgl` on PyPI, OpenGL, Grant Sanderson's own tool) has a different API: use it only when the operator asks for it.
 
 System dependencies: `ffmpeg`, Cairo and Pango (`libcairo2-dev libpango1.0-dev` on Debian). LaTeX is only for `MathTex` and `Tex`; use `Text` when you can.
 
@@ -46,7 +46,7 @@ iMessage takes images, not mp4. Run `render.py /tmp/demo.py Demo --gif --send "c
 
 ## Checked before this skill
 
-Existing skills (adithya-s-k/manim_skill, Yusuke710/manim-skill, edoardob90/manim-skills, vumichien/manim-skill) are large API references or multi-agent pipelines that write renders into the project `media/` dir. None fits the temp-dir and 1-day-prune rule, so this skill is a small original.
+Existing community Manim skills are large API references or multi-agent pipelines that write renders into the project `media/` dir. None fits the temp-dir and 1-day-prune rule, so this skill is a small original.
 
 ## Install of this skill
 
