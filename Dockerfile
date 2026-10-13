@@ -13,8 +13,32 @@
 # Base image: ubuntu:latest, the newest Ubuntu LTS, pulled from mirror.gcr.io
 # (Google's Docker Hub mirror: the same official image, no anonymous pull
 # limit). Nothing is pinned; the registry's content digests verify the layers
-# that are pulled. It is already the minimal Ubuntu image; the playbook's
-# preflight accepts only Ubuntu, so a Debian, Alpine or distroless base is out.
+# that are pulled.
+#
+# Size, one line per step (3.7 GB -> 2.88 GB uncompressed; 1.21 GB -> 0.99 GB
+# compressed):
+#   1. Slim base: measured, NOT applied. ubuntu 113 MB, debian:stable-slim
+#      86 MB, alpine 9 MB. Effect 0 MB: the playbook preflight requires Ubuntu,
+#      and alpine (musl) breaks the glibc builds of node, bun and omp addons.
+#   2. Multi-stage: applied. `builder` provisions and cleans up; `worker` is
+#      separate. Compilers stay (rustc links with cc, the playbook installs
+#      build-essential). 0 MB alone; it makes step 5 possible.
+#   3. Manifests before source: applied. pyproject.toml, uv.lock, onboard.sh and
+#      scripts/provisions.py are copied before `COPY .`; the Dockerfile is kept
+#      out of the context. Size 0. After a README edit the onboard layer is
+#      cached; after a Dockerfile-only edit every builder layer is cached,
+#      including launch.
+#   4. Lockfile installs: applied where a lockfile exists. Python uses
+#      `uv sync --locked`. The npm tools publish no lockfile, so exact versions
+#      are installed, then `npm prune` runs. No bun install in the build.
+#      0 MB; the prune result is counted in omp.
+#   5. Final stage copies only built output: applied. `FROM scratch` +
+#      `COPY --from=builder / /`. 3.7 GB -> 2.88 GB uncompressed, 1.21 GB ->
+#      0.99 GB compressed. The same builder without this step is 2.25 GB
+#      compressed.
+#   6. Tight .dockerignore: applied. Context is 2.3 MB in 267 files; Dockerfile,
+#      CHANGELOG.md, CONTRIBUTING.md, SETUP.md and install.sh are excluded.
+#      About -70 KB.
 #
 # Build targets:
 #   base     OS packages and the Crewship account only (no repository content)
@@ -243,7 +267,7 @@ ENV LANG=C.UTF-8 \
     HOME=${CREWSHIP_HOME} \
     CREWSHIP_WORKSPACE=${CREWSHIP_WORKSPACE} \
     CREWSHIP_ROOT=/opt/crewship \
-    PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=${CREWSHIP_HOME}/.local/bin:${CREWSHIP_HOME}/.bun/bin:${CREWSHIP_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 USER ${CREWSHIP_USER}
 
