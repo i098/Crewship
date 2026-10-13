@@ -19,8 +19,10 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
 2. Open the address in any browser and enter the password.
 3. Open a local page as `/PORT/path`. For example, a Lavish board on port 9525 is `https://….trycloudflare.com/9525/`.
    A dev server such as Vite or Next.js loads its files from root paths, for example `/@vite/client` or `/_next/static/…`.
-   The gateway sends such a path to the port of the page that asked for it. It takes the port from the `Referer` header, or else from the `__Host-crewship-port` cookie, which names the last `/PORT/` page you opened (1 hour).
+   The gateway sends such a path to the port of the page that asked for it. It takes the port from the `Referer` header, or else from the `__Host-crewship-port` cookie (1 hour).
+   Only a page that you open in a tab sets this cookie; the files and requests of a page never change it.
    The path `/` stays the start page unless the `Referer` names a port.
+   With two different dev apps of this kind open in two tabs at once, reload the tab you switch to.
 
 After the right password, your IP address is allowed for 24 hours.
 The browser also gets a cookie that lasts as long.
@@ -59,7 +61,7 @@ crewship:
 
 ## Sign out
 
-- **Sign out** on the start page signs out every device: it removes every allowed address and makes every cookie invalid.
+- **Sign out** on the start page signs out every device: it removes every allowed address and makes every cookie invalid. Only a signed-in visitor can sign out, and only from a page of this site.
 - `crewship-gateway password` sets a new password and also signs out every device.
 
 Five wrong passwords from one address within 15 minutes lock that address out for 15 minutes.

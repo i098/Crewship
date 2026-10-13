@@ -265,7 +265,10 @@ def test_server_logout_signs_out_every_device(stack):
     phone = {"CF-Connecting-IP": "198.51.100.9", "Cookie": cookie}
     assert request("GET", f"/{port}/", phone)[0].status == 200
     stranger = {"CF-Connecting-IP": "192.0.2.50", "Content-Type": "application/x-www-form-urlencoded"}
-    assert request("POST", "/_gateway/logout", stranger, "")[0].status == 401
+    response, body = request("POST", "/_gateway/logout", stranger, "")
+    assert response.status == 401 and 'name="next" value="/"' in body
+    cross_site = {**headers, "Sec-Fetch-Site": "cross-site"}
+    assert request("POST", "/_gateway/logout", cross_site, "")[0].status == 403
     for visitor in (headers, other, phone):
         assert request("GET", f"/{port}/", visitor)[0].status == 200
     response, _ = request("POST", "/_gateway/logout", phone, "")
@@ -291,7 +294,8 @@ def test_root_absolute_asset_follows_the_last_port_cookie(stack):
     request, port, seen = stack
     ip = {"CF-Connecting-IP": "203.0.113.5"}
     request("POST", "/_gateway/login", {**ip, "Content-Type": "application/x-www-form-urlencoded"}, "password=right-pass")
-    response, _ = request("GET", f"/{port}/", ip)
+    page = {**ip, "Sec-Fetch-Dest": "document"}
+    response, _ = request("GET", f"/{port}/", page)
     remembered = [c for c in response.headers.get_all("Set-Cookie") if c.startswith(gw.PORT_COOKIE + "=")]
     assert remembered and all(a in remembered[0] for a in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/"))
     jar = {**ip, "Cookie": f"app=1; {remembered[0].split(';')[0]}"}
@@ -300,6 +304,17 @@ def test_root_absolute_asset_follows_the_last_port_cookie(stack):
     assert seen[-1]["Cookie"] == "app=1"
     assert 'action="/_gateway/logout"' in request("GET", "/", jar)[1]
     assert request("GET", "/_gateway/other", jar)[0].status == 404
+
+
+def test_sub_resource_never_changes_the_port_cookie(stack):
+    request, port, _ = stack
+    ip = {"CF-Connecting-IP": "203.0.113.5"}
+    request("POST", "/_gateway/login", {**ip, "Content-Type": "application/x-www-form-urlencoded"}, "password=right-pass")
+    for dest in ("script", "empty", "image", None):
+        headers = {**ip, "Sec-Fetch-Dest": dest} if dest else ip
+        response, _ = request("GET", f"/{port}/poll", headers)
+        assert response.status == 200
+        assert not any(c.startswith(gw.PORT_COOKIE + "=") for c in response.headers.get_all("Set-Cookie") or [])
 
 
 def test_server_answers_400_for_a_bad_content_length(stack):

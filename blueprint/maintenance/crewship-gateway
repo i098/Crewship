@@ -270,8 +270,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.login(gate, now)
         cookies = dict(p.strip().partition("=")[::2] for p in self.headers.get("Cookie", "").split(";"))
         if not gate.admitted(self.ip, cookies.get(COOKIE), now):
-            return self.page(401, login_body(self.path))
+            return self.page(401, login_body("/" if path.startswith("/_gateway/") else self.path))
         if path == "/_gateway/logout" and self.command == "POST":
+            if self.headers.get("Sec-Fetch-Site", "same-origin") != "same-origin":
+                return self.page(403, "<h1>Forbidden</h1><p>Sign out from the start page.</p>")
             gate.revoke(now)
             return self.page(200, login_body("/", "Signed out."), f"{COOKIE}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict")
         match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
@@ -348,7 +350,9 @@ class Handler(BaseHTTPRequestHandler):
             if name.lower() == "location":
                 value = re.sub(rf"^(https?://(127\.0\.0\.1|localhost):{port})?(?=/(?!/))", f"/{port}", value)
             self.send_header(name, value)
-        if remember:
+        dest = self.headers.get("Sec-Fetch-Dest")
+        if remember and (dest == "document" or dest is None and
+                         (response.getheader("Content-Type") or "").startswith("text/html")):
             self.send_header("Set-Cookie", f"{PORT_COOKIE}={port}; Max-Age=3600; Path=/; Secure; HttpOnly; SameSite=Strict")
         self.send_header("Connection", "close")
         self.end_headers()
