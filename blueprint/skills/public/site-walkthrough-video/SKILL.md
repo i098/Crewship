@@ -102,7 +102,7 @@ Read the credentials by name from the operator's secret store, and never print o
 key="walkthrough-$(openssl rand -hex 16).mp4"
 uv run --with boto3 python3 -c 'import boto3, os, sys; boto3.client("s3", endpoint_url=os.environ["R2_S3_ENDPOINT"], aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"], aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"], region_name="auto").upload_file(sys.argv[1], os.environ["R2_BUCKET"], sys.argv[2], ExtraArgs={"ContentType": "video/mp4"})' out.mp4 "$key"
 curl -sI "$R2_PUBLIC_URL/$key" | head -1                  # HTTP/1.1 200 OK (curl, not Python's urllib: it gets 403)
-scp out.mp4 "$MAC_HOST:Movies/" && ssh "$MAC_HOST" open -g -a "QuickTime Player" "Movies/out.mp4"
+ssh "$MAC_HOST" open -g -a Dia "$R2_PUBLIC_URL/$key"   # open the link in the background; never copy files to the Mac
 ```
 
-Give the link and the length, and give the per-leg scores in the report.
+Deliver the video as the link only. Do not copy it to the operator's Mac or open it there from disk, unless they ask for that exact file. Give the link and the length, and give the per-leg scores in the report.
