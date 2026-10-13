@@ -23,6 +23,7 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
    Only a page that you open in a tab sets this cookie; the files and requests of a page never change it.
    The path `/` stays the start page unless the `Referer` names a port or the request opens a WebSocket.
    With two different dev apps of this kind open in two tabs at once, reload the tab you switch to.
+   A root path that starts with a number, such as `/2024/hello`, goes to the page's own port when nothing listens on port 2024. When something listens on that port, the path goes there; start such an app with a base path, for example `vite --base /3000/`.
 
 After the right password, your IP address is allowed for 24 hours.
 The browser also gets a cookie that lasts as long.

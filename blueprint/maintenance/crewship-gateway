@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             gate.revoke(now)
             return self.page(200, login_body("/", "Signed out."), f"{COOKIE}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict")
         match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
-        if match and self.port_ok(int(match[1])):
+        if match and self.port_ok(int(match[1])) and not self.app_path(int(match[1])):
             port = int(match[1])
             if match[2] is None:
                 return self.redirect(f"{path}/" + (f"?{query}" if query else ""))
@@ -301,18 +301,34 @@ class Handler(BaseHTTPRequestHandler):
     def port_ok(self, port):
         return 1024 <= port <= 65535 and port != self.server.server_address[1]
 
+    def referer_port(self):
+        """The port of a same-site Referer under /PORT/; None for any other Referer."""
+        referer = urllib.parse.urlsplit(self.headers.get("Referer") or "")
+        match = re.match(r"/(\d{4,5})(?:/|$)", referer.path)
+        if match and referer.netloc == self.headers.get("Host") and self.port_ok(int(match[1])):
+            return int(match[1])
+        return None
+
+    def app_path(self, port):
+        """True when /<port>/... is a root-absolute path of the page in the Referer, not a
+        port: the Referer names another port and nothing listens on <port>."""
+        if self.referer_port() in (None, port):
+            return False
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+        except OSError:
+            return True
+        return False
+
     def last_port(self, cookies, path):
         """The port of the page that asked for a root-absolute path such as /@vite/client:
         from a same-site Referer under /PORT/, else from PORT_COOKIE. "/" stays the start page
         unless the Referer names a port or the request is a WebSocket."""
-        referer = urllib.parse.urlsplit(self.headers.get("Referer") or "")
-        match = re.match(r"/(\d{4,5})(?:/|$)", referer.path)
-        if match and referer.netloc == self.headers.get("Host"):
-            port = match[1]
-        elif path != "/" or self.headers.get("Upgrade"):
-            port = cookies.get(PORT_COOKIE, "")
-        else:
+        if port := self.referer_port():
+            return port
+        if path == "/" and not self.headers.get("Upgrade"):
             return None
+        port = cookies.get(PORT_COOKIE, "")
         return int(port) if port.isascii() and port.isdigit() and self.port_ok(int(port)) else None
 
     def login(self, gate, now):

@@ -3,6 +3,7 @@
 import http.client
 import importlib.machinery
 import importlib.util
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -289,6 +290,19 @@ def test_root_absolute_asset_follows_the_referer_port(stack):
     elsewhere = {**ip, "Referer": f"https://evil.example/{port}/"}
     assert request("GET", "/@vite/client", elsewhere)[0].status == 404
     assert 'action="/_gateway/logout"' in request("GET", "/", ip)[1]
+
+
+def test_numeric_app_path_with_nothing_on_that_port_stays_on_the_page_port(stack):
+    request, port, seen = stack
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed = probe.getsockname()[1]
+    ip = {"CF-Connecting-IP": "203.0.113.5", "Host": "x.trycloudflare.com"}
+    request("POST", "/_gateway/login", {**ip, "Content-Type": "application/x-www-form-urlencoded"}, "password=right-pass")
+    link = {**ip, "Referer": f"https://x.trycloudflare.com/{port}/"}
+    response, body = request("GET", f"/{closed}/hello", link)
+    assert (response.status, body, seen[-1]["path"]) == (200, "ok", f"/{closed}/hello")
+    assert request("GET", f"/{closed}/hello", ip)[0].status == 502
 
 
 def test_root_absolute_asset_follows_the_last_port_cookie(stack):
