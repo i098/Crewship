@@ -36,8 +36,9 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   password=$(crewship-gateway password)
   hash=~/.config/crewship/gateway/password.hash
   grep -q "^scrypt\\$" "$hash"
-  ! grep -q "$password" "$hash"
-  [ "$(stat -c %a "$hash")" = 600 ] && [ "$(stat -c %a "$(dirname "$hash")")" = 700 ]
+  if grep -q "$password" "$hash"; then false; fi
+  [ "$(stat -c %a "$hash")" = 600 ]
+  [ "$(stat -c %a "$(dirname "$hash")")" = 700 ]
   start() { "$@" crewship-gateway serve >/tmp/gateway.log 2>&1 & echo $! >/tmp/gateway.pid
             for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:20240/ && return; sleep 0.1; done; return 1; }
   stop() { kill "$(cat /tmp/gateway.pid)"; wait "$(cat /tmp/gateway.pid)" 2>/dev/null || true; }
@@ -65,14 +66,15 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
   [ "$(code -d password=wrong "$public/_gateway/login")" = 401 ]
   # Cloudflare refuses a visitor that sends its own CF-Connecting-IP (error 1000), so it never reaches the gateway.
   [ "$(code -H "CF-Connecting-IP: 192.0.2.77" -d "password=$password" "$public/_gateway/login")" = 403 ]
-  ! grep -q 192.0.2.77 /tmp/gateway.log
+  if grep -q 192.0.2.77 /tmp/gateway.log; then false; fi
   [ "$(code -c /tmp/jar -d "password=$password" -d next=/8000/ "$public/_gateway/login")" = 303 ]
   grep -q "#HttpOnly_.*__Host-crewship" /tmp/jar
   [ "$(code "$public/8000/")" = 200 ]; grep -q "hello from port 8000" /tmp/body
   echo "ok: login allows this address without a cookie"
 
   stop
-  [ "$(code "$public/8000/")" = 502 ]; ! grep -q "hello from port 8000" /tmp/body
+  [ "$(code "$public/8000/")" = 502 ]
+  if grep -q "hello from port 8000" /tmp/body; then false; fi
   echo "ok: with the gateway down the tunnel serves nothing"
 
   # libfaketime in the gateway process itself (the faketime wrapper forks, so kill would miss it).

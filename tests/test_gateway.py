@@ -155,14 +155,6 @@ def test_revoke_all_signs_out_addresses_and_cookies(gate):
     assert gate.login("203.0.113.5", "right-pass", T0 + 3)
 
 
-def test_sign_out_of_one_address_keeps_the_others(gate):
-    gate.login("203.0.113.5", "right-pass", T0)
-    gate.login("203.0.113.6", "right-pass", T0)
-    gate.revoke(T0 + 1, "203.0.113.5")
-    assert not gate.admitted("203.0.113.5", None, T0 + 2)
-    assert gate.admitted("203.0.113.6", None, T0 + 2)
-
-
 def test_new_password_voids_old_cookies(gate):
     cookie = gate.login("203.0.113.5", "right-pass", T0)
     gate.set_hash(gw.hash_password("next-pass"))
@@ -198,7 +190,7 @@ def stack(gate, tmp_path):
 
     class Upstream(BaseHTTPRequestHandler):
         def do_GET(self):
-            seen.append(dict(self.headers))
+            seen.append({"path": self.path, **dict(self.headers)})
             if self.path == "/go":
                 self.send_response(302)
                 self.send_header("Location", "/there")
@@ -262,16 +254,48 @@ def test_server_wrong_password_then_lockout(stack):
     assert request("POST", "/_gateway/login", headers, "password=right-pass")[0].status == 429
 
 
-def test_server_logout_forgets_the_address(stack):
+def test_server_logout_signs_out_every_device(stack):
     request, port, _ = stack
     headers = {"CF-Connecting-IP": "203.0.113.5", "Content-Type": "application/x-www-form-urlencoded"}
-    assert request("POST", "/_gateway/login", headers, "password=right-pass")[0].status == 303
-    assert request("GET", f"/{port}/", headers)[0].status == 200
-    response, _ = request("POST", "/_gateway/logout", headers, "")
+    response = request("POST", "/_gateway/login", headers, "password=right-pass")[0]
+    assert response.status == 303
+    cookie = response.getheader("Set-Cookie").split(";")[0]
+    other = {"CF-Connecting-IP": "203.0.113.6", "Content-Type": "application/x-www-form-urlencoded"}
+    assert request("POST", "/_gateway/login", other, "password=right-pass")[0].status == 303
+    phone = {"CF-Connecting-IP": "198.51.100.9", "Cookie": cookie}
+    assert request("GET", f"/{port}/", phone)[0].status == 200
+    response, _ = request("POST", "/_gateway/logout", phone, "")
     assert "Max-Age=0" in response.getheader("Set-Cookie")
-    assert request("GET", f"/{port}/", headers)[0].status == 401
+    for visitor in (headers, other, phone):
+        assert request("GET", f"/{port}/", visitor)[0].status == 401
 
 
+def test_root_absolute_asset_follows_the_referer_port(stack):
+    request, port, seen = stack
+    ip = {"CF-Connecting-IP": "203.0.113.5", "Host": "x.trycloudflare.com"}
+    asset = {**ip, "Referer": f"https://x.trycloudflare.com/{port}/"}
+    assert request("GET", "/@vite/client", asset)[0].status == 401 and not seen
+    request("POST", "/_gateway/login", {**ip, "Content-Type": "application/x-www-form-urlencoded"}, "password=right-pass")
+    response, body = request("GET", "/@vite/client?v=1", asset)
+    assert (response.status, body, seen[-1]["path"]) == (200, "ok", "/@vite/client?v=1")
+    elsewhere = {**ip, "Referer": f"https://evil.example/{port}/"}
+    assert request("GET", "/@vite/client", elsewhere)[0].status == 404
+    assert 'action="/_gateway/logout"' in request("GET", "/", ip)[1]
+
+
+def test_root_absolute_asset_follows_the_last_port_cookie(stack):
+    request, port, seen = stack
+    ip = {"CF-Connecting-IP": "203.0.113.5"}
+    request("POST", "/_gateway/login", {**ip, "Content-Type": "application/x-www-form-urlencoded"}, "password=right-pass")
+    response, _ = request("GET", f"/{port}/", ip)
+    remembered = [c for c in response.headers.get_all("Set-Cookie") if c.startswith(gw.PORT_COOKIE + "=")]
+    assert remembered and all(a in remembered[0] for a in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/"))
+    jar = {**ip, "Cookie": f"app=1; {remembered[0].split(';')[0]}"}
+    response, body = request("GET", "/src/main.ts", {**jar, "Referer": "http://127.0.0.1/src/app.ts"})
+    assert (response.status, body, seen[-1]["path"]) == (200, "ok", "/src/main.ts")
+    assert seen[-1]["Cookie"] == "app=1"
+    assert 'action="/_gateway/logout"' in request("GET", "/", jar)[1]
+    assert request("GET", "/_gateway/other", jar)[0].status == 404
 
 
 def test_server_answers_400_for_a_bad_content_length(stack):

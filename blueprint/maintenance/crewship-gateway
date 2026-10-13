@@ -8,7 +8,8 @@ that header and never X-Forwarded-For. A local process can forge the header, but
 it already reaches every loopback port directly. After the right password, the
 visitor's IP address is allowed for ALLOW_HOURS, and a signed cookie admits the
 same browser for the same time when its address changes.
-/<port>/<path> goes to http://127.0.0.1:<port>/<path>. Only the password's scrypt
+/<port>/<path> goes to http://127.0.0.1:<port>/<path>; another path from a signed-in visitor
+goes, unchanged, to the port of the page that asked for it (Referer, else PORT_COOKIE). Only the password's scrypt
 hash is kept, in ~/.config/crewship/gateway/password.hash on this host alone.
 
   crewship-gateway serve                   run the gateway (crewship-gateway.service)
@@ -42,6 +43,7 @@ from pathlib import Path
 
 CHECKS = threading.BoundedSemaphore(2)  # each scrypt check needs 16 MiB: at most two at a time
 COOKIE = "__Host-crewship"
+PORT_COOKIE = "__Host-crewship-port"  # the port of the last /PORT/ page, for root-absolute paths
 MAX_FAILURES = 5  # wrong passwords from one address before it is locked out
 LOCK_SECONDS = 900  # how long the lockout lasts; failures older than this are forgotten
 MAX_BODY = 64 << 20
@@ -121,12 +123,9 @@ class Gate:
             state = {}
         return {"allowed": state.get("allowed", {}), "not_before": state.get("not_before", 0)}
 
-    def revoke(self, now, ip=None):
+    def revoke(self, now):
         def change(state):
-            if ip:
-                state["allowed"].pop(ip, None)
-            else:
-                state["allowed"], state["not_before"] = {}, int(now * 1000)
+            state["allowed"], state["not_before"] = {}, int(now * 1000)
         self.update_state(change)
 
     # --- cookies: issue time in ms, signed with a key derived from the hash ----
@@ -192,7 +191,7 @@ def client_ip(headers):
 
 def without_cookie(header):
     return "; ".join(p for p in (header or "").split(";") if p.strip() and
-                     not p.strip().startswith(COOKIE + "="))
+                     p.strip().partition("=")[0] not in (COOKIE, PORT_COOKIE))
 
 
 def safe_next(target):
@@ -270,23 +269,44 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/_gateway/login" and self.command == "POST":
             return self.login(gate, now)
         if path == "/_gateway/logout" and self.command == "POST":
-            gate.revoke(now, self.ip)
+            gate.revoke(now)
             return self.page(200, login_body("/", "Signed out."), f"{COOKIE}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict")
         cookies = dict(p.strip().partition("=")[::2] for p in self.headers.get("Cookie", "").split(";"))
         if not gate.admitted(self.ip, cookies.get(COOKIE), now):
             return self.page(401, login_body(self.path))
-        if path == "/":
+        match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
+        if match and self.port_ok(int(match[1])):
+            port = int(match[1])
+            if match[2] is None:
+                return self.redirect(f"{path}/" + (f"?{query}" if query else ""))
+            rest, remember = match[2] + (f"?{query}" if query else ""), True
+        elif not path.startswith("/_gateway/") and (port := self.last_port(cookies, path)):
+            rest, remember = self.path, False
+        elif path == "/":
             return self.page(200, """<h1>Crewship</h1><p>Open a local page as /PORT/path.</p>
 <form method="post" action="/_gateway/logout"><button type="submit">Sign out</button></form>""")
-        match = re.fullmatch(r"/(\d{4,5})(/.*)?", path)
-        if not match or not 1024 <= int(match[1]) <= 65535 or int(match[1]) == self.server.server_address[1]:
+        else:
             return self.page(404, "<h1>Not found</h1><p>Open a page as /PORT/path.</p>")
-        if match[2] is None:
-            return self.redirect(f"{path}/" + (f"?{query}" if query else ""))
-        rest = match[2] + (f"?{query}" if query else "")
         if self.headers.get("Upgrade"):
-            return self.tunnel(int(match[1]), rest)
-        return self.proxy(int(match[1]), rest)
+            return self.tunnel(port, rest)
+        return self.proxy(port, rest, remember)
+
+    def port_ok(self, port):
+        return 1024 <= port <= 65535 and port != self.server.server_address[1]
+
+    def last_port(self, cookies, path):
+        """The port of the page that asked for a root-absolute path such as /@vite/client:
+        from a same-site Referer under /PORT/, else from PORT_COOKIE. "/" stays the start page
+        unless the Referer names a port or the request is a WebSocket."""
+        referer = urllib.parse.urlsplit(self.headers.get("Referer") or "")
+        match = re.match(r"/(\d{4,5})(?:/|$)", referer.path)
+        if match and referer.netloc == self.headers.get("Host"):
+            port = match[1]
+        elif path != "/" or self.headers.get("Upgrade"):
+            port = cookies.get(PORT_COOKIE, "")
+        else:
+            return None
+        return int(port) if port.isascii() and port.isdigit() and self.port_ok(int(port)) else None
 
     def login(self, gate, now):
         form = urllib.parse.parse_qs(self.rfile.read(min(self.length, 4096)).decode(errors="replace"))
@@ -308,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
         headers["Host"] = f"127.0.0.1:{port}"
         return headers
 
-    def proxy(self, port, rest):
+    def proxy(self, port, rest, remember):
         if self.headers.get("Transfer-Encoding"):
             return self.page(411, "<h1>Length required</h1>")
         length = self.length
@@ -328,6 +348,8 @@ class Handler(BaseHTTPRequestHandler):
             if name.lower() == "location":
                 value = re.sub(rf"^(https?://(127\.0\.0\.1|localhost):{port})?(?=/(?!/))", f"/{port}", value)
             self.send_header(name, value)
+        if remember:
+            self.send_header("Set-Cookie", f"{PORT_COOKIE}={port}; Max-Age=3600; Path=/; Secure; HttpOnly; SameSite=Strict")
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True

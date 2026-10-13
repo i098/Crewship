@@ -18,6 +18,9 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
 
 2. Open the address in any browser and enter the password.
 3. Open a local page as `/PORT/path`. For example, a Lavish board on port 9525 is `https://….trycloudflare.com/9525/`.
+   A dev server such as Vite or Next.js loads its files from root paths, for example `/@vite/client` or `/_next/static/…`.
+   The gateway sends such a path to the port of the page that asked for it. It takes the port from the `Referer` header, or else from the `__Host-crewship-port` cookie, which names the last `/PORT/` page you opened (1 hour).
+   The path `/` stays the start page unless the `Referer` names a port.
 
 After the right password, your IP address is allowed for 24 hours.
 The browser also gets a cookie that lasts as long.
@@ -56,8 +59,8 @@ crewship:
 
 ## Sign out
 
-- **Sign out** on the start page removes your address and your cookie.
-- `crewship-gateway password` sets a new password and signs out every address and every browser.
+- **Sign out** on the start page signs out every device: it removes every allowed address and makes every cookie invalid.
+- `crewship-gateway password` sets a new password and also signs out every device.
 
 Five wrong passwords from one address within 15 minutes lock that address out for 15 minutes.
 Other addresses can still sign in.
@@ -83,7 +86,7 @@ flowchart LR
 - `crewship-tunnel.service` runs `cloudflared tunnel --url http://127.0.0.1:20240`, so the gateway is its only origin. It sends nothing to a local page directly. When the gateway is down, the tunnel answers 502 and shows no page.
 - Cloudflare's edge sets `CF-Connecting-IP` on every request. It refuses a request in which the visitor sends that header (error 1000). Only loopback peers reach the gateway, so a request from off the host comes through the tunnel, and the gateway trusts that header. It never reads `X-Forwarded-For`. A request without a valid `CF-Connecting-IP` gets 400. A local process can send any header, but it already reaches every loopback port directly, so the header gives it nothing more.
 - The password check uses scrypt and a constant-time compare. Each check needs about 16 MiB, so at most two checks run at the same time. Many parallel sign-ins wait in turn and cannot use up the host's memory.
-- The cookie `__Host-crewship` is `HttpOnly`, `Secure`, and `SameSite=Strict`. It is an HMAC of its issue time, with a key from the stored hash, so a new password makes every cookie invalid. The gateway removes the cookie before it sends a request to a local page.
+- The cookie `__Host-crewship` is `HttpOnly`, `Secure`, and `SameSite=Strict`. It is an HMAC of its issue time, with a key from the stored hash, so a new password makes every cookie invalid. The gateway removes this cookie and `__Host-crewship-port` before it sends a request to a local page.
 - The allowed addresses are in `~/.local/state/crewship/gateway.json`, so a restart keeps them. The lockout counts are in memory only.
 - After sign-in, every loopback port from 1024 up is reachable. That is the same access that your account has on the host.
 
