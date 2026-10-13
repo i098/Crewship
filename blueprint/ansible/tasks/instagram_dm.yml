@@ -25,6 +25,13 @@
     mode: "0755"
     remote_src: true
 
+- name: Install the Instagram reel curator
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/skills/public/instagram-dm/reel_curator.py"
+    dest: "{{ crewship_instagram_curator_script }}"
+    mode: "0755"
+    remote_src: true
+
 - name: Install the Instagram DM reply command
   ansible.builtin.template:
     src: fm-insta-reply.j2
@@ -45,7 +52,12 @@
     src: "{{ item }}.j2"
     dest: "{{ crewship_user_units }}/{{ item }}"
     mode: "0644"
-  loop: [instagram-dm-listen.service, instagram-dm-poll.service, instagram-dm-poll.timer]
+  loop:
+    - instagram-dm-listen.service
+    - instagram-dm-poll.service
+    - instagram-dm-poll.timer
+    - instagram-reel-curator.service
+    - instagram-reel-curator.timer
   notify: reload user systemd
 
 - name: Render the Instagram front desk unit
@@ -65,6 +77,14 @@
     force: true
     follow: false
 
+- name: Statically enable the Instagram reel curator timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-reel-curator.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/instagram-reel-curator.timer"
+    state: link
+    force: true
+    follow: false
+
 - name: Statically enable the Instagram DM listener
   ansible.builtin.file:
     src: "{{ crewship_user_units }}/instagram-dm-listen.service"
@@ -79,7 +99,7 @@
     name: "{{ item }}"
     enabled: true
     state: started
-  loop: [instagram-dm-listen.service, instagram-dm-poll.timer]
+  loop: [instagram-dm-listen.service, instagram-dm-poll.timer, instagram-reel-curator.timer]
   environment: "{{ crewship_user_systemd_env }}"
   when: crewship_manage_services | bool
 

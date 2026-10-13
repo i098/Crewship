@@ -126,6 +126,10 @@
                 if (crewship_cfg.profiles.firstmate | bool and crewship_gh_replies_account | length > 0) else [])
              + ([crewship_instagram_dm_script,
                  crewship_instagram_dm_reply,
+                 crewship_instagram_curator_script,
+                 crewship_user_units ~ '/instagram-reel-curator.service',
+                 crewship_user_units ~ '/instagram-reel-curator.timer',
+                 crewship_user_units ~ '/timers.target.wants/instagram-reel-curator.timer',
                  crewship_user_units ~ '/instagram-dm-listen.service',
                  crewship_user_units ~ '/default.target.wants/instagram-dm-listen.service',
                  crewship_user_units ~ '/instagram-dm-poll.service',

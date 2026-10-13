@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Send the operator a few Instagram reels worth watching, three times a day (Crewship managed)
+
+[Timer]
+Unit=instagram-reel-curator.service
+OnCalendar=*-*-* 09,14,19:00:00
+RandomizedDelaySec=90min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

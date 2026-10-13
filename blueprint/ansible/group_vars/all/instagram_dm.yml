@@ -18,6 +18,11 @@ crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jso
 crewship_instagram_dm_notify: "{{ crewship_firstmate_dir }}/bin/fm-inbox.sh note"
 # The front desk (docs/imessage.md#instagram-front-desk): when main has not answered a DM for
 # crewship_instagram_desk_quiet_ms, a one-shot model answers or reacts through fm-insta-reply.
+# The reel curator (docs/architecture.md#instagram-reel-curator): three times a day it shares at most three
+# reels worth watching into the operator's thread. It stays idle until crewship_instagram_curator_config exists.
+crewship_instagram_curator_script: "{{ crewship_local_bin }}/reel_curator.py"
+crewship_instagram_curator_config: "{{ crewship_cfg.home }}/.config/crewship/instagram/curator.json"
+crewship_instagram_curator_log: "{{ crewship_cfg.home }}/.local/state/crewship/instagram/reels.jsonl"
 crewship_instagram_desk_dir: "{{ crewship_share_dir }}/instagram-desk"
 crewship_instagram_desk_model: claude-haiku-5-5
 crewship_instagram_desk_owner_name: the owner
