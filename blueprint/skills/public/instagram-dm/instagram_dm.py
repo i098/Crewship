@@ -242,37 +242,53 @@ def poll():
         sys.exit(f"poll {err}")
 
 
+def halt_if_flagged(e):
+    """Halt the account when e means Instagram flagged it. Returns True when halted."""
+    if not any(c.__name__ in HALT for c in type(e).__mro__):
+        return False
+    with locked():
+        state = load_state()
+        fail(state, e, time.time())
+        save_state(state)
+    return True
+
+
+def listen_once(cl):
+    """Serve one realtime connection until it breaks (raises) or the account is halted (returns)."""
+    events = []
+    cl.realtime_on("message", events.append)
+    cl.realtime_on("direct", events.append)
+    rt = cl.realtime_connect()
+    rt.direct_subscribe()
+    sync(lambda: cl)  # what arrived while the channel was down
+    last = time.time()
+    while not load_state().get("halted"):
+        try:
+            cl.realtime_read_once()
+        except TimeoutError:  # idle: the broker must still answer a ping
+            if not rt.ping():
+                raise ConnectionError("realtime ping unanswered") from None
+        if events:
+            time.sleep(max(0, REALTIME_GAP - (time.time() - last)))
+            events.clear()
+            last = time.time()
+            if err := sync(lambda: cl):
+                print(f"poll {err}", flush=True)
+
+
 def listen():
     """Keep the realtime channel open; every message event runs a poll. The channel is a doorbell only:
     the HTTP poll supplies the data, so the private event format is never parsed. A dead channel reconnects
     with backoff. Return when the account is halted."""
     fails = 0
-    while True:
+    while not load_state().get("halted"):
         cl = None
         try:
             cl = client()
-            events = []
-            cl.realtime_on("message", events.append)
-            cl.realtime_on("direct", events.append)
-            rt = cl.realtime_connect()
-            rt.direct_subscribe()
-            sync(lambda: cl)  # what arrived while the channel was down
-            fails, last = 0, time.time()
-            while True:
-                try:
-                    cl.realtime_read_once()
-                except TimeoutError:  # idle: the broker must still answer a ping
-                    if not rt.ping():
-                        raise ConnectionError("realtime ping unanswered")
-                if events:
-                    time.sleep(max(0, REALTIME_GAP - (time.time() - last)))
-                    events.clear()
-                    last = time.time()
-                    if err := sync(lambda: cl):
-                        print(f"poll {err}", flush=True)
-                if load_state().get("halted"):
-                    return
+            listen_once(cl)
         except Exception as e:
+            if halt_if_flagged(e):
+                return
             fails += 1
             wait = backoff(
                 fails,
@@ -280,17 +296,11 @@ def listen():
                 int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
             )
             print(f"realtime {type(e).__name__}: {str(e)[:200]}; reconnect in {wait}s", flush=True)
+            time.sleep(wait)
+        finally:
             if cl:
                 with contextlib.suppress(Exception):
                     cl.realtime_disconnect()
-            with locked():
-                state = load_state()
-                if any(c.__name__ in HALT for c in type(e).__mro__):
-                    fail(state, e, time.time())
-                    save_state(state)
-            if load_state().get("halted"):
-                return
-            time.sleep(wait)
 
 
 def resume():
@@ -298,6 +308,45 @@ def resume():
         state = load_state()
         state.update(halted=None, fails=0, next=0)
         save_state(state)
+
+
+def operator_thread(cl, thread, operator):
+    """The thread to write to: the given one or the operator's 1:1 thread. Exits unless it holds the operator alone."""
+    if thread:
+        t = cl.direct_thread(int(thread))
+    else:
+        t = next(
+            (t for t in cl.direct_threads(amount=20) if [str(u.pk) for u in t.users] == [operator]),
+            None,
+        )
+    if t is None or [str(u.pk) for u in t.users] != [operator]:
+        sys.exit("no thread with the operator alone: refusing to send")
+    return t
+
+
+def send_actions(cl, state, t, operator, text, emoji, typing):
+    """Typing indicator, reaction to his latest message, then the text, each at least REPLY_GAP after the last send."""
+
+    def pause():
+        time.sleep(max(0, state["sent"] + REPLY_GAP - time.time()))
+
+    if typing:
+        cl.realtime_connect().direct_indicate_activity(t.id, True)
+        time.sleep(min(4, 1 + len(text) / 25) if text else 3)  # typing time grows with the text
+    if emoji:
+        latest = next(
+            (m for m in t.messages if str(m.user_id) == operator and m.item_type != "action_log"),
+            None,
+        )
+        if latest is None:
+            sys.exit("no message of the operator to react to")
+        pause()
+        cl.direct_send_reaction(t.id, latest.id, emoji)
+        state["sent"] = time.time()
+    if text:
+        pause()
+        cl.direct_send(text, thread_ids=[int(t.id)])
+        state["sent"] = time.time()
 
 
 def reply(text, thread, emoji, typing):
@@ -314,47 +363,12 @@ def reply(text, thread, emoji, typing):
         state, now = load_state(), time.time()
         if why := blocked(state, now):
             sys.exit(f"not sending: {why}")
+        cl = None
         try:
             cl = client()
-            t = (
-                cl.direct_thread(int(thread))
-                if thread
-                else next(
-                    (
-                        t
-                        for t in cl.direct_threads(amount=20)
-                        if [str(u.pk) for u in t.users] == [operator]
-                    ),
-                    None,
-                )
+            send_actions(
+                cl, state, operator_thread(cl, thread, operator), operator, text, emoji, typing
             )
-            if t is None or [str(u.pk) for u in t.users] != [operator]:
-                sys.exit("no thread with the operator alone: refusing to send")
-            pause = lambda: time.sleep(max(0, state["sent"] + REPLY_GAP - time.time()))  # noqa: E731
-            if typing:
-                rt = cl.realtime_connect()
-                rt.direct_indicate_activity(t.id, True)
-                time.sleep(
-                    min(4, 1 + len(text) / 25) if text else 3
-                )  # typing time grows with the text
-            if emoji:
-                latest = next(
-                    (
-                        m
-                        for m in t.messages
-                        if str(m.user_id) == operator and m.item_type != "action_log"
-                    ),
-                    None,
-                )
-                if latest is None:
-                    sys.exit("no message of the operator to react to")
-                pause()
-                cl.direct_send_reaction(t.id, latest.id, emoji)
-                state["sent"] = time.time()
-            if text:
-                pause()
-                cl.direct_send(text, thread_ids=[int(t.id)])
-                state["sent"] = time.time()
         except SystemExit:
             raise
         except Exception as e:
@@ -362,8 +376,9 @@ def reply(text, thread, emoji, typing):
             save_state(state)
             sys.exit(f"reply {err}")
         finally:
-            with contextlib.suppress(Exception):
-                cl.realtime_disconnect()
+            if cl:
+                with contextlib.suppress(Exception):
+                    cl.realtime_disconnect()
         save_state(state)
 
 
