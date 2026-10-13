@@ -12,11 +12,12 @@
 set -euo pipefail
 
 # The same text is in tools/npm/crewship.js; tests/test_install.py keeps the two equal.
-USAGE='Usage: crewship [update] [--container] [--user NAME] [--home DIR]
+USAGE='Usage: crewship [update] [--container] [--no-gateway] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
-  update      install the newest release over this host, keeping its .local/ files
-  -h, --help  print this help and exit'
+  update        install the newest release over this host, keeping its .local/ files
+  --no-gateway  no password gateway or Cloudflare tunnel for the web pages (docs/gateway.md)
+  -h, --help    print this help and exit'
 
 # Runs before any install step, so --help and a bad option change nothing.
 check_args() {
@@ -26,7 +27,7 @@ check_args() {
   done
   while (($#)); do
     case $1 in
-      --container | --user=?* | --home=?*) shift ;;
+      --container | --no-gateway | --user=?* | --home=?*) shift ;;
       --user | --home) (($# > 1)) || break; shift 2 ;;
       *) break ;;
     esac
@@ -218,13 +219,27 @@ main() {
   cd "$dir"
   migrate_v040
   ./onboard.sh
-  [ -f .local/host.yml ] || ./ship.sh dock "$@"
+  if [ ! -f .local/host.yml ]; then
+    ./ship.sh dock "$@"
+  elif [[ " $* " == *" --no-gateway "* ]] && grep -Eq '^ +gateway: true' .local/host.yml; then
+    # The options shape a new host config only; this config turns the gateway on.
+    echo 'install.sh: --no-gateway applies to a new host config; set profiles.gateway: false in .local/host.yml and rerun' >&2
+    return 1
+  fi
   ./ship.sh inspect
   # Check mode cannot preview tasks that depend on an earlier install, so chart
   # fails on a fresh host; it changes nothing, and launch reports real failures.
   ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
+  local url home
+  if url=$(blueprint/maintenance/crewship-gateway url 2>/dev/null); then
+    echo "Open this host's web pages at $url; \`crewship-gateway url\` prints the URL again."
+    home=$(python3 -c 'import yaml; print(yaml.safe_load(open(".local/host.yml"))["crewship"]["home"])')
+    if [ -f "$home/.config/crewship/gateway/initial-password" ]; then
+      echo "The first gateway password is in $home/.config/crewship/gateway/initial-password (mode 600): read it yourself over SSH, then delete the file. \`crewship-gateway password\` in your own terminal sets a new one."
+    fi
+  fi
 }
 
 # Under `curl | bash` the script is stdin, so prompts (sudo, the new-host

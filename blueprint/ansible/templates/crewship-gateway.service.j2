@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# Password gateway (docs/gateway.md): one password, then the visitor's address is
+# allowed for {{ crewship_cfg.gateway.allow_hours }} h. It listens on 127.0.0.1:{{ crewship_gateway_port }} only;
+# crewship-tunnel.service is its one remote client.
+
+[Unit]
+Description=Crewship password gateway on 127.0.0.1:{{ crewship_gateway_port }} (Crewship managed)
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=CREWSHIP_GATEWAY_PORT={{ crewship_gateway_port }}
+Environment=CREWSHIP_TUNNEL_METRICS={{ crewship_gateway_metrics }}
+Environment=ALLOW_HOURS={{ crewship_cfg.gateway.allow_hours }}
+ExecStart={{ crewship_gateway_script }} serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

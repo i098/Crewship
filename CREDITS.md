@@ -46,7 +46,8 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Docker Engine](https://github.com/moby/moby): containers for the worker and the CI pool. License: Apache-2.0.
 - [Docker Compose](https://github.com/docker/compose): the worker and backing services. License: Apache-2.0.
 - [GitHub Actions Runner](https://github.com/actions/runner): the image of the self-hosted CI pool. License: MIT.
-- [Tailscale](https://github.com/tailscale/tailscale): the private network to the host. License: BSD-3-Clause.
+- [cloudflared](https://github.com/cloudflare/cloudflared): `cloudflared`, the Quick Tunnel to the password gateway. License: Apache-2.0.
+- [Tailscale](https://github.com/tailscale/tailscale): the optional private network to the host. License: BSD-3-Clause.
 - [Google Chrome](https://www.google.com/chrome/): the headed browser of the desktop and the browser ladder. License: proprietary.
 - [mosh](https://github.com/mobile-shell/mosh): the roaming shell for Herdr. License: GPL-3.0-or-later.
 - [Xfce](https://www.xfce.org/): the remote desktop. License: GPL-2.0-or-later.

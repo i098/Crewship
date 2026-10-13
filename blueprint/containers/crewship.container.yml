@@ -15,6 +15,8 @@
 #                          identity; joining a tailnet is an interactive host step.
 #   profiles.desktop       XFCE/TigerVNC/noVNC and the single persistent
 #                          ~/.vnc-chrome-profile are host-only by design.
+#   profiles.gateway       the password gateway and its tunnel are user services,
+#                          and the image has no user manager to run them.
 #   profiles.firstmate     the Firstmate checkout belongs in the workspace, which
 #                          compose and the devcontainer mount as a volume/bind,
 #                          so baking a clone into the image would be shadowed.
@@ -39,6 +41,7 @@ crewship:
     tailscale: false
     desktop: false
     chat: false
+    gateway: false
   herdr:
     theme: catppuccin
     toast_delivery: herdr

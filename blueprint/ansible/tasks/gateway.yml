@@ -1,0 +1,113 @@
+---
+# Password gateway and Cloudflare Quick Tunnel (profiles.gateway, docs/gateway.md).
+# crewship-gateway.service serves blueprint/maintenance/crewship-gateway on TCP
+# 127.0.0.1:{{ crewship_gateway_port }}; crewship-tunnel.service runs cloudflared with that address
+# as its only origin. Any local process can reach that port and send its own
+# CF-Connecting-IP, but it already reaches every loopback port directly. The first
+# apply sets a password, keeps only its scrypt hash in
+# ~/.config/crewship/gateway/password.hash, and writes the password to the mode-600
+# file initial-password beside it; the summary names that file, never the password.
+# With the profile off, every apply stops and removes both units, so turning it
+# off is one apply.
+#
+#   * the tunnel restarts only when its unit changes: each start gets a new URL
+#   * the password step never runs in check mode and never replaces a set password
+
+- name: Install the password gateway
+  when: crewship_cfg.profiles.gateway | bool
+  block:
+    - name: Ensure the gateway directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ crewship_local_bin }}"
+        - "{{ crewship_user_units }}/default.target.wants"
+
+    - name: Install the gateway command
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/maintenance/crewship-gateway"
+        dest: "{{ crewship_gateway_script }}"
+        mode: "0755"
+        remote_src: true
+      notify: restart crewship gateway
+
+    - name: Render the gateway unit
+      ansible.builtin.template:
+        src: crewship-gateway.service.j2
+        dest: "{{ crewship_user_units }}/crewship-gateway.service"
+        mode: "0644"
+      notify:
+        - reload user systemd
+        - restart crewship gateway
+
+    - name: Render the tunnel unit
+      ansible.builtin.template:
+        src: crewship-tunnel.service.j2
+        dest: "{{ crewship_user_units }}/crewship-tunnel.service"
+        mode: "0644"
+      notify:
+        - reload user systemd
+        - restart crewship tunnel
+
+    - name: Statically enable the gateway and tunnel
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/{{ item }}"
+        dest: "{{ crewship_user_units }}/default.target.wants/{{ item }}"
+        state: link
+        force: true
+        follow: false
+      loop: [crewship-gateway.service, crewship-tunnel.service]
+
+    # Prints the initial-password path only when there was no password.
+    - name: Set the gateway password when none is set
+      ansible.builtin.command:
+        argv: ["{{ crewship_gateway_script }}", password, --if-missing]
+      register: crewship_gateway_password
+      changed_when: crewship_gateway_password.stdout | length > 0
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Enable and start the gateway and tunnel
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      environment: "{{ crewship_user_systemd_env }}"
+      loop: [crewship-gateway.service, crewship-tunnel.service]
+      when: crewship_manage_services | bool
+
+- name: Remove the password gateway
+  when: not (crewship_cfg.profiles.gateway | bool)
+  block:
+    - name: Look for installed gateway units
+      ansible.builtin.stat:
+        path: "{{ crewship_user_units }}/{{ item }}"
+        get_checksum: false
+      loop: [crewship-tunnel.service, crewship-gateway.service]
+      register: crewship_gateway_installed
+
+    - name: Stop the tunnel, then the gateway
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "{{ item.item }}"
+        state: stopped
+      environment: "{{ crewship_user_systemd_env }}"
+      loop: "{{ crewship_gateway_installed.results | selectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: crewship_manage_services | bool
+
+    - name: Remove the gateway units and command
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ crewship_user_units }}/default.target.wants/crewship-tunnel.service"
+        - "{{ crewship_user_units }}/default.target.wants/crewship-gateway.service"
+        - "{{ crewship_user_units }}/crewship-tunnel.service"
+        - "{{ crewship_user_units }}/crewship-gateway.service"
+        - "{{ crewship_gateway_script }}"
+      notify: reload user systemd

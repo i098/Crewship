@@ -99,6 +99,8 @@ GITHUB_LATEST = {
     "sentrux-grammars": ("sentrux/sentrux", "v", "grammars-{key}.tar.gz", {}),
     # JS/TS changed-code health for the omp quality gate (docs/omp.md#quality-gate).
     "fallow": ("fallow-rs/fallow", "v", "fallow-linux-{node}-musl", {"fallow": "fallow"}),
+    # Quick Tunnel to the password gateway (docs/gateway.md); a single binary per release.
+    "cloudflared": ("cloudflare/cloudflared", "", "cloudflared-linux-{go}", {"cloudflared": "cloudflared"}),
     # Python type checker and language server for every host.
     "pyrefly": (
         "facebook/pyrefly",

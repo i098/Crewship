@@ -9,7 +9,8 @@ crewship_chat_tools: [concord, slk]
 # release it does not install.
 crewship_installer_selection: >-
   {{ ['--tools', (crewship_core_tools
-                  + (crewship_chat_tools if (crewship_cfg.profiles.chat | bool) else []))
+                  + (crewship_chat_tools if (crewship_cfg.profiles.chat | bool) else [])
+                  + (['cloudflared'] if (crewship_cfg.profiles.gateway | bool) else []))
                  | join(',')]
      + (['--npm'] if (crewship_cfg.profiles.agents | bool) else [])
      + (['--development'] if (crewship_cfg.profiles.development | bool) else []) }}

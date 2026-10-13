@@ -187,6 +187,7 @@ RELEASES = {
     "aristocratos/btop": ("v9.9.9", "btop-x86_64-unknown-linux-musl.tar.gz"),
     "sentrux/sentrux": ("v9.9.9", "sentrux-linux-x86_64", "grammars-linux-x86_64.tar.gz"),
     "fallow-rs/fallow": ("v9.9.9", "fallow-linux-x64-musl"),
+    "cloudflare/cloudflared": ("9.9.9", "cloudflared-linux-amd64"),
     "facebook/pyrefly": (
         "9.9.9",
         "pyrefly-linux-x86_64-musl.tar.gz",
