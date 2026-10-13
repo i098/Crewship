@@ -29,9 +29,10 @@
 #      cached; after a Dockerfile-only edit every builder layer is cached,
 #      including launch.
 #   4. Lockfile installs: applied where a lockfile exists. Python uses
-#      `uv sync --locked`. The npm tools publish no lockfile, so exact versions
-#      are installed, then `npm prune` runs. No bun install in the build.
-#      0 MB; the prune result is counted in omp.
+#      `uv sync --locked`. The npm-registry tools are installed with
+#      `bun add -g --exact` at the resolved version. A global install has no
+#      project lockfile, so `bun install --frozen-lockfile` and `npm ci` have
+#      nothing to apply to. 0 MB.
 #   5. Final stage copies only built output: applied. `FROM scratch` +
 #      `COPY --from=builder / /`. 3.7 GB -> 2.88 GB uncompressed, 1.21 GB ->
 #      0.99 GB compressed. The same builder without this step is 2.25 GB
@@ -198,9 +199,8 @@ RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
 # without the layers, so what is deleted here is gone from the image.
 #   * package-manager caches, the apt indexes (the next apply refreshes them),
 #     rustup docs, and node's C headers (node-gyp downloads its own)
-#   * in each npm tool prefix: packages no installed package requires (npm
-#     prune; omp's copy of onnxruntime-node 1.21), source maps, and TypeScript
-#     declarations outside omp's own packages
+#   * in each npm tool prefix: source maps, and TypeScript declarations outside
+#     omp's own packages
 #   * in omp: onnxruntime-web (only the browser build of transformers.js loads
 #     it; the Node build loads onnxruntime-node), the AVX2 build of pi-natives
 #     (its loader falls back to the baseline build, which runs on every x86-64
@@ -215,7 +215,6 @@ RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
 #     their SHA-256 again on every run
 RUN set -eux; \
     share="${CREWSHIP_HOME}/.local/share/crewship"; \
-    for prefix in "${share}"/*/[0-9]*/; do npm prune --prefix "${prefix}" --no-audit --no-fund; done; \
     sudo rm -rf /var/lib/apt/lists/* /usr/lib/*/libLLVM*.so* /usr/lib/*/libgallium-*.so \
         /usr/lib/*/dri/*_drv_video.so /usr/lib/*/gbm/dri_gbm.so; \
     rm -rf "${CREWSHIP_HOME}/.npm" "${CREWSHIP_HOME}/.cache/uv" \
