@@ -57,6 +57,16 @@ Every send waits 3 s after the last one. After an Instagram error, `poll`, `list
 
 Crewship wires all of this on a `firstmate` host when `crewship_instagram_dm_operator` is set: see [Instagram DM alerts](../../../../docs/architecture.md#instagram-dm-alerts).
 
+## Reel curator
+
+`reel_curator.py` (next to `instagram_dm.py`) sends the operator the few reels worth watching. A user timer runs `reel_curator.py run` three times a day (09, 14 and 19 h, up to 90 min late). A cycle pulls new reels from the accounts and hashtags in `CURATOR_CONFIG` (default `~/.config/crewship/instagram/curator.json`), one slow request at a time, and drops every reel already in the log or in the operator's thread. It downloads the best liked, transcribes each with the `watch` skill (`WATCH_SCRIPT`, else `~/.omp/agent/skills/watch` or `~/.claude/skills/watch`), and scores it with one `omp -p` call (`model`, default `anthropic/claude-haiku-5-5`; the input is clipped well under 100k tokens). A reel passes at `min_score` (7); engagement bait ("comment X for the link", "link in bio") needs `bait_min_score` (9). It resolves the real repo (the model's repo checked on GitHub, a GitHub URL in the caption, or a repo of that exact name found by search) and rejects a reel with no link. A pick is shared into the thread with `direct_media_share`, then one line: what it is, the link, why it matters. It sends at most `daily_cap` (3) a day and never likes, comments or posts.
+
+```json
+{"accounts": ["creator_one", "creator_two"], "hashtags": ["claudecode", "opensource"]}
+```
+
+The config holds the seed accounts and hashtags; any key of `DEFAULTS` in the script may be added to override it. `reel_curator.py follow` follows each listed account not yet followed, 3 to 10 minutes apart: run it once after you edit the list. Every pick, rejection, follow and halt is one line in `CURATOR_LOG` (default `~/.local/state/crewship/instagram/reels.jsonl`) with its score. On a challenge, a 429 or `feedback_required` the curator logs a `halt` row and does nothing for 24 h; a flagged account (challenge, feedback block) also halts the DM poller as above.
+
 ## Install
 
 Crewship installs this skill with every other public skill: an apply copies it to `~/.omp/agent/skills/instagram-dm/` for omp and `~/.claude/skills/instagram-dm/` for Claude Code (see [Skills](../../../../docs/omp.md#skills)). To install it by hand, copy this folder to both paths.

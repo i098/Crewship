@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# Triggered by instagram-reel-curator.timer; not enabled on its own. It waits for the session and the curator config.
+
+[Unit]
+Description=Send the operator a few Instagram reels worth watching (Crewship managed)
+After=network-online.target
+ConditionPathExists={{ crewship_instagram_dm_session }}
+ConditionPathExists={{ crewship_instagram_curator_config }}
+
+[Service]
+Type=oneshot
+TimeoutStartSec=2h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator }}
+Environment=INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session }}
+Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
+Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
+Environment=CURATOR_CONFIG={{ crewship_instagram_curator_config }}
+Environment=CURATOR_LOG={{ crewship_instagram_curator_log }}
+ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_curator_script }} run
