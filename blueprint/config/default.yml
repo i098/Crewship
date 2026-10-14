@@ -19,6 +19,8 @@ crewship:
     shared_postgres: false
     # Jujutsu (jj) for agents, colocated with git (docs/jj.md).
     jj: false
+    # fdu, a fast gitignore-aware du for large worktrees (docs/configuration.md#profiles).
+    fdu: false
     fleet_browsers: false
     chat: true
     # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md). Off

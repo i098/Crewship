@@ -51,6 +51,7 @@ crewship:
     fleet_guards: false   # Docker guard, reapers, storage guard and browser ladder
     shared_postgres: false # Optional per-project dev databases, helper and env seeder
     jj: false             # Jujutsu (jj) for agents, colocated with git
+    fdu: false            # fdu, a fast gitignore-aware du for large worktrees
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: true            # Concord (Discord) and slk (Slack) terminal clients
     gateway: true         # Password gateway + Cloudflare Quick Tunnel; only dock writes true (default.yml: false)
@@ -147,6 +148,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `fleet_guards` | off | Docker guard, dev-server reaper, devtools-bridge reaper, storage guard and browser ladder. See [Fleet guards](fleet-guards.md). |
 | `shared_postgres` | off | One [dev database container per project](shared-postgres.md), in the engine the project's compose file names, with a helper and a worktree environment seeder. |
 | `jj` | off | The latest [Jujutsu](jj.md) (`jj`), verified against its release digest, for use colocated with git. Installs no repository change. |
+| `fdu` | off | The latest [fdu](https://github.com/jlevy/fdu) (MIT), a fast gitignore-aware `du` for worktrees with 100 GB or more, installed with `uv tool install --no-build fdu` into `~/.local/bin`. It uses the PyPI wheel, so it needs no Rust toolchain, and nothing is pinned: each apply moves it to the newest release. It needs the `uv` that the installer always provides. |
 | `fleet_browsers` | off | The [browser ladder](fleet-guards.md#browser-ladder): the always-on Obscura CDP tier on `127.0.0.1:9222`, the on-demand `chrome` and `vnc` tiers with the `vnc` tier's TigerVNC and noVNC packages, the cookie sync and gc timers, and the ladder environment in shell profiles and the Herdr unit. `fleet_guards` provisions the same ladder, so a `fleet_guards` host needs no change. Needs no other profile; the ladder needs `iproute2` (`ss`) from the base image, which only `desktop` installs. |
 | `chat` | on | The latest [Concord](https://github.com/chojs23/concord) (Discord) and [slk](https://github.com/gammons/slk) (Slack) terminal clients, their shared libraries, and a first-write config for each. Logins stay manual. See [Chat clients](chat.md). |
 | `gateway` | on for a new host | The [password gateway](gateway.md) and the latest `cloudflared`: one password opens the host's loopback web pages over a Cloudflare Quick Tunnel. `crewship.gateway.allow_hours` (default 24) sets how long an address stays allowed. `./ship.sh dock` writes `true` into a new host config; the installer's `--no-gateway` writes `false`. `blueprint/config/default.yml` has `false`, so a host config from before the gateway, without the key, keeps it off on update. To turn it on there, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`. |

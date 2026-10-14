@@ -23,6 +23,7 @@ FEATURES = {
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
     "crewship.profiles.shared_postgres": "docs/shared-postgres.md",
     "crewship.profiles.jj": "docs/jj.md",
+    "crewship.profiles.fdu": "docs/configuration.md#profiles",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
@@ -96,13 +97,14 @@ def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_defau
         assert matches[0].endswith(" (opt-in)") == found[path], matches[0]
 
 
-def test_schema_accepts_the_jj_profile_and_rejects_unknown_ones():
+def test_schema_accepts_the_opt_in_tool_profiles_and_rejects_unknown_ones():
     validator = jsonschema.Draft202012Validator(SCHEMA)
-    for key, ok in (("jj", True), ("jjj", False)):
+    for key, ok in (("jj", True), ("fdu", True), ("jjj", False)):
         host = copy.deepcopy(DEFAULT)
         host["crewship"]["profiles"][key] = True
         assert (not list(validator.iter_errors(host))) is ok
     assert DEFAULT["crewship"]["profiles"]["jj"] is False
+    assert DEFAULT["crewship"]["profiles"]["fdu"] is False
 
 
 def test_default_config_lists_the_current_defaults():
