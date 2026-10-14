@@ -94,7 +94,7 @@ def test_runtime_dependencies(dependency):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     config["crewship"]["profiles"]["shared_postgres"] = True
     config["crewship"]["profiles"][dependency] = False
-    with pytest.raises(ValueError, match="shared Postgres requires"):
+    with pytest.raises(ValueError, match="project databases require"):
         ship.validate_config(config)
 
 
