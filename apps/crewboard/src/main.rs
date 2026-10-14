@@ -3,6 +3,7 @@
 
 mod board;
 mod serve;
+mod sink;
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -10,6 +11,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -23,6 +25,9 @@ const USAGE: &str = "usage:
   crewboard tail <topic> [-n 50] [--json] print history, then exit
   crewboard topics                        list topics with counts
   crewboard stat                          print caps, usage and the boot id
+  crewboard github-sink --repo OWNER/REPO --issue N [<topic>...] [--interval 300]
+                                          post the messages of the topics (default fleet) as one comment
+                                          on the issue every interval seconds (60 or more), through gh api
   crewboard serve [--socket PATH] [--cap-bytes 67108864] [--history 256] [--max-msg 65536]
 
 The socket is $CREWBOARD_SOCKET, else $XDG_RUNTIME_DIR/crewboard.sock, else /run/user/<uid>/crewboard.sock.
@@ -192,6 +197,21 @@ fn tail(rest: &[String]) {
     }
 }
 
+fn github_sink(rest: &[String]) {
+    let a = Args::parse(rest, &["--repo", "--issue", "--interval"]);
+    let (Some(repo), Some(issue)) = (a.opt::<String>("--repo"), a.opt::<u64>("--issue")) else { usage() };
+    let secs = a.opt::<u64>("--interval").unwrap_or(300);
+    if !sink::valid_repo(&repo) || secs < 60 {
+        usage();
+    }
+    let topics = if a.pos.is_empty() { vec!["fleet"] } else { a.pos.clone() };
+    let stream = request(json!({"op": "sub", "topics": topics}));
+    match sink::run(stream, Duration::from_secs(secs), |body| sink::gh_post(&repo, issue, body)) {
+        sink::Stop::Off => off(),
+        sink::Stop::Fail(e) => fail(&e),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some((cmd, rest)) = args.split_first() else { usage() };
@@ -199,6 +219,7 @@ fn main() {
         "serve" => serve(rest),
         "pub" => publish(rest),
         "sub" => subscribe(rest),
+        "github-sink" => github_sink(rest),
         "tail" => tail(rest),
         "topics" | "stat" if rest.is_empty() => println!("{}", next(&mut request(json!({"op": cmd}))).0),
         "-h" | "--help" | "help" => println!("{USAGE}"),

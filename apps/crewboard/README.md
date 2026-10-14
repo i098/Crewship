@@ -23,8 +23,10 @@ The daemon is `crewboard serve`. Each client command is a short process. It send
 |---|---|
 | `src/main.rs` | Command line, socket path, the client side of the protocol. |
 | `src/serve.rs` | The daemon: listener, peer check, request parsing, subscriber streams. |
+| `src/sink.rs` | The GitHub sink: batches subscriber messages into one issue comment. No tokio. |
 | `src/board.rs` | Board state: topics, rings, caps, fan-out. Pure logic with no I/O. |
 | `tests/two_clients.rs` | End-to-end test with a real daemon and two clients. |
+| `tests/github_sink.rs` | End-to-end test of the sink with a real daemon and a fake `gh`. |
 
 The daemon runs on one tokio thread (`current_thread`). The board sits behind one `Mutex`, and no code holds it across an `await`.
 Dependencies are `tokio`, `serde_json` and `libc`.
@@ -105,10 +107,21 @@ crewboard sub task/my-task fleet            # stream; add --since N --boot ID to
 crewboard tail fleet -n 20                  # history, then exit (default 50)
 crewboard topics                            # topics with counts
 crewboard stat                              # caps, usage, boot id
+crewboard github-sink --repo owner/board --issue 7   # post fleet messages to an issue (see below)
 ```
 
 `pub` prints the new seq. `sub` prints the boot line and gap notices on stderr unless `--json` is set.
 When no daemon answers, a client prints `board off` and exits 3. Other failures exit 1. A usage error exits 2.
+
+## GitHub sink
+
+`crewboard github-sink --repo OWNER/REPO --issue N [<topic>...] [--interval 300]` is a subscriber, like `sub`, that sends what it reads to GitHub. It is the optional sink of the [GitHub board](../../docs/github-board.md#crew-board-messages).
+The topics default to `fleet`. A trailing `*` matches a prefix, as for `sub`.
+
+- Messages wait in memory (500 at most). Every `--interval` seconds (default 300, 60 at the least) the sink posts them as one comment on the issue with `gh api --method POST repos/OWNER/REPO/issues/N/comments`. A period with no message makes no call.
+- The comment holds the messages in a code fence, one line each, cut at 2000 characters. A message cannot mention a user or link an issue. The comment stays under 60000 characters; the oldest lines drop first, and the first line says how many.
+- `gh` is the one from `$PATH`, or the binary in `$CREWBOARD_GH`. It uses the host's gh login, so the sink stores no token. The `repo` scope (or `public_repo` for a public repository) is enough.
+- When the daemon closes the stream, the sink posts what it holds and exits 3 (`board off`). A failed `gh` call, or `{"error":"slow"}` from the daemon, ends it with exit 1 after the last post attempt, and the messages of a failed post are lost. It does not resume with `--since`, so a restart drops what was in flight. Run it under a unit with `Restart=always`, or start it again.
 
 ## Socket path
 
