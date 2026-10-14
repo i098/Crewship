@@ -7,7 +7,7 @@ Apply opens this runbook as the default checklist for the [new-host questions](c
 ## What stays on the old host
 
 Services that hold state other hosts share, such as a model relay, a monitoring stack, or a project database, stay where they are unless you move them on purpose. A second copy splits their state. A project moves its own data only as a deliberate project decision, with a database-aware backup and restore ([App and fleet state](recovery.md#app-and-fleet-state)).
-Follow [Shared Postgres](shared-postgres.md) for optional database setup, backups and upgrades.
+Follow [Project databases](shared-postgres.md) for optional per-project database setup, backups and upgrades.
 
 `~/super.env` is still edited on one host only ([Shared credentials](secrets.md)).
 
