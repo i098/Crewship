@@ -59,6 +59,11 @@ Put the files from the secrets tar back into `~/.config/crewship/forgejo` with m
 The timer keeps the newest 7 dumps and secrets tars. A failed dump removes nothing and leaves no partial files.
 If a dump is stopped while it runs, the next run removes its temporary files.
 
+Before a new Forgejo release first starts, apply runs `forgejo-dump.service` one time with the installed release.
+The new release changes the database on its first start, and an older release cannot open the result.
+If that dump fails, apply stops and Forgejo keeps the installed release.
+`journalctl --user -u forgejo-dump.service` shows the error.
+
 ## no-mistakes
 
 Apply installs `forgejo-axi` on every host with the `agents` profile, also without the Forgejo profile.
