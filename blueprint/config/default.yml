@@ -17,6 +17,8 @@ crewship:
     desktop: false
     fleet_guards: false
     shared_postgres: false
+    # Jujutsu (jj) colocated with git for agents (docs/jj.md); opt-in.
+    jj: false
     fleet_browsers: false
     chat: true
     # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md). Off
