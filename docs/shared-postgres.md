@@ -1,7 +1,10 @@
-# Shared Postgres
+# Project databases
 
 `crewship.profiles.shared_postgres` is off by default.
-It adds one official Postgres container for all project lanes on a host.
+The key keeps its old name so existing host configs stay valid.
+It gives each project one dev database container of the engine that the project already uses.
+All worktrees of the project share that container.
+There is no host-wide database.
 
 ## Enable
 
@@ -25,36 +28,49 @@ Project creation and automatic seeding use the same account and require the same
 
 Run `./ship.sh chart` to preview, then `./ship.sh launch` to apply.
 Follow [New-host questions](configuration.md#new-host-questions) for guided setup.
+Apply installs the `crewship-db` helper, records the Firstmate projects directory and enables the seeder timer.
+It starts no database. The seeder creates each project's container on its next run.
 An unchanged second apply reports no changes for this service.
-With `start_services: false`, apply writes the configuration, secrets and enabled timer but does not pull images or start services.
-Run apply with service starts enabled when the host is ready.
+With `start_services: false`, apply does not start the timer.
+Run apply with service starts enabled when the host is ready, or run `crewship-db --seed` yourself.
 
-The container is `crewship-shared-postgres`.
-It publishes only `127.0.0.1:25432`, uses `restart: unless-stopped`, and stores data in `crewship-shared-postgres-data`.
-See [Container images](dependencies.md#container-images) for the image and pull policy.
-The health check waits for the final TCP server, not the temporary Unix-socket server used during initialization.
-The configuration is `~/.local/state/code-factory/shared-postgres/compose.json`.
-The superuser password is generated once in `~/.local/state/code-factory/secrets/shared-postgres/superuser`, with mode `0600`.
-Compose mounts that password as a file secret; no password enters the repository, command arguments or apply output.
+## Engine and container
+
+The helper reads the project's own compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml` or `docker-compose.yml`) in a checkout of the project.
+It looks at each `image:` line and picks the engine from the image name:
+
+| Engine | Image names | Variable in `.env.local` |
+| --- | --- | --- |
+| `postgres` | `postgres`, `postgis`, `pgvector` | `DATABASE_URL` (`postgresql://`) |
+| `mysql` | `mysql` | `DATABASE_URL` (`mysql://`) |
+| `mariadb` | `mariadb` | `DATABASE_URL` (`mysql://`) |
+| `redis` | `redis` | `REDIS_URL` |
+
+If the compose file names several engines, the first row of the table wins, so a project with Postgres and Redis gets Postgres.
+A project with no supported engine gets no container and no change.
+The container runs the image the compose file names, including its tag. An image tag with an unresolved `${VARIABLE}` falls back to the engine's `latest` tag, or `lts` for MySQL and MariaDB.
+The helper supports only images that follow the official image conventions.
+Add a row to `ENGINES` in `blueprint/fleet/bin/crewship-db` for another engine.
+
+The helper decides the engine, the image and the port once, and writes them to `~/.local/state/code-factory/project-db/<project>/meta.json`.
+Later changes to the compose file do not change the container.
+To change the image, stop the container and edit `meta.json`. Keep the same engine and a compatible major version.
+
+For each project the helper creates:
+
+| Item | Value |
+| --- | --- |
+| Container | `crewship-db-<project>` (project name in lower case) |
+| Volume | `crewship-db-<project>-data` |
+| Port | one free port on `127.0.0.1`, starting at 25432, kept for the life of the project |
+| User and database | `app` and `app` (Redis uses a password only) |
+| Configuration | `~/.local/state/code-factory/project-db/<project>/compose.json` |
+
+The container uses `restart: unless-stopped`.
+The health check waits for the final TCP server, not the temporary server used during initialization.
+Compose mounts the password as a file secret; no password enters the repository, command arguments or apply output.
 Docker group members and accounts with Docker sudo access can read all container data and secrets.
-This service is a development database, not a security boundary between untrusted agents.
-
-## Project databases
-
-Run `crewship-db example-app` to create a project's role and database and print its environment file path.
-Project names start with a letter and contain at most 48 letters, digits, underscores or hyphens.
-Names are case-sensitive.
-The role and database both use the name `crewship_<project>`.
-The helper creates missing objects and keeps the same password on later calls.
-A host file lock serializes concurrent requests.
-Each project role owns its database, has no superuser or database-creation rights, and cannot connect to other project databases.
-Lanes of the same project share the same role and database.
-Projects with the same directory name share a database, even when they come from different repositories.
-
-Project passwords stay in `~/.local/state/code-factory/secrets/shared-postgres/<project>.password`, with mode `0600`.
-Do not delete these files while you keep the volume.
-The helper writes `DATABASE_URL` to `~/.local/state/code-factory/secrets/shared-postgres/<project>.env`, with mode `0600`.
-The helper prints only that file's path, never the connection string.
+These services are development databases, not a security boundary between untrusted agents.
 
 ## Worktree environment
 
@@ -62,51 +78,81 @@ The helper prints only that file's path, never the connection string.
 Its service runs `crewship-db --seed` to discover checkouts in Treehouse pools and Firstmate project directories.
 Apply records the configured `<workspace>/firstmate/projects` directory, so custom workspace paths also receive database settings.
 It finds each checkout by its `.git` entry and uses the checkout directory name as the project name.
-It ignores names that do not meet the helper's name rules.
-It writes `DATABASE_URL` into `.env.local`, with mode `0600`.
-The seeder replaces an existing `DATABASE_URL` but keeps other environment entries.
-The seeder skips checkout file errors and continues without recreating removed checkout directories.
-Lock, credential, and database errors remain fatal.
+It ignores names that start with anything but a letter or have more than 48 letters, digits, underscores or hyphens.
+Projects with the same directory name share a container, even when they come from different repositories.
+The seeder starts or updates one container per project, then writes the project's variable into `.env.local` of every checkout of that project, with mode `0600`.
+Every checkout of one project gets the same URL.
+The seeder replaces an existing `DATABASE_URL` or `REDIS_URL` but keeps other environment entries.
+It skips checkout file errors and continues without recreating removed checkout directories.
+If Docker fails for one project, the seeder still serves the other projects, then exits with an error.
 Save an existing database URL before you enable this profile.
 Do not commit `.env.local` or the password files.
 Run `crewship-db --seed` before you start an app when you cannot wait for the timer.
-Outside these managed directories, copy the environment file returned by `crewship-db <project>` into the app's local environment.
-Apps that do not load `.env.local` must load `DATABASE_URL` themselves.
+
+Run `crewship-db example-app [checkout]` to create one project's container now.
+The helper uses the known checkouts of `example-app`, or the `checkout` directory you give, to find the engine.
+It prints the path of `~/.local/state/code-factory/secrets/project-db/example-app.env`, with mode `0600`, and never the connection string.
+Outside the managed directories, copy that file's entry into the app's local environment.
+Apps that do not load `.env.local` must load the variable themselves.
 
 ## Data and upgrades
 
-Back up the database and password files together.
-Apply never removes the data volume.
-The latest image can change the Postgres major version.
-Postgres does not automatically upgrade an older data directory; a new major version can prevent the container from starting.
-Before a major upgrade, dump the databases with the old image and restore them into a new volume with the new image.
-Keep the old volume until you verify the restore.
-No automatic migration or data deletion runs here.
+Docker named volumes keep the data.
+When `data_dir` is set, they sit on the data disk ([Data disk](configuration.md#data-disk)); otherwise they sit in Docker's root.
+Passwords stay in `~/.local/state/code-factory/secrets/project-db/<project>.password`, with mode `0600`.
+Back up the database and the password file together, and do not delete the password file while you keep the volume.
+Apply never removes a volume.
+The seeder never pulls a newer image for a tag that is already on the host, so a floating tag such as `latest` stays on its current version until you pull it yourself.
+Postgres and MySQL do not automatically upgrade an older data directory.
+Before a major upgrade, dump the database with the old image and restore it into a new volume with the new image.
+
+## Migrate from the host-wide Postgres
+
+Earlier releases ran one `crewship-shared-postgres` container with one database per project.
+The new seeder does not touch it, but it replaces `DATABASE_URL` in each worktree's `.env.local` with the project's new, empty database, and it replaces the old `# crewship-shared-postgres` marker line.
+To keep the data, copy each project's database before the seeder runs, or restore it afterwards:
+
+```sh
+# Old database crewship_<project> to the new container. Use sudo -n docker if needed.
+docker exec crewship-shared-postgres pg_dump -U postgres --no-owner --no-privileges crewship_example-app \
+  | docker exec -i crewship-db-example-app psql -U app -d app
+```
+
+Projects with no compose file that names an engine keep their old `DATABASE_URL` until you remove the old container.
+After you verify every restore, remove the old service:
+
+```sh
+docker compose -f "$HOME/.local/state/code-factory/shared-postgres/compose.json" down
+```
+
+Do not stop the seeder: it now serves the project databases.
+The `down` command keeps the volume `crewship-shared-postgres-data`.
+Delete the volume and `~/.local/state/code-factory/shared-postgres` and `~/.local/state/code-factory/secrets/shared-postgres` only after a verified backup.
 
 ## Disable and remove
 
 Set `shared_postgres: false` and apply to stop managing this profile.
-This leaves the existing container, volume, timer, environment files and secrets unchanged.
-The container and timer can continue to run; disabling the profile does not stop them.
+This leaves the existing containers, volumes, timer, environment files and secrets unchanged.
+The containers and timer can continue to run; disabling the profile does not stop them.
 
-To stop the service manually, run these commands as the host owner:
+To stop the seeder and one project's container manually, run these commands as the host owner:
 
 ```sh
 systemctl --user disable --now crewship-postgres-env-seed.timer
 systemctl --user stop crewship-postgres-env-seed.service
-docker compose -f "$HOME/.local/state/code-factory/shared-postgres/compose.json" down
+docker compose -f "$HOME/.local/state/code-factory/project-db/example-app/compose.json" down
 ```
 
 Use `sudo -n docker` instead of `docker` if the account has no Docker group access.
-The `down` command above keeps the named volume.
+The `down` command keeps the named volume.
 Remove the helper and seeder units manually if you no longer need them.
-Remove the managed `DATABASE_URL` entries from worktrees before you use another database.
+Remove the managed `DATABASE_URL` and `REDIS_URL` entries from worktrees before you use another database.
 
-**Warning:** The following command permanently deletes every project database in this volume.
+**Warning:** The following command permanently deletes one project's database.
 Run it only after you save and verify a backup:
 
 ```sh
-docker volume rm crewship-shared-postgres-data
+docker volume rm crewship-db-example-app-data
 ```
 
 ## Verification
