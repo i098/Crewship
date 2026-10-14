@@ -22,7 +22,7 @@
 ## Features
 
 - **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent runs many coding agents.
-- **[Web pages from anywhere](docs/gateway.md):** one password opens agent pages and previews over a Cloudflare tunnel; Tailscale is an option.
+- **[Web pages from anywhere](docs/gateway.md):** one password opens agent pages and previews over Cloudflare or Tailscale.
 - **[Custom Herdr sidebar](docs/herdr.md):** every workspace and agent, with its state and load, at a glance.
 - **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
 - **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
