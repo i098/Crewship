@@ -6,7 +6,6 @@ import io
 import json
 import os
 import runpy
-import shutil
 import ssl
 import subprocess
 import sys
@@ -412,23 +411,27 @@ def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
         installer.resolve_latest("linux-x86_64", {"forgejo"})
 
 
-def test_a_failed_dump_with_the_running_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
+def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
     home, stubs, log = tmp_path / "home", tmp_path / "bin", tmp_path / "calls"
     old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
     new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
     conf = home / ".config/crewship/forgejo"
-    unit = home / ".config/systemd/user/forgejo.service"
-    for directory in (old.parent, new.parent, conf, unit.parent, stubs):
+    units = home / ".config/systemd/user"
+    for directory in (old.parent, new.parent, conf, units, stubs):
         directory.mkdir(parents=True)
-    # The running release is a real process of the old binary, which cannot dump.
-    shutil.copy(shutil.which("sleep"), old)
     for name in ("secret-key", "internal-token", "jwt-secret"):
         (conf / name).write_text("s3cret-value\n")
-    unit.write_text(f"[Service]\nExecStart={old} web\n")
-    running = subprocess.Popen(["sleep", "600"], executable=old)
+    installed = {"forgejo.service": f"[Service]\nExecStart={old} web\n",
+                 "forgejo-dump.service": f"[Service]\nExecStart={old} dump\n"}
+    for name, text in installed.items():
+        (units / name).write_text(text)
+    # The service is stopped; systemctl start runs the installed dump unit's command.
     for path, body in (
+        (old, f'echo "old $*" >> {log}; exit 1'),
         (new, f'echo "new $*" >> {log}'),
-        (stubs / "systemctl", f'echo "systemctl $*" >> {log}; echo {running.pid}'),
+        (stubs / "systemctl", f'echo "systemctl $*" >> {log}\n'
+         f'[ "$*" = "--user start forgejo-dump.service" ] || exit 0\n'
+         f'exec $(sed -n "s/^ExecStart=//p" {units}/forgejo-dump.service)'),
         (stubs / "tailscale", "exit 1"),
     ):
         path.write_text(f"#!/bin/sh\n{body}\n")
@@ -455,26 +458,22 @@ def test_a_failed_dump_with_the_running_forgejo_stops_the_upgrade_before_its_uni
             "profiles": {"forgejo": True},
         },
     }
-    try:
-        result = subprocess.run(
-            [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
-             "--extra-vars", json.dumps(variables)],
-            cwd=tmp_path, capture_output=True, text=True,
-            env={**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}"},
-        )
-    finally:
-        running.kill()
-        running.wait()
+    result = subprocess.run(
+        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
+         "--extra-vars", json.dumps(variables)],
+        cwd=tmp_path, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}"},
+    )
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert "rescued=1" in result.stdout, output
     assert "s3cret-value" not in output
-    # Forgejo keeps the old release: no new unit, no configuration, no restart, no new dump.
-    assert unit.read_text() == f"[Service]\nExecStart={old} web\n"
+    # The old release dumped; Forgejo keeps it: no new units, configuration or restart.
+    assert {name: (units / name).read_text() for name in installed} == installed
     assert not (conf / "app.ini").exists()
     calls = log.read_text()
+    assert "old dump" in calls, calls
     assert "restart" not in calls and "new" not in calls, calls
-    assert not list((home / ".local/share/forgejo/dumps").iterdir())
 
 
 @pytest.mark.parametrize(
