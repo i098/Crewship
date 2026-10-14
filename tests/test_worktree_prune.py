@@ -60,6 +60,13 @@ def run(tmp_path, *args, scan="find", **env):
     fdu.unlink(missing_ok=True)
     if scan == "fdu":
         fdu.symlink_to(shutil.which("fdu"))
+    elif scan == "lying-fdu":  # reports a size, and would name every file as a candidate
+        fdu.write_text(
+            '#!/bin/sh\necho "$*" >> "$0.log"\n'
+            'echo \'{"reports": [{"summary": {"bytes": 4242, "ignored": {"bytes": 1}}}]}\'\n'
+            "echo tracked.txt\n"
+        )
+        fdu.chmod(0o755)
     elif scan == "broken-fdu":
         fdu.write_text("#!/bin/sh\nexit 1\n")
         fdu.chmod(0o755)
@@ -78,7 +85,8 @@ def run(tmp_path, *args, scan="find", **env):
     )
 
 
-SCANS = ["find", "broken-fdu", pytest.param("fdu", marks=NEEDS_FDU)]
+# Discovery is always find; fdu, when on PATH, only reports sizes. Nothing may depend on it.
+SCANS = ["find", "broken-fdu", "lying-fdu", pytest.param("fdu", marks=NEEDS_FDU)]
 
 
 @pytest.mark.parametrize("scan", SCANS)
@@ -197,6 +205,33 @@ def test_a_stale_directory_inside_a_live_build_directory_stays(tmp_path, pool, s
     run(tmp_path, scan=scan)
 
     assert (pool / "node_modules/.pnpm/yargs/node_modules/yargs/index.js").is_file()
+
+
+def test_sizes_come_from_fdu_when_installed_and_from_du_otherwise(tmp_path, pool):
+    put(pool / "node_modules/pkg/index.js", "x" * 3000, age_days=30)
+    age(pool / "node_modules", 30)
+
+    stub = run(tmp_path, "--dry-run", scan="lying-fdu").stdout
+    assert f"would remove {pool}/node_modules (4.2KB)" in stub  # fdu's number
+    assert "sizes: fdu" in stub
+    assert "--view summary" in (tmp_path / "bin/fdu.log").read_text()
+
+    for scan in ("find", "broken-fdu"):
+        out = run(tmp_path, "--dry-run", scan=scan).stdout
+        assert f"would remove {pool}/node_modules (3.0KB)" in out, scan  # du's number
+    assert "sizes: du" in run(tmp_path, "--dry-run", scan="find").stdout
+
+
+@NEEDS_FDU
+def test_real_fdu_and_du_report_the_same_size(tmp_path, pool):
+    put(pool / "node_modules/pkg/index.js", "x" * 5000, age_days=30)
+    age(pool / "node_modules", 30)
+
+    def line(scan):
+        out = run(tmp_path, "--dry-run", scan=scan).stdout
+        return next(row for row in out.splitlines() if row.startswith("would"))
+
+    assert line("fdu") == line("find")
 
 
 def test_the_age_threshold_is_configurable(tmp_path, pool):

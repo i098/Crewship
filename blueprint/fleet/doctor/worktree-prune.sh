@@ -8,9 +8,9 @@
 # Candidates are directories named in WORKTREE_PRUNE_NAMES, inside a pool
 # worktree ($WORKTREE_PRUNE_POOLS/<pool>/<n>/<repo>, default ~/.treehouse),
 # that are gitignored and where nothing changed for WORKTREE_PRUNE_AGE_DAYS (7).
-# With fdu installed, one `fdu --ignored only` scan per worktree finds them;
-# without it, `find` finds them by name and age. Both lists then pass the same
-# git checks, which fdu and find are never trusted to replace: a directory goes
+# `find` discovers them, by name and age: it stops at the first build directory
+# instead of walking the files inside it, which beat `fdu --ignored only` four
+# times over on a 165-worktree host (23 s against 94 s). A candidate then goes
 # only when the nearest enclosing git repository
 #   - ignores it (`git check-ignore`, all rules, not only .gitignore files),
 #   - tracks no file in it and has no untracked, non-ignored file in it,
@@ -21,6 +21,10 @@
 # Never touched: tracked files, untracked files outside an ignored build
 # directory, uncommitted or unpushed work, any path outside the pools, and any
 # directory whose name is not in the list.
+#
+# fdu is optional and never decides what is removed: when it is installed, the
+# size in each report line comes from `fdu --view summary` (faster than du on big
+# trees), else from du, and the same when fdu fails.
 #
 # --dry-run prints what a real run would remove and removes nothing.
 set -u
@@ -48,21 +52,23 @@ command -v fdu >/dev/null 2>&1 && FDU=1
 
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "${1}B"; }
 
-# <worktree> -> relative paths of gitignored candidates older than AGE_D days, via fdu.
-# Fails when fdu fails, so the caller can fall back to find for this worktree.
-candidates_fdu() {
-  local args=() n
-  for n in "${NAME_LIST[@]}"; do args+=(--include "**/$n"); done
-  # --cache off: a snapshot cache must never vouch for a directory about to be deleted.
-  (cd "$1" && fdu . --cache off -q --ignored only --kind dir --modified-before "${AGE_D}d" "${args[@]}" --format paths)
-}
-# <worktree> -> the same, via find: matched by name, stale when nothing inside is newer than the cutoff.
+# <worktree> -> relative paths of directories matched by name where nothing inside is newer than the cutoff.
 candidates_find() {
   local wt=$1 d args=() n
   for n in "${NAME_LIST[@]}"; do args+=(-o -name "$n"); done
   while IFS= read -r -d '' d; do
     [ -z "$(find "$d" -newermt "@$CUTOFF" -print -quit 2>/dev/null)" ] && printf '%s\n' "${d#"$wt"/}"
   done < <(find "$wt" -name .git -prune -o -type d \( -false "${args[@]}" \) -print0 -prune 2>/dev/null)
+}
+
+# <directory> -> apparent size in bytes: fdu when installed, du otherwise or when fdu gives nothing.
+size_of() {
+  local b=
+  # --cache off: a snapshot cache must never report a directory it has not just read.
+  [ "$FDU" = 1 ] && b=$(fdu "$1" --cache off -q --view summary --size apparent --format json 2>/dev/null \
+    | grep -o '"bytes": *[0-9]*' | head -n 1 | grep -o '[0-9]*$')
+  [[ $b =~ ^[0-9]+$ ]] || b=$(du -sb -- "$1" 2>/dev/null | cut -f1)
+  echo "${b:-0}"
 }
 
 # <worktree> <relative path> -> 0 only when every guard in the header holds.
@@ -91,22 +97,12 @@ for wt in "$POOLS"/*/[0-9]*/*/; do
   [ -d "$wt" ] && [ ! -L "$wt" ] && [ -e "$wt/.git" ] || continue
   [ "$(realpath -e -- "$wt" 2>/dev/null)" = "$POOLS_REAL/${wt#"$POOLS"/}" ] || continue
   scanned=$((scanned + 1))
-  if [ "$FDU" = 1 ]; then
-    list=$(candidates_fdu "$wt") || list=$(candidates_find "$wt")
-  else
-    list=$(candidates_find "$wt")
-  fi
-  selected=()
+  list=$(candidates_find "$wt")
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
     rel=${rel#./}
-    nested=0
-    for s in "${selected[@]}"; do [[ $rel == "$s"/* ]] && nested=1; done
-    [ "$nested" = 1 ] && continue
     if ! safe "$wt" "$rel"; then skipped=$((skipped + 1)); continue; fi
-    selected+=("$rel")
-    size=$(du -sb -- "$wt/$rel" 2>/dev/null | cut -f1)
-    size=${size:-0}
+    size=$(size_of "$wt/$rel")
     if [ "$DRY" = 1 ]; then
       echo "would remove $wt/$rel ($(human "$size"))"
     elif rm -rf --one-file-system -- "$wt/$rel"; then
@@ -117,5 +113,5 @@ for wt in "$POOLS"/*/[0-9]*/*/; do
     count=$((count + 1)) total=$((total + size))
   done < <(printf '%s\n' "$list" | sort)
 done
-echo "worktree-prune: $([ "$DRY" = 1 ] && echo "would remove" || echo removed) $count director$([ "$count" = 1 ] && echo y || echo ies), $(human "$total"), older than ${AGE_D}d, in $scanned worktree(s) under $POOLS (scan: $([ "$FDU" = 1 ] && echo fdu || echo find), $skipped candidate(s) skipped by the checks)"
+echo "worktree-prune: $([ "$DRY" = 1 ] && echo "would remove" || echo removed) $count director$([ "$count" = 1 ] && echo y || echo ies), $(human "$total"), older than ${AGE_D}d, in $scanned worktree(s) under $POOLS (sizes: $([ "$FDU" = 1 ] && echo fdu || echo du), $skipped candidate(s) skipped by the checks)"
 exit 0

@@ -20,7 +20,7 @@ crewship_storage_guard_fill_horizon_hours: 6
 crewship_storage_guard_repeat_min: 30
 # CRIT also removes gitignored build output (node_modules, .venv, target, dist,
 # .next, ...) in Treehouse pool worktrees that nothing changed for this many
-# days, through blueprint/fleet/doctor/worktree-prune.sh (fdu when installed).
+# days, through blueprint/fleet/doctor/worktree-prune.sh (found with find; sizes from fdu when installed).
 crewship_storage_guard_worktree_age_days: 7
 
 crewship_fleet_guard_units:

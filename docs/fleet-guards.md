@@ -71,10 +71,12 @@ root). A directory is removed only when all of these hold:
 - It is a real directory, not a symlink, and its resolved path is still inside the worktree.
 
 Tracked files, untracked work outside such directories, anything outside the
-pools and every directory that fails one check stay. With the opt-in
-[`fdu` profile](configuration.md#profiles), one `fdu --ignored only` scan per
-worktree finds the candidates and their age; without fdu, or when fdu fails,
-`find` does the same by name and age. Both lists pass the same git checks.
+pools and every directory that fails one check stay. `find` discovers the
+candidates by name and age: it stops at the first build directory, and measured
+on 165 worktrees it took 23 s where `fdu --ignored only` took 94 s for the same
+104 directories. The opt-in [`fdu` profile](configuration.md#profiles) is used
+only for the size in each report line (`fdu --view summary`); without fdu, or
+when fdu fails, `du` gives it. fdu never decides what is removed.
 `~/oss-fleet/doctor/worktree-prune.sh --dry-run` prints what a real run would
 remove. `tests/test_worktree_prune.py` runs it against real git repositories.
 

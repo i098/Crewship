@@ -38,7 +38,7 @@
 # ($WORKTREE_PRUNE_POOLS, default ~/.treehouse), before the Docker steps: it
 # removes only gitignored build output (node_modules, .venv, target, dist,
 # .next, ...) that nothing changed for WORKTREE_PRUNE_AGE_DAYS (7), found with
-# `fdu --ignored only` when fdu is installed and with find when it is not.
+# find; fdu, when installed, only reports the sizes.
 # Tracked files, uncommitted or unpushed work and anything outside the pools
 # stay; see that script for each guard. Firstmate's orphan sweep still owns
 # whole leaked worktrees and /tmp litter.
