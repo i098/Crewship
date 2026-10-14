@@ -29,9 +29,15 @@ The service, its data and its secrets stay on the host.
 - With the `agents` profile, the no-mistakes Forgejo setup. See [no-mistakes](#no-mistakes).
 
 When Tailscale runs with HTTPS certificates, `tailscale serve` publishes Forgejo at `https://<tailnet host>:20250/`.
-Without HTTPS certificates, apply does not use `tailscale serve`, and Forgejo stays on `http://127.0.0.1:20250/`.
+Without HTTPS certificates, apply does not use `tailscale serve`.
 Apply does not change an HTTPS port 20250 that `tailscale serve` gives to a different service; it stops with an error.
-Clone URLs and pull request links use the published URL, or the loopback URL without it.
+Clone URLs, pull request links and the no-mistakes base URL use the root URL that apply sets in `app.ini`:
+
+- When you set the Ansible variable `crewship_forgejo_root_url`, apply always uses it.
+- When `tailscale serve` publishes Forgejo, apply uses the published URL.
+- Otherwise apply keeps the root URL that `app.ini` already has, so a Tailscale outage does not change it.
+- On the first install without a published URL, apply uses `http://127.0.0.1:20250/`.
+
 Apply never uses Funnel, so Forgejo is never on the public internet.
 
 ## Admin password recovery

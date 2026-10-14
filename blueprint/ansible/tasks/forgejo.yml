@@ -218,12 +218,24 @@
       ansible.builtin.set_fact:
         crewship_forgejo_published: "{{ crewship_forgejo_served_by == crewship_forgejo_proxy }}"
 
+- name: Read the installed Forgejo root URL
+  ansible.builtin.command:
+    argv: [sed, -n, 's/^ROOT_URL = //p', "{{ crewship_forgejo_conf_dir }}/app.ini"]
+  register: crewship_forgejo_installed_url
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# An explicit crewship_forgejo_root_url wins. While Tailscale is down, the installed URL
+# stays, so clone URLs and the no-mistakes base URL do not follow a transient outage.
 - name: Choose the Forgejo root URL
   ansible.builtin.set_fact:
     crewship_forgejo_root_url: >-
-      {{ ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
-         if crewship_forgejo_published | default(false) | bool
-         else ('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/') }}
+      {{ crewship_forgejo_root_url | default(
+           ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
+           if crewship_forgejo_published | default(false) | bool
+           else crewship_forgejo_installed_url.stdout
+             | default('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/', true), true) }}
 
 - name: Read the Forgejo release the installed unit runs
   ansible.builtin.command:
@@ -442,13 +454,6 @@
 # finds forgejo-axi on the daemon PATH (~/.local/bin). The drop-in applies to every
 # no-mistakes-daemon-<hash>.service; a running daemon picks it up on its next restart,
 # which is reported, never performed.
-- name: Ensure the no-mistakes daemon drop-in directory
-  ansible.builtin.file:
-    path: "{{ crewship_user_units }}/no-mistakes-daemon-.service.d"
-    state: directory
-    mode: "0755"
-  when: crewship_cfg.profiles.agents | bool
-
 - name: Give the no-mistakes daemon the Forgejo base URL and token
   ansible.builtin.copy:
     content: |

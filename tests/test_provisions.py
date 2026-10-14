@@ -1,3 +1,4 @@
+import configparser
 import getpass
 import grp
 import hashlib
@@ -411,16 +412,57 @@ def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
         installer.resolve_latest("linux-x86_64", {"forgejo"})
 
 
-def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
-    home, stubs, log = tmp_path / "home", tmp_path / "bin", tmp_path / "calls"
-    old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
-    new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
-    conf = home / ".config/crewship/forgejo"
-    units = home / ".config/systemd/user"
-    for directory in (old.parent, new.parent, conf, units, stubs):
+def forgejo_host(tmp_path):
+    """A home with the Forgejo secrets, units directories and a stopped Tailscale."""
+    home, stubs = tmp_path / "home", tmp_path / "bin"
+    conf, units = home / ".config/crewship/forgejo", home / ".config/systemd/user"
+    for directory in (conf, units, stubs):
         directory.mkdir(parents=True)
     for name in ("secret-key", "internal-token", "jwt-secret"):
         (conf / name).write_text("s3cret-value\n")
+    (stubs / "tailscale").write_text("#!/bin/sh\nexit 1\n")
+    (stubs / "tailscale").chmod(0o755)
+    return home, conf, units, stubs
+
+
+def apply_forgejo(tmp_path, crewship, **extra):
+    """Run tasks/forgejo.yml with Forgejo 2.0.0 and tmp_path/bin first on PATH."""
+    (tmp_path / "templates").symlink_to(Path(__file__).parents[1] / "blueprint/ansible/templates")
+    ansible = Path(__file__).parents[1] / "blueprint/ansible"
+    playbook = tmp_path / "forgejo.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars_files": [str(f) for f in sorted((ansible / "group_vars/all").glob("*.yml"))],
+        "tasks": [{"ansible.builtin.import_tasks": str(ansible / "tasks/forgejo.yml")}],
+        "handlers": [{"name": name, "ansible.builtin.debug": {"msg": name}}
+                     for name in ("reload user systemd", "no-mistakes daemon restart required")],
+    }]))
+    variables = {
+        "crewship_repo": str(ansible.parents[1]), "crewship_blueprint": str(ansible.parent),
+        "ansible_become": False,
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_platform": "linux-x86_64",
+        "crewship_local_bin": str(tmp_path / "bin"),
+        "crewship_user_uid": os.getuid(),
+        "crewship_latest": {"forgejo": {"version": "2.0.0", "assets": {}}},
+        "crewship": {"user": getpass.getuser(), "home": str(tmp_path / "home"), **crewship},
+        **extra,
+    }
+    return subprocess.run(
+        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
+         "--extra-vars", json.dumps(variables)],
+        cwd=tmp_path, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"},
+    )
+
+
+def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
+    home, conf, units, stubs = forgejo_host(tmp_path)
+    log = tmp_path / "calls"
+    old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
+    new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    for directory in (old.parent, new.parent):
+        directory.mkdir(parents=True)
     installed = {"forgejo.service": f"[Service]\nExecStart={old} web\n",
                  "forgejo-dump.service": f"[Service]\nExecStart={old} dump\n"}
     for name, text in installed.items():
@@ -432,38 +474,10 @@ def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_u
         (stubs / "systemctl", f'echo "systemctl $*" >> {log}\n'
          f'[ "$*" = "--user start forgejo-dump.service" ] || exit 0\n'
          f'exec $(sed -n "s/^ExecStart=//p" {units}/forgejo-dump.service)'),
-        (stubs / "tailscale", "exit 1"),
     ):
         path.write_text(f"#!/bin/sh\n{body}\n")
         path.chmod(0o755)
-    (tmp_path / "templates").symlink_to(Path(__file__).parents[1] / "blueprint/ansible/templates")
-    ansible = Path(__file__).parents[1] / "blueprint/ansible"
-    playbook = tmp_path / "forgejo.yml"
-    playbook.write_text(yaml.safe_dump([{
-        "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "vars_files": [str(f) for f in sorted((ansible / "group_vars/all").glob("*.yml"))],
-        "tasks": [{"ansible.builtin.import_tasks": str(ansible / "tasks/forgejo.yml")}],
-        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "reload"}}],
-    }]))
-    variables = {
-        "crewship_repo": str(ansible.parents[1]), "crewship_blueprint": str(ansible.parent),
-        "ansible_become": False,
-        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
-        "crewship_platform": "linux-x86_64",
-        "crewship_local_bin": str(stubs),
-        "crewship_user_uid": os.getuid(),
-        "crewship_latest": {"forgejo": {"version": "2.0.0", "assets": {}}},
-        "crewship": {
-            "user": getpass.getuser(), "home": str(home), "start_services": True,
-            "profiles": {"forgejo": True},
-        },
-    }
-    result = subprocess.run(
-        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
-         "--extra-vars", json.dumps(variables)],
-        cwd=tmp_path, capture_output=True, text=True,
-        env={**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}"},
-    )
+    result = apply_forgejo(tmp_path, {"start_services": True, "profiles": {"forgejo": True}})
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert "rescued=1" in result.stdout, output
@@ -476,6 +490,41 @@ def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_u
     assert "restart" not in calls and "new" not in calls, calls
     # `forgejo dump` fails until this directory exists, and Forgejo makes it only with a repository.
     assert (home / ".local/share/forgejo/data/forgejo-repositories").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("installed", "explicit", "expected"),
+    [
+        # Tailscale is down: the installed tailnet URL stays.
+        ("https://host.tail.ts.net:20250/", None, "https://host.tail.ts.net:20250/"),
+        # A first install without Tailscale uses the loopback URL.
+        (None, None, "http://127.0.0.1:20250/"),
+        # An explicit URL wins over the installed one.
+        ("https://host.tail.ts.net:20250/", "https://git.example/", "https://git.example/"),
+    ],
+)
+def test_forgejo_root_url_without_tailscale(tmp_path, installed, explicit, expected):
+    home, conf, units, stubs = forgejo_host(tmp_path)
+    binary = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    (units / "no-mistakes-daemon-.service.d").mkdir()
+    if installed:
+        (conf / "app.ini").write_text(f"[server]\nROOT_URL = {installed}\n")
+    extra = {"crewship_forgejo_root_url": explicit} if explicit else {}
+    result = apply_forgejo(
+        tmp_path,
+        {"start_services": False, "profiles": {"forgejo": True, "agents": True}},
+        **extra,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    app = configparser.ConfigParser(interpolation=None)
+    app.read_string("[root]\n" + (conf / "app.ini").read_text())
+    assert app["server"]["ROOT_URL"] == expected
+    dropin = configparser.ConfigParser(interpolation=None)
+    dropin.read_string((units / "no-mistakes-daemon-.service.d/forgejo.conf").read_text())
+    assert dropin["Service"]["Environment"] == f'"FORGEJO_BASE_URL={expected.rstrip("/")}"'
 
 
 @pytest.mark.parametrize(
