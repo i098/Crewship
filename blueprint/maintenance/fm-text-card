@@ -2,10 +2,11 @@
 # Render a short update as an image card (CARD_WIDTH x at least CARD_MIN_HEIGHT) for the iMessage line.
 # Usage: fm-text-card OUT.png < text   (first line = title; "- x" = bullet;
 #        "k: v" = row; "# x" = section; blank line = gap)
-# Then: fm-imessage --image OUT.png, and delete OUT.png. Render to mktemp and delete after the send; nothing persists.
+#        fm-text-card --send < text    sends it: an iMessage text card (fm-imessage --card) when the bridge has cards
+#        on, else this PNG with fm-imessage --image, rendered to a temp file that is deleted after the send.
 # Needs headless Chrome: CHROME, else google-chrome, google-chrome-stable or chromium on PATH, else omp's puppeteer Chrome
 # under ~/.omp/puppeteer (the desktop profile installs google-chrome; crewship_chrome_install: true installs it without a desktop).
-import glob, html, os, shutil, subprocess, sys, tempfile
+import glob, html, json, os, shutil, subprocess, sys, tempfile
 
 # iMessage crops a card narrower or flatter than about 4:3; keep these two values.
 CARD_WIDTH = 840
@@ -57,5 +58,23 @@ def shoot(page, height, out):
                         f"--window-size={CARD_WIDTH},{max(height, CARD_MIN_HEIGHT)}", f"file://{f}"], capture_output=True, timeout=60, check=True)
 
 
+def send(text):
+    """A text card when fm-imessage queues it; else the PNG. The card's limits: title 120 chars, 60 lines of 200."""
+    lines = text.strip().splitlines() or ["Update"]
+    card = {"kind": "text", "key": "text-card", "title": lines[0][:120] or "Update", "lines": [l[:200] for l in lines[1:61]] or [""]}
+    if subprocess.run(["fm-imessage", "--card", "-"], input=json.dumps(card), text=True, capture_output=True).returncode == 0:
+        return
+    fd, out = tempfile.mkstemp(suffix=".png", prefix="fm-text-card-")
+    os.close(fd)
+    try:
+        shoot(*render(text), out)
+        subprocess.run(["fm-imessage", "--image", out], check=True)
+    finally:
+        os.unlink(out)
+
+
 if __name__ == "__main__":
-    shoot(*render(sys.stdin.read()), sys.argv[1])
+    if sys.argv[1:] == ["--send"]:
+        send(sys.stdin.read())
+    else:
+        shoot(*render(sys.stdin.read()), sys.argv[1])
