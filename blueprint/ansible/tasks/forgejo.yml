@@ -94,7 +94,8 @@
     mode: "{{ item.mode }}"
   loop:
     - { path: "{{ crewship_forgejo_work }}", mode: "0700" }
-    # `forgejo dump` fails until this exists; Forgejo makes it only with the first repository.
+    # `forgejo dump` fails while this directory is missing, and Forgejo creates it only
+    # with the first repository.
     - { path: "{{ crewship_forgejo_work }}/data/forgejo-repositories", mode: "0700" }
     - { path: "{{ crewship_forgejo_conf_dir }}", mode: "0700" }
     - { path: "{{ crewship_local_bin }}", mode: "0755" }
