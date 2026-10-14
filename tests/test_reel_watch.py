@@ -110,3 +110,19 @@ def test_partial_geonode_settings_stop_and_never_print_the_password(spawned, mon
         rw.run([URL], wait=lambda s: None)
     assert "GEONODE_STICKY_PORT_BASE" in str(error.value) and "secret-pw" not in str(error.value)
     assert spawned == []
+
+
+def test_a_stopped_line_fetches_nothing_even_when_the_halt_comes_while_waiting(fake_watch, monkeypatch):
+    monkeypatch.setenv("INSTAGRAM_DM_DIR", str(fake_watch / "dm"))
+    (fake_watch / "dm").mkdir()
+    (fake_watch / "dm" / "stop").write_text("AccountSuspended: challenge_required")
+    with pytest.raises(SystemExit, match="halted \\(AccountSuspended"):
+        rw.run([URL], wait=lambda s: None)
+    (fake_watch / "dm" / "stop").unlink()
+    rw.run([URL], wait=lambda s: None)  # the line runs: one fetch goes through
+    assert len((fake_watch / "seen").read_text().splitlines()) == 1
+    waits = []
+    os.utime(fake_watch / "state" / "reel-watch.last")  # a fetch just ended: the next one waits
+    with pytest.raises(SystemExit, match="stopped by hand"):
+        rw.run([URL], wait=lambda gap: (waits.append(gap), (fake_watch / "dm" / "stop").write_text("stopped by hand")))
+    assert len(waits) == 1 and len((fake_watch / "seen").read_text().splitlines()) == 1  # stopped during the wait

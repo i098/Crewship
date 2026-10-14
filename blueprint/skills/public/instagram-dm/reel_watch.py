@@ -10,6 +10,8 @@ stops with the error: do not retry in a loop, and do not add a login.
   WATCH_SCRIPT     watch.py of the video-watch skill (default: the one under ~/.omp/agent/skills or ~/.claude/skills)
   GEONODE_GATEWAY, GEONODE_USERNAME, GEONODE_PASSWORD, GEONODE_STICKY_PORT_BASE, GEONODE_STICKY_PORT_MAX
                    Geonode residential proxy for the fetch, on a sticky port picked per fetch. Unset: fetch direct.
+  INSTAGRAM_DM_DIR the DM line's state directory (default ~/.local/state/instagram-dm). While its `stop` flag exists (a
+                   halt, or `instagram_dm.py stop`) nothing is fetched.
 """
 import fcntl
 import os
@@ -56,6 +58,11 @@ def geonode_proxy(env, pick=random.randint):
     return f"http://{user}:{password}@{values['GEONODE_GATEWAY']}:{pick(base, top)}"
 
 
+def stopped():
+    """Why the DM line is stopped (the reason in its `stop` flag file), or None."""
+    flag = Path(os.environ.get("INSTAGRAM_DM_DIR", "~/.local/state/instagram-dm")).expanduser() / "stop"
+    return (flag.read_text() or "stopped") if flag.is_file() else None
+
 
 def command(argv):
     """The watch.py command line for a reel URL plus options; exits on a non-Instagram URL or a cookie option."""
@@ -68,6 +75,8 @@ def command(argv):
 
 def run(argv, wait=time.sleep):
     cmd = command(argv)
+    if why := stopped():
+        sys.exit(f"halted ({why}): nothing is fetched until a human runs `instagram_dm.py resume`")
     state = Path(os.environ.get("REEL_WATCH_DIR", "~/.cache/instagram-dm")).expanduser()
     state.mkdir(parents=True, exist_ok=True)
     stamp = state / "reel-watch.last"
@@ -80,6 +89,8 @@ def run(argv, wait=time.sleep):
         if (gap := last + MIN_GAP - time.time()) > 0:
             print(f"[reel_watch] waiting {gap:.0f}s", file=sys.stderr)
             wait(gap)
+        if why := stopped():  # a halt that came while this fetch waited its turn
+            sys.exit(f"halted ({why}): nothing is fetched until a human runs `instagram_dm.py resume`")
         try:
             # An empty value beats the watch config file: no jar, no browser session.
             env = {**os.environ, "WATCH_COOKIES_FILE": "", "WATCH_COOKIES_FROM_BROWSER": ""}

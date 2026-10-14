@@ -4,7 +4,7 @@
 [Unit]
 Description=Send the operator a few Instagram reels worth watching (Crewship managed)
 After=network-online.target
-ConditionPathExists={{ crewship_instagram_dm_session }}
+ConditionPathExists={{ crewship_instagram_curator_session }}
 ConditionPathExists={{ crewship_instagram_curator_config }}
 
 [Service]
@@ -12,8 +12,14 @@ Type=oneshot
 TimeoutStartSec=2h
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator }}
-Environment=INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session }}
-Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
+# The curator's own account: its session and its state. The DM bot's session is only named, so the curator refuses it,
+# and the DM line's state is only read: a stop, a halt or DM activity keeps the curator idle.
+Environment=INSTAGRAM_DM_SESSION={{ crewship_instagram_curator_session }}
+Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_curator_state }}
+Environment=CURATOR_DM_SESSION={{ crewship_instagram_dm_session }}
+Environment=CURATOR_DM_DIR={{ crewship_instagram_dm_state }}
+Environment=CURATOR_DM_LOG={{ crewship_instagram_dm_log }}
+EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
 Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
 Environment=CURATOR_CONFIG={{ crewship_instagram_curator_config }}
 Environment=CURATOR_LOG={{ crewship_instagram_curator_log }}

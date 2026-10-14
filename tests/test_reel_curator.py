@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -132,6 +133,99 @@ def test_a_429_stops_the_curator_for_a_day_and_is_logged(env, monkeypatch, capsy
     assert row["action"] == "halt" and row["until"] > time.time() + 86000
     monkeypatch.setattr(rc.ig, "client", lambda: pytest.fail("called Instagram while stopped"))
     with pytest.raises(SystemExit, match="stopped"):
+        rc.main()
+
+
+def test_the_kill_switch_stops_the_curator_before_any_request(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(rc, "load_config", lambda: CFG)
+    monkeypatch.setattr(rc.ig, "client", lambda: pytest.fail("called Instagram while stopped"))
+    monkeypatch.setattr(sys, "argv", ["reel_curator.py", "run"])
+    rc.ig.stop()
+    with pytest.raises(SystemExit, match="stopped by hand"):
+        rc.main()
+
+
+def test_a_run_ends_quietly_at_40_instagram_calls(env, monkeypatch, capsys):
+    calls = []
+
+    class Counting(Client):
+        def direct_messages(self, thread, amount):
+            calls.append("direct_messages")
+            return super().direct_messages(thread, amount)
+
+        def user_id_from_username(self, name):
+            calls.append("user_id")
+            return 1
+
+        def user_clips_v1(self, uid, amount):
+            calls.append("clips")
+            return []
+
+        def hashtag_medias_reels_v1(self, name, amount):
+            calls.append("tag")
+            return []
+
+    monkeypatch.setattr(rc, "load_config", lambda: {**CFG, "accounts": [f"a{i}" for i in range(60)]})
+    monkeypatch.setattr(rc.ig, "client", lambda: Counting())
+    monkeypatch.setattr(sys, "argv", ["reel_curator.py", "run"])
+    rc.main()  # no SystemExit: the cap is not a failure
+    assert len(calls) == 40 and "40 Instagram calls spent" in capsys.readouterr().out
+    assert rc.read_log() == []  # and no halt row: nothing is wrong with the account
+
+
+class ChallengeError(Exception):
+    pass
+
+
+@pytest.fixture
+def dm_line(env, monkeypatch, tmp_path):
+    """The DM line's state: a directory (the one `env` already points at) and its message log."""
+    d = tmp_path / "dm"
+    d.mkdir()
+    monkeypatch.setenv("CURATOR_DM_LOG", str(d / "messages.jsonl"))
+    return d
+
+
+def test_no_run_within_60_minutes_of_dm_activity(dm_line):
+    now = time.time()
+    assert rc.hold_off(CFG, now) is None
+    for name in ("messages.jsonl", "sent.jsonl"):
+        (dm_line / name).write_text("{}\n")
+        os.utime(dm_line / name, (now - 30 * 60,) * 2)
+        assert "active less than 60 min ago" in rc.hold_off(CFG, now)
+        os.utime(dm_line / name, (now - 61 * 60,) * 2)
+        assert rc.hold_off(CFG, now) is None
+
+
+def test_no_run_for_24_hours_after_a_halt_even_after_resume(dm_line):
+    now = time.time()
+    state = rc.ig.load_state()
+    rc.ig.fail(state, ChallengeError("checkpoint"), now - 3600)
+    rc.ig.save_state(state)
+    assert "the DM line is stopped (ChallengeError" in rc.hold_off(CFG, now)
+    rc.ig.resume()  # the human checked the account: the line may run, the curator still waits out the 24 h
+    assert "halted less than 24 h ago" in rc.hold_off(CFG, now)
+    assert rc.hold_off(CFG, now + 24 * 3600) is None
+
+
+def test_no_run_while_the_dm_line_is_stopped_or_on_the_bots_own_session(dm_line, monkeypatch, tmp_path):
+    rc.ig.stop()
+    assert "the DM line is stopped (stopped by hand)" in rc.hold_off(CFG, time.time())
+    rc.ig.resume()
+    (tmp_path / "bot.json").write_text("{}")
+    monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(tmp_path / "bot.json"))
+    monkeypatch.setenv("CURATOR_DM_SESSION", str(tmp_path / "bot.json"))
+    assert "the DM bot's session" in rc.hold_off(CFG, time.time())
+    monkeypatch.setenv("CURATOR_DM_SESSION", str(tmp_path / "other.json"))
+    assert rc.hold_off(CFG, time.time()) is None
+
+
+def test_main_does_nothing_while_the_dm_line_was_active(dm_line, monkeypatch):
+    (dm_line / "messages.jsonl").write_text("{}\n")
+    monkeypatch.setattr(rc, "load_config", lambda: CFG)
+    monkeypatch.setattr(rc.ig, "client", lambda: pytest.fail("called Instagram while the line was busy"))
+    monkeypatch.setattr(sys, "argv", ["reel_curator.py", "run"])
+    with pytest.raises(SystemExit, match="not running: the DM line was active"):
         rc.main()
 
 

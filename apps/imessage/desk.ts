@@ -251,10 +251,11 @@ export class DeskTiming {
     private timers: Timers = globalThis as unknown as Timers,
   ) {}
 
-  inboundText() {
+  // `quietMs` overrides the quiet period for this burst: the Instagram desk waits longer while reel links come in.
+  inboundText(quietMs = this.quietMs) {
     const burst = this.inbound = ++this.seq;
     this.timers.clearTimeout(this.timer);
-    this.timer = this.timers.setTimeout(() => this.run(() => this.inbound === burst && this.firstmate < burst), this.quietMs);
+    this.timer = this.timers.setTimeout(() => this.run(() => this.inbound === burst && this.firstmate < burst), quietMs);
   }
 
   firstmateActive() {
