@@ -293,7 +293,7 @@ def fail(state, e, now):
     """Record a failure in state and return its one-line report. A flagged account halts; anything else backs off."""
     what = describe(e)
     if is_halt(e):
-        state["halted"] = what
+        state["halted"], state["halted_at"] = what, now  # the curator waits 24 h after it, resume or not
         stop_file().write_text(what)  # the one flag every process, and the desk, looks at
         with contextlib.suppress(Exception):
             notify(
