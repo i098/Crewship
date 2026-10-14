@@ -64,9 +64,10 @@ function base(c: Record<string, unknown>): Base {
   if (c.subtitle !== undefined) b.subtitle = text(c.subtitle, 200, "subtitle");
   if (c.hours !== undefined && (!Number.isInteger(c.hours) || (c.hours as number) < 1 || (c.hours as number) > 168)) throw new Error("hours must be a whole number from 1 to 168");
   if (c.hours !== undefined) b.hours = c.hours as number;
+  // A card is an app bubble with its live view unless it says otherwise.
   for (const flag of ["app", "live"] as const) {
     if (c[flag] !== undefined && typeof c[flag] !== "boolean") throw new Error(`${flag} must be true or false`);
-    if (c[flag] !== undefined) b[flag] = c[flag] as boolean;
+    b[flag] = (c[flag] as boolean | undefined) ?? true;
   }
   return b;
 }
@@ -87,13 +88,13 @@ export function parseCard(json: string): Card {
 
 export const letter = (i: number) => String.fromCharCode(65 + i);
 
-// The bubble: the title, then the state of the card.
+// The bubble: the title, then one status line. No trailing caption: without the card app, Messages runs the caption
+// and the trailing caption together into one line.
 export function cardLayout(card: Stored): Layout {
-  const what = card.kind === "choice"
-    ? card.picked === undefined ? `${card.options.length} options` : `Picked ${letter(card.picked)}: ${card.options[card.picked]}`
-    : { bars: "Bar chart", timeline: "Timeline", table: "Table" }[card.kind];
-  const done = card.kind === "choice" && card.picked !== undefined;
-  return { caption: card.title, subcaption: card.subtitle && !done ? card.subtitle : what, trailingCaption: done ? "Done" : card.kind === "choice" ? "Tap to pick" : "Tap to open", summary: card.title };
+  const status = card.kind === "choice"
+    ? card.picked === undefined ? card.subtitle ?? `Pick one of ${card.options.length}` : `Picked ${letter(card.picked)}: ${card.options[card.picked]}`
+    : card.subtitle ?? { bars: "Bar chart", timeline: "Timeline", table: "Table" }[card.kind];
+  return { caption: card.title, subcaption: status, summary: card.title };
 }
 
 // One JSON file per card, named by its token, in a directory private to the account. The bridge is the only writer.
@@ -145,44 +146,53 @@ const HEADERS = {
   "x-robots-tag": "noindex",
 };
 const esc = (s: string | number) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
-const STYLE = `:root{color-scheme:light dark;--fg:#111;--muted:#666;--line:#ddd;--accent:#0a84ff}
-@media(prefers-color-scheme:dark){:root{--fg:#f2f2f2;--muted:#999;--line:#333}}
-body{font:17px/1.4 -apple-system,system-ui,sans-serif;color:var(--fg);margin:0;padding:20px;max-width:640px}
-h1{font-size:22px;margin:0 0 4px}p{color:var(--muted);margin:0 0 16px}
-button{display:block;width:100%;text-align:left;font:inherit;padding:14px;margin:0 0 10px;border:1px solid var(--line);border-radius:12px;background:none;color:inherit}
-b.l{color:var(--accent);margin-right:8px}.picked{border-color:var(--accent);border-width:2px}
-.bar{margin:0 0 10px}.track{height:22px;border-radius:6px;background:var(--line)}.fill{height:100%;border-radius:6px;background:var(--accent)}
-.row{display:flex;justify-content:space-between;font-size:15px}
-ol{list-style:none;padding:0 0 0 16px;border-left:2px solid var(--line);margin:0}li{margin:0 0 14px;position:relative}
-li:before{content:"";position:absolute;left:-23px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--accent)}
-li span{color:var(--muted);font-size:14px;display:block}
-table{border-collapse:collapse;width:100%;font-size:15px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
-.wide{overflow-x:auto}`;
+// iOS system look: the system font and text styles, the system colours for light and dark, inset grouped lists,
+// 44 pt rows, safe-area padding, and an instant pressed state with no tap delay.
+const STYLE = `:root{color-scheme:light dark;--bg:#f2f2f7;--cell:#fff;--fg:#000;--muted:rgba(60,60,67,.6);--sep:rgba(60,60,67,.29);--fill:rgba(120,120,128,.16);--press:#d1d1d6;--accent:#007aff;--done:#34c759}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--cell:#1c1c1e;--fg:#fff;--muted:rgba(235,235,245,.6);--sep:rgba(84,84,88,.65);--fill:rgba(120,120,128,.32);--press:#3a3a3c;--accent:#0a84ff;--done:#30d158}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg);-webkit-text-size-adjust:100%}
+body{font:17px/22px -apple-system,system-ui,sans-serif;letter-spacing:-.4px;color:var(--fg);margin:0 auto;max-width:600px;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));-webkit-user-select:none;user-select:none}
+h1{font-size:22px;line-height:28px;font-weight:700;letter-spacing:-.26px;margin:4px 4px 2px}
+p{font-size:15px;line-height:20px;letter-spacing:-.24px;color:var(--muted);margin:0 4px 16px}
+.group{background:var(--cell);border-radius:10px;overflow:hidden;margin:0 0 16px}
+.cell{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:11px 16px;font:inherit;color:inherit;text-align:left;background:none;border:0;border-radius:0;position:relative;touch-action:manipulation}
+.cell+.cell:before{content:"";position:absolute;top:0;left:16px;right:0;height:.5px;background:var(--sep)}
+button.cell:active:not(:disabled){background:var(--press)}button.cell:disabled{opacity:1;color:inherit}
+.l{flex:none;width:28px;height:28px;border-radius:14px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.t{flex:1}.check{flex:none;color:var(--accent);font-weight:600}.dim .l{background:var(--fill);color:var(--muted)}.dim .t{color:var(--muted)}
+.note{display:flex;align-items:center;gap:8px;color:var(--done);font-size:15px;font-weight:600;margin:0 4px 12px}
+.bar{display:block}.row{display:flex;justify-content:space-between;gap:12px}.v{color:var(--muted);font-variant-numeric:tabular-nums}
+.track{height:6px;border-radius:3px;background:var(--fill);margin-top:8px}.fillbar{height:100%;border-radius:3px;background:var(--accent)}
+.when{font-size:13px;line-height:18px;color:var(--muted)}.dot{flex:none;width:10px;height:10px;border-radius:5px;background:var(--accent);align-self:flex-start;margin-top:6px}
+.wide{overflow-x:auto;-webkit-overflow-scrolling:touch}table{border-collapse:collapse;width:100%;font-size:15px;line-height:20px;font-variant-numeric:tabular-nums}
+th{font-size:13px;font-weight:400;color:var(--muted);text-align:left;padding:10px 16px 6px}td{text-align:left;padding:11px 16px;border-top:.5px solid var(--sep);white-space:nowrap}`;
 
 // `description` makes the Open Graph tags that iMessage reads for the link preview of a card's URL.
 function page(status: number, title: string, body: string, description?: string) {
   const og = description === undefined ? "" : `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}"><meta property="og:site_name" content="Firstmate"><meta property="og:type" content="website">`;
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${og}<style>${STYLE}</style></head><body>${body}</body></html>`,
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>${esc(title)}</title>${og}<style>${STYLE}</style></head><body>${body}</body></html>`,
     { status, headers: { ...HEADERS, "content-type": "text/html; charset=utf-8" } });
 }
 
-// The card's page. A choice card shows one form button per option until it has its pick.
+// The card's page, made to look like an iOS view inside Messages. A choice card shows one row per option until it
+// has its pick; then the rows stay, with a check on the pick.
 export function cardPage(card: Stored, status = 200, notice = "") {
   const head = `<h1>${esc(card.title)}</h1>${card.subtitle ? `<p>${esc(card.subtitle)}</p>` : ""}${notice ? `<p>${esc(notice)}</p>` : ""}`;
   let body: string;
   if (card.kind === "choice") {
-    const button = (o: string, i: number) => `<button name="choice" value="${i}"${card.picked === i ? ' class="picked"' : ""}${card.picked === undefined ? "" : " disabled"}><b class="l">${letter(i)}</b>${esc(o)}</button>`;
-    body = card.picked === undefined
-      ? `<form method="post" action="/c/${card.token}/pick">${card.options.map(button).join("")}</form>`
-      : `<p>Picked ${letter(card.picked)}. Firstmate has it.</p>${card.options.map(button).join("")}`;
+    const done = card.picked !== undefined;
+    const row = (o: string, i: number) => `<button class="cell${done && card.picked !== i ? " dim" : ""}" name="choice" value="${i}"${done ? " disabled" : ""}><span class="l">${letter(i)}</span><span class="t">${esc(o)}</span>${card.picked === i ? '<span class="check">&#10003;</span>' : ""}</button>`;
+    const rows = `<div class="group">${card.options.map(row).join("")}</div>`;
+    body = done ? `<div class="note">&#10003; Picked ${letter(card.picked!)}. Firstmate has it.</div>${rows}` : `<form method="post" action="/c/${card.token}/pick">${rows}</form>`;
   } else if (card.kind === "bars") {
     // A percentage fills its track out of 100; any other unit is scaled to the largest bar.
     const max = Math.max(...card.bars.map((b) => b.value), card.unit === "%" ? 100 : 0) || 1;
-    body = card.bars.map((b) => `<div class="bar"><div class="row"><span>${esc(b.label)}</span><span>${esc(b.value)}${card.unit ? ` ${esc(card.unit)}` : ""}</span></div><div class="track"><div class="fill" style="width:${((b.value / max) * 100).toFixed(1)}%"></div></div></div>`).join("");
+    body = `<div class="group">${card.bars.map((b) => `<div class="cell bar"><div class="row"><span>${esc(b.label)}</span><span class="v">${esc(b.value)}${card.unit ? ` ${esc(card.unit)}` : ""}</span></div><div class="track"><div class="fillbar" style="width:${((b.value / max) * 100).toFixed(1)}%"></div></div></div>`).join("")}</div>`;
   } else if (card.kind === "timeline") {
-    body = `<ol>${card.items.map((x) => `<li><span>${esc(x.when)}</span>${esc(x.text)}</li>`).join("")}</ol>`;
+    body = `<div class="group">${card.items.map((x) => `<div class="cell"><span class="dot"></span><span class="t"><span class="when">${esc(x.when)}</span><br>${esc(x.text)}</span></div>`).join("")}</div>`;
   } else {
-    body = `<div class="wide"><table><thead><tr>${card.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${card.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    body = `<div class="group wide"><table><thead><tr>${card.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${card.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
   }
   return page(status, card.title, head + body, cardLayout(card).subcaption);
 }

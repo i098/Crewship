@@ -1424,7 +1424,7 @@ function sent(line, chat) {
 }
 async function shown(content) {
   if (typeof content === "string") return content;
-  if (content.type === "app") return `card ${content.url} | ${Object.values(content.layout).join(" | ")}`;
+  if (content.type === "app") return `card ${content.url}${content.live ? " live" : ""} | ${Object.values(content.layout).join(" | ")}`;
   if (content.type === "edit") return `edit ${content.target.miniAppCardSession.sessionId} ${await shown(content.content)}`;
   const { width, height } = await new Bun.Image(readFileSync(content.attachment)).metadata();
   return `[image ${content.name} ${content.mimeType} ${width}x${height}]`;
@@ -2617,19 +2617,19 @@ def test_card_pick_is_single_use_wakes_firstmate_and_updates_the_bubble(tmp_path
     bridge = start(1)
     try:
         inbound("m1", text="ask me")
-        card = {"kind": "choice", "key": "layout", "title": "Board layout?", "options": ["Short list", "Cards", "Table"], "app": app}
+        card = {"kind": "choice", "key": "layout", "title": "Board layout?", "options": ["Short list", "Cards", "Table"], **({} if app else {"app": False})}
         assert cli("--card", json.dumps(card)).startswith("queued card layout")
         wait_for(lambda: card_bubbles(fake, text), "the card bubble")
         url = card_url(card_bubbles(fake, text)[0])
         if app:
-            assert card_bubbles(fake, text)[0] == f"send card {url} | Board layout? | 3 options | Tap to pick | Board layout?"
+            assert card_bubbles(fake, text)[0] == f"send card {url} live | Board layout? | Pick one of 3 | Board layout?"
         else:
             assert card_bubbles(fake, text)[0] == f"send {url}"
         token = url.rsplit("/", 1)[1]
         assert re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
         status, headers, page = http(url)
         assert status == 200 and "Short list" in page and 'name="choice" value="2"' in page
-        assert '<meta property="og:title" content="Board layout?">' in page and 'content="3 options"' in page
+        assert '<meta property="og:title" content="Board layout?">' in page and 'content="Pick one of 3"' in page
         assert headers["cache-control"] == "no-store" and headers["referrer-policy"] == "no-referrer"
         assert "default-src 'none'" in headers["content-security-policy"]
         assert http(url + "/pick", "POST", "choice=")[0] == 400
@@ -2641,7 +2641,7 @@ def test_card_pick_is_single_use_wakes_firstmate_and_updates_the_bubble(tmp_path
         assert "Picked B" in http(url)[2]
         if app:
             wait_for(lambda: len(card_bubbles(fake, text)) == 2, "the bubble edit")
-            assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} | Board layout? | Picked B: Cards | Done | Board layout?"
+            assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} live | Board layout? | Picked B: Cards | Board layout?"
         else:
             time.sleep(0.5)
             assert len(card_bubbles(fake, text)) == 1
