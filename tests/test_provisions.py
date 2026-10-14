@@ -1,15 +1,21 @@
+import getpass
+import grp
 import hashlib
 import importlib.util
 import io
 import json
+import os
 import runpy
+import shutil
 import ssl
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 SPEC = importlib.util.spec_from_file_location(
     "provisions", Path(__file__).parents[1] / "scripts/provisions.py"
@@ -404,6 +410,71 @@ def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
     upstream(monkeypatch, unverified="forgejo")
     with pytest.raises(ValueError, match="refusing an unverified binary"):
         installer.resolve_latest("linux-x86_64", {"forgejo"})
+
+
+def test_a_failed_dump_with_the_running_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
+    home, stubs, log = tmp_path / "home", tmp_path / "bin", tmp_path / "calls"
+    old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
+    new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    conf = home / ".config/crewship/forgejo"
+    unit = home / ".config/systemd/user/forgejo.service"
+    for directory in (old.parent, new.parent, conf, unit.parent, stubs):
+        directory.mkdir(parents=True)
+    # The running release is a real process of the old binary, which cannot dump.
+    shutil.copy(shutil.which("sleep"), old)
+    for name in ("secret-key", "internal-token", "jwt-secret"):
+        (conf / name).write_text("s3cret-value\n")
+    unit.write_text(f"[Service]\nExecStart={old} web\n")
+    running = subprocess.Popen(["sleep", "600"], executable=old)
+    for path, body in (
+        (new, f'echo "new $*" >> {log}'),
+        (stubs / "systemctl", f'echo "systemctl $*" >> {log}; echo {running.pid}'),
+        (stubs / "tailscale", "exit 1"),
+    ):
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+    (tmp_path / "templates").symlink_to(Path(__file__).parents[1] / "blueprint/ansible/templates")
+    ansible = Path(__file__).parents[1] / "blueprint/ansible"
+    playbook = tmp_path / "forgejo.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars_files": [str(f) for f in sorted((ansible / "group_vars/all").glob("*.yml"))],
+        "tasks": [{"ansible.builtin.import_tasks": str(ansible / "tasks/forgejo.yml")}],
+        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "reload"}}],
+    }]))
+    variables = {
+        "crewship_repo": str(ansible.parents[1]), "crewship_blueprint": str(ansible.parent),
+        "ansible_become": False,
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_platform": "linux-x86_64",
+        "crewship_local_bin": str(stubs),
+        "crewship_user_uid": os.getuid(),
+        "crewship_latest": {"forgejo": {"version": "2.0.0", "assets": {}}},
+        "crewship": {
+            "user": getpass.getuser(), "home": str(home), "start_services": True,
+            "profiles": {"forgejo": True},
+        },
+    }
+    try:
+        result = subprocess.run(
+            [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
+             "--extra-vars", json.dumps(variables)],
+            cwd=tmp_path, capture_output=True, text=True,
+            env={**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}"},
+        )
+    finally:
+        running.kill()
+        running.wait()
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "rescued=1" in result.stdout, output
+    assert "s3cret-value" not in output
+    # Forgejo keeps the old release: no new unit, no configuration, no restart, no new dump.
+    assert unit.read_text() == f"[Service]\nExecStart={old} web\n"
+    assert not (conf / "app.ini").exists()
+    calls = log.read_text()
+    assert "restart" not in calls and "new" not in calls, calls
+    assert not list((home / ".local/share/forgejo/dumps").iterdir())
 
 
 @pytest.mark.parametrize(
