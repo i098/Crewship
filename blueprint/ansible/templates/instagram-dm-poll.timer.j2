@@ -6,8 +6,9 @@ Description=Poll the agent Instagram DMs (Crewship managed)
 [Timer]
 Unit=instagram-dm-poll.service
 OnBootSec=1min
-OnUnitActiveSec={{ crewship_instagram_dm_interval }}s
-RandomizedDelaySec=40
+# Every interval plus or minus 60 s: the base is 60 s shorter and 0-120 s of random delay is added.
+OnUnitActiveSec={{ crewship_instagram_dm_interval - 60 }}s
+RandomizedDelaySec=120s
 AccuracySec=10s
 
 [Install]

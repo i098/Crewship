@@ -24,6 +24,11 @@ Settings come from the environment:
   INSTAGRAM_DM_CODE_CMD   shell command that prints the newest 6-digit Instagram email code (see SKILL.md)
   INSTAGRAM_DM_TIMEZONE   IANA time zone of the host's public IP (America/Chicago): REQUIRED by the first `login`, which
                           pins it in the session file; never the library's New York default
+  INSTAGRAM_DM_WRITE_GAP / _WRITE_JITTER   seconds between two writes: 20, plus 0-10 of random
+  INSTAGRAM_DM_REPLIES_HOUR / _REPLIES_DAY   texts allowed per hour and per day (10, 40)
+  INSTAGRAM_DM_SIGNALS_HOUR   tapbacks and typing indicators allowed per hour together (20)
+  INSTAGRAM_DM_ERROR_COOLDOWN   seconds without sends after any error (1800)
+  INSTAGRAM_DM_REALTIME_GAP   least seconds between two polls that realtime events cause (30)
   INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failure (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
 A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). The first challenge, feedback
 block, suspension, login_required, please-wait, throttle (429), bad password or a challenge answer it could not parse
@@ -38,6 +43,7 @@ import contextlib
 import fcntl
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -56,8 +62,16 @@ LINK = re.compile(
 SHARE = re.compile(r"https?://(?:www\.)?instagram\.com/share/[\w/-]+")
 SEEN_KEEP = 5000
 REPLY_MAX = 500  # characters: the operator asked for short plain texts
-REPLY_GAP = 3  # seconds between two sends
-REALTIME_GAP = 5  # seconds between two polls caused by realtime events
+TYPING_MIN = 100  # characters: a typing indicator only comes before a reply longer than this
+# What the shared limiter counts: per write kind, (window in s, kinds counted together, env name, default cap).
+CAPS = {
+    "text": [
+        (3600, ("text",), "INSTAGRAM_DM_REPLIES_HOUR", 10),
+        (86400, ("text",), "INSTAGRAM_DM_REPLIES_DAY", 40),
+    ],
+    "react": [(3600, ("react", "typing"), "INSTAGRAM_DM_SIGNALS_HOUR", 20)],
+    "typing": [(3600, ("react", "typing"), "INSTAGRAM_DM_SIGNALS_HOUR", 20)],
+}
 # Exception class names that mean the account is flagged, throttled or logged out: stop, never retry.
 HALT = {
     "ChallengeError",
@@ -195,15 +209,62 @@ def locked():
         yield
 
 
+def num(name, default):
+    return float(conf(name, str(default)))
+
+
 def load_state():
     file = state_dir() / "poll.json"
     return {
         "seen": [],
         "fails": 0,
         "next": 0,
-        "sent": 0,
+        "writes": [],  # [time, kind] of every outbound write of the last day: the limiter's memory
+        "write_at": 0,  # no write before this time: the gap after the last one, jitter included
+        "cooldown": 0,  # no write before this time: the pause after an error
         **(json.loads(file.read_text()) if file.is_file() else {}),
     }
+
+
+def save_state(state):
+    (state_dir() / "poll.json").write_text(json.dumps(state))
+
+
+def allow(state, kind, now):
+    """Why a write of this kind may not go out now (the error cooldown or a cap), or None. `seen` has no cap."""
+    if now < state["cooldown"]:
+        return f"send cooldown, {int(state['cooldown'] - now)}s more after an error"
+    for window, kinds, env, default in CAPS.get(kind, ()):
+        cap = int(num(env, default))
+        if sum(k in kinds and now - at < window for at, k in state["writes"]) >= cap:
+            return f"limit of {cap} {'/'.join(kinds)} writes per {window // 3600} h reached"
+    return None
+
+
+def pace(state, kind):
+    """Wait out the gap since the last write, or exit when a cap or the cooldown forbids this one."""
+    if why := allow(state, kind, time.time()):
+        sys.exit(f"not sending: {why}")
+    time.sleep(max(0, state["write_at"] - time.time()))
+
+
+def record_write(state, kind, now=None):
+    """Remember a write and set the earliest time of the next one: INSTAGRAM_DM_WRITE_GAP (20 s) plus up to
+    INSTAGRAM_DM_WRITE_JITTER (10 s) of random."""
+    now = now or time.time()
+    state["writes"] = [[at, k] for at, k in state["writes"] if now - at < 86400] + [[now, kind]]
+    gap, jitter = num("INSTAGRAM_DM_WRITE_GAP", 20), num("INSTAGRAM_DM_WRITE_JITTER", 10)
+    state["write_at"] = now + gap + random.uniform(0, jitter)
+
+
+def write(state, kind, thread, call, text=None):
+    """One outbound write through the shared limiter: wait for the gap, make the call, count it, log it for the front
+    desk (a text of None is not logged)."""
+    pace(state, kind)
+    call()
+    record_write(state, kind)
+    if text is not None:
+        record_sent(kind, thread, text)
 
 
 def save_state(state):
@@ -233,6 +294,7 @@ def fail(state, e, now):
         int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
     )
     state["next"] = now + wait
+    state["cooldown"] = now + num("INSTAGRAM_DM_ERROR_COOLDOWN", 1800)  # reads may go on, sends wait
     return f"failed ({what}); next try in {wait}s"
 
 
@@ -266,8 +328,15 @@ def poll_once(cl, state):
     save_state(state)  # before the receipts: a failure there must not log the rows twice
     newest = {r["thread"]: r["id"] for r in rows}  # rows are oldest first
     for thread_id, message_id in newest.items():
-        with contextlib.suppress(Exception):  # a read receipt is best effort
+        if time.time() < state["write_at"]:
+            break  # a receipt is best effort: never wait for the gap, never go under it
+        try:
             cl.direct_message_seen(thread_id, message_id)
+            record_write(state, "seen")
+        except Exception as e:
+            if is_halt(e):
+                raise
+    save_state(state)
 
 
 def sync(get_client):
@@ -309,17 +378,17 @@ def listen_once(cl):
     rt = cl.realtime_connect()
     rt.direct_subscribe()
     sync(lambda: cl)  # what arrived while the channel was down
-    last = time.time()
+    last, pending = time.time(), False
     while not load_state().get("halted"):
         try:
             cl.realtime_read_once()
         except TimeoutError:  # idle: the broker must still answer a ping
             if not rt.ping():
                 raise ConnectionError("realtime ping unanswered") from None
-        if events:
-            time.sleep(max(0, REALTIME_GAP - (time.time() - last)))
-            events.clear()
-            last = time.time()
+        pending = pending or bool(events)  # events only ring the doorbell: any number of them mean one poll
+        events.clear()
+        if pending and time.time() - last >= num("INSTAGRAM_DM_REALTIME_GAP", 30):
+            pending, last = False, time.time()
             if err := sync(lambda: cl):
                 print(f"poll {err}", flush=True)
 
@@ -387,15 +456,17 @@ def record_sent(kind, thread, text=""):
 
 
 def send_actions(cl, state, t, operator, text, emoji, typing):
-    """Typing indicator, reaction to his latest message, then the text, each at least REPLY_GAP after the last send."""
-
-    def pause():
-        time.sleep(max(0, state["sent"] + REPLY_GAP - time.time()))
-
-    if typing:
-        cl.realtime_connect().direct_indicate_activity(t.id, True)
-        record_sent("typing", t.id)
-        time.sleep(min(4, 1 + len(text) / 25) if text else 3)  # typing time grows with the text
+    """Typing indicator (only before a text longer than TYPING_MIN), reaction to his latest message, then the text:
+    each through the shared limiter."""
+    if typing and len(text) > TYPING_MIN:
+        write(
+            state,
+            "typing",
+            t.id,
+            lambda: cl.realtime_connect().direct_indicate_activity(t.id, True),
+            "",
+        )
+        time.sleep(min(4, 1 + len(text) / 25))  # typing time grows with the text
     if emoji:
         latest = next(
             (m for m in t.messages if str(m.user_id) == operator and m.item_type != "action_log"),
@@ -403,15 +474,9 @@ def send_actions(cl, state, t, operator, text, emoji, typing):
         )
         if latest is None:
             sys.exit("no message of the operator to react to")
-        pause()
-        cl.direct_send_reaction(t.id, latest.id, emoji)
-        state["sent"] = time.time()
-        record_sent("react", t.id, emoji)
+        write(state, "react", t.id, lambda: cl.direct_send_reaction(t.id, latest.id, emoji), emoji)
     if text:
-        pause()
-        cl.direct_send(text, thread_ids=[int(t.id)])
-        state["sent"] = time.time()
-        record_sent("text", t.id, text)
+        write(state, "text", t.id, lambda: cl.direct_send(text, thread_ids=[int(t.id)]), text)
 
 
 def reply(text, thread, emoji, typing):
@@ -424,9 +489,13 @@ def reply(text, thread, emoji, typing):
         sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
     if not (text or emoji or typing):
         sys.exit("nothing to send: give TEXT, --react or --typing")
+    typing = typing and len(text) > TYPING_MIN
+    kinds = [k for k, on in (("typing", typing), ("react", emoji), ("text", text)) if on]
+    if not kinds:
+        return print("no typing indicator for a short reply: nothing to send")
     with locked():
         state, now = load_state(), time.time()
-        if why := blocked(state, now):
+        if why := blocked(state, now) or next(filter(None, (allow(state, k, now) for k in kinds)), None):
             sys.exit(f"not sending: {why}")
         cl = None
         try:
@@ -438,13 +507,12 @@ def reply(text, thread, emoji, typing):
             raise
         except Exception as e:
             err = fail(state, e, now)
-            save_state(state)
             sys.exit(f"reply {err}")
         finally:
+            save_state(state)  # the writes made before a failure still count
             if cl:
                 with contextlib.suppress(Exception):
                     cl.realtime_disconnect()
-        save_state(state)
 
 
 def code_handler(username, choice):

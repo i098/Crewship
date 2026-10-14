@@ -245,14 +245,17 @@ def compose(info, link):
 
 
 def send(cl, thread, media, line):
-    """Share the reel into his thread, then the one line. Holds the DM lock so poll and reply never overlap."""
+    """Share the reel into his thread, then the one line, both through the DM limiter. Holds the DM lock so poll and
+    reply never overlap."""
     with ig.locked():
-        if why := ig.blocked(ig.load_state(), time.time()):
+        state = ig.load_state()
+        if why := ig.blocked(state, time.time()) or ig.allow(state, "text", time.time()):
             sys.exit(f"not sending: {why}")
-        cl.direct_media_share(media.id, thread_ids=[int(thread.id)], media_type="video")
-        time.sleep(ig.REPLY_GAP)
-        cl.direct_send(line, thread_ids=[int(thread.id)])
-        ig.record_sent("text", thread.id, line)
+        try:
+            ig.write(state, "text", thread.id, lambda: cl.direct_media_share(media.id, thread_ids=[int(thread.id)], media_type="video"))
+            ig.write(state, "text", thread.id, lambda: cl.direct_send(line, thread_ids=[int(thread.id)]), line)
+        finally:
+            ig.save_state(state)
 
 
 def cycle(cl, cfg, now):

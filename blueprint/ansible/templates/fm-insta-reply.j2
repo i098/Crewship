@@ -5,4 +5,5 @@ export INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator | quote }}
 export INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session | quote }}
 export INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state | quote }}
 export INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval | quote }}
+[ ! -f {{ (crewship_instagram_dm_session | dirname ~ '/dm.env') | quote }} ] || { set -a; . {{ (crewship_instagram_dm_session | dirname ~ '/dm.env') | quote }}; set +a; }
 exec {{ crewship_uv_bin | quote }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script | quote }} reply "$@"
