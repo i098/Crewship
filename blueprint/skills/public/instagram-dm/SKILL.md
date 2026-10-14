@@ -23,12 +23,11 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
 2. List the threads: `instagram_dm.py inbox`. A message request from a new sender shows as `request` and stays hidden from the inbox until accepted.
 3. List the reel links of one thread: `instagram_dm.py reels THREAD_ID` (add `--mark-seen` only after you handled the thread). Every link prints in the `https://www.instagram.com/reel/CODE/` form, whether the DM held a `/p/`, `/reel/`, `/reels/` or `/tv/` link or a shared reel or post. A `/share/...` link holds no shortcode: it prints unchanged. Open it with `curl -sIL` and use the final URL.
 4. To wake an agent on every new DM, run `listen` as a service and `poll` on a timer (see below).
-5. Watch each reel with the video-watch path (yt-dlp on the `/reel/` URL):
+5. Watch each reel with `reel_watch.py`. It runs the `watch` skill with no cookies and no login, one reel at a time and at least 20 s after the last fetch (a lock in `~/.cache/instagram-dm/`), so parallel agents cannot burst:
    ```bash
-   cache=~/.cache/instagram-dm; mkdir -p "$cache"; find "$cache" -type f -mtime +0 -delete
-   yt-dlp -o "$cache/%(id)s.%(ext)s" "https://www.instagram.com/reel/CODE/"
+   python3 ~/.claude/skills/instagram-dm/reel_watch.py "https://www.instagram.com/reel/CODE/" --detail balanced --question "..."
    ```
-   If yt-dlp needs a login, add `--cookies-from-browser` only with the operator's approval. Delete the file when you finish.
+   It takes the `watch.py` options and refuses `--cookies` and `--cookies-from-browser`. Never put `WATCH_COOKIES_FILE` in the watch config for Instagram: the DM account's session must never fetch media. On a `challenge`, a login demand or a 403, stop and tell the operator: do not retry in a loop.
 
 ## Wake on new DMs, and reply
 
