@@ -57,12 +57,28 @@ The board patch adds instructions only when the socket above exists as a Unix so
 It resolves the path the same way as the client: `$CREWBOARD_SOCKET`, else the default path.
 A missing path or a regular file leaves the output unchanged.
 
-Worker briefs describe peer messages on `task/<peer-id>`, crew messages on `fleet`, and information for Firstmate on `fm`.
-Board messages do not wake Firstmate.
+Worker briefs describe peer messages on `task/<peer-id>`, crew messages on `fleet`, and messages that Firstmate must read now on `fm`.
+A message on `fleet` or `task/<peer-id>` does not wake Firstmate. A message on `fm` does, as described below.
 Workers read their task topic and `fleet` at natural checkpoints, or subscribe in a separate pane.
 Supervisor start output instructs Firstmate to run `crewboard sub '*'` in a separate pane.
 Firstmate observes the board and never relays its messages.
 The status file remains the durable ledger for working, done, needs-decision, blocked, failed, and paused states.
+
+### Wake Firstmate from the board
+
+The watcher patch (`0004-watch-crewboard-event-source.patch`) starts `bin/fm-board-bridge.sh` with each watcher run, but only while the board socket is live and `crewboard` and `jq` are installed.
+With the board off, no process starts and no file is written.
+
+- `fm`: each message queues one wake row, and the watcher ends its idle wait within about 1 second. Firstmate reads `check: crew board fm #<seq> from <task> - <message>` once per message.
+  The wake is a hint. A worker still reports done, blocked, needs-decision, failed, and paused in the status file.
+- The board seq is the cursor, saved in `state/.board-cursor`. A watcher that starts after another one resumes with `--since` and `--boot`, so a message published between two watchers still wakes Firstmate.
+  A board that restarted has dropped its old messages, so the bridge replays all that it retains.
+  A first run starts live and never replays old history.
+  The board keeps messages in memory only, so a message the board dropped (a full ring, the byte cap, a restart) is gone.
+- `task/<id>`, optional: create `config/board-doorbell` in the Firstmate home. A message on `task/<id>` then rings the pane of task `<id>` with one line that names `crewboard tail task/<id>`.
+  The bridge reuses the steering inbox doorbell, so it never types into a dead pane or over text that someone half-typed, and it skips an agent that is busy. It does not retry; the message stays on the board.
+  A message from a task to itself, and a message for a task that has no record, ring nothing.
+  Remove the file to turn the doorbell off. The next watcher run no longer subscribes to `task/*`.
 
 ## Turn it off
 

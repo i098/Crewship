@@ -6,14 +6,14 @@ To add a patch, commit the fix on top of upstream `main` in a Firstmate clone, r
 
 [Firstmate patch layer](../../../docs/dependencies.md#firstmate-patch-layer) tells what each patch does, how apply handles upstream changes, and how to drop a patch once upstream has it.
 
-To test the board patch against an upstream checkout, set `FIRSTMATE_TEST_SOURCE` to that checkout and run:
+To test the board patches (0003 and 0004) against an upstream checkout, set `FIRSTMATE_TEST_SOURCE` to that checkout and run:
 
 ```bash
 FIRSTMATE_TEST_SOURCE=/path/to/firstmate uv run pytest tests/test_firstmate_patches.py -k crewboard
 ```
 
-The tests export that checkout's `HEAD` into temporary directories and never change the checkout.
-They check patch application, real brief generation, and the supervisor output renderer that session start calls.
+The tests clone that checkout into temporary directories, put the whole patch layer on the clone with `scripts/firstmate-patch-layer.sh`, and never change the checkout.
+They check patch application, real brief generation, the supervisor output renderer that session start calls, and the patch's own shell suite `tests/fm-board-bridge.test.sh` (it needs `jq` and `python3`).
 They compare board-off output byte for byte and bind a real Unix socket for board-on output.
 Without `FIRSTMATE_TEST_SOURCE`, these integration tests skip rather than fetch upstream code during the test suite.
 

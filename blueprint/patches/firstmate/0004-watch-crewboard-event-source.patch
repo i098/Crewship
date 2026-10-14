@@ -1,0 +1,624 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Crewship <noreply@example.invalid>
+Date: Wed, 14 Oct 2026 03:00:00 +0000
+Subject: [PATCH] feat(watch): wake firstmate from the crew board
+
+With the board socket live, the watcher starts bin/fm-board-bridge.sh. It
+subscribes to the fm topic, queues one durable check row per message, and the
+watcher surfaces it like an inbox note, so the idle wait ends within about 1 s.
+The board seq is the cursor, so a successor watcher resumes without loss.
+With config/board-doorbell, a task/<id> message also rings that task's pane
+through fm_task_inbox_ring. The board off starts nothing and writes nothing.
+---
+ bin/fm-board-bridge.sh             | 168 +++++++++++++++++
+ bin/fm-brief.sh                    |   2 +-
+ bin/fm-supervision-instructions.sh |   2 +-
+ bin/fm-task-inbox-lib.sh           |   6 +-
+ bin/fm-watch.sh                    |  25 ++-
+ docs/scripts.md                    |   1 +
+ tests/fm-board-bridge.test.sh      | 285 +++++++++++++++++++++++++++++
+ 7 files changed, 483 insertions(+), 6 deletions(-)
+ create mode 100755 bin/fm-board-bridge.sh
+ create mode 100755 tests/fm-board-bridge.test.sh
+
+diff --git a/bin/fm-board-bridge.sh b/bin/fm-board-bridge.sh
+new file mode 100755
+index 00000000..fde7d4c9
+--- /dev/null
++++ b/bin/fm-board-bridge.sh
+@@ -0,0 +1,168 @@
++#!/usr/bin/env bash
++# fm-board-bridge.sh - the crew board's event source for bin/fm-watch.sh.
++#
++# The watcher starts one bridge per run while the board socket is a live Unix
++# socket (CREWBOARD_SOCKET, else $XDG_RUNTIME_DIR/crewboard.sock, else
++# /run/user/<uid>/crewboard.sock) and `crewboard` and `jq` are on PATH, and
++# stops it on exit. Board off: nothing starts and nothing changes.
++#
++#   fm      every message queues one durable `check` wake row,
++#           board:<boot>:<seq>, "check: crew board fm #<seq> from <from> - <body>".
++#           bin/fm-watch.sh surfaces the row like a captain inbox note: the
++#           idle wait ends within about 1 s and firstmate wakes once per
++#           message. The row is a hint; the status file still owns done,
++#           blocked, needs-decision, failed and paused.
++#   task/*  only when config/board-doorbell exists: a message on task/<id>
++#           rings the doorbell of task <id>'s pane when its agent is not busy.
++#           It reuses fm_task_inbox_ring, so a dead endpoint and a composer
++#           that holds someone's half-typed text are never typed into. A busy
++#           worker reads the board at its checkpoints, and a skipped bell is
++#           not retried; the message stays on the board.
++#
++# The board's own seq is the cursor: state/.board-cursor holds "<boot>\t<seq>"
++# after each handled message, so a successor watcher resumes with --since and
++# --boot and nothing published between two watchers is lost (the board still
++# drops what its ring dropped). A first run has no cursor and starts live, so
++# old history never wakes anyone. The row is written before the cursor, so a
++# crash can repeat a row (the same key, surfaced once) but never lose one.
++#
++# usage: fm-board-bridge.sh [--parent <pid>]
++#   --parent  exit when that pid is gone, so a killed watcher leaves no bridge
++set -u
++
++SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd "${d:-/}" && pwd)"
++FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
++FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
++STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
++CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
++BOARD_SOCK=${CREWBOARD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/crewboard.sock}
++CURSOR="$STATE/.board-cursor"
++
++PARENT=
++[ "${1:-}" != --parent ] || PARENT=${2:-}
++
++parent_alive() { [ -z "$PARENT" ] || kill -0 "$PARENT" 2>/dev/null; }
++
++nap() {  # <secs>: sleep in 1 s slices, leaving as soon as the parent is gone
++  local left=$1
++  while [ "$left" -gt 0 ]; do
++    parent_alive || exit 0
++    sleep 1
++    left=$((left - 1))
++  done
++}
++
++command -v crewboard >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || exit 0
++# shellcheck source=bin/fm-wake-lib.sh
++FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" STATE="$STATE" . "$SCRIPT_DIR/fm-wake-lib.sh" || exit 1
++
++CUR_BOOT= CUR_SEQ=
++read_cursor() {
++  CUR_BOOT= CUR_SEQ=
++  { IFS=$'\t' read -r CUR_BOOT CUR_SEQ < "$CURSOR"; } 2>/dev/null || true
++  case "$CUR_SEQ" in ''|*[!0-9]*) CUR_BOOT= CUR_SEQ= ;; esac
++}
++
++write_cursor() {  # <boot> <seq>
++  printf '%s\t%s\n' "$1" "$2" > "$CURSOR.tmp.$$" && mv -f "$CURSOR.tmp.$$" "$CURSOR"
++}
++
++# A first run (no cursor) starts at the board's seq now. A different boot id
++# means the board restarted: every retained message is new, so resume from 0.
++on_boot() {  # <boot> <seq>
++  read_cursor
++  if [ -z "$CUR_BOOT" ]; then
++    write_cursor "$1" "$2"
++  elif [ "$CUR_BOOT" != "$1" ]; then
++    write_cursor "$1" 0
++  fi
++  BOOT=$1
++}
++
++RING_LIB=
++ring_task() {  # <task-id> <from>
++  local id=$1 from=$2 meta backend target
++  case "$id" in ''|*[!A-Za-z0-9._-]*) return 0 ;; esac
++  [ "$id" != "$from" ] || return 0
++  meta="$STATE/$id.meta"
++  [ -f "$meta" ] || return 0
++  if [ -z "$RING_LIB" ]; then
++    # shellcheck source=bin/fm-task-inbox-lib.sh
++    . "$SCRIPT_DIR/fm-task-inbox-lib.sh" || return 0
++    RING_LIB=1
++  fi
++  target=$(fm_backend_target_of_meta "$meta")
++  [ -n "$target" ] || return 0
++  backend=$(fm_backend_of_meta "$meta")
++  [ "$(fm_backend_busy_state "$backend" "$target" 2>/dev/null || true)" != busy ] || return 0
++  FM_TASK_INBOX_DOORBELL_LINE=": Crew board message for you on task/$id: run 'crewboard tail task/$id -n 5', read it, then continue." \
++    fm_task_inbox_ring "$backend" "$target" "" "fm-$id" || true
++}
++
++on_message() {  # <seq> <topic> <from> <body>
++  local seq=$1 topic=$2 from=$3 body=$4
++  case "$topic" in
++    fm) fm_wake_append check "board:$BOOT:$seq" "check: crew board fm #$seq from $from - $body" || return 1 ;;
++    task/*) [ ! -e "$CONFIG/board-doorbell" ] || ring_task "${topic#task/}" "$from" ;;
++  esac
++  write_cursor "$BOOT" "$seq"
++}
++
++# One TSV record per board line: boot, msg, or other (a gap notice needs no action).
++handle_line() {  # <json line>
++  local kind a b c d
++  IFS=$'\t' read -r kind a b c d < <(printf '%s\n' "$1" | jq -r '
++    if has("boot") then ["boot", .boot, .seq]
++    elif has("seq") and has("topic") then ["msg", .seq, .topic, (.from // "unknown"), (.body | tostring | .[0:200])]
++    else ["other"] end | @tsv' 2>/dev/null)
++  case "$kind" in
++    boot) on_boot "$a" "$b" ;;
++    msg) on_message "$a" "$b" "$c" "$d" ;;
++  esac
++}
++
++FIFO_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-bridge.XXXXXX") || exit 1
++FIFO="$FIFO_DIR/board"
++mkfifo "$FIFO" || exit 1
++SUB_PID=
++BOOT=
++cleanup() {
++  [ -z "$SUB_PID" ] || kill "$SUB_PID" 2>/dev/null
++  rm -rf "$FIFO_DIR"
++}
++trap cleanup EXIT
++trap 'exit 0' HUP INT TERM
++
++delay=1
++while parent_alive; do
++  if [ -S "$BOARD_SOCK" ]; then
++    read_cursor
++    args=(sub --json fm)
++    [ ! -e "$CONFIG/board-doorbell" ] || args+=('task/*')
++    [ -z "$CUR_BOOT" ] || args+=(--since "$CUR_SEQ" --boot "$CUR_BOOT")
++    crewboard "${args[@]}" > "$FIFO" 2>/dev/null &
++    SUB_PID=$!
++    exec 3< "$FIFO"
++    began=$SECONDS
++    while parent_alive; do
++      started=$SECONDS
++      if IFS= read -r -t 1 line <&3; then
++        handle_line "$line" || exit 1
++      else
++        rc=$?
++        # Bash 4+ reports a timeout above 128. Bash 3.2 returns 1 for a timeout
++        # and for EOF, but only a timeout spends a whole second.
++        [ "$rc" -gt 128 ] || [ "$SECONDS" -ne "$started" ] || break
++      fi
++    done
++    exec 3<&-
++    kill "$SUB_PID" 2>/dev/null
++    wait "$SUB_PID" 2>/dev/null
++    SUB_PID=
++    # A subscription that lived 10 s was healthy; a dead board backs off to 30 s.
++    if [ $((SECONDS - began)) -ge 10 ]; then delay=1; else delay=$((delay * 2 > 30 ? 30 : delay * 2)); fi
++    nap "$delay"
++  else
++    nap 5
++  fi
++done
+diff --git a/bin/fm-brief.sh b/bin/fm-brief.sh
+index a83b51c4..2c12ae77 100755
+--- a/bin/fm-brief.sh
++++ b/bin/fm-brief.sh
+@@ -467,7 +467,7 @@ if [ -S "$BOARD_SOCK" ]; then
+ # Crew board
+ The board permits direct peer coordination; report task states only to Firstmate through the status file.
+ Use \`crewboard pub task/<peer-id> 'message'\` for a peer and \`crewboard pub fleet 'message'\` for the crew.
+-Use \`crewboard pub fm 'message'\` for information that must not wake Firstmate.
++Use \`crewboard pub fm 'message'\` to tell Firstmate something it must read now; it wakes Firstmate within about a second. Use \`crewboard pub fleet\` for notes that must not wake it.
+ Read \`crewboard tail task/$ID\` and \`crewboard tail fleet\` at natural checkpoints, or subscribe in a separate pane.
+ Use \`crewboard sub task/$ID fleet\` for that subscription; it waits for messages.
+ Firstmate observes the board and never relays messages. The steering inbox remains unchanged.
+diff --git a/bin/fm-supervision-instructions.sh b/bin/fm-supervision-instructions.sh
+index 4a4e08cb..04484bff 100755
+--- a/bin/fm-supervision-instructions.sh
++++ b/bin/fm-supervision-instructions.sh
+@@ -273,7 +273,7 @@ if [ -n "$HOST_SNIPPET" ]; then
+ fi
+ board_sock=${CREWBOARD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/crewboard.sock}
+ if [ -S "$board_sock" ]; then
+-  printf '%s\n' "- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. The status file remains the durable ledger."
++  printf '%s\n' "- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. A message on the fm topic wakes you as check: crew board fm; the status file remains the durable ledger."
+ fi
+ ordinary_wake_line
+ printf '\n'
+diff --git a/bin/fm-task-inbox-lib.sh b/bin/fm-task-inbox-lib.sh
+index 3b87a429..1910f90f 100644
+--- a/bin/fm-task-inbox-lib.sh
++++ b/bin/fm-task-inbox-lib.sh
+@@ -353,12 +353,16 @@ fm_task_inbox_doorbell_line() {  # <record-path>
+ # whose Enter never landed, so on an agent not reported busy it is submitted
+ # rather than skipped; skipping it would block every later ring. On both paths
+ # a lost first Enter gets one confirmed retry.
++# FM_TASK_INBOX_DOORBELL_LINE, when set, replaces the steering-inbox line for
++# one call (the crew board bridge, bin/fm-board-bridge.sh); the checks above
++# and below apply to it unchanged, and <record-path> is then unused.
+ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
+   local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
+   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+     dead|missing) return 3 ;;
+   esac
+-  if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
++  line=${FM_TASK_INBOX_DOORBELL_LINE:-}
++  if [ -z "$line" ] && ! line=$(fm_task_inbox_doorbell_line "$rec"); then
+     return 2
+   fi
+   cstate=$(fm_backend_composer_state "$backend" "$target" "$label" 2>/dev/null) || cstate=unknown
+diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
+index c887b4f0..1da10388 100755
+--- a/bin/fm-watch.sh
++++ b/bin/fm-watch.sh
+@@ -86,6 +86,10 @@
+ #                          a bin/fm-inbox.sh note is queued and has not been
+ #                          surfaced yet; reported once per note, never again
+ #                          while that record stays queued
++#   check: crew board fm #<seq> from <task> - <message>
++#                          a message on the crew board's fm topic, queued by
++#                          bin/fm-board-bridge.sh and reported once, like an
++#                          inbox note; the board is a hint, never the ledger
+ #   check: process-event result captured: <keys>
+ #                          a durably captured process-to-event result is queued
+ #                          and has not been surfaced yet; reported once per
+@@ -2057,7 +2061,7 @@ surface_queued_checks() {
+   [ -s "$FM_WAKE_QUEUE" ] || return 0
+   fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
+   while IFS= read -r key; do
+-    case "$key" in procevent:*|inbox:*) ;; *) continue ;; esac
++    case "$key" in procevent:*|inbox:*|board:*) ;; *) continue ;; esac
+     [ -e "$(queued_surfaced_marker "$key")" ] && continue
+     QUEUED_SURFACED="$QUEUED_SURFACED $key"
+     # A stranded source or one whose launch never proved itself is the opposite
+@@ -2065,7 +2069,7 @@ surface_queued_checks() {
+     # a capture would present it as healthy, which is the shape of defect
+     # these wakes exist to surface.
+     case "$key" in
+-      inbox:*)
++      inbox:*|board:*)
+         reason=$(awk -F '\t' -v k="$key" 'NF >= 5 && $3 == "check" && $4 == k { print $5; exit }' "$FM_WAKE_QUEUE")
+         notes="$notes; ${reason#check: }" ;;
+       procevent:*:stranded:*) stranded="$stranded $key" ;;
+@@ -2362,7 +2366,7 @@ queued_inbox_pending() {
+   _queue_wait_sig=$sig
+   [ -s "$FM_WAKE_QUEUE" ] || return 1
+   while IFS= read -r key; do
+-    case "$key" in inbox:*) ;; *) continue ;; esac
++    case "$key" in inbox:*|board:*) ;; *) continue ;; esac
+     [ -e "$(queued_surfaced_marker "$key")" ] || return 0
+   done < <(fm_wake_queued_keys_locked check)
+   return 1
+@@ -2626,8 +2630,16 @@ pr_poll_publish_release() {
+   PR_POLL_PUBLISH_LOCK=
+ }
+ 
++# The crew board's event source (bin/fm-board-bridge.sh): one background
++# subscriber per watcher run, only while the board socket is live. It queues a
++# wake row per message on the fm topic, which queued_inbox_pending and
++# surface_queued_checks above turn into a wake within about 1 s. The bridge
++# exits on its own when this pid is gone; the cleanup below stops it sooner.
++BOARD_BRIDGE_PID=
++
+ watcher_cleanup() {
+   local cleanup_status=0 owns_lock=0 transition=release-lock
++  [ -z "$BOARD_BRIDGE_PID" ] || kill "$BOARD_BRIDGE_PID" 2>/dev/null || true
+   pr_poll_publish_release || cleanup_status=1
+   pr_poll_control_release || cleanup_status=1
+   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
+@@ -2664,6 +2676,13 @@ printf '%s\n' "$FM_WATCH_DELIVERY_IDENTITY" > "$WATCH_LOCK/pid-identity" 2>/dev/
+ 
+ [ -e "$STATE/.last-heartbeat" ] || touch "$STATE/.last-heartbeat"
+ 
++board_sock=${CREWBOARD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/crewboard.sock}
++if [ -S "$board_sock" ] && [ -x "$SCRIPT_DIR/fm-board-bridge.sh" ]; then
++  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
++    "$SCRIPT_DIR/fm-board-bridge.sh" --parent "$WATCHER_PID" </dev/null >/dev/null 2>&1 &
++  BOARD_BRIDGE_PID=$!
++fi
++
+ # A merged poll may have queued its terminal wake and then lost the process
+ # between receipt publication and fixed-path removal.
+ # Finish only identity-bound retirement receipts before any check can run.
+diff --git a/docs/scripts.md b/docs/scripts.md
+index 07d3bc41..71968dc3 100644
+--- a/docs/scripts.md
++++ b/docs/scripts.md
+@@ -92,6 +92,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
+ | `fm-watch-arm.sh`        | Verified home-scoped watcher arm wrapper with loud cycle endings and bounded lifecycle ledger |
+ | `fm-watch-checkpoint.sh` | Run one bounded foreground watcher checkpoint for Codex-style supervision            |
+ | `fm-watch.sh`            | Singleton-safe watcher: absorb benign wakes, detect stalled local-secondmate wake queues, and exit on actionable ones |
++| `fm-board-bridge.sh`     | The watcher's crew board event source: queue one wake row per message on the board's `fm` topic and, only with `config/board-doorbell`, ring the pane of a task that gets a `task/<id>` message |
+ | `fm-inactive-reconcile.sh` | Reconcile long-inactive direct crewmate terminal outcomes without forge access |
+ | `fm-afk-contract.sh`     | Own the away-or-quiet record's posture, schema, entry, read-back, archive, and cross-subsystem authority lock |
+ | `fm-afk-start.sh`        | Run the common sourceable away-mode daemon entry in the foreground                      |
+diff --git a/tests/fm-board-bridge.test.sh b/tests/fm-board-bridge.test.sh
+new file mode 100755
+index 00000000..86830408
+--- /dev/null
++++ b/tests/fm-board-bridge.test.sh
+@@ -0,0 +1,285 @@
++#!/usr/bin/env bash
++# tests/fm-board-bridge.test.sh - the crew board event source
++# (bin/fm-board-bridge.sh) and the watcher wiring that starts it.
++#
++# A fake `crewboard` on PATH prints the NDJSON a real `crewboard sub --json`
++# prints and logs its arguments, so the bridge is driven with real processes:
++#   1. Every fm message queues one durable `check` row, board:<boot>:<seq>, and
++#      moves the cursor; a resubscription resumes with --since and --boot.
++#   2. A first run starts live (no --since, nothing replayed); a changed boot id
++#      replays everything the board retained.
++#   3. task/* is subscribed, and rings a doorbell, only with config/board-doorbell;
++#      a dead pane, an unknown task and a message from the task itself ring nothing.
++#   4. A real fm-watch.sh with a 60 s poll wakes within seconds of an fm message
++#      and leaves no bridge behind; with the board off no bridge ever starts.
++set -u
++
++# shellcheck source=tests/wake-helpers.sh
++. "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
++
++BRIDGE="$ROOT/bin/fm-board-bridge.sh"
++WATCH="$ROOT/bin/fm-watch.sh"
++TMP_ROOT=$(fm_test_tmproot fm-board-bridge)
++TMP_ROOT=$(cd "$TMP_ROOT" && pwd -P)
++command -v jq >/dev/null 2>&1 || { echo "ok - skipped: jq is not installed"; exit 0; }
++
++# Fixture: <dir>/state, <dir>/config, a fake crewboard and tmux in <dir>/fakebin.
++# The fake prints the lines in $FAKE_BOARD_LINES (one JSON line per row), logs
++# its arguments to $FAKE_BOARD_ARGS, and holds the stream open for
++# $FAKE_BOARD_HOLD seconds.
++make_bridge_case() {  # <name>
++  local dir="$TMP_ROOT/$1" fb
++  fb="$dir/fakebin"
++  mkdir -p "$dir/state" "$dir/config" "$fb"
++  fm_test_track_watcher_state "$dir/state"
++  cat > "$fb/crewboard" <<'SH'
++#!/usr/bin/env bash
++printf '%s\n' "$*" >> "$FAKE_BOARD_ARGS"
++[ ! -f "${FAKE_BOARD_LINES:-}" ] || cat "$FAKE_BOARD_LINES"
++exec sleep "${FAKE_BOARD_HOLD:-0}"
++SH
++  cat > "$fb/tmux" <<'SH'
++#!/usr/bin/env bash
++case "${1:-}" in
++  send-keys)
++    shift
++    literal=0
++    while [ $# -gt 0 ]; do
++      case "$1" in -t) shift 2 ;; -l) literal=1; shift ;; *) break ;; esac
++    done
++    [ "$literal" != 1 ] || printf '%s\n' "${1:-}" >> "${FM_SEND_LOG:-/dev/null}"
++    exit 0 ;;
++  display-message)
++    for a in "$@"; do
++      case "$a" in
++        *cursor_y*) printf '1\n'; exit 0 ;;
++        *pane_current_command*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '%s\n' "$FM_FAKE_TMUX_AGENT"; exit 0; } ;;
++        *pane_tty*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '\n'; exit 0; } ;;
++      esac
++    done
++    printf 'fakepane\n'; exit 0 ;;
++  capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
++  list-windows) printf 'fm-t1\n'; exit 0 ;;
++esac
++exit 0
++SH
++  chmod +x "$fb/crewboard" "$fb/tmux"
++  make_fake_crew_state "$fb" >/dev/null
++  : > "$dir/args"
++  : > "$dir/send.log"
++  printf '%s\n' "$dir"
++}
++
++# Run the bridge on a case dir; $BRIDGE_PARENT is a sleeper whose death ends it.
++bridge_bg() {  # <dir> [env assignments...]
++  local dir=$1
++  shift
++  sleep 120 &
++  BRIDGE_PARENT=$!
++  PATH="$dir/fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$dir/state" FM_CONFIG_OVERRIDE="$dir/config" \
++    CREWBOARD_SOCKET="$dir/none.sock" FAKE_BOARD_ARGS="$dir/args" FM_SEND_LOG="$dir/send.log" \
++    env "$@" "$BRIDGE" --parent "$BRIDGE_PARENT" >/dev/null 2>&1 &
++  BRIDGE_PID=$!
++}
++
++bridge_stop() {
++  kill "$BRIDGE_PARENT" 2>/dev/null
++  wait_for_exit "$BRIDGE_PID" 100 || true
++  wait "$BRIDGE_PARENT" 2>/dev/null
++}
++
++# Wait up to <ticks> tenths of a second for <file> to contain the fixed string.
++wait_for_text() {  # <file> <text> [ticks]
++  local i=0
++  while [ "$i" -lt "${3:-60}" ]; do
++    grep -F -- "$2" "$1" >/dev/null 2>&1 && return 0
++    sleep 0.1
++    i=$((i + 1))
++  done
++  return 1
++}
++
++# The bridge only needs the socket path to be a socket; a bound, listening
++# python socket is the portable way to make one.
++make_board_socket() {  # <path>
++  python3 -c 'import socket, sys, time
++s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(); time.sleep(120)' "$1" &
++  BOARD_SOCKET_PID=$!
++  local i=0
++  while [ ! -S "$1" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
++  [ -S "$1" ] || fail "the test socket was not created"
++}
++
++test_fm_messages_queue_rows_and_resume_from_the_cursor() {
++  local dir sock
++  dir=$(make_bridge_case rows); sock="$dir/board.sock"
++  make_board_socket "$sock"
++  cat > "$dir/lines" <<'EOF'
++{"boot":"b1","seq":4}
++{"seq":5,"ts":"2026-10-09T20:14:03.117Z","topic":"fm","from":"t1","pid":1,"body":"needs-decision: pick a db"}
++{"seq":6,"ts":"2026-10-09T20:14:04.117Z","topic":"fleet","from":"t2","pid":1,"body":"not for firstmate"}
++{"seq":7,"ts":"2026-10-09T20:14:05.117Z","topic":"fm","from":null,"pid":1,"body":"line one\nline two\ttabbed"}
++EOF
++  bridge_bg "$dir" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines"
++  wait_for_text "$dir/state/.wake-queue" "board:b1:7" || fail "the fm messages queued no rows: $(cat "$dir/state/.wake-queue" 2>/dev/null)"
++  [ "$(awk -F '\t' '$3 == "check"' "$dir/state/.wake-queue" | wc -l | tr -d ' ')" = 2 ] \
++    || fail "expected exactly two rows (the fleet message is not for firstmate): $(cat "$dir/state/.wake-queue")"
++  awk -F '\t' '$4 == "board:b1:5" { print $5 }' "$dir/state/.wake-queue" | grep -Fx "check: crew board fm #5 from t1 - needs-decision: pick a db" >/dev/null \
++    || fail "the first row has the wrong reason: $(cat "$dir/state/.wake-queue")"
++  awk -F '\t' '$4 == "board:b1:7" { print $5 }' "$dir/state/.wake-queue" | grep -Fx 'check: crew board fm #7 from unknown - line one\nline two\ttabbed' >/dev/null \
++    || fail "a multi-line body must stay on one row: $(cat "$dir/state/.wake-queue")"
++  [ "$(cat "$dir/state/.board-cursor")" = "$(printf 'b1\t7')" ] || fail "the cursor did not reach seq 7: $(cat "$dir/state/.board-cursor")"
++  # The first subscription is live (no cursor); the stream ended, so the next one resumes.
++  [ "$(sed -n 1p "$dir/args")" = "sub --json fm" ] || fail "the first run must start live: $(cat "$dir/args")"
++  wait_for_text "$dir/args" "sub --json fm --since 7 --boot b1" 80 || fail "the bridge did not resume from its cursor: $(cat "$dir/args")"
++  bridge_stop; kill "$BOARD_SOCKET_PID" 2>/dev/null
++  pass "bridge: fm messages queue one row each, the cursor moves, and a resubscribe resumes from it"
++}
++
++test_a_restarted_board_replays_what_it_retained() {
++  local dir sock
++  dir=$(make_bridge_case restart); sock="$dir/board.sock"
++  make_board_socket "$sock"
++  printf 'old\t90\n' > "$dir/state/.board-cursor"
++  cat > "$dir/lines" <<'EOF'
++{"boot":"new","seq":2}
++{"gap":true,"oldest":1,"restarted":true}
++{"seq":1,"ts":"2026-10-09T20:14:03.117Z","topic":"fm","from":"t1","pid":1,"body":"after the restart"}
++EOF
++  bridge_bg "$dir" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines" FAKE_BOARD_HOLD=30
++  wait_for_text "$dir/state/.wake-queue" "board:new:1" || fail "a message of the new boot queued no row: $(cat "$dir/state/.wake-queue" 2>/dev/null)"
++  [ "$(sed -n 1p "$dir/args")" = "sub --json fm --since 90 --boot old" ] || fail "the bridge must resume with the old cursor: $(cat "$dir/args")"
++  [ "$(cat "$dir/state/.board-cursor")" = "$(printf 'new\t1')" ] || fail "the cursor must follow the new boot: $(cat "$dir/state/.board-cursor")"
++  bridge_stop; kill "$BOARD_SOCKET_PID" 2>/dev/null
++  pass "bridge: a restarted board's retained messages all queue and the cursor follows the new boot"
++}
++
++test_task_doorbell_needs_the_opt_in_and_a_live_pane() {
++  local dir sock
++  dir=$(make_bridge_case doorbell); sock="$dir/board.sock"
++  make_board_socket "$sock"
++  fm_write_meta "$dir/state/t1.meta" "window=sess:fm-t1" "kind=ship"
++  cat > "$dir/lines" <<'EOF'
++{"boot":"b1","seq":0}
++{"seq":1,"ts":"2026-10-09T20:14:03.117Z","topic":"task/t1","from":"t2","pid":1,"body":"I changed the API"}
++{"seq":2,"ts":"2026-10-09T20:14:03.117Z","topic":"task/t1","from":"t1","pid":1,"body":"note to self"}
++{"seq":3,"ts":"2026-10-09T20:14:03.117Z","topic":"task/nobody","from":"t2","pid":1,"body":"nobody home"}
++{"seq":4,"ts":"2026-10-09T20:14:03.117Z","topic":"task/../x","from":"t2","pid":1,"body":"hostile"}
++EOF
++  # Off by default: no task/* subscription and no ring.
++  bridge_bg "$dir" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines" FAKE_BOARD_HOLD=30
++  wait_for_text "$dir/args" "sub" || fail "the bridge never subscribed"
++  sleep 1
++  [ "$(sed -n 1p "$dir/args")" = "sub --json fm" ] || fail "task/* must not be subscribed without the opt-in: $(cat "$dir/args")"
++  [ ! -s "$dir/send.log" ] || fail "a doorbell rang without the opt-in: $(cat "$dir/send.log")"
++  bridge_stop
++
++  # On: one ring for the live task t1 and none for the other three messages.
++  : > "$dir/args"; rm -f "$dir/state/.board-cursor"; : > "$dir/config/board-doorbell"
++  bridge_bg "$dir" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines" FAKE_BOARD_HOLD=30
++  wait_for_text "$dir/send.log" "Crew board message for you on task/t1" 80 || fail "the doorbell never rang task t1"
++  [ "$(sed -n 1p "$dir/args")" = "sub --json fm task/*" ] || fail "task/* must be subscribed with the opt-in: $(cat "$dir/args")"
++  wait_for_text "$dir/state/.board-cursor" "b1" 20 && sleep 1
++  [ "$(grep -c . "$dir/send.log")" = 1 ] || fail "only t1's message from another task may ring: $(cat "$dir/send.log")"
++  grep -F "crewboard tail task/t1" "$dir/send.log" >/dev/null || fail "the bell must name the command that reads it: $(cat "$dir/send.log")"
++  [ ! -s "$dir/state/.wake-queue" ] || fail "a task message must not wake firstmate: $(cat "$dir/state/.wake-queue")"
++  bridge_stop
++
++  # A dead pane (a bare shell) is never typed into.
++  : > "$dir/send.log"; : > "$dir/args"; rm -f "$dir/state/.board-cursor"
++  bridge_bg "$dir" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines" FAKE_BOARD_HOLD=30 FM_FAKE_TMUX_AGENT=zsh
++  wait_for_text "$dir/args" "sub" || fail "the bridge never subscribed"
++  sleep 2
++  [ ! -s "$dir/send.log" ] || fail "a dead pane was typed into: $(cat "$dir/send.log")"
++  bridge_stop; kill "$BOARD_SOCKET_PID" 2>/dev/null
++  pass "bridge: task/* rings only with the opt-in, only for a live task other than the sender"
++}
++
++test_the_bridge_leaves_when_its_parent_is_gone_and_idles_without_a_board() {
++  local dir i=0
++  dir=$(make_bridge_case orphan)
++  bridge_bg "$dir" FAKE_BOARD_HOLD=30
++  sleep 1
++  kill -0 "$BRIDGE_PID" 2>/dev/null || fail "the bridge must idle, not exit, while the board socket is absent"
++  [ ! -s "$dir/args" ] || fail "the bridge subscribed with no board socket: $(cat "$dir/args")"
++  kill "$BRIDGE_PARENT"
++  wait_for_exit "$BRIDGE_PID" 50 || fail "the bridge outlived its parent"
++  wait "$BRIDGE_PARENT" 2>/dev/null
++  while pgrep -f "$dir/fakebin/crewboard" >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
++  pass "bridge: idles without a board and leaves with its parent"
++}
++
++watch_bg() {  # <dir> <out> [env assignments...]
++  local dir=$1 out=$2
++  shift 2
++  PATH="$dir/fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$dir/state" FM_CONFIG_OVERRIDE="$dir/config" \
++    FM_CREW_STATE_BIN="$dir/fakebin/fm-crew-state.sh" FAKE_BOARD_ARGS="$dir/args" \
++    FM_POLL=60 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
++    env "$@" "$WATCH" > "$out" 2>/dev/null &
++}
++
++test_a_board_message_ends_a_long_idle_wait() {
++  local dir sock out pid i=0
++  dir=$(make_bridge_case watch-wake); sock="$dir/board.sock"; out="$dir/watch.out"
++  make_board_socket "$sock"
++  # The board delivers the message 3 s into the subscription, while the watcher idles.
++  cat > "$dir/fakebin/crewboard" <<'SH'
++#!/usr/bin/env bash
++printf '%s\n' "$*" >> "$FAKE_BOARD_ARGS"
++printf '{"boot":"b1","seq":0}\n'
++sleep 3
++printf '{"seq":1,"ts":"2026-10-09T20:14:03.117Z","topic":"fm","from":"t1","pid":1,"body":"needs-decision: ship it?"}\n'
++exec sleep 60
++SH
++  watch_bg "$dir" "$out" CREWBOARD_SOCKET="$sock"
++  pid=$!
++  wait_for_text "$dir/args" "sub --json fm" || fail "the watcher never started the bridge: $(cat "$out")"
++  wait_for_exit "$pid" 100 || fail "an fm message did not end a 60 s idle wait within 10 s"
++  grep -Fx "check: crew board fm #1 from t1 - needs-decision: ship it?" "$out" >/dev/null || fail "the wake did not name the message: $(cat "$out")"
++  [ "$(grep -c . "$out")" = 1 ] || fail "the message did not produce exactly one wake: $(cat "$out")"
++  while pgrep -f "$dir/fakebin/crewboard" >/dev/null 2>&1 && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
++  ! pgrep -f "$dir/fakebin/crewboard" >/dev/null 2>&1 || fail "the exited watcher left a board subscriber running"
++  kill "$BOARD_SOCKET_PID" 2>/dev/null
++  pass "watcher: an fm board message wakes an idle watcher within seconds and leaves no bridge behind"
++}
++
++test_a_surfaced_board_message_wakes_a_successor_watcher_only_once() {
++  local dir sock out pid
++  dir=$(make_bridge_case watch-once); sock="$dir/board.sock"; out="$dir/watch.out"
++  make_board_socket "$sock"
++  append_wake "$dir/state" check "board:b1:1" "check: crew board fm #1 from t1 - already told"
++  # Mark the row surfaced the way a first wake would have.
++  : > "$dir/state/.seen-board-$(printf '%s' 'board:b1:1' | LC_ALL=C od -An -tx1 | tr -d ' \n')"
++  printf 'b1\t1\n' > "$dir/state/.board-cursor"
++  printf '{"boot":"b1","seq":1}\n' > "$dir/lines"
++  watch_bg "$dir" "$out" CREWBOARD_SOCKET="$sock" FAKE_BOARD_LINES="$dir/lines" FAKE_BOARD_HOLD=60 FM_WATCH_HANDLING_SUCCESSOR=1
++  pid=$!
++  wait_for_text "$dir/args" "sub --json fm --since 1 --boot b1" || fail "the successor bridge did not resume: $(cat "$dir/args")"
++  sleep 3
++  kill -0 "$pid" 2>/dev/null || fail "a surfaced board message woke the successor again: $(cat "$out")"
++  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
++  kill "$BOARD_SOCKET_PID" 2>/dev/null
++  pass "watcher: a surfaced board message does not wake a successor watcher again"
++}
++
++test_no_bridge_starts_with_the_board_off() {
++  local dir out pid
++  dir=$(make_bridge_case board-off); out="$dir/watch.out"
++  watch_bg "$dir" "$out" CREWBOARD_SOCKET="$dir/absent.sock"
++  pid=$!
++  sleep 3
++  kill -0 "$pid" 2>/dev/null || fail "the watcher exited with no board: $(cat "$out")"
++  ! pgrep -f "fm-board-bridge.sh --parent $pid" >/dev/null 2>&1 || fail "a bridge ran with the board off"
++  [ ! -s "$dir/args" ] || fail "crewboard was called with the board off: $(cat "$dir/args")"
++  [ ! -e "$dir/state/.board-cursor" ] || fail "the board off left a cursor"
++  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
++  pass "watcher: with the board off no bridge starts and no state is written"
++}
++
++test_fm_messages_queue_rows_and_resume_from_the_cursor
++test_a_restarted_board_replays_what_it_retained
++test_task_doorbell_needs_the_opt_in_and_a_live_pane
++test_the_bridge_leaves_when_its_parent_is_gone_and_idles_without_a_board
++test_a_board_message_ends_a_long_idle_wait
++test_a_surfaced_board_message_wakes_a_successor_watcher_only_once
++test_no_bridge_starts_with_the_board_off
+-- 
+2.53.0
+

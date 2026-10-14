@@ -98,6 +98,8 @@ Example exchange (`>` is the client):
 A subscription to the topic `*` matches every topic. This is the firehose. Firstmate uses it to watch the board: `crewboard sub '*'`.
 It is a normal subscriber. It has the same queue and the same slow-subscriber rule.
 
+The Firstmate watcher also subscribes, to `fm` and (with the opt-in doorbell) `task/*`, with `--json --since --boot`. It saves the last seq it handled, so it resumes after a restart of the watcher with a gap line when messages are lost. See [Wake Firstmate from the board](../../docs/board.md#wake-firstmate-from-the-board).
+
 ## Commands
 
 ```bash

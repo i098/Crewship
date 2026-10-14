@@ -7,14 +7,12 @@ Crew board tests apply the carried patch to an exported upstream checkout.
 
 import getpass
 import grp
-import io
 import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -283,26 +281,24 @@ def assert_default_socket(tmp_path, monkeypatch, env, render, enabled):
 
 @pytest.fixture
 def crewboard_firstmate(tmp_path):
-    """Exercise the carried patch against a supplied, read-only upstream tree."""
+    """Exercise the carried patches against a clone of a supplied upstream checkout."""
     source = os.environ.get("FIRSTMATE_TEST_SOURCE")
     if not source:
         pytest.skip("Set FIRSTMATE_TEST_SOURCE to an upstream Firstmate source tree")
     checkout = tmp_path / "source"
-    archive = subprocess.run(
-        ["git", "-C", source, "archive", "HEAD", "bin", "docs"],
-        check=True, capture_output=True,
-    ).stdout
-    with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
-        tree.extractall(checkout, filter="data")
+    # A clone, not an export: the layer applies three-way and needs upstream's history.
+    subprocess.run(["git", "clone", "-q", "--no-checkout", source, str(checkout)], check=True)
+    target = git(Path(source), "rev-parse", "HEAD")
+    git(checkout, "checkout", "-q", "-B", "main", target)
     scripts = ("fm-brief.sh", "fm-supervision-instructions.sh")
     for script in scripts:
         shutil.copyfile(checkout / "bin" / script, checkout / "bin" / f"baseline-{script}")
-    patch = ROOT / "blueprint/patches/firstmate/0003-brief-crewboard.patch"
-    # Keep git apply from finding a parent repository and skipping these paths.
-    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
-    subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
-    subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
-    for script in scripts:
+    # The real layer script puts every carried patch on top of upstream, as apply does on a host.
+    subprocess.run(
+        ["bash", SCRIPT, "apply", checkout, target, ROOT / "blueprint/patches/firstmate"],
+        check=True, capture_output=True,
+    )
+    for script in (*scripts, "fm-watch.sh", "fm-board-bridge.sh", "fm-task-inbox-lib.sh"):
         subprocess.run(["bash", "-n", checkout / "bin" / script], check=True)
     return checkout
 
@@ -355,7 +351,7 @@ def test_crewboard_brief_output(crewboard_firstmate, tmp_path, arguments, monkey
             b"\n\n# Crew board\n"
             b"The board permits direct peer coordination; report task states only to Firstmate through the status file.\n"
             b"Use `crewboard pub task/<peer-id> 'message'` for a peer and `crewboard pub fleet 'message'` for the crew.\n"
-            b"Use `crewboard pub fm 'message'` for information that must not wake Firstmate.\n"
+            b"Use `crewboard pub fm 'message'` to tell Firstmate something it must read now; it wakes Firstmate within about a second. Use `crewboard pub fleet` for notes that must not wake it.\n"
             b"Read `crewboard tail task/sample` and `crewboard tail fleet` at natural checkpoints, or subscribe in a separate pane.\n"
             b"Use `crewboard sub task/sample fleet` for that subscription; it waits for messages.\n"
             b"Firstmate observes the board and never relays messages. The steering inbox remains unchanged.\n"
@@ -400,10 +396,26 @@ def test_crewboard_supervisor_output(crewboard_firstmate, tmp_path, harness, mon
         env["CREWBOARD_SOCKET"] = str(path)
         enabled = render("fm-supervision-instructions.sh")
         assert_default_socket(tmp_path, monkeypatch, env, lambda: render("fm-supervision-instructions.sh"), enabled)
-        note = b"- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. The status file remains the durable ledger.\n"
+        note = (
+            b"- Crew board: open a separate pane and run crewboard sub '*'; observe, never relay. "
+            b"A message on the fm topic wakes you as check: crew board fm; the status file remains the durable ledger.\n"
+        )
         assert enabled.count(note) == 1
         anchor = baseline.index(b"- Ordinary wake:")
         assert enabled == baseline[:anchor] + note + baseline[anchor:]
         assert render("fm-supervision-instructions.sh", "--repair-line") == render(
             "baseline-fm-supervision-instructions.sh", "--repair-line"
         )
+
+
+def test_crewboard_event_source_suite_passes_on_the_patched_tree(crewboard_firstmate):
+    """The patch's own shell suite: fm rows, cursor resume, doorbell opt-in, real watcher wake."""
+    if not shutil.which("jq") or not shutil.which("python3"):
+        pytest.skip("the suite needs jq and python3")
+    env = {k: v for k, v in os.environ.items() if k not in ("CREWBOARD_SOCKET", "FM_HOME", "FM_TASK_ID")}
+    result = subprocess.run(
+        ["bash", "tests/fm-board-bridge.test.sh"],
+        cwd=crewboard_firstmate, env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("ok - ") == 7
