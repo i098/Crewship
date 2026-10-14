@@ -18,6 +18,7 @@ track each author's default branch.
 import argparse
 import fcntl
 import hashlib
+import html
 import json
 import os
 import platform
@@ -173,7 +174,12 @@ def platform_key():
     return "linux-" + machine
 
 
-def fetch(url, what):
+class RateLimited(ValueError):
+    """The GitHub API refused a lookup for the request budget (HTTP 403 or 429)."""
+
+
+def fetch_page(url, what):
+    """The final URL after redirects, and the body."""
     # The GitHub token only ever goes to the GitHub API. Unauthenticated calls
     # there share a 60/hour budget per IP.
     token = os.environ.get("GITHUB_TOKEN")
@@ -184,18 +190,68 @@ def fetch(url, what):
             with urllib.request.urlopen(
                 urllib.request.Request(url, headers=headers), timeout=60
             ) as response:
-                return response.read()
+                return response.geturl(), response.read()
         except OSError as error:
             # Connection resets, TLS EOFs, timeouts and 5xx are transient; a 4xx is final.
             status = getattr(error, "code", 500)
             if status < 500 or attempt == DOWNLOAD_ATTEMPTS:
                 if isinstance(error, urllib.error.HTTPError):
-                    raise ValueError(
+                    failure = RateLimited if github and status in (403, 429) else ValueError
+                    raise failure(
                         f"cannot resolve the latest {what} (HTTP {error.code}); "
                         "if rate limited, set GITHUB_TOKEN and re-run"
                     ) from None
                 raise
             time.sleep(attempt)
+
+
+def fetch(url, what):
+    return fetch_page(url, what)[1]
+
+
+def release_from_pages(repo, tool, prerelease):
+    """The release as the API shows it, read from github.com's public pages.
+
+    The pages have no request budget: the latest tag is where /releases/latest
+    redirects (the newest one in the Atom feed for the prerelease channel) and
+    the release's asset list shows each asset's SHA-256.
+    """
+    site = f"https://github.com/{repo}"
+    if prerelease:
+        feed = fetch(f"{site}/releases.atom", f"{tool} release").decode()
+        found = re.search(rf'href="{re.escape(site)}/releases/tag/([^"]+)"', feed)
+    else:
+        url = fetch_page(f"{site}/releases/latest", f"{tool} release")[0]
+        found = re.search(r"/releases/tag/([^/?#]+)$", url)
+    if not found:
+        raise ValueError(f"cannot read the latest {tool} release from {site}/releases")
+    tag = urllib.parse.unquote(found[1])
+    page = fetch(f"{site}/releases/expanded_assets/{found[1]}", f"{tool} assets").decode()
+    assets = []
+    for chunk in page.split(f'href="/{repo}/releases/download/')[1:]:
+        link = chunk.split('"', 1)[0]
+        digest = re.search(r"sha256:[0-9a-f]{64}", chunk)
+        assets.append(
+            {
+                "name": html.unescape(urllib.parse.unquote(link.split("/", 1)[1])),
+                "browser_download_url": f"{site}/releases/download/{html.unescape(link)}",
+                "digest": digest[0] if digest else None,
+            }
+        )
+    return {"tag_name": tag, "assets": assets}
+
+
+def latest_release(repo, tool, prerelease):
+    """The newest release of a repo from the API; the public pages once the API is rate limited."""
+    api = GITHUB_API.format(repo)
+    try:
+        if prerelease:
+            releases = json.loads(fetch(api + "?per_page=10", f"{tool} release"))
+            return next((r for r in releases if not r["draft"]), None)
+        return json.loads(fetch(api + "/latest", f"{tool} release"))
+    except RateLimited as error:
+        print(f"provisions: {error}; reading github.com's release pages instead", file=sys.stderr)
+        return release_from_pages(repo, tool, prerelease)
 
 
 def verified(tool, version, key, name, url, checksum, binaries):
@@ -221,16 +277,12 @@ def resolve_latest(key, names):
             continue
         try:
             if tool in PRERELEASE_CHANNEL:
-                releases = json.loads(
-                    fetch(GITHUB_API.format(repo) + "?per_page=10", f"{tool} release")
-                )
-                release = next((r for r in releases if not r["draft"]), None)
+                release = latest_release(repo, tool, True)
                 if release is None:
                     raise ValueError(f"{tool} has no published release")
             else:
                 if repo not in stable:
-                    url = GITHUB_API.format(repo) + "/latest"
-                    stable[repo] = json.loads(fetch(url, f"{tool} release"))
+                    stable[repo] = latest_release(repo, tool, False)
                 release = stable[repo]
             version = release["tag_name"].removeprefix(prefix)
             name = pattern.format(v=version, key=key, **ARCH[key])
