@@ -17,6 +17,7 @@
 - [Install, update and migrate](install.md): release artifact, updates, moving a git install
 - [Migration and recovery](recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
+- [Host hardening](security.md#host-hardening): the Koncreet toolkit, installed as root and never run (opt-in)
 - [Tailscale](security.md#remote-access): the Tailscale daemon for a private network, an option beside the gateway (opt-in)
 - [Agent host move](agent-host-move.md): move the agents to a new host with parity checks
 - [Security](security.md): the password gateway, Tailscale, and credentials

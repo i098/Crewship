@@ -52,6 +52,7 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
 | `jj` | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
 | `fleet_browsers` | the browser ladder only |
 | `tailscale` | the Tailscale daemon (login is manual); an option beside the gateway |
+| `koncreet` | the Koncreet host hardening toolkit, installed as root and never run ([Security](docs/security.md#host-hardening)) |
 | `desktop` | a loopback-only XFCE desktop over noVNC |
 | `board` | the crew message board ([Board](docs/board.md)); it brings `development` |
 

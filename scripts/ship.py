@@ -35,11 +35,12 @@ OPT_IN = {
     "shared_postgres": ("one dev database per project", ("docker",)),
     "fleet_browsers": ("the browser ladder", ()),
     "tailscale": ("the Tailscale daemon", ()),
+    "koncreet": ("the Koncreet host hardening toolkit, installed as root and never run", ()),
     "desktop": ("an XFCE desktop over noVNC", ()),
     "board": ("the crew message board", ("development",)),
 }
 # A container worker image has no Docker, no user services, no desktop and no Firstmate.
-NOT_IN_CONTAINER = {"docker", "chat", "gateway", "fleet_guards", "shared_postgres", "tailscale", "desktop", "board"}
+NOT_IN_CONTAINER = {"docker", "chat", "gateway", "fleet_guards", "shared_postgres", "tailscale", "desktop", "board", "koncreet"}
 
 
 def validate_document(document, schema_name):
