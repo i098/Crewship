@@ -118,34 +118,19 @@
     remote_src: true
   become: true
 
-# mosh-server and non-interactive SSH commands run with the system PATH, which
-# has no ~/.local/bin, so `mosh <host> -- herdr-patch` finds the command, and
-# herdr-patch finds herdr, only through these links.
-# No owner or group: the file module follows links, so setting root here would
-# chown the targets in ~/.local/bin and the next apply could not rewrite them.
-- name: Link herdr and herdr-patch into /usr/local/bin
-  ansible.builtin.file:
-    src: "{{ crewship_local_bin }}/{{ item }}"
-    dest: "/usr/local/bin/{{ item }}"
-    state: link
-    force: true
-  become: true
-  become_user: root
-  loop:
-    - herdr
-    - herdr-patch
+# The host-wide links in the system PATH; an apply for another account never
+# takes them over (tasks/herdr_links.yml).
+- name: Link herdr and herdr-patch into the system PATH
+  ansible.builtin.import_tasks: herdr_links.yml
 
-# herdr-mosh is retired: herdr-patch replaced it. Hosts that applied the
-# earlier install keep the old copy and its link until this removes them.
+# herdr-mosh is retired: herdr-patch replaced it; herdr_links.yml removes its
+# host-wide link.
 - name: Remove retired herdr-mosh
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ crewship_local_bin }}/herdr-mosh"
     state: absent
   become: true
   become_user: root
-  loop:
-    - /usr/local/bin/herdr-mosh
-    - "{{ crewship_local_bin }}/herdr-mosh"
 
 # btop fitted to its pane (docs/herdr.md#btop): the launcher takes the place of
 # the btop command and runs the installer's btop-bin with a preset of this
