@@ -34,19 +34,42 @@ flowchart TD
     profiles --> gateway
 ```
 
-## 0. Install Crewship
+## 0. Choose features and install Crewship
+
+Crewship installs a core, the omp agents and Firstmate. Everything else is opt-in and off until the user chooses it. `docker` comes with `fleet_guards` and `shared_postgres`, and `development` comes with `board`.
+
+- STOP: show the user this checklist and ask which names to turn on. The default is none.
+
+| Name | Adds |
+| --- | --- |
+| `public_skills` | the public skills and rules for omp and Claude Code ([Skills](docs/omp.md#skills)) |
+| `development` | the Rust toolchain and build tools |
+| `docker` | the Docker engine and Compose |
+| `chat` | the Discord and Slack terminal clients |
+| `gateway` | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)) |
+| `fdu` | fdu, a fast gitignore-aware `du` for large worktrees |
+| `fleet_guards` | Docker guard, dev-server reaper, storage guard, browser ladder |
+| `shared_postgres` | one dev database container per project, in the engine its compose file names |
+| `jj` | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
+| `fleet_browsers` | the browser ladder only |
+| `tailscale` | the Tailscale daemon (login is manual); an option beside the gateway |
+| `koncreet` | the Koncreet host hardening toolkit, installed as root and never run ([Security](docs/security.md#host-hardening)) |
+| `desktop` | a loopback-only XFCE desktop over noVNC |
+| `board` | the crew message board ([Board](docs/board.md)); it brings `development` |
+
+Run the installer with the chosen names, comma separated. Use `--with none` for none. You have no terminal for the installer's own checklist, so always pass `--with`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash -s -- --with public_skills,docker
 ```
 
 `bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
 
-The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` with the default profiles ([Install, update and migrate](docs/install.md)). The later steps sign in and change the profiles, then apply again.
+The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock --with …`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). `--with` applies to a new host only. The later steps sign in, then apply again.
 
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
-- STOP: the installer's output ends with the web address ([Web pages from anywhere](docs/gateway.md)). Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
+- STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
 - Then run `cd ~/Crewship` for every later step.
 
 ## 1. Sign in to GitHub
@@ -73,24 +96,13 @@ omp models --json
 - STOP: the user must finish the browser or device-code step. Show the URL or code that omp prints. Wait until the user says it is done.
 - Check: `omp models --json` lists at least one model. Never copy a credentials file from another host.
 
-## 3. Choose profiles with the user
+## 3. Review the profiles
 
-`.local/host.yml` holds the host config. Open it and show the user the `profiles` block. The defaults are:
-
-| Profile | Default | Adds |
-| --- | --- | --- |
-| `agents`, `development`, `firstmate`, `docker`, `chat` | on | omp, build tools, the Firstmate orchestrator, Docker, Discord and Slack terminal clients |
-| `gateway` | on for a new host | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)); a host from before the gateway keeps it off until `profiles.gateway: true` is set |
-| `fleet_guards` | off | Docker guard, dev-server reaper, storage guard, browser ladder |
-| `shared_postgres` | off | one dev database container per project, in the engine its compose file names |
-| `jj` | off | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
-| `fleet_browsers` | off | the browser ladder only |
-| `tailscale` | off | the Tailscale daemon (login is manual); an option beside the gateway |
-| `desktop` | off | a loopback-only XFCE desktop over noVNC |
+`.local/host.yml` holds the host config. Open it and show the user the `profiles` block. Step 0 already set the user's choices. To change one later, set its key to `true` or `false`.
 
 The full list and the rules between profiles are in [Profiles](docs/configuration.md#profiles).
 
-- STOP: ask the user which profiles to turn on. Change only the keys the user chose, with `true` or `false`.
+- STOP: ask the user which profiles to change, if any. Change only the keys the user chose.
 - Never put secrets, host names, or personal details in `.local/host.yml` that the user did not give you.
 - Check:
 
@@ -130,7 +142,7 @@ The installer already applied the default profiles. This run applies your change
 ```
 
 - Check: each expected tool runs, and `gh` shows as authenticated.
-- Check: `crewship-gateway url` prints an `https://….trycloudflare.com` address, unless the user turned the gateway off.
+- Check: with the gateway on, `crewship-gateway url` prints an `https://….trycloudflare.com` address.
 - Tell the user what passed and what failed, and which step to repeat for each failure.
 - Do not mark the setup as done while a check fails.
 

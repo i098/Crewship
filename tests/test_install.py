@@ -1,5 +1,6 @@
 """install.sh and the npm launcher print the usage before any install step."""
 
+import importlib.util
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,6 +9,9 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 BASH = shutil.which("bash")
+SHIP = importlib.util.spec_from_file_location("ship", ROOT / "scripts/ship.py")
+ship = importlib.util.module_from_spec(SHIP)
+SHIP.loader.exec_module(ship)
 
 
 def sandbox(tmp_path):
@@ -38,7 +42,12 @@ def test_help_prints_usage_and_changes_nothing(tmp_path, args):
     assert not any((tmp_path / "home").iterdir())
 
 
-@pytest.mark.parametrize("args", [["--bogus"], ["--user"], ["--container", "extra"]])
+def test_usage_names_every_opt_in_feature(tmp_path):
+    usage = install(sandbox(tmp_path), "--help").stdout
+    assert all(name in usage.split() for name in ship.OPT_IN)
+
+
+@pytest.mark.parametrize("args", [["--bogus"], ["--user"], ["--with"], ["--container", "extra"]])
 def test_bad_option_prints_usage_and_fails(tmp_path, args):
     result = install(sandbox(tmp_path), *args)
     assert result.returncode == 2
@@ -282,6 +291,17 @@ def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
     assert release.crewship.resolve() == (release.releases / "v1.1.0").resolve()
     assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
     assert "dock" not in (release.home / "calls").read_text().split()[4:]
+
+
+def test_with_goes_to_dock_for_a_new_host_and_is_refused_for_an_existing_one(release):
+    assert release.install("v1.0.0", "--with=docker,chat").returncode == 0
+    assert (release.home / "args").read_text().splitlines()[0] == "dock --with=docker,chat"
+    (release.crewship / ".local").mkdir(exist_ok=True)
+    (release.crewship / ".local/host.yml").write_text("mine\n")
+    result = release.install("v1.1.0", "update", "--with", "docker")
+    assert result.returncode == 1
+    assert "--with applies to a new host config" in result.stderr
+    assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")

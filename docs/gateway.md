@@ -3,14 +3,14 @@
 Agents on the host serve web pages: Lavish boards, dev previews, and other local services.
 These pages listen on loopback, so you cannot open them from a phone or a laptop without help.
 
-The password gateway is the default way in on a new host.
+The password gateway is the way in for hosts that turn it on.
 It puts one password in front of every local web page and serves the pages over a [Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).
 The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudflare account, no open port, and no DNS change.
 [Tailscale](#tailscale-instead) stays available as an option.
 
 ## Open a page
 
-1. Find the address. The installer and every `./ship.sh launch` print it at the end. On the host, this command prints it again:
+1. Find the address. With the gateway on, the installer and every `./ship.sh launch` print it at the end. On the host, this command prints it again:
 
    ```bash
    crewship-gateway url
@@ -71,9 +71,8 @@ Other addresses can still sign in.
 
 ## Turn it on or off
 
-- A new host gets the gateway: `./ship.sh dock` writes `profiles.gateway: true` into its new `.local/host.yml`.
-- On a new host, give the installer `--no-gateway` to leave it off, for example `npx crewship --no-gateway`.
-- A host that existed before the gateway keeps it off: an update never opens a tunnel. To turn it on, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`.
+- The gateway is off by default, so a new host opens no tunnel. To turn it on, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`.
+- A host config that already sets `profiles.gateway: true` keeps it. An update never opens or closes a tunnel on its own.
 - To turn it off, set `profiles.gateway: false` in `.local/host.yml` and run `./ship.sh launch`. The apply stops and removes both services.
 
 ## How it works

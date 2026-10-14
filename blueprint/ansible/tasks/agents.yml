@@ -75,7 +75,9 @@
 # skills.private_source set, the installer first fills blueprint/skills/private and
 # blueprint/rules/private from it, signed in as the account's own git and GitHub login.
 # It replaces or removes only the items its manifest records, and prints one
-# JSON object whose `changed` is the only changed signal.
+# JSON object whose `changed` is the only changed signal. The public skills and rules
+# are opt-in: profiles.public_skills true installs them, false leaves them out, and
+# absent installs them only on a host that already has them. Nothing is removed for it.
 - name: Install the Crewship skills for omp and Claude Code, and its omp rules
   ansible.builtin.command:
     argv: >-
@@ -83,6 +85,8 @@
          + (['--private-source', crewship_cfg.skills.private_source,
              '--private-ref', crewship_cfg.skills.private_ref | default('HEAD')]
             if crewship_cfg.skills is defined else [])
+         + ['--public', ('auto' if crewship_cfg.profiles.public_skills is not defined
+                         else 'yes' if crewship_cfg.profiles.public_skills | bool else 'no')]
          + (['--skip-rule', 'drive-the-browser-yourself.md',
              '--skip-rule', 'fleet-browser-default-tier.md']
             if not (crewship_fleet_browsers_enabled | bool) else []) }}
