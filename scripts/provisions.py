@@ -37,7 +37,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
-FORGEJO_RELEASES = "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest"
+FORGEJO_RELEASES = (
+    "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases?draft=false&pre-release=false"
+)
 # How release asset names spell each platform.
 ARCH = {
     "linux-x86_64": {
@@ -319,7 +321,10 @@ def resolve_latest(key, names):
     if "forgejo" in names:
         # Installed by Ansible itself (blueprint/ansible/tasks/forgejo.yml), which also
         # checks the release signature against the Forgejo release key.
-        release = json.loads(fetch(FORGEJO_RELEASES, "forgejo release"))
+        releases = json.loads(fetch(FORGEJO_RELEASES, "forgejo release"))
+        release = max(
+            releases, key=lambda r: tuple(int(n) for n in re.findall(r"\d+", r["tag_name"]))
+        )
         version = release["tag_name"].removeprefix("v")
         name = f"forgejo-{version}-linux-{ARCH[key]['go']}"
         urls = {asset["name"]: asset["browser_download_url"] for asset in release["assets"]}
