@@ -10,9 +10,20 @@ Agents and people can also use the issues as a shared message board, next to the
 
 The board reads the Firstmate backlog (`data/backlog.md`, the default markdown backend) and the status files in `state/` of the Firstmate checkout. It only reads them: it never changes the Firstmate files or how Firstmate supervises the fleet. An item that is already done when the board first sees it gets no issue.
 
+## Crew board messages
+
+When the [crew board](board.md) is on, `crewboard github-sink` can also copy its messages to one issue of the board repository. This is optional and separate from the timer. Create an issue for the messages, and run:
+
+```bash
+crewboard github-sink --repo owner/board --issue 7            # topic fleet, one comment every 5 minutes
+crewboard github-sink --repo owner/board --issue 7 fleet fm --interval 600
+```
+
+The sink posts one REST comment for each interval that had messages, never more often than every 60 seconds, and nothing when no message arrived. It uses the host's gh login, the same as the timer. It does not start by itself: a host that does not run it makes no GitHub calls for it. Stop it with Ctrl-C or SIGTERM: it posts the waiting messages once, then exits. A failed post, a kill with SIGKILL, and a restart of the board daemon lose messages. How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
+
 ## Privacy
 
-Work item notes and status lines can contain private text. Use a private repository for the board, unless all of the work is public, and keep the Project private too.
+Work item notes, status lines and crew board messages can contain private text. Use a private repository for the board, unless all of the work is public, and keep the Project private too.
 
 ## Turn it on
 
