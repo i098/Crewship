@@ -49,7 +49,7 @@ crewship:
     tailscale: false      # Daemon only; authenticate separately
     desktop: false        # XFCE + TigerVNC + noVNC
     fleet_guards: false   # Docker guard, reapers, storage guard and browser ladder
-    shared_postgres: false # Optional container, database helper and env seeder
+    shared_postgres: false # Optional per-project dev databases, helper and env seeder
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: true            # Concord (Discord) and slk (Slack) terminal clients
     gateway: true         # Password gateway + Cloudflare Quick Tunnel; only dock writes true (default.yml: false)
