@@ -101,13 +101,16 @@ forgejo-github-push disable OWNER/REPO
 
 After each push to an enabled repository, the hook pushes the branches that the push created or updated.
 It pushes every branch except `main`, `master` and the repository's default branch, which it reads from the repository `HEAD`.
-It pushes each branch to the same name on GitHub without force, so GitHub never loses a commit.
+It pushes each branch to the same name on GitHub with a lease on the commit that it pushed last for that branch, or on no branch for a new one.
+So a rebased or amended branch replaces what the hook pushed before, but a commit that exists only on GitHub is never overwritten.
 It never pushes `main`, `master`, the default branch, tags or a deletion, so it never deletes a GitHub branch.
 The push runs in a transient user unit and uses the account's git credential helper.
-When GitHub has commits that the branch lacks, for example from "Update branch" or a review suggestion, GitHub rejects the push.
-The unit then fetches the GitHub branch into the Forgejo repository as `refs/github-ahead/<branch>` and fails.
-Until the branch has those commits, each push of the branch prints a warning; `git fetch origin refs/github-ahead/<branch> && git merge FETCH_HEAD` merges them.
-The next successful push of the branch removes `refs/github-ahead/<branch>`.
+The units of one repository push one at a time.
+When GitHub has a commit that the Forgejo branch does not contain, for example from "Update branch", a review suggestion or a web edit, the lease fails and the unit fails.
+Until the branch contains that commit, each push of the branch prints a warning and the hook does not push it; `git fetch <GitHub URL> <branch> && git merge FETCH_HEAD` merges it.
+When the GitHub branch no longer exists, for example after its PR merged, the hook pushes it again as a new branch.
+When the GitHub branch is only behind the Forgejo branch, for example on a branch that existed before `enable`, the hook pushes it again with a lease on the GitHub commit.
+The hook keeps its state in the repository's git config, as `crewship-github.<branch>.pushed` and `crewship-github.<branch>.ahead`.
 Other push errors get three tries, and a unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
 `systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
