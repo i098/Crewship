@@ -33,10 +33,9 @@ Without HTTPS certificates, apply does not use `tailscale serve`.
 Apply does not change an HTTPS port 20250 that `tailscale serve` gives to a different service; it stops with an error.
 Clone URLs, pull request links and the no-mistakes base URL use the root URL that apply sets in `app.ini`:
 
-- When you set the Ansible variable `crewship_forgejo_root_url`, apply always uses it.
 - When `tailscale serve` publishes Forgejo, apply uses the published URL.
-- Otherwise apply keeps the root URL that `app.ini` already has, so a Tailscale outage does not change it.
-- On the first install without a published URL, apply uses `http://127.0.0.1:20250/`.
+- Otherwise apply keeps the tailnet root URL that `app.ini` already has, so a Tailscale outage does not change it.
+- Without a tailnet root URL in `app.ini`, apply uses the loopback URL `http://127.0.0.1:<port>/` with the current port.
 
 Apply never uses Funnel, so Forgejo is never on the public internet.
 

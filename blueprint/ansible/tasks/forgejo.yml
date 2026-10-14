@@ -2,8 +2,8 @@
 # Self-hosted Forgejo (profiles.forgejo, docs/forgejo.md): the latest release as a user
 # service of the target account on 127.0.0.1:{{ crewship_forgejo_port }} with SQLite, published to the
 # tailnet with `tailscale serve` when Tailscale runs with HTTPS certificates enabled
-# (else on the loopback URL only), an admin account with a generated password, a
-# nightly `forgejo dump`, and a post-receive hook that pushes feature branches to
+# (else it keeps an installed tailnet URL or uses the loopback URL), an admin account
+# with a generated password, a nightly `forgejo dump`, and a post-receive hook that pushes feature branches to
 # GitHub for the repositories that opt in (forgejo-github-push). With the agents
 # profile it also gives the no-mistakes daemon the Forgejo base URL and a token
 # (forgejo-axi itself is installed by tasks/tools.yml). Nothing here moves a
@@ -226,16 +226,19 @@
   failed_when: false
   check_mode: false
 
-# An explicit crewship_forgejo_root_url wins. While Tailscale is down, the installed URL
-# stays, so clone URLs and the no-mistakes base URL do not follow a transient outage.
+# While Tailscale is down, an installed tailnet URL stays, so clone URLs and the
+# no-mistakes base URL do not follow a transient outage.
 - name: Choose the Forgejo root URL
+  vars:
+    crewship_forgejo_kept_url: "{{ crewship_forgejo_installed_url.stdout }}"
   ansible.builtin.set_fact:
     crewship_forgejo_root_url: >-
-      {{ crewship_forgejo_root_url | default(
-           ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
-           if crewship_forgejo_published | default(false) | bool
-           else crewship_forgejo_installed_url.stdout
-             | default('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/', true), true) }}
+      {{ ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
+         if crewship_forgejo_published | default(false) | bool
+         else crewship_forgejo_kept_url
+           if crewship_forgejo_kept_url | length > 0
+              and crewship_forgejo_kept_url is not match('http://127[.]0[.]0[.]1:')
+         else ('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/') }}
 
 - name: Read the Forgejo release the installed unit runs
   ansible.builtin.command:

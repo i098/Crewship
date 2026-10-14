@@ -493,17 +493,17 @@ def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_u
 
 
 @pytest.mark.parametrize(
-    ("installed", "explicit", "expected"),
+    ("installed", "port", "expected"),
     [
         # Tailscale is down: the installed tailnet URL stays.
-        ("https://host.tail.ts.net:20250/", None, "https://host.tail.ts.net:20250/"),
+        ("https://host.tail.ts.net:20250/", 20250, "https://host.tail.ts.net:20250/"),
         # A first install without Tailscale uses the loopback URL.
-        (None, None, "http://127.0.0.1:20250/"),
-        # An explicit URL wins over the installed one.
-        ("https://host.tail.ts.net:20250/", "https://git.example/", "https://git.example/"),
+        (None, 20250, "http://127.0.0.1:20250/"),
+        # A loopback URL follows a new port.
+        ("http://127.0.0.1:20250/", 20251, "http://127.0.0.1:20251/"),
     ],
 )
-def test_forgejo_root_url_without_tailscale(tmp_path, installed, explicit, expected):
+def test_forgejo_root_url_without_tailscale(tmp_path, installed, port, expected):
     home, conf, units, stubs = forgejo_host(tmp_path)
     binary = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
     binary.parent.mkdir(parents=True)
@@ -512,11 +512,10 @@ def test_forgejo_root_url_without_tailscale(tmp_path, installed, explicit, expec
     (units / "no-mistakes-daemon-.service.d").mkdir()
     if installed:
         (conf / "app.ini").write_text(f"[server]\nROOT_URL = {installed}\n")
-    extra = {"crewship_forgejo_root_url": explicit} if explicit else {}
     result = apply_forgejo(
         tmp_path,
         {"start_services": False, "profiles": {"forgejo": True, "agents": True}},
-        **extra,
+        crewship_forgejo_port=port,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     app = configparser.ConfigParser(interpolation=None)
