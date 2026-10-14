@@ -313,6 +313,20 @@ Explicit threaded replies can use a configured fallback because the bridge canno
 - **Memory.** The desk memory records the send as `[image: name]`, then the caption. The name has the extension of the real format.
 - **Transport.** Photos go over the Photon line only. The BlueBubbles code of the bridge has no attachment send. When the owner's chat is on BlueBubbles, the photo uses the Photon line's latest chat. If the Photon line is not running, the command exits non-zero with HTTP 503.
 
+## Voice memos and audio
+
+A voice memo or an audio attachment (`.caf`, `.m4a`, `.amr`, `.mp3`, `.aac`, `.wav`, `.ogg`, `.opus`, `.flac`, `.aiff`, or any `audio/*` type) is saved in `~/.local/state/fm-imessage/attachments/`, then transcribed on the host. `apps/imessage/transcribe.ts` runs `ffmpeg` to make a 16 kHz mono wav, then `whisperx` on the CPU with `int8`. No API is called.
+
+The note reads `[voice memo, 4s] <words>`, then `(audio saved for Firstmate at <path>)`. The desk memory records the same text, so the desk sees the transcript. If the audio holds no speech, the words are `(no speech heard)`. If `ffmpeg` or `whisperx` fails or times out, the service logs the error, and the note still has the path and says `transcription failed`. If the file cannot be saved, the download retries as for any attachment, and the retry transcribes it.
+
+The inbound loop waits for the transcription, so the next inbound message waits too (about 15 s on a warm host, up to 45 s on a cold start). Sends are not held up.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_IMESSAGE_WHISPERX` | `~/.cache/watch/whisperx-venv/bin/whisperx` | The `whisperx` executable. The `watch` skill's venv has it. |
+| `FM_IMESSAGE_WHISPER_MODEL` | `small` | The Whisper model name. |
+| `FM_IMESSAGE_TRANSCRIBE_MS` | `120000` | The time limit for each of the two commands. |
+
 ## Cards
 
 `fm-imessage --card` sends a card: by default, a Spectrum app bubble. A tap opens the card's page as a full-width sheet inside Messages, in Photon's free "Spectrum" iMessage app; the bridge serves the page. He installs that app once, from the App Store prompt in Messages. The code is `apps/imessage/cards.ts`.

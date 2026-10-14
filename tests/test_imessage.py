@@ -176,6 +176,65 @@ console.log(JSON.stringify(await Promise.all(contents.map(async (c) => (await de
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_describe_files_a_voice_memo_with_its_transcript():
+    result = bun(f"""
+import {{ describe }} from {DESK};
+const save = async (c, id) => {{ if (c.name === "bad.caf") throw new Error("disk full"); return `/att/${{id}}-${{c.name}}`; }};
+const hear = async (path) => {{
+  if (path.endsWith("broken.m4a")) throw new Error("whisperx failed");
+  return path.endsWith("quiet.caf") ? {{ text: "", seconds: 3 }} : {{ text: "ship the fix tonight", seconds: 4 }};
+}};
+const contents = [
+  {{ type: "voice", name: "memo.caf", mimeType: "audio/x-caf" }},
+  {{ type: "attachment", name: "memo.amr", mimeType: "application/octet-stream" }},
+  {{ type: "attachment", name: "x", mimeType: "audio/mpeg" }},
+  {{ type: "attachment", name: "broken.m4a", mimeType: "audio/mp4" }},
+  {{ type: "voice", name: "quiet.caf", mimeType: "audio/x-caf" }},
+  {{ type: "voice", name: "bad.caf", mimeType: "audio/x-caf" }},
+  {{ type: "attachment", name: "a.pdf", mimeType: "application/pdf" }},
+];
+const out = await Promise.all(contents.map((c) => describe(c, "m1", save, hear)));
+console.log(JSON.stringify(out));
+""")
+    assert result == [
+        "[voice memo, 4s] ship the fix tonight\n(audio saved for Firstmate at /att/m1-memo.caf)",
+        "[voice memo, 4s] ship the fix tonight\n(audio saved for Firstmate at /att/m1-memo.amr)",
+        "[voice memo, 4s] ship the fix tonight\n(audio saved for Firstmate at /att/m1-x)",
+        "(sent a voice memo, saved for Firstmate at /att/m1-broken.m4a; transcription failed)",
+        "[voice memo, 3s] (no speech heard)\n(audio saved for Firstmate at /att/m1-quiet.caf)",
+        "(sent an audio message that could not be saved yet; the bridge retries the download and files this note again with the path)",
+        "(sent an attachment, saved for Firstmate at /att/m1-a.pdf)",
+    ]
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("ffmpeg")), reason="needs bun and ffmpeg")
+def test_transcribe_converts_then_reads_the_words_and_fails_loudly(tmp_path):
+    """ffmpeg really converts a 2 s tone; a stub whisperx stands in for the model. A non-zero exit and a timeout both throw."""
+    tone = tmp_path / "tone.caf"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=duration=2", str(tone)], check=True)
+    stub = tmp_path / "whisperx"
+    stub.write_text(
+        '#!/bin/sh\nwav=$1; shift\nwhile [ $# -gt 0 ]; do [ "$1" = --output_dir ] && out=$2; shift; done\n'
+        'case "$FM_STUB" in fail) echo boom >&2; exit 3;; slow) sleep 5;; esac\n'
+        'printf " ship it\\n tonight \\n" > "$out/$(basename "${wav%.wav}").txt"\n'
+    )
+    stub.chmod(0o755)
+    TRANSCRIBE = json.dumps(str(ROOT / "apps/imessage/transcribe.ts"))
+
+    def run(mode, timeout_ms):
+        env = {**os.environ, "FM_STUB": mode, "FM_IMESSAGE_WHISPERX": str(stub), "FM_IMESSAGE_TRANSCRIBE_MS": str(timeout_ms)}
+        code = f"""
+import {{ listenFrom, transcribe }} from {TRANSCRIBE};
+const listen = listenFrom(process.env, (p) => p);
+console.log(JSON.stringify(await transcribe({json.dumps(str(tone))}, listen).catch((e) => ({{ error: e.message }}))));
+"""
+        return json.loads(subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, env=env, timeout=30).stdout)
+
+    assert run("ok", 20_000) == {"text": "ship it tonight", "seconds": 2}
+    assert "exit 3" in run("fail", 20_000)["error"] and "boom" in run("fail", 20_000)["error"]
+    assert "failed" in run("slow", 1_500)["error"]
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_desk_answer_and_prompt():
     result = bun(f"""
 import {{ deskPrompt, isSkip, parseReact }} from {DESK};

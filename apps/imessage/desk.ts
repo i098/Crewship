@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Message } from "spectrum-ts";
 import { CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
 // `channel` names the line the desk answers on.
@@ -122,6 +123,8 @@ export function typingPause(bubble: string): number {
 // A spectrum-ts message content. A type-only import: bun erases it, so tests run without spectrum-ts.
 type Content = Message["content"];
 export type Attachment = Extract<Content, { type: "attachment" }>;
+// What `describe` saves: an attachment or a voice memo.
+export type Saveable = Pick<Attachment, "read"> & { name?: string };
 
 // The part of an iMessage the bridge uses. A spectrum-ts Message (Photon) and a BlueBubbles message
 // (bluebubbles.ts) both have it, so the bridge runs on either transport.
@@ -195,33 +198,35 @@ export async function* inbound<L extends { messages: AsyncIterable<LineMessage> 
 // receipts, unsends, chat changes). Threaded replies, edits, effects and grouped messages are unwrapped, so
 // nothing he writes is dropped, and an unknown kind still becomes a note. `save` writes an attachment and
 // returns its path; when it throws, the note says so, and the caller logs the error and retries the download.
-export async function describe(c: Content, id: string, save: (c: Attachment, id: string) => Promise<string>): Promise<string | undefined> {
+// `hear` turns a saved audio file into its transcript; when it throws, the note still has the path.
+export async function describe(c: Content, id: string, save: (c: Saveable, id: string) => Promise<string>, hear: (path: string) => Promise<Heard>): Promise<string | undefined> {
   const kind: string = c.type; // kept for the default case, where TypeScript narrows c to never
   switch (c.type) {
     case "text": return c.text;
     case "markdown": return c.markdown;
     case "richlink": return c.url;
-    case "voice": return "(sent a voice message)";
+    case "voice": return audio(c, id, save, hear);
     case "contact": return `(sent a contact: ${(typeof c.name === "object" && c.name.formatted) || "no name"})`;
     case "poll": return `(sent a poll: ${c.title})`;
     case "attachment":
+      if (isAudio(c)) return audio(c, id, save, hear);
       try {
         return `(sent an attachment, saved for Firstmate at ${await save(c, id)})`;
       } catch {
         return "(sent an attachment that could not be saved yet; the bridge retries the download and files this note again with the path)";
       }
     case "reply": {
-      const inner = await describe(c.content, id, save);
+      const inner = await describe(c.content, id, save, hear);
       const target = c.target.content.type === "text" ? c.target.content.text.slice(0, 120) : c.target.content.type;
       return inner === undefined ? undefined : `${inner} (replying in a thread to: "${target}")`;
     }
     case "edit": {
-      const inner = await describe(c.content, id, save);
+      const inner = await describe(c.content, id, save, hear);
       return inner === undefined ? undefined : `(edited a message to) ${inner}`;
     }
-    case "effect": return describe(c.content, id, save);
+    case "effect": return describe(c.content, id, save, hear);
     case "group": {
-      const parts = await Promise.all(c.items.map((m, i) => describe(m.content, `${id}-${i}`, save)));
+      const parts = await Promise.all(c.items.map((m, i) => describe(m.content, `${id}-${i}`, save, hear)));
       const kept = parts.filter((p) => p !== undefined);
       return kept.length ? kept.join("\n") : undefined;
     }
@@ -229,6 +234,23 @@ export async function describe(c: Content, id: string, save: (c: Attachment, id:
     case "addMember": case "removeMember": case "leaveSpace": case "poll_option":
       return undefined;
     default: return `(sent a ${kind} message the bridge cannot show)`;
+  }
+}
+
+// A voice memo or audio attachment: "[voice memo, 4s] <words>" and where it is saved. A failed transcription still
+// gives the path; an unsaved file gets the attachment retry text, and the retry transcribes it.
+async function audio(c: Saveable, id: string, save: (c: Saveable, id: string) => Promise<string>, hear: (path: string) => Promise<Heard>): Promise<string> {
+  let path: string;
+  try {
+    path = await save(c, id);
+  } catch {
+    return "(sent an audio message that could not be saved yet; the bridge retries the download and files this note again with the path)";
+  }
+  try {
+    const { text, seconds } = await hear(path);
+    return `[voice memo, ${seconds}s] ${text || "(no speech heard)"}\n(audio saved for Firstmate at ${path})`;
+  } catch {
+    return `(sent a voice memo, saved for Firstmate at ${path}; transcription failed)`;
   }
 }
 

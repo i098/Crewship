@@ -14,6 +14,9 @@
 //   state directory, so a restart can still reach him.
 // Photos: POST a multipart form to /image (fm-imessage --image). image.ts checks and downscales it, and the file waits in
 //   the state directory while its outbox item is delivered. Photon only: the bridge has no BlueBubbles attachment send.
+// Voice: a voice memo or audio attachment is saved, then transcribed by local whisperx (transcribe.ts). The note reads
+//   "[voice memo, Ns] <words>" and the saved path, or the path and "transcription failed". Sends are not held up by it;
+//   the next inbound message waits for it.
 // Location: when he shares his location with the Photon line in Find My, GET /location (the fm-location command).
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
@@ -27,10 +30,11 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { type Attachment, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, spawnDesk, typingPause, verdict } from "./desk.ts";
+import { bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause, verdict } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
+import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
 const children = new Set<Bun.Subprocess>();
@@ -86,6 +90,7 @@ const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment n
 const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
+const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
 const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
 for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 let burstFrom: number | undefined; // the memory id of his first text the desk has not answered yet
@@ -545,7 +550,7 @@ async function runDesk(current: () => boolean) {
   appendFileSync(DESK_LOG, `${new Date().toISOString()} ${target.id} ${outcome}\n`, { mode: 0o600 });
 }
 
-async function saveAttachment(c: Attachment, id: string) {
+async function saveAttachment(c: Saveable, id: string) {
   const path = `${ATTACH_DIR}/${id}-${String(c.name ?? "file").replace(/[^\w.-]/g, "_")}`;
   await Bun.write(path, await c.read());
   return path;
@@ -556,6 +561,9 @@ async function noteText(message: LineMessage) {
   let failed: unknown;
   const text = await describe(message.content, message.id, (c, id) => saveAttachment(c, id).catch((e) => {
     failed ??= e;
+    throw e;
+  }), (path) => transcribe(path, listen).catch((e) => {
+    log("transcribe")(e);
     throw e;
   }));
   return { text, failed };
