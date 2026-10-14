@@ -29,28 +29,89 @@ def setup(tmp_path, enabled=True):
     git("init", "-q", "-b", "main", str(work))
     for name in ("forgejo.git", "github.git"):
         git("init", "-q", "--bare", "-b", "main", str(tmp_path / name))
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base", cwd=work)
+    git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "base",
+        cwd=work,
+    )
     base = git("rev-parse", "HEAD", cwd=work)
     # GitHub already has main and a branch only it knows.
-    git("push", "-q", str(tmp_path / "github.git"), "main", "main:refs/heads/github-only/keep", cwd=work)
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "next", cwd=work)
+    git(
+        "push",
+        "-q",
+        str(tmp_path / "github.git"),
+        "main",
+        "main:refs/heads/github-only/keep",
+        cwd=work,
+    )
+    git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "next",
+        cwd=work,
+    )
     head = git("rev-parse", "HEAD", cwd=work)
     for ref in ("main", "develop", "fm/x", "anything/y"):
         git("push", "-q", str(tmp_path / "forgejo.git"), f"HEAD:refs/heads/{ref}", cwd=work)
     if enabled:
-        git("config", "crewship.github-push", str(tmp_path / "github.git"), cwd=tmp_path / "forgejo.git")
+        git(
+            "config",
+            "crewship.github-push",
+            str(tmp_path / "github.git"),
+            cwd=tmp_path / "forgejo.git",
+        )
     return base, head
 
 
-def hook(tmp_path, lines):
+def run_hook(tmp_path, lines):
     env = {
         **os.environ,
         "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
         "GIT_DIR": str(tmp_path / "forgejo.git"),
     }
-    subprocess.run([SCRIPT, "hook"], input="".join(lines), env=env, check=True, text=True)
-    listing = git("for-each-ref", "--format=%(refname)\t%(objectname)", cwd=tmp_path / "github.git")
+    return subprocess.run(
+        [SCRIPT, "hook"], input="".join(lines), env=env, capture_output=True, text=True
+    )
+
+
+def refs_of(repo):
+    listing = git("for-each-ref", "--format=%(refname)\t%(objectname)", cwd=repo)
     return dict(line.split("\t") for line in listing.splitlines())
+
+
+def hook(tmp_path, lines):
+    assert run_hook(tmp_path, lines).returncode == 0
+    return refs_of(tmp_path / "github.git")
+
+
+def commit(repo, message, *parents):
+    tree = git("rev-parse", f"{parents[0]}^{{tree}}", cwd=repo)
+    args = [a for p in parents for a in ("-p", p)]
+    return git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit-tree",
+        tree,
+        *args,
+        "-m",
+        message,
+        cwd=repo,
+    )
 
 
 def test_pushes_every_received_branch_but_never_the_default_branch_tags_or_deletions(tmp_path):
@@ -95,3 +156,38 @@ def test_a_repository_without_the_opt_in_pushes_nothing(tmp_path):
     base, head = setup(tmp_path, enabled=False)
     refs = hook(tmp_path, [f"{ZERO} {head} refs/heads/fm/x\n"])
     assert refs == {"refs/heads/main": base, "refs/heads/github-only/keep": base}
+
+
+def test_a_github_only_commit_survives_and_is_fetched_back_until_merged(tmp_path):
+    _, head = setup(tmp_path)
+    forgejo, github = tmp_path / "forgejo.git", tmp_path / "github.git"
+    hook(tmp_path, [f"{ZERO} {head} refs/heads/fm/x\n"])
+    # A review suggestion made on GitHub, then an agent commit that lacks it.
+    review = commit(github, "review", head)
+    git("update-ref", "refs/heads/fm/x", review, cwd=github)
+    agent = commit(forgejo, "agent", head)
+    for ref in ("fm/x", "anything/y"):
+        git("update-ref", f"refs/heads/{ref}", agent, cwd=forgejo)
+
+    first = run_hook(
+        tmp_path, [f"{head} {agent} refs/heads/fm/x\n", f"{head} {agent} refs/heads/anything/y\n"]
+    )
+    assert first.returncode != 0
+    assert refs_of(github)["refs/heads/fm/x"] == review
+    assert refs_of(github)["refs/heads/anything/y"] == agent
+    assert refs_of(forgejo)["refs/github-ahead/fm/x"] == review
+
+    again = commit(forgejo, "again", agent)
+    git("update-ref", "refs/heads/fm/x", again, cwd=forgejo)
+    second = run_hook(tmp_path, [f"{agent} {again} refs/heads/fm/x\n"])
+    assert "warning: GitHub has commits" in second.stderr
+    assert second.returncode != 0
+    assert refs_of(github)["refs/heads/fm/x"] == review
+
+    merged = commit(forgejo, "merge", again, review)
+    git("update-ref", "refs/heads/fm/x", merged, cwd=forgejo)
+    third = run_hook(tmp_path, [f"{again} {merged} refs/heads/fm/x\n"])
+    assert third.returncode == 0
+    assert "refs/github-ahead/fm/x" not in third.stderr
+    assert refs_of(github)["refs/heads/fm/x"] == merged
+    assert "refs/github-ahead/fm/x" not in refs_of(forgejo)
