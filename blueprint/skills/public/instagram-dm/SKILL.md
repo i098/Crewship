@@ -13,6 +13,7 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
 
 - Send only through `fm-insta-reply`, and only to the operator. Do not send to anyone else, and do not unsend. The one other write is accepting a message request from the operator's own account (`poll`) and the read receipt it sends.
 - Read the credentials only from the env vars `INSTAGRAM_FIRSTMATE_USERNAME` and `INSTAGRAM_FIRSTMATE_PASSWORD`. Never print them, and never write them to a file or a message. The session file holds a login token: keep it mode 600 and never print it.
+- The bot account reads only what arrives in the DM: the shared reel link and the author, caption and duration that the DM payload already carries (they are in the inbox note). It never downloads a video and never makes a media, clip or user request of its own. To learn more about a reel, watch it without the bot account (step 5).
 - Log in once, by hand, then reuse the session file. Each fresh login can raise a checkpoint, so nothing logs in again by itself: a missing session file, one without its pinned device, or a session Instagram rejects (`login_required`) halts the line and asks a human. The first login pins a realistic device and the time zone of the host's public IP (`INSTAGRAM_DM_TIMEZONE`, required, e.g. `America/Chicago`; never the library's New York default) in the session file. `login` refuses when the file exists; `login --force` keeps the pinned device and only follows a check of the account in the app.
 - Rate limits: Instagram flags fast, repeated calls. The timer polls every 5 min, plus or minus 60 s. On a failure the poller backs off (2 min, 4 min, ... up to 30 min). On a rate-limit or challenge error, stop and tell the operator. Do not retry in a loop.
 - Media goes to a temp dir or `~/.cache/instagram-dm/`. Delete files older than one day on each run (step 5). Keep nothing else.
@@ -33,8 +34,8 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
 
 `instagram_dm.py listen` keeps Instagram's realtime channel open (a service that reconnects on its own). Each message event runs `poll`, so a DM reaches the agent in seconds. A timer that runs `poll` every few minutes is the backstop for a missed event. `poll` reads the inbox and the message requests and accepts a request only from the 1:1 thread of `INSTAGRAM_DM_OPERATOR` (his numeric user id; every other sender is ignored and never accepted). For each new message of the operator it:
 
-1. runs `INSTAGRAM_DM_NOTIFY --request-id ig-ID -- "[Instagram DM from NAME; answer with fm-insta-reply] URL or text"` (for Firstmate, `fm-inbox.sh note`, which wakes main within about a second; the request id makes a repeat harmless),
-2. appends one JSON line (time, thread, message id, sender, type, `/reel/` URL or text) to `INSTAGRAM_DM_LOG`,
+1. runs `INSTAGRAM_DM_NOTIFY --request-id ig-ID -- "[Instagram DM from NAME; answer with fm-insta-reply] URL (by @AUTHOR, N s) caption: \"CAPTION\""` or the text (for Firstmate, `fm-inbox.sh note`, which wakes main within about a second; the request id makes a repeat harmless),
+2. appends one JSON line (time, thread, message id, sender, type, `/reel/` URL, its `meta` (author, caption, duration) or text) to `INSTAGRAM_DM_LOG`,
 3. marks the message seen, which is the read receipt.
 
 It keeps the seen message ids in `INSTAGRAM_DM_DIR/poll.json`, so nothing repeats, and downloads no media. If the hand-over fails, nothing is logged and the next poll retries.

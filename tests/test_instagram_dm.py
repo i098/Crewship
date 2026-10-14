@@ -18,8 +18,8 @@ ME = "1"
 OP = "2"
 
 
-def msg(mid, user="2", text=None, code=None, link=None, sent=False, at=1000):
-    media = NS(code=code) if code else None
+def msg(mid, user="2", text=None, code=None, link=None, sent=False, at=1000, meta=None):
+    media = NS(code=code, **(meta or {})) if code else None
     return NS(
         id=mid,
         user_id=user,
@@ -628,3 +628,44 @@ def test_a_halt_from_before_the_flag_file_still_stops_everything(monkeypatch, ho
     (host / "poll.json").write_text(json.dumps({"halted": "AccountSuspended: challenge_required"}))
     with pytest.raises(SystemExit, match="AccountSuspended"):
         ig.client()
+
+
+class Spy:
+    """Wraps a client and records every method the code calls on it."""
+
+    def __init__(self, inner):
+        self.inner, self.calls = inner, []
+
+    def __getattr__(self, name):
+        attr = getattr(self.inner, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            self.calls.append(name)
+            return attr(*args, **kwargs)
+
+        return call
+
+
+def test_a_reel_dm_files_its_metadata_in_the_note_and_makes_no_extra_request(monkeypatch, host):
+    clip = {"user": NS(username="creator"), "caption_text": "A  new\nopen-source tool", "video_duration": 23.4}
+    spy = Spy(Fake([msg("m1", code="C1", meta=clip), msg("m2", text="hi", at=2000)]))
+    monkeypatch.setattr(ig, "client", lambda: spy)
+    assert run(monkeypatch, ig.poll, 1000) is None
+    note = [n for n in notified(host) if "reel/C1" in n[-1]][0][-1]
+    assert note == (
+        "[Instagram DM from op; answer with fm-insta-reply] https://www.instagram.com/reel/C1/"
+        ' (by @creator, 23.4 s) caption: "A new open-source tool"'
+    )
+    row = json.loads((host / "messages.jsonl").read_text().splitlines()[0])
+    assert row["meta"] == {"author": "creator", "caption": "A new open-source tool", "duration": 23.4}
+    # the two inbox reads and the read receipt: no media, clip, user or download request
+    assert sorted(set(spy.calls)) == ["direct_message_seen", "direct_pending_inbox", "direct_threads"]
+
+
+def test_a_shared_reel_without_metadata_and_a_plain_text_keep_the_short_note(monkeypatch, host):
+    monkeypatch.setattr(ig, "client", lambda: Fake([msg("m1", code="C2")]))
+    assert run(monkeypatch, ig.poll, 1000) is None
+    assert notified(host)[0][-1].endswith("fm-insta-reply] https://www.instagram.com/reel/C2/")
+    assert "meta" not in json.loads((host / "messages.jsonl").read_text())

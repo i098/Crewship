@@ -144,6 +144,21 @@ def message_url(msg):
     return urls[0] if urls else None
 
 
+def message_meta(msg):
+    """What the DM itself says about a shared reel or post: author, caption and duration, from the payload the inbox read
+    already returned. Never a request of its own. Empty when the message shares no media."""
+    for media in (msg.clip, msg.media_share):
+        if media and media.code:
+            user, caption = getattr(media, "user", None), getattr(media, "caption_text", "")
+            meta = {
+                "author": getattr(user, "username", ""),
+                "caption": " ".join((caption or "").split())[:300],
+                "duration": round(getattr(media, "video_duration", 0) or 0, 1),
+            }
+            return {k: v for k, v in meta.items() if v}
+    return {}
+
+
 def collect(inbox, pending, me, operator, seen):
     """Return (thread ids to accept, new log rows) from the inbox and the message requests.
 
@@ -178,6 +193,8 @@ def collect(inbox, pending, me, operator, seen):
             }
             if url := message_url(m):
                 row["url"] = url
+            if meta := message_meta(m):
+                row["meta"] = meta
             if m.text:
                 row["text"] = m.text
             rows.append(row)
@@ -185,8 +202,12 @@ def collect(inbox, pending, me, operator, seen):
 
 
 def note_text(row):
-    """The one line the agent gets for a log row: sender, then the reel URL or the text."""
+    """The one line the agent gets for a log row: sender, then the reel URL with its author, duration and caption
+    from the DM, or the text."""
     what = row.get("url") or " ".join(row.get("text", "").split())[:300] or f"[{row.get('type')}]"
+    meta = row.get("meta", {})
+    by = ", ".join(filter(None, (meta.get("author") and f"by @{meta['author']}", meta.get("duration") and f"{meta['duration']:g} s")))
+    what += (f" ({by})" if by else "") + (f' caption: "{meta["caption"]}"' if meta.get("caption") else "")
     return f"[Instagram DM from {row['sender']}; answer with fm-insta-reply] {what}"
 
 
