@@ -69,10 +69,11 @@ function base(c: Record<string, unknown>): Base {
   if (c.subtitle !== undefined) b.subtitle = text(c.subtitle, 200, "subtitle");
   if (c.hours !== undefined && (!Number.isInteger(c.hours) || (c.hours as number) < 1 || (c.hours as number) > 168)) throw new Error("hours must be a whole number from 1 to 168");
   if (c.hours !== undefined) b.hours = c.hours as number;
-  // A card is an app bubble with its live view unless it says otherwise.
-  for (const flag of ["app", "live"] as const) {
+  // A card is an app bubble unless it says otherwise. Its tap opens the page in a full sheet; `live: true` draws the
+  // page inside the bubble instead, at a width that Messages sets and the page cannot change.
+  for (const [flag, dflt] of [["app", true], ["live", false]] as const) {
     if (c[flag] !== undefined && typeof c[flag] !== "boolean") throw new Error(`${flag} must be true or false`);
-    b[flag] = (c[flag] as boolean | undefined) ?? true;
+    b[flag] = (c[flag] as boolean | undefined) ?? dflt;
   }
   return b;
 }
@@ -152,12 +153,13 @@ const HEADERS = {
 };
 const esc = (s: string | number) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 // iOS system look: the system font and text styles, the system colours for light and dark, inset grouped lists,
-// 44 pt rows, safe-area padding, and an instant pressed state with no tap delay.
+// 44 pt rows, safe-area padding, and an instant pressed state with no tap delay. No fixed width: the view fills the
+// space Messages gives it (a sheet, or a bubble), and text, bars and tables reflow to it.
 const STYLE = `:root{color-scheme:light dark;--bg:#f2f2f7;--cell:#fff;--fg:#000;--muted:rgba(60,60,67,.6);--sep:rgba(60,60,67,.29);--fill:rgba(120,120,128,.16);--press:#d1d1d6;--accent:#007aff;--done:#34c759}
 @media(prefers-color-scheme:dark){:root{--bg:#000;--cell:#1c1c1e;--fg:#fff;--muted:rgba(235,235,245,.6);--sep:rgba(84,84,88,.65);--fill:rgba(120,120,128,.32);--press:#3a3a3c;--accent:#0a84ff;--done:#30d158}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{background:var(--bg);-webkit-text-size-adjust:100%}
-body{font:17px/22px -apple-system,system-ui,sans-serif;letter-spacing:-.4px;color:var(--fg);margin:0 auto;max-width:600px;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));-webkit-user-select:none;user-select:none}
+body{font:17px/22px -apple-system,system-ui,sans-serif;letter-spacing:-.4px;color:var(--fg);margin:0;min-height:100vh;overflow-wrap:break-word;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));-webkit-user-select:none;user-select:none}
 h1{font-size:22px;line-height:28px;font-weight:700;letter-spacing:-.26px;margin:4px 4px 2px}
 p{font-size:15px;line-height:20px;letter-spacing:-.24px;color:var(--muted);margin:0 4px 16px}
 .group{background:var(--cell);border-radius:10px;overflow:hidden;margin:0 0 16px}
@@ -165,13 +167,13 @@ p{font-size:15px;line-height:20px;letter-spacing:-.24px;color:var(--muted);margi
 .cell+.cell:before{content:"";position:absolute;top:0;left:16px;right:0;height:.5px;background:var(--sep)}
 button.cell:active:not(:disabled){background:var(--press)}button.cell:disabled{opacity:1;color:inherit}
 .l{flex:none;width:28px;height:28px;border-radius:14px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center}
-.t{flex:1}.check{flex:none;color:var(--accent);font-weight:600}.dim .l{background:var(--fill);color:var(--muted)}.dim .t{color:var(--muted)}
+.t{flex:1;min-width:0}.check{flex:none;color:var(--accent);font-weight:600}.dim .l{background:var(--fill);color:var(--muted)}.dim .t{color:var(--muted)}
 .note{display:flex;align-items:center;gap:8px;color:var(--done);font-size:15px;font-weight:600;margin:0 4px 12px}
-.bar{display:block}.row{display:flex;justify-content:space-between;gap:12px}.v{color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{display:block}.row{display:flex;justify-content:space-between;gap:12px}.row>:first-child{min-width:0}.row .v{flex:none;white-space:nowrap}.v{color:var(--muted);font-variant-numeric:tabular-nums}
 .track{height:6px;border-radius:3px;background:var(--fill);margin-top:8px}.fillbar{height:100%;border-radius:3px;background:var(--accent)}
 .when{font-size:13px;line-height:18px;color:var(--muted)}.dot{flex:none;width:10px;height:10px;border-radius:5px;background:var(--accent);align-self:flex-start;margin-top:6px}
 .wide{overflow-x:auto;-webkit-overflow-scrolling:touch}table{border-collapse:collapse;width:100%;font-size:15px;line-height:20px;font-variant-numeric:tabular-nums}
-th{font-size:13px;font-weight:400;color:var(--muted);text-align:left;padding:10px 16px 6px}td{text-align:left;padding:11px 16px;border-top:.5px solid var(--sep);white-space:nowrap}
+th{font-size:13px;font-weight:400;color:var(--muted);text-align:left;padding:10px 16px 6px}td{text-align:left;padding:11px 16px;border-top:.5px solid var(--sep)}
 h2{font-size:13px;line-height:18px;font-weight:400;text-transform:uppercase;color:var(--muted);margin:0 16px 6px}`;
 
 // `description` makes the Open Graph tags that iMessage reads for the link preview of a card's URL.
