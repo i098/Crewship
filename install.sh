@@ -12,10 +12,12 @@
 set -euo pipefail
 
 # The same text is in tools/npm/crewship.js; tests/test_install.py keeps the two equal.
-USAGE='Usage: crewship [update] [--container] [--user NAME] [--home DIR]
+USAGE='Usage: crewship [update] [--container] [--with NAMES] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
   update        install the newest release over this host, keeping its .local/ files
+  --with NAMES  turn on these opt-in features, comma separated, and skip the checklist (--with none: none)
+                public_skills development docker chat gateway jj fleet_guards shared_postgres fleet_browsers tailscale desktop board
   -h, --help    print this help and exit'
 
 # Runs before any install step, so --help and a bad option change nothing.
@@ -26,8 +28,8 @@ check_args() {
   done
   while (($#)); do
     case $1 in
-      --container | --user=?* | --home=?*) shift ;;
-      --user | --home) (($# > 1)) || break; shift 2 ;;
+      --container | --with=* | --user=?* | --home=?*) shift ;;
+      --user | --home | --with) (($# > 1)) || break; shift 2 ;;
       *) break ;;
     esac
   done
@@ -220,6 +222,14 @@ main() {
   ./onboard.sh
   if [ ! -f .local/host.yml ]; then
     ./ship.sh dock "$@"
+  else
+    for arg; do
+      case $arg in --with | --with=*)
+        # The options shape a new host config only.
+        echo 'install.sh: --with applies to a new host config; set the profile in .local/host.yml and rerun' >&2
+        return 1 ;;
+      esac
+    done
   fi
   ./ship.sh inspect
   # Check mode cannot preview tasks that depend on an earlier install, so chart

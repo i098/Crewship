@@ -270,7 +270,7 @@ def test_init_preserves_existing_local_configuration(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
-    args = argparse.Namespace(user="coder", home="/home/coder", container=True, board=False)
+    args = argparse.Namespace(user="coder", home="/home/coder", container=True, with_=None)
     ship.initialize(args)
     local = tmp_path / ".local/host.yml"
     first = local.read_bytes()
@@ -288,22 +288,66 @@ def test_root_operator_is_rejected_before_config_is_written(tmp_path, monkeypatc
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="non-root"):
         ship.initialize(
-            argparse.Namespace(user="root", home="/home/root", container=False, board=False)
+            argparse.Namespace(user="root", home="/home/root", container=False, with_=None)
         )
     assert not (tmp_path / ".local/host.yml").exists()
 
 
-@pytest.mark.parametrize("container, board", [(False, False), (False, True), (True, False)])
-def test_dock_writes_the_core_only_and_a_board_brings_its_toolchain(tmp_path, monkeypatch, container, board):
+def dock(tmp_path, monkeypatch, **options):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
-    ship.initialize(
-        argparse.Namespace(user="coder", home="/home/coder", container=container, board=board)
-    )
-    profiles = ship.load_config(tmp_path / ".local/host.yml")["crewship"]["profiles"]
-    on = {name for name, enabled in profiles.items() if enabled}
-    assert on == ({"agents"} if container else {"agents", "firstmate"}) | ({"development"} if board else set())
+    options = {"container": False, "with_": None, **options}
+    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", **options))
+    return ship.load_config(tmp_path / ".local/host.yml")["crewship"]
+
+
+def on(config):
+    return {name for name, enabled in config["profiles"].items() if enabled} | ({"board"} & config.keys())
+
+
+def test_dock_writes_the_core_only_unless_a_choice_is_given(tmp_path, monkeypatch):
+    config = dock(tmp_path, monkeypatch)
+    assert on(config) == {"agents", "firstmate"}
+    assert config["profiles"]["public_skills"] is False
+
+
+def test_dock_with_turns_on_the_choices_and_what_they_need(tmp_path, monkeypatch):
+    config = dock(tmp_path, monkeypatch, with_=["fleet_guards,board", "public_skills"])
+    assert on(config) == {"agents", "firstmate", "fleet_guards", "docker", "board", "development", "public_skills"}
+    assert on(dock(tmp_path / "all", monkeypatch, with_=["all"])) == {*ship.OPT_IN, "agents", "firstmate"}
+
+
+@pytest.mark.parametrize("with_", [[""], ["none"]])
+def test_dock_with_nothing_keeps_the_core(tmp_path, monkeypatch, with_):
+    assert on(dock(tmp_path, monkeypatch, with_=with_)) == {"agents", "firstmate"}
+
+
+@pytest.mark.parametrize("container, with_", [(False, ["bogus"]), (True, ["docker"]), (True, ["all,gateway"])])
+def test_dock_rejects_an_unknown_choice_and_one_a_container_cannot_have(tmp_path, monkeypatch, container, with_):
+    with pytest.raises(ValueError):
+        dock(tmp_path, monkeypatch, container=container, with_=with_)
+    assert not (tmp_path / ".local/host.yml").exists()
+
+
+def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypatch):
+    assert on(dock(tmp_path, monkeypatch, container=True, with_=["all"])) == {
+        "agents",
+        "public_skills",
+        "development",
+        "jj",
+        "fleet_browsers",
+    }
+
+
+def test_the_checklist_asks_until_the_answer_is_valid(tmp_path, monkeypatch, capsys):
+    answers = iter(["bogus", "1 docker 99", "1 3 12"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    config = dock(tmp_path, monkeypatch)
+    assert on(config) == {"agents", "firstmate", "public_skills", "docker", "board", "development"}
+    out = capsys.readouterr().out
+    assert "unknown choice 'bogus'" in out and " 1. public_skills" in out and "12. board" in out
 
 
 def fake_omp(launches, models=json.dumps({"models": [{"id": "model"}]}), exits=lambda n: 0):
