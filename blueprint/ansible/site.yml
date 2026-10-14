@@ -221,6 +221,17 @@
       when: crewship_cfg.profiles.tailscale | bool
       tags: [tailscale]
 
+    # After Tailscale, so a new host can publish Forgejo with tailscale serve.
+    - name: Optional self-hosted Forgejo, its nightly dump and the no-mistakes forge profile
+      ansible.builtin.import_tasks: tasks/forgejo.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_forgejo_enabled | bool
+      tags: [forgejo]
+
     - name: Optional `ssh mac` key and Host entry for an operator Mac
       ansible.builtin.import_tasks: tasks/mac_ssh.yml
       become: "{{ crewship_become_target | bool }}"
@@ -343,6 +354,20 @@
       environment: "{{ crewship_user_systemd_env }}"
       when: crewship_manage_services | bool
       listen: restart crewboard
+
+    - name: Restart Forgejo
+      ansible.builtin.systemd_service:
+        scope: user
+        name: forgejo.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      # Check mode never wrote the unit of a first apply.
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+      listen: restart forgejo
 
     - name: Restart the password gateway
       ansible.builtin.systemd_service:

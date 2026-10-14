@@ -20,4 +20,5 @@ crewship_installer_also: >-
      + (['psutil'] if ((crewship_cfg.profiles.agents | bool)
                        and (crewship_cfg.browser_prune.enabled | bool)) else [])
      + (['obscura'] if (crewship_fleet_browsers_enabled | bool) else [])
-     + (['spectrum-ts'] if (crewship_cfg.imessage is defined) else []) }}
+     + (['spectrum-ts'] if (crewship_cfg.imessage is defined) else [])
+     + (['forgejo'] if (crewship_forgejo_enabled | bool) else []) }}

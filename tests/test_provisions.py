@@ -229,6 +229,20 @@ RELEASES = {
 }
 
 
+def codeberg(url, unverified):
+    """Fake Forgejo's Codeberg releases: the latest v9.9.9 and each binary's .sha256 file."""
+    if url.endswith(".sha256"):
+        checksum = "" if unverified == "forgejo" else "9" * 64
+        return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}\n".encode())
+    assert url == installer.FORGEJO_RELEASES, url
+    assets = [
+        {"name": name + suffix, "browser_download_url": f"https://codeberg.org/{name}{suffix}"}
+        for name in ("forgejo-9.9.9-linux-amd64", "forgejo-9.9.9-linux-arm64")
+        for suffix in ("", ".sha256", ".asc")
+    ]
+    return Download(json.dumps({"tag_name": "v9.9.9", "assets": assets}).encode())
+
+
 def upstream(monkeypatch, unverified=None, seen=None):
     """Fake GitHub, nodejs.org, rustup, npm and PyPI; `unverified` publishes no SHA-256 for that source.
 
@@ -286,6 +300,8 @@ def upstream(monkeypatch, unverified=None, seen=None):
         elif url.startswith("https://github.com/pyrefly-") and url.endswith(".sha256"):
             checksum = "" if unverified == "facebook/pyrefly" else "f" * 64
             return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
+        elif url.startswith("https://codeberg.org/"):
+            return codeberg(url, unverified)
         elif url == "https://pypi.org/pypi/psutil/json":
             files = [] if unverified == "psutil" else [{"digests": {"sha256": "e" * 64}}]
             body = {"info": {"version": "9.9.9"}, "urls": files}
@@ -360,6 +376,24 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
     assert latest["psutil"] == {"version": "9.9.9", "sha256": ["e" * 64]}
     for tool in installer.NPM_LATEST:
         assert latest[tool] == "18.9.9"
+
+
+def test_forgejo_resolves_from_codeberg_with_its_checksum_file_and_signature(monkeypatch):
+    upstream(monkeypatch)
+    forgejo = installer.resolve_latest("linux-x86_64", {"forgejo"})["forgejo"]
+    asset = forgejo["assets"]["linux-x86_64"]
+    assert forgejo["version"] == "9.9.9"
+    assert asset["url"] == "https://codeberg.org/forgejo-9.9.9-linux-amd64"
+    assert (asset["sha256"], asset["format"]) == ("9" * 64, "file")
+    # Ansible checks this signature against the Forgejo release key before installing.
+    assert asset["signature"] == "https://codeberg.org/forgejo-9.9.9-linux-amd64.asc"
+
+
+def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
+    upstream(monkeypatch, unverified="forgejo")
+    with pytest.raises(ValueError, match="refusing an unverified binary"):
+        installer.resolve_latest("linux-x86_64", {"forgejo"})
+
 
 
 @pytest.mark.parametrize(
@@ -535,6 +569,7 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
             {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST},
         ),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
+        (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),
         (["--tools", "sentrux"], {"sentrux", "sentrux-grammars"}),
         (["--tools", "pyrefly"], {"pyrefly"}),
     ],
