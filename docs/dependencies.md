@@ -101,12 +101,6 @@ Every host that starts services (`start_services: true`); the container worker i
 
 - [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `blueprint/patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
 
-## Forgejo
-
-`profiles.forgejo`. The config schema does not accept this switch yet, so no host installs Forgejo now.
-
-- [Forgejo](https://codeberg.org/forgejo/forgejo/releases), the newest non-draft, non-prerelease release on Codeberg, `forgejo-<version>-linux-<arch>`. The binary is verified against the `.sha256` file that the release publishes, and its `.asc` signature must come from the Forgejo release key (`crewship_forgejo_key_fingerprint`), fetched from keys.openpgp.org (`blueprint/ansible/tasks/forgejo.yml`). Each release installs into `~/.local/share/crewship/forgejo/<version>/`.
-
 ## Chrome autopruner
 
 `agents` profile with `browser_prune.enabled`.
