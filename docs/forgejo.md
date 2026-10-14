@@ -77,5 +77,5 @@ A unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
 `systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
 
-New Forgejo push mirrors are off.
+Forgejo mirrors are off, in the web UI and in the API.
 A push mirror deletes every GitHub branch that it does not push.
