@@ -64,6 +64,9 @@
             "jj": {
               "type": "boolean"
             },
+            "fdu": {
+              "type": "boolean"
+            },
             "fleet_browsers": {
               "type": "boolean"
             },

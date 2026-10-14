@@ -3,6 +3,7 @@
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
 - [Project databases](shared-postgres.md): one dev database container per project, in the engine its compose file names, and worktree connection strings (opt-in)
 - [Jujutsu](jj.md): `jj` colocated with git for agents, digest-verified in `~/.local/bin` (opt-in)
+- [fdu](configuration.md#profiles): a fast gitignore-aware `du` for large worktrees, installed with uv (opt-in)
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)

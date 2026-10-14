@@ -674,6 +674,26 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     assert "error: network down" in capsys.readouterr().err
 
 
+def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(tmp_path):
+    bin_dir = tmp_path / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    release = tmp_path / "release"
+    release.write_text("fdu 0.5.0\n")
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ "$*" = "tool install --upgrade --no-build fdu" ] || exit 2\n'
+        f'printf \'#!/bin/sh\\necho "%s"\\n\' "$(cat {release})" > "$UV_TOOL_BIN_DIR/fdu"\n'
+        'chmod +x "$UV_TOOL_BIN_DIR/fdu"\n'
+    )
+    uv.chmod(0o755)
+    assert installer.fdu_install(tmp_path, {}) is True
+    assert subprocess.check_output([bin_dir / "fdu"], text=True) == "fdu 0.5.0\n"
+    assert installer.fdu_install(tmp_path, {}) is False
+    release.write_text("fdu 0.6.0\n")
+    assert installer.fdu_install(tmp_path, {}) is True
+
+
 def test_every_installed_tool_has_a_built_with_line():
     credits = (Path(__file__).parents[1] / "CREDITS.md").read_text()
     tools = {*EVERYTHING, *installer.OMP_PLUGINS}

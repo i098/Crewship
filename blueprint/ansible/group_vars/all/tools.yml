@@ -15,7 +15,8 @@ crewship_installer_selection: >-
                                          or (crewship_cfg.imessage.cards is defined)) else []))
                  | join(',')]
      + (['--npm'] if (crewship_cfg.profiles.agents | bool) else [])
-     + (['--development'] if (crewship_cfg.profiles.development | bool) else []) }}
+     + (['--development'] if (crewship_cfg.profiles.development | bool) else [])
+     + (['--fdu'] if (crewship_cfg.profiles.fdu | default(false) | bool) else []) }}
 crewship_installer_also: >-
   {{ (['koncreet'] if (crewship_cfg.start_services | bool) else [])
      + (['psutil'] if ((crewship_cfg.profiles.agents | bool)
