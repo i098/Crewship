@@ -4,15 +4,18 @@
 #   forgejo-github-push enable OWNER/REPO https://github.com/OWNER/REPO.git
 #   forgejo-github-push disable OWNER/REPO
 #   forgejo-github-push hook           (Forgejo's global post-receive hook runs it)
-#   forgejo-github-push push DIR URL REFSPEC...
+#   forgejo-github-push push DIR URL REF...
 #
 # The hook acts only in repositories that `enable` marked. It pushes every branch the
 # received push created or updated, except main, master and the repository's default
-# branch (its HEAD), each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes
-# tags or a deletion, and never uses --mirror or --prune, so nothing on GitHub is ever
-# deleted. The push runs in a transient user unit, so the git client never waits for
-# GitHub; pushes for one repository run one at a time, so the last one sends the current
-# branch. It authenticates with the account's own git credential helper.
+# branch (its HEAD). It never pushes tags or a deletion and never uses --mirror or
+# --prune. Each push leases against the commit the hook last pushed for that branch
+# (crewship-github.<branch>.pushed; nothing for a new branch), so a rebase or an amend
+# goes through, but a commit made only on GitHub (Update branch, a suggestion, a web
+# edit) makes the lease fail and is never overwritten. The hook then records GitHub's
+# commit (crewship-github.<branch>.ahead), and every later push of that branch warns and
+# waits until the branch contains it. The push runs in a transient user unit, so the git
+# client never waits for GitHub; it authenticates with the account's git credential helper.
 set -euo pipefail
 
 repos=$HOME/.local/share/forgejo/data/forgejo-repositories
@@ -39,30 +42,81 @@ hook)
     dir=$(git rev-parse --absolute-git-dir)
     url=$(git -C "$dir" config crewship.github-push) || exit 0
     default=$(git -C "$dir" symbolic-ref HEAD)
-    refspecs=()
+    refs=()
     while read -r _ new ref; do
         [[ $new =~ ^0+$ || $ref != refs/heads/* || $ref == "$default" ]] && continue
         [[ $ref == refs/heads/main || $ref == refs/heads/master ]] && continue
-        refspecs+=("+$ref:$ref")
+        branch=${ref#refs/heads/}
+        ahead=$(git -C "$dir" config --get "crewship-github.$branch.ahead") || ahead=
+        if [ -n "$ahead" ] && ! git -C "$dir" merge-base --is-ancestor "$ahead" "$new" 2>/dev/null; then
+            echo "warning: GitHub has commits on $branch that this push lacks; run: git fetch $url $branch && git merge FETCH_HEAD, then push again" >&2
+        fi
+        refs+=("$ref")
     done
-    [ "${#refspecs[@]}" -gt 0 ] || exit 0
+    [ "${#refs[@]}" -gt 0 ] || exit 0
     # The unit starts from the user manager's environment, not Forgejo's git environment.
     exec systemd-run --user --quiet --no-block --unit="forgejo-github-push-$(date +%s%N)" \
-        "$(readlink -f "$0")" push "$dir" "$url" "${refspecs[@]}"
+        "$(readlink -f "$0")" push "$dir" "$url" "${refs[@]}"
     ;;
 push)
     dir=$2 url=$3
     shift 3
     exec 9>"$dir/crewship-github-push.lock"
-    flock 9
-    for attempt in 1 2 3; do
-        git -C "$dir" push --porcelain "$url" "$@" && exit 0
-        [ "$attempt" = 3 ] || sleep $((attempt * 20))
+    pending=("$@") failed=0 tries=0
+    while :; do
+        flock 9
+        leases=() specs=()
+        for ref in "${pending[@]}"; do
+            branch=${ref#refs/heads/}
+            sha=$(git -C "$dir" rev-parse "$ref")
+            ahead=$(git -C "$dir" config --get "crewship-github.$branch.ahead") || ahead=
+            expect=$(git -C "$dir" config --get "crewship-github.$branch.pushed") || expect=
+            if [ -n "$ahead" ]; then
+                expect=$ahead
+                git -C "$dir" merge-base --is-ancestor "$ahead" "$sha" 2>/dev/null || expect=
+            fi
+            leases+=("--force-with-lease=$ref:$expect")
+            specs+=("$sha:$ref")
+        done
+        [ "${#specs[@]}" -gt 0 ] || exit "$failed"
+        out=$(git -C "$dir" push --porcelain "${leases[@]}" "$url" "${specs[@]}") || true
+        printf '%s\n' "$out"
+        left=() nap=0
+        for spec in "${specs[@]}"; do
+            sha=${spec%%:*} ref=${spec#*:}
+            branch=${ref#refs/heads/}
+            line=$(grep -F $'\t'"$spec"$'\t' <<<"$out") || line=$(grep -F ":$ref"$'\t' <<<"$out") || true
+            case $line in
+            ' '* | '+'* | '*'* | '='*)
+                git -C "$dir" config "crewship-github.$branch.pushed" "$sha"
+                git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
+                ;;
+            '!'*'(stale info)'* | '!'*'(fetch first)'* | '!'*'(non-fast-forward)'*)
+                if remote=$(git -C "$dir" ls-remote "$url" "$ref" | cut -f1) \
+                    && { [ -z "$remote" ] || git -C "$dir" merge-base --is-ancestor "$remote" "$sha" 2>/dev/null; }; then
+                    git -C "$dir" config "crewship-github.$branch.pushed" "$remote"
+                    git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
+                    left+=("$ref")
+                    continue
+                fi
+                echo "$branch: GitHub has commits that Forgejo lacks (Update branch, a suggestion or a web edit); not pushed, fetch the GitHub branch and merge it" >&2
+                [ -z "$remote" ] || git -C "$dir" config "crewship-github.$branch.ahead" "$remote"
+                failed=1
+                ;;
+            *) left+=("$ref") nap=$(((tries + 1) * 20)) ;;
+            esac
+        done
+        pending=("${left[@]}")
+        [ "${#pending[@]}" -gt 0 ] || exit "$failed"
+        [ "$nap" = 0 ] && continue
+        tries=$((tries + 1))
+        [ "$tries" -lt 3 ] || exit 1
+        flock -u 9
+        sleep "$nap"
     done
-    exit 1
     ;;
 *)
-    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac
