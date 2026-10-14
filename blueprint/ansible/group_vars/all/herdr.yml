@@ -1,4 +1,6 @@
 ---
+# The system PATH directory for the host-wide herdr links (tasks/herdr_links.yml).
+crewship_global_bin: /usr/local/bin
 # --- Herdr static config ----------------------------------------------------
 # Only the reviewed, non-secret subset is templated. experimental.pane_history
 # is deliberately absent: it persists terminal output that can contain tokens.

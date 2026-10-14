@@ -8,10 +8,12 @@
 #
 # The hook acts only in repositories that `enable` marked. It pushes every branch the
 # received push created or updated, except main, master and the repository's default
-# branch (its HEAD), each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes
-# tags or a deletion, and never uses --mirror or --prune, so nothing on GitHub is ever
-# deleted. The push runs in a transient user unit, so the git client never waits for
-# GitHub; it authenticates with the account's own git credential helper.
+# branch (its HEAD), each as refs/heads/<branch>:refs/heads/<branch> without force. It
+# never pushes tags or a deletion, and never uses --mirror or --prune, so GitHub never
+# loses a commit. When GitHub has commits that a branch lacks, the push fetches them as
+# refs/github-ahead/<branch> and fails; each later push warns until the branch has them.
+# The push runs in a transient user unit, so the git client never waits for GitHub; it
+# authenticates with the account's own git credential helper.
 set -euo pipefail
 
 repos=$HOME/.local/share/forgejo/data/forgejo-repositories
@@ -42,7 +44,12 @@ hook)
     while read -r _ new ref; do
         [[ $new =~ ^0+$ || $ref != refs/heads/* || $ref == "$default" ]] && continue
         [[ $ref == refs/heads/main || $ref == refs/heads/master ]] && continue
-        refspecs+=("+$ref:$ref")
+        ahead=refs/github-ahead/${ref#refs/heads/}
+        if git -C "$dir" rev-parse -q --verify "$ahead" >/dev/null \
+            && ! git -C "$dir" merge-base --is-ancestor "$ahead" "$new"; then
+            echo "warning: GitHub has commits that ${ref#refs/heads/} lacks; run: git fetch origin $ahead && git merge FETCH_HEAD" >&2
+        fi
+        refspecs+=("$ref:$ref")
     done
     [ "${#refspecs[@]}" -gt 0 ] || exit 0
     # The unit starts from the user manager's environment, not Forgejo's git environment.
@@ -52,14 +59,33 @@ hook)
 push)
     dir=$2 url=$3
     shift 3
+    pending=("$@") failed=0
     for attempt in 1 2 3; do
-        git -C "$dir" push --porcelain "$url" "$@" && exit 0
+        out=$(git -C "$dir" push --porcelain "$url" "${pending[@]}") || true
+        printf '%s\n' "$out"
+        left=()
+        for spec in "${pending[@]}"; do
+            ref=${spec%%:*}
+            ahead=refs/github-ahead/${ref#refs/heads/}
+            line=$(grep -F $'\t'"$spec"$'\t' <<<"$out") || true
+            case $line in
+            ' '* | '*'* | '='*) git -C "$dir" update-ref -d "$ahead" ;;
+            '!'*'(fetch first)' | '!'*'(non-fast-forward)')
+                echo "GitHub has commits that $ref lacks: not pushed, fetched them as $ahead" >&2
+                git -C "$dir" fetch -q "$url" "+$ref:$ahead"
+                failed=1
+                ;;
+            *) left+=("$spec") ;;
+            esac
+        done
+        pending=("${left[@]}")
+        [ "${#pending[@]}" -gt 0 ] || exit "$failed"
         [ "$attempt" = 3 ] || sleep $((attempt * 20))
     done
     exit 1
     ;;
 *)
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

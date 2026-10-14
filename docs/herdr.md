@@ -219,6 +219,7 @@ Pane state (the sidebar dots) is reported on the host by the omp integration `./
 ## Over mosh
 
 Over mosh, Herdr 0.9.3 can paint an opaque fill over older panes ([herdr#3773](https://github.com/herdrdev/herdr/issues/3773)), and mosh drops the images in the panes. `./ship.sh launch` installs [`tools/herdr-patch/herdr-patch`](../tools/herdr-patch/herdr-patch) as `~/.local/bin/herdr-patch`, which fixes both. `mosh-server` starts its command with the system `PATH`, which has no `~/.local/bin`, so apply also links `/usr/local/bin/herdr-patch` and `/usr/local/bin/herdr` to the installed files.
+Apply changes such a link only when it is missing or already points into this account's home. It never changes a link into another account's home, for example after a sandbox or test apply for a second home, even when that link dangles, and it never changes a file that is not a link. Verification checks the two links only for the account that owns them.
 
 On your computer, install the same script and attach with real images:
 
@@ -228,7 +229,7 @@ herdr-patch <user>@<host>
 
 In a mobile mosh app, or with plain mosh, set the host command to `herdr-patch` (`mosh <user>@<host> -- herdr-patch`). The [herdr-patch README](../tools/herdr-patch/README.md) has the install steps for your computer, the images, the `HERDR_PATCH_FILL` fill list, the limits, and the removal steps.
 
-Retired: `herdr-mosh` is now `herdr-patch`. An apply on a host that still has `~/.local/bin/herdr-mosh` or `/usr/local/bin/herdr-mosh` removes both, so a saved mosh command that runs `herdr-mosh` must change to `herdr-patch`.
+Retired: `herdr-mosh` is now `herdr-patch`. An apply on a host that still has `~/.local/bin/herdr-mosh` or `/usr/local/bin/herdr-mosh` removes both (the second only under the same rule), so a saved mosh command that runs `herdr-mosh` must change to `herdr-patch`.
 
 ## Known limits
 

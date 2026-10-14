@@ -238,6 +238,7 @@
 
     # mosh-server and non-interactive SSH run commands with the system PATH,
     # which has no ~/.local/bin; the /usr/local/bin links make both resolve.
+    # Only for the links this account owns (tasks/herdr_links.yml).
     - name: Resolve herdr and herdr-patch with the mosh-server PATH
       ansible.builtin.command:
         argv: [env, -i, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -248,6 +249,7 @@
       changed_when: false
       failed_when: false
       check_mode: false
+      when: "['herdr', 'herdr-patch'] is subset(crewship_global_links_owned | default([]))"
 
     - name: Assert herdr and herdr-patch resolve through /usr/local/bin
       ansible.builtin.assert:
@@ -259,6 +261,7 @@
           not /usr/local/bin/herdr and /usr/local/bin/herdr-patch, so
           `mosh <host> -- herdr-patch` fails.
         quiet: true
+      when: "['herdr', 'herdr-patch'] is subset(crewship_global_links_owned | default([]))"
 
     # --- the omp release this run resolved is the one installed ------------
 

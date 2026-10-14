@@ -101,10 +101,14 @@ forgejo-github-push disable OWNER/REPO
 
 After each push to an enabled repository, the hook pushes the branches that the push created or updated.
 It pushes every branch except `main`, `master` and the repository's default branch, which it reads from the repository `HEAD`.
-It force-pushes each branch to the same name on GitHub.
+It pushes each branch to the same name on GitHub without force, so GitHub never loses a commit.
 It never pushes `main`, `master`, the default branch, tags or a deletion, so it never deletes a GitHub branch.
-The push runs in a transient user unit with three tries and uses the account's git credential helper.
-A unit that fails all three tries stays as a failed unit.
+The push runs in a transient user unit and uses the account's git credential helper.
+When GitHub has commits that the branch lacks, for example from "Update branch" or a review suggestion, GitHub rejects the push.
+The unit then fetches the GitHub branch into the Forgejo repository as `refs/github-ahead/<branch>` and fails.
+Until the branch has those commits, each push of the branch prints a warning; `git fetch origin refs/github-ahead/<branch> && git merge FETCH_HEAD` merges them.
+The next successful push of the branch removes `refs/github-ahead/<branch>`.
+Other push errors get three tries, and a unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
 `systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
 
