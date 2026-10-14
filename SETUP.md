@@ -42,11 +42,11 @@ curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bas
 
 `bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
 
-The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` with the default profiles ([Install, update and migrate](docs/install.md)). The later steps sign in and change the profiles, then apply again.
+The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock`, `inspect`, `chart`, and `launch` with the core profiles, `agents` and `firstmate` ([Install, update and migrate](docs/install.md)). Everything else is off. The later steps sign in and turn on the profiles the user chooses, then apply again.
 
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
-- STOP: the installer's output ends with the web address ([Web pages from anywhere](docs/gateway.md)). Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
+- STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
 - Then run `cd ~/Crewship` for every later step.
 
 ## 1. Sign in to GitHub
@@ -79,8 +79,11 @@ omp models --json
 
 | Profile | Default | Adds |
 | --- | --- | --- |
-| `agents`, `development`, `firstmate`, `docker`, `chat` | on | omp, build tools, the Firstmate orchestrator, Docker, Discord and Slack terminal clients |
-| `gateway` | on for a new host | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)); a host from before the gateway keeps it off until `profiles.gateway: true` is set |
+| `agents`, `firstmate` | on | omp, and the Firstmate orchestrator |
+| `development` | off | the Rust toolchain and build tools |
+| `docker` | off | the Docker engine and Compose |
+| `chat` | off | the Discord and Slack terminal clients |
+| `gateway` | off | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)) |
 | `fleet_guards` | off | Docker guard, dev-server reaper, storage guard, browser ladder |
 | `shared_postgres` | off | one dev database container per project, in the engine its compose file names |
 | `jj` | off | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
@@ -130,7 +133,7 @@ The installer already applied the default profiles. This run applies your change
 ```
 
 - Check: each expected tool runs, and `gh` shows as authenticated.
-- Check: `crewship-gateway url` prints an `https://….trycloudflare.com` address, unless the user turned the gateway off.
+- Check: with the gateway on, `crewship-gateway url` prints an `https://….trycloudflare.com` address.
 - Tell the user what passed and what failed, and which step to repeat for each failure.
 - Do not mark the setup as done while a check fails.
 

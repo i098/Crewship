@@ -165,12 +165,11 @@ def initialize(args):
     config["crewship"].update(user=user, home=home, workspace=str(Path(home) / "Dev"))
     if args.container:
         config["crewship"].update(start_services=False, enable_linger=False)
-        for profile in ("docker", "tailscale", "desktop", "firstmate", "chat"):
-            config["crewship"]["profiles"][profile] = False
+        config["crewship"]["profiles"]["firstmate"] = False
         config["crewship"]["browser_prune"]["enabled"] = False
-    config["crewship"]["profiles"]["gateway"] = not (args.container or args.no_gateway)
     if args.board:
         config["crewship"]["board"] = {}
+        config["crewship"]["profiles"]["development"] = True  # the board builds with cargo
     destination = ROOT / ".local/host.yml"
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Validate before writing; a bad argument must not strand an unusable config.
@@ -409,11 +408,6 @@ def main():
     dock.add_argument("--home")
     dock.add_argument("--container", action="store_true")
     dock.add_argument("--board", action="store_true", help="turn on the crew board (docs/board.md)")
-    dock.add_argument(
-        "--no-gateway",
-        action="store_true",
-        help="turn off the password gateway and its Cloudflare tunnel (docs/gateway.md)",
-    )
     for name, text in (
         ("inspect", "check the host config against the schema; old config keys are rewritten once"),
         ("chart", "preview provisioning changes; old config keys are rewritten once"),
