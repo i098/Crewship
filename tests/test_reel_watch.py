@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -62,3 +63,50 @@ def test_refuses_other_hosts_and_cookie_options(fake_watch, argv):
     with pytest.raises(SystemExit):
         rw.run(argv, wait=lambda s: None)
     assert not (fake_watch / "seen").exists()
+
+
+GEONODE = {
+    "GEONODE_GATEWAY": "gw.example", "GEONODE_USERNAME": "user", "GEONODE_PASSWORD": "p@ss word",
+    "GEONODE_STICKY_PORT_BASE": "10000", "GEONODE_STICKY_PORT_MAX": "10009",
+}
+
+
+@pytest.fixture
+def spawned(tmp_path, monkeypatch):
+    """Records the child environment instead of starting watch.py."""
+    calls = []
+    monkeypatch.setattr(rw.os, "spawnve", lambda mode, path, argv, env: calls.append(env) or 0)
+    monkeypatch.setenv("REEL_WATCH_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("WATCH_SCRIPT", str(tmp_path / "watch.py"))
+    for key in (*rw.GEONODE_KEYS, *rw.PROXY_KEYS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(key, raising=False)
+    return calls
+
+
+def test_no_geonode_settings_fetch_direct(spawned):
+    rw.run([URL], wait=lambda s: None)
+    assert not any(k in spawned[0] for k in rw.PROXY_KEYS)
+
+
+def test_geonode_settings_route_the_fetch_through_a_sticky_port(spawned, monkeypatch):
+    for key, value in GEONODE.items():
+        monkeypatch.setenv(key, value)
+    rw.run([URL], wait=lambda s: None)
+    env = spawned[0]
+    proxy = urlparse(env["HTTPS_PROXY"])
+    assert (proxy.scheme, proxy.hostname, proxy.username) == ("http", "gw.example", "user")
+    assert unquote(proxy.password) == "p@ss word"
+    assert 10000 <= proxy.port <= 10009
+    assert env["HTTP_PROXY"] == env["ALL_PROXY"] == env["https_proxy"] == env["HTTPS_PROXY"]
+    assert env["NO_PROXY"] == env["no_proxy"] == ""
+    assert env["WATCH_COOKIES_FILE"] == "" and env["WATCH_COOKIES_FROM_BROWSER"] == ""
+
+
+def test_partial_geonode_settings_stop_and_never_print_the_password(spawned, monkeypatch):
+    monkeypatch.setenv("GEONODE_GATEWAY", "gw.example")
+    monkeypatch.setenv("GEONODE_USERNAME", "user")
+    monkeypatch.setenv("GEONODE_PASSWORD", "secret-pw")
+    with pytest.raises(SystemExit) as error:
+        rw.run([URL], wait=lambda s: None)
+    assert "GEONODE_STICKY_PORT_BASE" in str(error.value) and "secret-pw" not in str(error.value)
+    assert spawned == []
