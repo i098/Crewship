@@ -169,6 +169,16 @@
     mode: "0755"
   become: true
 
+- name: Stat the btop configuration directory
+  ansible.builtin.stat:
+    path: "{{ crewship_btop_config | dirname }}"
+    get_checksum: false
+  become: true
+  register: crewship_btop_dir
+  changed_when: false
+
+# Check mode never creates the directory above, so a copy into it has no parent
+# to write to; the copy is then skipped in the preview and runs on the apply.
 - name: Install the btop configuration
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/config/btop.conf"
@@ -178,6 +188,7 @@
     mode: "0644"
     remote_src: true
   become: true
+  when: not ansible_check_mode or crewship_btop_dir.stat.exists
 
 - name: Render the Herdr Spaces reporter unit and timer
   ansible.builtin.template:
