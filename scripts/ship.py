@@ -382,7 +382,7 @@ def questions(document, config_path):
         )
     if not config["profiles"].get("shared_postgres"):
         prompt += (
-            " Then ask one short question: enable the optional shared Postgres database? "
+            " Then ask one short question: enable the optional per-project dev databases? "
             "It is off by default and needs Docker and Firstmate. "
             "If yes, set crewship.profiles.shared_postgres to true in "
             f"{config_path} and follow {ROOT / 'docs/shared-postgres.md'}."

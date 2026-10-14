@@ -82,9 +82,7 @@
                  crewship_user_units ~ '/default.target.wants/crewship-novnc.service']
                 if (crewship_cfg.profiles.desktop | bool) else [])
              + ([crewship_local_bin ~ '/crewship-db',
-                 crewship_cfg.home ~ '/.local/state/code-factory/shared-postgres/compose.json',
-                 crewship_cfg.home ~ '/.local/state/code-factory/shared-postgres/projects-dir',
-                 crewship_cfg.home ~ '/.local/state/code-factory/secrets/shared-postgres/superuser',
+                 crewship_cfg.home ~ '/.local/state/code-factory/project-db/projects-dir',
                  crewship_user_units ~ '/crewship-postgres-env-seed.service',
                  crewship_user_units ~ '/crewship-postgres-env-seed.timer',
                  crewship_user_units ~ '/timers.target.wants/crewship-postgres-env-seed.timer']

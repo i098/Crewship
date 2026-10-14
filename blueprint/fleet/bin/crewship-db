@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Shared Postgres: <project> prints an env file path; --seed writes worktree .env.local files.
+"""Per-project dev databases: <project> [checkout] prints an env file path; --seed converges all projects.
 
---check-docker verifies target-account access; --apply [--check] [--no-start]
-converges the optional host service.
+Each project gets one container of the engine its own compose file declares
+(postgres, mysql, mariadb or redis), shared by all of its worktrees.
+--seed starts the containers and writes DATABASE_URL or REDIS_URL into worktree .env.local files.
+--check-docker verifies target-account access; --apply [--check] records the projects directory.
 """
 
 import fcntl
@@ -10,28 +12,66 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 HOME = Path.home()
-STATE = HOME / ".local/state/code-factory/shared-postgres"
-SECRETS = HOME / ".local/state/code-factory/secrets/shared-postgres"
-COMPOSE = STATE / "compose.json"
+STATE = HOME / ".local/state/code-factory/project-db"
+SECRETS = HOME / ".local/state/code-factory/secrets/project-db"
 PROJECTS = STATE / "projects-dir"
-CONTAINER = "crewship-shared-postgres"
-IMAGE = "postgres:latest"
-PORT = 25432
-MARK = "# crewship-shared-postgres"
+FIRST_PORT = 25432
+MARK = "# crewship-project-db"
+LEGACY_MARK = "# crewship-shared-postgres"
+NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}")
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+IMAGE = re.compile(r"^\s*image:\s*[\"']?([^\s\"'#]+)", re.M)
+PASSWORD_FILE = "/run/secrets/db_password"
+MYSQL_PING = ('$(command -v mariadb-admin || command -v mysqladmin) ping -h 127.0.0.1 -uroot '
+              f'-p"$(cat {PASSWORD_FILE})" --silent')
+
+# One row per engine, in priority order when a compose file declares several.
+# images maps an image repository name (last path segment) to the engine.
+# ponytail: images that follow the official image conventions only; add a row for another engine.
+ENGINES = {
+    "postgres": {
+        "images": ("postgres", "postgis", "pgvector"), "default": "postgres:latest", "port": 5432,
+        "data": "/var/lib/postgresql", "scheme": "postgresql", "var": "DATABASE_URL",
+        "environment": {"POSTGRES_USER": "app", "POSTGRES_DB": "app",
+                        "POSTGRES_PASSWORD_FILE": PASSWORD_FILE, "POSTGRES_INITDB_ARGS": "--data-checksums"},
+        "health": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"],
+    },
+    "mysql": {
+        "images": ("mysql",), "default": "mysql:lts", "port": 3306, "data": "/var/lib/mysql",
+        "scheme": "mysql", "var": "DATABASE_URL",
+        "environment": {"MYSQL_USER": "app", "MYSQL_DATABASE": "app", "MYSQL_PASSWORD_FILE": PASSWORD_FILE,
+                        "MYSQL_ROOT_PASSWORD_FILE": PASSWORD_FILE},
+        "health": ["CMD-SHELL", MYSQL_PING.replace("$", "$$")],
+    },
+    "mariadb": {
+        "images": ("mariadb",), "default": "mariadb:lts", "port": 3306, "data": "/var/lib/mysql",
+        "scheme": "mysql", "var": "DATABASE_URL",
+        "environment": {"MYSQL_USER": "app", "MYSQL_DATABASE": "app", "MYSQL_PASSWORD_FILE": PASSWORD_FILE,
+                        "MYSQL_ROOT_PASSWORD_FILE": PASSWORD_FILE},
+        "health": ["CMD-SHELL", MYSQL_PING.replace("$", "$$")],
+    },
+    "redis": {
+        "images": ("redis",), "default": "redis:latest", "port": 6379, "data": "/data",
+        "scheme": "redis", "var": "REDIS_URL", "environment": {},
+        "command": ["sh", "-c", f'exec redis-server --appendonly yes --requirepass "$$(cat {PASSWORD_FILE})"'],
+        "health": ["CMD-SHELL", f'REDISCLI_AUTH="$$(cat {PASSWORD_FILE})" redis-cli -h 127.0.0.1 ping | grep -q PONG'],
+    },
+}
 
 
-def docker(*args, input=None, optional=False):
+def docker(*args, optional=False):
     prefix = ["docker"] if os.access("/var/run/docker.sock", os.W_OK) else ["sudo", "-n", "docker"]
-    result = subprocess.run([*prefix, *args], input=input, capture_output=True, text=True)
+    result = subprocess.run([*prefix, *args], capture_output=True, text=True)
     if result.returncode and not optional:
-        # SQL errors can include passwords. Never forward Docker or psql output.
-        raise RuntimeError("Docker operation failed; check the shared Postgres service")
+        # Docker output can include passwords. Never forward it.
+        raise RuntimeError("Docker operation failed; check the project database service")
     return result
 
 
@@ -60,100 +100,130 @@ def password(path):
     return value
 
 
-def compose_document():
-    return {
-        "name": "crewship-shared-postgres",
-        "services": {"postgres": {
-            "image": IMAGE,
-            "container_name": CONTAINER,
-            "restart": "unless-stopped",
-            "environment": {
-                "POSTGRES_PASSWORD_FILE": "/run/secrets/postgres_password",
-                "POSTGRES_INITDB_ARGS": "--data-checksums",
-            },
-            "secrets": ["postgres_password"],
-            "ports": [f"127.0.0.1:{PORT}:5432"],
-            "volumes": ["data:/var/lib/postgresql"],
-            "healthcheck": {
-                "test": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"],
-                "interval": "2s", "timeout": "5s", "retries": 60,
-            },
-        }},
-        "volumes": {"data": {"name": "crewship-shared-postgres-data"}},
-        "secrets": {"postgres_password": {"file": str(SECRETS / "superuser")}},
-    }
-
-
-def apply(check=False, start=True):
-    text = json.dumps(compose_document(), indent=2) + "\n"
-    projects = str(Path(os.environ.get("CREWSHIP_PROJECTS_DIR", HOME / "Dev/firstmate/projects"))) + "\n"
-    if check:
-        if (not COMPOSE.exists() or COMPOSE.read_text() != text
-                or not PROJECTS.exists() or PROJECTS.read_text() != projects
-                or not (SECRETS / "superuser").exists()):
-            print("configure shared Postgres")
-        return
-    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-    SECRETS.mkdir(parents=True, exist_ok=True, mode=0o700)
-    password(SECRETS / "superuser")
-    changed = write_changed(COMPOSE, text)
-    if write_changed(PROJECTS, projects) or changed:
-        print("configure shared Postgres")
-    if start:
-        before = docker("inspect", "--format", "{{.Id}} {{.State.Running}}", CONTAINER, optional=True)
-        docker("compose", "-f", str(COMPOSE), "up", "-d", "--pull", "always", "--wait")
-        after = docker("inspect", "--format", "{{.Id}} {{.State.Running}}", CONTAINER)
-        if before.returncode or before.stdout != after.stdout:
-            print("start shared Postgres")
-
-
-def project_url(project):
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", project):
-        raise ValueError("Project must be 1-48 letters, digits, underscores or hyphens, starting with a letter")
-    if not COMPOSE.exists():
-        raise RuntimeError("Enable the shared_postgres profile and apply it first")
-    name = "crewship_" + project
-    secret = password(SECRETS / (project + ".password"))
-    # The host lock serializes concurrent lanes. gexec creates only missing objects.
-    # Restricted identifiers and hex passwords cannot inject SQL.
-    sql = fr"""SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '{name}', '{secret}')
-WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{name}')\gexec
-SELECT format('CREATE DATABASE %I OWNER %I', '{name}', '{name}')
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{name}')\gexec
-SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', '{name}')
-WHERE EXISTS (
-  SELECT FROM pg_database, aclexplode(coalesce(datacl, acldefault('d', datdba))) acl
-  WHERE datname = '{name}' AND acl.grantee = 0
-    AND acl.privilege_type IN ('CONNECT', 'TEMPORARY')
-)\gexec
-"""
-    docker("exec", "-i", "--user", "postgres", CONTAINER, "psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-d", "postgres", input=sql)
-    return f"postgresql://{name}:{secret}@127.0.0.1:{PORT}/{name}"
-
-
-def seed():
-    worktrees = {
+def checkouts():
+    """Map project name -> sorted checkout directories (every worktree of that project)."""
+    found = {
         git.parent for pattern in ("*/*/*/.git", "firstmate-*/*/firstmate/projects/*/.git")
         for git in (HOME / ".treehouse").glob(pattern)
     }
     if PROJECTS.exists():
-        worktrees.update(git.parent for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
-    urls = {}
-    for worktree in sorted(worktrees):
-        project = worktree.name
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", project):
-            continue
-        if project not in urls:
-            urls[project] = project_url(project)
-        path = worktree / ".env.local"
+        found.update(git.parent for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
+    projects = {}
+    for directory in sorted(found):
+        if NAME.fullmatch(directory.name):
+            projects.setdefault(directory.name, []).append(directory)
+    return projects
+
+
+def detect(directories):
+    """Return (engine, image) from the first compose file that names a supported engine, else None."""
+    for directory in directories:
+        for name in COMPOSE_FILES:
+            try:
+                images = IMAGE.findall((directory / name).read_text())
+            except OSError:
+                continue
+            for engine, spec in ENGINES.items():
+                for image in images:
+                    repository = image.split("@")[0].rsplit("/", 1)[-1].split(":")[0]
+                    if repository in spec["images"]:
+                        # An image with an unresolved ${VAR} falls back to the engine default.
+                        return engine, spec["default"] if "$" in image else image
+    return None
+
+
+def free_port(taken):
+    port = FIRST_PORT
+    while True:
+        with socket.socket() as probe:
+            if port not in taken and probe.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+        port += 1
+
+
+def compose_document(key, meta):
+    spec = ENGINES[meta["engine"]]
+    service = {
+        "image": meta["image"],
+        "container_name": "crewship-db-" + key,
+        "restart": "unless-stopped",
+        "environment": spec["environment"],
+        "secrets": ["db_password"],
+        "ports": [f"127.0.0.1:{meta['port']}:{spec['port']}"],
+        "volumes": [f"data:{spec['data']}"],
+        "healthcheck": {"test": spec["health"], "interval": "2s", "timeout": "5s", "retries": 60},
+    }
+    if "command" in spec:
+        service["command"] = spec["command"]
+    return {
+        "name": "crewship-db-" + key,
+        "services": {"db": service},
+        "volumes": {"data": {"name": f"crewship-db-{key}-data"}},
+        "secrets": {"db_password": {"file": str(SECRETS / (key + ".password"))}},
+    }
+
+
+def project_url(project, directories):
+    """Converge the project's container and return (variable, url), or None without a supported engine."""
+    key = project.lower()
+    directory = STATE / key
+    meta_file = directory / "meta.json"
+    if meta_file.exists():
+        meta = json.loads(meta_file.read_text())
+    else:
+        detected = detect(directories)
+        if detected is None:
+            return None
+        taken = {json.loads(path.read_text())["port"] for path in STATE.glob("*/meta.json")}
+        meta = {"engine": detected[0], "image": detected[1], "port": free_port(taken)}
+    for private in (STATE, SECRETS, directory):
+        private.mkdir(exist_ok=True, mode=0o700, parents=True)
+    secret = password(SECRETS / (key + ".password"))
+    write_changed(meta_file, json.dumps(meta, indent=2) + "\n")
+    compose = directory / "compose.json"
+    write_changed(compose, json.dumps(compose_document(key, meta), indent=2) + "\n")
+    docker("compose", "-f", str(compose), "up", "-d", "--wait")
+    spec = ENGINES[meta["engine"]]
+    user = "" if meta["engine"] == "redis" else "app"
+    path = "/0" if meta["engine"] == "redis" else "/app"
+    return spec["var"], f"{spec['scheme']}://{user}:{secret}@127.0.0.1:{meta['port']}{path}"
+
+
+def seed_worktree(worktree, variable, url):
+    path = worktree / ".env.local"
+    original = path.read_text() if path.exists() else ""
+    lines = [line for line in original.splitlines()
+             if line not in (MARK, LEGACY_MARK) and not re.match(rf"^\s*(?:export\s+)?{variable}\s*=", line)]
+    write_changed(path, "\n".join([*lines, MARK, f"{variable}={url}"]) + "\n")
+
+
+def seed():
+    failure = None
+    for project, directories in checkouts().items():
         try:
-            original = path.read_text() if path.exists() else ""
-            lines = [line for line in original.splitlines()
-                     if line != MARK and not re.match(r"^\s*(?:export\s+)?DATABASE_URL\s*=", line)]
-            text = "\n".join([*lines, MARK, "DATABASE_URL=" + urls[project]]) + "\n"
-            write_changed(path, text)
-        except OSError:
+            result = project_url(project, directories)
+        except RuntimeError as error:
+            failure = failure or error  # one failing project must not block the others
             continue
+        for worktree in directories if result else ():
+            try:
+                seed_worktree(worktree, *result)
+            except OSError:
+                continue  # a checkout removed during the scan
+    if failure:
+        raise failure
+
+
+def apply(check=False):
+    projects = str(Path(os.environ.get("CREWSHIP_PROJECTS_DIR", HOME / "Dev/firstmate/projects"))) + "\n"
+    if check:
+        if not PROJECTS.exists() or PROJECTS.read_text() != projects:
+            print("configure project databases")
+        return
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    SECRETS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if write_changed(PROJECTS, projects):
+        print("configure project databases")
 
 
 def main(argv):
@@ -164,17 +234,19 @@ def main(argv):
             result = None
         if result is None or result.returncode:
             raise RuntimeError(
-                "Shared Postgres requires explicit Docker access for this account: "
+                "Project databases need explicit Docker access for this account: "
                 "a writable /var/run/docker.sock or sudo -n docker, and a running daemon. "
                 "Crewship does not grant Docker privileges."
             )
         return
     if argv[:1] == ["--apply"]:
-        if set(argv[1:]) - {"--check", "--no-start"}:
+        if set(argv[1:]) - {"--check"}:
             raise ValueError(__doc__)
-        apply(check="--check" in argv, start="--no-start" not in argv)
+        apply(check="--check" in argv)
         return
-    if argv == ["--seed"] or len(argv) == 1 and not argv[0].startswith("-"):
+    if argv == ["--seed"] or 1 <= len(argv) <= 2 and not argv[0].startswith("-"):
+        if argv != ["--seed"] and not NAME.fullmatch(argv[0]):
+            raise ValueError("Project must be 1-48 letters, digits, underscores or hyphens, starting with a letter")
         SECRETS.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (SECRETS / ".lock").open("a") as lock:
             os.chmod(lock.name, 0o600)
@@ -182,9 +254,12 @@ def main(argv):
             if argv == ["--seed"]:
                 seed()
             else:
-                url = project_url(argv[0])
-                path = SECRETS / (argv[0] + ".env")
-                write_changed(path, "DATABASE_URL=" + url + "\n")
+                directories = checkouts().get(argv[0], []) + [Path(a).resolve() for a in argv[1:]]
+                result = project_url(argv[0], directories)
+                if result is None:
+                    raise RuntimeError(f"No postgres, mysql, mariadb or redis image in a compose file of {argv[0]}")
+                path = SECRETS / (argv[0].lower() + ".env")
+                write_changed(path, f"{result[0]}={result[1]}\n")
                 print(path)
         return
     raise ValueError(__doc__)

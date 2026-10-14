@@ -1,5 +1,5 @@
 ---
-# Disabled profiles leave the container, volume, secrets and units unmanaged.
+# Disabled profiles leave the containers, volumes, secrets and units unmanaged.
 - name: Check explicit target-account Docker access
   ansible.builtin.command:
     argv:
@@ -12,7 +12,7 @@
   changed_when: false
   check_mode: false
 
-- name: Install the shared Postgres helper
+- name: Install the project database helper
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/fleet/bin/crewship-db"
     dest: "{{ crewship_local_bin }}/crewship-db"
@@ -23,12 +23,12 @@
   become: true
 
 # Use the checkout's copy so check mode also works before the first install.
-- name: Converge the shared Postgres service
+# The seeder timer starts each project's own container; apply only records the projects directory.
+- name: Record the projects directory for the project database seeder
   ansible.builtin.command:
     argv: >-
       {{ ['/usr/bin/python3', crewship_blueprint ~ '/fleet/bin/crewship-db', '--apply']
-         + (['--check'] if ansible_check_mode else [])
-         + (['--no-start'] if not (crewship_manage_services | bool) else []) }}
+         + (['--check'] if ansible_check_mode else []) }}
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: >-
@@ -39,7 +39,7 @@
   changed_when: crewship_postgres_apply.stdout | length > 0
   check_mode: false
 
-- name: Ensure the Postgres seeder unit directories
+- name: Ensure the project database seeder unit directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -51,7 +51,7 @@
     - "{{ crewship_user_units }}"
     - "{{ crewship_user_units }}/timers.target.wants"
 
-- name: Render the Postgres worktree seeder units
+- name: Render the project database seeder units
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "{{ crewship_user_units }}/{{ item }}"
@@ -64,7 +64,7 @@
     - crewship-postgres-env-seed.timer
   notify: reload user systemd
 
-- name: Statically enable the Postgres worktree seeder
+- name: Statically enable the project database seeder
   ansible.builtin.file:
     src: "{{ crewship_user_units }}/crewship-postgres-env-seed.timer"
     dest: "{{ crewship_user_units }}/timers.target.wants/crewship-postgres-env-seed.timer"
@@ -74,7 +74,7 @@
     follow: false
   become: true
 
-- name: Start the Postgres worktree seeder timer
+- name: Start the project database seeder timer
   ansible.builtin.systemd_service:
     scope: user
     name: crewship-postgres-env-seed.timer
