@@ -37,11 +37,12 @@ Run apply with service starts enabled when the host is ready, or run `crewship-d
 ## Engine and container
 
 The helper reads the project's own compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml` or `docker-compose.yml`) in a checkout of the project.
-It looks at each `image:` line and picks the engine from the image name:
+It looks at each `image:` line and picks the engine from the image name.
+Only official images count: the bare name, `library/<name>` or `docker.io/library/<name>`, plus `pgvector/pgvector` for Postgres:
 
 | Engine | Image names | Variable in `.env.local` |
 | --- | --- | --- |
-| `postgres` | `postgres`, `postgis`, `pgvector` | `DATABASE_URL` (`postgresql://`) |
+| `postgres` | `postgres`, `pgvector/pgvector` | `DATABASE_URL` (`postgresql://`) |
 | `mysql` | `mysql` | `DATABASE_URL` (`mysql://`) |
 | `mariadb` | `mariadb` | `DATABASE_URL` (`mysql://`) |
 | `redis` | `redis` | `REDIS_URL` |
@@ -49,7 +50,7 @@ It looks at each `image:` line and picks the engine from the image name:
 If the compose file names several engines, the first row of the table wins, so a project with Postgres and Redis gets Postgres.
 A project with no supported engine gets no container and no change.
 The container runs the image the compose file names, including its tag. An image tag with an unresolved `${VARIABLE}` falls back to the engine's `latest` tag, or `lts` for MySQL and MariaDB.
-The helper supports only images that follow the official image conventions.
+Any other namespace, such as `bitnami/mysql` or `postgis/postgis`, is unsupported. The helper skips it, prints `unsupported image <image>` on stderr and does not guess another engine, because those images use other environment variables, data paths and start commands.
 Add a row to `ENGINES` in `blueprint/fleet/bin/crewship-db` for another engine.
 
 The helper decides the engine, the image and the port once, and writes them to `~/.local/state/code-factory/project-db/<project>/meta.json`.
@@ -66,6 +67,8 @@ For each project the helper creates:
 | User and database | `app` and `app` (Redis uses a password only) |
 | Configuration | `~/.local/state/code-factory/project-db/<project>/compose.json` |
 
+Postgres keeps its cluster in `<mount>/pgdata` on the volume for every major version, so the volume holds the data for images older than 18 too.
+Passwords never appear in a process argument list: Redis reads the password from a mode `0600` config file in the container, and the MySQL and MariaDB health check passes it in the environment.
 The container uses `restart: unless-stopped`.
 The health check waits for the final TCP server, not the temporary server used during initialization.
 Compose mounts the password as a file secret; no password enters the repository, command arguments or apply output.
