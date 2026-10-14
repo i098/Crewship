@@ -1,8 +1,10 @@
 # Features
 
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
+- [Public skills and rules](omp.md#skills): the skills and rules that ship with Crewship, installed on request (opt-in)
 - [Project databases](shared-postgres.md): one dev database container per project, in the engine its compose file names, and worktree connection strings (opt-in)
 - [Jujutsu](jj.md): `jj` colocated with git for agents, digest-verified in `~/.local/bin` (opt-in)
+- [fdu](configuration.md#profiles): a fast gitignore-aware `du` for large worktrees, installed with uv (opt-in)
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)
@@ -16,6 +18,7 @@
 - [Install, update and migrate](install.md): release artifact, updates, moving a git install
 - [Migration and recovery](recovery.md): new-device sequence, desktop access, upgrades
 - [Review desktop](recovery.md#desktop-access): XFCE through loopback noVNC (opt-in)
+- [Host hardening](security.md#host-hardening): the Koncreet toolkit, installed as root and never run (opt-in)
 - [Tailscale](security.md#remote-access): the Tailscale daemon for a private network, an option beside the gateway (opt-in)
 - [Agent host move](agent-host-move.md): move the agents to a new host with parity checks
 - [Security](security.md): the password gateway, Tailscale, and credentials

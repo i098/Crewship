@@ -43,7 +43,7 @@ Idle chrome-devtools-axi bridges come on top: each holds about 2 GB until
 - **CPU:** the vCPU line above is an estimate for lanes while they compile.
 - **RAM:** a 24 GB host fits one UI lane plus two light lanes, or six light lanes.
 - **Swap:** keeps the host reachable during a spike. It is not capacity, because the spawn floor ignores it and a swapping host thrashes.
-- **Disk:** Docker images and build cache grow with the lane count. The storage guard warns at 85% and prunes at 92%.
+- **Disk:** Docker images and build cache grow with the lane count. The storage guard warns at 85% and prunes at 92%, stale gitignored worktree output first (see [Stale worktree output](fleet-guards.md#stale-worktree-output)).
 - **File watchers:** every agent runs file watchers (LSP servers, bundlers, test runners) as the one Crewship account, and the stock limit is 128 inotify instances per user. Every host that starts services gets `/etc/sysctl.d/60-agent-host.conf` with `fs.inotify.max_user_instances = 8192`; apply loads it with `sysctl -p` when it writes the file.
 
 ## Auto pruners
@@ -55,7 +55,7 @@ The Setting column names the profile that installs each pruner and what tunes it
 | Pruner | Removes | Runs | Setting |
 | --- | --- | --- | --- |
 | Docker guard (`crewship-docker-guard.timer`) | Stopped containers 24 h (default) after they exit. Running containers 48 h old are reported, never removed. Never a container with the `crewship.keep` label or a restart policy, a volume or an image. | every hour | `fleet.docker_guard.stopped_hours`; profile `fleet_guards` |
-| Storage guard (`crewship-storage-guard.timer`) | At 92% disk use: Docker build cache, dangling images, and unused images created more than 168 h ago. Never volumes, containers, repositories, logs or home content. | every 5 min | `crewship_storage_guard_*` in `blueprint/ansible/group_vars/all/fleet.yml`; profile `fleet_guards` |
+| Storage guard (`crewship-storage-guard.timer`) | At 92% disk use: gitignored build output (`node_modules`, `.venv`, `target`, `dist`, `.next`, ...) in Treehouse pool worktrees that nothing changed for 7 days, found with `find` (sizes from [fdu](configuration.md#profiles) when installed, else `du`); then Docker build cache, dangling images, and unused images created more than 168 h ago. Never tracked files, uncommitted or unpushed work, volumes, containers, repositories, logs or other home content. | every 5 min | `crewship_storage_guard_*` (`worktree_age_days` is the 7) in `blueprint/ansible/group_vars/all/fleet.yml`; profile `fleet_guards` |
 | Dev-server reaper (`crewship-dev-server-reaper.timer`) | `next dev`, `next-server` and `tsc --noEmit` trees whose lane is done, paused, blocked or failed, has no agent, or is idle for 30 min or more. | every 2 min | `REAPER_IDLE_MIN` (30) in the script; profile `fleet_guards` |
 | Devtools-bridge reaper (`crewship-devtools-bridge-reaper.timer`) | Attached chrome-devtools-axi bridges whose process tree used no CPU and whose session state did not change for 60 min. Never any other bridge. | every 10 min | `REAPER_IDLE_MIN` (60) in the script; profile `fleet_guards` |
 | Browser autoprune (`chrome-autoprune.timer`) | AXI bridge browser processes idle for 2 h. Never headed, attached or persistent-profile browsers. | every 5 min | `browser_prune.enabled`, `browser_prune.idle_seconds` (7200), `browser_prune.poll_seconds` (300); profile `agents` |

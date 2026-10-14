@@ -8,21 +8,24 @@ crewship:
   # Absolute path on a data disk for Docker's data root and the npm and pip
   # caches. Empty keeps both on the system disk (docs/configuration.md#data-disk).
   data_dir: ""
+  # A new host gets the core only: agents and firstmate. Every other profile is
+  # opt-in (docs/default-config.md).
   profiles:
     agents: true
-    development: true
+    development: false
     firstmate: true
-    docker: true
+    docker: false
     tailscale: false
     desktop: false
     fleet_guards: false
     shared_postgres: false
     # Jujutsu (jj) for agents, colocated with git (docs/jj.md).
     jj: false
+    # fdu, a fast gitignore-aware du for large worktrees (docs/configuration.md#profiles).
+    fdu: false
     fleet_browsers: false
-    chat: true
-    # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md). Off
-    # here so an update never opens a tunnel; ./ship.sh dock turns it on for a new host.
+    chat: false
+    # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md).
     gateway: false
   gateway:
     # Hours an address stays allowed after the right password; the cookie lasts as long.
