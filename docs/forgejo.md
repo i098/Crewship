@@ -75,6 +75,15 @@ Apply never restarts the no-mistakes daemon, because a restart stops the pipelin
 The daemon loads the drop-in only after a restart.
 When no pipeline run is active, run `no-mistakes daemon restart`.
 
+Apply creates the token only when `no-mistakes.env` does not exist.
+Forgejo refuses a second token with the name `crewship-no-mistakes`, so a removed file alone stops apply at the token task.
+To make a new token, do these steps:
+
+1. Sign in to Forgejo as the admin account, with the password in `admin-password`.
+2. Delete the token `crewship-no-mistakes` in **Settings** > **Applications**.
+3. Remove `~/.config/crewship/forgejo/no-mistakes.env`.
+4. Run apply again, then restart the no-mistakes daemon.
+
 ## GitHub push
 
 `forgejo-github-push` pushes feature branches from a Forgejo repository to GitHub.
