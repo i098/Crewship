@@ -221,6 +221,7 @@ RELEASES = {
     "gammons/slk": ("v9.9.9", "slk_9.9.9_linux_x86_64.tar.gz"),
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
     "jimididit/koncreet": ("v9.9.9", "koncreet.tar.gz"),
+    "jj-vcs/jj": ("v9.9.9", "jj-v9.9.9-x86_64-unknown-linux-musl.tar.gz"),
     "googleworkspace/cli": (
         "v9.9.9",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
@@ -323,6 +324,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "slk",
         "obscura",
         "koncreet",
+        "jj",
     ):
         assert latest[tool]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
     for tool in (
@@ -338,6 +340,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "slk",
         "obscura",
         "koncreet",
+        "jj",
     ):
         assert latest[tool]["version"] == "9.9.9"
     gws = latest["gws"]["assets"]["linux-x86_64"]
@@ -349,6 +352,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
     assert latest["fallow"]["assets"]["linux-x86_64"]["format"] == "file"
     assert latest["sentrux-grammars"]["assets"]["linux-x86_64"]["format"] == "tar"
     assert latest["concord"]["assets"]["linux-x86_64"]["format"] == "tar"
+    assert latest["jj"]["assets"]["linux-x86_64"]["format"] == "tar"
     # The newest Node release, not the first index entry, verified by SHASUMS256.
     node = latest["node"]["assets"]["linux-x86_64"]
     assert latest["node"]["version"] == "30.1.0"
@@ -537,6 +541,7 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
         (["--tools", "sentrux"], {"sentrux", "sentrux-grammars"}),
         (["--tools", "pyrefly"], {"pyrefly"}),
+        (["--tools", "jj"], {"jj"}),
     ],
 )
 def test_resolve_selection_matches_what_the_flags_install(
