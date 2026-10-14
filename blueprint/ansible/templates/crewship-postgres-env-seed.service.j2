@@ -1,7 +1,7 @@
 {{ ansible_managed | comment }}
 [Unit]
-Description=Shared Postgres worktree environment (Crewship managed)
-ConditionPathExists=%h/.local/state/code-factory/shared-postgres/compose.json
+Description=Project database worktree environment (Crewship managed)
+ConditionPathExists=%h/.local/state/code-factory/project-db/projects-dir
 
 [Service]
 Type=oneshot
