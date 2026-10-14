@@ -62,9 +62,9 @@ push)
     dir=$2 url=$3
     shift 3
     exec 9>"$dir/crewship-github-push.lock"
-    flock 9
-    pending=("$@") failed=0
-    for attempt in 1 2 3; do
+    pending=("$@") failed=0 tries=0
+    while :; do
+        flock 9
         leases=() specs=()
         for ref in "${pending[@]}"; do
             branch=${ref#refs/heads/}
@@ -92,8 +92,9 @@ push)
                 git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
                 ;;
             '!'*'(stale info)'* | '!'*'(fetch first)'* | '!'*'(non-fast-forward)'*)
-                if remote=$(git -C "$dir" ls-remote "$url" "$ref" | cut -f1) && [ -z "$remote" ]; then
-                    git -C "$dir" config --unset "crewship-github.$branch.pushed" || true
+                if remote=$(git -C "$dir" ls-remote "$url" "$ref" | cut -f1) \
+                    && { [ -z "$remote" ] || git -C "$dir" merge-base --is-ancestor "$remote" "$sha" 2>/dev/null; }; then
+                    git -C "$dir" config "crewship-github.$branch.pushed" "$remote"
                     git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
                     left+=("$ref")
                     continue
@@ -102,14 +103,17 @@ push)
                 [ -z "$remote" ] || git -C "$dir" config "crewship-github.$branch.ahead" "$remote"
                 failed=1
                 ;;
-            *) left+=("$ref") nap=$((attempt * 20)) ;;
+            *) left+=("$ref") nap=$(((tries + 1) * 20)) ;;
             esac
         done
         pending=("${left[@]}")
         [ "${#pending[@]}" -gt 0 ] || exit "$failed"
-        [ "$attempt" = 3 ] || sleep "$nap"
+        [ "$nap" = 0 ] && continue
+        tries=$((tries + 1))
+        [ "$tries" -lt 3 ] || exit 1
+        flock -u 9
+        sleep "$nap"
     done
-    exit 1
     ;;
 *)
     sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2

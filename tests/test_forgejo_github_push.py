@@ -224,3 +224,10 @@ def test_a_branch_deleted_on_github_is_pushed_again(tmp_path):
     )
     assert refs["refs/heads/fm/x"] == later
     assert refs["refs/heads/anything/y"] == later
+
+
+def test_a_branch_that_github_has_behind_forgejo_is_pushed(tmp_path):
+    base, head = setup(tmp_path)
+    # fm/x was on GitHub before the repository was enabled.
+    git("update-ref", "refs/heads/fm/x", base, cwd=tmp_path / "github.git")
+    assert hook(tmp_path, [f"{base} {head} refs/heads/fm/x\n"])["refs/heads/fm/x"] == head

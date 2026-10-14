@@ -75,9 +75,10 @@ So a rebased or amended branch replaces what the hook pushed before, but a commi
 It never pushes `main`, `master`, the default branch, tags or a deletion, so it never deletes a GitHub branch.
 The push runs in a transient user unit and uses the account's git credential helper.
 The units of one repository push one at a time.
-When GitHub has a commit that the hook did not push, for example from "Update branch", a review suggestion or a web edit, the lease fails and the unit fails.
+When GitHub has a commit that the Forgejo branch does not contain, for example from "Update branch", a review suggestion or a web edit, the lease fails and the unit fails.
 Until the branch contains that commit, each push of the branch prints a warning and the hook does not push it; `git fetch <GitHub URL> <branch> && git merge FETCH_HEAD` merges it.
-When the GitHub branch no longer exists, for example after its PR merged, the next push of the branch creates it again.
+When the GitHub branch no longer exists, for example after its PR merged, the hook pushes it again as a new branch.
+When the GitHub branch is only behind the Forgejo branch, for example on a branch that existed before `enable`, the hook pushes it again with a lease on the GitHub commit.
 The hook keeps its state in the repository's git config, as `crewship-github.<branch>.pushed` and `crewship-github.<branch>.ahead`.
 Other push errors get three tries, and a unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
