@@ -267,10 +267,6 @@ def write(state, kind, thread, call, text=None):
         record_sent(kind, thread, text)
 
 
-def save_state(state):
-    (state_dir() / "poll.json").write_text(json.dumps(state))
-
-
 def fail(state, e, now):
     """Record a failure in state and return its one-line report. A flagged account halts; anything else backs off."""
     what = describe(e)
@@ -479,19 +475,24 @@ def send_actions(cl, state, t, operator, text, emoji, typing):
         write(state, "text", t.id, lambda: cl.direct_send(text, thread_ids=[int(t.id)]), text)
 
 
+def plan(text, emoji, typing):
+    """The kinds of write a reply makes, in order: a typing indicator (only before a text over TYPING_MIN characters),
+    a tapback, a text. Exits when the request is wrong."""
+    if len(text) > REPLY_MAX:
+        sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
+    if not (text or emoji or typing):
+        sys.exit("nothing to send: give TEXT, --react or --typing")
+    wanted = (("typing", typing and len(text) > TYPING_MIN), ("react", emoji), ("text", text))
+    return [kind for kind, on in wanted if on]
+
+
 def reply(text, thread, emoji, typing):
     """DM the operator: an optional typing indicator, an optional reaction to his latest message, an optional text."""
     operator = conf("INSTAGRAM_DM_OPERATOR")
     text = " ".join((text or "").split())
     if not operator:
         sys.exit("set INSTAGRAM_DM_OPERATOR")
-    if len(text) > REPLY_MAX:
-        sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
-    if not (text or emoji or typing):
-        sys.exit("nothing to send: give TEXT, --react or --typing")
-    typing = typing and len(text) > TYPING_MIN
-    kinds = [k for k, on in (("typing", typing), ("react", emoji), ("text", text)) if on]
-    if not kinds:
+    if not (kinds := plan(text, emoji, typing)):
         return print("no typing indicator for a short reply: nothing to send")
     with locked():
         state, now = load_state(), time.time()
