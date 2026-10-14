@@ -6,16 +6,15 @@
 #   forgejo-github-push hook           (Forgejo's global post-receive hook runs it)
 #   forgejo-github-push push DIR URL REFSPEC...
 #
-# The hook acts only in repositories that `enable` marked. It pushes only the branches
-# the received push created or updated, and only under the prefixes below, each as
-# +refs/heads/<branch>:refs/heads/<branch>. It never pushes main, tags or a deletion, and
-# never uses --mirror or --prune, so nothing on GitHub is ever deleted. The push runs in
-# a transient user unit, so the git client never waits for GitHub; it authenticates with
-# the account's own git credential helper.
+# The hook acts only in repositories that `enable` marked. It pushes every branch the
+# received push created or updated, except main, master and the repository's default
+# branch (its HEAD), each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes
+# tags or a deletion, and never uses --mirror or --prune, so nothing on GitHub is ever
+# deleted. The push runs in a transient user unit, so the git client never waits for
+# GitHub; it authenticates with the account's own git credential helper.
 set -euo pipefail
 
 repos=$HOME/.local/share/forgejo/data/forgejo-repositories
-prefixes=(feat fix chore docs refactor perf test build ci style revert)
 
 repo_dir() {
     [[ $1 =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "OWNER/REPO expected: $1" >&2; exit 2; }
@@ -38,12 +37,12 @@ disable)
 hook)
     dir=$(git rev-parse --absolute-git-dir)
     url=$(git -C "$dir" config crewship.github-push) || exit 0
+    default=$(git -C "$dir" symbolic-ref HEAD)
     refspecs=()
     while read -r _ new ref; do
-        [[ $new =~ ^0+$ ]] && continue
-        for prefix in "${prefixes[@]}"; do
-            [[ $ref == refs/heads/$prefix/* ]] && refspecs+=("+$ref:$ref") && break
-        done
+        [[ $new =~ ^0+$ || $ref != refs/heads/* || $ref == "$default" ]] && continue
+        [[ $ref == refs/heads/main || $ref == refs/heads/master ]] && continue
+        refspecs+=("+$ref:$ref")
     done
     [ "${#refspecs[@]}" -gt 0 ] || exit 0
     # The unit starts from the user manager's environment, not Forgejo's git environment.
