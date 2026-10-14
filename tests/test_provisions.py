@@ -474,6 +474,8 @@ def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_u
     calls = log.read_text()
     assert "old dump" in calls, calls
     assert "restart" not in calls and "new" not in calls, calls
+    # `forgejo dump` fails until this directory exists, and Forgejo makes it only with a repository.
+    assert (home / ".local/share/forgejo/data/forgejo-repositories").is_dir()
 
 
 @pytest.mark.parametrize(
