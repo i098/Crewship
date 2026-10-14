@@ -344,8 +344,13 @@ async function photoOf(form: FormData): Promise<PreparedImage | Response> {
 }
 if (cards) {
   const routes = cardRoutes(cards, picked);
-  Bun.serve({ hostname: "127.0.0.1", port: CARD_PORT, maxRequestBodySize: 4096, fetch: (req) =>
-    stopping ? new Response("stopping\n", { status: 503 }) : routes(req) });
+  // This port is public through the tunnel: no debug page, and no error line that names a token.
+  Bun.serve({ hostname: "127.0.0.1", port: CARD_PORT, maxRequestBodySize: 4096, development: false,
+    fetch: (req) => stopping ? new Response("stopping\n", { status: 503 }) : routes(req),
+    error(e) {
+      console.error(`fm-imessage: card page failed: ${brief(e).replace(/[A-Za-z0-9_-]{43}/g, "<token>")}`);
+      return new Response("error\n", { status: 500 });
+    } });
   console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
