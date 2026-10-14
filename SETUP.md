@@ -52,6 +52,7 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
 | `shared_postgres` | one dev database container per project, in the engine its compose file names |
 | `jj` | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
 | `fleet_browsers` | the browser ladder only |
+| `forgejo` | a self-hosted Forgejo git server on loopback for agent pushes ([Self-hosted Forgejo](docs/forgejo.md)) |
 | `tailscale` | the Tailscale daemon (login is manual); an option beside the gateway |
 | `koncreet` | the Koncreet host hardening toolkit, installed as root and never run ([Security](docs/security.md#host-hardening)) |
 | `desktop` | a loopback-only XFCE desktop over noVNC |

@@ -17,7 +17,7 @@ Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crew
 The options go to ./ship.sh dock, which writes the host config on the first run.
   update        install the newest release over this host, keeping its .local/ files
   --with NAMES  turn on these opt-in features, comma separated, and skip the checklist (--with none: none)
-                public_skills development docker chat gateway jj fdu fleet_guards shared_postgres fleet_browsers tailscale koncreet desktop board
+                public_skills development docker chat gateway jj fdu fleet_guards shared_postgres fleet_browsers forgejo tailscale koncreet desktop board
   -h, --help    print this help and exit'
 
 # Runs before any install step, so --help and a bad option change nothing.
