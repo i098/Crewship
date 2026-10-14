@@ -306,9 +306,9 @@ Bun.serve({
       } catch (e) {
         return new Response(`nothing queued: ${e instanceof Error ? e.message : String(e)}\n`, { status: 400 });
       }
-      // Like a proactive text, a card goes to his latest direct chat; only Photon can send one.
+      // Like a proactive text, a card goes to his latest direct chat. Only Photon can send an app bubble.
       const chat = proactiveRef;
-      if (!chat || !lineOf(chat)?.sendCard) return new Response("nothing queued: a card needs his latest direct chat on the photon transport\n", { status: 503 });
+      if (!chat || !lineOf(chat) || (card.app && !lineOf(chat)!.sendCard)) return new Response(`nothing queued: ${card.app ? "an app card needs his latest direct chat on the photon transport" : "no direct chat with him yet"}\n`, { status: 503 });
       return queue({ ...chat, card: cards.add(card, chat).token }, `card ${card.key}`);
     }
     // /image is a multipart form: the file `image` and the optional text `caption`, sent as bubbles after the photo.
@@ -410,20 +410,23 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (o.image) rmSync(o.image.path, { force: true });
 }
 
-// Sends a card's bubble, or edits it in place once it is out. An outage retries in order like a text. Any other
-// failure (the plan or the line refuses app cards, for example) moves the item to the dead-letter folder, so the
-// texts behind it go on, and files a note the first time. No error that names the token reaches a log.
+// Sends a card's bubble. A link card is its page's URL as a plain text, which iMessage shows as a link preview from
+// the page's Open Graph tags. An app card (`"app": true`) is a Spectrum app bubble, edited in place once it is out.
+// An outage retries in order like a text. Any other failure (the plan or the line refuses app cards, for example)
+// moves the item to the dead-letter folder, so the texts behind it go on, and files a note the first time. No error
+// that names the token reaches a log.
 async function deliverCard(o: Out, kind: Kind) {
   const card = cards?.read(o.card!);
   if (!card) throw Object.assign(new Error("the card's record is gone (expired)"), { permanent: true });
   const line = lineOf(o);
-  if (!line?.sendCard) throw Object.assign(new Error("a card needs the photon transport"), { permanent: true });
+  if (!line || (card.app && !line.sendCard)) throw Object.assign(new Error(`a card needs the ${card.app ? "photon" : o.line ?? "photon"} transport`), { permanent: true });
   if (card.sent && !card.session) {
     console.error(`fm-imessage: card ${card.key} has no card session, so its bubble stays as it was sent`);
     return;
   }
+  const url = `${CARD_URL}/c/${card.token}`;
   try {
-    const session = await line.sendCard(o.space, `${CARD_URL}/c/${card.token}`, cardLayout(card), card.live, card.session);
+    const session = card.app ? await line.sendCard!(o.space, url, cardLayout(card), card.live, card.session) : await line.send(o.space, url, undefined, o.guid && `${o.guid}-0`).then(() => undefined);
     cards!.save({ ...cards!.read(card.token)!, sent: true, session: session ?? card.session });
   } catch (e) {
     if (transient(e)) throw e;
@@ -439,7 +442,7 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
   const text = `[iMessage card pick] ${card.key}: ${letter(choice)}. ${card.options[choice]}`;
   if (!fileNote(`card-${card.key}-${card.expires}-pick`, text)) return false;
   remember("owner", text);
-  if (card.chat) put({ ...card.chat, card: card.token });
+  if (card.chat && card.app) put({ ...card.chat, card: card.token });
   return true;
 }
 

@@ -4,7 +4,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 
-type Base = { key: string; title: string; subtitle?: string; hours?: number; live?: boolean };
+type Base = { key: string; title: string; subtitle?: string; hours?: number; app?: boolean; live?: boolean };
 export type Card = Base & (
   | { kind: "choice"; options: string[] }
   | { kind: "bars"; bars: { label: string; value: number }[]; unit?: string }
@@ -64,8 +64,10 @@ function base(c: Record<string, unknown>): Base {
   if (c.subtitle !== undefined) b.subtitle = text(c.subtitle, 200, "subtitle");
   if (c.hours !== undefined && (!Number.isInteger(c.hours) || (c.hours as number) < 1 || (c.hours as number) > 168)) throw new Error("hours must be a whole number from 1 to 168");
   if (c.hours !== undefined) b.hours = c.hours as number;
-  if (c.live !== undefined && typeof c.live !== "boolean") throw new Error("live must be true or false");
-  if (c.live !== undefined) b.live = c.live as boolean;
+  for (const flag of ["app", "live"] as const) {
+    if (c[flag] !== undefined && typeof c[flag] !== "boolean") throw new Error(`${flag} must be true or false`);
+    if (c[flag] !== undefined) b[flag] = c[flag] as boolean;
+  }
   return b;
 }
 
@@ -157,8 +159,10 @@ li span{color:var(--muted);font-size:14px;display:block}
 table{border-collapse:collapse;width:100%;font-size:15px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
 .wide{overflow-x:auto}`;
 
-function page(status: number, title: string, body: string) {
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${STYLE}</style></head><body>${body}</body></html>`,
+// `description` makes the Open Graph tags that iMessage reads for the link preview of a card's URL.
+function page(status: number, title: string, body: string, description?: string) {
+  const og = description === undefined ? "" : `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}"><meta property="og:site_name" content="Firstmate"><meta property="og:type" content="website">`;
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${og}<style>${STYLE}</style></head><body>${body}</body></html>`,
     { status, headers: { ...HEADERS, "content-type": "text/html; charset=utf-8" } });
 }
 
@@ -180,7 +184,7 @@ export function cardPage(card: Stored, status = 200, notice = "") {
   } else {
     body = `<div class="wide"><table><thead><tr>${card.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${card.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
   }
-  return page(status, card.title, head + body);
+  return page(status, card.title, head + body, cardLayout(card).subcaption);
 }
 
 // The card-only listener: GET /c/<token> and POST /c/<token>/pick, nothing else. `pick` gets the card with its pick

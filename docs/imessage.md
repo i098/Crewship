@@ -288,7 +288,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
 | `fm-imessage --typing` | Shows the typing bubble, best effort. The next send removes it. A typing error is only logged, so the command exits 0. |
 | `fm-imessage --react '👍'` | Queues a tapback in the outbox, in order with the sends. The tapback goes on the text that was his latest when the command ran. |
-| `fm-imessage --card '<json>'` | Queues an app card. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
+| `fm-imessage --card '<json>'` | Queues a card: a link to a page with options to tap, a chart, a timeline, or a table. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
 | `fm-location` | Prints the location that the owner shares with the line in Find My, as JSON. |
 
@@ -315,14 +315,14 @@ Explicit threaded replies can use a configured fallback because the bridge canno
 
 ## Cards
 
-`fm-imessage --card` sends an app card: a bubble with a title and a status line. A tap opens a page that the bridge serves. The code is `apps/imessage/cards.ts`.
+`fm-imessage --card` sends a card: by default, the URL of the card's page as a plain text, which iMessage shows as a link preview with the title and a status line. A tap opens the page that the bridge serves. The code is `apps/imessage/cards.ts`.
 
 ```bash
 fm-imessage --card '{"kind":"choice","key":"layout","title":"Board layout?",
   "options":["Short list, one screen","Cards with a mock each","Table with all details"]}'
 ```
 
-Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `title` (up to 120 characters). Optional fields: `subtitle` (up to 200 characters), `hours` until the card expires (1 to 168, default 24), and `live` (`true` asks for the live view of the card app; not tested yet). The kinds:
+Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `title` (up to 120 characters). Optional fields: `subtitle` (up to 200 characters), `hours` until the card expires (1 to 168, default 24), `app` (`true` sends a Spectrum app bubble in place of the link; see below), and `live` (with `app`, `true` asks for the live view of the card app; not tested). The kinds:
 
 | Kind | Fields | The page shows |
 | --- | --- | --- |
@@ -333,8 +333,9 @@ Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `ti
 
 A bad card queues nothing, and the command names the first bad field.
 
-- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. Then the service edits the bubble in place to "Picked B: ...". The page shows the pick.
-- **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. It needs the Photon transport: it uses spectrum-ts `app(url, {layout})`, so the bubble opens in Photon's free "Spectrum" iMessage app. He installs that app once, from the App Store prompt in Messages. The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. An outage retries like a text. Any other error (for example, a plan that does not allow app cards) moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
+- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. The page shows the pick. An app bubble also changes in place to "Picked B: ...".
+- **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. A link card is a text, so it goes on any transport. The page has Open Graph tags (`og:title`, `og:description`), so the preview shows the title and the status line. The desk memory records `[card <key>: <title>]`, never the URL. An outage retries like a text.
+- **App bubbles.** With `"app": true`, the card uses spectrum-ts `app(url, {layout})` on the Photon transport, so the bubble opens in Photon's free "Spectrum" iMessage app. The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. Measured on the free shared line: Photon delivers the bubble with no error, but without the Spectrum app on his phone, iMessage shows only a plain balloon with the title and the status line run together, and no page. Photon's pricing lists iMessage mini apps for the Business plan only. Any error other than an outage moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
 - **Page listener.** A second listener serves the pages. It listens on `127.0.0.1:8767` (`FM_IMESSAGE_CARD_PORT`), apart from the private command port. It answers only `GET /c/<token>` and `POST /c/<token>/pick`; every other request gets `404`. The command port does not answer card paths. Cards are off until `FM_IMESSAGE_CARD_URL` is set: then `/card` queues cards, and the bubbles open `<FM_IMESSAGE_CARD_URL>/c/<token>`.
 - **Tokens.** Each card has its own token: 256 random bits, base64url. The token is the only key to the card: no login, no password. A wrong, unknown, or expired token gets the same `404` page. A choice card takes one pick: a second pick gets `409` and files no note. If the inbox refuses the note, the pick is undone and the page says to try again. The service never logs a token and never prints one; `fm-imessage` prints only the key. The pages send `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and a Content Security Policy that allows no script and no outside content.
 - **Records.** Each card is one file, `~/.local/state/fm-imessage/cards/<token>.json` (the directory is private to the account). The service deletes a card file one day after the card expires.
