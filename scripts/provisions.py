@@ -666,6 +666,25 @@ def rust_install(home, environment):
     return changed
 
 
+def fdu_install(home, environment):
+    """The latest fdu from its PyPI wheel (no Rust toolchain), installed by uv; an apply moves it to the newest."""
+    fdu = home / ".local/bin/fdu"
+
+    def version():
+        if not fdu.exists():
+            return ""
+        return subprocess.run(
+            [fdu, "--version"], env=environment, capture_output=True, text=True, check=True
+        ).stdout
+
+    before = version()
+    command(
+        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build", "fdu"],
+        {**environment, "UV_TOOL_BIN_DIR": str(home / ".local/bin")},
+    )
+    return version() != before
+
+
 # omp marketplace plugins, upgraded on every apply to the default branch: name -> repository.
 OMP_PLUGINS = {
     "ponytail": "DietrichGebert/ponytail",
@@ -709,6 +728,7 @@ def main():
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
     parser.add_argument("--development", action="store_true")
+    parser.add_argument("--fdu", action="store_true", help="also install fdu with uv (needs uv in --tools)")
     parser.add_argument(
         "--also",
         default="",
@@ -764,6 +784,8 @@ def main():
             changed = omp_plugins(home, environment) or changed
         if args.development:
             changed = rust_install(home, environment) or changed
+        if args.fdu:
+            changed = fdu_install(home, environment) or changed
         if args.resolved:
             # The record checks compare against, so a later upstream release cannot
             # make an unchanged install look wrong.

@@ -64,6 +64,9 @@
             "jj": {
               "type": "boolean"
             },
+            "fdu": {
+              "type": "boolean"
+            },
             "fleet_browsers": {
               "type": "boolean"
             },
@@ -71,6 +74,12 @@
               "type": "boolean"
             },
             "gateway": {
+              "type": "boolean"
+            },
+            "public_skills": {
+              "type": "boolean"
+            },
+            "koncreet": {
               "type": "boolean"
             },
             "forgejo": {
