@@ -72,6 +72,9 @@
             },
             "gateway": {
               "type": "boolean"
+            },
+            "public_skills": {
+              "type": "boolean"
             }
           },
           "required": [

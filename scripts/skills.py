@@ -10,6 +10,10 @@ and blueprint/rules/private/; without it, the items an earlier fill added are re
 from there. Each item is then copied into every root of its kind in KINDS. A
 manifest records the names this script installed, so an item the operator put
 there by hand is never replaced or removed. stdout is one JSON result.
+
+--public chooses the public items: yes installs them, no leaves them out, and auto
+installs them only on a host whose manifest already lists some. Public items an
+earlier run installed are never removed because of this choice.
 """
 
 import argparse
@@ -67,8 +71,8 @@ def remove(path):
         shutil.rmtree(path)
 
 
-def sync(wanted, base, mine, skipped):
-    """Copy each wanted item into base and remove the ones in mine that are no longer wanted."""
+def sync(wanted, base, mine, skipped, keep=()):
+    """Copy each wanted item into base and remove the ones in mine that are no longer wanted, except keep."""
     changed = False
     for name, source in wanted.items():
         target = base / name
@@ -84,20 +88,24 @@ def sync(wanted, base, mine, skipped):
                 base.mkdir(parents=True, exist_ok=True)
                 shutil.copy(source, target)
             changed = True
-    for name in mine - wanted.keys():
+    for name in mine - wanted.keys() - set(keep):
         remove(base / name)
         mine.discard(name)
         changed = True
     return changed
 
 
-def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules=()):
+def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules=(), public="yes"):
     record = home / MANIFEST
     blueprint = repo / "blueprint"
     owned = json.loads(record.read_text()) if record.is_file() else {}
     keys = [key for kind, (_, _, roots) in KINDS.items() for key in (f"{kind}/private", *roots)]
     owned = {key: set(owned.get(key, [])) for key in keys}
     before = json.dumps({r: sorted(n) for r, n in owned.items()}, sort_keys=True) + "\n"
+    publics = {kind: find(blueprint / kind / "public") for kind, (find, _, _) in KINDS.items()}
+    if public == "auto":  # a host that has public items keeps them current
+        has = any(owned[root] & publics[kind].keys() for kind, (_, _, roots) in KINDS.items() for root in roots)
+        public = "yes" if has else "no"
     changed, installed, skipped = False, {}, []
     try:
         private = fetch(private_source, private_ref, home / CACHE) if private_source else None
@@ -105,12 +113,14 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
             filled = find(private / folder) if private else {}
             changed |= sync(filled, blueprint / kind / "private", owned[f"{kind}/private"], skipped)
             # private last, so it wins a name clash
-            wanted = {**find(blueprint / kind / "public"), **find(blueprint / kind / "private")}
+            wanted = {**(publics[kind] if public == "yes" else {}), **find(blueprint / kind / "private")}
             if kind == "rules":
                 wanted = {name: path for name, path in wanted.items() if name not in skip_rules}
             installed[kind] = sorted(wanted)
+            # public items already on the host stay when public is off, except a skipped rule
+            keep = set() if public == "yes" else publics[kind].keys() - (set(skip_rules) if kind == "rules" else set())
             for root in roots:
-                changed |= sync(wanted, home / root, owned[root], skipped)
+                changed |= sync(wanted, home / root, owned[root], skipped, keep)
     finally:
         text = json.dumps({r: sorted(n) for r, n in owned.items()}, sort_keys=True) + "\n"
         if text != before:
@@ -125,6 +135,7 @@ if __name__ == "__main__":
     parser.add_argument("--private-source")
     parser.add_argument("--private-ref", default="HEAD")
     parser.add_argument("--skip-rule", action="append", default=[])
+    parser.add_argument("--public", choices=("yes", "no", "auto"), default="yes")
     args = parser.parse_args()
     home = args.home.resolve(strict=True)
-    print(json.dumps(install(home, REPO, args.private_source, args.private_ref, args.skip_rule)))
+    print(json.dumps(install(home, REPO, args.private_source, args.private_ref, args.skip_rule, args.public)))
