@@ -1,0 +1,27 @@
+---
+# Self-hosted Forgejo (profiles.forgejo, tasks/forgejo.yml, docs/forgejo.md). A user
+# service of the target account on 127.0.0.1 only; tailscale serve publishes it to the
+# tailnet over HTTPS when Tailscale runs with HTTPS certificates enabled; else apply
+# keeps the installed tailnet ROOT_URL, and uses the loopback URL only on a first
+# install. Nothing here is a secret: the generated
+# secrets, the admin password and the no-mistakes token live in crewship_forgejo_conf_dir.
+crewship_forgejo_enabled: "{{ crewship_cfg.profiles.forgejo | default(false) | bool }}"
+# The loopback port, and the tailnet HTTPS port tailscale serve publishes.
+crewship_forgejo_port: 20250
+# The release key's primary fingerprint; a release signed by any other key is refused.
+crewship_forgejo_key_fingerprint: EB114F5E6C0DC2BCDD183550A4B61A2DC5923710
+crewship_forgejo_version: "{{ crewship_latest.forgejo.version }}"
+crewship_forgejo_asset: "{{ crewship_latest.forgejo.assets[crewship_platform] }}"
+crewship_forgejo_bin: "{{ crewship_share_dir }}/forgejo/{{ crewship_forgejo_version }}/forgejo"
+crewship_forgejo_work: "{{ crewship_cfg.home }}/.local/share/forgejo"
+crewship_forgejo_conf_dir: "{{ crewship_cfg.home }}/.config/crewship/forgejo"
+crewship_forgejo_cli: >-
+  {{ [crewship_forgejo_bin, '--config', crewship_forgejo_conf_dir ~ '/app.ini',
+      '--work-path', crewship_forgejo_work] }}
+crewship_forgejo_admin: "{{ crewship_cfg.user }}"
+# Nightly `forgejo dump`: the data disk when crewship.data_dir is set; the newest
+# crewship_forgejo_dump_keep dumps stay.
+crewship_forgejo_dump_dir: >-
+  {{ (crewship_data_dir ~ '/forgejo-dumps') if crewship_data_dir
+     else (crewship_forgejo_work ~ '/dumps') }}
+crewship_forgejo_dump_keep: 7

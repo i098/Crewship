@@ -56,6 +56,7 @@ crewship:
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: false           # Concord (Discord) and slk (Slack) terminal clients
     gateway: false        # Password gateway + Cloudflare Quick Tunnel
+    forgejo: false        # Self-hosted Forgejo on 127.0.0.1:20250 (tailnet HTTPS with Tailscale)
   gateway:
     allow_hours: 24       # How long an address stays allowed after the password
   herdr:
@@ -155,6 +156,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `chat` | off | The latest [Concord](https://github.com/chojs23/concord) (Discord) and [slk](https://github.com/gammons/slk) (Slack) terminal clients, their shared libraries, and a first-write config for each. Logins stay manual. See [Chat clients](chat.md). |
 | `gateway` | off | The [password gateway](gateway.md) and the latest `cloudflared`: one password opens the host's loopback web pages over a Cloudflare Quick Tunnel. `crewship.gateway.allow_hours` (default 24) sets how long an address stays allowed. `./ship.sh dock` writes `true` into a new host config; the installer's `--no-gateway` writes `false`. `blueprint/config/default.yml` has `false`, so a host config from before the gateway, without the key, keeps it off on update. To turn it on there, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`. |
 | `koncreet` | off for a new host; an older host config without the key keeps it | The [Koncreet](security.md#host-hardening) host hardening toolkit, installed as root and never run. See [Host hardening](security.md#host-hardening). |
+| `forgejo` | off | [Self-hosted Forgejo](forgejo.md): the latest release on `127.0.0.1:20250` with SQLite, published to the tailnet over HTTPS when Tailscale runs with HTTPS certificates, an admin account with a generated password, a nightly `forgejo dump`, and an opt-in push of feature branches to GitHub. With `agents`, also the no-mistakes Forgejo base URL and token; `forgejo-axi` comes with every `agents` host. |
 | `tailscale` | off | Tailscale daemon only, an option beside the gateway. Authentication is manual; see [Security](security.md#remote-access). |
 | `desktop` | off | Loopback-only XFCE + TigerVNC + noVNC operator desktop on `127.0.0.1:6080`, and the Google Chrome apt package. Needs an operator-created VNC password; see [Desktop access](recovery.md#desktop-access). |
 

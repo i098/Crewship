@@ -1,0 +1,472 @@
+---
+# Self-hosted Forgejo (profiles.forgejo, docs/forgejo.md): the latest release as a user
+# service of the target account on 127.0.0.1:{{ crewship_forgejo_port }} with SQLite, published to the
+# tailnet with `tailscale serve` when Tailscale runs with HTTPS certificates enabled
+# (else it keeps an installed tailnet URL or uses the loopback URL), an admin account
+# with a generated password, a nightly `forgejo dump`, and a post-receive hook that pushes feature branches to
+# GitHub for the repositories that opt in (forgejo-github-push). With the agents
+# profile it also gives the no-mistakes daemon the Forgejo base URL and a token
+# (forgejo-axi itself is installed by tasks/tools.yml). Nothing here moves a
+# repository to Forgejo.
+#
+#   * the binary is installed only after its SHA-256 and its signature by the Forgejo
+#     release key both match; a new release lands in its own directory
+#   * secrets, the admin password and the token are written once, mode 600, under
+#     crewship_forgejo_conf_dir, and are never printed or rewritten; each nightly dump
+#     keeps a copy of the secrets next to it
+#   * before a new release first starts, the installed release runs its dump unit once;
+#     if that dump fails, the apply stops and Forgejo stays as it is
+#   * turning the profile off leaves the service, its data and its secrets as they are
+
+- name: Check for the resolved Forgejo release
+  ansible.builtin.stat:
+    path: "{{ crewship_forgejo_bin }}"
+    get_checksum: false
+  register: crewship_forgejo_installed
+
+- name: Install the resolved Forgejo release
+  when:
+    - not crewship_forgejo_installed.stat.exists
+    - not ansible_check_mode
+  block:
+    - name: Create the Forgejo staging directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: crewship-forgejo-
+      register: crewship_forgejo_stage
+
+    - name: Download Forgejo against its published SHA-256
+      ansible.builtin.get_url:
+        url: "{{ crewship_forgejo_asset.url }}"
+        dest: "{{ crewship_forgejo_stage.path }}/forgejo"
+        checksum: "sha256:{{ crewship_forgejo_asset.sha256 }}"
+        mode: "0755"
+
+    - name: Download the release signature and the Forgejo release key
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ crewship_forgejo_stage.path }}/{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - url: "{{ crewship_forgejo_asset.signature }}"
+          dest: forgejo.asc
+        - url: "https://keys.openpgp.org/vks/v1/by-fingerprint/{{ crewship_forgejo_key_fingerprint }}"
+          dest: release-key.asc
+
+    # gpgv starts no agent. VALIDSIG ends with the primary key fingerprint, so a
+    # signature by any other key fails.
+    - name: Verify the signature against the Forgejo release key
+      ansible.builtin.shell: |
+        set -eu
+        GNUPGHOME="$PWD" gpg --batch --dearmor < release-key.asc > release-key.gpg
+        gpgv --status-fd 1 --keyring ./release-key.gpg forgejo.asc forgejo 2>/dev/null
+      args:
+        chdir: "{{ crewship_forgejo_stage.path }}"
+        executable: /bin/bash
+      register: crewship_forgejo_signature
+      changed_when: false
+      failed_when: >-
+        crewship_forgejo_signature.rc != 0
+        or crewship_forgejo_signature.stdout is not search(
+             '^[^ ]+ VALIDSIG .* ' ~ crewship_forgejo_key_fingerprint ~ '$', multiline=True)
+
+    - name: Create the Forgejo release directory
+      ansible.builtin.file:
+        path: "{{ crewship_forgejo_bin | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Install the verified Forgejo binary
+      ansible.builtin.copy:
+        src: "{{ crewship_forgejo_stage.path }}/forgejo"
+        dest: "{{ crewship_forgejo_bin }}"
+        mode: "0755"
+        remote_src: true
+  always:
+    - name: Remove the Forgejo staging directory
+      ansible.builtin.file:
+        path: "{{ crewship_forgejo_stage.path }}"
+        state: absent
+      when: crewship_forgejo_stage.path is defined
+
+- name: Ensure the Forgejo directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ crewship_forgejo_work }}", mode: "0700" }
+    # `forgejo dump` fails while this directory is missing, and Forgejo creates it only
+    # with the first repository.
+    - { path: "{{ crewship_forgejo_work }}/data/forgejo-repositories", mode: "0700" }
+    - { path: "{{ crewship_forgejo_conf_dir }}", mode: "0700" }
+    - { path: "{{ crewship_local_bin }}", mode: "0755" }
+    - { path: "{{ crewship_user_units }}/default.target.wants", mode: "0755" }
+    - { path: "{{ crewship_user_units }}/timers.target.wants", mode: "0755" }
+
+# The global post-receive hook calls it; see docs/forgejo.md#github-push.
+- name: Install the Forgejo-to-GitHub push command
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/forgejo-github-push"
+    dest: "{{ crewship_local_bin }}/forgejo-github-push"
+    mode: "0755"
+    remote_src: true
+
+# The data disk's root directory can be root-owned.
+- name: Ensure the Forgejo dump directory
+  ansible.builtin.file:
+    path: "{{ crewship_forgejo_dump_dir }}"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0700"
+  become: true
+  become_user: root
+
+# The app.ini *_URI keys read these, so app.ini itself holds no secret.
+- name: Generate the Forgejo internal secrets once
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - umask 077 && "$1" generate secret "$2" > "$3.new" && mv "$3.new" "$3"
+      - bash
+      - "{{ crewship_forgejo_bin }}"
+      - "{{ item.kind }}"
+      - "{{ crewship_forgejo_conf_dir }}/{{ item.file }}"
+    creates: "{{ crewship_forgejo_conf_dir }}/{{ item.file }}"
+  loop:
+    - { kind: SECRET_KEY, file: secret-key }
+    - { kind: INTERNAL_TOKEN, file: internal-token }
+    - { kind: JWT_SECRET, file: jwt-secret }
+  when: not ansible_check_mode
+
+- name: Read the Tailscale state
+  ansible.builtin.command:
+    argv: [tailscale, status, --json]
+  register: crewship_forgejo_tailscale
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# tailscale serve needs HTTPS certificates; without them it exits or waits for an admin.
+- name: Name the tailnet host when Tailscale runs with HTTPS certificates
+  ansible.builtin.set_fact:
+    crewship_forgejo_tailnet_host: >-
+      {{ ((crewship_forgejo_tailscale.stdout | from_json).Self.DNSName | regex_replace('[.]$', ''))
+         if (crewship_forgejo_tailscale.rc | default(1)) == 0
+            and (crewship_forgejo_tailscale.stdout | from_json).BackendState == 'Running'
+            and (crewship_forgejo_tailscale.stdout | from_json).CertDomains | default([], true) | length > 0
+         else '' }}
+
+- name: Publish Forgejo to the tailnet over HTTPS
+  when: crewship_forgejo_tailnet_host | length > 0
+  become: true
+  become_user: root
+  vars:
+    crewship_forgejo_proxy: {"/": {"Proxy": "http://127.0.0.1:{{ crewship_forgejo_port }}"}}
+    crewship_forgejo_served_by: >-
+      {{ (((crewship_forgejo_serve.stdout | from_json).Web | default({}, true))
+          [crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port] | default({}))
+         .Handlers | default({}) }}
+  block:
+    - name: Read the tailscale serve configuration
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_forgejo_serve
+      changed_when: false
+      check_mode: false
+
+    # Never takes over a port that tailscale serve already gives to something else.
+    - name: Refuse a tailnet port that serves something else
+      ansible.builtin.assert:
+        that: crewship_forgejo_served_by in [{}, crewship_forgejo_proxy]
+        fail_msg: >-
+          tailscale serve already uses HTTPS port {{ crewship_forgejo_port }} for something
+          else; free it (tailscale serve --https={{ crewship_forgejo_port }} off) or set
+          crewship_forgejo_port.
+        quiet: true
+
+    # Only the configuration read below decides whether Forgejo is published.
+    - name: Ask tailscale serve to publish Forgejo
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "60"
+          - tailscale
+          - serve
+          - --bg
+          - "--https={{ crewship_forgejo_port }}"
+          - "http://127.0.0.1:{{ crewship_forgejo_port }}"
+      register: crewship_forgejo_publish
+      changed_when: false
+      failed_when: false
+      when:
+        - crewship_forgejo_served_by == {}
+        - not ansible_check_mode
+
+    - name: Confirm that the tailnet serves Forgejo
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_forgejo_serve
+      changed_when:
+        - crewship_forgejo_publish is not skipped
+        - crewship_forgejo_served_by == crewship_forgejo_proxy
+      check_mode: false
+
+    - name: Record whether the tailnet serves Forgejo
+      ansible.builtin.set_fact:
+        crewship_forgejo_published: "{{ crewship_forgejo_served_by == crewship_forgejo_proxy }}"
+
+- name: Read the installed Forgejo root URL
+  ansible.builtin.command:
+    argv: [sed, -n, 's/^ROOT_URL = //p', "{{ crewship_forgejo_conf_dir }}/app.ini"]
+  register: crewship_forgejo_installed_url
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# While Tailscale is down, an installed tailnet URL stays, so clone URLs and the
+# no-mistakes base URL do not follow a transient outage.
+- name: Choose the Forgejo root URL
+  vars:
+    crewship_forgejo_kept_url: "{{ crewship_forgejo_installed_url.stdout }}"
+  ansible.builtin.set_fact:
+    crewship_forgejo_root_url: >-
+      {{ ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
+         if crewship_forgejo_published | default(false) | bool
+         else crewship_forgejo_kept_url
+           if crewship_forgejo_kept_url | length > 0
+              and crewship_forgejo_kept_url is not match('http://127[.]0[.]0[.]1:')
+         else ('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/') }}
+
+- name: Read the Forgejo release the installed unit runs
+  ansible.builtin.command:
+    argv: [sed, -n, 's/^ExecStart=\([^ ]*\).*/\1/p', "{{ crewship_user_units }}/forgejo.service"]
+  register: crewship_forgejo_previous
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# A new release migrates the database on its first start, and an older release cannot
+# open the result, so the installed dump unit, which still runs the installed release,
+# dumps first.
+- name: Back up Forgejo with the installed release before the upgrade
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+    - crewship_forgejo_previous.stdout not in ['', crewship_forgejo_bin]
+  block:
+    - name: Dump Forgejo with the installed release
+      ansible.builtin.command:
+        argv: [systemctl, --user, start, forgejo-dump.service]
+      environment: "{{ crewship_user_systemd_env }}"
+  rescue:
+    - name: Stop the upgrade when the backup fails
+      ansible.builtin.fail:
+        msg: >-
+          The dump with the installed Forgejo release {{ crewship_forgejo_previous.stdout }}
+          into {{ crewship_forgejo_dump_dir }} failed, so Forgejo was not upgraded to
+          {{ crewship_forgejo_version }} and still uses that release. See
+          `journalctl --user -u forgejo-dump.service`, fix the dump and apply again.
+
+- name: Render the Forgejo configuration
+  ansible.builtin.template:
+    src: forgejo-app.ini.j2
+    dest: "{{ crewship_forgejo_conf_dir }}/app.ini"
+    mode: "0600"
+  register: crewship_forgejo_config
+
+- name: Render the Forgejo units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop: [forgejo.service, forgejo-dump.service]
+  register: crewship_forgejo_units
+  notify: reload user systemd
+
+- name: Write the Forgejo dump timer
+  ansible.builtin.copy:
+    content: |
+      # Managed by Crewship (docs/forgejo.md#backups).
+      [Unit]
+      Description=Forgejo nightly dump (Crewship managed)
+
+      [Timer]
+      OnCalendar=*-*-* 03:30:00
+      RandomizedDelaySec=30min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+    dest: "{{ crewship_user_units }}/forgejo-dump.timer"
+    mode: "0644"
+  notify: reload user systemd
+
+- name: Statically enable Forgejo and its dump timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/{{ item.unit }}"
+    dest: "{{ crewship_user_units }}/{{ item.wants }}/{{ item.unit }}"
+    state: link
+    force: true
+    follow: false
+  loop:
+    - { unit: forgejo.service, wants: default.target.wants }
+    - { unit: forgejo-dump.timer, wants: timers.target.wants }
+
+- name: Check whether the running Forgejo runs an older binary
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - >-
+        pid="$(systemctl --user show --property MainPID --value forgejo.service)";
+        if [ "${pid:-0}" != 0 ] && [ "$(readlink -f "/proc/$pid/exe")" != "$(readlink -f "$1")" ];
+        then echo stale; fi
+      - bash
+      - "{{ crewship_forgejo_bin }}"
+  environment: "{{ crewship_user_systemd_env }}"
+  register: crewship_forgejo_running
+  changed_when: false
+  failed_when: false
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+
+# The admin CLI below runs the resolved release, so the service must run it too. The
+# git hooks need no regeneration: every repository uses the global core.hooksPath
+# (<work>/data/home/hooks), and each start rewrites those hooks with the running binary.
+- name: Restart Forgejo on a new release or configuration
+  ansible.builtin.systemd_service:
+    scope: user
+    name: forgejo.service
+    state: restarted
+    daemon_reload: true
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+    - >-
+      crewship_forgejo_config is changed or crewship_forgejo_units is changed
+      or crewship_forgejo_running.stdout == 'stale'
+
+- name: Start Forgejo and its dump timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  environment: "{{ crewship_user_systemd_env }}"
+  loop: [forgejo.service, forgejo-dump.timer]
+  # A unit that check mode only previewed does not exist yet.
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+
+# These steps need the running service: Forgejo creates its database and its global
+# hook directory on its first start.
+- name: Finish the running Forgejo - push hook, admin account, no-mistakes token
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+  block:
+    - name: Wait for Forgejo to answer
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ crewship_forgejo_port }}/api/healthz"
+      register: crewship_forgejo_health
+      until: crewship_forgejo_health.status == 200
+      retries: 30
+      delay: 2
+
+    # Forgejo's global hook directory (core.hooksPath) runs every executable in
+    # post-receive.d after each push to any repository.
+    - name: Install the GitHub push hook for every Forgejo repository
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          # Managed by Crewship (docs/forgejo.md#github-push).
+          exec {{ (crewship_local_bin ~ '/forgejo-github-push') | quote }} hook
+        dest: "{{ crewship_forgejo_work }}/data/home/hooks/post-receive.d/crewship-github-push"
+        mode: "0755"
+
+    - name: List the Forgejo admin accounts
+      ansible.builtin.command:
+        argv: "{{ crewship_forgejo_cli + ['admin', 'user', 'list', '--admin'] }}"
+      register: crewship_forgejo_admins
+      changed_when: false
+
+    # --random-password prints the password once; it goes only to the mode-600 file.
+    - name: Create the Forgejo admin account with a generated password
+      vars:
+        script: |
+          set -eu
+          umask 077
+          out="$(mktemp)"
+          trap 'rm -f "$out"' EXIT
+          "$@" admin user create --admin --username "$USERNAME" --email "$USERNAME@localhost" \
+            --random-password --random-password-length 32 --must-change-password=false > "$out"
+          sed -n "s/^generated random password is '\(.*\)'$/\1/p" "$out" > admin-password.new
+          test -s admin-password.new
+          mv admin-password.new admin-password
+      ansible.builtin.command:
+        argv: "{{ ['/bin/bash', '-c', script, 'bash'] + crewship_forgejo_cli }}"
+        chdir: "{{ crewship_forgejo_conf_dir }}"
+      environment:
+        USERNAME: "{{ crewship_forgejo_admin }}"
+      when: crewship_forgejo_admins.stdout is not search('^[0-9]+[ \t]+' ~ crewship_forgejo_admin ~ '[ \t]', multiline=True)
+      no_log: true
+
+    - name: Check the admin password file
+      ansible.builtin.stat:
+        path: "{{ crewship_forgejo_conf_dir }}/admin-password"
+        get_checksum: false
+      register: crewship_forgejo_password
+
+    - name: Refuse an admin account without its password file
+      ansible.builtin.assert:
+        that: crewship_forgejo_password.stat.exists
+        fail_msg: >-
+          The Forgejo admin account {{ crewship_forgejo_admin }} exists, but
+          {{ crewship_forgejo_conf_dir }}/admin-password does not. Set a new password with
+          `forgejo admin user change-password` and save it there (mode 600); see docs/forgejo.md.
+        quiet: true
+
+    - name: Create the no-mistakes Forgejo token once
+      vars:
+        script: |
+          set -eu
+          umask 077
+          token="$("$@" admin user generate-access-token --raw --username "$USERNAME" \
+            --token-name crewship-no-mistakes \
+            --scopes write:repository,write:issue,read:user,read:organization)"
+          printf 'FORGEJO_TOKEN=%s\n' "$token" > no-mistakes.env.new
+          mv no-mistakes.env.new no-mistakes.env
+      ansible.builtin.command:
+        argv: "{{ ['/bin/bash', '-c', script, 'bash'] + crewship_forgejo_cli }}"
+        chdir: "{{ crewship_forgejo_conf_dir }}"
+        creates: "{{ crewship_forgejo_conf_dir }}/no-mistakes.env"
+      environment:
+        USERNAME: "{{ crewship_forgejo_admin }}"
+      when: crewship_cfg.profiles.agents | bool
+      no_log: true
+
+# --- no-mistakes Forgejo forge profile (docs/forgejo.md#no-mistakes) ----------
+# no-mistakes reads the Forgejo base URL and token from its daemon environment and
+# finds forgejo-axi on the daemon PATH (~/.local/bin). The drop-in applies to every
+# no-mistakes-daemon-<hash>.service; a running daemon picks it up on its next restart,
+# which is reported, never performed.
+- name: Give the no-mistakes daemon the Forgejo base URL and token
+  ansible.builtin.copy:
+    content: |
+      # Managed by Crewship (docs/forgejo.md#no-mistakes).
+      [Service]
+      Environment="FORGEJO_BASE_URL={{ crewship_forgejo_root_url | regex_replace('/$', '') }}"
+      EnvironmentFile=-{{ crewship_forgejo_conf_dir }}/no-mistakes.env
+    dest: "{{ crewship_user_units }}/no-mistakes-daemon-.service.d/forgejo.conf"
+    mode: "0644"
+  when: crewship_cfg.profiles.agents | bool
+  notify:
+    - reload user systemd
+    - no-mistakes daemon restart required

@@ -1,15 +1,21 @@
+import configparser
+import getpass
+import grp
 import hashlib
 import importlib.util
 import io
 import json
+import os
 import runpy
 import ssl
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 SPEC = importlib.util.spec_from_file_location(
     "provisions", Path(__file__).parents[1] / "scripts/provisions.py"
@@ -230,6 +236,27 @@ RELEASES = {
 }
 
 
+def codeberg(url, unverified):
+    """Fake Forgejo's Codeberg releases and each binary's .sha256 file.
+
+    The newest is v9.9.9, listed after an older LTS point release that was published later.
+    """
+    if url.endswith(".sha256"):
+        checksum = "" if unverified == "forgejo" else "9" * 64
+        return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}\n".encode())
+    assert url == installer.FORGEJO_RELEASES, url
+
+    def release(version):
+        assets = [
+            {"name": name + suffix, "browser_download_url": f"https://codeberg.org/{name}{suffix}"}
+            for name in (f"forgejo-{version}-linux-amd64", f"forgejo-{version}-linux-arm64")
+            for suffix in ("", ".sha256", ".asc")
+        ]
+        return {"tag_name": f"v{version}", "assets": assets}
+
+    return Download(json.dumps([release("9.0.10"), release("9.9.9")]).encode())
+
+
 def upstream(monkeypatch, unverified=None, seen=None):
     """Fake GitHub, nodejs.org, rustup, npm and PyPI; `unverified` publishes no SHA-256 for that source.
 
@@ -287,6 +314,8 @@ def upstream(monkeypatch, unverified=None, seen=None):
         elif url.startswith("https://github.com/pyrefly-") and url.endswith(".sha256"):
             checksum = "" if unverified == "facebook/pyrefly" else "f" * 64
             return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
+        elif url.startswith("https://codeberg.org/"):
+            return codeberg(url, unverified)
         elif url == "https://pypi.org/pypi/psutil/json":
             files = [] if unverified == "psutil" else [{"digests": {"sha256": "e" * 64}}]
             body = {"info": {"version": "9.9.9"}, "urls": files}
@@ -364,6 +393,137 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
     assert latest["psutil"] == {"version": "9.9.9", "sha256": ["e" * 64]}
     for tool in installer.NPM_LATEST:
         assert latest[tool] == "18.9.9"
+
+
+def test_forgejo_resolves_from_codeberg_with_its_checksum_file_and_signature(monkeypatch):
+    upstream(monkeypatch)
+    forgejo = installer.resolve_latest("linux-x86_64", {"forgejo"})["forgejo"]
+    asset = forgejo["assets"]["linux-x86_64"]
+    assert forgejo["version"] == "9.9.9"
+    assert asset["url"] == "https://codeberg.org/forgejo-9.9.9-linux-amd64"
+    assert (asset["sha256"], asset["format"]) == ("9" * 64, "file")
+    # Ansible checks this signature against the Forgejo release key before installing.
+    assert asset["signature"] == "https://codeberg.org/forgejo-9.9.9-linux-amd64.asc"
+
+
+def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
+    upstream(monkeypatch, unverified="forgejo")
+    with pytest.raises(ValueError, match="refusing an unverified binary"):
+        installer.resolve_latest("linux-x86_64", {"forgejo"})
+
+
+def forgejo_host(tmp_path):
+    """A home with the Forgejo secrets, units directories and a stopped Tailscale."""
+    home, stubs = tmp_path / "home", tmp_path / "bin"
+    conf, units = home / ".config/crewship/forgejo", home / ".config/systemd/user"
+    for directory in (conf, units, stubs):
+        directory.mkdir(parents=True)
+    for name in ("secret-key", "internal-token", "jwt-secret"):
+        (conf / name).write_text("s3cret-value\n")
+    (stubs / "tailscale").write_text("#!/bin/sh\nexit 1\n")
+    (stubs / "tailscale").chmod(0o755)
+    return home, conf, units, stubs
+
+
+def apply_forgejo(tmp_path, crewship, **extra):
+    """Run tasks/forgejo.yml with Forgejo 2.0.0 and tmp_path/bin first on PATH."""
+    (tmp_path / "templates").symlink_to(Path(__file__).parents[1] / "blueprint/ansible/templates")
+    ansible = Path(__file__).parents[1] / "blueprint/ansible"
+    playbook = tmp_path / "forgejo.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars_files": [str(f) for f in sorted((ansible / "group_vars/all").glob("*.yml"))],
+        "tasks": [{"ansible.builtin.import_tasks": str(ansible / "tasks/forgejo.yml")}],
+        "handlers": [{"name": name, "ansible.builtin.debug": {"msg": name}}
+                     for name in ("reload user systemd", "no-mistakes daemon restart required")],
+    }]))
+    variables = {
+        "crewship_repo": str(ansible.parents[1]), "crewship_blueprint": str(ansible.parent),
+        "ansible_become": False,
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_platform": "linux-x86_64",
+        "crewship_local_bin": str(tmp_path / "bin"),
+        "crewship_user_uid": os.getuid(),
+        "crewship_latest": {"forgejo": {"version": "2.0.0", "assets": {}}},
+        "crewship": {"user": getpass.getuser(), "home": str(tmp_path / "home"), **crewship},
+        **extra,
+    }
+    return subprocess.run(
+        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
+         "--extra-vars", json.dumps(variables)],
+        cwd=tmp_path, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"},
+    )
+
+
+def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
+    home, conf, units, stubs = forgejo_host(tmp_path)
+    log = tmp_path / "calls"
+    old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
+    new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    for directory in (old.parent, new.parent):
+        directory.mkdir(parents=True)
+    installed = {"forgejo.service": f"[Service]\nExecStart={old} web\n",
+                 "forgejo-dump.service": f"[Service]\nExecStart={old} dump\n"}
+    for name, text in installed.items():
+        (units / name).write_text(text)
+    # The service is stopped; systemctl start runs the installed dump unit's command.
+    for path, body in (
+        (old, f'echo "old $*" >> {log}; exit 1'),
+        (new, f'echo "new $*" >> {log}'),
+        (stubs / "systemctl", f'echo "systemctl $*" >> {log}\n'
+         f'[ "$*" = "--user start forgejo-dump.service" ] || exit 0\n'
+         f'exec $(sed -n "s/^ExecStart=//p" {units}/forgejo-dump.service)'),
+    ):
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+    result = apply_forgejo(tmp_path, {"start_services": True, "profiles": {"forgejo": True}})
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "rescued=1" in result.stdout, output
+    assert "s3cret-value" not in output
+    # The old release dumped; Forgejo keeps it: no new units, configuration or restart.
+    assert {name: (units / name).read_text() for name in installed} == installed
+    assert not (conf / "app.ini").exists()
+    calls = log.read_text()
+    assert "old dump" in calls, calls
+    assert "restart" not in calls and "new" not in calls, calls
+    # `forgejo dump` fails until this directory exists, and Forgejo makes it only with a repository.
+    assert (home / ".local/share/forgejo/data/forgejo-repositories").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("installed", "port", "expected"),
+    [
+        # Tailscale is down: the installed tailnet URL stays.
+        ("https://host.tail.ts.net:20250/", 20250, "https://host.tail.ts.net:20250/"),
+        # A first install without Tailscale uses the loopback URL.
+        (None, 20250, "http://127.0.0.1:20250/"),
+        # A loopback URL follows a new port.
+        ("http://127.0.0.1:20250/", 20251, "http://127.0.0.1:20251/"),
+    ],
+)
+def test_forgejo_root_url_without_tailscale(tmp_path, installed, port, expected):
+    home, conf, units, stubs = forgejo_host(tmp_path)
+    binary = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    (units / "no-mistakes-daemon-.service.d").mkdir()
+    if installed:
+        (conf / "app.ini").write_text(f"[server]\nROOT_URL = {installed}\n")
+    result = apply_forgejo(
+        tmp_path,
+        {"start_services": False, "profiles": {"forgejo": True, "agents": True}},
+        crewship_forgejo_port=port,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    app = configparser.ConfigParser(interpolation=None)
+    app.read_string("[root]\n" + (conf / "app.ini").read_text())
+    assert app["server"]["ROOT_URL"] == expected
+    dropin = configparser.ConfigParser(interpolation=None)
+    dropin.read_string((units / "no-mistakes-daemon-.service.d/forgejo.conf").read_text())
+    assert dropin["Service"]["Environment"] == f'"FORGEJO_BASE_URL={expected.rstrip("/")}"'
 
 
 @pytest.mark.parametrize(
@@ -534,11 +694,9 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
     [
         (["--tools", "herdr,node"], {"herdr", "node"}),
         (["--tools", "uv", "--development"], {"uv", "rustup-init"}),
-        (
-            ["--tools", "uv", "--npm"],
-            {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST},
-        ),
+        (["--tools", "uv", "--npm"], {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST}),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
+        (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),
         (["--tools", "sentrux"], {"sentrux", "sentrux-grammars"}),
         (["--tools", "pyrefly"], {"pyrefly"}),
         (["--tools", "jj"], {"jj"}),

@@ -221,6 +221,17 @@
       when: crewship_cfg.profiles.tailscale | bool
       tags: [tailscale]
 
+    # After Tailscale, so a new host can publish Forgejo with tailscale serve.
+    - name: Optional self-hosted Forgejo, its nightly dump and the no-mistakes forge profile
+      ansible.builtin.import_tasks: tasks/forgejo.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_forgejo_enabled | bool
+      tags: [forgejo]
+
     - name: Optional `ssh mac` key and Host entry for an operator Mac
       ansible.builtin.import_tasks: tasks/mac_ssh.yml
       become: "{{ crewship_become_target | bool }}"
