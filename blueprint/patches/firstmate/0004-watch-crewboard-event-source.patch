@@ -142,7 +142,7 @@ index 00000000..fde7d4c9
 +  local kind a b c d
 +  IFS=$'\t' read -r kind a b c d < <(printf '%s\n' "$1" | jq -r '
 +    if has("boot") then ["boot", .boot, .seq]
-+    elif has("seq") and has("topic") then ["msg", .seq, .topic, (.from // "unknown"), (.body | tostring | .[0:200])]
++    elif has("seq") and has("topic") then ["msg", .seq, .topic, (.from // "" | if . == "" then "unknown" else . end), (.body | tostring | .[0:200])]
 +    else ["other"] end | @tsv' 2>/dev/null)
 +  case "$kind" in
 +    boot) on_boot "$a" "$b" ;;
