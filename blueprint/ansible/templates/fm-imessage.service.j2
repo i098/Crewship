@@ -25,6 +25,11 @@ Environment="FM_IMESSAGE_TRANSPORTS={{ imessage_transports | join(' ') }}"
 Environment="FM_BLUEBUBBLES_RELAYS={% for relay in crewship_cfg.imessage.bluebubbles.relays %}{{ relay.url }},{{ relay.password_env | default('BLUEBUBBLES_PASSWORD') }}{{ '' if loop.last else ' ' }}{% endfor %}"
 Environment="FM_BLUEBUBBLES_WEBHOOK={{ crewship_cfg.imessage.bluebubbles.webhook_listen }}"
 {% endif %}
+{% if crewship_cfg.imessage.cards is defined %}
+# App cards (docs/imessage.md#cards): fm-cards-tunnel.service carries this public address to the card-only port.
+Environment="FM_IMESSAGE_CARD_URL={{ crewship_cfg.imessage.cards.url }}"
+Environment="FM_IMESSAGE_CARD_PORT={{ crewship_imessage_card_port }}"
+{% endif %}
 EnvironmentFile=%h/super.env
 # ~/.local/state/fm-imessage: the latest text, attachments, the outbox, the downloads to retry, the desk's memory
 # and its empty cwd.

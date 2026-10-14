@@ -311,6 +311,17 @@
       when: crewship_manage_services | bool
       listen: restart fm-imessage
 
+    - name: Restart the iMessage card tunnel
+      ansible.builtin.systemd_service:
+        scope: user
+        name: fm-cards-tunnel.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when: crewship_manage_services | bool
+      listen: restart fm-cards-tunnel
+
     - name: Restart the Instagram front desk
       ansible.builtin.systemd_service:
         scope: user

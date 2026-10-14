@@ -6,3 +6,8 @@ crewship_imessage_dir: "{{ crewship_share_dir }}/imessage"
 crewship_imessage_desk_model: "{{ crewship_cfg.imessage.desk_model | default('claude-haiku-5-5') }}"
 crewship_imessage_supervisor_model: "{{ crewship_cfg.imessage.supervisor_model | default('') }}"
 crewship_imessage_owner_name: "{{ crewship_cfg.imessage.owner_name | default('the owner') }}"
+# App cards (crewship.imessage.cards, docs/imessage.md#cards): the card-only loopback port, the named tunnel's
+# token variable in ~/super.env, and that tunnel's metrics address (the gateway's quick tunnel uses 20241).
+crewship_imessage_card_port: "{{ crewship_cfg.imessage.cards.port | default(8767) }}"
+crewship_imessage_card_tunnel_token_env: "{{ crewship_cfg.imessage.cards.tunnel_token_env | default('CARDS_TUNNEL_TOKEN') }}"
+crewship_imessage_card_metrics: 127.0.0.1:20242

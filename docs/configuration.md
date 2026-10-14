@@ -90,6 +90,10 @@ crewship:
   #       - url: http://<relay>:1234
   #         password_env: BLUEBUBBLES_PASSWORD   # the default; a variable name in ~/super.env
   #     webhook_listen: <agent host address>:8766
+  #   cards:                         # Optional: app cards; see imessage.md#cards
+  #     url: https://cards.example.com   # the public hostname of the named card tunnel
+  #     port: 8767                       # the default; the card-only loopback port
+  #     tunnel_token_env: CARDS_TUNNEL_TOKEN   # the default; a variable name in ~/super.env
   # github_board:         # Optional, off when absent; set only in .local/host.yml. See github-board.md
   #   repo: owner/board
   #   project: 3
