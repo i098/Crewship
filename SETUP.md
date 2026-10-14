@@ -83,6 +83,7 @@ omp models --json
 | `gateway` | on for a new host | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)); a host from before the gateway keeps it off until `profiles.gateway: true` is set |
 | `fleet_guards` | off | Docker guard, dev-server reaper, storage guard, browser ladder |
 | `shared_postgres` | off | one dev database container per project, in the engine its compose file names |
+| `jj` | off | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
 | `fleet_browsers` | off | the browser ladder only |
 | `tailscale` | off | the Tailscale daemon (login is manual); an option beside the gateway |
 | `desktop` | off | a loopback-only XFCE desktop over noVNC |
