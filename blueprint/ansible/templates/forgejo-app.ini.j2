@@ -41,8 +41,9 @@ DEFAULT_PRIVATE = private
 ENABLED = false
 
 # A push mirror deletes every GitHub branch it does not push (docs/forgejo.md#github-push).
+# DISABLE_NEW_PUSH blocks only the web UI; ENABLED = false also refuses the API.
 [mirror]
-DISABLE_NEW_PUSH = true
+ENABLED = false
 
 [cron.update_checker]
 ENABLED = false
