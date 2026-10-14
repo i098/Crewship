@@ -228,8 +228,10 @@ def choose(args, names):
     return chosen
 
 
-def ask_instructions_mode(home):
-    """The mode for a file the instructions would touch; None when none exists (append is the default)."""
+def ask_instructions_mode(args, chosen, home):
+    """The checklist's mode for a file the instructions would touch; None when it does not ask (append is the default)."""
+    if "agent_instructions" not in chosen or args.with_ is not None or not sys.stdin.isatty():
+        return None
     found = [rel for rel in INSTRUCTION_FILES if (Path(home) / rel).exists() or (Path(home) / rel).is_symlink()]
     if not found:
         return None
@@ -260,10 +262,9 @@ def initialize(args):
         config["crewship"]["browser_prune"]["enabled"] = False
     names = [name for name in OPT_IN if not (args.container and name in NOT_IN_CONTAINER)]
     chosen = choose(args, names)
-    if "agent_instructions" in chosen and args.with_ is None and sys.stdin.isatty():
-        mode = ask_instructions_mode(home)
-        if mode:
-            config["crewship"]["instructions_mode"] = mode
+    mode = ask_instructions_mode(args, chosen, home)
+    if mode:
+        config["crewship"]["instructions_mode"] = mode
     for name in OPT_IN:
         if name == "board":
             if name in chosen:
