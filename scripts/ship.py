@@ -22,6 +22,24 @@ REMOVED_PROFILE = "shared_supabase"
 REMOVED_FLEET_KEYS = ("supabase_project_id", "fixture_archive", "worktree_pools")
 RETIRED_STACK = "oss-fleet/shared-supabase"
 OLD_ROOT, NEW_ROOT = "factory", "crewship"
+# The opt-in features of a new host, in checklist order: name -> (what it adds, what it needs).
+# Every name is a profile, except board, which is a block (docs/board.md).
+OPT_IN = {
+    "public_skills": ("the public skills and rules for omp and Claude Code", ()),
+    "development": ("the Rust toolchain and build tools", ()),
+    "docker": ("the Docker engine and Compose", ()),
+    "chat": ("the Discord and Slack terminal clients", ()),
+    "gateway": ("one password for the host's web pages over a Cloudflare tunnel", ()),
+    "jj": ("the Jujutsu (jj) version control tool", ()),
+    "fleet_guards": ("the Docker guard, reapers and storage guard", ("docker",)),
+    "shared_postgres": ("one dev database per project", ("docker",)),
+    "fleet_browsers": ("the browser ladder", ()),
+    "tailscale": ("the Tailscale daemon", ()),
+    "desktop": ("an XFCE desktop over noVNC", ()),
+    "board": ("the crew message board", ("development",)),
+}
+# A container worker image has no Docker, no user services, no desktop and no Firstmate.
+NOT_IN_CONTAINER = {"docker", "chat", "gateway", "fleet_guards", "shared_postgres", "tailscale", "desktop", "board"}
 
 
 def validate_document(document, schema_name):
@@ -155,6 +173,52 @@ def load_config(path):
     return document
 
 
+def parse_choice(text, names):
+    """Names, checklist numbers, all or none, split by commas or spaces; ValueError on any other word."""
+    chosen = []
+    for word in text.replace(",", " ").split():
+        word = word.lower()
+        if word == "none":
+            continue
+        if word == "all":
+            chosen += names
+        elif word.isdigit() and 0 < int(word) <= len(names):
+            chosen.append(names[int(word) - 1])
+        elif word in OPT_IN:
+            chosen.append(word)
+        else:
+            raise ValueError(f"unknown choice {word!r}; names: {', '.join(names)}")
+    return chosen
+
+
+def choose(args, names):
+    """The opt-ins of a new host: --with, else a checklist on a terminal, else none."""
+    if args.with_ is not None:
+        chosen = parse_choice(" ".join(args.with_), names)
+        missing = [name for name in chosen if name not in names]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} cannot be turned on with --container")
+    elif sys.stdin.isatty():
+        print("Crewship installs the core: omp agents and Firstmate. Choose what else to install.")
+        for number, name in enumerate(names, 1):
+            print(f"  {number:>2}. {name:<16} {OPT_IN[name][0]}")
+        while True:
+            try:
+                answer = input("Numbers or names, separated by spaces; all; Enter for none: ")
+                chosen = parse_choice(answer, names)
+                break
+            except ValueError as error:
+                print(error)
+            except EOFError:
+                chosen = []
+                break
+    else:
+        chosen = []
+    for name in list(chosen):  # what a choice needs comes with it
+        chosen += [need for need in OPT_IN[name][1] if need not in chosen]
+    return chosen
+
+
 def initialize(args):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     current = pwd.getpwuid(os.getuid())
@@ -167,9 +231,14 @@ def initialize(args):
         config["crewship"].update(start_services=False, enable_linger=False)
         config["crewship"]["profiles"]["firstmate"] = False
         config["crewship"]["browser_prune"]["enabled"] = False
-    if args.board:
-        config["crewship"]["board"] = {}
-        config["crewship"]["profiles"]["development"] = True  # the board builds with cargo
+    names = [name for name in OPT_IN if not (args.container and name in NOT_IN_CONTAINER)]
+    chosen = choose(args, names)
+    for name in OPT_IN:
+        if name == "board":
+            if name in chosen:
+                config["crewship"]["board"] = {}
+        elif not (args.container and name in NOT_IN_CONTAINER):
+            config["crewship"]["profiles"][name] = name in chosen
     destination = ROOT / ".local/host.yml"
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Validate before writing; a bad argument must not strand an unusable config.
@@ -407,7 +476,14 @@ def main():
     dock.add_argument("--user")
     dock.add_argument("--home")
     dock.add_argument("--container", action="store_true")
-    dock.add_argument("--board", action="store_true", help="turn on the crew board (docs/board.md)")
+    dock.add_argument(
+        "--with",
+        dest="with_",
+        action="append",
+        metavar="NAMES",
+        help="opt-in features to turn on, comma separated, instead of the checklist "
+        f"(none for none): {', '.join(OPT_IN)}",
+    )
     for name, text in (
         ("inspect", "check the host config against the schema; old config keys are rewritten once"),
         ("chart", "preview provisioning changes; old config keys are rewritten once"),

@@ -45,7 +45,7 @@ The other features, each with its docs link, are listed in [docs/features.md](do
 
 3. **Update:** run `bunx crewship update` (`npx crewship update` and `pnpm dlx crewship update` work too), or the same install command again
 
-Prefer to do it by hand? The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
+Prefer to do it by hand? `bunx crewship` installs the core (omp agents and Firstmate) and, in a terminal, shows one checklist of the opt-in features, including the public skills. Skip it with `--with docker,chat` (`--with none` for the core only). The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
 ## How it works
 
