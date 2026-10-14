@@ -2656,7 +2656,7 @@ def test_card_listener_serves_only_open_cards_by_their_token(tmp_path):
         (bars_url, _), (old_url, _) = (b.removeprefix("send card ").split(" | ", 1) for b in card_bubbles(fake, text))
         base = bars_url.rsplit("/c/", 1)[0]
         status, _, page = http(bars_url)
-        assert status == 200 and "width:50.0%" in page and "width:100.0%" in page and "80 %" in page
+        assert status == 200 and "width:40.0%" in page and "width:80.0%" in page and "80 %" in page
         for path, method in [("/c/" + "A" * 43, "GET"), ("/c/abc", "GET"), ("/c/../outbox", "GET"), ("/send", "POST"), ("/", "GET"),
                              (bars_url.removeprefix(base) + "/pick", "GET"), (bars_url.removeprefix(base), "POST"),
                              (bars_url.removeprefix(base) + "/pick", "POST")]:

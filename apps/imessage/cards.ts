@@ -170,7 +170,8 @@ export function cardPage(card: Stored, status = 200, notice = "") {
       ? `<form method="post" action="/c/${card.token}/pick">${card.options.map(button).join("")}</form>`
       : `<p>Picked ${letter(card.picked)}. Firstmate has it.</p>${card.options.map(button).join("")}`;
   } else if (card.kind === "bars") {
-    const max = Math.max(...card.bars.map((b) => b.value)) || 1;
+    // A percentage fills its track out of 100; any other unit is scaled to the largest bar.
+    const max = Math.max(...card.bars.map((b) => b.value), card.unit === "%" ? 100 : 0) || 1;
     body = card.bars.map((b) => `<div class="bar"><div class="row"><span>${esc(b.label)}</span><span>${esc(b.value)}${card.unit ? ` ${esc(card.unit)}` : ""}</span></div><div class="track"><div class="fill" style="width:${((b.value / max) * 100).toFixed(1)}%"></div></div></div>`).join("");
   } else if (card.kind === "timeline") {
     body = `<ol>${card.items.map((x) => `<li><span>${esc(x.when)}</span>${esc(x.text)}</li>`).join("")}</ol>`;

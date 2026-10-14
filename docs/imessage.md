@@ -327,7 +327,7 @@ Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `ti
 | Kind | Fields | The page shows |
 | --- | --- | --- |
 | `choice` | `options`: 2 to 6 texts | One button per option, A to F. One tap picks. |
-| `bars` | `bars`: 1 to 30 `{"label", "value"}`, optional `unit` | A bar chart, scaled to the largest value. |
+| `bars` | `bars`: 1 to 30 `{"label", "value"}`, optional `unit` | A bar chart. With `"unit": "%"` a bar fills its track at 100; with any other unit, at the largest value. |
 | `timeline` | `items`: 1 to 50 `{"when", "text"}` | A vertical timeline. |
 | `table` | `columns`: 1 to 8 texts; `rows`: 1 to 100 rows of that length | A table. |
 
