@@ -90,10 +90,10 @@ The Pyrefly configuration is the only added runtime file.
 
 - `fleet_browsers` or `fleet_guards` profile: Obscura, the latest [h4ckf0r0day/obscura release](https://github.com/h4ckf0r0day/obscura/releases/latest) for the host's platform, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/fleet-browsers.yml`). Each release extracts into its own `~/oss-fleet/browsers/obscura-<version>/`. The `vnc` tier's Ubuntu packages: tigervnc-standalone-server, websockify, novnc, xfwm4.
 
-## Optional shared Postgres
+## Optional project databases
 
-The database profile uses the official Postgres container and the Docker Compose plugin.
-See [Shared Postgres](shared-postgres.md) for setup, backups and removal.
+The database profile uses the official database image of each project and the Docker Compose plugin.
+See [Project databases](shared-postgres.md) for setup, backups and removal.
 
 ## Koncreet
 
@@ -155,8 +155,8 @@ To update a patch, edit its file in a pull request. To drop a patch, delete its 
 - The worker image is provisioned in a `builder` stage and copied into one layer. It omits files no worker process reads, so it differs from a host: no apt indexes, package-manager caches, rustup docs or node C headers; no source maps, and no TypeScript declarations outside omp's own packages, in the npm tool prefixes; in omp, no `onnxruntime-web`, no AVX2 build of `pi-natives` (omp loads the baseline build), and only the CPU `onnxruntime-node` binaries for the image's platform; and no Mesa GPU driver or its LLVM (`libgallium`, `libLLVM`), which libgbm loads only to open a GPU device. `sudo apt-get install --reinstall mesa-libgallium libllvm21` restores them. The rustup toolchain and the npm tools' native addons are stripped of symbol tables; the release binaries the installer verifies keep their published bytes.
 - Optional compose backing services, never installed by apply: `postgres:18-bookworm`, `redis:8-alpine`, from the same mirror, digest-pinned because a floating Postgres tag would move a data volume across major versions it cannot read.
 - CI pool job containers (`blueprint/maintenance/ci-pool.py`, only with `crewship.ci_pool`): the official `ghcr.io/actions/actions-runner:latest`, pulled again when a new image is available. It is the runner GitHub publishes, so it is not checksum-verified here; see [CI pool](ci-pool.md).
-- Shared Postgres (`profiles.shared_postgres` only): the official `postgres:latest`, pulled once per apply with Compose, like the CI pool's latest-image pattern.
-  A new major version needs a manual database upgrade; see [Shared Postgres](shared-postgres.md#data-and-upgrades).
+- Project databases (`profiles.shared_postgres` only): the image each project's compose file names (Postgres, MySQL, MariaDB or Redis), pulled once when the container is first created. No other image is pulled.
+  A new major version needs a manual database upgrade; see [Project databases](shared-postgres.md#data-and-upgrades).
 
 ## Assumed on the host
 

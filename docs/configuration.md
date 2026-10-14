@@ -49,7 +49,7 @@ crewship:
     tailscale: false      # Daemon only; authenticate separately
     desktop: false        # XFCE + TigerVNC + noVNC
     fleet_guards: false   # Docker guard, reapers, storage guard and browser ladder
-    shared_postgres: false # Optional container, database helper and env seeder
+    shared_postgres: false # Optional per-project dev databases, helper and env seeder
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: true            # Concord (Discord) and slk (Slack) terminal clients
     gateway: true         # Password gateway + Cloudflare Quick Tunnel; only dock writes true (default.yml: false)
@@ -127,7 +127,7 @@ After a successful `./ship.sh launch` with the `firstmate` profile on, once omp 
 - The questions follow `firstmate.checklist` when it is set and `gh` can read it: `repo` is a GitHub repository (it can be private) and `path` is the checklist file in it. Set it only in `.local/host.yml`, never in `blueprint/config/default.yml`. Otherwise they follow [Agent host move](agent-host-move.md).
 - When `.local/host.yml` has no `github_board` block, a question asks whether to turn on the [GitHub board](github-board.md). The answer is off unless you choose it.
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.
-- When `shared_postgres` is off or omitted, a question offers the [shared Postgres database](shared-postgres.md).
+- When `shared_postgres` is off or omitted, a question offers the [per-project dev databases](shared-postgres.md).
   The prompt names the resolved config path and does not enable the profile without your choice.
 - They are asked once per host. When the omp session exits successfully, apply writes the marker `~/.local/share/crewship/new-host-questions-done`; while it exists, later applies skip the questions and print one line naming it. If omp exits non-zero, apply writes no marker and prints one line saying the questions did not complete. To ask again, delete the marker and rerun `./ship.sh launch` interactively.
 - The launch needs an interactive terminal, run as `crewship.user`. When stdin is not a TTY, when `CI` is set, or when another account runs apply, apply skips them without writing the marker and prints one line saying to rerun `./ship.sh launch` interactively.
@@ -144,7 +144,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `firstmate` | on | Firstmate clone tracking upstream `main`, plus seeded Firstmate config: crew dispatch, crew and secondmate harness, the crew omp overlay (crew advisor, see [omp configuration](omp.md#advisor)), Herdr backend selection, startup memory budget, the spawn memory floor, presentation spaces off, and the turn-end pane-churn flag (see [Seeded Firstmate and OMP configuration](agents/architecture.md#seeded-firstmate-and-omp-configuration)). |
 | `docker` | on | Docker engine and Compose v2, with daemon defaults `init` (reaps orphaned children) and `live-restore`. Group membership is opt-in through the Ansible variable `crewship_docker_group_users`. |
 | `fleet_guards` | off | Docker guard, dev-server reaper, devtools-bridge reaper, storage guard and browser ladder. See [Fleet guards](fleet-guards.md). |
-| `shared_postgres` | off | One [shared Postgres container](shared-postgres.md), per-project database helper and worktree environment seeder. |
+| `shared_postgres` | off | One [dev database container per project](shared-postgres.md), in the engine the project's compose file names, with a helper and a worktree environment seeder. |
 | `fleet_browsers` | off | The [browser ladder](fleet-guards.md#browser-ladder): the always-on Obscura CDP tier on `127.0.0.1:9222`, the on-demand `chrome` and `vnc` tiers with the `vnc` tier's TigerVNC and noVNC packages, the cookie sync and gc timers, and the ladder environment in shell profiles and the Herdr unit. `fleet_guards` provisions the same ladder, so a `fleet_guards` host needs no change. Needs no other profile; the ladder needs `iproute2` (`ss`) from the base image, which only `desktop` installs. |
 | `chat` | on | The latest [Concord](https://github.com/chojs23/concord) (Discord) and [slk](https://github.com/gammons/slk) (Slack) terminal clients, their shared libraries, and a first-write config for each. Logins stay manual. See [Chat clients](chat.md). |
 | `gateway` | on for a new host | The [password gateway](gateway.md) and the latest `cloudflared`: one password opens the host's loopback web pages over a Cloudflare Quick Tunnel. `crewship.gateway.allow_hours` (default 24) sets how long an address stays allowed. `./ship.sh dock` writes `true` into a new host config; the installer's `--no-gateway` writes `false`. `blueprint/config/default.yml` has `false`, so a host config from before the gateway, without the key, keeps it off on update. To turn it on there, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`. |
@@ -153,7 +153,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).
 
-See [Shared Postgres](shared-postgres.md) for existing-host management and safe removal.
+See [Project databases](shared-postgres.md) for existing-host management and safe removal.
 
 ## Data disk
 
