@@ -4,7 +4,8 @@
 # jwt-secret files next to it as forgejo-dump-<time>.secrets.tar, mode 600. The dump
 # does not hold these files, so a restore needs the secrets tar with the dump. All but
 # the newest {{ crewship_forgejo_dump_keep }} dumps and secrets tars are removed. A failed dump removes nothing
-# and leaves no partial or temporary files.
+# and leaves no partial or temporary files. Each run first removes the temporary files of
+# a run that was stopped (SIGTERM or SIGKILL), because the EXIT trap does not run then.
 
 [Unit]
 Description=Forgejo nightly dump (Crewship managed)
@@ -16,7 +17,7 @@ WorkingDirectory={{ crewship_forgejo_dump_dir }}
 UMask=0077
 ExecStart=/bin/sh -c 'set -e; t="$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"; \
   trap "rm -rf forgejo-dump-$$t.tmp forgejo-dump-$$t.secrets.new" EXIT; \
-  mkdir "forgejo-dump-$$t.tmp"; \
+  rm -rf forgejo-dump-*.tmp forgejo-dump-*.secrets.new; mkdir "forgejo-dump-$$t.tmp"; \
   {{ crewship_forgejo_cli | join(" ") }} dump --quiet --type tar.zst --tempdir "forgejo-dump-$$t.tmp" --file "forgejo-dump-$$t.tmp/dump.tar.zst"; \
   mv "forgejo-dump-$$t.tmp/dump.tar.zst" "forgejo-dump-$$t.tar.zst"; \
   tar -C {{ crewship_forgejo_conf_dir }} -cf "forgejo-dump-$$t.secrets.new" secret-key internal-token jwt-secret; \
