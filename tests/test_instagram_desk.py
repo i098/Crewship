@@ -39,7 +39,7 @@ def run(tmp_path, body, answer="hello there", omp_sleep=0, reply=None):
         import {{ readdirSync, readFileSync, existsSync }} from "node:fs";
         const dir = {json.dumps(str(tmp_path / "state"))};
         const desk = new InstagramDesk({{
-          dir, model: "m", owner: "Ana", supervisorModel: "", quietMs: 300,
+          dir, model: "m", owner: "Ana", supervisorModel: "", quietMs: 300, stopFile: {json.dumps(str(tmp_path / "stop"))},
           replyCmd: [{json.dumps(str(bin_dir / "reply"))}], statusCmd: [{json.dumps(str(bin_dir / "status"))}],
           env: {{ ...process.env, PATH: {json.dumps(str(bin_dir))} + ":" + process.env.PATH }},
           chat: () => ({{ say: async () => "x", end() {{}} }}),
@@ -126,6 +126,25 @@ def test_a_new_dm_while_the_desk_drafts_restarts_the_wait(tmp_path):
     assert out["sends"] == ["desk|--thread T -- hello there"]  # only the second turn sends
     assert len(out["prompts"]) == 2  # the first draft was killed
     assert sum("owner: yo\nowner: more" in p for p in out["prompts"]) == 1
+
+
+def test_a_stopped_line_gets_no_desk_turn_and_the_burst_is_dropped(tmp_path):
+    stop = json.dumps(str(tmp_path / "stop"))
+    tmp_path.mkdir(exist_ok=True)
+    (tmp_path / "stop").write_text("stopped by hand")
+    out = run(tmp_path, f"""
+        feed("messages", {{ id: "a", text: "yo" }});
+        await wait(800);
+        out.stopped = [omp().length, sends().length, log()];
+        (await import("node:fs")).unlinkSync({stop});    // resume
+        feed("messages", {{ id: "b", text: "you there?" }});
+        await wait(1200);
+        out.after = [omp().length, sends().length];
+        out.prompt = omp()[0];
+    """)
+    assert out["stopped"] == [0, 0, ["skip (line stopped)"]]
+    assert out["after"] == [1, 1]
+    assert "Latest messages, after the chat:\nowner: you there?" in out["prompt"]  # not the dropped "yo"
 
 
 def test_react_skip_and_failed_desk_answers(tmp_path):

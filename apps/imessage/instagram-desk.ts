@@ -4,6 +4,7 @@
 //   INSTAGRAM_DM_SENT  one row per fm-insta-reply send, tapback or typing, with `by`: "desk" for the desk's own calls
 // Each DM restarts the quiet period; any send, tapback or typing by Firstmate since his last DM stands the desk down
 // for that burst. When the quiet period ends, one desk turn answers the whole burst through `fm-insta-reply`.
+// While INSTAGRAM_DM_DIR/stop exists (a halt, or `instagram_dm.py stop`) a turn calls neither the model nor fm-insta-reply.
 // Runs as the systemd --user service instagram-desk (docs/imessage.md#instagram-front-desk).
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { compactChat, type DeskProc, DeskTiming, deskInput, deskPrompt, readDesk, spawnDesk, verdict } from "./desk.ts";
@@ -17,6 +18,7 @@ export type Options = {
   supervisorModel: string;
   quietMs: number;
   replyCmd: string[]; // fm-insta-reply
+  stopFile?: string; // the DM line's halt and kill-switch flag (INSTAGRAM_DM_DIR/stop): while it exists the desk does nothing
   statusCmd: string[]; // prints the fleet status
   env: Record<string, string | undefined>;
   chat: (system: string) => Chat; // the memory's compaction conversation
@@ -79,6 +81,11 @@ export class InstagramDesk {
   private async turn(current: () => boolean) {
     const thread = this.thread;
     if (!thread) return;
+    if (this.o.stopFile && existsSync(this.o.stopFile)) {
+      this.burstFrom = undefined; // the burst is dropped: after a resume the desk never answers it late
+      appendFileSync(`${this.o.dir}/desk.log`, `${new Date().toISOString()} ${this.lastId} skip (line stopped)\n`, { mode: 0o600 });
+      return;
+    }
     const status = await new Response(Bun.spawn(this.o.statusCmd, { env: this.o.env, stdout: "pipe", stderr: "ignore" }).stdout).text();
     if (!current()) return;
     const from = this.burstFrom ?? this.memory.msgs.length;
@@ -169,6 +176,7 @@ if (import.meta.main) {
     supervisorModel: env.FM_INSTAGRAM_DESK_SUPERVISOR_MODEL || "",
     quietMs: Number(env.FM_INSTAGRAM_DESK_QUIET_MS || 8000),
     replyCmd: (env.FM_INSTA_REPLY_CMD || "fm-insta-reply").split(/\s+/),
+    stopFile: `${igDir}/stop`,
     statusCmd: (env.FM_INBOX_CMD || `${fmHome}/bin/fm-inbox.sh`).split(/\s+/).concat("status"),
     env: { ...env, FM_HOME: fmHome },
     chat: (system) => compactChat(system, () => stopping, track),

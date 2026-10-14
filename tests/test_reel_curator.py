@@ -135,6 +135,15 @@ def test_a_429_stops_the_curator_for_a_day_and_is_logged(env, monkeypatch, capsy
         rc.main()
 
 
+def test_the_kill_switch_stops_the_curator_before_any_request(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(rc, "load_config", lambda: CFG)
+    monkeypatch.setattr(rc.ig, "client", lambda: pytest.fail("called Instagram while stopped"))
+    monkeypatch.setattr(sys, "argv", ["reel_curator.py", "run"])
+    rc.ig.stop()
+    with pytest.raises(SystemExit, match="stopped by hand"):
+        rc.main()
+
+
 @pytest.mark.parametrize(
     ("spoken", "speech", "caption", "lang"),
     [

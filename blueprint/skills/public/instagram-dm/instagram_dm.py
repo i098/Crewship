@@ -9,7 +9,8 @@ instagram_dm.py reels THREAD [--limit N] [--mark-seen]   # one normalised reel U
 instagram_dm.py poll                 # read once: log and hand over every NEW message of the operator, mark it seen
 instagram_dm.py listen               # keep Instagram's realtime channel open and run `poll` on each event (a service)
 instagram_dm.py reply [TEXT] [--thread ID] [--react EMOJI] [--typing]   # DM the operator
-instagram_dm.py resume               # clear a halt (see below) after you fixed the account
+instagram_dm.py resume               # clear a halt (see below) after you fixed the account, or a `stop`
+instagram_dm.py stop                 # the kill switch: poll, listen, reply, the curator, the desk and reel_watch.py do nothing
 
 Settings come from the environment:
   INSTAGRAM_DM_SESSION    session file (default ~/.config/crewship/instagram/session.json)
@@ -272,6 +273,7 @@ def fail(state, e, now):
     what = describe(e)
     if is_halt(e):
         state["halted"] = what
+        stop_file().write_text(what)  # the one flag every process, and the desk, looks at
         with contextlib.suppress(Exception):
             notify(
                 [
@@ -294,10 +296,22 @@ def fail(state, e, now):
     return f"failed ({what}); next try in {wait}s"
 
 
+def stop_file():
+    return state_dir() / "stop"
+
+
+def why_stopped(state):
+    """Why the whole line is stopped (a halt, or `instagram_dm.py stop`), or None. The flag file is what every
+    process and the front desk look at; `halted` in the state is the same halt, kept from before the file existed."""
+    if stop_file().is_file():
+        return stop_file().read_text() or "stopped"
+    return state.get("halted")
+
+
 def blocked(state, now):
     """Why Instagram must not be called now, or None."""
-    if state.get("halted"):
-        return f"halted ({state['halted']}); a human must open the Instagram app first, then run `instagram_dm.py resume`"
+    if why := why_stopped(state):
+        return f"halted ({why}); a human must open the Instagram app first, then run `instagram_dm.py resume`"
     if now < state["next"]:
         return f"backing off for {int(state['next'] - now)}s more"
     return None
@@ -375,7 +389,7 @@ def listen_once(cl):
     rt.direct_subscribe()
     sync(lambda: cl)  # what arrived while the channel was down
     last, pending = time.time(), False
-    while not load_state().get("halted"):
+    while not why_stopped(load_state()):
         try:
             cl.realtime_read_once()
         except TimeoutError:  # idle: the broker must still answer a ping
@@ -394,7 +408,7 @@ def listen():
     the HTTP poll supplies the data, so the private event format is never parsed. A dead channel reconnects
     with backoff. Return when the account is halted."""
     fails = 0
-    while not load_state().get("halted"):
+    while not why_stopped(load_state()):
         cl = None
         try:
             cl = client()
@@ -421,7 +435,15 @@ def resume():
         state = load_state()
         state.update(halted=None, fails=0, next=0)
         save_state(state)
+        stop_file().unlink(missing_ok=True)
     print("resumed. The next call goes to Instagram: open the app first and make sure the account is fine.")
+
+
+def stop():
+    """The kill switch: poll, listen, reply, the curator, the desk and reel_watch.py do nothing until `resume`."""
+    with locked():
+        stop_file().write_text("stopped by hand")
+    print(f"stopped: nothing calls Instagram until `instagram_dm.py resume` (flag file {stop_file()})")
 
 
 def operator_thread(cl, thread, operator):
@@ -579,6 +601,8 @@ def refuse(cl, e):
 def client():
     """A client on the saved session. It never logs in: no session file, or one without its pinned device, raises
     SessionLost; a session Instagram rejects raises LoginRequired on its first call. Both halt the line."""
+    if why := why_stopped(load_state()):
+        sys.exit(f"halted ({why}): nothing calls Instagram until `instagram_dm.py resume`")
     from instagrapi import Client
 
     session = session_file()
@@ -599,7 +623,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("poll", "listen", "resume"):
+    for name in ("poll", "listen", "resume", "stop"):
         sub.add_parser(name)
     sub.add_parser("login").add_argument("--force", action="store_true")
     inbox = sub.add_parser("inbox")
@@ -620,6 +644,8 @@ def main():
         listen()
     elif a.cmd == "resume":
         resume()
+    elif a.cmd == "stop":
+        stop()
     elif a.cmd == "reply":
         reply(a.text, a.thread, a.react, a.typing)
     elif a.cmd == "login":

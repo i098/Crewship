@@ -595,3 +595,36 @@ def test_events_coalesce_into_one_poll_30s_after_the_last(monkeypatch, host):
     live = Live()
     ig.listen_once(live)
     assert live.polls == 1 + 2  # the poll on connect, one at +30 s, one for the events after it
+
+
+def test_a_halt_writes_the_flag_file_and_resume_removes_it(monkeypatch, host):
+    def flagged():
+        raise ChallengeError("checkpoint")
+
+    monkeypatch.setattr(ig, "client", flagged)
+    run(monkeypatch, ig.poll, 1000)
+    assert "ChallengeError" in (host / "stop").read_text()  # what the desk and the shell tools look at
+    ig.resume()
+    assert not (host / "stop").exists()
+
+
+def test_stop_is_a_kill_switch_for_every_command_and_resume_ends_it(monkeypatch, host):
+    made = lib(monkeypatch)
+    (host / "session.json").write_text(json.dumps({"uuids": {"u": 1}, "device_settings": {"m": 1}}))
+    monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(host / "session.json"))
+    ig.stop()
+    assert (host / "stop").read_text() == "stopped by hand"
+    for call in (ig.client, lambda: ig.reply("hi", None, None, False)):
+        with pytest.raises(SystemExit, match="stopped by hand"):
+            call()
+    ig.poll()  # the timer's poll ends quietly
+    assert made == []  # no client was even built
+    ig.listen()  # returns at once instead of connecting
+    ig.resume()
+    assert ig.client() is not None and len(made) == 1
+
+
+def test_a_halt_from_before_the_flag_file_still_stops_everything(monkeypatch, host):
+    (host / "poll.json").write_text(json.dumps({"halted": "AccountSuspended: challenge_required"}))
+    with pytest.raises(SystemExit, match="AccountSuspended"):
+        ig.client()

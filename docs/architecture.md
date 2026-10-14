@@ -87,6 +87,8 @@ Every write (text, tapback, typing indicator, read receipt) goes through one lim
 
 After a failed call the next calls wait 2, 4, 8 ... times the interval, up to 30 min, and every command refuses to call Instagram meanwhile. The first challenge, feedback block, suspension, `login_required`, please-wait, throttle or bad password halts them with no retry: main gets one note and nothing calls Instagram until a human has checked the account in the app and runs `instagram_dm.py resume`. Nothing logs in by itself: a missing or dead session is such a halt, and the one login is the manual `instagram_dm.py login` (`--force` for a second). Every failure names its exception class and endpoint.
 
+A halt writes a flag file, `state/.instagram-dms/stop`, with its reason. `poll`, `listen`, `reply`, the reel curator, the front desk and `reel_watch.py` all check it and do nothing while it exists (the desk logs `skip (line stopped)`, drops the burst, and calls neither its model nor `fm-insta-reply`). `instagram_dm.py stop` is the kill switch: it writes the same flag by hand, with no Instagram call, and `instagram_dm.py resume` removes it. `reel_watch.py` finds the flag through `INSTAGRAM_DM_DIR` (default `~/.local/state/instagram-dm`): set that variable to the DM state directory in the environment of any agent that runs it.
+
 A front desk, `instagram-desk.service`, answers a DM that main leaves alone for 8 s, the way the iMessage desk does: see [Instagram front desk](imessage.md#instagram-front-desk).
 
 ### Instagram reel curator
