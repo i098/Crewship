@@ -315,14 +315,14 @@ Explicit threaded replies can use a configured fallback because the bridge canno
 
 ## Cards
 
-`fm-imessage --card` sends a card: by default, the URL of the card's page as a plain text, which iMessage shows as a link preview with the title and a status line. A tap opens the page that the bridge serves. The code is `apps/imessage/cards.ts`.
+`fm-imessage --card` sends a card: by default, a Spectrum app bubble with its live view. A tap opens the card's page inside Messages, in Photon's free "Spectrum" iMessage app; the bridge serves the page. He installs that app once, from the App Store prompt in Messages. The code is `apps/imessage/cards.ts`.
 
 ```bash
 fm-imessage --card '{"kind":"choice","key":"layout","title":"Board layout?",
   "options":["Short list, one screen","Cards with a mock each","Table with all details"]}'
 ```
 
-Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `title` (up to 120 characters). Optional fields: `subtitle` (up to 200 characters), `hours` until the card expires (1 to 168, default 24), `app` (`true` sends a Spectrum app bubble in place of the link; see below), and `live` (with `app`, `true` asks for the live view of the card app; not tested). The kinds:
+Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `title` (up to 120 characters). Optional fields: `subtitle` (up to 200 characters), `hours` until the card expires (1 to 168, default 24), `app` (default `true`; `false` sends a link in place of the app bubble; see below), and `live` (default `true`: the bubble asks for the app's live view; `false` keeps the static preview). The kinds:
 
 | Kind | Fields | The page shows |
 | --- | --- | --- |
@@ -333,9 +333,11 @@ Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `ti
 
 A bad card queues nothing, and the command names the first bad field.
 
-- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. The page shows the pick. An app bubble also changes in place to "Picked B: ...".
-- **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. A link card is a text, so it goes on any transport. The page has Open Graph tags (`og:title`, `og:description`), so the preview shows the title and the status line. The desk memory records `[card <key>: <title>]`, never the URL. An outage retries like a text.
-- **App bubbles.** With `"app": true`, the card uses spectrum-ts `app(url, {layout})` on the Photon transport, so the bubble opens in Photon's free "Spectrum" iMessage app. The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. Measured on the free shared line: Photon delivers the bubble with no error, but without the Spectrum app on his phone, iMessage shows only a plain balloon with the title and the status line run together, and no page. Photon's pricing lists iMessage mini apps for the Business plan only. Any error other than an outage moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
+- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. The page shows the pick with a check. An app bubble also changes in place to "Picked B: ...".
+- **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. The desk memory records `[card <key>: <title>]`, never the URL. An outage retries like a text.
+- **App bubbles.** The card uses spectrum-ts `app(url, {layout, live})` on the Photon transport. Photon's docs say that the app delivers the URL to the Spectrum extension on tap and opens it in Messages, so the view is the card's page. The bubble's layout is the title and one status line (no trailing caption: without the app, Messages runs the two together). The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. Measured on the free shared line: Photon delivers the bubble with no error. Without the Spectrum app, his phone shows only a plain balloon with the layout text. Photon's pricing lists iMessage mini apps for the Business plan only. Any error other than an outage moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
+- **Link cards.** With `"app": false`, the card is its page's URL as a plain text, which iMessage shows as a link preview from the page's Open Graph tags (`og:title`, `og:description`). A link card goes on any transport, and a tap opens the browser.
+- **Page.** The page looks like an iOS view: the system font and text sizes, the system colours in light and dark mode, inset grouped rows of 44 pt or more, safe-area padding, and a pressed state with no tap delay. It has no script.
 - **Page listener.** A second listener serves the pages. It listens on `127.0.0.1:8767` (`FM_IMESSAGE_CARD_PORT`), apart from the private command port. It answers only `GET /c/<token>` and `POST /c/<token>/pick`; every other request gets `404`. The command port does not answer card paths. Cards are off until `FM_IMESSAGE_CARD_URL` is set: then `/card` queues cards, and the bubbles open `<FM_IMESSAGE_CARD_URL>/c/<token>`.
 - **Tokens.** Each card has its own token: 256 random bits, base64url. The token is the only key to the card: no login, no password. A wrong, unknown, or expired token gets the same `404` page. A choice card takes one pick: a second pick gets `409` and files no note. If the inbox refuses the note, the pick is undone and the page says to try again. The service never logs a token and never prints one; `fm-imessage` prints only the key. The pages send `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and a Content Security Policy that allows no script and no outside content.
 - **Records.** Each card is one file, `~/.local/state/fm-imessage/cards/<token>.json` (the directory is private to the account). The service deletes a card file one day after the card expires.
