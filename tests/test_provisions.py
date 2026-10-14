@@ -572,10 +572,11 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
         (["--tools", "uv", "--development"], {"uv", "rustup-init"}),
         (
             ["--tools", "uv", "--npm"],
-            {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST},
+            {"uv", *installer.AGENT_TOOLS, *(set(installer.NPM_LATEST) - installer.NPM_OPT_IN)},
         ),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
         (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),
+        (["--tools", "uv,forgejo-axi"], {"uv", "forgejo-axi"}),
         (["--tools", "sentrux"], {"sentrux", "sentrux-grammars"}),
         (["--tools", "pyrefly"], {"pyrefly"}),
     ],

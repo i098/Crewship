@@ -47,6 +47,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Docker Compose](https://github.com/docker/compose): the worker and backing services. License: Apache-2.0.
 - [GitHub Actions Runner](https://github.com/actions/runner): the image of the self-hosted CI pool. License: MIT.
 - [cloudflared](https://github.com/cloudflare/cloudflared): `cloudflared`, the Quick Tunnel to the password gateway. License: Apache-2.0.
+- [forgejo-axi](https://github.com/escidmore/forgejo-axi) (`forgejo-axi`): Forgejo pull requests and CI for no-mistakes. License: MIT.
 - [Tailscale](https://github.com/tailscale/tailscale): the optional private network to the host. License: BSD-3-Clause.
 - [Google Chrome](https://www.google.com/chrome/): the headed browser of the desktop and the browser ladder. License: proprietary.
 - [mosh](https://github.com/mobile-shell/mosh): the roaming shell for Herdr. License: GPL-3.0-or-later.

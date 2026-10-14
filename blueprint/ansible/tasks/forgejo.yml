@@ -4,12 +4,14 @@
 # tailnet with `tailscale serve` when Tailscale runs with HTTPS certificates enabled
 # (else on the loopback URL only), an admin account with a generated password, a
 # nightly `forgejo dump`, and a post-receive hook that pushes feature branches to
-# GitHub for the repositories that opt in (forgejo-github-push). Nothing here moves a
+# GitHub for the repositories that opt in (forgejo-github-push). With the agents
+# profile it also gives the no-mistakes daemon the Forgejo base URL and a token
+# (forgejo-axi itself is installed by tasks/tools.yml). Nothing here moves a
 # repository to Forgejo.
 #
 #   * the binary is installed only after its SHA-256 and its signature by the Forgejo
 #     release key both match; a new release lands in its own directory
-#   * secrets and the admin password are written once, mode 600, under
+#   * secrets, the admin password and the token are written once, mode 600, under
 #     crewship_forgejo_conf_dir, and are never printed or rewritten; each nightly dump
 #     keeps a copy of the secrets next to it
 #   * turning the profile off leaves the service, its data and its secrets as they are
@@ -317,7 +319,7 @@
 
 # These steps need the running service: Forgejo creates its database and its global
 # hook directory on its first start.
-- name: Finish the running Forgejo - push hook and admin account
+- name: Finish the running Forgejo - push hook, admin account, no-mistakes token
   when:
     - crewship_manage_services | bool
     - not ansible_check_mode
@@ -382,3 +384,48 @@
           {{ crewship_forgejo_conf_dir }}/admin-password does not. Set a new password with
           `forgejo admin user change-password` and save it there (mode 600); see docs/forgejo.md.
         quiet: true
+
+    - name: Create the no-mistakes Forgejo token once
+      vars:
+        script: |
+          set -eu
+          umask 077
+          token="$("$@" admin user generate-access-token --raw --username "$USERNAME" \
+            --token-name crewship-no-mistakes \
+            --scopes write:repository,write:issue,read:user,read:organization)"
+          printf 'FORGEJO_TOKEN=%s\n' "$token" > no-mistakes.env.new
+          mv no-mistakes.env.new no-mistakes.env
+      ansible.builtin.command:
+        argv: "{{ ['/bin/bash', '-c', script, 'bash'] + crewship_forgejo_cli }}"
+        chdir: "{{ crewship_forgejo_conf_dir }}"
+        creates: "{{ crewship_forgejo_conf_dir }}/no-mistakes.env"
+      environment:
+        USERNAME: "{{ crewship_forgejo_admin }}"
+      when: crewship_cfg.profiles.agents | bool
+      no_log: true
+
+# --- no-mistakes Forgejo forge profile (docs/forgejo.md#no-mistakes) ----------
+# no-mistakes reads the Forgejo base URL and token from its daemon environment and
+# finds forgejo-axi on the daemon PATH (~/.local/bin). The drop-in applies to every
+# no-mistakes-daemon-<hash>.service; a running daemon picks it up on its next restart,
+# which is reported, never performed.
+- name: Ensure the no-mistakes daemon drop-in directory
+  ansible.builtin.file:
+    path: "{{ crewship_user_units }}/no-mistakes-daemon-.service.d"
+    state: directory
+    mode: "0755"
+  when: crewship_cfg.profiles.agents | bool
+
+- name: Give the no-mistakes daemon the Forgejo base URL and token
+  ansible.builtin.copy:
+    content: |
+      # Managed by Crewship (docs/forgejo.md#no-mistakes).
+      [Service]
+      Environment="FORGEJO_BASE_URL={{ crewship_forgejo_root_url | regex_replace('/$', '') }}"
+      EnvironmentFile=-{{ crewship_forgejo_conf_dir }}/no-mistakes.env
+    dest: "{{ crewship_user_units }}/no-mistakes-daemon-.service.d/forgejo.conf"
+    mode: "0644"
+  when: crewship_cfg.profiles.agents | bool
+  notify:
+    - reload user systemd
+    - no-mistakes daemon restart required
