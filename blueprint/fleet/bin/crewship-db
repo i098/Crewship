@@ -208,8 +208,12 @@ def project_url(project, directories):
 def seed_worktree(worktree, variable, url):
     path = worktree / ".env.local"
     original = path.read_text() if path.exists() else ""
-    lines = [line for line in original.splitlines()
-             if line not in (MARK, LEGACY_MARK) and not re.match(rf"^\s*(?:export\s+)?{variable}\s*=", line)]
+    lines, legacy = [], False
+    for line in original.splitlines():
+        old_url = legacy and re.match(r"^\s*(?:export\s+)?DATABASE_URL\s*=", line)
+        legacy = line == LEGACY_MARK
+        if not (old_url or legacy or line == MARK or re.match(rf"^\s*(?:export\s+)?{variable}\s*=", line)):
+            lines.append(line)
     write_changed(path, "\n".join([*lines, MARK, f"{variable}={url}"]) + "\n")
 
 

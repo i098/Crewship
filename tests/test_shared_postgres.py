@@ -247,6 +247,15 @@ def test_seed_gives_each_project_one_stable_container_and_url_for_all_worktrees(
     assert urlsplit((first / ".env.local").read_text().split("DATABASE_URL=")[1].strip()).port == shop_url.port
 
 
+def test_legacy_database_url_is_dropped_for_a_redis_project(database, tmp_path):
+    cache = checkout(tmp_path, "cache-abc", 1, "cache", "services:\n  c:\n    image: redis:7\n")
+    (cache / ".env.local").write_text("OTHER=keep\n# crewship-shared-postgres\nDATABASE_URL=postgresql://old@127.0.0.1:25432/x\nKEEP=1\n")
+    database.seed()
+    lines = (cache / ".env.local").read_text().splitlines()
+    assert lines[:2] == ["OTHER=keep", "KEEP=1"] and lines[2] == "# crewship-project-db"
+    assert lines[3].startswith("REDIS_URL=redis://") and len(lines) == 4
+
+
 def test_engine_choice_sticks_after_the_compose_file_changes(database, tmp_path):
     app = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
     database.seed()

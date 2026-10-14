@@ -112,7 +112,7 @@ Before a major upgrade, dump the database with the old image and restore it into
 ## Migrate from the host-wide Postgres
 
 Earlier releases ran one `crewship-shared-postgres` container with one database per project.
-The new seeder does not touch it, but it replaces `DATABASE_URL` in each worktree's `.env.local` with the project's new, empty database, and it replaces the old `# crewship-shared-postgres` marker line.
+The new seeder does not touch it, but it replaces `DATABASE_URL` in each worktree's `.env.local` with the project's new, empty database. It also removes the old `# crewship-shared-postgres` marker line and the `DATABASE_URL` line under it, even when the project's engine uses another variable.
 To keep the data, copy each project's database before the seeder runs, or restore it afterwards:
 
 ```sh
