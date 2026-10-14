@@ -3,7 +3,7 @@
 
 Run it with `uv run --quiet --with instagrapi python instagram_dm.py ...` (instagrapi is imported only when a command needs it).
 
-instagram_dm.py login                # one login, then the session file is reused; needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
+instagram_dm.py login [--force]     # the one manual login (a human, the app checked first); needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
 instagram_dm.py inbox [--limit N]    # thread id, "request" for a message request, title
 instagram_dm.py reels THREAD [--limit N] [--mark-seen]   # one normalised reel URL per line
 instagram_dm.py poll                 # read once: log and hand over every NEW message of the operator, mark it seen
@@ -23,9 +23,12 @@ Settings come from the environment:
                           `<home>/bin/fm-inbox.sh note`); its request id makes a repeat harmless. Empty: log only
   INSTAGRAM_DM_CODE_CMD   shell command that prints the newest 6-digit Instagram email code (see SKILL.md)
   INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failure (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
-A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). A challenge, a feedback
-block, a suspension or a bad password halts everything instead: one notice goes to the agent and nothing calls
-Instagram again until `resume`. Nothing but `reply` sends anything, and no media is downloaded.
+A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). The first challenge, feedback
+block, suspension, login_required, please-wait, throttle (429) or bad password halts everything instead, with no
+retry: one notice goes to the agent and nothing calls Instagram again until `resume`. Nothing here ever logs in
+again by itself: a missing or dead session is such a halt, and a human runs `login --force` after checking the app.
+Every failure is reported with its exception class and endpoint. Nothing but `reply` sends anything, and no media
+is downloaded.
 """
 
 import argparse
@@ -39,6 +42,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Any post link (post, reel, tv, or with a username prefix). "Always assume it is a reel."
 LINK = re.compile(
@@ -50,8 +54,25 @@ SEEN_KEEP = 5000
 REPLY_MAX = 500  # characters: the operator asked for short plain texts
 REPLY_GAP = 3  # seconds between two sends
 REALTIME_GAP = 5  # seconds between two polls caused by realtime events
-# Exception class names that mean the account is flagged: stop, never retry.
-HALT = {"ChallengeError", "FeedbackRequired", "AccountSuspended", "BadPassword", "BadCredentials"}
+# Exception class names that mean the account is flagged, throttled or logged out: stop, never retry.
+HALT = {
+    "ChallengeError",
+    "FeedbackRequired",
+    "AccountSuspended",
+    "BadPassword",
+    "BadCredentials",
+    "LoginRequired",
+    "SessionLost",
+    "PleaseWaitFewMinutes",
+    "RateLimitError",
+    "ClientThrottledError",
+    "SentryBlock",
+    "CaptchaChallengeRequired",
+}
+
+
+class SessionLost(Exception):
+    """No usable saved session. Nothing here logs in again: a human does."""
 
 
 def conf(name, default=""):
@@ -71,6 +92,21 @@ def reel_urls(text):
 def backoff(fails, base, cap):
     """Seconds to wait after `fails` failures in a row: base, 2*base, 4*base ... up to cap."""
     return min(cap, base * 2 ** (max(fails, 1) - 1))
+
+
+def is_halt(e):
+    """True when e (or a parent class) is one of HALT: Instagram flagged, throttled or logged the account out."""
+    return any(c.__name__ in HALT for c in type(e).__mro__)
+
+
+def describe(e):
+    """One line for a failure: exception class, the endpoint path when the error carries its response, the message
+    (password masked, clipped)."""
+    secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
+    text = str(e).replace(secret, "***") if secret else str(e)
+    url = getattr(getattr(e, "response", None), "url", None)
+    where = f" at {urlsplit(url).path}" if url else ""
+    return f"{type(e).__name__}{where}: {text}"[:300]
 
 
 def message_url(msg):
@@ -165,9 +201,8 @@ def save_state(state):
 
 def fail(state, e, now):
     """Record a failure in state and return its one-line report. A flagged account halts; anything else backs off."""
-    secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
-    what = f"{type(e).__name__}: {str(e).replace(secret, '***') if secret else e}"[:300]
-    if any(c.__name__ in HALT for c in type(e).__mro__):
+    what = describe(e)
+    if is_halt(e):
         state["halted"] = what
         with contextlib.suppress(Exception):
             notify(
@@ -175,7 +210,7 @@ def fail(state, e, now):
                     {
                         "id": f"halt-{int(now)}",
                         "sender": "poller",
-                        "text": f"halted, run `instagram_dm.py resume` after you fix the account: {what}",
+                        "text": f"halted, a human must open the Instagram app first, then run `instagram_dm.py resume`: {what}",
                     }
                 ]
             )
@@ -193,7 +228,7 @@ def fail(state, e, now):
 def blocked(state, now):
     """Why Instagram must not be called now, or None."""
     if state.get("halted"):
-        return f"halted ({state['halted']}); run `instagram_dm.py resume` after you fix the account"
+        return f"halted ({state['halted']}); a human must open the Instagram app first, then run `instagram_dm.py resume`"
     if now < state["next"]:
         return f"backing off for {int(state['next'] - now)}s more"
     return None
@@ -246,7 +281,7 @@ def poll():
 
 def halt_if_flagged(e):
     """Halt the account when e means Instagram flagged it. Returns True when halted."""
-    if not any(c.__name__ in HALT for c in type(e).__mro__):
+    if not is_halt(e):
         return False
     with locked():
         state = load_state()
@@ -297,7 +332,7 @@ def listen():
                 int(conf("INSTAGRAM_DM_INTERVAL", "120")),
                 int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
             )
-            print(f"realtime {type(e).__name__}: {str(e)[:200]}; reconnect in {wait}s", flush=True)
+            print(f"realtime {describe(e)}; reconnect in {wait}s", flush=True)
             time.sleep(wait)
         finally:
             if cl:
@@ -310,6 +345,7 @@ def resume():
         state = load_state()
         state.update(halted=None, fails=0, next=0)
         save_state(state)
+    print("resumed. The next call goes to Instagram: open the app first and make sure the account is fine.")
 
 
 def operator_thread(cl, thread, operator):
@@ -417,45 +453,58 @@ def code_handler(username, choice):
     return False
 
 
-def login(cl):
-    """Log in once with the env credentials and save the session (mode 600)."""
+def session_file():
+    return Path(conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")).expanduser()
+
+
+def login(force=False):
+    """The one manual login: the env credentials, saved with the device it pinned to the session file (mode 600).
+    A session file already there means a second login, which needs --force and keeps that device."""
+    from instagrapi import Client
+
     user, password = (
         os.environ.get("INSTAGRAM_FIRSTMATE_USERNAME"),
         os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD"),
     )
     if not user or not password:
         sys.exit("set INSTAGRAM_FIRSTMATE_USERNAME and INSTAGRAM_FIRSTMATE_PASSWORD")
-    os.environ["INSTAGRAM_DM_CODE_SINCE"] = str(
-        int(time.time())
-    )  # the code command must ignore older mail
+    session = session_file()
+    if session.is_file() and not force:
+        sys.exit(f"{session} exists and nothing logs in again by itself: check the account in the app, then `login --force`")
+    cl = Client()
+    cl.challenge_code_handler = code_handler
+    if session.is_file():
+        cl.load_settings(session)  # the same device as the first login
+    else:
+        cl.set_timezone_offset(time.localtime().tm_gmtoff)  # the host's zone, fixed from now on
+    os.environ["INSTAGRAM_DM_CODE_SINCE"] = str(int(time.time()))  # the code command must ignore older mail
     cl.login(user, password)
-    session = Path(
-        conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")
-    ).expanduser()
     session.parent.mkdir(parents=True, exist_ok=True)
     cl.dump_settings(session)
     session.chmod(0o600)
+    print(f"logged in; device {cl.device_settings.get('model')}, pinned in {session}")
+
+
+def refuse(cl, e):
+    """instagrapi's handle_exception: raise at once. Its default solves a challenge and retries by itself."""
+    raise e
 
 
 def client():
-    """A client on the saved session; it logs in only when there is no session or Instagram rejects it."""
+    """A client on the saved session. It never logs in: no session file, or one without its pinned device, raises
+    SessionLost; a session Instagram rejects raises LoginRequired on its first call. Both halt the line."""
     from instagrapi import Client
-    from instagrapi.exceptions import LoginRequired
 
+    session = session_file()
+    if not session.is_file():
+        raise SessionLost(f"no session file {session}: a human runs `instagram_dm.py login`")
+    saved = json.loads(session.read_text())
+    if not (saved.get("uuids") and saved.get("device_settings")):
+        raise SessionLost(f"{session} holds no pinned device: a human runs `instagram_dm.py login --force`")
     cl = Client()
     cl.delay_range = [1, 3]
-    cl.challenge_code_handler = code_handler
-    session = Path(
-        conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")
-    ).expanduser()
-    if not session.is_file():
-        login(cl)
-        return cl
-    cl.load_settings(session)
-    try:
-        cl.account_info()
-    except LoginRequired:
-        login(cl)
+    cl.handle_exception = refuse
+    cl.set_settings({**saved, "session_retry_total": 0})  # the HTTP layer would retry a 429 three times
     return cl
 
 
@@ -464,8 +513,9 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "poll", "listen", "resume"):
+    for name in ("poll", "listen", "resume"):
         sub.add_parser(name)
+    sub.add_parser("login").add_argument("--force", action="store_true")
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--limit", type=int, default=20)
     reels = sub.add_parser("reels")
@@ -487,12 +537,7 @@ def main():
     elif a.cmd == "reply":
         reply(a.text, a.thread, a.react, a.typing)
     elif a.cmd == "login":
-        from instagrapi import Client
-
-        cl = Client()
-        cl.challenge_code_handler = code_handler
-        login(cl)
-        print("logged in")
+        login(a.force)
     elif a.cmd == "inbox":
         cl = client()
         for kind, threads in (

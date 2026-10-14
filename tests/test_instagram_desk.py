@@ -17,7 +17,7 @@ DESK = json.dumps(str(Path(__file__).parents[1] / "apps/imessage/instagram-desk.
 pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 
 
-def run(tmp_path, body, answer="hello there", omp_sleep=0):
+def run(tmp_path, body, answer="hello there", omp_sleep=0, reply=None):
     """Run `body` (TypeScript) against a desk built on the stand-ins; return what it printed as JSON.
 
     In `body`: `desk`, `feed(source, row)` (fresh now), `wait(ms)`, `omp()` (desk calls so far, their stdin) and
@@ -29,7 +29,7 @@ def run(tmp_path, body, answer="hello there", omp_sleep=0):
     stub = {
         "omp": f"""cat > "{tmp_path}/omp.$$"\nsleep {omp_sleep}\ncat "{tmp_path}/answer"\n""",
         "status": "echo fleet is quiet\n",
-        "reply": f"""printf '%s\\n' "$INSTAGRAM_DM_ACTOR|$*" >> "{tmp_path}/sends"\n""",
+        "reply": reply or f"""printf '%s\\n' "$INSTAGRAM_DM_ACTOR|$*" >> "{tmp_path}/sends"\n""",
     }
     for name, script in stub.items():
         (bin_dir / name).write_text("#!/bin/sh\n" + script)
@@ -135,6 +135,11 @@ def test_react_skip_and_failed_desk_answers(tmp_path):
     assert skip["sends"] == [] and skip["log"] == ["skip"]
     failed = run(tmp_path / "f", "feed('messages', { id: 'a', text: 'hi' }); await wait(1200); out.sends = sends(); out.log = log();", answer="")
     assert failed["sends"] == [] and failed["log"] == ["skip (desk failed)"]
+
+
+def test_a_failed_send_logs_what_fm_insta_reply_said(tmp_path):
+    out = run(tmp_path, "feed('messages', { id: 'a', text: 'hi' }); await wait(1200); out.log = log();", reply="echo 'poll halted (AccountSuspended at /api/v1/direct_v2/inbox/: challenge_required)' >&2\nexit 1\n")
+    assert out["log"] == ["hello there (send failed, exit 1: poll halted (AccountSuspended at /api/v1/direct_v2/inbox/: challenge_required))"]
 
 
 def test_old_rows_fill_the_memory_and_never_start_a_turn(tmp_path):

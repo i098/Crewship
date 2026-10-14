@@ -42,8 +42,7 @@ DEFAULTS = {
     "jitter": [20, 60],  # seconds between two Instagram requests
     "follow_jitter": [180, 600],  # seconds before each follow
 }
-# Errors that stop the curator for a day: the account is flagged (ig.HALT) or Instagram throttles it.
-STOP = ig.HALT | {"PleaseWaitFewMinutes", "RateLimitError", "ClientThrottledError", "CaptchaChallengeRequired", "SentryBlock"}
+# A 429, and every class in ig.HALT (flagged, throttled, logged out), stops the curator for a day.
 BAIT = re.compile(
     r"\bcomment\b.{0,60}?\b(link|repo|code|guide|send|dm|get)\b|\b(dm|message) me\b|\blink in (my |the )?bio\b|\bfollow (and|&) comment\b",
     re.I | re.S,
@@ -105,7 +104,7 @@ def halted_until(rows):
 
 def is_stop(e):
     status = getattr(getattr(e, "response", None), "status_code", None)
-    return status == 429 or any(c.__name__ in STOP for c in type(e).__mro__)
+    return status == 429 or ig.is_halt(e)
 
 
 def pause(cfg, key="jitter"):
@@ -139,7 +138,7 @@ def candidates(cl, cfg, seen, now):
         except Exception as e:
             if is_stop(e):
                 raise
-            print(f"{label}: {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+            print(f"{label}: {ig.describe(e)}", file=sys.stderr)
             continue
         for m in medias:
             fresh = now - m.taken_at.timestamp() < cfg["max_age_days"] * DAY
@@ -281,7 +280,7 @@ def cycle(cl, cfg, now):
         except Exception as e:
             if is_stop(e):
                 raise
-            write_log(action="reject", score=None, reason=f"{type(e).__name__}: {str(e)[:150]}", **row)
+            write_log(action="reject", score=None, reason=ig.describe(e), **row)
             continue
         row.update(score=info.get("score"), reason=reason, what=info.get("what"), link=link)
         if ok:
@@ -320,9 +319,9 @@ def main():
     except Exception as e:
         if not is_stop(e):
             raise
-        write_log(action="halt", until=int(now) + DAY, error=f"{type(e).__name__}: {str(e)[:200]}")
-        ig.halt_if_flagged(e)  # a flagged account stops the DM poller too; a plain 429 only stops the curator
-        sys.exit(f"stopped for 24 h: {type(e).__name__}")
+        write_log(action="halt", until=int(now) + DAY, error=ig.describe(e))
+        ig.halt_if_flagged(e)  # a flagged or throttled account stops the DM poller too; a bare 429 only the curator
+        sys.exit(f"stopped for 24 h: {ig.describe(e)}")
 
 
 if __name__ == "__main__":

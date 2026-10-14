@@ -314,3 +314,79 @@ def test_every_reply_action_is_logged_for_the_front_desk(monkeypatch, host):
         ("text", "hey", "desk"),
     ]
     assert {r["thread"] for r in rows} == {"7"} and rows[0]["at"] == 1000
+
+
+def lib(monkeypatch):
+    """A stand-in `instagrapi` whose Client records its settings and fails the test on any login."""
+    made = []
+
+    class Client:
+        def __init__(self):
+            made.append(self)
+
+        def set_settings(self, settings):
+            self.settings = settings
+
+        def login(self, *args):
+            raise AssertionError("a login nothing asked for")
+
+    monkeypatch.setitem(sys.modules, "instagrapi", NS(Client=Client))
+    return made
+
+
+def test_a_missing_or_incomplete_session_halts_and_never_logs_in(monkeypatch, host):
+    made = lib(monkeypatch)
+    session = host / "session.json"
+    monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(session))
+    assert "halted (SessionLost" in run(monkeypatch, ig.poll, 1000)
+    assert "a human runs `instagram_dm.py login`" in notified(host)[0][-1]
+    session.write_text('{"cookies": {}}')  # a session without its pinned device would get a random one
+    ig.resume()
+    assert "halted (SessionLost" in run(monkeypatch, ig.poll, 2000)
+    assert made == []
+
+
+def test_the_saved_session_is_loaded_as_it_is_and_the_library_never_solves_a_challenge(monkeypatch, host):
+    made = lib(monkeypatch)
+    saved = {"uuids": {"uuid": "u"}, "device_settings": {"model": "Pixel 8 Pro"}}
+    (host / "session.json").write_text(json.dumps(saved))
+    monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(host / "session.json"))
+    cl = ig.client()
+    assert made == [cl] and cl.settings == {**saved, "session_retry_total": 0}
+    with pytest.raises(ValueError):  # instagrapi's default would solve the challenge and retry the call
+        cl.handle_exception(cl, ValueError("challenge"))
+
+
+@pytest.mark.parametrize(
+    "name,parent",
+    [
+        ("PleaseWaitFewMinutes", Exception),
+        ("FeedbackRequired", Exception),
+        ("AccountSuspended", Exception),
+        ("LoginRequired", Exception),
+        ("ClientThrottledError", Exception),
+        ("ChallengeRequired", ChallengeError),  # halts through its parent, as instagrapi's does
+    ],
+)
+def test_the_first_flag_halts_with_no_retry(monkeypatch, host, name, parent):
+    calls = []
+
+    def flagged():
+        calls.append(1)
+        raise type(name, (parent,), {})("flag")
+
+    monkeypatch.setattr(ig, "client", flagged)
+    assert f"halted ({name}" in run(monkeypatch, ig.poll, 1000)
+    assert run(monkeypatch, ig.poll, 1000 + 86400) is None  # a day later: still nothing called
+    assert len(calls) == 1 and len(notified(host)) == 1
+
+
+def test_a_failure_names_its_class_and_endpoint(monkeypatch, host):
+    err = RuntimeError("boom")
+    err.response = NS(url="https://i.instagram.com/api/v1/direct_v2/inbox/?persistentBadge=true")
+
+    def broken():
+        raise err
+
+    monkeypatch.setattr(ig, "client", broken)
+    assert "RuntimeError at /api/v1/direct_v2/inbox/: boom" in run(monkeypatch, ig.poll, 1000)

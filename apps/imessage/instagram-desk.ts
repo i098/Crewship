@@ -95,8 +95,10 @@ export class InstagramDesk {
     if (tapback || !skip) {
       // `--` keeps a text that starts with "-" from being read as an option. The desk's own call must not stand it down.
       const args = tapback ? ["--react", tapback, "--thread", thread] : ["--thread", thread, "--", drafted];
-      const exit = await Bun.spawn([...this.o.replyCmd, ...args], { env: { ...this.o.env, INSTAGRAM_DM_ACTOR: "desk" }, stdout: "ignore", stderr: "ignore" }).exited;
-      if (exit !== 0) sent = ` (send failed, exit ${exit})`;
+      const reply = Bun.spawn([...this.o.replyCmd, ...args], { env: { ...this.o.env, INSTAGRAM_DM_ACTOR: "desk" }, stdout: "ignore", stderr: "pipe" });
+      const [exit, err] = await Promise.all([reply.exited, new Response(reply.stderr).text()]);
+      // fm-insta-reply says why it failed (exception class, endpoint, backoff or halt) on stderr: keep it in the desk log.
+      if (exit !== 0) sent = ` (send failed, exit ${exit}: ${err.trim().replace(/\s+/g, " ").slice(0, 300)})`;
     }
     appendFileSync(`${this.o.dir}/desk.log`, `${new Date().toISOString()} ${this.lastId} ${outcome}${sent}\n`, { mode: 0o600 });
   }
