@@ -1,15 +1,20 @@
+import getpass
+import grp
 import hashlib
 import importlib.util
 import io
 import json
+import os
 import runpy
 import ssl
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 SPEC = importlib.util.spec_from_file_location(
     "provisions", Path(__file__).parents[1] / "scripts/provisions.py"
@@ -221,6 +226,7 @@ RELEASES = {
     "gammons/slk": ("v9.9.9", "slk_9.9.9_linux_x86_64.tar.gz"),
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
     "jimididit/koncreet": ("v9.9.9", "koncreet.tar.gz"),
+    "jj-vcs/jj": ("v9.9.9", "jj-v9.9.9-x86_64-unknown-linux-musl.tar.gz"),
     "googleworkspace/cli": (
         "v9.9.9",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
@@ -346,6 +352,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "slk",
         "obscura",
         "koncreet",
+        "jj",
     ):
         assert latest[tool]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
     for tool in (
@@ -361,6 +368,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "slk",
         "obscura",
         "koncreet",
+        "jj",
     ):
         assert latest[tool]["version"] == "9.9.9"
     gws = latest["gws"]["assets"]["linux-x86_64"]
@@ -372,6 +380,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
     assert latest["fallow"]["assets"]["linux-x86_64"]["format"] == "file"
     assert latest["sentrux-grammars"]["assets"]["linux-x86_64"]["format"] == "tar"
     assert latest["concord"]["assets"]["linux-x86_64"]["format"] == "tar"
+    assert latest["jj"]["assets"]["linux-x86_64"]["format"] == "tar"
     # The newest Node release, not the first index entry, verified by SHASUMS256.
     node = latest["node"]["assets"]["linux-x86_64"]
     assert latest["node"]["version"] == "30.1.0"
@@ -400,6 +409,71 @@ def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
     upstream(monkeypatch, unverified="forgejo")
     with pytest.raises(ValueError, match="refusing an unverified binary"):
         installer.resolve_latest("linux-x86_64", {"forgejo"})
+
+
+def test_a_failed_dump_with_the_installed_forgejo_stops_the_upgrade_before_its_units_change(tmp_path):
+    home, stubs, log = tmp_path / "home", tmp_path / "bin", tmp_path / "calls"
+    old = home / ".local/share/crewship/forgejo/1.0.0/forgejo"
+    new = home / ".local/share/crewship/forgejo/2.0.0/forgejo"
+    conf = home / ".config/crewship/forgejo"
+    units = home / ".config/systemd/user"
+    for directory in (old.parent, new.parent, conf, units, stubs):
+        directory.mkdir(parents=True)
+    for name in ("secret-key", "internal-token", "jwt-secret"):
+        (conf / name).write_text("s3cret-value\n")
+    installed = {"forgejo.service": f"[Service]\nExecStart={old} web\n",
+                 "forgejo-dump.service": f"[Service]\nExecStart={old} dump\n"}
+    for name, text in installed.items():
+        (units / name).write_text(text)
+    # The service is stopped; systemctl start runs the installed dump unit's command.
+    for path, body in (
+        (old, f'echo "old $*" >> {log}; exit 1'),
+        (new, f'echo "new $*" >> {log}'),
+        (stubs / "systemctl", f'echo "systemctl $*" >> {log}\n'
+         f'[ "$*" = "--user start forgejo-dump.service" ] || exit 0\n'
+         f'exec $(sed -n "s/^ExecStart=//p" {units}/forgejo-dump.service)'),
+        (stubs / "tailscale", "exit 1"),
+    ):
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+    (tmp_path / "templates").symlink_to(Path(__file__).parents[1] / "blueprint/ansible/templates")
+    ansible = Path(__file__).parents[1] / "blueprint/ansible"
+    playbook = tmp_path / "forgejo.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars_files": [str(f) for f in sorted((ansible / "group_vars/all").glob("*.yml"))],
+        "tasks": [{"ansible.builtin.import_tasks": str(ansible / "tasks/forgejo.yml")}],
+        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "reload"}}],
+    }]))
+    variables = {
+        "crewship_repo": str(ansible.parents[1]), "crewship_blueprint": str(ansible.parent),
+        "ansible_become": False,
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_platform": "linux-x86_64",
+        "crewship_local_bin": str(stubs),
+        "crewship_user_uid": os.getuid(),
+        "crewship_latest": {"forgejo": {"version": "2.0.0", "assets": {}}},
+        "crewship": {
+            "user": getpass.getuser(), "home": str(home), "start_services": True,
+            "profiles": {"forgejo": True},
+        },
+    }
+    result = subprocess.run(
+        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
+         "--extra-vars", json.dumps(variables)],
+        cwd=tmp_path, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}"},
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "rescued=1" in result.stdout, output
+    assert "s3cret-value" not in output
+    # The old release dumped; Forgejo keeps it: no new units, configuration or restart.
+    assert {name: (units / name).read_text() for name in installed} == installed
+    assert not (conf / "app.ini").exists()
+    calls = log.read_text()
+    assert "old dump" in calls, calls
+    assert "restart" not in calls and "new" not in calls, calls
 
 
 @pytest.mark.parametrize(
@@ -578,6 +652,7 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
         (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),
         (["--tools", "sentrux"], {"sentrux", "sentrux-grammars"}),
         (["--tools", "pyrefly"], {"pyrefly"}),
+        (["--tools", "jj"], {"jj"}),
     ],
 )
 def test_resolve_selection_matches_what_the_flags_install(

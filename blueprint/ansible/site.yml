@@ -195,7 +195,7 @@
         - crewship_cfg.profiles.fleet_guards | bool
       tags: [fleet]
 
-    - name: Optional shared Postgres and worktree database environment
+    - name: Optional per-project databases and worktree database environment
       ansible.builtin.import_tasks: tasks/shared_postgres.yml
       when:
         - crewship_account_ready | bool

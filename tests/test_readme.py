@@ -1,7 +1,9 @@
+import copy
 import importlib.util
 import json
 from pathlib import Path
 
+import jsonschema
 import yaml
 
 ROOT = Path(__file__).parents[1]
@@ -20,6 +22,7 @@ FEATURES = {
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
     "crewship.profiles.shared_postgres": "docs/shared-postgres.md",
+    "crewship.profiles.jj": "docs/jj.md",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
     "crewship.profiles.forgejo": "docs/forgejo.md",
     "crewship.data_dir": "docs/configuration.md#data-disk",
@@ -92,6 +95,15 @@ def test_every_config_switch_has_a_features_line_tagged_opt_in_when_off_by_defau
             continue
         assert len(matches) == 1, f"{path}: one Features line must link {link}"
         assert matches[0].endswith(" (opt-in)") == found[path], matches[0]
+
+
+def test_schema_accepts_the_jj_profile_and_rejects_unknown_ones():
+    validator = jsonschema.Draft202012Validator(SCHEMA)
+    for key, ok in (("jj", True), ("jjj", False)):
+        host = copy.deepcopy(DEFAULT)
+        host["crewship"]["profiles"][key] = True
+        assert (not list(validator.iter_errors(host))) is ok
+    assert DEFAULT["crewship"]["profiles"]["jj"] is False
 
 
 def test_default_config_lists_the_current_defaults():

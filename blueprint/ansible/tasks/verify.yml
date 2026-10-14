@@ -139,6 +139,7 @@
                  crewship_cfg.home ~ '/.config/concord/config.toml',
                  crewship_cfg.home ~ '/.config/slk/config.toml']
                 if (crewship_cfg.profiles.chat | bool) else [])
+             + ([crewship_local_bin ~ '/jj'] if (crewship_cfg.profiles.jj | default(false) | bool) else [])
              + ([crewship_local_bin ~ '/crewboard',
                  crewship_user_units ~ '/crewboard.service',
                  crewship_user_units ~ '/default.target.wants/crewboard.service']

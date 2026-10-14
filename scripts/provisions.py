@@ -129,6 +129,13 @@ GITHUB_LATEST = {
     ),
     # Resolved for host hardening (blueprint/ansible/tasks/koncreet.yml), installed there as root.
     "koncreet": ("jimididit/koncreet", "v", "koncreet.tar.gz", {"koncreet": "koncreet/koncreet"}),
+    # Jujutsu for the opt-in jj profile (docs/jj.md); one static musl binary per release.
+    "jj": (
+        "jj-vcs/jj",
+        "v",
+        "jj-v{v}-{gnu}-unknown-linux-musl.tar.gz",
+        {"jj": "jj"},
+    ),
     # Google Workspace CLI, verified against the .sha256 file the release publishes.
     "gws": (
         "googleworkspace/cli",

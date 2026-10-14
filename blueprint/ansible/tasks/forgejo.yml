@@ -12,6 +12,8 @@
 #   * secrets and the admin password are written once, mode 600, under
 #     crewship_forgejo_conf_dir, and are never printed or rewritten; each nightly dump
 #     keeps a copy of the secrets next to it
+#   * before a new release first starts, the installed release runs its dump unit once;
+#     if that dump fails, the apply stops and Forgejo stays as it is
 #   * turning the profile off leaves the service, its data and its secrets as they are
 
 - name: Check for the resolved Forgejo release
@@ -219,6 +221,36 @@
       {{ ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
          if crewship_forgejo_published | default(false) | bool
          else ('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/') }}
+
+- name: Read the Forgejo release the installed unit runs
+  ansible.builtin.command:
+    argv: [sed, -n, 's/^ExecStart=\([^ ]*\).*/\1/p', "{{ crewship_user_units }}/forgejo.service"]
+  register: crewship_forgejo_previous
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# A new release migrates the database on its first start, and an older release cannot
+# open the result, so the installed dump unit, which still runs the installed release,
+# dumps first.
+- name: Back up Forgejo with the installed release before the upgrade
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+    - crewship_forgejo_previous.stdout not in ['', crewship_forgejo_bin]
+  block:
+    - name: Dump Forgejo with the installed release
+      ansible.builtin.command:
+        argv: [systemctl, --user, start, forgejo-dump.service]
+      environment: "{{ crewship_user_systemd_env }}"
+  rescue:
+    - name: Stop the upgrade when the backup fails
+      ansible.builtin.fail:
+        msg: >-
+          The dump with the installed Forgejo release {{ crewship_forgejo_previous.stdout }}
+          into {{ crewship_forgejo_dump_dir }} failed, so Forgejo was not upgraded to
+          {{ crewship_forgejo_version }} and still uses that release. See
+          `journalctl --user -u forgejo-dump.service`, fix the dump and apply again.
 
 - name: Render the Forgejo configuration
   ansible.builtin.template:
