@@ -61,9 +61,6 @@
             "shared_postgres": {
               "type": "boolean"
             },
-            "jj": {
-              "type": "boolean"
-            },
             "fleet_browsers": {
               "type": "boolean"
             },

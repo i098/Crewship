@@ -39,7 +39,6 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
   They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
 - `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
-- `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
 - `gateway` profile: cloudflared ([cloudflare/cloudflared](https://github.com/cloudflare/cloudflared/releases/latest), `cloudflared-linux-<arch>`), verified against the GitHub release-asset digest. See [Web pages from anywhere](gateway.md).
 
 The GitHub API allows 60 unauthenticated requests per hour per IP.
