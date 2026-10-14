@@ -61,6 +61,8 @@ hook)
 push)
     dir=$2 url=$3
     shift 3
+    exec 9>"$dir/crewship-github-push.lock"
+    flock 9
     pending=("$@") failed=0
     for attempt in 1 2 3; do
         leases=() specs=()
@@ -68,15 +70,10 @@ push)
             branch=${ref#refs/heads/}
             sha=$(git -C "$dir" rev-parse "$ref")
             ahead=$(git -C "$dir" config --get "crewship-github.$branch.ahead") || ahead=
+            expect=$(git -C "$dir" config --get "crewship-github.$branch.pushed") || expect=
             if [ -n "$ahead" ]; then
-                if ! git -C "$dir" merge-base --is-ancestor "$ahead" "$sha" 2>/dev/null; then
-                    echo "$branch: GitHub has commits that Forgejo lacks; not pushed until the branch merges them" >&2
-                    failed=1
-                    continue
-                fi
                 expect=$ahead
-            else
-                expect=$(git -C "$dir" config --get "crewship-github.$branch.pushed") || expect=
+                git -C "$dir" merge-base --is-ancestor "$ahead" "$sha" 2>/dev/null || expect=
             fi
             leases+=("--force-with-lease=$ref:$expect")
             specs+=("$sha:$ref")
@@ -84,7 +81,7 @@ push)
         [ "${#specs[@]}" -gt 0 ] || exit "$failed"
         out=$(git -C "$dir" push --porcelain "${leases[@]}" "$url" "${specs[@]}") || true
         printf '%s\n' "$out"
-        left=()
+        left=() nap=0
         for spec in "${specs[@]}"; do
             sha=${spec%%:*} ref=${spec#*:}
             branch=${ref#refs/heads/}
@@ -95,17 +92,22 @@ push)
                 git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
                 ;;
             '!'*'(stale info)'* | '!'*'(fetch first)'* | '!'*'(non-fast-forward)'*)
+                if remote=$(git -C "$dir" ls-remote "$url" "$ref" | cut -f1) && [ -z "$remote" ]; then
+                    git -C "$dir" config --unset "crewship-github.$branch.pushed" || true
+                    git -C "$dir" config --unset "crewship-github.$branch.ahead" || true
+                    left+=("$ref")
+                    continue
+                fi
                 echo "$branch: GitHub has commits that Forgejo lacks (Update branch, a suggestion or a web edit); not pushed, fetch the GitHub branch and merge it" >&2
-                remote=$(git -C "$dir" ls-remote "$url" "$ref" | cut -f1) || remote=
                 [ -z "$remote" ] || git -C "$dir" config "crewship-github.$branch.ahead" "$remote"
                 failed=1
                 ;;
-            *) left+=("$ref") ;;
+            *) left+=("$ref") nap=$((attempt * 20)) ;;
             esac
         done
         pending=("${left[@]}")
         [ "${#pending[@]}" -gt 0 ] || exit "$failed"
-        [ "$attempt" = 3 ] || sleep $((attempt * 20))
+        [ "$attempt" = 3 ] || sleep "$nap"
     done
     exit 1
     ;;

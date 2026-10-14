@@ -200,3 +200,27 @@ def test_a_github_only_commit_survives_until_the_branch_merges_it(tmp_path):
     assert third.returncode == 0
     assert "warning" not in third.stderr
     assert refs_of(github)["refs/heads/fm/x"] == merged
+
+
+def test_a_branch_deleted_on_github_is_pushed_again(tmp_path):
+    _, head = setup(tmp_path)
+    forgejo, github = tmp_path / "forgejo.git", tmp_path / "github.git"
+    hook(tmp_path, [f"{ZERO} {head} refs/heads/fm/x\n", f"{ZERO} {head} refs/heads/anything/y\n"])
+    # anything/y gets a GitHub-only commit that Forgejo never merges.
+    git("update-ref", "refs/heads/anything/y", commit(github, "review", head), cwd=github)
+    agent = commit(forgejo, "agent", head)
+    git("update-ref", "refs/heads/anything/y", agent, cwd=forgejo)
+    assert run_hook(tmp_path, [f"{head} {agent} refs/heads/anything/y\n"]).returncode != 0
+
+    # Both PRs merge and GitHub deletes their branches; the agents push again.
+    for ref in ("fm/x", "anything/y"):
+        git("update-ref", "-d", f"refs/heads/{ref}", cwd=github)
+    later = commit(forgejo, "later", agent)
+    for ref in ("fm/x", "anything/y"):
+        git("update-ref", f"refs/heads/{ref}", later, cwd=forgejo)
+    refs = hook(
+        tmp_path,
+        [f"{head} {later} refs/heads/fm/x\n", f"{agent} {later} refs/heads/anything/y\n"],
+    )
+    assert refs["refs/heads/fm/x"] == later
+    assert refs["refs/heads/anything/y"] == later
