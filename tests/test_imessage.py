@@ -2602,24 +2602,34 @@ def http(url, method="GET", body=None):
 
 
 def card_bubbles(fake, text):
-    return [line for line in text(fake / "sent").splitlines() if line.startswith(("send card ", "send edit "))]
+    """The card bubbles sent so far: link cards ("send <url>"), app cards and their edits."""
+    return [line for line in text(fake / "sent").splitlines() if re.match(r"send (card |edit |http)", line)]
+
+
+def card_url(bubble):
+    return re.search(r"http://\S+/c/[A-Za-z0-9_-]{43}", bubble)[0]
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_card_pick_is_single_use_wakes_firstmate_and_edits_the_bubble(tmp_path):
+@pytest.mark.parametrize("app", [False, True])
+def test_card_pick_is_single_use_wakes_firstmate_and_updates_the_bubble(tmp_path, app):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
     bridge = start(1)
     try:
         inbound("m1", text="ask me")
-        card = {"kind": "choice", "key": "layout", "title": "Board layout?", "options": ["Short list", "Cards", "Table"]}
+        card = {"kind": "choice", "key": "layout", "title": "Board layout?", "options": ["Short list", "Cards", "Table"], "app": app}
         assert cli("--card", json.dumps(card)).startswith("queued card layout")
         wait_for(lambda: card_bubbles(fake, text), "the card bubble")
-        url, layout = card_bubbles(fake, text)[0].removeprefix("send card ").split(" | ", 1)
-        assert layout == "Board layout? | 3 options | Tap to pick | Board layout?"
+        url = card_url(card_bubbles(fake, text)[0])
+        if app:
+            assert card_bubbles(fake, text)[0] == f"send card {url} | Board layout? | 3 options | Tap to pick | Board layout?"
+        else:
+            assert card_bubbles(fake, text)[0] == f"send {url}"
         token = url.rsplit("/", 1)[1]
         assert re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
         status, headers, page = http(url)
         assert status == 200 and "Short list" in page and 'name="choice" value="2"' in page
+        assert '<meta property="og:title" content="Board layout?">' in page and 'content="3 options"' in page
         assert headers["cache-control"] == "no-store" and headers["referrer-policy"] == "no-referrer"
         assert "default-src 'none'" in headers["content-security-policy"]
         assert http(url + "/pick", "POST", "choice=")[0] == 400
@@ -2629,14 +2639,20 @@ def test_card_pick_is_single_use_wakes_firstmate_and_edits_the_bubble(tmp_path):
         status, _, page = http(url + "/pick", "POST", "choice=0")
         assert status == 409 and text(notes).count("[iMessage card pick]") == 1
         assert "Picked B" in http(url)[2]
-        wait_for(lambda: len(card_bubbles(fake, text)) == 2, "the bubble edit")
-        assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} | Board layout? | Picked B: Cards | Done | Board layout?"
+        if app:
+            wait_for(lambda: len(card_bubbles(fake, text)) == 2, "the bubble edit")
+            assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} | Board layout? | Picked B: Cards | Done | Board layout?"
+        else:
+            time.sleep(0.5)
+            assert len(card_bubbles(fake, text)) == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
     assert token not in text(err) + text(tmp_path / "out") + text(notes)
     records = [json.loads(line) for f in (state / "memory/main").glob("*.jsonl") for line in f.read_text().splitlines()]
     assert "[iMessage card pick] layout: B. Cards" in [r["text"] for r in records]
+    assert "[card layout: Board layout?]" in [r["text"] for r in records]
+    assert not any(token in r["text"] for r in records)
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
@@ -2653,7 +2669,7 @@ def test_card_listener_serves_only_open_cards_by_their_token(tmp_path):
         cli("--card", str(bars))
         cli("--card", json.dumps({"kind": "choice", "key": "old", "title": "Old", "options": ["a", "b"]}))
         wait_for(lambda: len(card_bubbles(fake, text)) == 2, "two card bubbles")
-        (bars_url, _), (old_url, _) = (b.removeprefix("send card ").split(" | ", 1) for b in card_bubbles(fake, text))
+        bars_url, old_url = (card_url(b) for b in card_bubbles(fake, text))
         base = bars_url.rsplit("/c/", 1)[0]
         status, _, page = http(bars_url)
         assert status == 200 and "width:40.0%" in page and "width:80.0%" in page and "80 %" in page
@@ -2678,7 +2694,7 @@ def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
     bridge = start(1)
     try:
         inbound("m1", text="try a card")
-        cli("--card", json.dumps({"kind": "timeline", "key": "plan", "title": "Plan", "items": [{"when": "now", "text": "build"}]}))
+        cli("--card", json.dumps({"kind": "timeline", "key": "plan", "title": "Plan", "items": [{"when": "now", "text": "build"}], "app": True}))
         cli("after the card")
         wait_for(lambda: "send after the card" in text(fake / "sent"), "the text behind the refused card")
         assert "(card plan was not sent: Error: app cards are not on this plan)" in text(notes)
