@@ -3,6 +3,7 @@
 
 eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] [--send [CAPTION]]
 Without --out the PNG goes to a temp file; --send deletes it right after fm-imessage returns.
+--send without --out first sends a timeline card (fm-imessage --card -); the PNG is the fallback.
 items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved"}]
 An ISO time without an offset is read in --tz. start == end draws a dot; done always draws a dot at its end.
 """
@@ -148,7 +149,7 @@ def main():
         nargs="?",
         const="",
         metavar="CAPTION",
-        help="send the PNG with fm-imessage --image",
+        help="send a timeline card, else the PNG with fm-imessage --image",
     )
     a = p.parse_args()
     tz = ZoneInfo(a.tz)
@@ -169,6 +170,29 @@ def main():
         )
     if not items:
         sys.exit("no items")
+    if a.send is not None and not a.out and len(items) <= 50 and shutil.which("fm-imessage"):
+        hm = "%-I:%M %p"
+        card = {
+            "kind": "timeline",
+            "key": "eta",
+            "title": (a.send or "ETA")[:120],
+            "subtitle": f"Times in {a.tz}"[:200],
+            "items": [
+                {
+                    "when": i["end"].strftime(hm)
+                    if i["start"] == i["end"]
+                    else f"{i['start'].strftime(hm)} – {i['end'].strftime(hm)}",
+                    "text": (
+                        f"{i['group']}: {i['label']}"
+                        + ("" if i["state"] == "planned" else f" ({i['state']})")
+                    )[:200],
+                }
+                for i in items
+            ],
+        }
+        sent = subprocess.run(["fm-imessage", "--card", "-"], input=json.dumps(card), text=True)
+        if sent.returncode == 0:
+            return
     out = a.out or tempfile.mkstemp(suffix=".png", prefix="eta-timeline-")[1]
     render(items, tz, now, out)
     if a.send is None:

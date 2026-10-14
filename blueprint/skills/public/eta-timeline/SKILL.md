@@ -18,7 +18,7 @@ The chart is an 840 px wide PNG (630 px minimum tall) for iMessage. It has a tim
    `eta_timeline.py /tmp/eta.json --tz America/Los_Angeles`
    It prints the path of a temp PNG. Delete that file after you use it. Do not keep these images: pass `--out` only when a file must persist.
    Add `--now ISO` to fix the now line (default: the current time).
-3. Look at the PNG before you send it. Then show it to the operator. To send it over iMessage, run the script with `--send "caption"` and no `--out`. It renders to a temp file, runs `fm-imessage --image`, and deletes the file right after. It stops with a message when `fm-imessage` does not exist. With `--send` you cannot look first: render once without it to check.
+3. Look at the PNG before you send it. Then show it to the operator. To send it over iMessage, run the script with `--send "caption"` and no `--out`. It first sends a timeline card with `fm-imessage --card -` (the caption is the title), and stops there when the card is queued. When cards are off, it renders to a temp file, runs `fm-imessage --image`, and deletes the file right after. It stops with a message when `fm-imessage` does not exist. With `--send` you cannot look first: render once without it to check.
 
 ## Install
 

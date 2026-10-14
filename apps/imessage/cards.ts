@@ -10,6 +10,7 @@ export type Card = Base & (
   | { kind: "bars"; bars: { label: string; value: number }[]; unit?: string }
   | { kind: "timeline"; items: { when: string; text: string }[] }
   | { kind: "table"; columns: string[]; rows: (string | number)[][] }
+  | { kind: "text"; lines: string[] }
 );
 // `expires` is in ms since the epoch; `chat` is the outbox destination of its bubble; `picked` is the option index;
 // `sent` is set once the bubble is out, and `session` is the bubble's miniAppCardSession, which an edit needs.
@@ -55,6 +56,10 @@ const FIELDS: Record<Card["kind"], (c: Record<string, unknown>) => object> = {
       throw new Error(`row ${i + 1} cells must be text of at most 200 characters or numbers`);
     })) };
   },
+  text: (c) => ({ lines: list(c.lines, 1, 60, "lines", (x, i) => {
+    if (typeof x !== "string" || x.length > 200) throw new Error(`line ${i + 1} must be text of at most 200 characters`);
+    return x;
+  }) }),
 };
 
 // The fields every kind has.
@@ -93,7 +98,7 @@ export const letter = (i: number) => String.fromCharCode(65 + i);
 export function cardLayout(card: Stored): Layout {
   const status = card.kind === "choice"
     ? card.picked === undefined ? card.subtitle ?? `Pick one of ${card.options.length}` : `Picked ${letter(card.picked)}: ${card.options[card.picked]}`
-    : card.subtitle ?? { bars: "Bar chart", timeline: "Timeline", table: "Table" }[card.kind];
+    : card.subtitle ?? { bars: "Bar chart", timeline: "Timeline", table: "Table", text: "Update" }[card.kind];
   return { caption: card.title, subcaption: status, summary: card.title };
 }
 
@@ -166,7 +171,8 @@ button.cell:active:not(:disabled){background:var(--press)}button.cell:disabled{o
 .track{height:6px;border-radius:3px;background:var(--fill);margin-top:8px}.fillbar{height:100%;border-radius:3px;background:var(--accent)}
 .when{font-size:13px;line-height:18px;color:var(--muted)}.dot{flex:none;width:10px;height:10px;border-radius:5px;background:var(--accent);align-self:flex-start;margin-top:6px}
 .wide{overflow-x:auto;-webkit-overflow-scrolling:touch}table{border-collapse:collapse;width:100%;font-size:15px;line-height:20px;font-variant-numeric:tabular-nums}
-th{font-size:13px;font-weight:400;color:var(--muted);text-align:left;padding:10px 16px 6px}td{text-align:left;padding:11px 16px;border-top:.5px solid var(--sep);white-space:nowrap}`;
+th{font-size:13px;font-weight:400;color:var(--muted);text-align:left;padding:10px 16px 6px}td{text-align:left;padding:11px 16px;border-top:.5px solid var(--sep);white-space:nowrap}
+h2{font-size:13px;line-height:18px;font-weight:400;text-transform:uppercase;color:var(--muted);margin:0 16px 6px}`;
 
 // `description` makes the Open Graph tags that iMessage reads for the link preview of a card's URL.
 function page(status: number, title: string, body: string, description?: string) {
@@ -175,25 +181,39 @@ function page(status: number, title: string, body: string, description?: string)
     { status, headers: { ...HEADERS, "content-type": "text/html; charset=utf-8" } });
 }
 
-// The card's page, made to look like an iOS view inside Messages. A choice card shows one row per option until it
-// has its pick; then the rows stay, with a check on the pick.
-export function cardPage(card: Stored, status = 200, notice = "") {
-  const head = `<h1>${esc(card.title)}</h1>${card.subtitle ? `<p>${esc(card.subtitle)}</p>` : ""}${notice ? `<p>${esc(notice)}</p>` : ""}`;
-  let body: string;
-  if (card.kind === "choice") {
+type Of<K extends Card["kind"]> = Extract<Stored, { kind: K }>;
+// Each kind's view. A choice card shows one row per option until it has its pick; then the rows stay, with a check on
+// the pick. A text card reads the fm-text-card lines: "# x" starts a section, "- x" is a bullet, "k: v" is a row.
+const BODY: { [K in Card["kind"]]: (card: Of<K>) => string } = {
+  choice(card) {
     const done = card.picked !== undefined;
     const row = (o: string, i: number) => `<button class="cell${done && card.picked !== i ? " dim" : ""}" name="choice" value="${i}"${done ? " disabled" : ""}><span class="l">${letter(i)}</span><span class="t">${esc(o)}</span>${card.picked === i ? '<span class="check">&#10003;</span>' : ""}</button>`;
     const rows = `<div class="group">${card.options.map(row).join("")}</div>`;
-    body = done ? `<div class="note">&#10003; Picked ${letter(card.picked!)}. Firstmate has it.</div>${rows}` : `<form method="post" action="/c/${card.token}/pick">${rows}</form>`;
-  } else if (card.kind === "bars") {
+    return done ? `<div class="note">&#10003; Picked ${letter(card.picked!)}. Firstmate has it.</div>${rows}` : `<form method="post" action="/c/${card.token}/pick">${rows}</form>`;
+  },
+  bars(card) {
     // A percentage fills its track out of 100; any other unit is scaled to the largest bar.
     const max = Math.max(...card.bars.map((b) => b.value), card.unit === "%" ? 100 : 0) || 1;
-    body = `<div class="group">${card.bars.map((b) => `<div class="cell bar"><div class="row"><span>${esc(b.label)}</span><span class="v">${esc(b.value)}${card.unit ? ` ${esc(card.unit)}` : ""}</span></div><div class="track"><div class="fillbar" style="width:${((b.value / max) * 100).toFixed(1)}%"></div></div></div>`).join("")}</div>`;
-  } else if (card.kind === "timeline") {
-    body = `<div class="group">${card.items.map((x) => `<div class="cell"><span class="dot"></span><span class="t"><span class="when">${esc(x.when)}</span><br>${esc(x.text)}</span></div>`).join("")}</div>`;
-  } else {
-    body = `<div class="group wide"><table><thead><tr>${card.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${card.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
-  }
+    return `<div class="group">${card.bars.map((b) => `<div class="cell bar"><div class="row"><span>${esc(b.label)}</span><span class="v">${esc(b.value)}${card.unit ? ` ${esc(card.unit)}` : ""}</span></div><div class="track"><div class="fillbar" style="width:${((b.value / max) * 100).toFixed(1)}%"></div></div></div>`).join("")}</div>`;
+  },
+  timeline: (card) => `<div class="group">${card.items.map((x) => `<div class="cell"><span class="dot"></span><span class="t"><span class="when">${esc(x.when)}</span><br>${esc(x.text)}</span></div>`).join("")}</div>`,
+  table: (card) => `<div class="group wide"><table><thead><tr>${card.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${card.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`,
+  text(card) {
+    const sections: { head?: string; rows: string[] }[] = [{ rows: [] }];
+    for (const s of card.lines.map((l) => l.trim()).filter(Boolean)) {
+      const kv = /^([^:]{1,28}): (.+)$/.exec(s);
+      if (s.startsWith("# ")) sections.push({ head: s.slice(2), rows: [] });
+      else sections.at(-1)!.rows.push(/^[-•] /.test(s) ? `<div class="cell"><span class="dot"></span><span class="t">${esc(s.slice(2))}</span></div>`
+        : kv ? `<div class="cell"><span class="t">${esc(kv[1]!)}</span><span class="v">${esc(kv[2]!)}</span></div>` : `<div class="cell"><span class="t">${esc(s)}</span></div>`);
+    }
+    return sections.map((x) => `${x.head ? `<h2>${esc(x.head)}</h2>` : ""}${x.rows.length ? `<div class="group">${x.rows.join("")}</div>` : ""}`).join("");
+  },
+};
+
+// The card's page, made to look like an iOS view inside Messages.
+export function cardPage(card: Stored, status = 200, notice = "") {
+  const head = `<h1>${esc(card.title)}</h1>${card.subtitle ? `<p>${esc(card.subtitle)}</p>` : ""}${notice ? `<p>${esc(notice)}</p>` : ""}`;
+  const body = (BODY[card.kind] as (c: Stored) => string)(card);
   return page(status, card.title, head + body, cardLayout(card).subcaption);
 }
 

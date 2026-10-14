@@ -124,6 +124,27 @@ def test_text_card_maps_line_kinds():
     assert height > 0
 
 
+@pytest.mark.parametrize("cards_on", [True, False])
+def test_text_card_send_prefers_a_card_and_falls_back_to_the_png(monkeypatch, cards_on):
+    card = load("fm-text-card")
+    calls, shots = [], []
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("input")))
+        return subprocess.CompletedProcess(argv, 0 if cards_on or argv[1] == "--image" else 22)
+
+    monkeypatch.setattr(card.subprocess, "run", run)
+    monkeypatch.setattr(card, "shoot", lambda page, height, out: shots.append(out))
+    card.send("Deploy\n# Steps\n- build\nstatus: ok\n" + "x" * 300)
+    sent = json.loads(calls[0][1])
+    assert calls[0][0] == ["fm-imessage", "--card", "-"]
+    assert sent == {"kind": "text", "key": "text-card", "title": "Deploy", "lines": ["# Steps", "- build", "status: ok", "x" * 200]}
+    if cards_on:
+        assert len(calls) == 1 and not shots
+    else:
+        assert calls[1][0] == ["fm-imessage", "--image", shots[0]] and not os.path.exists(shots[0])
+
+
 def test_chrome_falls_back_to_omp_puppeteer(tmp_path, monkeypatch):
     card = load("fm-text-card")
     old, new = (tmp_path / ".omp/puppeteer/chrome" / v / "chrome-linux64/chrome" for v in ("linux-1.0", "linux-2.0"))
