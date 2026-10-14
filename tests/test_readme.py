@@ -17,6 +17,7 @@ SPEC.loader.exec_module(provisions)
 FEATURES = {
     "crewship.profiles.agents": "docs/omp.md",
     "crewship.profiles.public_skills": "docs/omp.md#skills",
+    "crewship.profiles.agent_instructions": "docs/omp.md#global-instructions",
     "crewship.profiles.chat": "docs/chat.md",
     "crewship.profiles.gateway": "docs/gateway.md",
     "crewship.profiles.koncreet": "docs/security.md#host-hardening",
@@ -49,6 +50,7 @@ EXCLUDED = {
     "crewship.gateway",
     "crewship.imessage.bluebubbles",
     "crewship.imessage.cards",
+    "crewship.instructions_mode",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",
 }

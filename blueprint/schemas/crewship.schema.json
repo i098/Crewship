@@ -33,6 +33,13 @@
           "type": "string",
           "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$"
         },
+        "instructions_mode": {
+          "enum": [
+            "skip",
+            "overwrite",
+            "append"
+          ]
+        },
         "profiles": {
           "type": "object",
           "additionalProperties": false,
@@ -77,6 +84,9 @@
               "type": "boolean"
             },
             "public_skills": {
+              "type": "boolean"
+            },
+            "agent_instructions": {
               "type": "boolean"
             },
             "koncreet": {
