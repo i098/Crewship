@@ -131,67 +131,80 @@
   failed_when: false
   check_mode: false
 
-- name: Name the tailnet host when Tailscale is running
+# tailscale serve needs HTTPS certificates; without them it exits or waits for an admin.
+- name: Name the tailnet host when Tailscale runs with HTTPS certificates
   ansible.builtin.set_fact:
     crewship_forgejo_tailnet_host: >-
       {{ ((crewship_forgejo_tailscale.stdout | from_json).Self.DNSName | regex_replace('[.]$', ''))
          if (crewship_forgejo_tailscale.rc | default(1)) == 0
             and (crewship_forgejo_tailscale.stdout | from_json).BackendState == 'Running'
+            and (crewship_forgejo_tailscale.stdout | from_json).CertDomains | default([], true) | length > 0
          else '' }}
 
-- name: Read the tailscale serve configuration
-  ansible.builtin.command:
-    argv: [tailscale, serve, status, --json]
+- name: Publish Forgejo to the tailnet over HTTPS
+  when: crewship_forgejo_tailnet_host | length > 0
   become: true
   become_user: root
-  register: crewship_forgejo_serve
-  changed_when: false
-  check_mode: false
-  when: crewship_forgejo_tailnet_host | length > 0
-
-- name: Check the tailnet HTTPS port for Forgejo
-  ansible.builtin.set_fact:
+  vars:
+    crewship_forgejo_proxy: {"/": {"Proxy": "http://127.0.0.1:{{ crewship_forgejo_port }}"}}
     crewship_forgejo_served_by: >-
       {{ (((crewship_forgejo_serve.stdout | from_json).Web | default({}, true))
           [crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port] | default({}))
          .Handlers | default({}) }}
-  when: crewship_forgejo_tailnet_host | length > 0
+  block:
+    - name: Read the tailscale serve configuration
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_forgejo_serve
+      changed_when: false
+      check_mode: false
 
-# Never takes over a port that tailscale serve already gives to something else.
-- name: Refuse a tailnet port that serves something else
-  ansible.builtin.assert:
-    that:
-      - >-
-        crewship_forgejo_served_by == {}
-        or crewship_forgejo_served_by == {'/': {'Proxy': 'http://127.0.0.1:' ~ crewship_forgejo_port}}
-    fail_msg: >-
-      tailscale serve already uses HTTPS port {{ crewship_forgejo_port }} for something
-      else; free it (tailscale serve --https={{ crewship_forgejo_port }} off) or set
-      crewship_forgejo_port.
-    quiet: true
-  when: crewship_forgejo_tailnet_host | length > 0
+    # Never takes over a port that tailscale serve already gives to something else.
+    - name: Refuse a tailnet port that serves something else
+      ansible.builtin.assert:
+        that: crewship_forgejo_served_by in [{}, crewship_forgejo_proxy]
+        fail_msg: >-
+          tailscale serve already uses HTTPS port {{ crewship_forgejo_port }} for something
+          else; free it (tailscale serve --https={{ crewship_forgejo_port }} off) or set
+          crewship_forgejo_port.
+        quiet: true
 
-- name: Publish Forgejo to the tailnet over HTTPS
-  ansible.builtin.command:
-    argv:
-      - tailscale
-      - serve
-      - --bg
-      - "--https={{ crewship_forgejo_port }}"
-      - "http://127.0.0.1:{{ crewship_forgejo_port }}"
-  become: true
-  become_user: root
-  changed_when: true
-  when:
-    - crewship_forgejo_tailnet_host | length > 0
-    - crewship_forgejo_served_by == {}
-    - not ansible_check_mode
+    # Only the configuration read below decides whether Forgejo is published.
+    - name: Ask tailscale serve to publish Forgejo
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "60"
+          - tailscale
+          - serve
+          - --bg
+          - "--https={{ crewship_forgejo_port }}"
+          - "http://127.0.0.1:{{ crewship_forgejo_port }}"
+      register: crewship_forgejo_publish
+      changed_when: false
+      failed_when: false
+      when:
+        - crewship_forgejo_served_by == {}
+        - not ansible_check_mode
+
+    - name: Confirm that the tailnet serves Forgejo
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_forgejo_serve
+      changed_when:
+        - crewship_forgejo_publish is not skipped
+        - crewship_forgejo_served_by == crewship_forgejo_proxy
+      check_mode: false
+
+    - name: Record whether the tailnet serves Forgejo
+      ansible.builtin.set_fact:
+        crewship_forgejo_published: "{{ crewship_forgejo_served_by == crewship_forgejo_proxy }}"
 
 - name: Choose the Forgejo root URL
   ansible.builtin.set_fact:
     crewship_forgejo_root_url: >-
       {{ ('https://' ~ crewship_forgejo_tailnet_host ~ ':' ~ crewship_forgejo_port ~ '/')
-         if crewship_forgejo_tailnet_host | length > 0
+         if crewship_forgejo_published | default(false) | bool
          else ('http://127.0.0.1:' ~ crewship_forgejo_port ~ '/') }}
 
 - name: Render the Forgejo configuration
@@ -239,7 +252,26 @@
     - { unit: forgejo.service, wants: default.target.wants }
     - { unit: forgejo-dump.timer, wants: timers.target.wants }
 
-# The admin CLI below runs the new release, so the service must run it too.
+- name: Check whether the running Forgejo runs an older binary
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - >-
+        pid="$(systemctl --user show --property MainPID --value forgejo.service)";
+        if [ "${pid:-0}" != 0 ] && [ "$(readlink -f "/proc/$pid/exe")" != "$(readlink -f "$1")" ];
+        then echo stale; fi
+      - bash
+      - "{{ crewship_forgejo_bin }}"
+  environment: "{{ crewship_user_systemd_env }}"
+  register: crewship_forgejo_running
+  changed_when: false
+  failed_when: false
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+
+# The admin CLI below runs the resolved release, so the service must run it too.
 - name: Restart Forgejo on a new release or configuration
   ansible.builtin.systemd_service:
     scope: user
@@ -250,7 +282,9 @@
   when:
     - crewship_manage_services | bool
     - not ansible_check_mode
-    - crewship_forgejo_config is changed or crewship_forgejo_units is changed
+    - >-
+      crewship_forgejo_config is changed or crewship_forgejo_units is changed
+      or crewship_forgejo_running.stdout == 'stale'
 
 - name: Start Forgejo and its dump timer
   ansible.builtin.systemd_service:
@@ -258,6 +292,7 @@
     name: "{{ item }}"
     enabled: true
     state: started
+    daemon_reload: true
   environment: "{{ crewship_user_systemd_env }}"
   loop: [forgejo.service, forgejo-dump.timer]
   # A unit that check mode only previewed does not exist yet.
