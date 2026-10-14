@@ -29,8 +29,8 @@ NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}")
 COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 IMAGE = re.compile(r"^\s*image:\s*[\"']?([^\s\"'#]+)", re.M)
 PASSWORD_FILE = "/run/secrets/db_password"
-MYSQL_PING = ('$(command -v mariadb-admin || command -v mysqladmin) ping -h 127.0.0.1 -uroot '
-              f'-p"$(cat {PASSWORD_FILE})" --silent')
+MYSQL_PING = (f'MYSQL_PWD="$(cat {PASSWORD_FILE})" $(command -v mariadb-admin || command -v mysqladmin) '
+              'ping -h 127.0.0.1 -uroot --silent')
 
 # One row per engine, in priority order when a compose file declares several.
 # images lists the only repositories that engine accepts: the official image, unnamespaced
@@ -61,7 +61,8 @@ ENGINES = {
     "redis": {
         "images": ("redis",), "default": "redis:latest", "port": 6379, "data": "/data",
         "scheme": "redis", "var": "REDIS_URL", "environment": {},
-        "command": ["sh", "-c", f'exec redis-server --appendonly yes --requirepass "$$(cat {PASSWORD_FILE})"'],
+        "command": ["sh", "-c", ('umask 077; echo "requirepass $(cat ' + PASSWORD_FILE + ')" > /tmp/redis.conf; '
+                                 'exec redis-server /tmp/redis.conf --appendonly yes').replace("$", "$$")],
         "health": ["CMD-SHELL", f'REDISCLI_AUTH="$$(cat {PASSWORD_FILE})" redis-cli -h 127.0.0.1 ping | grep -q PONG'],
     },
 }
@@ -127,7 +128,7 @@ def repository(image):
 def detect(directories):
     """Return (engine, image) from the first compose file that names a supported engine, else None."""
     accepted = {name for spec in ENGINES.values() for name in spec["images"]}
-    lookalikes = {name.rsplit("/", 1)[-1] for name in accepted} | {"postgis"}
+    lookalikes = {name.rsplit("/", 1)[-1] for name in accepted} | {"postgis", "postgresql"}
     for directory in directories:
         for name in COMPOSE_FILES:
             try:

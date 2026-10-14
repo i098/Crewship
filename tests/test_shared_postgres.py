@@ -164,7 +164,31 @@ def test_detection_prefers_a_database_over_a_cache_and_skips_unreadable_checkout
     assert database.detect([tmp_path / "gone", bare, full]) == ("postgres", "postgres:17")
 
 
-@pytest.mark.parametrize("image", ["bitnami/redis:7", "postgis/postgis:16-3.4", "ghcr.io/acme/mysql:8"])
+@pytest.mark.parametrize("engine, image, program, argument", [
+    ("redis", "redis:7", "redis-server", "command"),
+    ("mysql", "mysql:8.4", "mysqladmin", "healthcheck"),
+    ("mariadb", "mariadb:11", "mariadb-admin", "healthcheck"),
+])
+def test_the_password_never_reaches_a_process_argument(database, tmp_path, engine, image, program, argument):
+    service = database.compose_document("app", {"engine": engine, "image": image, "port": 25440})["services"]["db"]
+    script = service["command"][-1] if argument == "command" else service["healthcheck"]["test"][-1]
+    secret = tmp_path / "secret"
+    secret.write_text("s3cretvalue\n")
+    script = script.replace("$$", "$").replace("/run/secrets/db_password", str(secret))
+    script = script.replace("/tmp/redis.conf", str(tmp_path / "redis.conf"))
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    (stub / program).write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/argv\necho "$MYSQL_PWD" > {tmp_path}/env\n')
+    (stub / program).chmod(0o755)
+    subprocess.run(["sh", "-c", script], env={"PATH": f"{stub}:/usr/bin:/bin"}, check=True)
+    assert "s3cretvalue" not in (tmp_path / "argv").read_text()
+    if engine == "redis":
+        assert "requirepass s3cretvalue" in (tmp_path / "redis.conf").read_text()
+    else:
+        assert (tmp_path / "env").read_text().strip() == "s3cretvalue"
+
+
+@pytest.mark.parametrize("image", ["bitnami/redis:7", "bitnami/postgresql:16", "postgis/postgis:16-3.4", "ghcr.io/acme/mysql:8"])
 def test_unofficial_images_are_rejected_with_a_message_naming_the_image(database, tmp_path, capsys, image):
     directory = tmp_path / "app"
     directory.mkdir()
