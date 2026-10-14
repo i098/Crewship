@@ -77,13 +77,14 @@ def test_duration_and_ticks_follow_the_operator_clock():
     assert "1 h 30 min" in page and "1 h 15 min" in page and "4:00 PM" in page
 
 
-@pytest.mark.parametrize("card_exit", [0, 22])
-def test_send_tries_a_card_first_then_falls_back_to_the_png(tmp_path, card_exit):
-    if card_exit:
+@pytest.mark.parametrize(("flags", "card_exit"), [([], 0), (["--card"], 0), (["--card"], 22)])
+def test_send_is_a_png_unless_card_is_asked_for(tmp_path, flags, card_exit):
+    png = not flags or card_exit
+    if png:
         try:
             eta.chrome()
         except SystemExit:
-            pytest.skip("the PNG fallback needs headless Chrome")
+            pytest.skip("the PNG needs headless Chrome")
     log, src = tmp_path / "calls.jsonl", tmp_path / "items.json"
     src.write_text(json.dumps(ITEMS))
     stub = tmp_path / "bin/fm-imessage"
@@ -98,15 +99,16 @@ def test_send_tries_a_card_first_then_falls_back_to_the_png(tmp_path, card_exit)
     env = {**os.environ, "PATH": f"{stub.parent}{os.pathsep}{os.environ['PATH']}"}
     subprocess.run(
         [sys.executable, str(SKILL / "eta_timeline.py"), str(src), "--tz", "America/Los_Angeles"]
-        + ["--now", "2026-10-12T16:26", "--send", "Landing ETA"],
+        + ["--now", "2026-10-12T16:26", "--send", "Landing ETA", *flags],
         check=True,
         capture_output=True,
         env=env,
     )
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert calls[0][0] == ["--card", "-"]
-    card = json.loads(calls[0][1])
-    assert (card["kind"], card["title"], len(card["items"])) == ("timeline", "Landing ETA", 3)
-    assert card["items"][0]["text"].endswith(" (done)")
-    assert card["items"][1]["when"] == "4:30 PM – 6:00 PM"
-    assert [c[0][0] for c in calls[1:]] == (["--image"] if card_exit else [])
+    if flags:
+        assert calls[0][0] == ["--card", "-"]
+        card = json.loads(calls.pop(0)[1])
+        assert (card["kind"], card["title"], len(card["items"])) == ("timeline", "Landing ETA", 3)
+        assert card["items"][0]["text"].endswith(" (done)")
+        assert card["items"][1]["when"] == "4:30 PM – 6:00 PM"
+    assert [c[0][0] for c in calls] == (["--image"] if png else [])
