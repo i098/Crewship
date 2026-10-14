@@ -106,6 +106,7 @@ It pushes every branch except `main`, `master` and the repository's default bran
 It force-pushes each branch to the same name on GitHub.
 It never pushes `main`, `master`, the default branch, tags or a deletion, so it never deletes a GitHub branch.
 The push runs in a transient user unit with three tries and uses the account's git credential helper.
+The units for one repository push one at a time, so the last unit sends the current branch.
 A unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
 `systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
