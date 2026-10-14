@@ -242,6 +242,7 @@ def test_a_failed_apply_keeps_the_old_config_so_the_rerun_restarts_idle_slots(sl
 @pytest.fixture
 def configuration():
     document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    document["crewship"]["profiles"]["docker"] = True
     document["crewship"]["ci_pool"] = {
         "data_dir": "/srv/ci",
         "repos": [{"repo": "o/repo", "slots": 2, "labels": ["pool"]}],
