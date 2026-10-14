@@ -96,24 +96,38 @@
   changed_when: (crewship_skills_run.stdout_lines | last | from_json).changed | bool
   when: not ansible_check_mode
 
-# blueprint/config/AGENTS.md as ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md and
-# ~/.codex/AGENTS.md (docs/omp.md#global-instructions). A file the user changed
-# since the last apply is moved to a timestamped .bak beside it first.
+# blueprint/config/AGENTS.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, and a
+# one-line import of the first as ~/.omp/agent/AGENTS.md (docs/omp.md#global-instructions).
+# profiles.agent_instructions true installs it, false leaves it out, and absent installs
+# it only on a host that already has it. instructions_mode (default append) says what
+# happens to a file that exists: skip, overwrite after a timestamped .bak, or append one
+# marked block.
 - name: Install the global agent instructions
   ansible.builtin.command:
-    argv: [python3, "{{ crewship_repo }}/scripts/instructions.py", --home, "{{ crewship_cfg.home }}"]
+    argv:
+      - python3
+      - "{{ crewship_repo }}/scripts/instructions.py"
+      - --home
+      - "{{ crewship_cfg.home }}"
+      - --mode
+      - "{{ crewship_cfg.instructions_mode | default('append') }}"
+      - --enabled
+      - "{{ 'auto' if crewship_cfg.profiles.agent_instructions is not defined
+            else 'yes' if crewship_cfg.profiles.agent_instructions | bool else 'no' }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   register: crewship_instructions_run
   changed_when: (crewship_instructions_run.stdout_lines | last | from_json).changed | bool
   when: not ansible_check_mode
 
-- name: Report the global agent instructions backed up
+- name: Report the global agent instructions backed up or left alone
   ansible.builtin.debug:
-    msg: "Changed by hand, moved aside: {{ (crewship_instructions_run.stdout_lines | last | from_json).backups | join(', ') }}"
+    msg: "Moved aside: {{ result.backups | join(', ') or 'none' }}. Left alone: {{ result.skipped | join('; ') or 'none' }}."
+  vars:
+    result: "{{ crewship_instructions_run.stdout_lines | last | from_json }}"
   when:
     - not ansible_check_mode
-    - (crewship_instructions_run.stdout_lines | last | from_json).backups | length > 0
+    - result.backups | length > 0 or result.skipped | length > 0
 
 # The omp extension that feeds the Herdr agent sidebar layout ($who, the pull
 # request parts and the bare topic title; docs/herdr.md). Managed: every apply
