@@ -2009,8 +2009,12 @@ class FallbackRig:
         result = subprocess.run([str(SEND), *args], capture_output=True, text=True, env=self.env, timeout=30)
         assert result.returncode == 0, result.stderr
 
-    def photon_text(self, mid, text):
+    def photon_text(self, mid, text, at=None):
+        # Without `at` the bridge stamps the text when it handles it, after the test saw the note: a later test clock
+        # reading can then be older than that stamp. A test that orders texts by time gives `at`.
         record = {"id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": text}
+        if at is not None:
+            record["at"] = at
         publish_json(self.fake / "inbound" / f"{mid}.json", record)
         wait_for(lambda: f"photon-{mid} " in read_text(self.notes), f"the Photon note {mid}")
 
@@ -2034,7 +2038,7 @@ def test_reply_keeps_an_uncertain_fallback_queued_after_a_permanent_read_error(t
     rig = FallbackRig(tmp_path)
     try:
         rig.start()
-        rig.photon_text("p1", "on Photon")
+        rig.photon_text("p1", "on Photon", at=1)
         rig.relay_text("g1", "on BlueBubbles", int(time.time() * 1000))
         rig.relay_mode("last-404")
         (rig.fake / "send-unsure").touch()
@@ -2100,8 +2104,8 @@ def test_smart_reply_orders_history_across_lagging_relays(tmp_path, later):
             f" http://127.0.0.1:{read_text(second / 'relay-port')},RELAY_PASSWORD"
         )
         rig.start()
-        rig.photon_text("p1", "the plain route")
-        at = int(time.time() * 1000)
+        rig.photon_text("p1", "the plain route", at=1)
+        at = int(time.time() * 1000) - 60_000
         rig.relay_message("older", "older history", at - 1000)
         rig.relay_text("target", "the target", at)
         target = rig.fake / "relay/target.json"
@@ -2157,14 +2161,16 @@ def test_bridge_smart_reply_uses_inbound_bluebubbles_transport(tmp_path, private
         (rig.fake / "no-private-api").touch()
     try:
         rig.start()
-        rig.photon_text("p1", "earlier on Photon")
-        rig.relay_text("g1", "on BlueBubbles", int(time.time() * 1000))
+        rig.photon_text("p1", "earlier on Photon", at=1)
+        # In the past, and a second apart: the relay stamps its own bubbles with the real clock, which is later.
+        base = int(time.time() * 1000) - 60_000
+        rig.relay_text("g1", "on BlueBubbles", base)
         rig.cli("--reply", "1", "adjacent")
         wait_for(lambda: "adjacent" in read_text(rig.fake / "relay-sent"), "the adjacent BlueBubbles answer")
         rig.cli("--reply", "1", "after our bubble")
         wait_for(lambda: "after our bubble" in read_text(rig.fake / "relay-sent"), "the separated BlueBubbles answer")
-        rig.relay_text("g2", "another target", int(time.time() * 1000))
-        rig.relay_text("g3", "later owner bubble", int(time.time() * 1000))
+        rig.relay_text("g2", "another target", base + 1000)
+        rig.relay_text("g3", "later owner bubble", base + 2000)
         rig.cli("--reply", "2", "after his bubble")
         wait_for(lambda: "after his bubble" in read_text(rig.fake / "relay-sent"), "the later-owner BlueBubbles answer")
         payloads = [json.loads(line) for line in read_text(rig.fake / "relay-payloads").splitlines()]
