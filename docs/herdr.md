@@ -219,7 +219,7 @@ Pane state (the sidebar dots) is reported on the host by the omp integration `./
 ## Over mosh
 
 Over mosh, Herdr 0.9.3 can paint an opaque fill over older panes ([herdr#3773](https://github.com/herdrdev/herdr/issues/3773)), and mosh drops the images in the panes. `./ship.sh launch` installs [`tools/herdr-patch/herdr-patch`](../tools/herdr-patch/herdr-patch) as `~/.local/bin/herdr-patch`, which fixes both. `mosh-server` starts its command with the system `PATH`, which has no `~/.local/bin`, so apply also links `/usr/local/bin/herdr-patch` and `/usr/local/bin/herdr` to the installed files.
-Apply changes such a link only when it is missing, already points into this account's home, or points to a file that is gone. It never takes over a link of another account, for example from a sandbox or test apply for a second home, or a file that is not a link: it leaves it and prints a warning.
+Apply changes such a link only when it is missing or already points into this account's home. It never changes a link into another account's home, for example after a sandbox or test apply for a second home, even when that link dangles, and it never changes a file that is not a link.
 
 On your computer, install the same script and attach with real images:
 

@@ -5,8 +5,11 @@
 #
 # The links are host-wide, but the account is not: an apply for another account,
 # such as a sandbox or a test home, must never take over this host's links. So apply
-# changes a link only when it is missing, already points into this account's home,
-# or dangles. Any other file there stays, and apply prints a warning.
+# changes a link only when it is missing or already points into this account's
+# home. Any other file there stays, even a link into another home that dangles.
+# follow: false, so the stat never enters another account's home, which this
+# account may not be allowed to search. tags: always, so a verify-only run
+# (tasks/verify.yml) also knows which links this account owns.
 # No owner or group: the file module follows links, so setting root here would
 # chown the targets in ~/.local/bin and the next apply could not rewrite them.
 
@@ -17,30 +20,24 @@
     get_checksum: false
   loop: [herdr, herdr-patch, herdr-mosh]
   register: crewship_global_links
-
-- name: Read the targets of the host-wide herdr links
-  ansible.builtin.stat:
-    path: "{{ crewship_global_bin }}/{{ item }}"
-    follow: true
-    get_checksum: false
-  loop: [herdr, herdr-patch, herdr-mosh]
-  register: crewship_global_link_targets
+  tags: [always]
 
 - name: Start the list of host-wide herdr links this account owns
   ansible.builtin.set_fact:
     crewship_global_links_owned: []
+  tags: [always]
 
 - name: Add each host-wide herdr link this account owns
   ansible.builtin.set_fact:
-    crewship_global_links_owned: "{{ crewship_global_links_owned + [item.0.item] }}"
-  loop: "{{ crewship_global_links.results | zip(crewship_global_link_targets.results) | list }}"
+    crewship_global_links_owned: "{{ crewship_global_links_owned + [item.item] }}"
+  loop: "{{ crewship_global_links.results }}"
   loop_control:
-    label: "{{ item.0.item }}"
+    label: "{{ item.item }}"
   when: >-
-    not item.0.stat.exists
-    or (item.0.stat.islnk
-        and ((item.0.stat.lnk_target | default('')).startswith(crewship_cfg.home ~ '/')
-             or not item.1.stat.exists))
+    not item.stat.exists
+    or (item.stat.islnk
+        and (item.stat.lnk_target | default('')).startswith(crewship_cfg.home ~ '/'))
+  tags: [always]
 
 - name: Link herdr and herdr-patch into the system PATH
   ansible.builtin.file:
@@ -52,14 +49,6 @@
   become_user: root
   loop: [herdr, herdr-patch]
   when: item in crewship_global_links_owned
-
-- name: Report host-wide herdr links that belong to another account
-  ansible.builtin.debug:
-    msg: >-
-      Leaving {{ crewship_global_bin }}/{{ item }} as it is: it is not a link into
-      {{ crewship_cfg.home }}. Remove it by hand if this account should own it.
-  loop: [herdr, herdr-patch]
-  when: item not in crewship_global_links_owned
 
 # herdr-mosh is retired: herdr-patch replaced it. Hosts that applied the
 # earlier install keep the old copy and its link until this removes them.

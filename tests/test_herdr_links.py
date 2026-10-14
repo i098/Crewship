@@ -26,10 +26,9 @@ def apply(tmp_path, home):
     }]))
     result = subprocess.run(
         [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook)],
-        cwd=tmp_path, env={**os.environ, "ANSIBLE_STDOUT_CALLBACK": "default"}, capture_output=True, text=True,
+        cwd=tmp_path, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    return result.stdout
 
 
 def account(tmp_path, name):
@@ -44,21 +43,20 @@ def test_an_apply_for_a_second_account_leaves_the_owners_links_and_files(tmp_pat
     owner, sandbox = account(tmp_path, "owner"), account(tmp_path, "sandbox")
     links = tmp_path / "usr-local-bin"
     links.mkdir()
-    (links / "herdr").symlink_to(owner / ".local/bin/herdr")
+    (links / "herdr").symlink_to(owner / ".local/bin/gone")  # dangles
     (links / "herdr-patch").write_text("#!/bin/sh\n")  # an unmanaged file
     (links / "herdr-mosh").symlink_to(owner / ".local/bin/herdr")
-    output = apply(tmp_path, sandbox)
-    assert os.readlink(links / "herdr") == str(owner / ".local/bin/herdr")
+    apply(tmp_path, sandbox)
+    assert os.readlink(links / "herdr") == str(owner / ".local/bin/gone")
     assert not (links / "herdr-patch").is_symlink()
-    assert (links / "herdr-mosh").is_symlink()
-    assert "Leaving" in output
+    assert os.readlink(links / "herdr-mosh") == str(owner / ".local/bin/herdr")
 
 
-def test_an_apply_creates_missing_links_and_replaces_dangling_ones(tmp_path):
+def test_an_apply_creates_missing_links_and_repoints_its_own(tmp_path):
     home = account(tmp_path, "owner")
     links = tmp_path / "usr-local-bin"
     links.mkdir()
-    (links / "herdr").symlink_to(tmp_path / "gone/.local/bin/herdr")
+    (links / "herdr").symlink_to(home / ".local/bin/old-herdr")
     (links / "herdr-mosh").symlink_to(home / ".local/bin/herdr")
     apply(tmp_path, home)
     for command in ("herdr", "herdr-patch"):
@@ -66,4 +64,5 @@ def test_an_apply_creates_missing_links_and_replaces_dangling_ones(tmp_path):
     assert not os.path.lexists(links / "herdr-mosh")
     # A second apply keeps the account's own links.
     apply(tmp_path, home)
-    assert os.readlink(links / "herdr") == str(home / ".local/bin/herdr")
+    for command in ("herdr", "herdr-patch"):
+        assert os.readlink(links / command) == str(home / ".local/bin" / command)
