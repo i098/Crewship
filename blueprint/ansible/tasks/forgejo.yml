@@ -272,7 +272,9 @@
     - crewship_manage_services | bool
     - not ansible_check_mode
 
-# The admin CLI below runs the resolved release, so the service must run it too.
+# The admin CLI below runs the resolved release, so the service must run it too. The
+# git hooks need no regeneration: every repository uses the global core.hooksPath
+# (<work>/data/home/hooks), and each start rewrites those hooks with the running binary.
 - name: Restart Forgejo on a new release or configuration
   ansible.builtin.systemd_service:
     scope: user
