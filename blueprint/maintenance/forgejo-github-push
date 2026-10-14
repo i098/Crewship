@@ -11,7 +11,8 @@
 # branch (its HEAD), each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes
 # tags or a deletion, and never uses --mirror or --prune, so nothing on GitHub is ever
 # deleted. The push runs in a transient user unit, so the git client never waits for
-# GitHub; it authenticates with the account's own git credential helper.
+# GitHub; pushes for one repository run one at a time, so the last one sends the current
+# branch. It authenticates with the account's own git credential helper.
 set -euo pipefail
 
 repos=$HOME/.local/share/forgejo/data/forgejo-repositories
@@ -52,6 +53,8 @@ hook)
 push)
     dir=$2 url=$3
     shift 3
+    exec 9>"$dir/crewship-github-push.lock"
+    flock 9
     for attempt in 1 2 3; do
         git -C "$dir" push --porcelain "$url" "$@" && exit 0
         [ "$attempt" = 3 ] || sleep $((attempt * 20))
@@ -59,7 +62,7 @@ push)
     exit 1
     ;;
 *)
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac
