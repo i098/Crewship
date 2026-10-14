@@ -55,7 +55,7 @@ The dump goes to `<data_dir>/forgejo-dumps` when `crewship.data_dir` is set, els
 Each run writes `forgejo-dump-<time>.tar.zst` and `forgejo-dump-<time>.secrets.tar` beside it, both mode 600.
 The dump does not hold the secret files, so a restore needs the secrets tar with the dump.
 Put the files from the secrets tar back into `~/.config/crewship/forgejo` with mode 600.
-The timer keeps the newest 7 dumps and secrets tars. A failed dump removes nothing.
+The timer keeps the newest 7 dumps and secrets tars. A failed dump removes nothing and leaves no partial files.
 
 ## GitHub push
 
