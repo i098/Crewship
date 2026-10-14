@@ -17,7 +17,6 @@ type Chat = { line?: string; space: string; id: string };
 export type Stored = Card & { token: string; expires: number; chat?: Chat; picked?: number; sent?: boolean; session?: unknown };
 export type Layout = { caption: string; subcaption?: string; trailingCaption?: string; summary: string };
 
-const KINDS = ["choice", "bars", "timeline", "table"];
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const DAY = 86_400_000;
 
@@ -34,6 +33,42 @@ const object = (v: unknown, what: string) => {
   return v as Record<string, unknown>;
 };
 
+// Each kind's own fields, checked; an Error names the first bad field.
+const FIELDS: Record<Card["kind"], (c: Record<string, unknown>) => object> = {
+  choice: (c) => ({ options: list(c.options, 2, 6, "options", (o, i) => text(o, 120, `option ${i + 1}`)) }),
+  bars: (c) => ({
+    ...(c.unit === undefined ? {} : { unit: text(c.unit, 12, "unit") }),
+    bars: list(c.bars, 1, 30, "bars", (b, i) => {
+      const o = object(b, `bar ${i + 1}`);
+      if (typeof o.value !== "number" || !Number.isFinite(o.value) || o.value < 0) throw new Error(`bar ${i + 1} value must be a number of 0 or more`);
+      return { label: text(o.label, 60, `bar ${i + 1} label`), value: o.value };
+    }),
+  }),
+  timeline: (c) => ({ items: list(c.items, 1, 50, "items", (x, i) => {
+    const o = object(x, `item ${i + 1}`);
+    return { when: text(o.when, 40, `item ${i + 1} when`), text: text(o.text, 200, `item ${i + 1} text`) };
+  }) }),
+  table: (c) => {
+    const columns = list(c.columns, 1, 8, "columns", (x, i) => text(x, 40, `column ${i + 1}`));
+    return { columns, rows: list(c.rows, 1, 100, "rows", (r, i) => list(r, columns.length, columns.length, `row ${i + 1}`, (cell) => {
+      if ((typeof cell === "number" && Number.isFinite(cell)) || (typeof cell === "string" && cell.length <= 200)) return cell;
+      throw new Error(`row ${i + 1} cells must be text of at most 200 characters or numbers`);
+    })) };
+  },
+};
+
+// The fields every kind has.
+function base(c: Record<string, unknown>): Base {
+  if (typeof c.key !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(c.key)) throw new Error("key must be 1 to 40 letters, digits, '.', '_' or '-'");
+  const b: Base = { key: c.key, title: text(c.title, 120, "title") };
+  if (c.subtitle !== undefined) b.subtitle = text(c.subtitle, 200, "subtitle");
+  if (c.hours !== undefined && (!Number.isInteger(c.hours) || (c.hours as number) < 1 || (c.hours as number) > 168)) throw new Error("hours must be a whole number from 1 to 168");
+  if (c.hours !== undefined) b.hours = c.hours as number;
+  if (c.live !== undefined && typeof c.live !== "boolean") throw new Error("live must be true or false");
+  if (c.live !== undefined) b.live = c.live as boolean;
+  return b;
+}
+
 // The card in `json`, checked field by field; an Error names the first bad field.
 export function parseCard(json: string): Card {
   let raw: unknown;
@@ -43,42 +78,9 @@ export function parseCard(json: string): Card {
     throw new Error("the card is not valid JSON");
   }
   const c = object(raw, "the card");
-  if (!KINDS.includes(c.kind as string)) throw new Error(`kind must be one of ${KINDS.join(", ")}`);
-  if (typeof c.key !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(c.key)) throw new Error("key must be 1 to 40 letters, digits, '.', '_' or '-'");
-  const base: Base = { key: c.key, title: text(c.title, 120, "title") };
-  if (c.subtitle !== undefined) base.subtitle = text(c.subtitle, 200, "subtitle");
-  if (c.hours !== undefined) {
-    if (!Number.isInteger(c.hours) || (c.hours as number) < 1 || (c.hours as number) > 168) throw new Error("hours must be a whole number from 1 to 168");
-    base.hours = c.hours as number;
-  }
-  if (c.live !== undefined) {
-    if (typeof c.live !== "boolean") throw new Error("live must be true or false");
-    base.live = c.live;
-  }
-  switch (c.kind) {
-    case "choice":
-      return { ...base, kind: "choice", options: list(c.options, 2, 6, "options", (o, i) => text(o, 120, `option ${i + 1}`)) };
-    case "bars":
-      if (c.unit !== undefined) text(c.unit, 12, "unit");
-      return { ...base, kind: "bars", ...(c.unit === undefined ? {} : { unit: c.unit as string }), bars: list(c.bars, 1, 30, "bars", (b, i) => {
-        const o = object(b, `bar ${i + 1}`);
-        if (typeof o.value !== "number" || !Number.isFinite(o.value) || o.value < 0) throw new Error(`bar ${i + 1} value must be a number of 0 or more`);
-        return { label: text(o.label, 60, `bar ${i + 1} label`), value: o.value };
-      }) };
-    case "timeline":
-      return { ...base, kind: "timeline", items: list(c.items, 1, 50, "items", (x, i) => {
-        const o = object(x, `item ${i + 1}`);
-        return { when: text(o.when, 40, `item ${i + 1} when`), text: text(o.text, 200, `item ${i + 1} text`) };
-      }) };
-    default: {
-      const columns = list(c.columns, 1, 8, "columns", (x, i) => text(x, 40, `column ${i + 1}`));
-      return { ...base, kind: "table", columns, rows: list(c.rows, 1, 100, "rows", (r, i) => list(r, columns.length, columns.length, `row ${i + 1}`, (cell) => {
-        if (typeof cell === "number" && Number.isFinite(cell)) return cell;
-        if (typeof cell === "string" && cell.length <= 200) return cell;
-        throw new Error(`row ${i + 1} cells must be text of at most 200 characters or numbers`);
-      })) };
-    }
-  }
+  const kind = c.kind as Card["kind"];
+  if (!Object.hasOwn(FIELDS, kind)) throw new Error(`kind must be one of ${Object.keys(FIELDS).join(", ")}`);
+  return { ...base(c), kind, ...FIELDS[kind](c) } as Card;
 }
 
 export const letter = (i: number) => String.fromCharCode(65 + i);
