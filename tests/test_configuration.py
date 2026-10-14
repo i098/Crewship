@@ -336,6 +336,7 @@ def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypat
         "public_skills",
         "development",
         "jj",
+        "fdu",
         "fleet_browsers",
     }
 

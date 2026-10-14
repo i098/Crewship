@@ -47,6 +47,7 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
 | `docker` | the Docker engine and Compose |
 | `chat` | the Discord and Slack terminal clients |
 | `gateway` | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)) |
+| `fdu` | fdu, a fast gitignore-aware `du` for large worktrees |
 | `fleet_guards` | Docker guard, dev-server reaper, storage guard, browser ladder |
 | `shared_postgres` | one dev database container per project, in the engine its compose file names |
 | `jj` | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |

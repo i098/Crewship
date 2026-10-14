@@ -31,6 +31,7 @@ OPT_IN = {
     "chat": ("the Discord and Slack terminal clients", ()),
     "gateway": ("one password for the host's web pages over a Cloudflare tunnel", ()),
     "jj": ("the Jujutsu (jj) version control tool", ()),
+    "fdu": ("fdu, a fast gitignore-aware du for large worktrees", ()),
     "fleet_guards": ("the Docker guard, reapers and storage guard", ("docker",)),
     "shared_postgres": ("one dev database per project", ("docker",)),
     "fleet_browsers": ("the browser ladder", ()),
