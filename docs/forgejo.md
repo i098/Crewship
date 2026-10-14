@@ -20,7 +20,7 @@ The service, its data and its secrets stay on the host.
 
 ## What apply installs
 
-- The latest Forgejo release in `~/.local/share/crewship/forgejo/<version>/forgejo`, after its SHA-256 and its release-key signature match. [Dependencies](dependencies.md#forgejo) has the source.
+- The latest Forgejo release from Codeberg in `~/.local/share/crewship/forgejo/<version>/forgejo`. Apply verifies it against its `.sha256` file and its signature by the Forgejo release key, primary fingerprint `EB114F5E6C0DC2BCDD183550A4B61A2DC5923710`.
 - The user units `forgejo.service`, `forgejo-dump.service` and `forgejo-dump.timer`. Forgejo uses SQLite and listens on `127.0.0.1:20250` only.
 - The work directory `~/.local/share/forgejo`, with the database and the repositories in `data/`.
 - The configuration directory `~/.config/crewship/forgejo`, mode 700. It holds `app.ini`, the generated `secret-key`, `internal-token` and `jwt-secret` files, `admin-password` and, with the `agents` profile, `no-mistakes.env`. Apply writes each secret one time and never prints it.
@@ -103,5 +103,5 @@ A unit that fails all three tries stays as a failed unit.
 To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
 `systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
 
-New Forgejo push mirrors are off.
+Forgejo mirrors are off, in the web UI and in the API.
 A push mirror deletes every GitHub branch that it does not push.

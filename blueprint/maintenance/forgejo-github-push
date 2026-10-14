@@ -14,7 +14,7 @@
 # the account's own git credential helper.
 set -euo pipefail
 
-repos=${FORGEJO_REPOSITORIES:-$HOME/.local/share/forgejo/data/forgejo-repositories}
+repos=$HOME/.local/share/forgejo/data/forgejo-repositories
 prefixes=(feat fix chore docs refactor perf test build ci style revert)
 
 repo_dir() {
