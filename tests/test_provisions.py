@@ -406,7 +406,6 @@ def test_forgejo_without_a_published_checksum_is_refused(monkeypatch):
         installer.resolve_latest("linux-x86_64", {"forgejo"})
 
 
-
 @pytest.mark.parametrize(
     ("key", "arch"), [("linux-x86_64", "x86_64"), ("linux-aarch64", "arm64")]
 )
