@@ -163,7 +163,7 @@ def test_fleet_guards_require_docker_and_firstmate(configuration):
 
 
 def test_fleet_guards_accept_the_default_document_when_enabled(configuration):
-    configuration["crewship"]["profiles"]["fleet_guards"] = True
+    configuration["crewship"]["profiles"].update(fleet_guards=True, docker=True)
     assert ship.validate_config(configuration) is configuration
 
 
@@ -270,7 +270,7 @@ def test_init_preserves_existing_local_configuration(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
-    args = argparse.Namespace(user="coder", home="/home/coder", container=True, board=False, no_gateway=False)
+    args = argparse.Namespace(user="coder", home="/home/coder", container=True, board=False)
     ship.initialize(args)
     local = tmp_path / ".local/host.yml"
     first = local.read_bytes()
@@ -288,24 +288,22 @@ def test_root_operator_is_rejected_before_config_is_written(tmp_path, monkeypatc
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="non-root"):
         ship.initialize(
-            argparse.Namespace(user="root", home="/home/root", container=False, board=False, no_gateway=False)
+            argparse.Namespace(user="root", home="/home/root", container=False, board=False)
         )
     assert not (tmp_path / ".local/host.yml").exists()
 
 
-@pytest.mark.parametrize(
-    "container, no_gateway, expected", [(False, False, True), (False, True, False), (True, False, False)]
-)
-def test_dock_turns_the_gateway_on_only_in_a_new_host_config(tmp_path, monkeypatch, container, no_gateway, expected):
+@pytest.mark.parametrize("container, board", [(False, False), (False, True), (True, False)])
+def test_dock_writes_the_core_only_and_a_board_brings_its_toolchain(tmp_path, monkeypatch, container, board):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     ship.initialize(
-        argparse.Namespace(user="coder", home="/home/coder", container=container, board=False, no_gateway=no_gateway)
+        argparse.Namespace(user="coder", home="/home/coder", container=container, board=board)
     )
-    assert ship.load_config(tmp_path / ".local/host.yml")["crewship"]["profiles"]["gateway"] is expected
-    # An existing host config without the key gets the default: no gateway on an update.
-    assert yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())["crewship"]["profiles"]["gateway"] is False
+    profiles = ship.load_config(tmp_path / ".local/host.yml")["crewship"]["profiles"]
+    on = {name for name, enabled in profiles.items() if enabled}
+    assert on == ({"agents"} if container else {"agents", "firstmate"}) | ({"development"} if board else set())
 
 
 def fake_omp(launches, models=json.dumps({"models": [{"id": "model"}]}), exits=lambda n: 0):

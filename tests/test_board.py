@@ -32,6 +32,7 @@ def test_the_defaults_leave_the_board_off():
 @pytest.mark.parametrize("block", [{}, BOARD])
 def test_the_board_block_is_accepted(configuration, block):
     configuration["crewship"]["board"] = dict(block)
+    configuration["crewship"]["profiles"]["development"] = True
     assert ship.validate_config(configuration) is configuration
 
 
@@ -55,7 +56,7 @@ def test_dock_board_writes_the_block(tmp_path, monkeypatch):
     for path in ("config", "schemas"):
         shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
     monkeypatch.setattr(ship, "ROOT", tmp_path)
-    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, board=True, no_gateway=False))
+    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, board=True))
     assert ship.load_config(tmp_path / ".local/host.yml")["crewship"]["board"] == {}
 
 
