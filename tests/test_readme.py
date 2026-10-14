@@ -19,6 +19,7 @@ FEATURES = {
     "crewship.profiles.public_skills": "docs/omp.md#skills",
     "crewship.profiles.chat": "docs/chat.md",
     "crewship.profiles.gateway": "docs/gateway.md",
+    "crewship.profiles.koncreet": "docs/security.md#host-hardening",
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",

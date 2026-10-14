@@ -341,13 +341,13 @@ def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypat
 
 
 def test_the_checklist_asks_until_the_answer_is_valid(tmp_path, monkeypatch, capsys):
-    answers = iter(["bogus", "1 docker 99", "1 3 12"])
+    answers = iter(["bogus", "1 docker 99", f"1 3 {list(ship.OPT_IN).index('board') + 1}"])
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     config = dock(tmp_path, monkeypatch)
     assert on(config) == {"agents", "firstmate", "public_skills", "docker", "board", "development"}
     out = capsys.readouterr().out
-    assert "unknown choice 'bogus'" in out and " 1. public_skills" in out and "12. board" in out
+    assert "unknown choice 'bogus'" in out and " 1. public_skills" in out and f"{list(ship.OPT_IN).index('board') + 1}. board" in out
 
 
 def fake_omp(launches, models=json.dumps({"models": [{"id": "model"}]}), exits=lambda n: 0):
@@ -914,7 +914,7 @@ def _ansible(tmp_path, *argv, wrapper=()):
 
 
 def _installer_also(
-    tmp_path, start_services=True, fleet_guards=False, fleet_browsers=False
+    tmp_path, start_services=True, fleet_guards=False, fleet_browsers=False, koncreet=None
 ):
     variables = {
         "crewship_cfg": {
@@ -923,6 +923,7 @@ def _installer_also(
                 "agents": False,
                 "fleet_guards": fleet_guards,
                 "fleet_browsers": fleet_browsers,
+                **({} if koncreet is None else {"koncreet": koncreet}),
             },
             "browser_prune": {"enabled": False},
         }
@@ -950,6 +951,11 @@ def _installer_also(
 @pytest.mark.parametrize("start_services", [True, False])
 def test_koncreet_is_resolved_only_on_hosts_that_start_services(tmp_path, start_services):
     assert ("koncreet" in _installer_also(tmp_path, start_services)) is start_services
+
+
+@pytest.mark.parametrize("koncreet, resolved", [(None, True), (True, True), (False, False)])
+def test_koncreet_follows_its_profile_and_an_absent_key_keeps_it(tmp_path, koncreet, resolved):
+    assert ("koncreet" in _installer_also(tmp_path, koncreet=koncreet)) is resolved
 
 
 @pytest.mark.parametrize("fleet_guards", [False, True])
