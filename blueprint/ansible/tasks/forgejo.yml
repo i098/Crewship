@@ -1,7 +1,8 @@
 ---
 # Self-hosted Forgejo (profiles.forgejo, docs/forgejo.md): the latest release as a user
 # service of the target account on 127.0.0.1:{{ crewship_forgejo_port }} with SQLite, published to the
-# tailnet with `tailscale serve` when Tailscale is running, an admin account with a
+# tailnet with `tailscale serve` when Tailscale runs with HTTPS certificates enabled
+# (else on the loopback URL only), an admin account with a
 # generated password, and a nightly `forgejo dump`. Nothing here moves a repository
 # to Forgejo.
 #

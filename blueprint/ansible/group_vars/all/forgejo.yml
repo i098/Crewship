@@ -1,7 +1,8 @@
 ---
 # Self-hosted Forgejo (profiles.forgejo, tasks/forgejo.yml, docs/forgejo.md). A user
 # service of the target account on 127.0.0.1 only; tailscale serve publishes it to the
-# tailnet over HTTPS when Tailscale is running. Nothing here is a secret: the generated
+# tailnet over HTTPS when Tailscale runs with HTTPS certificates enabled, else it stays
+# on the loopback URL. Nothing here is a secret: the generated
 # secrets, the admin password and the no-mistakes token live in crewship_forgejo_conf_dir.
 crewship_forgejo_enabled: "{{ crewship_cfg.profiles.forgejo | default(false) | bool }}"
 # The loopback port, and the tailnet HTTPS port tailscale serve publishes.
