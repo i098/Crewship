@@ -231,17 +231,24 @@ RELEASES = {
 
 
 def codeberg(url, unverified):
-    """Fake Forgejo's Codeberg releases: the latest v9.9.9 and each binary's .sha256 file."""
+    """Fake Forgejo's Codeberg releases and each binary's .sha256 file.
+
+    The newest is v9.9.9, listed after an older LTS point release that was published later.
+    """
     if url.endswith(".sha256"):
         checksum = "" if unverified == "forgejo" else "9" * 64
         return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}\n".encode())
     assert url == installer.FORGEJO_RELEASES, url
-    assets = [
-        {"name": name + suffix, "browser_download_url": f"https://codeberg.org/{name}{suffix}"}
-        for name in ("forgejo-9.9.9-linux-amd64", "forgejo-9.9.9-linux-arm64")
-        for suffix in ("", ".sha256", ".asc")
-    ]
-    return Download(json.dumps({"tag_name": "v9.9.9", "assets": assets}).encode())
+
+    def release(version):
+        assets = [
+            {"name": name + suffix, "browser_download_url": f"https://codeberg.org/{name}{suffix}"}
+            for name in (f"forgejo-{version}-linux-amd64", f"forgejo-{version}-linux-arm64")
+            for suffix in ("", ".sha256", ".asc")
+        ]
+        return {"tag_name": f"v{version}", "assets": assets}
+
+    return Download(json.dumps([release("9.0.10"), release("9.9.9")]).encode())
 
 
 def upstream(monkeypatch, unverified=None, seen=None):
