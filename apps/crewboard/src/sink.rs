@@ -86,60 +86,72 @@ pub fn gh_post(repo: &str, issue: u64, body: &str) -> Result<(), String> {
     }
 }
 
+/// Parses the stream into `tx`: one formatted line per message, or the daemon's error, which ends it.
+fn read(stream: impl BufRead, tx: mpsc::Sender<Result<String, String>>) {
+    for raw in stream.lines().map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else { continue };
+        // Boot and gap lines have no body; only messages do.
+        let msg = match (v["error"].as_str(), v["body"].is_string()) {
+            (Some(e), _) => Err(e.to_owned()),
+            (None, true) => Ok(line(&v)),
+            _ => continue,
+        };
+        let last = msg.is_err();
+        if tx.send(msg).is_err() || last {
+            return;
+        }
+    }
+}
+
+/// Messages waiting for the next post.
+#[derive(Default)]
+struct Batch {
+    pending: VecDeque<String>,
+    omitted: usize,
+}
+
+impl Batch {
+    fn push(&mut self, l: String) {
+        if self.pending.len() == MAX_PENDING {
+            self.pending.pop_front();
+            self.omitted += 1;
+        }
+        self.pending.push_back(l);
+    }
+
+    /// Posts the waiting messages, if any. They stay waiting when the post fails.
+    fn flush(&mut self, post: &mut impl FnMut(&str) -> Result<(), String>) -> Result<(), String> {
+        if !self.pending.is_empty() {
+            post(&comment(&self.pending, self.omitted))?;
+            *self = Batch::default();
+        }
+        Ok(())
+    }
+
+    /// A last post, then `stop`; a failed last post wins.
+    fn finish(&mut self, post: &mut impl FnMut(&str) -> Result<(), String>, stop: Stop) -> Stop {
+        self.flush(post).map_or_else(Stop::Fail, |()| stop)
+    }
+}
+
 /// Reads the subscription stream from `stream`, and calls `post` with one comment body each
 /// `interval` that had messages. Returns when the stream ends, reports an error, or a post fails.
 pub fn run(stream: impl BufRead + Send + 'static, interval: Duration, mut post: impl FnMut(&str) -> Result<(), String>) -> Stop {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for raw in stream.lines().map_while(Result::ok) {
-            let Ok(v) = serde_json::from_str::<Value>(&raw) else { continue };
-            // Boot and gap lines have no body; only messages do.
-            let msg = match (v["error"].as_str(), v["body"].is_string()) {
-                (Some(e), _) => Err(e.to_owned()),
-                (None, true) => Ok(line(&v)),
-                _ => continue,
-            };
-            let last = msg.is_err();
-            if tx.send(msg).is_err() || last {
-                return;
-            }
-        }
-    });
-    let (mut pending, mut omitted) = (VecDeque::new(), 0);
-    let mut flush = |pending: &mut VecDeque<String>, omitted: &mut usize| {
-        if pending.is_empty() {
-            return Ok(());
-        }
-        post(&comment(pending, *omitted))?;
-        pending.clear();
-        *omitted = 0;
-        Ok(())
-    };
-    let mut due = Instant::now() + interval;
+    std::thread::spawn(move || read(stream, tx));
+    let (mut batch, mut due) = (Batch::default(), Instant::now() + interval);
     loop {
-        let stop = match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
-            Ok(Ok(l)) => {
-                if pending.len() == MAX_PENDING {
-                    pending.pop_front();
-                    omitted += 1;
-                }
-                pending.push_back(l);
-                continue;
-            }
-            Ok(Err(e)) => Stop::Fail(e),
+        match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
+            Ok(Ok(l)) => batch.push(l),
+            Ok(Err(e)) => return batch.finish(&mut post, Stop::Fail(e)),
             Err(RecvTimeoutError::Timeout) => {
-                if let Err(e) = flush(&mut pending, &mut omitted) {
+                if let Err(e) = batch.flush(&mut post) {
                     return Stop::Fail(e);
                 }
                 due = Instant::now() + interval;
-                continue;
             }
-            Err(RecvTimeoutError::Disconnected) => Stop::Off,
-        };
-        return match flush(&mut pending, &mut omitted) {
-            Ok(()) => stop,
-            Err(e) => Stop::Fail(e),
-        };
+            Err(RecvTimeoutError::Disconnected) => return batch.finish(&mut post, Stop::Off),
+        }
     }
 }
 
