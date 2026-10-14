@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render an ETA timeline PNG (840 px wide, dark) from JSON items with headless Chrome.
 
-eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] [--send [CAPTION]]
+eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] [--send [CAPTION]] [--card]
 Without --out the PNG goes to a temp file; --send deletes it right after fm-imessage returns.
---send without --out first sends a timeline card (fm-imessage --card -); the PNG is the fallback.
+--send --card without --out first sends a timeline card (fm-imessage --card -); the PNG is the fallback.
 items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved"}]
 An ISO time without an offset is read in --tz. start == end draws a dot; done always draws a dot at its end.
 """
@@ -149,8 +149,9 @@ def main():
         nargs="?",
         const="",
         metavar="CAPTION",
-        help="send a timeline card, else the PNG with fm-imessage --image",
+        help="send the PNG with fm-imessage --image",
     )
+    p.add_argument("--card", action="store_true", help="with --send: send a timeline card, else the PNG")
     a = p.parse_args()
     tz = ZoneInfo(a.tz)
     now = parse(a.now, tz) if a.now else datetime.now(tz)
@@ -170,7 +171,7 @@ def main():
         )
     if not items:
         sys.exit("no items")
-    if a.send is not None and not a.out and len(items) <= 50 and shutil.which("fm-imessage"):
+    if a.card and a.send is not None and not a.out and len(items) <= 50 and shutil.which("fm-imessage"):
         hm = "%-I:%M %p"
         card = {
             "kind": "timeline",
