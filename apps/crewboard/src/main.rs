@@ -206,8 +206,9 @@ fn github_sink(rest: &[String]) {
     }
     let topics = if a.pos.is_empty() { vec!["fleet"] } else { a.pos.clone() };
     let stream = request(json!({"op": "sub", "topics": topics}));
-    match sink::run(stream, Duration::from_secs(secs), |body| sink::gh_post(&repo, issue, body)) {
+    match sink::run(stream, Duration::from_secs(secs), |body| sink::gh_post(&repo, issue, body), true) {
         sink::Stop::Off => off(),
+        sink::Stop::Signal => exit(0),
         sink::Stop::Fail(e) => fail(&e),
     }
 }

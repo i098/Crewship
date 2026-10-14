@@ -121,7 +121,7 @@ The topics default to `fleet`. A trailing `*` matches a prefix, as for `sub`.
 - Messages wait in memory (500 at most). Every `--interval` seconds (default 300, 60 at the least) the sink posts them as one comment on the issue with `gh api --method POST repos/OWNER/REPO/issues/N/comments`. A period with no message makes no call.
 - The comment holds the messages in a code fence, one line each, cut at 2000 characters. A message cannot mention a user or link an issue. The comment stays under 60000 characters; the oldest lines drop first, and the first line says how many.
 - `gh` is the one from `$PATH`, or the binary in `$CREWBOARD_GH`. It uses the host's gh login, so the sink stores no token. The `repo` scope (or `public_repo` for a public repository) is enough.
-- When the daemon closes the stream, the sink posts what it holds and exits 3 (`board off`). A failed `gh` call, or `{"error":"slow"}` from the daemon, ends it with exit 1 after the last post attempt, and the messages of a failed post are lost. It does not resume with `--since`, so a restart drops what was in flight. Run it under a unit with `Restart=always`, or start it again.
+- When the daemon closes the stream, the sink posts what it holds and exits 3 (`board off`). On SIGINT or SIGTERM (Ctrl-C, `systemctl stop`) it posts what it holds once and exits 0; if that post takes more than 5 seconds, it exits 1. A failed `gh` call, or `{"error":"slow"}` from the daemon, ends it with exit 1 after the last post attempt, and the messages of a failed post are lost. SIGKILL or a crash loses the waiting messages. It does not resume with `--since`, so a daemon restart drops what was in flight. Run it under a unit with `Restart=always`, or start it again.
 
 ## Socket path
 

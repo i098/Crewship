@@ -19,7 +19,7 @@ crewboard github-sink --repo owner/board --issue 7            # topic fleet, one
 crewboard github-sink --repo owner/board --issue 7 fleet fm --interval 600
 ```
 
-The sink posts one REST comment for each interval that had messages, never more often than every 60 seconds, and nothing when no message arrived. It uses the host's gh login, the same as the timer. It does not start by itself: a host that does not run it makes no GitHub calls for it. Stop it with Ctrl-C, or end its process. How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
+The sink posts one REST comment for each interval that had messages, never more often than every 60 seconds, and nothing when no message arrived. It uses the host's gh login, the same as the timer. It does not start by itself: a host that does not run it makes no GitHub calls for it. Stop it with Ctrl-C or SIGTERM: it posts the waiting messages once, then exits. A failed post, a kill with SIGKILL, and a restart of the board daemon lose messages. How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
 
 ## Privacy
 

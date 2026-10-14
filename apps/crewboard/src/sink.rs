@@ -2,12 +2,13 @@
 //!
 //! One REST call per interval, only when messages arrived. The call is `gh api`, so the host's
 //! gh login is used and no token is stored. A failed call or a gone daemon ends the sink after
-//! the last post attempt; the systemd unit (or the operator) starts it again.
+//! the last post attempt; the systemd unit (or the operator) starts it again. SIGINT and SIGTERM
+//! make one last post too, and the process is killed if that post takes longer than `STOP_WAIT`.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, Write};
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::process::{Command, Stdio, exit};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -18,11 +19,25 @@ const MAX_COMMENT: usize = 60_000;
 const MAX_LINE: usize = 2_000;
 /// Messages held between two posts. Older ones count as omitted.
 const MAX_PENDING: usize = 500;
+/// After SIGINT or SIGTERM the last post may take this long.
+const STOP_WAIT: Duration = Duration::from_secs(5);
 
 pub enum Stop {
     /// The daemon closed the stream.
     Off,
+    /// SIGINT or SIGTERM, after the last post.
+    Signal,
     Fail(String),
+}
+
+/// What the sink loop waits for.
+enum Event {
+    Line(String),
+    /// The daemon's error; it ends the stream.
+    Error(String),
+    /// The daemon closed the stream. The signal thread keeps a sender, so the channel cannot say it.
+    Closed,
+    Signal,
 }
 
 /// `owner/repo`: exactly one slash, only characters GitHub allows in a name.
@@ -87,20 +102,41 @@ pub fn gh_post(repo: &str, issue: u64, body: &str) -> Result<(), String> {
 }
 
 /// Parses the stream into `tx`: one formatted line per message, or the daemon's error, which ends it.
-fn read(stream: impl BufRead, tx: mpsc::Sender<Result<String, String>>) {
+fn read(stream: impl BufRead, tx: Sender<Event>) {
     for raw in stream.lines().map_while(Result::ok) {
         let Ok(v) = serde_json::from_str::<Value>(&raw) else { continue };
         // Boot and gap lines have no body; only messages do.
         let msg = match (v["error"].as_str(), v["body"].is_string()) {
-            (Some(e), _) => Err(e.to_owned()),
-            (None, true) => Ok(line(&v)),
+            (Some(e), _) => Event::Error(e.to_owned()),
+            (None, true) => Event::Line(line(&v)),
             _ => continue,
         };
-        let last = msg.is_err();
+        let last = matches!(msg, Event::Error(_));
         if tx.send(msg).is_err() || last {
             return;
         }
     }
+    let _ = tx.send(Event::Closed);
+}
+
+/// Blocks SIGINT and SIGTERM for this thread and every thread spawned after it, and turns the
+/// first one into `Event::Signal`. If the sink is still running `STOP_WAIT` later, the process ends.
+fn watch_signals(tx: Sender<Event>) {
+    let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+    std::thread::spawn(move || {
+        let mut sig = 0;
+        unsafe { libc::sigwait(&set, &mut sig) };
+        let _ = tx.send(Event::Signal);
+        std::thread::sleep(STOP_WAIT);
+        eprintln!("crewboard: last post timed out");
+        exit(1)
+    });
 }
 
 /// Messages waiting for the next post.
@@ -135,22 +171,27 @@ impl Batch {
 }
 
 /// Reads the subscription stream from `stream`, and calls `post` with one comment body each
-/// `interval` that had messages. Returns when the stream ends, reports an error, or a post fails.
-pub fn run(stream: impl BufRead + Send + 'static, interval: Duration, mut post: impl FnMut(&str) -> Result<(), String>) -> Stop {
+/// `interval` that had messages. Returns when the stream ends, reports an error, a post fails, or
+/// (with `on_signal`) SIGINT or SIGTERM arrives. All but a failed post make one last post first.
+pub fn run(stream: impl BufRead + Send + 'static, interval: Duration, mut post: impl FnMut(&str) -> Result<(), String>, on_signal: bool) -> Stop {
     let (tx, rx) = mpsc::channel();
+    if on_signal {
+        watch_signals(tx.clone());
+    }
     std::thread::spawn(move || read(stream, tx));
     let (mut batch, mut due) = (Batch::default(), Instant::now() + interval);
     loop {
         match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
-            Ok(Ok(l)) => batch.push(l),
-            Ok(Err(e)) => return batch.finish(&mut post, Stop::Fail(e)),
+            Ok(Event::Line(l)) => batch.push(l),
+            Ok(Event::Error(e)) => return batch.finish(&mut post, Stop::Fail(e)),
+            Ok(Event::Signal) => return batch.finish(&mut post, Stop::Signal),
             Err(RecvTimeoutError::Timeout) => {
                 if let Err(e) = batch.flush(&mut post) {
                     return Stop::Fail(e);
                 }
                 due = Instant::now() + interval;
             }
-            Err(RecvTimeoutError::Disconnected) => return batch.finish(&mut post, Stop::Off),
+            Ok(Event::Closed) | Err(RecvTimeoutError::Disconnected) => return batch.finish(&mut post, Stop::Off),
         }
     }
 }
@@ -199,7 +240,7 @@ mod tests {
         let stop = run(std::io::Cursor::new(input.to_owned()), interval, |b| {
             posts.push(b.to_owned());
             Ok(())
-        });
+        }, false);
         (posts, matches!(stop, Stop::Off))
     }
 
@@ -223,7 +264,7 @@ mod tests {
     #[test]
     fn a_failed_post_stops_the_sink() {
         let input = "{\"seq\":1,\"ts\":\"t\",\"topic\":\"fleet\",\"from\":null,\"body\":\"x\"}\n";
-        let stop = run(std::io::Cursor::new(input.to_owned()), Duration::from_secs(3600), |_| Err("boom".into()));
+        let stop = run(std::io::Cursor::new(input.to_owned()), Duration::from_secs(3600), |_| Err("boom".into()), false);
         assert!(matches!(stop, Stop::Fail(e) if e == "boom"));
     }
 }
