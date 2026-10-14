@@ -7,11 +7,11 @@
 #   forgejo-github-push push DIR URL REFSPEC...
 #
 # The hook acts only in repositories that `enable` marked. It pushes every branch the
-# received push created or updated, except the repository's default branch (its HEAD),
-# each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes tags or a deletion, and
-# never uses --mirror or --prune, so nothing on GitHub is ever deleted. The push runs in
-# a transient user unit, so the git client never waits for GitHub; it authenticates with
-# the account's own git credential helper.
+# received push created or updated, except main, master and the repository's default
+# branch (its HEAD), each as +refs/heads/<branch>:refs/heads/<branch>. It never pushes
+# tags or a deletion, and never uses --mirror or --prune, so nothing on GitHub is ever
+# deleted. The push runs in a transient user unit, so the git client never waits for
+# GitHub; it authenticates with the account's own git credential helper.
 set -euo pipefail
 
 repos=$HOME/.local/share/forgejo/data/forgejo-repositories
@@ -41,6 +41,7 @@ hook)
     refspecs=()
     while read -r _ new ref; do
         [[ $new =~ ^0+$ || $ref != refs/heads/* || $ref == "$default" ]] && continue
+        [[ $ref == refs/heads/main || $ref == refs/heads/master ]] && continue
         refspecs+=("+$ref:$ref")
     done
     [ "${#refspecs[@]}" -gt 0 ] || exit 0
