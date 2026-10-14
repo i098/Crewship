@@ -2622,7 +2622,7 @@ def test_card_pick_is_single_use_wakes_firstmate_and_updates_the_bubble(tmp_path
         wait_for(lambda: card_bubbles(fake, text), "the card bubble")
         url = card_url(card_bubbles(fake, text)[0])
         if app:
-            assert card_bubbles(fake, text)[0] == f"send card {url} live | Board layout? | Pick one of 3 | Board layout?"
+            assert card_bubbles(fake, text)[0] == f"send card {url} | Board layout? | Pick one of 3 | Board layout?"
         else:
             assert card_bubbles(fake, text)[0] == f"send {url}"
         token = url.rsplit("/", 1)[1]
@@ -2641,7 +2641,7 @@ def test_card_pick_is_single_use_wakes_firstmate_and_updates_the_bubble(tmp_path
         assert "Picked B" in http(url)[2]
         if app:
             wait_for(lambda: len(card_bubbles(fake, text)) == 2, "the bubble edit")
-            assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} live | Board layout? | Picked B: Cards | Board layout?"
+            assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} | Board layout? | Picked B: Cards | Board layout?"
         else:
             time.sleep(0.5)
             assert len(card_bubbles(fake, text)) == 1
