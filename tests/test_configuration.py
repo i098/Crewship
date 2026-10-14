@@ -334,6 +334,7 @@ def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypat
     assert on(dock(tmp_path, monkeypatch, container=True, with_=["all"])) == {
         "agents",
         "public_skills",
+        "agent_instructions",
         "development",
         "jj",
         "fdu",
@@ -342,13 +343,50 @@ def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypat
 
 
 def test_the_checklist_asks_until_the_answer_is_valid(tmp_path, monkeypatch, capsys):
-    answers = iter(["bogus", "1 docker 99", f"1 3 {list(ship.OPT_IN).index('board') + 1}"])
+    answers = iter(["bogus", "1 docker 99", f"1 4 {list(ship.OPT_IN).index('board') + 1}"])
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     config = dock(tmp_path, monkeypatch)
     assert on(config) == {"agents", "firstmate", "public_skills", "docker", "board", "development"}
     out = capsys.readouterr().out
     assert "unknown choice 'bogus'" in out and " 1. public_skills" in out and f"{list(ship.OPT_IN).index('board') + 1}. board" in out
+
+
+def checklist(tmp_path, monkeypatch, answers, existing=()):
+    # An absolute path wins the join with the home, so the files can live in tmp_path.
+    files = [str(tmp_path / "files" / rel) for rel in ship.INSTRUCTION_FILES]
+    monkeypatch.setattr(ship, "INSTRUCTION_FILES", files)
+    for rel in existing:
+        (tmp_path / "files" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "files" / rel).write_text("mine\n")
+    answers = iter(answers)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr(ship, "ROOT", tmp_path)
+    for path in ("config", "schemas"):
+        shutil.copytree(ROOT / "blueprint" / path, tmp_path / "blueprint" / path)
+    ship.initialize(argparse.Namespace(user="coder", home="/home/coder", container=False, with_=None))
+    return yaml.safe_load((tmp_path / ".local/host.yml").read_text())["crewship"]
+
+
+@pytest.mark.parametrize("answer, mode", [("skip", "skip"), ("OVERWRITE", "overwrite"), ("", "append"), ("bogus", "append")])
+def test_the_checklist_asks_the_mode_only_when_an_instructions_file_exists(tmp_path, monkeypatch, answer, mode):
+    config = checklist(tmp_path, monkeypatch, ["agent_instructions", answer, "append"], [ship.INSTRUCTION_FILES[1]])
+    assert config["profiles"]["agent_instructions"] is True and config["instructions_mode"] == mode
+
+
+def test_the_checklist_does_not_ask_the_mode_without_a_file_or_a_choice(tmp_path, monkeypatch):
+    config = checklist(tmp_path, monkeypatch, ["agent_instructions"])  # a third answer would raise StopIteration
+    assert config["profiles"]["agent_instructions"] is True and "instructions_mode" not in config
+    config = checklist(tmp_path / "other", monkeypatch, ["none"], ship.INSTRUCTION_FILES)
+    assert config["profiles"]["agent_instructions"] is False and "instructions_mode" not in config
+
+
+def test_instruction_files_match_the_installer():
+    spec = importlib.util.spec_from_file_location("instructions", ROOT / "scripts/instructions.py")
+    instructions = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(instructions)
+    assert ship.INSTRUCTION_FILES == instructions.TARGETS
 
 
 def fake_omp(launches, models=json.dumps({"models": [{"id": "model"}]}), exits=lambda n: 0):

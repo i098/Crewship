@@ -43,6 +43,7 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
 | Name | Adds |
 | --- | --- |
 | `public_skills` | the public skills and rules for omp and Claude Code ([Skills](docs/omp.md#skills)) |
+| `agent_instructions` | the global instructions for Claude Code, omp and Codex ([Global instructions](docs/omp.md#global-instructions)); if one of the files exists, ask whether to `skip` it, `overwrite` it after a backup, or `append` one marked block (the default) |
 | `development` | the Rust toolchain and build tools |
 | `docker` | the Docker engine and Compose |
 | `chat` | the Discord and Slack terminal clients |

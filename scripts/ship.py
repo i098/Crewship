@@ -26,6 +26,7 @@ OLD_ROOT, NEW_ROOT = "factory", "crewship"
 # Every name is a profile, except board, which is a block (docs/board.md).
 OPT_IN = {
     "public_skills": ("the public skills and rules for omp and Claude Code", ()),
+    "agent_instructions": ("the global instructions for Claude Code, omp and Codex", ()),
     "development": ("the Rust toolchain and build tools", ()),
     "docker": ("the Docker engine and Compose", ()),
     "chat": ("the Discord and Slack terminal clients", ()),
@@ -41,6 +42,9 @@ OPT_IN = {
     "desktop": ("an XFCE desktop over noVNC", ()),
     "board": ("the crew message board", ("development",)),
 }
+# The files agent_instructions writes (scripts/instructions.py TARGETS), under the home.
+INSTRUCTION_FILES = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS.md")
+INSTRUCTION_MODES = {"skip": "leave them as they are", "overwrite": "replace them, after a timestamped .bak", "append": "add one marked block"}
 # A container worker image has no Docker, no user services, no desktop and no Firstmate.
 NOT_IN_CONTAINER = {
     "docker", "chat", "gateway", "fleet_guards", "shared_postgres", "tailscale", "desktop", "board", "koncreet", "forgejo",
@@ -224,6 +228,24 @@ def choose(args, names):
     return chosen
 
 
+def ask_instructions_mode(home):
+    """The mode for a file the instructions would touch; None when none exists (append is the default)."""
+    found = [rel for rel in INSTRUCTION_FILES if (Path(home) / rel).exists() or (Path(home) / rel).is_symlink()]
+    if not found:
+        return None
+    print(f"These files already exist: {', '.join('~/' + rel for rel in found)}. What should Crewship do with them?")
+    for mode, text in INSTRUCTION_MODES.items():
+        print(f"  {mode:<10} {text}")
+    while True:
+        try:
+            answer = input("skip, overwrite or append; Enter for append: ").strip().lower() or "append"
+        except EOFError:
+            return None
+        if answer in INSTRUCTION_MODES:
+            return answer
+        print(f"unknown mode {answer!r}")
+
+
 def initialize(args):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     current = pwd.getpwuid(os.getuid())
@@ -238,6 +260,10 @@ def initialize(args):
         config["crewship"]["browser_prune"]["enabled"] = False
     names = [name for name in OPT_IN if not (args.container and name in NOT_IN_CONTAINER)]
     chosen = choose(args, names)
+    if "agent_instructions" in chosen and args.with_ is None and sys.stdin.isatty():
+        mode = ask_instructions_mode(home)
+        if mode:
+            config["crewship"]["instructions_mode"] = mode
     for name in OPT_IN:
         if name == "board":
             if name in chosen:
