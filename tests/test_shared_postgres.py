@@ -74,6 +74,7 @@ def database(tmp_path, monkeypatch):
 def test_schema_and_legacy_profile(enabled):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     assert config["crewship"]["profiles"]["shared_postgres"] is False
+    config["crewship"]["profiles"]["docker"] = True
     if enabled is None:
         config["crewship"]["profiles"].pop("shared_postgres")
     else:

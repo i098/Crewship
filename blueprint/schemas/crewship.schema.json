@@ -75,6 +75,12 @@
             },
             "gateway": {
               "type": "boolean"
+            },
+            "public_skills": {
+              "type": "boolean"
+            },
+            "koncreet": {
+              "type": "boolean"
             }
           },
           "required": [

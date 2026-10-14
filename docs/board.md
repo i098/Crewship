@@ -12,7 +12,7 @@ The [Firstmate patch layer](dependencies.md#firstmate-patch-layer) adds the opti
 ## Turn it on
 
 1. Make sure that the `firstmate` and `development` profiles are on. Apply builds the board from `apps/crewboard/` with the cargo that the `development` profile installs.
-2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --board`. All fields are optional:
+2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --with board`. All fields are optional:
 
    ```yaml
    crewship:
