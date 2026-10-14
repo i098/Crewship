@@ -34,8 +34,8 @@ Apply does not change an HTTPS port 20250 that `tailscale serve` gives to a diff
 Clone URLs, pull request links and the no-mistakes base URL use the root URL that apply sets in `app.ini`:
 
 - When `tailscale serve` publishes Forgejo, apply uses the published URL.
-- Otherwise apply keeps the tailnet root URL that `app.ini` already has, so a Tailscale outage does not change it.
-- Without a tailnet root URL in `app.ini`, apply uses the loopback URL `http://127.0.0.1:<port>/` with the current port.
+- Otherwise apply keeps a root URL in `app.ini` that is not on `http://127.0.0.1:`, for example the tailnet URL, so a Tailscale outage does not change it.
+- Without such a root URL in `app.ini`, apply uses the loopback URL `http://127.0.0.1:<port>/` with the current port.
 
 Apply never uses Funnel, so Forgejo is never on the public internet.
 
