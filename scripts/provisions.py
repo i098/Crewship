@@ -151,11 +151,8 @@ NPM_LATEST = {
     "tasks-axi": "tasks-axi",
     "acpx": "acpx",
     "chrome-devtools-mcp": "chrome-devtools-mcp",
-    # The no-mistakes Forgejo provider CLI (docs/forgejo.md); opt-in, see NPM_OPT_IN.
     "forgejo-axi": "forgejo-axi",
 }
-# Registry tools installed only when --tools names them, not with every --npm.
-NPM_OPT_IN = {"forgejo-axi"}
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
 PRERELEASE_CHANNEL = {"no-mistakes"}
@@ -727,9 +724,7 @@ def main():
         names.append("sentrux-grammars")
     if args.development:
         names.append("rustup-init")
-    npm = [t for t in NPM_LATEST if t in names or (args.npm and t not in NPM_OPT_IN)]
-    names = [name for name in names if name not in NPM_LATEST]
-    sources = {*names, *npm, *filter(None, args.also.split(","))}
+    sources = {*names, *(NPM_LATEST if args.npm else ()), *filter(None, args.also.split(","))}
     if args.resolve:
         print(json.dumps(resolve_latest(key, sources)))
         return
@@ -756,9 +751,9 @@ def main():
             version = latest["sentrux-grammars"]["version"]
             store = prefix / "tools/sentrux-grammars" / version / key
             changed = link_grammars(home, store) or changed
-        for tool in npm:
-            changed = bun_latest_install(home, tool, latest[tool], environment) or changed
         if args.npm:
+            for tool in NPM_LATEST:
+                changed = bun_latest_install(home, tool, latest[tool], environment) or changed
             changed = retire_legacy_npm(home) or changed
             changed = omp_plugins(home, environment) or changed
         if args.development:

@@ -11,9 +11,7 @@ crewship_installer_selection: >-
   {{ ['--tools', (crewship_core_tools
                   + (crewship_chat_tools if (crewship_cfg.profiles.chat | bool) else [])
                   + (['cloudflared'] if ((crewship_cfg.profiles.gateway | bool)
-                                         or (crewship_cfg.imessage.cards is defined)) else [])
-                  + (['forgejo-axi'] if ((crewship_forgejo_enabled | bool)
-                                         and (crewship_cfg.profiles.agents | bool)) else []))
+                                         or (crewship_cfg.imessage.cards is defined)) else []))
                  | join(',')]
      + (['--npm'] if (crewship_cfg.profiles.agents | bool) else [])
      + (['--development'] if (crewship_cfg.profiles.development | bool) else []) }}

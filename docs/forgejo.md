@@ -23,9 +23,10 @@ The service, its data and its secrets stay on the host.
 - The latest Forgejo release in `~/.local/share/crewship/forgejo/<version>/forgejo`, after its SHA-256 and its release-key signature match. [Dependencies](dependencies.md#forgejo) has the source.
 - The user units `forgejo.service`, `forgejo-dump.service` and `forgejo-dump.timer`. Forgejo uses SQLite and listens on `127.0.0.1:20250` only.
 - The work directory `~/.local/share/forgejo`, with the database and the repositories in `data/`.
-- The configuration directory `~/.config/crewship/forgejo`, mode 700. It holds `app.ini`, the generated `secret-key`, `internal-token` and `jwt-secret` files, and `admin-password`. Apply writes each secret one time and never prints it.
+- The configuration directory `~/.config/crewship/forgejo`, mode 700. It holds `app.ini`, the generated `secret-key`, `internal-token` and `jwt-secret` files, `admin-password` and, with the `agents` profile, `no-mistakes.env`. Apply writes each secret one time and never prints it.
 - An admin account with the name of the target account and a generated password in `admin-password`, mode 600.
 - `~/.local/bin/forgejo-github-push` and its post-receive hook. See [GitHub push](#github-push).
+- With the `agents` profile, the no-mistakes Forgejo setup. See [no-mistakes](#no-mistakes).
 
 When Tailscale runs with HTTPS certificates, `tailscale serve` publishes Forgejo at `https://<tailnet host>:20250/`.
 Without HTTPS certificates, apply does not use `tailscale serve`, and Forgejo stays on `http://127.0.0.1:20250/`.
@@ -57,6 +58,22 @@ The dump does not hold the secret files, so a restore needs the secrets tar with
 Put the files from the secrets tar back into `~/.config/crewship/forgejo` with mode 600.
 The timer keeps the newest 7 dumps and secrets tars. A failed dump removes nothing and leaves no partial files.
 If a dump is stopped while it runs, the next run removes its temporary files.
+
+## no-mistakes
+
+Apply installs `forgejo-axi` on every host with the `agents` profile, also without the Forgejo profile.
+no-mistakes uses it for Forgejo pull requests and CI.
+
+With the Forgejo profile and the `agents` profile, apply also does these steps:
+
+- It creates the Forgejo token `crewship-no-mistakes` one time, with the scopes `write:repository`, `write:issue`, `read:user` and `read:organization`.
+  It writes the token as `FORGEJO_TOKEN` to `~/.config/crewship/forgejo/no-mistakes.env`, mode 600.
+- It writes the drop-in `~/.config/systemd/user/no-mistakes-daemon-.service.d/forgejo.conf`.
+  The drop-in sets `FORGEJO_BASE_URL` to the Forgejo URL and loads `no-mistakes.env`.
+
+Apply never restarts the no-mistakes daemon, because a restart stops the pipeline runs in progress.
+The daemon loads the drop-in only after a restart.
+When no pipeline run is active, run `no-mistakes daemon restart`.
 
 ## GitHub push
 
