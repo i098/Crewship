@@ -1,7 +1,9 @@
 {{ ansible_managed | comment }}
 # Nightly Forgejo backup (docs/forgejo.md#backups): one `forgejo dump` into
-# {{ crewship_forgejo_dump_dir }}, then all but the newest {{ crewship_forgejo_dump_keep }} dumps are removed.
-# A failed dump removes nothing.
+# {{ crewship_forgejo_dump_dir }}, then a copy of the secret-key, internal-token and
+# jwt-secret files next to it as forgejo-dump-<time>.secrets.tar, mode 600. The dump
+# does not hold these files, so a restore needs the secrets tar with the dump. All but
+# the newest {{ crewship_forgejo_dump_keep }} dumps and secrets tars are removed. A failed dump removes nothing.
 
 [Unit]
 Description=Forgejo nightly dump (Crewship managed)
@@ -11,4 +13,8 @@ Type=oneshot
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 WorkingDirectory={{ crewship_forgejo_dump_dir }}
 UMask=0077
-ExecStart=/bin/sh -c '{{ crewship_forgejo_cli | join(" ") }} dump --quiet --type tar.zst --tempdir . --file "forgejo-dump-$(date -u +%%Y%%m%%dT%%H%%M%%SZ).tar.zst" && ls -1t forgejo-dump-*.tar.zst | tail -n +{{ crewship_forgejo_dump_keep + 1 }} | xargs -r rm -f --'
+ExecStart=/bin/sh -c 'set -e; t="$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"; \
+  {{ crewship_forgejo_cli | join(" ") }} dump --quiet --type tar.zst --tempdir . --file "forgejo-dump-$$t.tar.zst"; \
+  tar -C {{ crewship_forgejo_conf_dir }} -cf "forgejo-dump-$$t.secrets.new" secret-key internal-token jwt-secret; \
+  mv "forgejo-dump-$$t.secrets.new" "forgejo-dump-$$t.secrets.tar"; \
+  for kind in tar.zst secrets.tar; do ls -1t forgejo-dump-*."$$kind" | tail -n +{{ crewship_forgejo_dump_keep + 1 }} | xargs -r rm -f --; done'

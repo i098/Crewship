@@ -8,7 +8,8 @@
 #   * the binary is installed only after its SHA-256 and its signature by the Forgejo
 #     release key both match; a new release lands in its own directory
 #   * secrets and the admin password are written once, mode 600, under
-#     crewship_forgejo_conf_dir, and are never printed or rewritten
+#     crewship_forgejo_conf_dir, and are never printed or rewritten; each nightly dump
+#     keeps a copy of the secrets next to it
 #   * turning the profile off leaves the service, its data and its secrets as they are
 
 - name: Check for the resolved Forgejo release
@@ -198,7 +199,7 @@
     src: forgejo-app.ini.j2
     dest: "{{ crewship_forgejo_conf_dir }}/app.ini"
     mode: "0600"
-  notify: restart forgejo
+  register: crewship_forgejo_config
 
 - name: Render the Forgejo units
   ansible.builtin.template:
@@ -206,9 +207,8 @@
     dest: "{{ crewship_user_units }}/{{ item }}"
     mode: "0644"
   loop: [forgejo.service, forgejo-dump.service]
-  notify:
-    - reload user systemd
-    - restart forgejo
+  register: crewship_forgejo_units
+  notify: reload user systemd
 
 - name: Write the Forgejo dump timer
   ansible.builtin.copy:
@@ -238,6 +238,19 @@
   loop:
     - { unit: forgejo.service, wants: default.target.wants }
     - { unit: forgejo-dump.timer, wants: timers.target.wants }
+
+# The admin CLI below runs the new release, so the service must run it too.
+- name: Restart Forgejo on a new release or configuration
+  ansible.builtin.systemd_service:
+    scope: user
+    name: forgejo.service
+    state: restarted
+    daemon_reload: true
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+    - crewship_forgejo_config is changed or crewship_forgejo_units is changed
 
 - name: Start Forgejo and its dump timer
   ansible.builtin.systemd_service:
