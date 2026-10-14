@@ -4,7 +4,8 @@
 eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] [--send [CAPTION]] [--card]
 Without --out the PNG goes to a temp file; --send deletes it right after fm-imessage returns.
 --send --card without --out first sends a timeline card (fm-imessage --card -); the PNG is the fallback.
-items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved"}]
+items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved", "percent": 0-100}]
+percent is optional: default is the share of start..end that has passed at --now, clamped to 0-100.
 An ISO time without an offset is read in --tz. start == end draws a dot; done always draws a dot at its end.
 """
 
@@ -68,8 +69,17 @@ def build_page(items, tz, now):
             )
         else:
             left, mins = x(it["start"]), round((it["end"] - it["start"]).total_seconds() / 60)
+            pct = it.get("percent")
+            if pct is None:  # elapsed share of the planned span
+                pct = round((now - it["start"]).total_seconds() / 60 * 100 / mins)
+            pct = max(0, min(100, pct))
+            fill = (
+                f'<div style="position:absolute;left:0;top:0;bottom:0;width:{pct}%;background:rgba(0,0,0,.28);border-radius:14px"></div>'
+                if 0 < pct < 100
+                else ""
+            )
             rows.append(
-                f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{duration(mins)}</div>'
+                f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{fill}<span style="position:relative">{pct}% · {duration(mins)}</span></div>'
             )
         y += 40
     ticks = "".join(
@@ -167,6 +177,7 @@ def main():
                 "state": r.get("state", "planned"),
                 "start": parse(r["start"], tz),
                 "end": parse(r["end"], tz),
+                "percent": r.get("percent"),
             }
         )
     if not items:

@@ -112,3 +112,16 @@ def test_send_is_a_png_unless_card_is_asked_for(tmp_path, flags, card_exit):
         assert card["items"][0]["text"].endswith(" (done)")
         assert card["items"][1]["when"] == "4:30 PM – 6:00 PM"
     assert [c[0][0] for c in calls] == (["--image"] if png else [])
+
+
+@pytest.mark.parametrize(
+    ("percent", "label"),
+    [(None, "50% · 1 h"), (25, "25% · 1 h"), (250, "100% · 1 h"), (-5, "0% · 1 h")],
+)
+def test_percent_is_given_derived_or_clamped(percent, label):
+    tz = eta.ZoneInfo("America/Los_Angeles")
+    item = {"label": "a", "group": "g", "state": "planned", "percent": percent}
+    item |= {"start": eta.parse("2026-10-12T16:00", tz), "end": eta.parse("2026-10-12T17:00", tz)}
+    page, _ = eta.build_page([item], tz, eta.parse("2026-10-12T16:30", tz))
+    assert label in page
+    assert ("rgba(0,0,0,.28)" in page.split("</style>")[1]) == (0 < int(label.split("%")[0]) < 100)

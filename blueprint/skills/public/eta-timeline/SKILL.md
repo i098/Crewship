@@ -7,13 +7,13 @@ description: Use when the operator asks for an ETA, a timeline, or when somethin
 
 A list hides overlap and slip. When the operator asks for an ETA, a timeline, or when something will be done, draw the chart and show it. Do not answer with a list.
 
-The chart is an 840 px wide PNG (630 px minimum tall) for iMessage. It has a time axis in the operator's local time with AM/PM ticks, one bar per item from start to ETA with the duration inside, a red "now" line, a legend, and items grouped by project. A done item is a green dot. A moved item (the ETA slipped) is amber. A planned item is blue. An item with start equal to end is a dot.
+The chart is an 840 px wide PNG (630 px minimum tall) for iMessage. It has a time axis in the operator's local time with AM/PM ticks, one bar per item from start to ETA with the percent complete and the duration inside ("40% · 1 h 30 min"; a darker fill shows the done part), a red "now" line, a legend, and items grouped by project. A done item is a green dot. A moved item (the ETA slipped) is amber. A planned item is blue. An item with start equal to end is a dot.
 
 ## Steps
 
 1. Write the items to a JSON file outside the repository, for example `/tmp/eta.json`:
    `[{"label": "0.4.3 release", "group": "Crewship", "start": "2026-10-12T16:30", "end": "2026-10-12T17:30", "state": "planned"}]`
-   `state` is `planned`, `done` or `moved`. A time without an offset is read in the operator's timezone.
+   `state` is `planned`, `done` or `moved`. `percent` (0-100) is optional: without it the chart uses the share of start..end that has passed at now. A given value is clamped to 0-100. Example: `{"label": "Mobile pass", "group": "Landing", "start": "2026-10-12T16:30", "end": "2026-10-12T18:00", "percent": 60}`. A time without an offset is read in the operator's timezone.
 2. Run the script that sits next to this file. It needs headless Chrome (`CHROME` overrides the path):
    `eta_timeline.py /tmp/eta.json --tz America/Los_Angeles`
    It prints the path of a temp PNG. Delete that file after you use it. Do not keep these images: pass `--out` only when a file must persist.

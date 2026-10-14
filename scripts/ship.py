@@ -69,7 +69,7 @@ def validate_config(document):
             raise ValueError("fleet guards require the docker and firstmate profiles")
     if config["profiles"].get("shared_postgres"):
         if not (config["profiles"]["docker"] and config["profiles"]["firstmate"]):
-            raise ValueError("shared Postgres requires the docker and firstmate profiles")
+            raise ValueError("project databases require the docker and firstmate profiles")
     skills = config.get("skills", {})
     if "private_ref" in skills and skills["private_source"].startswith("/"):
         raise ValueError("skills.private_ref applies only to a git source; remove it for a local path")

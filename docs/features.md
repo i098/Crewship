@@ -1,7 +1,8 @@
 # Features
 
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
-- [Shared Postgres](shared-postgres.md): one container, per-project databases and worktree connection strings (opt-in)
+- [Project databases](shared-postgres.md): one dev database container per project, in the engine its compose file names, and worktree connection strings (opt-in)
+- [Jujutsu](jj.md): `jj` colocated with git for agents, digest-verified in `~/.local/bin` (opt-in)
 - [Self-hosted Forgejo](forgejo.md): a loopback git forge for agent pushes, with nightly dumps, a GitHub feature-branch push and the no-mistakes forge profile (opt-in)
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
