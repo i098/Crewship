@@ -19,8 +19,12 @@ SPEC.loader.exec_module(installer)
 
 
 class Download(io.BytesIO):
+    def __init__(self, body, url="https://downloads.example.test/tool"):
+        super().__init__(body)
+        self.url = url
+
     def geturl(self):
-        return "https://downloads.example.test/tool"
+        return self.url
 
 
 def asset(payload, checksum=None):
@@ -269,25 +273,25 @@ def upstream(monkeypatch, unverified=None, seen=None):
             body = [{"version": "v9.99.0"}, {"version": "v30.1.0"}]
         elif url == "https://nodejs.org/dist/v30.1.0/SHASUMS256.txt":
             sums = "" if unverified == "node" else "b" * 64 + "  node-v30.1.0-linux-x64.tar.xz\n"
-            return io.BytesIO(("c" * 64 + "  node-v30.1.0-linux-arm64.tar.xz\n" + sums).encode())
+            return Download(("c" * 64 + "  node-v30.1.0-linux-arm64.tar.xz\n" + sums).encode())
         elif url == "https://static.rust-lang.org/rustup/release-stable.toml":
-            return io.BytesIO(b"schema-version = '1'\nversion = '9.9.9'\n")
+            return Download(b"schema-version = '1'\nversion = '9.9.9'\n")
         elif url.endswith("/rustup-init.sha256"):
             checksum = "" if unverified == "rustup-init" else "d" * 64
-            return io.BytesIO(f"{checksum} *./rustup-init\n".encode())
+            return Download(f"{checksum} *./rustup-init\n".encode())
         elif url.startswith("https://github.com/google-workspace-cli-") and url.endswith(".sha256"):
             # gws publishes its own .sha256 file, which wins over the GitHub digest.
             checksum = "" if unverified == "googleworkspace/cli" else "f" * 64
-            return io.BytesIO(f"{checksum}  google-workspace-cli.tar.gz\n".encode())
+            return Download(f"{checksum}  google-workspace-cli.tar.gz\n".encode())
         elif url.startswith("https://github.com/pyrefly-") and url.endswith(".sha256"):
             checksum = "" if unverified == "facebook/pyrefly" else "f" * 64
-            return io.BytesIO(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
+            return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
         elif url == "https://pypi.org/pypi/psutil/json":
             files = [] if unverified == "psutil" else [{"digests": {"sha256": "e" * 64}}]
             body = {"info": {"version": "9.9.9"}, "urls": files}
         else:
             body = {"version": "18.9.9"}
-        return io.BytesIO(json.dumps(body).encode())
+        return Download(json.dumps(body).encode())
 
     monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
 
@@ -380,7 +384,7 @@ def test_pyrefly_musl_release_installs_verified_tar_and_is_idempotent(
     def urlopen(request, **kwargs):
         url = request if isinstance(request, str) else request.full_url
         if url == f"https://github.com/{name}.sha256":
-            return io.BytesIO(f"{checksum}  {name}".encode())
+            return Download(f"{checksum}  {name}".encode())
         if url == f"https://github.com/{name}":
             return Download(tar)
         return original(request, **kwargs)
@@ -412,9 +416,7 @@ def test_no_mistakes_follows_the_prerelease_channel_and_skips_drafts(monkeypatch
 
 def test_a_release_list_with_only_drafts_is_refused(monkeypatch):
     def urlopen(request, **kwargs):
-        return io.BytesIO(
-            json.dumps([{"tag_name": "v9.9.11", "draft": True, "assets": []}]).encode()
-        )
+        return Download(json.dumps([{"tag_name": "v9.9.11", "draft": True, "assets": []}]).encode())
 
     monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
     with pytest.raises(ValueError, match="no-mistakes has no published release"):
@@ -671,3 +673,65 @@ def test_every_installed_tool_has_a_built_with_line():
     credits = (Path(__file__).parents[1] / "CREDITS.md").read_text()
     tools = {*EVERYTHING, *installer.OMP_PLUGINS}
     assert [tool for tool in sorted(tools) if f"`{tool}`" not in credits] == []
+
+
+def rate_limited_github(monkeypatch):
+    """GitHub whose API refuses every call (HTTP 403, the 60 an hour budget spent) but whose public pages answer."""
+    api = installer.urllib.request.urlopen
+
+    def urlopen(request, **kwargs):
+        url = request.full_url
+        if url.startswith("https://api.github.com/"):
+            raise http_error(403)
+        if url.endswith(".sha256"):
+            return Download(b"f" * 64 + b"  asset")
+        if not url.startswith("https://github.com/"):
+            return api(request, **kwargs)
+        repo = "/".join(url.split("/")[3:5])
+        tag, *names = RELEASES[repo]
+        if url.endswith("/releases/latest"):
+            return Download(b"", url=f"https://github.com/{repo}/releases/tag/{tag}")
+        if url.endswith("/releases.atom"):
+            return Download(f'<link href="https://github.com/{repo}/releases/tag/{tag}"/>'.encode())
+        assert url.endswith(f"/releases/expanded_assets/{tag}"), url
+        page = "".join(
+            f'<a href="/{repo}/releases/download/{tag}/{name}">{name}</a>'
+            f'<span class="Truncate-text">sha256:{"a" * 64}</span>'
+            for name in names
+        )
+        return Download(page.encode())
+
+    upstream(monkeypatch)
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(installer.time, "sleep", lambda seconds: None)
+
+
+def test_a_rate_limited_api_falls_back_to_the_public_release_pages(monkeypatch, capsys):
+    rate_limited_github(monkeypatch)
+    latest = installer.resolve_latest("linux-x86_64", EVERYTHING)
+    assert "reading github.com's release pages instead" in capsys.readouterr().err
+    assert latest["uv"]["version"] == "9.9.9"
+    assert latest["uv"]["assets"]["linux-x86_64"] == {
+        "url": "https://github.com/astral-sh/uv/releases/download/9.9.9/uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "a" * 64,
+        "format": "tar",
+        "binaries": {"uv": "uv-*/uv", "uvx": "uv-*/uvx"},
+    }
+    # The prerelease channel reads the newest release from the Atom feed.
+    assert latest["no-mistakes"]["version"] == "9.9.10-beta.1"
+    # gws and Pyrefly keep their own .sha256 file as the checksum source.
+    assert latest["pyrefly"]["assets"]["linux-x86_64"]["sha256"] == "f" * 64
+
+
+def test_a_rate_limited_api_and_unreadable_pages_still_name_the_token(monkeypatch):
+    rate_limited_github(monkeypatch)
+    fake = installer.urllib.request.urlopen
+
+    def urlopen(request, **kwargs):
+        if request.full_url.startswith("https://github.com/"):
+            raise http_error(500)
+        return fake(request, **kwargs)
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    with pytest.raises(ValueError, match="set GITHUB_TOKEN"):
+        installer.resolve_latest("linux-x86_64", {"uv"})
