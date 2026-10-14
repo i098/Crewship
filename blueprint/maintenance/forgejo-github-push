@@ -47,7 +47,7 @@ hook)
     done
     [ "${#refspecs[@]}" -gt 0 ] || exit 0
     # The unit starts from the user manager's environment, not Forgejo's git environment.
-    exec systemd-run --user --collect --quiet --no-block --unit="forgejo-github-push-$(date +%s%N)" \
+    exec systemd-run --user --quiet --no-block --unit="forgejo-github-push-$(date +%s%N)" \
         "$(readlink -f "$0")" push "$dir" "$url" "${refspecs[@]}"
     ;;
 push)

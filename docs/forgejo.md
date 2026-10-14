@@ -72,6 +72,9 @@ It pushes only branches under these prefixes: `feat`, `fix`, `chore`, `docs`, `r
 It force-pushes each branch to the same name on GitHub.
 It never pushes main, tags or a deletion, so it never deletes a GitHub branch.
 The push runs in a transient user unit with three tries and uses the account's git credential helper.
+A unit that fails all three tries stays as a failed unit.
+To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github-push-*'`; `journalctl --user -u <unit>` shows the error.
+`systemctl --user reset-failed 'forgejo-github-push-*'` removes them.
 
 New Forgejo push mirrors are off.
 A push mirror deletes every GitHub branch that it does not push.
