@@ -27,7 +27,7 @@ This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unof
    ```bash
    python3 ~/.claude/skills/instagram-dm/reel_watch.py "https://www.instagram.com/reel/CODE/" --detail balanced --question "..."
    ```
-   It takes the `watch.py` options and refuses `--cookies` and `--cookies-from-browser`. Never put `WATCH_COOKIES_FILE` in the watch config for Instagram: the DM account's session must never fetch media. On a `challenge`, a login demand or a 403, stop and tell the operator: do not retry in a loop.
+   It takes the `watch.py` options and refuses `--cookies` and `--cookies-from-browser`. Never put `WATCH_COOKIES_FILE` in the watch config for Instagram: the DM account's session must never fetch media. With `GEONODE_GATEWAY`, `GEONODE_USERNAME`, `GEONODE_PASSWORD`, `GEONODE_STICKY_PORT_BASE` and `GEONODE_STICKY_PORT_MAX` set, it fetches through the Geonode residential proxy on a sticky port picked per fetch; with none set, it fetches direct. On a `challenge`, a login demand or a 403, stop and tell the operator: do not retry in a loop.
 
 ## Wake on new DMs, and reply
 
