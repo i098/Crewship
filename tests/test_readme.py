@@ -21,6 +21,7 @@ FEATURES = {
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
     "crewship.profiles.shared_postgres": "docs/shared-postgres.md",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
+    "crewship.profiles.forgejo": "docs/forgejo.md",
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
     "crewship.mac_ssh": "docs/security.md#ssh-to-a-mac",

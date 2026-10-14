@@ -103,7 +103,7 @@ Every host that starts services (`start_services: true`); the container worker i
 
 ## Forgejo
 
-`profiles.forgejo`. The config schema does not accept this switch yet, so no host installs Forgejo now.
+`profiles.forgejo` (opt-in, [Self-hosted Forgejo](forgejo.md)).
 
 - [Forgejo](https://codeberg.org/forgejo/forgejo/releases), the newest non-draft, non-prerelease release on Codeberg, `forgejo-<version>-linux-<arch>`. The binary is verified against the `.sha256` file that the release publishes, and its `.asc` signature must come from the Forgejo release key (`crewship_forgejo_key_fingerprint`), fetched from keys.openpgp.org (`blueprint/ansible/tasks/forgejo.yml`). Each release installs into `~/.local/share/crewship/forgejo/<version>/`.
 
