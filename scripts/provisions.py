@@ -8,7 +8,7 @@ Nothing is pinned: every tool tracks its latest release (no-mistakes its newest
 non-draft one, prereleases included). Native assets are
 verified against the SHA-256 their publisher lists for that exact release (the
 GitHub release-asset digest, or the release's own .sha256 file for gws and Pyrefly, Node's
-SHASUMS256.txt, rustup's .sha256), npm-registry tools (installed by bun)
+SHASUMS256.txt, rustup's .sha256, Forgejo's .sha256 on Codeberg), npm-registry tools (installed by bun)
 against the integrity the registry records for the resolved version, psutil against the
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
 marketplace plugins are the one exception: no publisher checksums them, so they
@@ -37,6 +37,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
+FORGEJO_RELEASES = "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest"
 # How release asset names spell each platform.
 ARCH = {
     "linux-x86_64": {
@@ -322,6 +323,18 @@ def resolve_latest(key, names):
             match[1] if match else "",
             binaries,
         )
+    if "forgejo" in names:
+        # Installed by Ansible itself (blueprint/ansible/tasks/forgejo.yml), which also
+        # checks the release signature against the Forgejo release key.
+        release = json.loads(fetch(FORGEJO_RELEASES, "forgejo release"))
+        version = release["tag_name"].removeprefix("v")
+        name = f"forgejo-{version}-linux-{ARCH[key]['go']}"
+        urls = {asset["name"]: asset["browser_download_url"] for asset in release["assets"]}
+        checksum = fetch(urls[name + ".sha256"], "forgejo checksum").decode().split(" ")[0]
+        latest["forgejo"] = verified(
+            "forgejo", version, key, name, urls[name], checksum, {"forgejo": name}
+        )
+        latest["forgejo"]["assets"][key]["signature"] = urls[name + ".asc"]
     if "rustup-init" in names:
         toml = fetch("https://static.rust-lang.org/rustup/release-stable.toml", "rustup").decode()
         match = re.search(r"^version = '([0-9.]+)'$", toml, re.M)
@@ -695,7 +708,7 @@ def main():
         "--also",
         default="",
         help="comma-separated extra sources to resolve that Ansible installs itself: "
-        "obscura, psutil, koncreet",
+        "obscura, psutil, koncreet, forgejo",
     )
     parser.add_argument(
         "--resolve",
