@@ -2,7 +2,7 @@
 
 `crewship.profiles.fleet_guards` installs the Docker guard, reapers, storage guard and browser ladder.
 The profile is off by default.
-See [Project databases](shared-postgres.md) for the optional per-project dev databases.
+See [Shared Postgres](shared-postgres.md) for the optional shared database.
 
 The controls address abandoned containers, orphan processes, idle dev servers and unbounded lane concurrency.
 
@@ -14,7 +14,7 @@ Sizing per lane count and the full list of pruners are in
 The Docker guard, reapers and storage guard require `fleet_guards`.
 Each profile manages only its own units.
 The Docker defaults and Firstmate spawn floor belong to their respective profiles.
-See [Project databases](shared-postgres.md#worktree-environment) for the separate database seeder.
+See [Shared Postgres](shared-postgres.md#worktree-environment) for the separate database seeder.
 
 | Path (under the account home) | Purpose |
 | --- | --- |

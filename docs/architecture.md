@@ -138,7 +138,7 @@ flowchart TB
     recipe[Provisioning recipe] --> config[Tool configuration]
     recipe --> worker[Isolated worker]
     worker --> volumes[Compose data volumes]
-    profile[Project databases profile] --> stack[One dev database per project]
+    profile[Shared Postgres profile] --> stack[Shared database]
     stack --> env[Worktree env seeder]
     env --> apps[Worktree apps]
     apps -->|application traffic| stack
@@ -146,6 +146,6 @@ flowchart TB
 ```
 
 Authentication and mutable state stay outside the recipe.
-See [Project databases](shared-postgres.md) for the optional per-project worktree databases.
+See [Shared Postgres](shared-postgres.md) for the optional worktree database.
 
 [Agent architecture reference](agents/architecture.md)
