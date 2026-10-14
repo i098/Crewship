@@ -288,6 +288,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
 | `fm-imessage --typing` | Shows the typing bubble, best effort. The next send removes it. A typing error is only logged, so the command exits 0. |
 | `fm-imessage --react '👍'` | Queues a tapback in the outbox, in order with the sends. The tapback goes on the text that was his latest when the command ran. |
+| `fm-imessage --card '<json>'` | Queues an app card. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
 | `fm-location` | Prints the location that the owner shares with the line in Find My, as JSON. |
 
@@ -311,6 +312,50 @@ Explicit threaded replies can use a configured fallback because the bridge canno
 - **Queue.** The photo is an outbox item like a text. The service saves the downscaled file in `~/.local/state/fm-imessage/outgoing/` (mode `0700`) and queues the item after the file is on disk. The retries, the order, the restarts, and the dead-letter folder work as in [Upstream outages](#upstream-outages). The service deletes the file after the last bubble of the item is sent. A photo that moves to `outbox-dead/` keeps its file.
 - **Memory.** The desk memory records the send as `[image: name]`, then the caption. The name has the extension of the real format.
 - **Transport.** Photos go over the Photon line only. The BlueBubbles code of the bridge has no attachment send. When the owner's chat is on BlueBubbles, the photo uses the Photon line's latest chat. If the Photon line is not running, the command exits non-zero with HTTP 503.
+
+## Cards
+
+`fm-imessage --card` sends an app card: a bubble with a title and a status line. A tap opens a page that the bridge serves. The code is `apps/imessage/cards.ts`.
+
+```bash
+fm-imessage --card '{"kind":"choice","key":"layout","title":"Board layout?",
+  "options":["Short list, one screen","Cards with a mock each","Table with all details"]}'
+```
+
+Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `title` (up to 120 characters). Optional fields: `subtitle` (up to 200 characters), `hours` until the card expires (1 to 168, default 24), and `live` (`true` asks for the live view of the card app; not tested yet). The kinds:
+
+| Kind | Fields | The page shows |
+| --- | --- | --- |
+| `choice` | `options`: 2 to 6 texts | One button per option, A to F. One tap picks. |
+| `bars` | `bars`: 1 to 30 `{"label", "value"}`, optional `unit` | A bar chart. With `"unit": "%"` a bar fills its track at 100; with any other unit, at the largest value. |
+| `timeline` | `items`: 1 to 50 `{"when", "text"}` | A vertical timeline. |
+| `table` | `columns`: 1 to 8 texts; `rows`: 1 to 100 rows of that length | A table. |
+
+A bad card queues nothing, and the command names the first bad field.
+
+- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. Then the service edits the bubble in place to "Picked B: ...". The page shows the pick.
+- **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. It needs the Photon transport: it uses spectrum-ts `app(url, {layout})`, so the bubble opens in Photon's free "Spectrum" iMessage app. He installs that app once, from the App Store prompt in Messages. The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. An outage retries like a text. Any other error (for example, a plan that does not allow app cards) moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
+- **Page listener.** A second listener serves the pages. It listens on `127.0.0.1:8767` (`FM_IMESSAGE_CARD_PORT`), apart from the private command port. It answers only `GET /c/<token>` and `POST /c/<token>/pick`; every other request gets `404`. The command port does not answer card paths. Cards are off until `FM_IMESSAGE_CARD_URL` is set: then `/card` queues cards, and the bubbles open `<FM_IMESSAGE_CARD_URL>/c/<token>`.
+- **Tokens.** Each card has its own token: 256 random bits, base64url. The token is the only key to the card: no login, no password. A wrong, unknown, or expired token gets the same `404` page. A choice card takes one pick: a second pick gets `409` and files no note. If the inbox refuses the note, the pick is undone and the page says to try again. The service never logs a token and never prints one; `fm-imessage` prints only the key. The pages send `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and a Content Security Policy that allows no script and no outside content.
+- **Records.** Each card is one file, `~/.local/state/fm-imessage/cards/<token>.json` (the directory is private to the account). The service deletes a card file one day after the card expires.
+
+### Publish the card pages
+
+The bubble opens on his phone, so the page listener needs a public HTTPS address. Use a named Cloudflare tunnel, because a quick tunnel gets a new address at each restart, and the old cards stop working.
+
+1. In the Cloudflare account that holds the domain, make a remotely managed tunnel (for example, `crewship-cards`). Give it one public hostname, for example `cards.example.com`, to `http://127.0.0.1:8767`. The catch-all rule stays `http_status:404`.
+2. Make sure that the DNS record of that hostname is a proxied `CNAME` to `<tunnel id>.cfargotunnel.com`.
+3. Add the tunnel token to `~/super.env` as `CARDS_TUNNEL_TOKEN=...`, as [Shared credentials](secrets.md) describes.
+4. Add the `cards` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
+
+   ```yaml
+       cards:
+         url: https://cards.example.com   # the public hostname of the tunnel
+         port: 8767                       # optional; this is the default
+         tunnel_token_env: CARDS_TUNNEL_TOKEN   # optional; this is the default
+   ```
+
+Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which runs the tunnel with the token from `~/super.env`, and sets the card variables in the bridge unit. The tunnel reaches only the page listener. To turn cards off, remove the block, run `./ship.sh launch`, then run `systemctl --user disable --now fm-cards-tunnel` and delete its unit.
 
 ## Plain messages and the shared line
 

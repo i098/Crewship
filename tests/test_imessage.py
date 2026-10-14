@@ -17,6 +17,7 @@ import struct
 import subprocess
 import time
 import zlib
+from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
@@ -1396,7 +1397,7 @@ process.exit(0);
 # A fake spectrum-ts for bridge.ts. Its state is in FAKE_DIR, so it outlives a bridge restart: `down` holds how
 # many more upstream calls fail with UNAVAILABLE, typing always fails while `typing-down` exists, `inbound/` holds
 # the owner's messages for the bridge to receive, `edits/` holds the line's raw message.edited events, `calls` logs
-# every call, and `sent` logs each delivered message.
+# every call, and `sent` logs each delivered message. An app card is refused while `card-refused` exists.
 FAKE_UPSTREAM = """
 import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 const dir = process.env.FAKE_DIR;
@@ -1423,6 +1424,8 @@ function sent(line, chat) {
 }
 async function shown(content) {
   if (typeof content === "string") return content;
+  if (content.type === "app") return `card ${content.url} | ${Object.values(content.layout).join(" | ")}`;
+  if (content.type === "edit") return `edit ${content.target.miniAppCardSession.sessionId} ${await shown(content.content)}`;
   const { width, height } = await new Bun.Image(readFileSync(content.attachment)).metadata();
   return `[image ${content.name} ${content.mimeType} ${width}x${height}]`;
 }
@@ -1432,7 +1435,13 @@ function space(id) {
     id,
     startTyping: typing,
     stopTyping: typing,
-    async send(content) { call("send"); sent(`send ${await shown(content)}`, id); appendFileSync(`${dir}/send-targets`, `${id}\\n`); },
+    async send(content) {
+      call("send");
+      if (content.type === "app" && existsSync(`${dir}/card-refused`)) throw Object.assign(new Error("app cards are not on this plan"), { grpcCode: 7 });
+      sent(`send ${await shown(content)}`, id);
+      appendFileSync(`${dir}/send-targets`, `${id}\\n`);
+      if (content.type === "app") return { id: "c1", direction: "outbound", miniAppCardSession: { chatGuid: id, messageGuid: "c1", sessionId: "s1", targetMessageGuid: "c1" } };
+    },
     async getMessage(mid) {
       call("getMessage");
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
@@ -1491,6 +1500,8 @@ export const Spectrum = async () => {
 };
 export const imessage = Object.assign(() => ({ space: { get: async (id) => space(id) } }), { config: () => ({}) });
 export const attachment = (path, options) => ({ attachment: path, ...options });
+export const app = (url, options = {}) => ({ type: "app", url, ...options });
+export const edit = (content, target) => ({ type: "edit", content, target });
 """
 
 
@@ -1545,7 +1556,7 @@ def fake_bridge(tmp_path):
     for name, body in stubs.items():
         (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
         (bin_dir / name).chmod(0o755)
-    port = free_port()
+    port, card_port = free_port(), free_port()
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -1554,6 +1565,8 @@ def fake_bridge(tmp_path):
         "FM_INBOX_CMD": str(bin_dir / "fm-inbox"),
         "FM_IMESSAGE_OWNER": "+10000000000",
         "FM_IMESSAGE_PORT": str(port),
+        "FM_IMESSAGE_CARD_URL": f"http://127.0.0.1:{card_port}",
+        "FM_IMESSAGE_CARD_PORT": str(card_port),
         "FM_IMESSAGE_RETRY_MS": "20",
         "PHOTON_PROJECT_ID": "fake",
         "PHOTON_PROJECT_SECRET": "fake",
@@ -2568,3 +2581,108 @@ def test_bridge_sends_a_photo_then_its_caption_through_an_outage_and_a_restart(t
     assert not list((state / "outgoing").iterdir())
     records = [json.loads(line) for f in (state / "memory/main").glob("*.jsonl") for line in f.read_text().splitlines()]
     assert "[image: shot.png]\n\nhere it is" in [r["text"] for r in records]
+
+
+@pytest.mark.parametrize("arg", ["-", "card.json", '{"kind": "choice"}'])
+def test_card_command_posts_json_text_stdin_or_a_file(tmp_path, arg):
+    (tmp_path / "card.json").write_text("{}")
+    result, calls = send(tmp_path, "--card", str(tmp_path / arg) if arg == "card.json" else arg)
+    assert result.returncode == 0
+    assert len(calls) == 1 and calls[0].endswith("--data-binary @- http://127.0.0.1:8765/card")
+
+
+def http(url, method="GET", body=None):
+    """One request without following redirects: (status, headers, body)."""
+    u = url.split("/", 3)
+    conn = HTTPConnection(u[2], timeout=10)
+    headers = {"Content-Type": "application/x-www-form-urlencoded"} if body is not None else {}
+    conn.request(method, "/" + u[3] if len(u) > 3 else "/", body=body, headers=headers)
+    r = conn.getresponse()
+    return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read().decode()
+
+
+def card_bubbles(fake, text):
+    return [line for line in text(fake / "sent").splitlines() if line.startswith(("send card ", "send edit "))]
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_card_pick_is_single_use_wakes_firstmate_and_edits_the_bubble(tmp_path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        inbound("m1", text="ask me")
+        card = {"kind": "choice", "key": "layout", "title": "Board layout?", "options": ["Short list", "Cards", "Table"]}
+        assert cli("--card", json.dumps(card)).startswith("queued card layout")
+        wait_for(lambda: card_bubbles(fake, text), "the card bubble")
+        url, layout = card_bubbles(fake, text)[0].removeprefix("send card ").split(" | ", 1)
+        assert layout == "Board layout? | 3 options | Tap to pick | Board layout?"
+        token = url.rsplit("/", 1)[1]
+        assert re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
+        status, headers, page = http(url)
+        assert status == 200 and "Short list" in page and 'name="choice" value="2"' in page
+        assert headers["cache-control"] == "no-store" and headers["referrer-policy"] == "no-referrer"
+        assert "default-src 'none'" in headers["content-security-policy"]
+        assert http(url + "/pick", "POST", "choice=")[0] == 400
+        status, headers, _ = http(url + "/pick", "POST", "choice=1")
+        assert status == 303 and headers["location"] == f"/c/{token}"
+        assert "[iMessage card pick] layout: B. Cards" in text(notes)
+        status, _, page = http(url + "/pick", "POST", "choice=0")
+        assert status == 409 and text(notes).count("[iMessage card pick]") == 1
+        assert "Picked B" in http(url)[2]
+        wait_for(lambda: len(card_bubbles(fake, text)) == 2, "the bubble edit")
+        assert card_bubbles(fake, text)[1] == f"send edit s1 card {url} | Board layout? | Picked B: Cards | Done | Board layout?"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+    assert token not in text(err) + text(tmp_path / "out") + text(notes)
+    records = [json.loads(line) for f in (state / "memory/main").glob("*.jsonl") for line in f.read_text().splitlines()]
+    assert "[iMessage card pick] layout: B. Cards" in [r["text"] for r in records]
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_card_listener_serves_only_open_cards_by_their_token(tmp_path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bars = tmp_path / "bars.json"
+    bars.write_text(json.dumps({"kind": "bars", "key": "load", "title": "Load", "unit": "%",
+                                "bars": [{"label": "cpu", "value": 40}, {"label": "ram", "value": 80}]}))
+    bridge = start(1)
+    try:
+        inbound("m1", text="show me")
+        assert "options must be a list of 2 to 6 items" in cli("--card", json.dumps(
+            {"kind": "choice", "key": "x", "title": "t", "options": ["one"]}), fails=True)
+        cli("--card", str(bars))
+        cli("--card", json.dumps({"kind": "choice", "key": "old", "title": "Old", "options": ["a", "b"]}))
+        wait_for(lambda: len(card_bubbles(fake, text)) == 2, "two card bubbles")
+        (bars_url, _), (old_url, _) = (b.removeprefix("send card ").split(" | ", 1) for b in card_bubbles(fake, text))
+        base = bars_url.rsplit("/c/", 1)[0]
+        status, _, page = http(bars_url)
+        assert status == 200 and "width:40.0%" in page and "width:80.0%" in page and "80 %" in page
+        for path, method in [("/c/" + "A" * 43, "GET"), ("/c/abc", "GET"), ("/c/../outbox", "GET"), ("/send", "POST"), ("/", "GET"),
+                             (bars_url.removeprefix(base) + "/pick", "GET"), (bars_url.removeprefix(base), "POST"),
+                             (bars_url.removeprefix(base) + "/pick", "POST")]:
+            assert http(base + path, method, "choice=0" if method == "POST" else None)[0] == 404, path
+        # An expired card is gone for both the page and the pick.
+        record = state / "cards" / (old_url.rsplit("/", 1)[1] + ".json")
+        record.write_text(json.dumps({**json.loads(record.read_text()), "expires": int(time.time() * 1000) - 1}))
+        assert http(old_url)[0] == 404 and http(old_url + "/pick", "POST", "choice=0")[0] == 404
+        assert "card pick" not in text(notes)
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    (fake / "card-refused").touch()
+    bridge = start(1)
+    try:
+        inbound("m1", text="try a card")
+        cli("--card", json.dumps({"kind": "timeline", "key": "plan", "title": "Plan", "items": [{"when": "now", "text": "build"}]}))
+        cli("after the card")
+        wait_for(lambda: "send after the card" in text(fake / "sent"), "the text behind the refused card")
+        assert "(card plan was not sent: Error: app cards are not on this plan)" in text(notes)
+        assert len(list((state / "outbox-dead").glob("*.json"))) == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)

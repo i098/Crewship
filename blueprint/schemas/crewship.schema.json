@@ -302,6 +302,28 @@
                 "relays",
                 "webhook_listen"
               ]
+            },
+            "cards": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://[A-Za-z0-9.-]+$"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1024,
+                  "maximum": 65535
+                },
+                "tunnel_token_env": {
+                  "type": "string",
+                  "pattern": "^[A-Z_][A-Z0-9_]*$"
+                }
+              },
+              "required": [
+                "url"
+              ]
             }
           },
           "required": [

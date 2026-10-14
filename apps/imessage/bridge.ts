@@ -17,12 +17,16 @@
 // Location: when he shares his location with the Photon line in Find My, GET /location (the fm-location command).
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
+// Cards: POST card JSON to /card (fm-imessage --card). The bubble is a Spectrum app card that opens
+//   FM_IMESSAGE_CARD_URL/c/<token>, which a second, card-only listener on 127.0.0.1:FM_IMESSAGE_CARD_PORT serves
+//   (cards.ts). A pick files "[iMessage card pick] <key>: <choice>" and edits the bubble in place.
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
 import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
-import { attachment, Spectrum } from "spectrum-ts";
+import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
+import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { type Attachment, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, spawnDesk, typingPause, verdict } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -80,6 +84,9 @@ const MEMORY_DIR = `${STATE}/memory`; // the desk's memory: the whole chat, word
 const OUTBOX_DIR = `${STATE}/outbox`; // sends and tapbacks not delivered yet, one file each (outbox.ts)
 const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment not saved yet
 const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
+const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
+const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
+const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
 for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 let burstFrom: number | undefined; // the memory id of his first text the desk has not answered yet
 const recent: Ref[] = []; // his last texts, newest last, for a threaded reply to one a few bubbles up
@@ -103,7 +110,8 @@ type Ref = { line?: string; space: string; id: string };
 // memory line it makes (Firstmate's unless "desk"); `silent` makes none.
 // `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
 // where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number };
+// `card` is the token of a card to send, or to edit in place once it is out.
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string };
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -115,6 +123,7 @@ type Line = {
   separated(space: string, id: string): Promise<boolean>;
   send(space: string, text: string, reply?: string, guid?: string): Promise<unknown>;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
+  sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
   react(ref: Ref, emoji: string): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
@@ -200,6 +209,16 @@ for (const name of TRANSPORTS) {
       const thread = await threadOf(space, reply);
       return thread ? thread.reply(content) : (await imessage(app).space.get(space)).send(content);
     },
+    // A card goes out once as an app bubble; with its card session, the same bubble is edited in place.
+    async sendCard(space, url, layout, live, session) {
+      const chat = await imessage(app).space.get(space);
+      const content = appCard(url, { layout, ...(live === undefined ? {} : { live }) });
+      if (!session) return Reflect.get((await chat.send(content)) ?? {}, "miniAppCardSession");
+      // The edit reads only the target's card session, and its send replaces that with the next session.
+      const target = { id: Reflect.get(session as object, "messageGuid"), direction: "outbound", content: { type: "app" }, miniAppCardSession: session };
+      await chat.send(edit(content, target as never));
+      return target.miniAppCardSession;
+    },
     react: async (ref, emoji) => (await find(ref)).react(emoji),
   });
 }
@@ -262,7 +281,7 @@ Bun.serve({
         return new Response(`no location: ${e instanceof Error ? e.message : String(e)}; he shares it with the line in Find My\n`, { status: 503 });
       }
     }
-    if (req.method !== "POST" || !["/send", "/image", "/typing", "/react"].includes(url.pathname)) return new Response("not found", { status: 404 });
+    if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
@@ -278,6 +297,19 @@ Bun.serve({
       const emoji = (await req.text()).trim();
       if (!emoji) return new Response("no emoji", { status: 400 });
       return queue({ ...ref, react: emoji }, `tapback ${emoji}`);
+    }
+    if (url.pathname === "/card") {
+      if (!cards) return new Response("nothing queued: cards are off; set FM_IMESSAGE_CARD_URL\n", { status: 503 });
+      let card;
+      try {
+        card = parseCard(await req.text());
+      } catch (e) {
+        return new Response(`nothing queued: ${e instanceof Error ? e.message : String(e)}\n`, { status: 400 });
+      }
+      // Like a proactive text, a card goes to his latest direct chat; only Photon can send one.
+      const chat = proactiveRef;
+      if (!chat || !lineOf(chat)?.sendCard) return new Response("nothing queued: a card needs his latest direct chat on the photon transport\n", { status: 503 });
+      return queue({ ...chat, card: cards.add(card, chat).token }, `card ${card.key}`);
     }
     // /image is a multipart form: the file `image` and the optional text `caption`, sent as bubbles after the photo.
     const form = url.pathname === "/image" ? await req.formData().catch(() => new FormData()) : undefined;
@@ -309,6 +341,17 @@ async function photoOf(form: FormData): Promise<PreparedImage | Response> {
     if (e instanceof ImageError) return new Response(`nothing queued: ${e.message}\n`, { status: 400 });
     throw e;
   }
+}
+if (cards) {
+  const routes = cardRoutes(cards, picked);
+  // This port is public through the tunnel: no debug page, and no error line that names a token.
+  Bun.serve({ hostname: "127.0.0.1", port: CARD_PORT, maxRequestBodySize: 4096, development: false,
+    fetch: (req) => stopping ? new Response("stopping\n", { status: 503 }) : routes(req),
+    error(e) {
+      console.error(`fm-imessage: card page failed: ${brief(e).replace(/[A-Za-z0-9_-]{43}/g, "<token>")}`);
+      return new Response("error\n", { status: 500 });
+    } });
+  console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
 
@@ -351,6 +394,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
     remember(kind, `tapback ${o.react} on his last text`);
     return;
   }
+  if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   for (let i = o.done ?? 0; i < parts.length; i++) {
     const part = parts[i]!;
@@ -364,6 +408,39 @@ async function deliver(o: Out, save: (o: Out) => void) {
   }
   if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
   if (o.image) rmSync(o.image.path, { force: true });
+}
+
+// Sends a card's bubble, or edits it in place once it is out. An outage retries in order like a text. Any other
+// failure (the plan or the line refuses app cards, for example) moves the item to the dead-letter folder, so the
+// texts behind it go on, and files a note the first time. No error that names the token reaches a log.
+async function deliverCard(o: Out, kind: Kind) {
+  const card = cards?.read(o.card!);
+  if (!card) throw Object.assign(new Error("the card's record is gone (expired)"), { permanent: true });
+  const line = lineOf(o);
+  if (!line?.sendCard) throw Object.assign(new Error("a card needs the photon transport"), { permanent: true });
+  if (card.sent && !card.session) {
+    console.error(`fm-imessage: card ${card.key} has no card session, so its bubble stays as it was sent`);
+    return;
+  }
+  try {
+    const session = await line.sendCard(o.space, `${CARD_URL}/c/${card.token}`, cardLayout(card), card.live, card.session);
+    cards!.save({ ...cards!.read(card.token)!, sent: true, session: session ?? card.session });
+  } catch (e) {
+    if (transient(e)) throw e;
+    const why = brief(e).replaceAll(card.token, "<token>");
+    if (!card.sent) fileNote(`card-${card.key}-${card.expires}-failed`, `(card ${card.key} was not sent: ${why})`);
+    throw Object.assign(new Error(`card ${card.key}: ${why}`), { permanent: true });
+  }
+  if (!card.sent) remember(kind, `[card ${card.key}: ${card.title}]`);
+}
+
+// His pick on a choice card's page: the inbox note, then the bubble edit, queued behind the sends before it.
+function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): boolean {
+  const text = `[iMessage card pick] ${card.key}: ${letter(choice)}. ${card.options[choice]}`;
+  if (!fileNote(`card-${card.key}-${card.expires}-pick`, text)) return false;
+  remember("owner", text);
+  if (card.chat) put({ ...card.chat, card: card.token });
+  return true;
 }
 
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {

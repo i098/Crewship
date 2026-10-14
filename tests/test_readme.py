@@ -41,6 +41,7 @@ EXCLUDED = {
     "crewship.browsers",
     "crewship.gateway",
     "crewship.imessage.bluebubbles",
+    "crewship.imessage.cards",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",
 }
