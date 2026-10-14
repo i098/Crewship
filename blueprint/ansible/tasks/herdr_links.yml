@@ -1,0 +1,72 @@
+---
+# Host-wide herdr links (docs/herdr.md#herdr-patch). mosh-server and plain SSH
+# commands run with the system PATH, which has no ~/.local/bin, so they find
+# herdr-patch, and herdr-patch finds herdr, only through these links.
+#
+# The links are host-wide, but the account is not: an apply for another account,
+# such as a sandbox or a test home, must never take over this host's links. So apply
+# changes a link only when it is missing, already points into this account's home,
+# or dangles. Any other file there stays, and apply prints a warning.
+# No owner or group: the file module follows links, so setting root here would
+# chown the targets in ~/.local/bin and the next apply could not rewrite them.
+
+- name: Read the host-wide herdr links
+  ansible.builtin.stat:
+    path: "{{ crewship_global_bin }}/{{ item }}"
+    follow: false
+    get_checksum: false
+  loop: [herdr, herdr-patch, herdr-mosh]
+  register: crewship_global_links
+
+- name: Read the targets of the host-wide herdr links
+  ansible.builtin.stat:
+    path: "{{ crewship_global_bin }}/{{ item }}"
+    follow: true
+    get_checksum: false
+  loop: [herdr, herdr-patch, herdr-mosh]
+  register: crewship_global_link_targets
+
+- name: Start the list of host-wide herdr links this account owns
+  ansible.builtin.set_fact:
+    crewship_global_links_owned: []
+
+- name: Add each host-wide herdr link this account owns
+  ansible.builtin.set_fact:
+    crewship_global_links_owned: "{{ crewship_global_links_owned + [item.0.item] }}"
+  loop: "{{ crewship_global_links.results | zip(crewship_global_link_targets.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item }}"
+  when: >-
+    not item.0.stat.exists
+    or (item.0.stat.islnk
+        and ((item.0.stat.lnk_target | default('')).startswith(crewship_cfg.home ~ '/')
+             or not item.1.stat.exists))
+
+- name: Link herdr and herdr-patch into the system PATH
+  ansible.builtin.file:
+    src: "{{ crewship_local_bin }}/{{ item }}"
+    dest: "{{ crewship_global_bin }}/{{ item }}"
+    state: link
+    force: true
+  become: true
+  become_user: root
+  loop: [herdr, herdr-patch]
+  when: item in crewship_global_links_owned
+
+- name: Report host-wide herdr links that belong to another account
+  ansible.builtin.debug:
+    msg: >-
+      Leaving {{ crewship_global_bin }}/{{ item }} as it is: it is not a link into
+      {{ crewship_cfg.home }}. Remove it by hand if this account should own it.
+  loop: [herdr, herdr-patch]
+  when: item not in crewship_global_links_owned
+
+# herdr-mosh is retired: herdr-patch replaced it. Hosts that applied the
+# earlier install keep the old copy and its link until this removes them.
+- name: Remove the retired host-wide herdr-mosh link
+  ansible.builtin.file:
+    path: "{{ crewship_global_bin }}/herdr-mosh"
+    state: absent
+  become: true
+  become_user: root
+  when: "'herdr-mosh' in crewship_global_links_owned"
