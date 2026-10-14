@@ -2,7 +2,8 @@
 // Instagram client of its own, that follows two logs of the instagram-dm skill's listener:
 //   INSTAGRAM_DM_LOG   one row per new DM from the operator (poll), after it went to the Firstmate inbox
 //   INSTAGRAM_DM_SENT  one row per fm-insta-reply send, tapback or typing, with `by`: "desk" for the desk's own calls
-// Each DM restarts the quiet period; any send, tapback or typing by Firstmate since his last DM stands the desk down
+// Each DM restarts the quiet period (8 s; 60 s once the burst holds a reel link, and with two or more links the desk
+// sends one "got N reels" and one tapback instead of a model turn); any send, tapback or typing by Firstmate since his last DM stands the desk down
 // for that burst. When the quiet period ends, one desk turn answers the whole burst through `fm-insta-reply`.
 // While INSTAGRAM_DM_DIR/stop exists (a halt, or `instagram_dm.py stop`) a turn calls neither the model nor fm-insta-reply.
 // Runs as the systemd --user service instagram-desk (docs/imessage.md#instagram-front-desk).
@@ -17,6 +18,7 @@ export type Options = {
   owner: string;
   supervisorModel: string;
   quietMs: number;
+  reelQuietMs: number; // the quiet period of a burst that holds a reel link
   replyCmd: string[]; // fm-insta-reply
   stopFile?: string; // the DM line's halt and kill-switch flag (INSTAGRAM_DM_DIR/stop): while it exists the desk does nothing
   statusCmd: string[]; // prints the fleet status
@@ -25,6 +27,7 @@ export type Options = {
   log?: (e: unknown) => void;
 };
 
+const BATCH_REACT = "\u{1F440}"; // the one tapback on the last reel of a batch
 const FRESH_S = 60; // a row older than this (replayed after a restart) is remembered, never answered
 
 export class InstagramDesk {
@@ -35,6 +38,7 @@ export class InstagramDesk {
   private thread?: string;
   private lastId = "";
   private burstFrom?: number; // the memory id of his first DM the desk has not answered yet
+  private reels = new Set<string>(); // the reel links of that burst
 
   constructor(private o: Options) {
     for (const sub of ["", "/desk"]) mkdirSync(`${o.dir}${sub}`, { recursive: true, mode: 0o700 });
@@ -52,7 +56,9 @@ export class InstagramDesk {
       this.thread = row.thread;
       this.lastId = row.id ?? this.lastId;
       this.cancel();
-      this.timing.inboundText();
+      if (row.url) this.reels.add(row.url);
+      // Reel links come in runs: wait for a long quiet after the last DM of a burst that holds one, then answer once.
+      this.timing.inboundText(this.reels.size ? this.o.reelQuietMs : this.o.quietMs);
       return;
     }
     const desk = row.by === "desk";
@@ -83,8 +89,15 @@ export class InstagramDesk {
     if (!thread) return;
     if (this.o.stopFile && existsSync(this.o.stopFile)) {
       this.burstFrom = undefined; // the burst is dropped: after a resume the desk never answers it late
+      this.reels = new Set();
       appendFileSync(`${this.o.dir}/desk.log`, `${new Date().toISOString()} ${this.lastId} skip (line stopped)\n`, { mode: 0o600 });
       return;
+    }
+    if (this.reels.size >= 2) {
+      const reels = this.reels.size;
+      this.burstFrom = undefined;
+      this.reels = new Set();
+      return this.batch(thread, reels);
     }
     const status = await new Response(Bun.spawn(this.o.statusCmd, { env: this.o.env, stdout: "pipe", stderr: "ignore" }).stdout).text();
     if (!current()) return;
@@ -97,6 +110,7 @@ export class InstagramDesk {
     this.run = undefined;
     if (!current()) return;
     this.burstFrom = undefined;
+    this.reels = new Set();
     const { skip, tapback, outcome } = verdict(ok, drafted);
     let sent = "";
     if (tapback || !skip) {
@@ -108,6 +122,15 @@ export class InstagramDesk {
       if (exit !== 0) sent = ` (send failed, exit ${exit}: ${err.trim().replace(/\s+/g, " ").slice(0, 300)})`;
     }
     appendFileSync(`${this.o.dir}/desk.log`, `${new Date().toISOString()} ${this.lastId} ${outcome}${sent}\n`, { mode: 0o600 });
+  }
+
+  // Two or more reel links in one burst: no model turn, ONE text ("got N reels") and ONE tapback, on the last link.
+  private async batch(thread: string, reels: number) {
+    const text = `got ${reels} reels`;
+    const reply = Bun.spawn([...this.o.replyCmd, "--react", BATCH_REACT, "--thread", thread, "--", text], { env: { ...this.o.env, INSTAGRAM_DM_ACTOR: "desk" }, stdout: "ignore", stderr: "pipe" });
+    const [exit, err] = await Promise.all([reply.exited, new Response(reply.stderr).text()]);
+    const sent = exit === 0 ? "" : ` (send failed, exit ${exit}: ${err.trim().replace(/\s+/g, " ").slice(0, 300)})`;
+    appendFileSync(`${this.o.dir}/desk.log`, `${new Date().toISOString()} ${this.lastId} batch ${text} (react ${BATCH_REACT})${sent}\n`, { mode: 0o600 });
   }
 }
 
@@ -175,6 +198,7 @@ if (import.meta.main) {
     owner: env.FM_INSTAGRAM_DESK_OWNER_NAME || "the owner",
     supervisorModel: env.FM_INSTAGRAM_DESK_SUPERVISOR_MODEL || "",
     quietMs: Number(env.FM_INSTAGRAM_DESK_QUIET_MS || 8000),
+    reelQuietMs: Number(env.FM_INSTAGRAM_DESK_REEL_QUIET_MS || 60000),
     replyCmd: (env.FM_INSTA_REPLY_CMD || "fm-insta-reply").split(/\s+/),
     stopFile: `${igDir}/stop`,
     statusCmd: (env.FM_INBOX_CMD || `${fmHome}/bin/fm-inbox.sh`).split(/\s+/).concat("status"),

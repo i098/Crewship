@@ -28,3 +28,5 @@ crewship_instagram_desk_model: claude-haiku-5-5
 crewship_instagram_desk_owner_name: the owner
 crewship_instagram_desk_supervisor_model: ""
 crewship_instagram_desk_quiet_ms: 8000
+# The quiet period once a burst holds a reel link; two or more links get one "got N reels" and one tapback.
+crewship_instagram_desk_reel_quiet_ms: 60000
