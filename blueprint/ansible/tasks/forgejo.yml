@@ -2,9 +2,10 @@
 # Self-hosted Forgejo (profiles.forgejo, docs/forgejo.md): the latest release as a user
 # service of the target account on 127.0.0.1:{{ crewship_forgejo_port }} with SQLite, published to the
 # tailnet with `tailscale serve` when Tailscale runs with HTTPS certificates enabled
-# (else on the loopback URL only), an admin account with a
-# generated password, and a nightly `forgejo dump`. Nothing here moves a repository
-# to Forgejo.
+# (else on the loopback URL only), an admin account with a generated password, a
+# nightly `forgejo dump`, and a post-receive hook that pushes feature branches to
+# GitHub for the repositories that opt in (forgejo-github-push). Nothing here moves a
+# repository to Forgejo.
 #
 #   * the binary is installed only after its SHA-256 and its signature by the Forgejo
 #     release key both match; a new release lands in its own directory
@@ -92,8 +93,17 @@
   loop:
     - { path: "{{ crewship_forgejo_work }}", mode: "0700" }
     - { path: "{{ crewship_forgejo_conf_dir }}", mode: "0700" }
+    - { path: "{{ crewship_local_bin }}", mode: "0755" }
     - { path: "{{ crewship_user_units }}/default.target.wants", mode: "0755" }
     - { path: "{{ crewship_user_units }}/timers.target.wants", mode: "0755" }
+
+# The global post-receive hook calls it; see docs/forgejo.md#github-push.
+- name: Install the Forgejo-to-GitHub push command
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/forgejo-github-push"
+    dest: "{{ crewship_local_bin }}/forgejo-github-push"
+    mode: "0755"
+    remote_src: true
 
 # The data disk's root directory can be root-owned.
 - name: Ensure the Forgejo dump directory
@@ -303,8 +313,9 @@
     - crewship_manage_services | bool
     - not ansible_check_mode
 
-# These steps need the database, which Forgejo creates on its first start.
-- name: Create the Forgejo admin account
+# These steps need the running service: Forgejo creates its database and its global
+# hook directory on its first start.
+- name: Finish the running Forgejo - push hook and admin account
   when:
     - crewship_manage_services | bool
     - not ansible_check_mode
@@ -316,6 +327,17 @@
       until: crewship_forgejo_health.status == 200
       retries: 30
       delay: 2
+
+    # Forgejo's global hook directory (core.hooksPath) runs every executable in
+    # post-receive.d after each push to any repository.
+    - name: Install the GitHub push hook for every Forgejo repository
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          # Managed by Crewship (docs/forgejo.md#github-push).
+          exec {{ (crewship_local_bin ~ '/forgejo-github-push') | quote }} hook
+        dest: "{{ crewship_forgejo_work }}/data/home/hooks/post-receive.d/crewship-github-push"
+        mode: "0755"
 
     - name: List the Forgejo admin accounts
       ansible.builtin.command:

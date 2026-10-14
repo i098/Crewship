@@ -40,6 +40,10 @@ DEFAULT_PRIVATE = private
 [actions]
 ENABLED = false
 
+# A push mirror deletes every GitHub branch it does not push (docs/forgejo.md#github-push).
+[mirror]
+DISABLE_NEW_PUSH = true
+
 [cron.update_checker]
 ENABLED = false
 
