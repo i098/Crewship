@@ -381,6 +381,30 @@ def test_the_first_flag_halts_with_no_retry(monkeypatch, host, name, parent):
     assert len(calls) == 1 and len(notified(host)) == 1
 
 
+def test_an_unparsed_challenge_halts_and_keeps_instagrams_answer(monkeypatch, host):
+    """instagrapi raised KeyError('challenge') on a challenge_required answer with no challenge data: that is a flag."""
+    answer = {"message": "challenge_required", "status": "fail"}
+
+    def broken():
+        err = KeyError("challenge")
+        err.last_json = answer
+        raise err
+
+    monkeypatch.setattr(ig, "client", broken)
+    out = run(monkeypatch, ig.poll, 1000)
+    assert "halted (KeyError" in out and '"message": "challenge_required"' in out
+    other = ValueError("odd")  # any class, when Instagram's own answer says it
+    other.last_json = answer
+    assert ig.is_halt(other) and not ig.is_halt(ValueError("odd"))
+
+
+def test_the_library_hands_instagrams_answer_to_the_exception_it_raises():
+    err = ValueError("x")
+    with pytest.raises(ValueError):
+        ig.refuse(NS(last_json={"message": "feedback_required"}), err)
+    assert err.last_json == {"message": "feedback_required"}
+
+
 def test_a_failure_names_its_class_and_endpoint(monkeypatch, host):
     err = RuntimeError("boom")
     err.response = NS(url="https://i.instagram.com/api/v1/direct_v2/inbox/?persistentBadge=true")
@@ -390,3 +414,29 @@ def test_a_failure_names_its_class_and_endpoint(monkeypatch, host):
 
     monkeypatch.setattr(ig, "client", broken)
     assert "RuntimeError at /api/v1/direct_v2/inbox/: boom" in run(monkeypatch, ig.poll, 1000)
+
+
+def test_the_one_login_pins_the_zone_of_the_hosts_ip_and_a_second_needs_force(monkeypatch, host):
+    class Client:
+        device_settings = {"model": "Pixel 8 Pro"}
+
+        def set_timezone_offset(self, seconds, name):
+            self.zone = (seconds, name)
+
+        def login(self, user, password):
+            pass
+
+        def dump_settings(self, path):
+            path.write_text(json.dumps({"timezone": self.zone}))
+
+    monkeypatch.setitem(sys.modules, "instagrapi", NS(Client=Client))
+    monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(host / "session.json"))
+    monkeypatch.setenv("INSTAGRAM_FIRSTMATE_USERNAME", "bot")
+    monkeypatch.setenv("INSTAGRAM_FIRSTMATE_PASSWORD", "pw")
+    with pytest.raises(SystemExit, match="INSTAGRAM_DM_TIMEZONE"):
+        ig.login()
+    monkeypatch.setenv("INSTAGRAM_DM_TIMEZONE", "Etc/GMT+5")  # fixed UTC-5, no daylight saving
+    ig.login()
+    assert json.loads((host / "session.json").read_text()) == {"timezone": [-18000, "Etc/GMT+5"]}
+    with pytest.raises(SystemExit, match="--force"):
+        ig.login()

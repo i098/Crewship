@@ -22,10 +22,12 @@ Settings come from the environment:
   INSTAGRAM_DM_NOTIFY     command that takes `--request-id ID -- TEXT` and tells the agent (for Firstmate:
                           `<home>/bin/fm-inbox.sh note`); its request id makes a repeat harmless. Empty: log only
   INSTAGRAM_DM_CODE_CMD   shell command that prints the newest 6-digit Instagram email code (see SKILL.md)
+  INSTAGRAM_DM_TIMEZONE   IANA time zone of the host's public IP (America/Chicago): REQUIRED by the first `login`, which
+                          pins it in the session file; never the library's New York default
   INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failure (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
 A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). The first challenge, feedback
-block, suspension, login_required, please-wait, throttle (429) or bad password halts everything instead, with no
-retry: one notice goes to the agent and nothing calls Instagram again until `resume`. Nothing here ever logs in
+block, suspension, login_required, please-wait, throttle (429), bad password or a challenge answer it could not parse
+(KeyError) halts everything instead, with no retry, and the log keeps Instagram's whole answer: one notice goes to the agent and nothing calls Instagram again until `resume`. Nothing here ever logs in
 again by itself: a missing or dead session is such a halt, and a human runs `login --force` after checking the app.
 Every failure is reported with its exception class and endpoint. Nothing but `reply` sends anything, and no media
 is downloaded.
@@ -41,8 +43,10 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 # Any post link (post, reel, tv, or with a username prefix). "Always assume it is a reel."
 LINK = re.compile(
@@ -68,7 +72,10 @@ HALT = {
     "ClientThrottledError",
     "SentryBlock",
     "CaptchaChallengeRequired",
+    "KeyError",  # instagrapi reads a response["challenge"] it does not have: a challenge it could not parse
 }
+# What Instagram's own answer says when it flags the account, whatever exception class carried it.
+FLAGGED = re.compile(r"challenge_required|checkpoint_required|feedback_required|login_required|/suspended/", re.I)
 
 
 class SessionLost(Exception):
@@ -95,18 +102,22 @@ def backoff(fails, base, cap):
 
 
 def is_halt(e):
-    """True when e (or a parent class) is one of HALT: Instagram flagged, throttled or logged the account out."""
-    return any(c.__name__ in HALT for c in type(e).__mro__)
+    """True when e is one of HALT (a parent class counts), or Instagram's answer in e.last_json says flagged."""
+    return any(c.__name__ in HALT for c in type(e).__mro__) or bool(FLAGGED.search(json.dumps(getattr(e, "last_json", None), default=str)))
 
 
 def describe(e):
     """One line for a failure: exception class, the endpoint path when the error carries its response, the message
-    (password masked, clipped)."""
+    (password masked, clipped). A halting failure adds Instagram's whole answer (last_json), so the next flag is read
+    from the log and not guessed."""
+    line = f"{type(e).__name__}"
+    if url := getattr(getattr(e, "response", None), "url", None):
+        line += f" at {urlsplit(url).path}"
+    line = f"{line}: {e}"[:300]
+    if (payload := getattr(e, "last_json", None)) and is_halt(e):
+        line += f" payload={json.dumps(payload, default=str)}"[:600]
     secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
-    text = str(e).replace(secret, "***") if secret else str(e)
-    url = getattr(getattr(e, "response", None), "url", None)
-    where = f" at {urlsplit(url).path}" if url else ""
-    return f"{type(e).__name__}{where}: {text}"[:300]
+    return line.replace(secret, "***") if secret else line
 
 
 def message_url(msg):
@@ -476,7 +487,10 @@ def login(force=False):
     if session.is_file():
         cl.load_settings(session)  # the same device as the first login
     else:
-        cl.set_timezone_offset(time.localtime().tm_gmtoff)  # the host's zone, fixed from now on
+        zone = conf("INSTAGRAM_DM_TIMEZONE")  # the zone of the egress IP, never the library's New York default
+        if not zone:
+            sys.exit("set INSTAGRAM_DM_TIMEZONE to the time zone of this host's public IP, e.g. America/Chicago")
+        cl.set_timezone_offset(int(datetime.now(ZoneInfo(zone)).utcoffset().total_seconds()), zone)
     os.environ["INSTAGRAM_DM_CODE_SINCE"] = str(int(time.time()))  # the code command must ignore older mail
     cl.login(user, password)
     session.parent.mkdir(parents=True, exist_ok=True)
@@ -486,7 +500,10 @@ def login(force=False):
 
 
 def refuse(cl, e):
-    """instagrapi's handle_exception: raise at once. Its default solves a challenge and retries by itself."""
+    """instagrapi's handle_exception: raise at once, with Instagram's answer on the exception. Its default solves a
+    challenge and retries by itself."""
+    with contextlib.suppress(Exception):
+        e.last_json = cl.last_json
     raise e
 
 
