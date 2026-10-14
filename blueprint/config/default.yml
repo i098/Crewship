@@ -22,6 +22,8 @@ crewship:
     # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md). Off
     # here so an update never opens a tunnel; ./ship.sh dock turns it on for a new host.
     gateway: false
+    # A self-hosted Forgejo on loopback for the agents' repositories (docs/forgejo.md).
+    forgejo: false
   gateway:
     # Hours an address stays allowed after the right password; the cookie lasts as long.
     allow_hours: 24

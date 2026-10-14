@@ -2,7 +2,7 @@
 
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
 - [Shared Postgres](shared-postgres.md): one container, per-project databases and worktree connection strings (opt-in)
-- [Self-hosted Forgejo](forgejo.md): a Forgejo git server on loopback, published to the tailnet, with nightly dumps (opt-in)
+- [Self-hosted Forgejo](forgejo.md): a loopback git forge for agent pushes, with nightly dumps, a GitHub feature-branch push and the no-mistakes forge profile (opt-in)
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)

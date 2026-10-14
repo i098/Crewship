@@ -84,6 +84,7 @@ omp models --json
 | `fleet_guards` | off | Docker guard, dev-server reaper, storage guard, browser ladder |
 | `shared_postgres` | off | one shared Postgres container for many projects |
 | `fleet_browsers` | off | the browser ladder only |
+| `forgejo` | off | a self-hosted Forgejo git server on loopback for agent pushes ([Self-hosted Forgejo](docs/forgejo.md)) |
 | `tailscale` | off | the Tailscale daemon (login is manual); an option beside the gateway |
 | `desktop` | off | a loopback-only XFCE desktop over noVNC |
 

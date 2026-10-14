@@ -31,6 +31,8 @@ The service, its data and its secrets stay on the host.
 When Tailscale runs with HTTPS certificates, `tailscale serve` publishes Forgejo at `https://<tailnet host>:20250/`.
 Without HTTPS certificates, apply does not use `tailscale serve`, and Forgejo stays on `http://127.0.0.1:20250/`.
 Apply does not change an HTTPS port 20250 that `tailscale serve` gives to a different service; it stops with an error.
+Clone URLs and pull request links use the published URL, or the loopback URL without it.
+Apply never uses Funnel, so Forgejo is never on the public internet.
 
 ## Admin password recovery
 
@@ -105,3 +107,16 @@ To find failed pushes, run `systemctl --user list-units --failed 'forgejo-github
 
 New Forgejo push mirrors are off.
 A push mirror deletes every GitHub branch that it does not push.
+
+## Security
+
+Forgejo runs as `crewship.user`, the account that also runs the agents.
+Every agent can read the admin password, the token and the database, so Forgejo is not a security boundary between agents on this host.
+It is a working remote that keeps the agents' git traffic off GitHub.
+
+## Turn it off
+
+Set `forgejo: false` and apply.
+Apply then stops managing Forgejo: the service, its data, its secrets and the `tailscale serve` entry stay as they are.
+To remove Forgejo, stop and disable `forgejo.service` and `forgejo-dump.timer`, delete their unit files, the drop-in and `~/.local/bin/forgejo-github-push`, and run `sudo tailscale serve --https=20250 off`.
+Then delete the directories in [What apply installs](#what-apply-installs) after you keep a backup.

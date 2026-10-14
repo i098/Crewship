@@ -53,6 +53,7 @@ crewship:
     fleet_browsers: false # Browser ladder (obscura tier on 127.0.0.1:9222)
     chat: true            # Concord (Discord) and slk (Slack) terminal clients
     gateway: true         # Password gateway + Cloudflare Quick Tunnel; only dock writes true (default.yml: false)
+    forgejo: false        # Self-hosted Forgejo on 127.0.0.1:20250 (tailnet HTTPS with Tailscale)
   gateway:
     allow_hours: 24       # How long an address stays allowed after the password
   herdr:
@@ -148,6 +149,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `fleet_browsers` | off | The [browser ladder](fleet-guards.md#browser-ladder): the always-on Obscura CDP tier on `127.0.0.1:9222`, the on-demand `chrome` and `vnc` tiers with the `vnc` tier's TigerVNC and noVNC packages, the cookie sync and gc timers, and the ladder environment in shell profiles and the Herdr unit. `fleet_guards` provisions the same ladder, so a `fleet_guards` host needs no change. Needs no other profile; the ladder needs `iproute2` (`ss`) from the base image, which only `desktop` installs. |
 | `chat` | on | The latest [Concord](https://github.com/chojs23/concord) (Discord) and [slk](https://github.com/gammons/slk) (Slack) terminal clients, their shared libraries, and a first-write config for each. Logins stay manual. See [Chat clients](chat.md). |
 | `gateway` | on for a new host | The [password gateway](gateway.md) and the latest `cloudflared`: one password opens the host's loopback web pages over a Cloudflare Quick Tunnel. `crewship.gateway.allow_hours` (default 24) sets how long an address stays allowed. `./ship.sh dock` writes `true` into a new host config; the installer's `--no-gateway` writes `false`. `blueprint/config/default.yml` has `false`, so a host config from before the gateway, without the key, keeps it off on update. To turn it on there, set `profiles.gateway: true` in `.local/host.yml` and run `./ship.sh launch`. |
+| `forgejo` | off | [Self-hosted Forgejo](forgejo.md): the latest release on `127.0.0.1:20250` with SQLite, published to the tailnet over HTTPS when Tailscale runs with HTTPS certificates, an admin account with a generated password, a nightly `forgejo dump`, and an opt-in push of feature branches to GitHub. With `agents`, also the no-mistakes Forgejo base URL and token; `forgejo-axi` comes with every `agents` host. |
 | `tailscale` | off | Tailscale daemon only, an option beside the gateway. Authentication is manual; see [Security](security.md#remote-access). |
 | `desktop` | off | Loopback-only XFCE + TigerVNC + noVNC operator desktop on `127.0.0.1:6080`, and the Google Chrome apt package. Needs an operator-created VNC password; see [Desktop access](recovery.md#desktop-access). |
 
