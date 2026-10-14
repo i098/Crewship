@@ -178,9 +178,8 @@ def test_the_password_never_reaches_a_process_argument(database, tmp_path, engin
     script = script.replace("/tmp/redis.conf", str(tmp_path / "redis.conf"))
     stub = tmp_path / "stub"
     stub.mkdir()
-    for name in {program, "mysqladmin", "mariadb-admin"}:  # a host mariadb client must not shadow the stub
-        (stub / name).write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/argv\necho "$MYSQL_PWD" > {tmp_path}/env\n')
-        (stub / name).chmod(0o755)
+    (stub / program).write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/argv\necho "$MYSQL_PWD" > {tmp_path}/env\n')
+    (stub / program).chmod(0o755)
     subprocess.run(["sh", "-c", script], env={"PATH": f"{stub}:/usr/bin:/bin"}, check=True)
     assert "s3cretvalue" not in (tmp_path / "argv").read_text()
     if engine == "redis":
