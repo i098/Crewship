@@ -6,6 +6,7 @@ thresholds, hysteresis and the order of the reclaim steps are observable.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -56,7 +57,8 @@ class Guard:
         self.stub = tmp / "stub"
         (self.stub / "bin").mkdir(parents=True)
         self.doctor.mkdir()
-        shutil.copy(ROOT / "blueprint/fleet/doctor/storage-guard.sh", self.doctor)
+        for script in ("storage-guard.sh", "worktree-prune.sh"):
+            shutil.copy(ROOT / "blueprint/fleet/doctor" / script, self.doctor)
         self._exe(self.doctor / "notify-master.sh", 'echo "$1" >> "$STUB/alerts"')
         for name, body in STUBS.items():
             self._exe(self.stub / "bin" / name, body)
@@ -93,6 +95,24 @@ class Guard:
             check=True,
             timeout=60,
         )
+
+    def pool_with_stale_output(self) -> Path:
+        """A Treehouse pool worktree holding a tracked file and a month-old ignored node_modules."""
+        home = self.doctor.parent / "home"
+        repo = home / ".treehouse/proj-1/2/repo"
+        (repo / "node_modules/pkg").mkdir(parents=True)
+        (repo / ".gitignore").write_text("node_modules/\n")
+        (repo / "tracked.txt").write_text("keep")
+        (repo / "node_modules/pkg/index.js").write_text("x")
+        month = time.time() - 30 * 86400
+        for path in (repo / "node_modules/pkg/index.js", repo / "node_modules/pkg", repo / "node_modules"):
+            os.utime(path, (month, month))
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "init"], check=True)
+        self.env["HOME"] = str(home)
+        return repo
 
     def _lines(self, name: str) -> list[str]:
         path = self.stub / name
@@ -276,3 +296,25 @@ def test_dry_run_estimates_each_step_and_writes_nothing(guard):
     assert "a real run would alert: CRIT / 95% used" in out
     assert guard.prunes() == [] and guard.alerts() == [] and guard.pct() == 95
     assert sorted(p.name for p in guard.doctor.iterdir()) == before
+
+
+def test_crit_prunes_stale_gitignored_worktree_output_and_nothing_else(guard):
+    repo = guard.pool_with_stale_output()
+    guard.fs({"/": 95})
+    guard.run()
+    assert not (repo / "node_modules").exists()
+    assert (repo / "tracked.txt").is_file() and (repo / ".gitignore").is_file()
+    log = (guard.doctor / "storage-guard.log").read_text()
+    assert f"removed {repo}/node_modules" in log
+
+
+def test_below_crit_and_in_dry_run_the_worktree_output_stays(guard):
+    repo = guard.pool_with_stale_output()
+    guard.fs({"/": 90})
+    guard.run()
+    assert (repo / "node_modules/pkg/index.js").is_file()
+    guard.fs({"/": 95})
+    out = guard.run("--dry-run").stdout
+    assert f"would remove {repo}/node_modules" in out
+    assert "CRIT worktree step (would run now" in out
+    assert (repo / "node_modules/pkg/index.js").is_file()

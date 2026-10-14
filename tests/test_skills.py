@@ -114,7 +114,7 @@ def browser_rules_repo(tmp_path):
     return repo
 
 
-def apply_rules(repo, home, ladder):
+def apply_rules(repo, home, ladder, profiles=None):
     home.mkdir(parents=True, exist_ok=True)
     tasks = yaml.safe_load((skills.REPO / "blueprint/ansible/tasks/agents.yml").read_text())
     task = next(t for t in tasks if t.get("register") == "crewship_skills_run")
@@ -122,12 +122,72 @@ def apply_rules(repo, home, ladder):
     template.filters["bool"] = bool
     argv = template.from_string(task["ansible.builtin.command"]["argv"]).render(
         crewship_repo=str(repo),
-        crewship_cfg={"home": str(home)},
+        crewship_cfg={"home": str(home), "profiles": {"public_skills": True} if profiles is None else profiles},
         crewship_fleet_browsers_enabled=ladder,
     )
     argv[0] = sys.executable
     result = subprocess.run(argv, check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
+
+
+@pytest.fixture
+def public_repo(tmp_path):
+    repo = tmp_path / "repo"
+    skill(repo / "blueprint/skills", "public", "shared", "public shared")
+    skill(repo / "blueprint/skills", "public", "only-public", "public only")
+    skill(repo / "blueprint/skills", "private", "shared", "private shared")
+    rule(repo / "blueprint/rules", "public", "style", "public rule")
+    return repo
+
+
+def installed(home):
+    names = {r: sorted(p.name for p in (home / r).glob("*")) for r in (*SKILL_ROOTS, RULES)}
+    return {r: n for r, n in names.items() if n}
+
+
+def test_public_off_installs_private_only_and_removes_nothing(public_repo, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    result = skills.install(home, public_repo, public="no")
+    assert result["installed"] == {"skills": ["shared"], "rules": []}
+    assert installed(home) == {r: ["shared"] for r in SKILL_ROOTS}
+    skills.install(home, public_repo)
+    assert "only-public" in installed(home)[SKILL_ROOTS[0]]
+    # turning it off later stops updates but deletes nothing, even a public rule
+    (public_repo / "blueprint/skills/public/only-public/SKILL.md").write_text("newer")
+    result = skills.install(home, public_repo, public="no")
+    assert not result["changed"]
+    assert installed(home)[RULES] == ["style.md"]
+    assert (home / SKILL_ROOTS[0] / "only-public/SKILL.md").read_text() == "public only"
+
+
+def test_public_auto_keeps_an_existing_bundle_and_starts_nothing_on_a_new_host(public_repo, tmp_path):
+    new, old = tmp_path / "new", tmp_path / "old"
+    new.mkdir()
+    old.mkdir()
+    skills.install(new, public_repo, public="auto")
+    assert installed(new) == {r: ["shared"] for r in SKILL_ROOTS}
+    skills.install(old, public_repo)
+    (public_repo / "blueprint/skills/public/only-public/SKILL.md").write_text("newer")
+    assert skills.install(old, public_repo, public="auto")["changed"]
+    assert (old / SKILL_ROOTS[0] / "only-public/SKILL.md").read_text() == "newer"
+
+
+@pytest.mark.parametrize(
+    "profiles, public",
+    [({}, False), ({"public_skills": False}, False), ({"public_skills": True}, True)],
+)
+def test_the_playbook_passes_the_public_choice(browser_rules_repo, tmp_path, profiles, public):
+    home = tmp_path / "home"
+    result = apply_rules(browser_rules_repo, home, True, profiles)
+    assert ("always-on-skills.md" in result["installed"]["rules"]) is public
+
+
+def test_the_playbook_keeps_public_skills_a_host_already_has(browser_rules_repo, tmp_path):
+    home = tmp_path / "home"
+    apply_rules(browser_rules_repo, home, True)
+    assert not apply_rules(browser_rules_repo, home, True, {})["changed"]
+    assert (home / RULES / "always-on-skills.md").exists()
 
 
 def test_browser_ladder_on_installs_both_rules(browser_rules_repo, tmp_path):
