@@ -135,7 +135,11 @@ def test_docker_access_check_does_not_change_resources(tmp_path, available):
 
 @pytest.mark.parametrize("compose, expected", [
     ("image: postgres:16-alpine", ("postgres", "postgres:16-alpine")),
-    ("image: 'ghcr.io/acme/postgis/postgis:16-3.4'", ("postgres", "ghcr.io/acme/postgis/postgis:16-3.4")),
+    ("image: library/postgres:16", ("postgres", "library/postgres:16")),
+    ("image: docker.io/library/mysql:8.4", ("mysql", "docker.io/library/mysql:8.4")),
+    ("image: 'ghcr.io/acme/postgis/postgis:16-3.4'", None),
+    ("image: postgis/postgis:16-3.4", None),
+    ("image: bitnami/mysql:8.4", None),
     ("image: pgvector/pgvector:pg18", ("postgres", "pgvector/pgvector:pg18")),
     ('image: "mysql:8.4"  # pinned', ("mysql", "mysql:8.4")),
     ("image: mariadb:11", ("mariadb", "mariadb:11")),
@@ -158,6 +162,23 @@ def test_detection_prefers_a_database_over_a_cache_and_skips_unreadable_checkout
     full.mkdir()
     (full / "compose.yaml").write_text("services:\n  r:\n    image: redis:7\n  p:\n    image: postgres:17\n")
     assert database.detect([tmp_path / "gone", bare, full]) == ("postgres", "postgres:17")
+
+
+@pytest.mark.parametrize("image", ["bitnami/redis:7", "postgis/postgis:16-3.4", "ghcr.io/acme/mysql:8"])
+def test_unofficial_images_are_rejected_with_a_message_naming_the_image(database, tmp_path, capsys, image):
+    directory = tmp_path / "app"
+    directory.mkdir()
+    (directory / "compose.yaml").write_text(f"services:\n  one:\n    image: {image}\n")
+    assert database.detect([directory]) is None
+    assert f"unsupported image {image}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("image", ["postgres:16-alpine", "postgres:17", "postgres:latest", "pgvector/pgvector:pg16"])
+def test_postgres_data_directory_is_inside_the_named_volume_for_any_major_version(database, image):
+    service = database.compose_document("app", {"engine": "postgres", "image": image, "port": 25440})["services"]["db"]
+    mount = service["volumes"][0].split(":")[1]
+    pgdata = Path(service["environment"]["PGDATA"])
+    assert pgdata != Path(mount) and Path(mount) in pgdata.parents
 
 
 @pytest.mark.parametrize("engine, image, binding", [

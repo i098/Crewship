@@ -33,13 +33,14 @@ MYSQL_PING = ('$(command -v mariadb-admin || command -v mysqladmin) ping -h 127.
               f'-p"$(cat {PASSWORD_FILE})" --silent')
 
 # One row per engine, in priority order when a compose file declares several.
-# images maps an image repository name (last path segment) to the engine.
-# ponytail: images that follow the official image conventions only; add a row for another engine.
+# images lists the only repositories that engine accepts: the official image, unnamespaced
+# (docker.io/ and library/ prefixes are ignored), plus pgvector/pgvector for postgres.
+# ponytail: official image conventions only; any other namespace is rejected, add a row for another engine.
 ENGINES = {
     "postgres": {
-        "images": ("postgres", "postgis", "pgvector"), "default": "postgres:latest", "port": 5432,
-        "data": "/var/lib/postgresql", "scheme": "postgresql", "var": "DATABASE_URL",
-        "environment": {"POSTGRES_USER": "app", "POSTGRES_DB": "app",
+        "images": ("postgres", "pgvector/pgvector"), "default": "postgres:latest", "port": 5432,
+        "data": "/var/lib/postgresql/data", "scheme": "postgresql", "var": "DATABASE_URL",
+        "environment": {"POSTGRES_USER": "app", "POSTGRES_DB": "app", "PGDATA": "/var/lib/postgresql/data/pgdata",
                         "POSTGRES_PASSWORD_FILE": PASSWORD_FILE, "POSTGRES_INITDB_ARGS": "--data-checksums"},
         "health": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"],
     },
@@ -115,18 +116,32 @@ def checkouts():
     return projects
 
 
+def repository(image):
+    """Image name without registry prefix docker.io/ or library/, tag and digest."""
+    name = image.split("@")[0]
+    head, _, last = name.rpartition("/")
+    name = f"{head}/{last.split(':')[0]}" if head else last.split(":")[0]
+    return re.sub(r"^(?:docker\.io/)?(?:library/)?", "", name)
+
+
 def detect(directories):
     """Return (engine, image) from the first compose file that names a supported engine, else None."""
+    accepted = {name for spec in ENGINES.values() for name in spec["images"]}
+    lookalikes = {name.rsplit("/", 1)[-1] for name in accepted} | {"postgis"}
     for directory in directories:
         for name in COMPOSE_FILES:
             try:
                 images = IMAGE.findall((directory / name).read_text())
             except OSError:
                 continue
+            for image in images:
+                repo = repository(image)
+                if repo not in accepted and repo.rsplit("/", 1)[-1] in lookalikes:
+                    print(f"crewship-db: unsupported image {image}: only official database images "
+                          "(postgres, mysql, mariadb, redis, pgvector/pgvector) are supported", file=sys.stderr)
             for engine, spec in ENGINES.items():
                 for image in images:
-                    repository = image.split("@")[0].rsplit("/", 1)[-1].split(":")[0]
-                    if repository in spec["images"]:
+                    if repository(image) in spec["images"]:
                         # An image with an unresolved ${VAR} falls back to the engine default.
                         return engine, spec["default"] if "$" in image else image
     return None
