@@ -16,6 +16,7 @@ SPEC.loader.exec_module(provisions)
 # Host config switch -> the doc its Features line links.
 FEATURES = {
     "crewship.profiles.agents": "docs/omp.md",
+    "crewship.profiles.public_skills": "docs/omp.md#skills",
     "crewship.profiles.chat": "docs/chat.md",
     "crewship.profiles.gateway": "docs/gateway.md",
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
