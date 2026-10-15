@@ -11,8 +11,11 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`clean-code-tests`](clean-code-tests/SKILL.md): F.I.R.S.T, one concept per test, build-operate-check, TDD (credits `@s4.codes` reels).
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
+- [`credentials`](credentials/SKILL.md): search every secrets file before you call a key absent, pass a process one variable and never the whole file, verify the process environment.
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
+- [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
+- [`frontend-ui-craft`](frontend-ui-craft/SKILL.md): twelve hierarchy rules for UI screens, cards, forms, dialogs, dark mode and motion (credits Zander Whitehurst's reels).
 - [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`instagram-dm`](instagram-dm/SKILL.md): read the agent Instagram DMs with `instagrapi` (session reuse, email-code login), normalise shared posts to `/reel/` URLs for yt-dlp, wake the agent within seconds on a new DM from the operator, reply with `fm-insta-reply`, and curate a few worthwhile reels a day with `reel_curator.py`.
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
@@ -27,5 +30,6 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): text the operator the important Slack messages (DMs, mentions, threads, decisions, deadlines, asks, incidents) from the slk cache, read-only, filtered by one `omp -p` call, at most one `fm-imessage` text per minute, every decision logged; opt-in `systemd --user` unit.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
+- [`third-party-signups`](third-party-signups/SKILL.md): act on an owner's standing authorization for signups, email codes and app approvals, with the bounds that always hold.
 - [`usage-card`](usage-card/SKILL.md): answer usage, quota, resource, load and disk questions with the `fm-usage-brief --png` card; notes the hourly `fm-usage-remind` reminder.
 - [`tooling-conventions`](tooling-conventions/SKILL.md): bun, gh-axi, lavish, no-mistakes, herdr, skillspector, caveman and ponytail.
