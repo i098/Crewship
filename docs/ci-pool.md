@@ -22,6 +22,7 @@ flowchart LR
        # total_slots: auto        # or a number; see "Pool size"
        # job_cpus: 4              # CPU cap of each job container
        # job_memory_gb: 8         # memory cap of each job container
+       # image: crewship-ci-runner:latest   # see "What a job gets"
        repos:
          - repo: owner/name
            slots: 2
@@ -47,6 +48,7 @@ To remove a repository, delete its entry and apply again. Its idle slots stop an
 | `total_slots` | `auto` | Most slots the pool runs. `auto` computes it at apply (see below). A number fixes it. |
 | `job_cpus` | `4` | `docker --cpus` of each job container. |
 | `job_memory_gb` | `8` | `docker --memory` and `--memory-swap` of each job container, in GiB. |
+| `image` | `crewship-ci-runner:latest` | Image of each job container. The default is built on the host (see [What a job gets](#what-a-job-gets)). Any other name is pulled hourly and used as it is. |
 | `repos[].repo` | required | `owner/name` on github.com. |
 | `repos[].slots` | required | Slots for this repository: the most jobs it runs at one time. |
 | `repos[].labels` | required | Runner labels that the workflow's `runs-on` selects. |
@@ -72,11 +74,12 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 
 ## What a job gets
 
-- The official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`). The watch timer pulls it once an hour; a job starts from the image already on the host.
+- The pool's own image `crewship-ci-runner:latest`: the official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`) plus `build-essential`, `pkg-config`, the GTK 3 runtime, Postgres 17 with its client, `unzip`, `git`, `curl`, and `bun`. A job that runs `apt-get install` for these finds them installed. `ci-pool-image.timer` rebuilds the image every hour from the latest official image (apt and bun update once a day), so a job never pulls or installs them. Until the first build ends, jobs start from the official image. The list is `DOCKERFILE` in `ci-pool.py`.
 - The CPU and memory caps above, and at most 8192 processes.
 - No Docker daemon: the host's Docker socket is not mounted. Jobs that build or run containers stay on GitHub-hosted runners.
 - An empty `_work` directory for each job, emptied when the container starts.
-- Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use) and `~/.cache` (uv, pip, and other tools).
+- Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), and the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`). The downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`) stay for each slot, not for the repository, because apt locks that directory.
+- Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, a fresh Postgres 17 cluster. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
 - A check before the first step: the runner's job-started hook ends the job container when its code comes from outside the repository, which is a pull request from a fork or a `workflow_run` that a fork's pull request started. The hook kills every process in the container, so no later step runs, not even an `if: always()` step. The slot then deletes the runner. Only the repositories in the pool's list, and only their own branches, run on the host.
 
 ## Files on the host
@@ -86,11 +89,13 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 | `~/.local/bin/ci-pool.py` | The script: `apply` converges the slots, `run <slot>` is each slot's `ExecStart`, `watch` is the timer's command. |
 | `~/.config/systemd/user/ci-runner@.service` | The one unit template. Apply writes it; instances are `ci-runner@<owner>-<name>-<n>.service`. |
 | `~/.config/systemd/user/ci-pool-watch.{service,timer}` | The watch timer (see [Stalled slots](#stalled-slots)). Apply writes and enables it. |
-| `~/.config/ci-pool/last-pull` | Its mtime is the time of the last image pull. |
+| `~/.config/systemd/user/ci-pool-image.{service,timer}` | The hourly image build. Apply writes and enables it. |
 | `~/.config/ci-pool/pool.json` | The `ci_pool` section as apply last wrote it. Each slot reads it when it starts. |
 | `~/.config/ci-pool/job-started.sh` | The job-started hook. Apply writes it; each job container mounts it read-only. A slot whose hook file is missing does not start a job. |
 | `<data_dir>/ci-pool/work/<slot>/` | The slot's job work directory. |
-| `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `.../home/` | The repository's tool cache and `~/.cache`. |
+| `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `home/`, `cargo-registry/`, `cargo-git/` | The repository's tool cache, `~/.cache`, and cargo directories. |
+| `<data_dir>/ci-pool/scratch/<slot>/` | The slot's `/tmp`, Postgres cluster directory, and `~/.bun`, deleted at each job start. |
+| `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
 
 No token is stored. Each slot reads the host's `gh` login when it starts. When an account is not in the `docker` group, the script runs `sudo -n docker`.
 
@@ -109,10 +114,16 @@ A slot that waits for a job shows as an `online` runner that is not busy. In a j
 
 On a loaded host the Docker daemon can stall a call for good. A slot then holds a registered runner that shows `offline` and has no container, so jobs wait in the queue. Two guards stop this:
 
-- Every `docker create` and `docker pull` that the script starts ends after 180 seconds. The slot removes the half-created container and the runner, waits 60 seconds, and exits with an error, and systemd restarts it. Set `CI_POOL_DOCKER_TIMEOUT` (seconds) in the unit (`systemctl --user edit ci-runner@.service` and `ci-pool-watch.service`) to change the limit.
-- `ci-pool-watch.timer` runs `ci-pool.py watch` every 3 minutes. It restarts each slot that started more than 10 minutes ago and has no running container, and prints `restart <unit>` to the journal (`journalctl --user -u ci-pool-watch`). It does not restart a slot when Docker does not answer, and never a slot with a running container, so a job is not killed.
+- Every `docker create`, `docker pull`, and other short Docker call that the script starts ends after 600 seconds (a create takes minutes when the host load is high). The slot removes the half-created container and the runner, waits 60 seconds, and exits with an error, and systemd restarts it. Set `CI_POOL_DOCKER_TIMEOUT` (seconds) in the unit (`systemctl --user edit ci-runner@.service` and `ci-pool-image.service`) to change the limit.
+- `ci-pool-watch.timer` runs `ci-pool.py watch` every minute. It restarts a slot only when all of this holds:
+  - the slot started more than 5 minutes ago,
+  - GitHub shows its runner `offline` and not busy, and
+  - the Docker daemon listed no container for the slot (`docker ps --all`, any state) in two successful reads at least 2 minutes apart. The first sighting is kept in `~/.config/ci-pool/watch-state.json`.
 
-Jobs create the container with `--pull missing`. `watch` pulls the image once an hour instead, so the slots do not pull at the same time.
+  A read that fails or takes more than 60 seconds acts on nothing and forgets the first sightings, because a loaded daemon answers slowly or in part. `watch` restarts at most 2 slots a run and prints `restart <unit>: <reason>` to the journal (`journalctl --user -u ci-pool-watch`). It also removes a container that is stuck in `removing` or `dead` when its slot unit is stopped. `ci-pool.py watch --dry-run` prints what it would do and changes nothing.
+- A slot that starts or stops waits for its old container: it stops it with a 60-second grace period, removes it, and waits until the daemon no longer lists it before it creates the next one. A slot whose old container still runs a job (a `Runner.Worker` process) does not touch it: the slot fails, waits 60 seconds, and systemd starts it again. The unit uses `KillMode=mixed`, so `systemctl stop` signals only `run`, which does this cleanup within `TimeoutStopSec=300`.
+
+Jobs create the container with `--pull missing`. `ci-pool-image.timer` refreshes the image once an hour instead, so the slots do not pull at the same time.
 
 ## Apply without the playbook
 
