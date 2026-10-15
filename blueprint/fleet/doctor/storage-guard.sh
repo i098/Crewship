@@ -16,7 +16,8 @@
 #   FILL  growth since the previous run projects the free space left after
 #         any CRIT reclaim full within STORAGE_FILL_HORIZON_HOURS (6): alert
 #         at once, even below WARN, naming the entry that grew most since the
-#         previous consumer scan.
+#         previous consumer scan. Only at or above STORAGE_FILL_MIN_PCT (70)
+#         use; below it the rate is sampled but not alerted.
 #   WARN  STORAGE_WARN_PCT (85): log, one COMMS.md line and one
 #         notify-master.sh alert per episode, re-armed only once usage falls
 #         below WARN - STORAGE_HYSTERESIS_PCT (3).
@@ -65,6 +66,7 @@ CRIT=${STORAGE_CRIT_PCT:-92}
 HYST=${STORAGE_HYSTERESIS_PCT:-3}
 AGE_H=${STORAGE_IMAGE_AGE_HOURS:-168}
 HORIZON_H=${STORAGE_FILL_HORIZON_HOURS:-6}
+FILL_MIN=${STORAGE_FILL_MIN_PCT:-70}
 REPEAT_MIN=${STORAGE_REPEAT_MIN:-30}
 SCAN_TIMEOUT=${STORAGE_SCAN_TIMEOUT:-300}
 PRUNE_TIMEOUT=${STORAGE_PRUNE_TIMEOUT:-300}
@@ -76,7 +78,7 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in WARN CRIT HYST AGE_H HORIZON_H REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT; do
+for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "storage-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 [ "$HYST" -lt "$WARN" ] && [ "$WARN" -lt "$CRIT" ] && [ "$CRIT" -le 100 ] \
@@ -293,7 +295,9 @@ for m in "${mounts[@]}"; do
   elif [ "$p_t" -gt 0 ] && [ "$grow" -gt 0 ]; then
     eta=$((avail * dt / grow))
     fill="+$(human "$grow") in $((dt / 60))m ($(human $((grow * 60 / dt)))/min), full in ~$(dur "$eta")"
-    if [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
+    if [ "$pct" -lt "$FILL_MIN" ]; then
+      show "  growing $fill - below FILL floor ${FILL_MIN}%"
+    elif [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
       say "  FILL $m $fill - inside the ${HORIZON_H}h horizon"
       if [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
         notes+=("filling: $fill"); fill_at=$now; filling=1

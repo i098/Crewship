@@ -12,12 +12,14 @@ crewship_fleet_doctor_dir: "{{ crewship_fleet_dir }}/doctor"
 # once per episode, re-armed below WARN - hysteresis; CRIT prunes build cache,
 # dangling images and unused images created more than image_age_hours ago
 # (creation time, not last use), then alerts at most once per repeat_min. A
-# fill rate projecting full within fill_horizon_hours alerts even below WARN.
+# fill rate projecting full within fill_horizon_hours alerts even below WARN, but
+# only on a mount at or above fill_min_pct (70) use.
 crewship_storage_guard_warn_pct: 85
 crewship_storage_guard_crit_pct: 92
 crewship_storage_guard_hysteresis_pct: 3
 crewship_storage_guard_image_age_hours: 168
 crewship_storage_guard_fill_horizon_hours: 6
+crewship_storage_guard_fill_min_pct: 70
 crewship_storage_guard_repeat_min: 30
 # CRIT also removes gitignored build output (node_modules, .venv, target, dist,
 # .next, ...) in Treehouse pool worktrees that nothing changed for this many
