@@ -6,8 +6,9 @@ crewship_fleet_sources: "{{ crewship_blueprint }}/fleet"
 crewship_fleet_dir: "{{ crewship_cfg.home }}/oss-fleet"
 crewship_fleet_doctor_dir: "{{ crewship_fleet_dir }}/doctor"
 
-# Storage guard (blueprint/fleet/doctor/storage-guard.sh, every 5 min). Use% of the
-# filesystems holding /, /var/log, the home and Docker's data root: WARN alerts
+# Storage guard (blueprint/fleet/doctor/storage-guard.sh, every 5 min). Use% of every
+# mounted real block filesystem (not tmpfs, overlay, squashfs, loop) and of the ones
+# holding /, /var/log, the home and Docker's data root: WARN alerts
 # once per episode, re-armed below WARN - hysteresis; CRIT prunes build cache,
 # dangling images and unused images created more than image_age_hours ago
 # (creation time, not last use), then alerts at most once per repeat_min. A

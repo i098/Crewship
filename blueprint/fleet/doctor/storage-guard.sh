@@ -8,8 +8,11 @@
 # reclaimable). Hours later /var/log/syslog grew to 39 GB at ~17 MB/s from one
 # looping process and took / to 100%, again with no alert.
 #
-# Measures use% of the filesystems holding /, /var/log, $HOME and Docker's
-# data root (`docker info`), once per filesystem. For each one:
+# Measures use% of every mounted real block filesystem (ext4, xfs, btrfs, zfs,
+# vfat, ...; not tmpfs, overlay, squashfs, loop devices or other pseudo
+# filesystems; findmnt, once per device) and of the filesystems holding /,
+# /var/log, $HOME and Docker's data root (`docker info`), once per filesystem.
+# For each one:
 #   FILL  growth since the previous run projects the free space left after
 #         any CRIT reclaim full within STORAGE_FILL_HORIZON_HOURS (6): alert
 #         at once, even below WARN, naming the entry that grew most since the
@@ -26,9 +29,14 @@
 #         freed, or that a human is needed while still at CRIT, at most once
 #         per STORAGE_REPEAT_MIN (30); FILL repeats likewise.
 # Alerts name the top consumers: the largest entries one level under the
-# filesystem root, and under the home and /var/log when they live on it, from
-# one du walk bounded by STORAGE_SCAN_TIMEOUT seconds (300), plus
-# `docker system df` on Docker's filesystem.
+# filesystem root, one level under its biggest entry, and under the home and
+# /var/log when they live on it, from one du walk bounded by
+# STORAGE_SCAN_TIMEOUT seconds (300), plus `docker system df` on Docker's
+# filesystem. When an earlier scan of the same filesystem exists, the alert
+# also names the (up to 5) entries that grew most since it.
+# Delivery: besides notify-master.sh when present, an alert goes to Firstmate
+# as `$FM_HOME/bin/fm-inbox.sh note` when FM_HOME points at a Firstmate home,
+# which wakes the main Firstmate to relay it.
 #
 # Never deleted, only reported: volumes, containers, repositories, /tmp, logs,
 # anything under the home but the worktree output below. A runaway log needs
@@ -61,6 +69,7 @@ REPEAT_MIN=${STORAGE_REPEAT_MIN:-30}
 SCAN_TIMEOUT=${STORAGE_SCAN_TIMEOUT:-300}
 PRUNE_TIMEOUT=${STORAGE_PRUNE_TIMEOUT:-300}
 POOLS=${WORKTREE_PRUNE_POOLS:-$HOME/.treehouse}
+PRUNE_CMD=${WORKTREE_PRUNE_CMD:-$HERE/worktree-prune.sh}  # takes [--dry-run] like worktree-prune.sh
 DRY=0
 case "${1:-}" in
   --dry-run) DRY=1 ;;
@@ -77,7 +86,13 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 show() { [ "$DRY" = 1 ] && printf '%s\n' "$*"; return 0; }  # dry-run narration only
 say() { if [ "$DRY" = 1 ]; then printf '%s\n' "$*"; else log "$*"; fi; }  # events
 comms() { printf '\n## [storage-guard -> orchestrator] %s %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$COMMS"; }
-notify() { [ -x "$HERE/notify-master.sh" ] && "$HERE/notify-master.sh" "$1" "storage-guard" >/dev/null 2>&1; return 0; }
+notify() {
+  [ -x "$HERE/notify-master.sh" ] && "$HERE/notify-master.sh" "$1" "storage-guard" >/dev/null 2>&1
+  local fm=${FM_HOME:-}; fm=${fm%/}
+  [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] \
+    && FM_HOME=$fm timeout 30 "$fm/bin/fm-inbox.sh" note -- "[storage-guard $(hostname -s)] $1" >/dev/null 2>&1
+  return 0
+}
 join() { local sep=$1 out=$2 x; shift 2; for x in "$@"; do out+="$sep$x"; done; printf '%s' "$out"; }
 HUMAN_AWK='function h(b,  s, u, i) { s = b < 0 ? "-" : ""; b = b < 0 ? -b : b; split("B K M G T P", u, " ")
   for (i = 1; b >= 1024 && i < 6; i++) b /= 1024
@@ -90,11 +105,12 @@ measure() { df -B1 --output=used,avail,pcent,target -- "$1" 2>/dev/null | awk 'N
 mount_of() { local m; read -r _ _ _ m <<<"$(measure "$1")"; printf '%s' "$m"; }
 
 # One du walk under SCAN_TIMEOUT: entries (files too - a runaway log is a file)
-# one level under <mount>, and under the home and /var/log when they live on it.
+# one level under <mount> and one level under its biggest entry, and under the
+# home and /var/log when they live on it.
 # Sets SCAN_OUT to "bytes<TAB>path" lines, largest first, and SCAN_PARTIAL=1
 # when the timeout cut the walk short. No temp files: the disk may be full.
 scan() {  # <mount>
-  local m=$1 r rel depth=1 roots=$1 raw
+  local m=$1 r rel depth=2 roots=$1 raw
   for r in "$HOME" /var/log; do
     [ "$r" != "$m" ] && [ "$(mount_of "$r")" = "$m" ] || continue
     roots+=$'\n'$r
@@ -103,9 +119,17 @@ scan() {  # <mount>
   done
   raw=$(timeout "$SCAN_TIMEOUT" du -x -a -B1 -d "$depth" -- "$m" 2>/dev/null)
   [ $? = 124 ] && SCAN_PARTIAL=1 || SCAN_PARTIAL=0
-  SCAN_OUT=$(printf '%s\n' "$raw" | awk -F'\t' -v roots="$roots" '
-    BEGIN { n = split(roots, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
-    NF == 2 { p = $2; sub(/\/[^\/]*$/, "", p); if (p == "") p = "/"; if ($2 != "/" && p in keep) print }' \
+  # du prints a directory after everything under it, so the level-2 lines seen
+  # since the previous level-1 entry are the children of the next one: keep them
+  # only when that entry is the biggest so far.
+  SCAN_OUT=$(printf '%s\n' "$raw" | awk -F'\t' -v roots="$roots" -v m="$m" '
+    BEGIN { n = split(roots, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1
+      ml = length(m) - (m ~ /\/$/) }
+    NF == 2 { p = $2; sub(/\/[^\/]*$/, "", p); if (p == "") p = "/"
+      if ($2 != "/" && p in keep) print
+      if (p == m) { if ($1 + 0 > big) { big = $1 + 0; kids = buf } buf = "" }
+      else if (!(p in keep)) { rel = substr($2, ml + 1); if (gsub(/\//, "/", rel) == 2) buf = buf $0 "\n" } }
+    END { printf "%s", kids }' \
     | sort -t$'\t' -k1,1nr)
 }
 # Scan lines on stdin -> "under /: home 120.3G, var 40.1G; under /home/u: ..."
@@ -117,19 +141,25 @@ top_consumers() {
     END { for (g = 1; g <= groups; g++) printf "%sunder %s: %s", (g > 1 ? "; " : ""), order[g], s[order[g]] }'
 }
 # Old scan file, new scan on stdin (first line of each: "epoch complete") ->
-# the entry that grew most between them, descending into a child that carries
-# at least half of that growth. Entries absent from a partial old scan are not
-# counted as growth.
-fastest() {  # <old-scan-file>
+# the (up to 5) entries that grew most between them, "<age>: path +size, ...".
+# An entry is skipped when a child carries at least half of its growth (the
+# child is the more precise answer). Entries absent from a partial old scan
+# are not counted as growth.
+growers() {  # <old-scan-file>
   awk -F'\t' "$HUMAN_AWK"'
     NR == FNR { if (FNR == 1) { split($0, f, " "); t0 = f[1]; whole = (f[2] == 1) } else old[$2] = $1; next }
     FNR == 1 { split($0, f, " "); t1 = f[1]; next }
     ($2 in old || whole) && $1 > old[$2] + 0 { d[$2] = $1 - old[$2] }
-    END { for (p in d) if (best == "" || d[p] > d[best]) best = p
-      if (best == "") exit
-      do { nx = ""; for (p in d) if (index(p, best "/") == 1 && 2 * d[p] >= d[best] && (nx == "" || d[p] > d[nx])) nx = p
-        if (nx != "") best = nx } while (nx != "")
-      printf "%s +%s in the %dm since the previous scan", best, h(d[best]), (t1 - t0) / 60 }' "$1" -
+    END { for (p in d) { ok = 1
+        for (q in d) if (index(q, p "/") == 1 && 2 * d[q] >= d[p]) ok = 0
+        if (ok) k[p] = d[p] }
+      for (i = 0; i < 5; i++) { best = ""
+        for (p in k) if (best == "" || k[p] > k[best]) best = p
+        if (best == "") break
+        out = out (i ? ", " : "") best " +" h(k[best]); delete k[best] }
+      if (out == "") exit
+      m = (t1 - t0) / 60
+      printf "%s since the previous scan: %s", (m >= 120 ? sprintf("%dh", m / 60) : sprintf("%dm", m)), out }' "$1" -
 }
 
 docker_df() { timeout 60 docker system df --format '{{.Type}} {{.Size}}, reclaimable {{.Reclaimable}}' 2>/dev/null | paste -sd';' | sed 's/;/; /g'; }
@@ -172,6 +202,22 @@ for p in / /var/log "$HOME" ${DOCKER_ROOT:+"$DOCKER_ROOT"} ${POOLS_DIR:+"$POOLS_
   [ -n "${holds[$m]+x}" ] || mounts+=("$m")
   holds[$m]+="${holds[$m]:+ and }$p"
 done
+# Every other real block filesystem, once per device (a bind mount or btrfs
+# subvolume of a device already listed adds nothing). findmnt -r escapes spaces.
+declare -A dev_of=() dev_seen=()
+real=()
+while read -r t ft src; do
+  [[ $ft =~ ^(ext[234]|xfs|btrfs|zfs|vfat|exfat|ntfs3?|f2fs|jfs|reiserfs|fuseblk)$ ]] || continue
+  [[ $src == /dev/loop* ]] && continue
+  printf -v t '%b' "$t"
+  dev_of[$t]=${src%%\[*}; real+=("$t")
+done < <(findmnt -rno TARGET,FSTYPE,SOURCE 2>/dev/null)
+for m in "${mounts[@]}"; do [ -n "${dev_of[$m]+x}" ] && dev_seen[${dev_of[$m]}]=1; done
+for m in "${real[@]}"; do
+  [ -z "${dev_seen[${dev_of[$m]}]+x}" ] || continue
+  dev_seen[${dev_of[$m]}]=1
+  mounts+=("$m"); holds[$m]="the mount ${dev_of[$m]}"
+done
 
 show "storage-guard --dry-run: WARN ${WARN}% (re-armed below $((WARN - HYST))%), CRIT ${CRIT}%, fill horizon ${HORIZON_H}h, image age ${AGE_H}h, repeat ${REPEAT_MIN}m"
 if [ "$DRY" != 1 ]; then
@@ -195,14 +241,14 @@ for m in "${mounts[@]}"; do
   # CRIT, first: stale gitignored build output in the Treehouse pools. worktree-prune.sh
   # holds every safety check; this only decides when it runs and reports what it freed.
   wt_note=
-  if [ "$m" = "$POOLS_MOUNT" ] && [ -x "$HERE/worktree-prune.sh" ]; then
+  if [ "$m" = "$POOLS_MOUNT" ] && [ -x "$PRUNE_CMD" ]; then
     if [ "$DRY" = 1 ]; then
       [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
-      show "  CRIT worktree step ($when, stopping once under ${CRIT}%): worktree-prune.sh - stale gitignored build output in $POOLS:"
-      timeout "$PRUNE_TIMEOUT" "$HERE/worktree-prune.sh" --dry-run 2>&1 | sed 's/^/    /'
+      show "  CRIT worktree step ($when, stopping once under ${CRIT}%): $(basename "$PRUNE_CMD") - stale gitignored build output in $POOLS:"
+      timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" --dry-run 2>&1 | sed 's/^/    /'
     elif [ "$pct" -ge "$CRIT" ]; then
       before=$used
-      out=$(timeout "$PRUNE_TIMEOUT" "$HERE/worktree-prune.sh" 2>&1)
+      out=$(timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" 2>&1)
       read -r used avail pct _ <<<"$(measure "$m")"
       log "  CRIT $m worktree-prune: freed $(human $((before - used))), now ${pct}%"
       while IFS= read -r line; do log "    $line"; done <<<"$out"
@@ -297,9 +343,9 @@ for m in "${mounts[@]}"; do
     [ "$m" = "$DOCKER_MOUNT" ] && top+="; docker: $(docker_df)"
     show "  $top"
     snapshot=$(printf '%s %s\n%s\n' "$now" $((1 - SCAN_PARTIAL)) "$SCAN_OUT")
-    if [ "$filling" = 1 ] && [ -f "$STATE/$key.scan" ]; then
-      g=$(printf '%s\n' "$snapshot" | fastest "$STATE/$key.scan")
-      [ -n "$g" ] && notes[0]+=", grew most: $g"
+    if [ ${#notes[@]} -gt 0 ] && [ -f "$STATE/$key.scan" ]; then
+      g=$(printf '%s\n' "$snapshot" | growers "$STATE/$key.scan")
+      [ -n "$g" ] && notes[0]+=", grew most in the $g"
     fi
     [ "$DRY" = 1 ] || printf '%s\n' "$snapshot" > "$STATE/$key.scan"
   fi
