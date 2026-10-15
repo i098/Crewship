@@ -68,6 +68,9 @@
             "shared_postgres": {
               "type": "boolean"
             },
+            "project_databases": {
+              "type": "boolean"
+            },
             "jj": {
               "type": "boolean"
             },

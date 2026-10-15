@@ -99,6 +99,22 @@ def test_runtime_dependencies(dependency):
         ship.validate_config(config)
 
 
+def test_project_databases_is_another_name_of_the_profile():
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    profiles = config["crewship"]["profiles"]
+    profiles.update(docker=True, project_databases=True)
+    del profiles["shared_postgres"]
+    assert ship.validate_config(config)["crewship"]["profiles"]["shared_postgres"] is True
+    assert "project_databases" not in profiles
+
+
+def test_both_names_of_the_profile_must_agree():
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    config["crewship"]["profiles"]["project_databases"] = True
+    with pytest.raises(ValueError, match="another name of profiles.shared_postgres"):
+        ship.validate_config(config)
+
+
 def test_preview_and_apply_record_only_the_projects_directory(tmp_path):
     assert "configure" in cli(tmp_path, "--apply", "--check").stdout
     assert list(tmp_path.iterdir()) == []

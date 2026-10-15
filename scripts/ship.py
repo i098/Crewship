@@ -22,6 +22,8 @@ REMOVED_PROFILE = "shared_supabase"
 REMOVED_FLEET_KEYS = ("supabase_project_id", "fixture_archive", "worktree_pools")
 RETIRED_STACK = "oss-fleet/shared-supabase"
 OLD_ROOT, NEW_ROOT = "factory", "crewship"
+# Other names a host config may use for a profile: alias -> the name the code reads.
+PROFILE_ALIASES = {"project_databases": "shared_postgres"}
 # The opt-in features of a new host, in checklist order: name -> (what it adds, what it needs).
 # Every name is a profile, except board, which is a block (docs/board.md).
 OPT_IN = {
@@ -75,6 +77,12 @@ def validate_config(document):
             "(docs/shared-postgres.md). Existing stacks and volumes remain untouched."
         )
     validate_document(document, "crewship.schema.json")
+    profiles = document["crewship"]["profiles"]
+    for alias, name in PROFILE_ALIASES.items():
+        if alias in profiles:
+            if profiles.setdefault(name, profiles[alias]) != profiles[alias]:
+                raise ValueError(f"profiles.{alias} is another name of profiles.{name}; set only one")
+            del profiles[alias]
     config = document["crewship"]
     home, workspace = Path(config["home"]), Path(config["workspace"])
     if (

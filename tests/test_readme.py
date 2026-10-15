@@ -51,6 +51,8 @@ EXCLUDED = {
     "crewship.imessage.bluebubbles",
     "crewship.imessage.cards",
     "crewship.instructions_mode",
+    # Another name of crewship.profiles.shared_postgres, folded into it.
+    "crewship.profiles.project_databases",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",
 }
