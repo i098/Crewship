@@ -5,6 +5,7 @@ only inside a disposable Docker-in-Docker lab.
 """
 
 import concurrent.futures
+import copy
 import importlib.machinery
 import importlib.util
 import json
@@ -73,30 +74,54 @@ def database(tmp_path, monkeypatch):
 @pytest.mark.parametrize("enabled", [True, False, None])
 def test_schema_and_legacy_profile(enabled):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
-    assert config["crewship"]["profiles"]["shared_postgres"] is False
+    assert config["crewship"]["profiles"]["project_databases"] is False
     config["crewship"]["profiles"]["docker"] = True
     if enabled is None:
-        config["crewship"]["profiles"].pop("shared_postgres")
+        config["crewship"]["profiles"].pop("project_databases")
     else:
-        config["crewship"]["profiles"]["shared_postgres"] = enabled
+        config["crewship"]["profiles"]["project_databases"] = enabled
     assert ship.validate_config(config) is config
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])
 def test_schema_rejects_non_boolean(value):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
-    config["crewship"]["profiles"]["shared_postgres"] = value
-    with pytest.raises(ValueError, match="profiles.shared_postgres"):
+    config["crewship"]["profiles"]["project_databases"] = value
+    with pytest.raises(ValueError, match="profiles.project_databases"):
         ship.validate_config(config)
 
 
 @pytest.mark.parametrize("dependency", ["docker", "firstmate"])
 def test_runtime_dependencies(dependency):
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
-    config["crewship"]["profiles"]["shared_postgres"] = True
+    config["crewship"]["profiles"]["project_databases"] = True
     config["crewship"]["profiles"][dependency] = False
     with pytest.raises(ValueError, match="project databases require"):
         ship.validate_config(config)
+
+
+def old_host(tmp_path, **profiles):
+    """A host config that still names the profile shared_postgres, and the same config under the new name."""
+    new = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    new["crewship"]["profiles"].update(docker=True, project_databases=True)
+    old = copy.deepcopy(new)
+    old["crewship"]["profiles"]["shared_postgres"] = old["crewship"]["profiles"].pop("project_databases")
+    old["crewship"]["profiles"].update(profiles)
+    host = tmp_path / "host.yml"
+    host.write_text(yaml.safe_dump(old))
+    return host, new
+
+
+def test_old_profile_name_applies_as_project_databases(tmp_path, capsys):
+    host, new = old_host(tmp_path)
+    assert ship.load_config(host) == new
+    assert "crewship.profiles.shared_postgres is now crewship.profiles.project_databases" in capsys.readouterr().err
+
+
+def test_both_profile_names_must_agree(tmp_path):
+    host, _ = old_host(tmp_path, project_databases=False)
+    with pytest.raises(ValueError, match="another name of profiles.project_databases"):
+        ship.load_config(host)
 
 
 def test_preview_and_apply_record_only_the_projects_directory(tmp_path):
@@ -398,7 +423,7 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"), "crewship_local_bin": str(home / ".local/bin"),
         "crewship_user_units": str(home / ".config/systemd/user"),
         "crewship_firstmate_dir": str(home / "custom-workspace/firstmate"),
-        "crewship_cfg": {"home": str(home), "user": "root", "profiles": {"shared_postgres": True}},
+        "crewship_cfg": {"home": str(home), "user": "root", "profiles": {"project_databases": True}},
         "crewship_group": "root", "crewship_manage_services": False,
         "crewship_become_target": False, "crewship_user_systemd_env": {},
     }
@@ -409,8 +434,8 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars": variables,
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/shared_postgres.yml"),
-                   "when": "crewship_cfg.profiles.shared_postgres | bool"}],
+        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/project_databases.yml"),
+                   "when": "crewship_cfg.profiles.project_databases | bool"}],
         "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "deferred"}}],
     }]))
     command = ["ansible-playbook", "-i", "localhost,", str(playbook)]
@@ -443,7 +468,7 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
     assert query(env_url(primary), "SELECT current_database()").stdout.strip() == "app"
     before = {str(p.relative_to(home)): (p.read_bytes(), p.stat().st_mtime_ns) for p in home.rglob("*") if p.is_file()}
     playbook_data = yaml.safe_load(playbook.read_text())
-    playbook_data[0]["vars"]["crewship_cfg"]["profiles"]["shared_postgres"] = False
+    playbook_data[0]["vars"]["crewship_cfg"]["profiles"]["project_databases"] = False
     playbook.write_text(yaml.safe_dump(playbook_data))
     off = subprocess.run(command, capture_output=True, text=True, check=True)
     assert "changed=0" in off.stdout.split("PLAY RECAP")[-1]

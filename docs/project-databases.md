@@ -1,7 +1,7 @@
 # Project databases
 
-`crewship.profiles.shared_postgres` is off by default.
-The key keeps its old name so existing host configs stay valid.
+`crewship.profiles.project_databases` is off by default.
+The key was called `shared_postgres` before. A host config that still uses that name keeps working, and apply prints a note to rename it.
 It gives each project one dev database container of the engine that the project already uses.
 All worktrees of the project share that container.
 There is no host-wide database.
@@ -15,7 +15,7 @@ crewship:
   profiles:
     docker: true
     firstmate: true
-    shared_postgres: true
+    project_databases: true
 ```
 
 Before convergence, give the configured target account explicit Docker access by an administrator's choice.
@@ -134,7 +134,7 @@ Delete the volume and `~/.local/state/code-factory/shared-postgres` and `~/.loca
 
 ## Disable and remove
 
-Set `shared_postgres: false` and apply to stop managing this profile.
+Set `project_databases: false` and apply to stop managing this profile.
 This leaves the existing containers, volumes, timer, environment files and secrets unchanged.
 The containers and timer can continue to run; disabling the profile does not stop them.
 
@@ -160,7 +160,7 @@ docker volume rm crewship-db-example-app-data
 
 ## Verification
 
-Run `bash tests/shared-postgres-smoke.sh` from the repository to exercise the service tests and Ansible syntax check.
+Run `bash tests/project-databases-smoke.sh` from the repository to exercise the service tests and Ansible syntax check.
 The same command runs in CI.
 It creates a disposable privileged Docker-in-Docker container and removes it when the command exits.
 The lab receives a read-only repository mount, not the host Docker socket.

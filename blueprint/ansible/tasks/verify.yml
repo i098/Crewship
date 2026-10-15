@@ -86,7 +86,7 @@
                  crewship_user_units ~ '/crewship-postgres-env-seed.service',
                  crewship_user_units ~ '/crewship-postgres-env-seed.timer',
                  crewship_user_units ~ '/timers.target.wants/crewship-postgres-env-seed.timer']
-                if (crewship_cfg.profiles.shared_postgres | default(false) | bool) else [])
+                if (crewship_cfg.profiles.project_databases | default(false) | bool) else [])
              + ([crewship_fleet_doctor_dir ~ '/docker-guard.sh',
                  crewship_fleet_doctor_dir ~ '/dev-server-reaper.sh',
                  crewship_fleet_doctor_dir ~ '/storage-guard.sh',

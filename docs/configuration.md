@@ -7,7 +7,7 @@
 | New name | Old name | What it does |
 | --- | --- | --- |
 | `./onboard.sh` | `./bootstrap.sh` | Installs the repository tooling: the latest uv, then the locked Python environment with Ansible. Changes nothing else on the host. |
-| `./ship.sh dock` | | Copies `blueprint/config/default.yml` to `.local/host.yml` with your user, home, and `~/Dev` workspace filled in. Never overwrites an existing file. On a terminal it shows one checklist of the opt-in features. Options: `--user`, `--home`, `--container`, and `--with NAMES`, which turns on the named opt-ins instead of asking (`--with none` for none). The names: `public_skills`, `development`, `docker`, `chat`, `gateway`, `jj`, `fdu`, `fleet_guards`, `shared_postgres`, `fleet_browsers`, `tailscale`, `koncreet`, `desktop`, and `board` (the [crew board](board.md)). A choice brings what it needs: `docker` for `fleet_guards` and `shared_postgres`, `development` for `board`. |
+| `./ship.sh dock` | | Copies `blueprint/config/default.yml` to `.local/host.yml` with your user, home, and `~/Dev` workspace filled in. Never overwrites an existing file. On a terminal it shows one checklist of the opt-in features. Options: `--user`, `--home`, `--container`, and `--with NAMES`, which turns on the named opt-ins instead of asking (`--with none` for none). The names: `public_skills`, `development`, `docker`, `chat`, `gateway`, `jj`, `fdu`, `fleet_guards`, `project_databases`, `fleet_browsers`, `tailscale`, `koncreet`, `desktop`, and `board` (the [crew board](board.md)). A choice brings what it needs: `docker` for `fleet_guards` and `project_databases`, `development` for `board`. |
 | `./ship.sh inspect` | | Does the one-time config rewrite below if needed, then checks the config against `blueprint/schemas/crewship.schema.json` and the cross-field rules below. |
 | `./ship.sh chart` | | Runs the Ansible playbook in check mode. Reports what would change; mutates nothing except for the one-time config rewrite below. |
 | `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. With the `firstmate` profile on, the first successful interactive apply with omp signed in then opens the new-host questions (below). |
@@ -49,7 +49,7 @@ crewship:
     tailscale: false      # Daemon only; authenticate separately
     desktop: false        # XFCE + TigerVNC + noVNC
     fleet_guards: false   # Docker guard, reapers, storage guard and browser ladder
-    shared_postgres: false # Optional per-project dev databases, helper and env seeder
+    project_databases: false # Optional per-project dev databases, helper and env seeder
     jj: false             # Jujutsu (jj) for agents, colocated with git
     fdu: false            # fdu, a fast gitignore-aware du for large worktrees
     # public_skills: true # Optional, set only in .local/host.yml: the public skills and rules; absent keeps them on a host that has them (omp.md#skills)
@@ -117,7 +117,7 @@ crewship:
 - `user` is not `root`, and `workspace` is inside `home`.
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
-- `shared_postgres` needs `docker` and `firstmate`, but does not need `fleet_guards`.
+- `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
 - `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
@@ -132,7 +132,7 @@ After a successful `./ship.sh launch` with the `firstmate` profile on, once omp 
 - The questions follow `firstmate.checklist` when it is set and `gh` can read it: `repo` is a GitHub repository (it can be private) and `path` is the checklist file in it. Set it only in `.local/host.yml`, never in `blueprint/config/default.yml`. Otherwise they follow [Agent host move](agent-host-move.md).
 - When `.local/host.yml` has no `github_board` block, a question asks whether to turn on the [GitHub board](github-board.md). The answer is off unless you choose it.
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.
-- When `shared_postgres` is off or omitted, a question offers the [per-project dev databases](shared-postgres.md).
+- When `project_databases` is off or omitted, a question offers the [per-project dev databases](project-databases.md).
   The prompt names the resolved config path and does not enable the profile without your choice.
 - They are asked once per host. When the omp session exits successfully, apply writes the marker `~/.local/share/crewship/new-host-questions-done`; while it exists, later applies skip the questions and print one line naming it. If omp exits non-zero, apply writes no marker and prints one line saying the questions did not complete. To ask again, delete the marker and rerun `./ship.sh launch` interactively.
 - The launch needs an interactive terminal, run as `crewship.user`. When stdin is not a TTY, when `CI` is set, or when another account runs apply, apply skips them without writing the marker and prints one line saying to rerun `./ship.sh launch` interactively.
@@ -151,7 +151,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `firstmate` | on | Firstmate clone tracking upstream `main`, plus seeded Firstmate config: crew dispatch, crew and secondmate harness, the crew omp overlay (crew advisor, see [omp configuration](omp.md#advisor)), Herdr backend selection, startup memory budget, the spawn memory floor, presentation spaces off, and the turn-end pane-churn flag (see [Seeded Firstmate and OMP configuration](agents/architecture.md#seeded-firstmate-and-omp-configuration)). |
 | `docker` | off | Docker engine and Compose v2, with daemon defaults `init` (reaps orphaned children) and `live-restore`. Group membership is opt-in through the Ansible variable `crewship_docker_group_users`. |
 | `fleet_guards` | off | Docker guard, dev-server reaper, devtools-bridge reaper, storage guard and browser ladder. See [Fleet guards](fleet-guards.md). |
-| `shared_postgres` | off | One [dev database container per project](shared-postgres.md), in the engine the project's compose file names, with a helper and a worktree environment seeder. |
+| `project_databases` | off | One [dev database container per project](project-databases.md), in the engine the project's compose file names, with a helper and a worktree environment seeder. |
 | `jj` | off | The latest [Jujutsu](jj.md) (`jj`), verified against its release digest, for use colocated with git. Installs no repository change. |
 | `fdu` | off | The latest [fdu](https://github.com/jlevy/fdu) (MIT), a fast gitignore-aware `du` for worktrees with 100 GB or more, installed with `uv tool install --no-build fdu` into `~/.local/bin`. It uses the PyPI wheel, so it needs no Rust toolchain, and nothing is pinned: each apply moves it to the newest release. It needs the `uv` that the installer always provides. |
 | `fleet_browsers` | off | The [browser ladder](fleet-guards.md#browser-ladder): the always-on Obscura CDP tier on `127.0.0.1:9222`, the on-demand `chrome` and `vnc` tiers with the `vnc` tier's TigerVNC and noVNC packages, the cookie sync and gc timers, and the ladder environment in shell profiles and the Herdr unit. `fleet_guards` provisions the same ladder, so a `fleet_guards` host needs no change. Needs no other profile; the ladder needs `iproute2` (`ss`) from the base image, which only `desktop` installs. |
@@ -164,7 +164,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).
 
-See [Project databases](shared-postgres.md) for existing-host management and safe removal.
+See [Project databases](project-databases.md) for existing-host management and safe removal.
 
 ## Data disk
 

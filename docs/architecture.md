@@ -150,6 +150,6 @@ flowchart TB
 ```
 
 Authentication and mutable state stay outside the recipe.
-See [Project databases](shared-postgres.md) for the optional per-project worktree database.
+See [Project databases](project-databases.md) for the optional per-project worktree database.
 
 [Agent architecture reference](agents/architecture.md)

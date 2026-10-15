@@ -18,7 +18,7 @@ crewship:
     tailscale: false
     desktop: false
     fleet_guards: false
-    shared_postgres: false
+    project_databases: false
     # Jujutsu (jj) for agents, colocated with git (docs/jj.md).
     jj: false
     # fdu, a fast gitignore-aware du for large worktrees (docs/configuration.md#profiles).

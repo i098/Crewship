@@ -22,6 +22,8 @@ REMOVED_PROFILE = "shared_supabase"
 REMOVED_FLEET_KEYS = ("supabase_project_id", "fixture_archive", "worktree_pools")
 RETIRED_STACK = "oss-fleet/shared-supabase"
 OLD_ROOT, NEW_ROOT = "factory", "crewship"
+# Old profile names a host config may still use: old name -> the name the code reads.
+PROFILE_ALIASES = {"shared_postgres": "project_databases"}
 # The opt-in features of a new host, in checklist order: name -> (what it adds, what it needs).
 # Every name is a profile, except board, which is a block (docs/board.md).
 OPT_IN = {
@@ -34,7 +36,7 @@ OPT_IN = {
     "jj": ("the Jujutsu (jj) version control tool", ()),
     "fdu": ("fdu, a fast gitignore-aware du for large worktrees", ()),
     "fleet_guards": ("the Docker guard, reapers and storage guard", ("docker",)),
-    "shared_postgres": ("one dev database per project", ("docker",)),
+    "project_databases": ("one dev database per project", ("docker",)),
     "fleet_browsers": ("the browser ladder", ()),
     "forgejo": ("a self-hosted Forgejo git server on loopback for agent pushes", ()),
     "tailscale": ("the Tailscale daemon", ()),
@@ -47,7 +49,7 @@ INSTRUCTION_FILES = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS
 INSTRUCTION_MODES = {"skip": "leave them as they are", "overwrite": "replace them, after a timestamped .bak", "append": "add one marked block"}
 # A container worker image has no Docker, no user services, no desktop and no Firstmate.
 NOT_IN_CONTAINER = {
-    "docker", "chat", "gateway", "fleet_guards", "shared_postgres", "tailscale", "desktop", "board", "koncreet", "forgejo",
+    "docker", "chat", "gateway", "fleet_guards", "project_databases", "tailscale", "desktop", "board", "koncreet", "forgejo",
 }
 
 
@@ -71,10 +73,18 @@ def validate_config(document):
         raise ValueError(
             "Shared Supabase support was removed. Remove profiles.shared_supabase, "
             "fleet.supabase_project_id, fleet.fixture_archive, and fleet.worktree_pools "
-            "from the host config; use profiles.shared_postgres "
-            "(docs/shared-postgres.md). Existing stacks and volumes remain untouched."
+            "from the host config; use profiles.project_databases "
+            "(docs/project-databases.md). Existing stacks and volumes remain untouched."
         )
     validate_document(document, "crewship.schema.json")
+    profiles = document["crewship"]["profiles"]
+    for alias, name in PROFILE_ALIASES.items():
+        if alias in profiles:
+            if profiles.setdefault(name, profiles[alias]) != profiles[alias]:
+                raise ValueError(f"profiles.{alias} is another name of profiles.{name}; set only one")
+            del profiles[alias]
+            print(f"NOTE: crewship.profiles.{alias} is now crewship.profiles.{name}; "
+                  "the old name still works, rename it in your host config.", file=sys.stderr)
     config = document["crewship"]
     home, workspace = Path(config["home"]), Path(config["workspace"])
     if (
@@ -94,7 +104,7 @@ def validate_config(document):
     if config["profiles"].get("fleet_guards"):
         if not (config["profiles"]["docker"] and config["profiles"]["firstmate"]):
             raise ValueError("fleet guards require the docker and firstmate profiles")
-    if config["profiles"].get("shared_postgres"):
+    if config["profiles"].get("project_databases"):
         if not (config["profiles"]["docker"] and config["profiles"]["firstmate"]):
             raise ValueError("project databases require the docker and firstmate profiles")
     skills = config.get("skills", {})
@@ -186,7 +196,7 @@ def parse_choice(text, names):
     """Names, checklist numbers, all or none, split by commas or spaces; ValueError on any other word."""
     chosen = []
     for word in text.replace(",", " ").split():
-        word = word.lower()
+        word = PROFILE_ALIASES.get(word.lower(), word.lower())
         if word == "none":
             continue
         if word == "all":
@@ -289,7 +299,7 @@ def provision(document, check):
             "crewship-/flotilla-shared-supabase and worktree-env-seed user units, run "
             "~/oss-fleet/shared-supabase/node_modules/.bin/supabase stop --workdir "
             "~/oss-fleet/shared-supabase, then remove those units, the CLI shim and scripts; "
-            "keep all Docker volumes. Use docs/shared-postgres.md for the replacement."
+            "keep all Docker volumes. Use docs/project-databases.md for the replacement."
         )
     environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "blueprint/ansible/ansible.cfg")}
     argv = [
@@ -480,12 +490,12 @@ def questions(document, config_path):
             " Then ask one short question: turn on the crew board, a host-local message "
             f"board for agent-to-agent messages? If yes, follow {ROOT / 'docs/board.md'}."
         )
-    if not config["profiles"].get("shared_postgres"):
+    if not config["profiles"].get("project_databases"):
         prompt += (
             " Then ask one short question: enable the optional per-project dev databases? "
             "It is off by default and needs Docker and Firstmate. "
-            "If yes, set crewship.profiles.shared_postgres to true in "
-            f"{config_path} and follow {ROOT / 'docs/shared-postgres.md'}."
+            "If yes, set crewship.profiles.project_databases to true in "
+            f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
     returncode = subprocess.run([omp, prompt], cwd=firstmate, env=environment).returncode
     if returncode:
