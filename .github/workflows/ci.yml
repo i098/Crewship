@@ -141,13 +141,13 @@ jobs:
             tests=(tests/test_imessage.py tests/test_bluebubbles_relay.py tests/test_changelog.py
               tests/test_instructions.py tests/test_readme.py tests/test_skills.py)
           fi
-          bash tests/project-databases-smoke.sh > "$RUNNER_TEMP/postgres-smoke.log" 2>&1 &
+          bash tests/project-databases-smoke.sh > "$RUNNER_TEMP/project-databases-smoke.log" 2>&1 &
           smoke=$!
           tests_status=0 smoke_status=0
           uv run pytest -n auto --dist worksteal "${tests[@]}" || tests_status=$?
           wait "$smoke" || smoke_status=$?
           echo "::group::Project database disposable service smoke (exit $smoke_status)"
-          cat "$RUNNER_TEMP/postgres-smoke.log"
+          cat "$RUNNER_TEMP/project-databases-smoke.log"
           echo "::endgroup::"
           [[ "$tests_status" == 0 && "$smoke_status" == 0 ]]
 
