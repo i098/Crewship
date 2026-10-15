@@ -22,14 +22,14 @@
 ## Features
 
 - **[Firstmate orchestration](docs/architecture.md#agent-fleet-and-supervision):** one supervisor agent runs many coding agents.
-- **[Web pages from anywhere](docs/gateway.md):** one password opens agent pages and previews over Cloudflare or Tailscale (opt-in).
-- **[Custom Herdr sidebar](docs/herdr.md):** every workspace and agent, with its state and load, at a glance.
-- **[In-memory message board](docs/board.md):** agents on one host talk over topics that never touch disk (opt-in).
+- **[Web pages from anywhere](docs/gateway.md):** one password opens agent pages and previews (opt-in).
+- **[Custom Herdr sidebar](docs/herdr.md):** every workspace and agent, with state and load, at a glance.
+- **[In-memory message board](docs/board.md):** agents on one host talk over topics, not disk (opt-in).
 - **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
-- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC only when needed (opt-in).
+- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC when needed (opt-in).
 - **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal (opt-in).
-- **[Credential management](docs/secrets.md):** one `super.env` file, fetched by each new host through a private Worker.
-- **[Mac control](docs/security.md#ssh-to-a-mac):** basically JARVIS - agents run `ssh mac` to open links and control apps on your Mac (opt-in).
+- **[Credentials](docs/secrets.md):** one `super.env` file, fetched by each new host via a private Worker.
+- **[Mac control](docs/security.md#ssh-to-a-mac):** JARVIS-style, agents run `ssh mac` to control apps on your Mac (opt-in).
 
 The other features, each with its docs link, are listed in [docs/features.md](docs/features.md).
 
@@ -58,9 +58,9 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 ## Repository layout
 
-- [`blueprint/`](blueprint/): what provisions a host. The Ansible playbook, config seeds, schemas, cloud-init and container configs, patches, rules, skills, fleet guards, and maintenance scripts.
-- [`apps/`](apps/): services Crewship builds and runs: the crew board (`crewboard`), the iMessage bridge (`imessage`), and the secrets Worker (`fleet-secrets`). The bridge's front desk remembers the whole thread after [Victor Taelin's OptChat gist](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
-- [`tools/`](tools/): stand-alone helpers: the `crewship` npm launcher (`npm`), `herdr-patch`, and `dia-debug`.
+- [`blueprint/`](blueprint/): what provisions a host: the Ansible playbook, seeds, skills, and guards.
+- [`apps/`](apps/): services Crewship runs: crew board, iMessage bridge, and secrets Worker.
+- [`tools/`](tools/): stand-alone helpers: the `crewship` launcher, `herdr-patch`, and `dia-debug`.
 - [`scripts/`](scripts/): the `ship.sh` CLI code, the release artifact build, and secrets helpers.
 - [`site/`](site/): the crewship.si landing page.
 - [`docs/`](docs/): the guides.
@@ -89,8 +89,8 @@ Built on Herdr, Firstmate, omp, Ansible and more: see [CREDITS.md](CREDITS.md).
 
 <a href="https://star-history.com/#i098/Crewship&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=i098/Crewship&type=Date&theme=dark">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=i098/Crewship&type=Date">
-    <img alt="Star history chart for i098/Crewship" src="https://api.star-history.com/svg?repos=i098/Crewship&type=Date">
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=i098/Crewship&type=Date&theme=dark&v=20261015">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=i098/Crewship&type=Date&v=20261015">
+    <img alt="Star history chart for i098/Crewship" src="https://api.star-history.com/svg?repos=i098/Crewship&type=Date&v=20261015">
   </picture>
 </a>
