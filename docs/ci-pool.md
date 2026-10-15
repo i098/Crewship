@@ -124,3 +124,56 @@ A self-hosted runner runs the code of the workflow that selects it. On a public 
 - This repository's `ci.yml` stays on GitHub-hosted runners. `ci-pool-smoke.yml` runs the same checks on the pool, and only `workflow_dispatch` starts it. It stays queued until `.local/host.yml` has the entry `{ repo: i098/Crewship, slots: N, labels: [crewship] }` in `crewship.ci_pool.repos`.
 - Do not opt in a repository whose jobs need secrets that a fork pull request could reach.
 - A job can change the repository's caches (`<data_dir>/ci-pool/cache/<owner>-<name>/`), which later jobs of that repository read, including jobs on the default branch. Each JIT runner is registered to one repository only, so other repositories' jobs never run in its slots or read its caches.
+
+## macOS runner
+
+The pool runs Linux jobs only. For macOS jobs, `blueprint/maintenance/mac-runner.sh` runs just-in-time runners on a Mac that you reach with `ssh mac` (see [SSH to a Mac](security.md#ssh-to-a-mac)).
+Each repository gets one launchd user agent. The agent asks GitHub for a JIT runner, runs one job, and exits; launchd then starts it again.
+The agent reads the Mac's own `gh` login, so the Mac needs `gh` signed in with the `repo` scope. No token is stored.
+Every file is in one folder, `~/actions-runner-<name>/`, except one plist for each repository in `~/Library/LaunchAgents/`.
+
+Install, from this repository on the host (the folder name is free; this example uses `i098`):
+
+```bash
+ssh mac 'mkdir -p ~/actions-runner-i098 && cat > ~/actions-runner-i098/mac-runner.sh && chmod +x ~/actions-runner-i098/mac-runner.sh' \
+  < blueprint/maintenance/mac-runner.sh
+ssh mac '~/actions-runner-i098/mac-runner.sh install owner/name another/repo'
+```
+
+`install` downloads the latest official `osx-arm64` runner and checks its SHA-256 digest from the GitHub release. Run it again to update the runner or to add a repository. It restarts the agents that it names, and a job that runs on one of them stops.
+
+In the workflow, run the job on the runner, and start the workflow only for files that can change the macOS result:
+
+```yaml
+on:
+  pull_request:
+    paths: [.github/workflows/mac.yml, "**/*.swift", "**/*.plist", "**/*[mM]ac[oO][sS]*"]
+jobs:
+  test:
+    runs-on: [self-hosted, macOS, mac-name]   # mac-<repository name>
+```
+
+What a job gets:
+
+- The account's own user, with a `HOME` in `~/actions-runner-<name>/home/`. Toolchains and caches that jobs install (rustup, npm, the tool cache) stay there. Repositories share that `HOME`.
+- `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and Xcode when it is installed. No `gh` login.
+- An empty work directory (`<owner>-<name>/_work/`) and `TMPDIR` for each job, and the launchd `Nice` value 10, so the Mac stays responsive.
+- The same check as the pool before the first step: the job-started hook ends the runner when the code comes from a fork's pull request or a `workflow_run` that one started.
+
+A job runs as the account on the Mac, without a container. It can read what that account can read. Opt in only repositories whose code you trust, and see [Public repositories](#public-repositories).
+
+See what runs:
+
+```bash
+ssh mac 'launchctl list | grep mac-runner'                          # one agent for each repository
+ssh mac 'tail ~/actions-runner-i098/<owner>-<name>/agent.log'        # runner IDs and job results
+gh api repos/OWNER/NAME/actions/runners                             # mac-<name>-<unix time> runners
+```
+
+Remove everything (the agents, their plists, and the folder):
+
+```bash
+ssh mac '~/actions-runner-i098/mac-runner.sh remove'
+```
+
+A runner that waited for a job then shows as offline in the repository settings. GitHub deletes an offline JIT runner within one day. To delete it at once, run `gh api -X DELETE repos/OWNER/NAME/actions/runners/ID`.
