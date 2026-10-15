@@ -4,6 +4,8 @@
   ci-pool.py apply [--check]   crewship.ci_pool as JSON on stdin; sizes the pool,
                                writes ci-runner@.service and enables one instance
                                per slot, and stops and cleans removed slots.
+  ci-pool.py watch             run by ci-pool-watch.timer: restarts slots stalled
+                               without a container, pulls the runner image hourly.
   ci-pool.py run <instance>    ExecStart of ci-runner@<instance>.service: asks
                                GitHub for a JIT runner, runs one job in a fresh
                                container from the official runner image, exits.
@@ -33,11 +35,21 @@ FAILURE_PAUSE_SECONDS = 60
 # The runner image's run.sh exits 0 even when the listener fails, so a
 # container that ends sooner than this did not run a job.
 MIN_JOB_SECONDS = 30
+# `docker create` and `docker pull` wait this long (CI_POOL_DOCKER_TIMEOUT overrides it):
+# on a loaded host the daemon can stall a call forever, which left a registered
+# runner offline with no container. A timeout fails the slot and systemd restarts it.
+DOCKER_TIMEOUT = int(os.environ.get("CI_POOL_DOCKER_TIMEOUT", 180))
+# `watch` restarts a slot that has run this long with no running container.
+STALL_SECONDS = 600
+PULL_INTERVAL_SECONDS = 3600
 HOME = Path.home()
 CONFIG = HOME / ".config/ci-pool/pool.json"
 UNITS = HOME / ".config/systemd/user"
 TEMPLATE = UNITS / "ci-runner@.service"
 WANTS = UNITS / "default.target.wants"
+WATCH_SERVICE = UNITS / "ci-pool-watch.service"
+WATCH_TIMER = UNITS / "ci-pool-watch.timer"
+PULL_STAMP = HOME / ".config/ci-pool/last-pull"
 HOOK = HOME / ".config/ci-pool/job-started.sh"
 HOOK_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 UNIT_TEXT = """\
@@ -58,6 +70,28 @@ SuccessExitStatus=143
 
 [Install]
 WantedBy=default.target
+"""
+WATCH_SERVICE_TEXT = """\
+# Written by ci-pool.py apply (Crewship).
+[Unit]
+Description=CI pool watch: restart stalled slots, refresh the runner image
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/bin/ci-pool.py watch
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+"""
+WATCH_TIMER_TEXT = """\
+# Written by ci-pool.py apply (Crewship).
+[Unit]
+Description=CI pool watch every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+
+[Install]
+WantedBy=timers.target
 """
 # Runs as the image's `runner` user, which has passwordless sudo: empty the
 # slot's work directory, give the runner the bind mounts, then run one job.
@@ -123,8 +157,14 @@ def docker():
     return ["docker"] if os.access("/var/run/docker.sock", os.W_OK) else ["sudo", "-n", "docker"]
 
 
+def bounded(argv):
+    """Prefix argv with coreutils `timeout`: TERM after DOCKER_TIMEOUT s (sudo relays it to
+    docker, which SIGKILL from Python would not reach), KILL 10 s later. A timeout exits 124."""
+    return ["timeout", "--kill-after=10", str(DOCKER_TIMEOUT), *argv]
+
+
 def quiet(argv):
-    return subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+    return subprocess.run(bounded(argv), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
 
 def busy(name):
@@ -175,8 +215,14 @@ def apply(check):
     if reconfigured:
         changes.append(f"write {CONFIG}")
     write(HOOK, HOOK_TEXT)
-    if write(TEMPLATE, UNIT_TEXT) and not check:
+    # A list, not `or`: every file is written even when the first one changed.
+    units = [(TEMPLATE, UNIT_TEXT), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT)]
+    if any([write(path, text) for path, text in units]) and not check:
         systemctl("daemon-reload")
+    if quiet(["systemctl", "--user", "--quiet", "is-enabled", WATCH_TIMER.name]):
+        changes.append(f"start {WATCH_TIMER.name}")
+        if not check:
+            systemctl("enable", "--now", WATCH_TIMER.name)
     for name in sorted(set(have) - set(want)):
         unit = f"ci-runner@{name}.service"
         if busy(name):
@@ -267,8 +313,8 @@ def run(instance):
         with tempfile.NamedTemporaryFile("w", dir=os.environ.get("XDG_RUNTIME_DIR")) as env:
             env.write(f"ACTIONS_RUNNER_INPUT_JITCONFIG={jit['encoded_jit_config']}\n")
             env.flush()
-            subprocess.run([
-                *docker(), "create", "--init", "--pull", "always", "--rm", "--name", container,
+            subprocess.run(bounded([
+                *docker(), "create", "--init", "--pull", "missing", "--rm", "--name", container,
                 "--label", f"crewship.ci-pool={instance}",
                 "--cpus", str(pool["job_cpus"]),
                 "--memory", f"{pool['job_memory_gb']}g", "--memory-swap", f"{pool['job_memory_gb']}g",
@@ -285,7 +331,7 @@ def run(instance):
                 "--mount", f"type=bind,src={HOOK},dst=/home/runner/job-started.sh,readonly",
                 "--env", f"{HOOK_ENV}=/home/runner/job-started.sh",
                 IMAGE, "bash", "-c", CONTAINER_PREP,
-            ], check=True, stdout=subprocess.DEVNULL)
+            ]), check=True, stdout=subprocess.DEVNULL)
         rc = subprocess.run([*docker(), "start", "--attach", container]).returncode
     except Exception as error:
         print(f"{instance}: container start failed: {error}", file=sys.stderr)
@@ -300,11 +346,53 @@ def run(instance):
     return rc
 
 
+def container_running(name):
+    """True or False for the slot's container; None when docker did not answer."""
+    result = subprocess.run(
+        bounded([*docker(), "inspect", "--format", "{{.State.Running}}", f"ci-runner-{name}"]),
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip() == "true"
+    return False if "no such object" in result.stderr.lower() else None
+
+
+def stalled(age, running):
+    """A slot that started STALL_SECONDS ago and has no running container is stuck."""
+    return age > STALL_SECONDS and running is False
+
+
+def watch():
+    """Restart stalled slots, then refresh the runner image once an hour."""
+    slots = sorted(WANTS.glob("ci-runner@*.service"))
+    for path in slots:
+        shown = subprocess.run(
+            ["systemctl", "--user", "show", path.name, "-p", "ActiveState", "-p", "ActiveEnterTimestampMonotonic"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        fields = dict(line.split("=", 1) for line in shown.splitlines())
+        if fields["ActiveState"] != "active":
+            continue
+        # systemd's monotonic stamps use the same clock as time.monotonic().
+        age = time.monotonic() - int(fields["ActiveEnterTimestampMonotonic"]) / 1e6
+        if stalled(age, container_running(path.name[len("ci-runner@"):-len(".service")])):
+            print(f"restart {path.name}: no container {int(age)} s after the slot started", flush=True)
+            systemctl("restart", path.name)
+    if slots and (not PULL_STAMP.exists() or time.time() - PULL_STAMP.stat().st_mtime > PULL_INTERVAL_SECONDS):
+        # Stamped even on failure: a daemon that cannot pull is tried again next hour, not every run.
+        pulled = subprocess.run(bounded([*docker(), "pull", "--quiet", IMAGE]), stdout=subprocess.DEVNULL)
+        PULL_STAMP.touch()
+        print(f"pull {IMAGE}: exit {pulled.returncode}", flush=True)
+    return 0
+
+
 def main(argv):
     if argv[:1] == ["apply"] and argv[1:] in ([], ["--check"]):
         return apply(check=argv[1:] == ["--check"])
     if argv[:1] == ["run"] and len(argv) == 2:
         return run(argv[1])
+    if argv == ["watch"]:
+        return watch()
     print(__doc__, file=sys.stderr)
     return 2
 

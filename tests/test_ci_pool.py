@@ -1,8 +1,10 @@
 import importlib.util
 import io
 import json
+import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -92,6 +94,11 @@ def slots(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "HOOK", tmp_path / "job-started.sh")
     monkeypatch.setattr(pool_script, "busy", lambda name: False)
     monkeypatch.setattr(pool_script, "remove_tree", shutil.rmtree)
+    for attr, text in (("WATCH_SERVICE", pool_script.WATCH_SERVICE_TEXT),
+                       ("WATCH_TIMER", pool_script.WATCH_TIMER_TEXT)):
+        monkeypatch.setattr(pool_script, attr, units / getattr(pool_script, attr).name)
+        getattr(pool_script, attr).write_text(text)
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)  # the watch timer is enabled
     calls = []
     monkeypatch.setattr(pool_script, "systemctl", lambda *args: calls.append(args))
 
@@ -313,3 +320,87 @@ def test_listener_failure_with_exit_zero_deletes_the_runner_and_pauses(tmp_path,
     assert pool_script.run("o-kept-1") == 1
     assert sleeps == [pool_script.FAILURE_PAUSE_SECONDS]
     assert any(argv[:3] == ["gh", "api", "--method"] and argv[3] == "DELETE" for argv in calls)
+
+
+def test_a_hung_docker_create_is_cut_off_and_the_slot_fails_so_systemd_restarts_it(
+    tmp_path, monkeypatch
+):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "log"
+    (bin_dir / "docker").write_text(
+        f'#!/bin/sh\necho "$@" >> {log}\n[ "$1" = create ] && exec sleep 60\nexit 0\n'
+    )
+    (bin_dir / "gh").write_text(
+        f'#!/bin/sh\necho gh "$@" >> {log}\n'
+        'cat > /dev/null\necho \'{"runner": {"id": 7}, "encoded_jit_config": "jit"}\'\n'
+    )
+    for script in bin_dir.iterdir():
+        script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    (tmp_path / "pool.json").write_text(json.dumps({
+        "data_dir": str(tmp_path / "data"), "job_cpus": 4, "job_memory_gb": 8,
+        "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
+    }))
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script, "DOCKER_TIMEOUT", 1)
+    real_quiet = pool_script.quiet  # docker and gh run for real; the slot is enabled
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0 if argv[0] == "systemctl" else real_quiet(argv))
+    monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
+    sleeps = []
+    monkeypatch.setattr(pool_script.time, "sleep", sleeps.append)
+
+    started = time.monotonic()
+    assert pool_script.run("o-kept-1") == 1
+    assert time.monotonic() - started < 20
+    assert sleeps == [pool_script.FAILURE_PAUSE_SECONDS]
+    lines = log.read_text().splitlines()
+    assert any(line.startswith("create ") and "--pull missing" in line for line in lines)
+    # The half-created container is removed by name and the runner is deleted.
+    assert lines[-2:] == ["rm --force ci-runner-o-kept-1", "gh api --method DELETE repos/o/kept/actions/runners/7"]
+
+
+@pytest.mark.parametrize(("age", "running", "restart"), [
+    (601, False, True),    # registered long ago, no container: stalled
+    (599, False, False),   # still inside the grace period
+    (900, True, False),    # a job or an idle listener runs
+    (900, None, False),    # docker did not answer: unknown is not stalled
+])
+def test_stalled_slot_decision(age, running, restart):
+    assert pool_script.stalled(age, running) is restart
+
+
+def test_watch_restarts_only_stalled_slots_and_pulls_the_image_once_an_hour(
+    tmp_path, monkeypatch, capsys
+):
+    wants = tmp_path / "wants"
+    wants.mkdir()
+    ages = {"o-stuck-1": 700, "o-job-1": 700, "o-new-1": 30}
+    for name in ages:
+        (wants / f"ci-runner@{name}.service").touch()
+    monkeypatch.setattr(pool_script, "WANTS", wants)
+    monkeypatch.setattr(pool_script, "PULL_STAMP", tmp_path / "last-pull")
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    pulls, restarts = [], []
+
+    def fake_run(argv, **kwargs):
+        if argv[:3] == ["systemctl", "--user", "show"]:
+            age = ages[argv[3][len("ci-runner@"):-len(".service")]]
+            out = f"ActiveState=active\nActiveEnterTimestampMonotonic={int((time.monotonic() - age) * 1e6)}\n"
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        pulls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    running = {"o-stuck-1": False, "o-job-1": True, "o-new-1": False}
+    monkeypatch.setattr(pool_script, "container_running", running.get)
+    monkeypatch.setattr(pool_script, "systemctl", lambda *args: restarts.append(args))
+
+    assert pool_script.watch() == 0
+    assert restarts == [("restart", "ci-runner@o-stuck-1.service")]
+    assert "restart ci-runner@o-stuck-1.service" in capsys.readouterr().out
+    assert len(pulls) == 1 and pulls[0][-3:] == ["pull", "--quiet", pool_script.IMAGE]
+
+    pool_script.watch()
+    assert len(pulls) == 1  # stamped: no second pull within the hour
