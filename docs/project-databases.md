@@ -1,7 +1,7 @@
 # Project databases
 
-`crewship.profiles.shared_postgres` is off by default.
-The key keeps its old name so existing host configs stay valid.
+`crewship.profiles.project_databases` is off by default.
+The key was called `shared_postgres` before. A host config that still uses that name keeps working, and apply prints a note to rename it.
 It gives each project one dev database container of the engine that the project already uses.
 All worktrees of the project share that container.
 There is no host-wide database.
@@ -15,7 +15,7 @@ crewship:
   profiles:
     docker: true
     firstmate: true
-    shared_postgres: true
+    project_databases: true
 ```
 
 Before convergence, give the configured target account explicit Docker access by an administrator's choice.
@@ -134,7 +134,7 @@ Delete the volume and `~/.local/state/code-factory/shared-postgres` and `~/.loca
 
 ## Disable and remove
 
-Set `shared_postgres: false` and apply to stop managing this profile.
+Set `project_databases: false` and apply to stop managing this profile.
 This leaves the existing containers, volumes, timer, environment files and secrets unchanged.
 The containers and timer can continue to run; disabling the profile does not stop them.
 

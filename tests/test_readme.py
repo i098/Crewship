@@ -24,7 +24,7 @@ FEATURES = {
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
-    "crewship.profiles.project_databases": "docs/shared-postgres.md",
+    "crewship.profiles.project_databases": "docs/project-databases.md",
     "crewship.profiles.jj": "docs/jj.md",
     "crewship.profiles.fdu": "docs/configuration.md#profiles",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
