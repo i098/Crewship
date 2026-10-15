@@ -46,7 +46,7 @@ HOOK
 
   mkdir -p "$AGENTS"
   for repo in "$@"; do
-    slug=${repo/\//-} dir="$ROOT/${repo/\//-}" plist="$AGENTS/$PREFIX.$slug.plist"
+    slug=${repo/\//-} && dir="$ROOT/$slug" plist="$AGENTS/$PREFIX.$slug.plist"
     launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
     mkdir -p "$dir"
     tar -xzf "$ROOT/runner.tar.gz" -C "$dir"
