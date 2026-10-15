@@ -76,13 +76,24 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 
 ## What a job gets
 
-- The pool's own image `crewship-ci-runner:latest`: the official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`) plus `build-essential`, `pkg-config`, the GTK 3 runtime, Postgres 17 with its client, `unzip`, `git`, `curl`, `bun`, and the `docker compose` plugin. A job that runs `apt-get install` for these finds them installed. `ci-pool-image.timer` rebuilds the image every hour from the latest official image (apt and bun update once a day), so a job never pulls or installs them. Until the first build ends, jobs start from the official image. The list is `DOCKERFILE` in `ci-pool.py`.
+- The pool's own image `crewship-ci-runner:latest`: the official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`) plus `build-essential`, `pkg-config`, the GTK 3 runtime, Postgres 17 and 18 with their clients, pgvector for 18, `unzip`, `git`, `curl`, `bun`, and the `docker compose` plugin. A job that runs `apt-get install` for these finds them installed. `ci-pool-image.timer` rebuilds the image every hour from the latest official image (apt and bun update once a day), so a job never pulls or installs them. Until the first build ends, jobs start from the official image. The list is `DOCKERFILE` in `ci-pool.py`.
 - The CPU and memory caps above, and at most 8192 processes.
 - No Docker daemon by default: the host's Docker socket is never mounted. A repository with `docker: dind` gets a daemon of its own (see [Docker in a job](#docker-in-a-job)). Other jobs that build or run containers stay on GitHub-hosted runners.
 - An empty `_work` directory for each job, emptied when the container starts.
 - Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), and the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`). The downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`) stay for each slot, not for the repository, because apt locks that directory.
-- Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, a fresh Postgres 17 cluster. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
+- Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, fresh Postgres 17 and 18 clusters. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
 - A check before the first step: the runner's job-started hook ends the job container when its code comes from outside the repository, which is a pull request from a fork or a `workflow_run` that a fork's pull request started. The hook kills every process in the container, so no later step runs, not even an `if: always()` step. The slot then deletes the runner. Only the repositories in the pool's list, and only their own branches, run on the host.
+
+### Postgres in the pool's image
+
+The image has a `main` cluster for Postgres 17 and for Postgres 18. Both clusters use port 5432 and do not start at boot, so a job starts only the version it needs, with one command:
+
+| Version | Start command |
+| --- | --- |
+| 17 | `sudo pg_ctlcluster 17 main start` |
+| 18 | `sudo pg_ctlcluster 18 main start` |
+
+Stop the other version first (`sudo pg_ctlcluster 17 main stop`), or the start fails on port 5432. Postgres 18 has pgvector: `CREATE EXTENSION vector;` works after the start.
 
 ## Docker in a job
 
