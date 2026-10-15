@@ -529,7 +529,7 @@ def test_image_refresh_builds_the_dockerfile_for_the_default_and_pulls_any_other
     assert argv[:3] == ["timeout", "--kill-after=10", str(pool_script.BUILD_TIMEOUT)]
     assert argv[-3:] == ["--tag", pool_script.BUILT_IMAGE, "-"]
     assert stdin == pool_script.DOCKERFILE and stdin.startswith(f"FROM {pool_script.IMAGE}\n")
-    assert "postgresql-17" in stdin and "bun.sh/install" in stdin
+    assert "postgresql-17" in stdin and "postgresql-18-pgvector" in stdin and "bun.sh/install" in stdin
     assert calls[-1][-3:] == ["image", "prune", "--force"]
 
     (tmp_path / "pool.json").write_text('{"image": "mine:1"}')
