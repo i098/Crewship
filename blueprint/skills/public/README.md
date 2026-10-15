@@ -2,6 +2,13 @@
 
 Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
 
+- [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
+- [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
+- [`clean-code-errors`](clean-code-errors/SKILL.md): exceptions over error codes, catch blocks, wrapping library exceptions, the failure contract of a function (credits `@s4.codes` reels).
+- [`clean-code-formatting`](clean-code-formatting/SKILL.md): blank lines, function order, declarations and indentation of a source file (credits `@s4.codes` reels).
+- [`clean-code-functions`](clean-code-functions/SKILL.md): function size, one job, argument count, flags, side effects, switch statements, duplication (credits `@s4.codes` reels).
+- [`clean-code-naming`](clean-code-naming/SKILL.md): names that reveal intent, no abbreviations or magic numbers (credits `@s4.codes` reels).
+- [`clean-code-tests`](clean-code-tests/SKILL.md): F.I.R.S.T, one concept per test, build-operate-check, TDD (credits `@s4.codes` reels).
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
