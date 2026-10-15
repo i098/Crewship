@@ -694,6 +694,7 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
     [
         (["--tools", "herdr,node"], {"herdr", "node"}),
         (["--tools", "uv", "--development"], {"uv", "rustup-init"}),
+        (["--tools", "uv", "--sgrep"], {"uv", "rustup-init"}),
         (["--tools", "uv", "--npm"], {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST}),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
         (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),
@@ -918,3 +919,27 @@ def test_a_rate_limited_api_and_unreadable_pages_still_name_the_token(monkeypatc
     monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
     with pytest.raises(ValueError, match="set GITHUB_TOKEN"):
         installer.resolve_latest("linux-x86_64", {"uv"})
+
+
+def test_sgrep_builds_from_git_links_warms_both_models_and_reports_change_only_on_a_new_build(tmp_path):
+    cargo_bin = tmp_path / ".cargo/bin"
+    cargo_bin.mkdir(parents=True)
+    log, release = tmp_path / "log", tmp_path / "release"
+    release.write_text("1")
+    for build in ("1", "2"):
+        (tmp_path / f"build{build}").write_text(f'#!/bin/sh\necho "sgrep $*" >> {log}\n# {build}\n')
+    cargo = cargo_bin / "cargo"
+    cargo.write_text(
+        f'#!/bin/sh\necho "cargo $*" >> {log}\n'
+        f'cp {tmp_path}/build"$(cat {release})" {cargo_bin}/sgrep\nchmod +x {cargo_bin}/sgrep\n'
+    )
+    cargo.chmod(0o755)
+    environment = {"PATH": "/usr/bin:/bin"}
+    assert installer.sgrep_install(tmp_path, environment) is True
+    assert (tmp_path / ".local/bin/sgrep").resolve() == cargo_bin / "sgrep"
+    lines = log.read_text().splitlines()
+    assert lines[0] == f"cargo install --git {installer.SGREP_REPOSITORY} --locked"
+    assert [line.split()[line.split().index("--model") + 1] for line in lines[1:]] == ["code", "text"]
+    assert installer.sgrep_install(tmp_path, environment) is False
+    release.write_text("2")
+    assert installer.sgrep_install(tmp_path, environment) is True
