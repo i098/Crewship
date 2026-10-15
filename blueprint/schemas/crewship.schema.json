@@ -519,6 +519,9 @@
                     },
                     "minItems": 1,
                     "uniqueItems": true
+                  },
+                  "docker": {
+                    "const": "dind"
                   }
                 },
                 "required": [
