@@ -59,6 +59,13 @@ WATCH_TIMER = UNITS / "ci-pool-watch.timer"
 IMAGE_SERVICE = UNITS / "ci-pool-image.service"
 IMAGE_TIMER = UNITS / "ci-pool-image.timer"
 HOOK = HOME / ".config/ci-pool/job-started.sh"
+# The containerd image store keeps a container's own writes on the system disk, so these
+# paths take the heavy ones to the data disk. Scratch is wiped when a job starts; the apt
+# packages and lists stay (and are per slot, because apt locks its archive directory).
+SCRATCH_DIRS = {"tmp": "/tmp", "postgresql": "/var/lib/postgresql", "bun": "/home/runner/.bun"}
+APT_DIRS = {"archives": "/var/cache/apt/archives", "lists": "/var/lib/apt/lists"}
+# Subdirectories of a repository's cache directory <data_dir>/ci-pool/cache/<owner>-<name>/.
+CACHE_DIRS = ("tool", "home", "cargo-registry", "cargo-git")
 HOOK_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 UNIT_TEXT = """\
 # Written by ci-pool.py apply (Crewship); instances come from crewship.ci_pool.
@@ -150,7 +157,11 @@ USER runner
 # slot's work directory, give the runner the bind mounts, then run one job.
 CONTAINER_PREP = (
     "sudo find /home/runner/_work -mindepth 1 -delete"
+    # The pool's image keeps a fresh Postgres cluster here; other images have none.
+    " && if [ -d /opt/postgresql-seed ]; then"
+    " sudo cp -a /opt/postgresql-seed/. /var/lib/postgresql/ && sudo chown postgres:postgres /var/lib/postgresql; fi"
     " && sudo chown runner:runner /home/runner/_work /opt/hostedtoolcache /home/runner/.cache"
+    " /home/runner/.cargo /home/runner/.cargo/registry /home/runner/.cargo/git"
     " && exec /home/runner/run.sh"
 )
 # The runner's job-started hook (ACTIONS_RUNNER_HOOK_JOB_STARTED) runs before
@@ -290,7 +301,8 @@ def apply(check):
             if not check:
                 systemctl("disable", "--now", unit)
     stale, held = [], set()
-    for path in sorted((root / "work").glob("*")):
+    for path in [*sorted((root / "work").glob("*")), *sorted((root / "scratch").glob("*")),
+                 *sorted((root / "apt").glob("*"))]:
         if path.name in want:
             continue
         if busy(path.name):
@@ -363,7 +375,13 @@ def run(instance):
     repo = entry["repo"]
     root = Path(pool["data_dir"]) / "ci-pool"
     work, cache = root / "work" / instance, root / "cache" / base
-    for path in (work, cache / "tool", cache / "home"):
+    scratch, apt = root / "scratch" / instance, root / "apt" / instance
+    # The previous job's files belong to other uids inside the container, hence sudo.
+    quiet(["sudo", "-n", "rm", "-rf", "--one-file-system", str(scratch)])
+    for name in SCRATCH_DIRS:
+        (scratch / name).mkdir(parents=True, exist_ok=True)
+        (scratch / name).chmod(0o1777)
+    for path in (work, *(apt / name for name in APT_DIRS), *(cache / name for name in CACHE_DIRS)):
         path.mkdir(parents=True, exist_ok=True)
 
     body = {
@@ -406,6 +424,14 @@ def run(instance):
                 "--volume", f"{work}:/home/runner/_work",
                 "--volume", f"{cache / 'tool'}:/opt/hostedtoolcache",
                 "--volume", f"{cache / 'home'}:/home/runner/.cache",
+                "--volume", f"{cache / 'cargo-registry'}:/home/runner/.cargo/registry",
+                "--volume", f"{cache / 'cargo-git'}:/home/runner/.cargo/git",
+                *(arg for base, dirs in ((scratch, SCRATCH_DIRS), (apt, APT_DIRS))
+                  for name, target in dirs.items() for arg in ("--volume", f"{base / name}:{target}")),
+                # Package managers that keep their cache outside ~/.cache.
+                "--env", "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun",
+                "--env", "npm_config_cache=/home/runner/.cache/npm",
+                "--env", "npm_config_store_dir=/home/runner/.cache/pnpm-store",
                 # --mount, not --volume: a missing hook fails the create instead of
                 # becoming an empty directory, so no job runs without the check.
                 "--mount", f"type=bind,src={HOOK},dst=/home/runner/job-started.sh,readonly",

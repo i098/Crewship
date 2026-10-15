@@ -85,7 +85,8 @@ def slots(tmp_path, monkeypatch):
     for name in ("o-kept-1", "o-gone-1"):
         (wants / f"ci-runner@{name}.service").touch()
     data = tmp_path / "data"
-    for path in ("ci-pool/work/o-kept-1", "ci-pool/work/o-gone-1", "ci-pool/cache/o-kept",
+    for path in ("ci-pool/work/o-kept-1", "ci-pool/work/o-gone-1", "ci-pool/apt/o-kept-1",
+                 "ci-pool/apt/o-gone-1", "ci-pool/scratch/o-gone-1", "ci-pool/cache/o-kept",
                  "ci-pool/cache/o-gone", "work/projects", "cache/models"):
         (data / path).mkdir(parents=True)
     monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
@@ -125,6 +126,8 @@ def test_check_lists_removed_slots_and_their_directories_without_touching_them(
         f"write {tmp_path / 'job-started.sh'}",
         "stop ci-runner@o-gone-1.service",
         f"remove {data / 'ci-pool/work/o-gone-1'}",
+        f"remove {data / 'ci-pool/scratch/o-gone-1'}",
+        f"remove {data / 'ci-pool/apt/o-gone-1'}",
         f"remove {data / 'ci-pool/cache/o-gone'}",
         "restart ci-runner@o-kept-1.service",
         "start ci-runner@o-kept-2.service",
@@ -140,8 +143,11 @@ def test_apply_deletes_only_what_the_pool_created(slots):
     assert apply() == 0
 
     assert not (data / "ci-pool/work/o-gone-1").exists()
+    assert not (data / "ci-pool/scratch/o-gone-1").exists()
+    assert not (data / "ci-pool/apt/o-gone-1").exists()
     assert not (data / "ci-pool/cache/o-gone").exists()
     assert (data / "ci-pool/work/o-kept-1").is_dir()
+    assert (data / "ci-pool/apt/o-kept-1").is_dir()
     assert (data / "work/projects").is_dir()
     assert (data / "cache/models").is_dir()
     assert ("disable", "--now", "ci-runner@o-gone-1.service") in calls
@@ -192,8 +198,11 @@ def test_a_drained_slot_keeps_its_repository_cache_while_it_is_busy(slots, monke
     assert apply(repos=[]) == 0
 
     assert (data / "ci-pool/work/o-gone-1").is_dir()
+    assert (data / "ci-pool/scratch/o-gone-1").is_dir()
+    assert (data / "ci-pool/apt/o-gone-1").is_dir()
     assert (data / "ci-pool/cache/o-gone").is_dir()
     assert not (data / "ci-pool/work/o-kept-1").exists()
+    assert not (data / "ci-pool/apt/o-kept-1").exists()
     assert not (data / "ci-pool/cache/o-kept").exists()
 
 
@@ -441,3 +450,48 @@ def test_image_refresh_builds_the_dockerfile_for_the_default_and_pulls_any_other
     pool_script.refresh_image()
     argv, stdin = runs[-1]
     assert argv[-3:] == ["pull", "--quiet", "mine:1"] and stdin is None
+
+
+def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    data = tmp_path / "data"
+    (tmp_path / "pool.json").write_text(json.dumps({
+        "data_dir": str(data), "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
+    }))
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    scratch = data / "ci-pool/scratch/o-kept-1"
+    (scratch / "tmp").mkdir(parents=True)
+    (scratch / "tmp/left-by-the-last-job").touch()
+
+    def fake_quiet(argv):
+        if argv[:4] == ["sudo", "-n", "rm", "-rf"]:  # the real one needs root for the job's uids
+            shutil.rmtree(argv[-1])
+        return 0
+
+    monkeypatch.setattr(pool_script, "quiet", fake_quiet)
+    monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(pool_script.time, "sleep", lambda seconds: None)
+    created = []
+
+    def fake_run(argv, **kwargs):
+        if argv[0] == "gh":
+            out = json.dumps({"runner": {"id": 7}, "encoded_jit_config": "jit"})
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        if "create" in argv:
+            created.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    pool_script.run("o-kept-1")
+
+    (argv,) = created
+    mounts = {a for a in argv if a.startswith(str(data))}
+    root = data / "ci-pool"
+    assert f"{root / 'apt/o-kept-1/archives'}:/var/cache/apt/archives" in mounts
+    for name, target in (("tmp", "/tmp"), ("postgresql", "/var/lib/postgresql"), ("bun", "/home/runner/.bun")):
+        assert f"{scratch / name}:{target}" in mounts
+        assert (scratch / name).stat().st_mode & 0o7777 == 0o1777
+    assert not (scratch / "tmp/left-by-the-last-job").exists()
+    assert f"{root / 'cache/o-kept/cargo-registry'}:/home/runner/.cargo/registry" in mounts
+    assert all(Path(m.split(":")[0]).is_dir() for m in mounts)
+    assert "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun" in argv

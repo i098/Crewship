@@ -78,7 +78,8 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 - The CPU and memory caps above, and at most 8192 processes.
 - No Docker daemon: the host's Docker socket is not mounted. Jobs that build or run containers stay on GitHub-hosted runners.
 - An empty `_work` directory for each job, emptied when the container starts.
-- Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use) and `~/.cache` (uv, pip, and other tools).
+- Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), and the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`). The downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`) stay for each slot, not for the repository, because apt locks that directory.
+- Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, a fresh Postgres 17 cluster. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
 - A check before the first step: the runner's job-started hook ends the job container when its code comes from outside the repository, which is a pull request from a fork or a `workflow_run` that a fork's pull request started. The hook kills every process in the container, so no later step runs, not even an `if: always()` step. The slot then deletes the runner. Only the repositories in the pool's list, and only their own branches, run on the host.
 
 ## Files on the host
@@ -92,7 +93,9 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 | `~/.config/ci-pool/pool.json` | The `ci_pool` section as apply last wrote it. Each slot reads it when it starts. |
 | `~/.config/ci-pool/job-started.sh` | The job-started hook. Apply writes it; each job container mounts it read-only. A slot whose hook file is missing does not start a job. |
 | `<data_dir>/ci-pool/work/<slot>/` | The slot's job work directory. |
-| `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `.../home/` | The repository's tool cache and `~/.cache`. |
+| `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `home/`, `cargo-registry/`, `cargo-git/` | The repository's tool cache, `~/.cache`, and cargo directories. |
+| `<data_dir>/ci-pool/scratch/<slot>/` | The slot's `/tmp`, Postgres cluster directory, and `~/.bun`, deleted at each job start. |
+| `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
 
 No token is stored. Each slot reads the host's `gh` login when it starts. When an account is not in the `docker` group, the script runs `sudo -n docker`.
 
