@@ -108,9 +108,11 @@ remove() {
   rm -rf "$ROOT"
 }
 
+# `esac; exit` on one line: bash then reads nothing more of this file, which an
+# update can rewrite while an agent still runs it.
 case "${1:-}" in
   install) shift; install "$@" ;;
   run) [ $# -eq 2 ] || die "usage: run OWNER/NAME"; run "$2" ;;
   remove) [ $# -eq 1 ] || die "usage: remove"; remove ;;
   *) sed -n '2,11p' "$0" >&2; exit 2 ;;
-esac
+esac; exit
