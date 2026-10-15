@@ -434,7 +434,7 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars": variables,
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/shared_postgres.yml"),
+        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/project_databases.yml"),
                    "when": "crewship_cfg.profiles.project_databases | bool"}],
         "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "deferred"}}],
     }]))

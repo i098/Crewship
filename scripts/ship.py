@@ -73,8 +73,8 @@ def validate_config(document):
         raise ValueError(
             "Shared Supabase support was removed. Remove profiles.shared_supabase, "
             "fleet.supabase_project_id, fleet.fixture_archive, and fleet.worktree_pools "
-            "from the host config; use profiles.shared_postgres "
-            "(docs/shared-postgres.md). Existing stacks and volumes remain untouched."
+            "from the host config; use profiles.project_databases "
+            "(docs/project-databases.md). Existing stacks and volumes remain untouched."
         )
     validate_document(document, "crewship.schema.json")
     profiles = document["crewship"]["profiles"]
@@ -299,7 +299,7 @@ def provision(document, check):
             "crewship-/flotilla-shared-supabase and worktree-env-seed user units, run "
             "~/oss-fleet/shared-supabase/node_modules/.bin/supabase stop --workdir "
             "~/oss-fleet/shared-supabase, then remove those units, the CLI shim and scripts; "
-            "keep all Docker volumes. Use docs/shared-postgres.md for the replacement."
+            "keep all Docker volumes. Use docs/project-databases.md for the replacement."
         )
     environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "blueprint/ansible/ansible.cfg")}
     argv = [
@@ -495,7 +495,7 @@ def questions(document, config_path):
             " Then ask one short question: enable the optional per-project dev databases? "
             "It is off by default and needs Docker and Firstmate. "
             "If yes, set crewship.profiles.project_databases to true in "
-            f"{config_path} and follow {ROOT / 'docs/shared-postgres.md'}."
+            f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
     returncode = subprocess.run([omp, prompt], cwd=firstmate, env=environment).returncode
     if returncode:

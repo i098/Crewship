@@ -36,7 +36,7 @@ flowchart TD
 
 ## 0. Choose features and install Crewship
 
-Crewship installs a core, the omp agents and Firstmate. Everything else is opt-in and off until the user chooses it. `docker` comes with `fleet_guards` and `shared_postgres`, and `development` comes with `board`.
+Crewship installs a core, the omp agents and Firstmate. Everything else is opt-in and off until the user chooses it. `docker` comes with `fleet_guards` and `project_databases`, and `development` comes with `board`.
 
 - STOP: show the user this checklist and ask which names to turn on. The default is none.
 
@@ -50,7 +50,7 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
 | `gateway` | one password for the host's web pages over a Cloudflare Quick Tunnel ([Web pages from anywhere](docs/gateway.md)) |
 | `fdu` | fdu, a fast gitignore-aware `du` for large worktrees |
 | `fleet_guards` | Docker guard, dev-server reaper, storage guard, browser ladder |
-| `shared_postgres` | one dev database container per project, in the engine its compose file names |
+| `project_databases` | one dev database container per project, in the engine its compose file names |
 | `jj` | the Jujutsu (`jj`) version control tool for agents, colocated with git ([Jujutsu](docs/jj.md)) |
 | `fleet_browsers` | the browser ladder only |
 | `forgejo` | a self-hosted Forgejo git server on loopback for agent pushes ([Self-hosted Forgejo](docs/forgejo.md)) |

@@ -160,7 +160,7 @@ docker volume rm crewship-db-example-app-data
 
 ## Verification
 
-Run `bash tests/shared-postgres-smoke.sh` from the repository to exercise the service tests and Ansible syntax check.
+Run `bash tests/project-databases-smoke.sh` from the repository to exercise the service tests and Ansible syntax check.
 The same command runs in CI.
 It creates a disposable privileged Docker-in-Docker container and removes it when the command exits.
 The lab receives a read-only repository mount, not the host Docker socket.

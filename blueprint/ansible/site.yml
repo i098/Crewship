@@ -196,7 +196,7 @@
       tags: [fleet]
 
     - name: Optional per-project databases and worktree database environment
-      ansible.builtin.import_tasks: tasks/shared_postgres.yml
+      ansible.builtin.import_tasks: tasks/project_databases.yml
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.project_databases | default(false) | bool

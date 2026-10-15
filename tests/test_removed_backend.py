@@ -46,7 +46,7 @@ def test_removed_switch_reports_replacement_without_traceback(tmp_path, enabled,
     )
     assert result.returncode == 1
     assert "support was removed" in result.stderr
-    assert "profiles.shared_postgres (docs/shared-postgres.md)" in result.stderr
+    assert "profiles.project_databases (docs/project-databases.md)" in result.stderr
     for key in (f"profiles.{ship.REMOVED_PROFILE}",
                 *(f"fleet.{key}" for key in ship.REMOVED_FLEET_KEYS)):
         assert key in result.stderr
@@ -122,7 +122,7 @@ def test_apply_preserves_running_retired_stack_and_volume(tmp_path, capsys, monk
         notice = capsys.readouterr().out
         assert "remains untouched" in notice
         assert "remove it manually" in notice
-        assert "docs/shared-postgres.md" in notice
+        assert "docs/project-databases.md" in notice
         assert {p: (p.read_bytes(), p.lstat().st_mtime_ns) for p in paths} == before
         current = inspect()
         assert current["State"]["Running"] is True
