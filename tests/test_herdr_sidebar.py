@@ -363,10 +363,10 @@ def test_reporter_counts_from_a_fixture_home(fixture):
     # Shares of the machine; CPU needs a baseline, so it waits for run two.
     # Herdr's own continuation indent puts it under the name: no padding.
     assert re.fullmatch(r"▤ \d+%  ⛁ \d+%", res)
-    # The primary carries the whole-machine line, short enough for the 40
-    # columns Herdr shows on a continuation row at width 46.
+    # The primary carries the whole-machine line with the agent count. Its
+    # width can pass the 40 columns Herdr shows on a continuation row at width 46.
     size = r"[\d.]+/[\d.]+[GT] \d+%"
-    assert re.fullmatch(rf"⌂ ▤ {size} ⛁ {size}", host) and len(host) <= 40
+    assert re.fullmatch(rf"⌂ ▤ {size} ⛁ {size} ◉ \d+/\d+", host)
     # A helper space shows its short name only; everything else is cleared.
     assert reported["w2"] == {"short": "☾ afk"} | dict.fromkeys(spaces.TOKENS[1:])
     # A space with no home is not the primary: CPU and RAM only.
@@ -385,6 +385,30 @@ def test_reporter_counts_from_a_fixture_home(fixture):
     assert docs["alert"] is None
     assert re.fullmatch(r"⚙ \d+%  ▤ \d+%  ⛁ \d+%", docs["res"])
     assert re.fullmatch(r"⌂ ⚙ \d+% ▤ .+", docs["host"])
+
+
+def test_host_line_counts_working_agent_panes(fixture, tmp_path):
+    home, run = fixture
+    panes = [
+        {
+            "workspace_id": "w1",
+            "pane_id": "w1:p1",
+            "cwd": str(home),
+            "agent": "omp",
+            "agent_status": "working",
+        },
+        {
+            "workspace_id": "w1",
+            "pane_id": "w1:p2",
+            "cwd": str(home),
+            "agent": "omp",
+            "agent_status": "idle",
+        },
+        {"workspace_id": "w1", "pane_id": "w1:p3", "cwd": str(home)},
+    ]
+    (tmp_path / "panes.json").write_text(json.dumps(panes))
+    # Agent panes only: the plain shell pane is left out of both counts.
+    assert run()["w1"]["host"].endswith(" ◉ 1/2")
 
 
 def test_reporter_forgets_status_logs_it_no_longer_reads(fixture):

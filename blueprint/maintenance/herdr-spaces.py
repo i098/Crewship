@@ -14,7 +14,8 @@ workspace tokens under the source `crewship:spaces`:
                     recounted when data/backlog.md changes, else once a minute
   res        "⚙ 29%  ▤ 8%  ⛁ 2%"  CPU, RAM and disk, as shares of the machine
   alert      "⚠ watcher silent" when the home's supervision is unhealthy
-  host       "⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43%"  the whole machine,
+  host       "⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42"  the whole machine
+             (◉ = agent panes working / all agent panes),
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
@@ -334,6 +335,9 @@ def main() -> None:
         st = os.statvfs("/")
         disk_total, disk_used = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize
         parts.append(f"⛁ {used_of(disk_used, disk_total)} {pct(disk_used, disk_total)}")
+        agents = [p for p in panes if p.get("agent")]
+        running = sum(p.get("agent_status") == "working" for p in agents)
+        parts.append(f"◉ {running}/{len(agents)}")
         return ["⌂ " + " ".join(parts)]
 
     first = workspaces[0] if workspaces else {}
