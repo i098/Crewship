@@ -5,7 +5,9 @@
                                writes ci-runner@.service and enables one instance
                                per slot, and stops and cleans removed slots.
   ci-pool.py watch             run by ci-pool-watch.timer: restarts slots stalled
-                               without a container, pulls the runner image hourly.
+                               without a container.
+  ci-pool.py image             run by ci-pool-image.timer: builds the pool's job
+                               image (see DOCKERFILE) from the latest official one.
   ci-pool.py run <instance>    ExecStart of ci-runner@<instance>.service: asks
                                GitHub for a JIT runner, runs one job in a fresh
                                container from the official runner image, exits.
@@ -26,7 +28,11 @@ import time
 from pathlib import Path
 
 IMAGE = "ghcr.io/actions/actions-runner:latest"
-DEFAULTS = {"total_slots": "auto", "job_cpus": 4, "job_memory_gb": 8}
+# The image every job container starts from. This default is built on the host by
+# `ci-pool.py image` from IMAGE plus the packages the jobs would otherwise install
+# on every start; any other name is pulled as it is.
+BUILT_IMAGE = "crewship-ci-runner:latest"
+DEFAULTS = {"total_slots": "auto", "job_cpus": 4, "job_memory_gb": 8, "image": BUILT_IMAGE}
 # The auto size takes this share of the host's CPUs and memory.
 SHARE = 0.5
 # A failed GitHub call or container start waits this long before systemd's
@@ -41,7 +47,8 @@ MIN_JOB_SECONDS = 30
 DOCKER_TIMEOUT = int(os.environ.get("CI_POOL_DOCKER_TIMEOUT", 180))
 # `watch` restarts a slot that has run this long with no running container.
 STALL_SECONDS = 600
-PULL_INTERVAL_SECONDS = 3600
+# An image build installs packages on a loaded host.
+BUILD_TIMEOUT = 3600
 HOME = Path.home()
 CONFIG = HOME / ".config/ci-pool/pool.json"
 UNITS = HOME / ".config/systemd/user"
@@ -49,7 +56,8 @@ TEMPLATE = UNITS / "ci-runner@.service"
 WANTS = UNITS / "default.target.wants"
 WATCH_SERVICE = UNITS / "ci-pool-watch.service"
 WATCH_TIMER = UNITS / "ci-pool-watch.timer"
-PULL_STAMP = HOME / ".config/ci-pool/last-pull"
+IMAGE_SERVICE = UNITS / "ci-pool-image.service"
+IMAGE_TIMER = UNITS / "ci-pool-image.timer"
 HOOK = HOME / ".config/ci-pool/job-started.sh"
 HOOK_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 UNIT_TEXT = """\
@@ -74,7 +82,7 @@ WantedBy=default.target
 WATCH_SERVICE_TEXT = """\
 # Written by ci-pool.py apply (Crewship).
 [Unit]
-Description=CI pool watch: restart stalled slots, refresh the runner image
+Description=CI pool watch: restart stalled slots
 
 [Service]
 Type=oneshot
@@ -92,6 +100,51 @@ OnUnitActiveSec=3min
 
 [Install]
 WantedBy=timers.target
+"""
+IMAGE_SERVICE_TEXT = """\
+# Written by ci-pool.py apply (Crewship).
+[Unit]
+Description=CI pool runner image: rebuild from the latest official runner image
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/bin/python3 %h/.local/bin/ci-pool.py image
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+"""
+IMAGE_TIMER_TEXT = """\
+# Written by ci-pool.py apply (Crewship).
+[Unit]
+Description=CI pool runner image every hour
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
+"""
+# The packages the jobs of the pool's repositories install on every start: a
+# compiler, the GTK runtime, Postgres 17 (from the PostgreSQL apt repository),
+# and bun. REFRESH changes daily, so apt and bun update once a day; the layers
+# before it stay cached. The apt archive is kept so a job's own `apt-get install`
+# can read the packages from a cache mount.
+DOCKERFILE = f"""\
+FROM {IMAGE}
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+ARG REFRESH
+RUN apt-get update -qq \\
+ && apt-get install -y -qq --no-install-recommends \\
+      build-essential pkg-config libgtk-3-0 unzip git curl ca-certificates gnupg lsb-release postgresql-common \\
+ && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \\
+ && apt-get install -y -qq --no-install-recommends postgresql-17 postgresql-client-17 \\
+ && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+# Jobs mount their own directory over /var/lib/postgresql (see CONTAINER_PREP), so the
+# cluster that the package created is kept here and copied in when a job starts.
+RUN cp -a /var/lib/postgresql /opt/postgresql-seed
+USER runner
 """
 # Runs as the image's `runner` user, which has passwordless sudo: empty the
 # slot's work directory, give the runner the bind mounts, then run one job.
@@ -157,10 +210,10 @@ def docker():
     return ["docker"] if os.access("/var/run/docker.sock", os.W_OK) else ["sudo", "-n", "docker"]
 
 
-def bounded(argv):
-    """Prefix argv with coreutils `timeout`: TERM after DOCKER_TIMEOUT s (sudo relays it to
-    docker, which SIGKILL from Python would not reach), KILL 10 s later. A timeout exits 124."""
-    return ["timeout", "--kill-after=10", str(DOCKER_TIMEOUT), *argv]
+def bounded(argv, seconds=None):
+    """Prefix argv with coreutils `timeout`: TERM after `seconds` (default DOCKER_TIMEOUT; sudo
+    relays it to docker, which SIGKILL from Python would not reach), KILL 10 s later. A timeout exits 124."""
+    return ["timeout", "--kill-after=10", str(seconds or DOCKER_TIMEOUT), *argv]
 
 
 def quiet(argv):
@@ -216,13 +269,15 @@ def apply(check):
         changes.append(f"write {CONFIG}")
     write(HOOK, HOOK_TEXT)
     # A list, not `or`: every file is written even when the first one changed.
-    units = [(TEMPLATE, UNIT_TEXT), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT)]
+    units = [(TEMPLATE, UNIT_TEXT), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT),
+             (IMAGE_SERVICE, IMAGE_SERVICE_TEXT), (IMAGE_TIMER, IMAGE_TIMER_TEXT)]
     if any([write(path, text) for path, text in units]) and not check:
         systemctl("daemon-reload")
-    if quiet(["systemctl", "--user", "--quiet", "is-enabled", WATCH_TIMER.name]):
-        changes.append(f"start {WATCH_TIMER.name}")
-        if not check:
-            systemctl("enable", "--now", WATCH_TIMER.name)
+    for timer in (WATCH_TIMER, IMAGE_TIMER):
+        if quiet(["systemctl", "--user", "--quiet", "is-enabled", timer.name]):
+            changes.append(f"start {timer.name}")
+            if not check:
+                systemctl("enable", "--now", timer.name)
     for name in sorted(set(have) - set(want)):
         unit = f"ci-runner@{name}.service"
         if busy(name):
@@ -267,13 +322,38 @@ def apply(check):
     return 0
 
 
+def job_image(pool):
+    """The configured image; the official one while the built image does not exist yet."""
+    if pool["image"] == BUILT_IMAGE and quiet([*docker(), "image", "inspect", BUILT_IMAGE]):
+        return IMAGE
+    return pool["image"]
+
+
+def refresh_image():
+    """Build the pool's image from the latest official one, or pull a custom image."""
+    image = {**DEFAULTS, **json.loads(CONFIG.read_text())}["image"]
+    if image != BUILT_IMAGE:
+        argv, stdin = [*docker(), "pull", "--quiet", image], None
+        seconds = DOCKER_TIMEOUT
+    else:
+        argv = [*docker(), "build", "--pull", "--quiet", "--build-arg", f"REFRESH={time.strftime('%Y-%m-%d')}",
+                "--tag", BUILT_IMAGE, "-"]
+        stdin, seconds = DOCKERFILE, BUILD_TIMEOUT
+    done = subprocess.run(bounded(argv, seconds), input=stdin, text=True, stdout=subprocess.DEVNULL)
+    print(f"image {image}: exit {done.returncode}", flush=True)
+    if not done.returncode:
+        # Untagged layers of the previous build; images that containers use stay.
+        quiet([*docker(), "image", "prune", "--force"])
+    return done.returncode
+
+
 def run(instance):
     unit = f"ci-runner@{instance}.service"
     if quiet(["systemctl", "--user", "--quiet", "is-enabled", unit]):
         # Drained by apply while it held a job: that job is done, leave for good.
         systemctl("stop", unit)
         return 0
-    pool = json.loads(CONFIG.read_text())
+    pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     base = instance.rpartition("-")[0]
     entry = next((e for e in pool["repos"] if slug(e["repo"]) == base), None)
     if entry is None:
@@ -330,7 +410,7 @@ def run(instance):
                 # becoming an empty directory, so no job runs without the check.
                 "--mount", f"type=bind,src={HOOK},dst=/home/runner/job-started.sh,readonly",
                 "--env", f"{HOOK_ENV}=/home/runner/job-started.sh",
-                IMAGE, "bash", "-c", CONTAINER_PREP,
+                job_image(pool), "bash", "-c", CONTAINER_PREP,
             ]), check=True, stdout=subprocess.DEVNULL)
         rc = subprocess.run([*docker(), "start", "--attach", container]).returncode
     except Exception as error:
@@ -363,7 +443,7 @@ def stalled(age, running):
 
 
 def watch():
-    """Restart stalled slots, then refresh the runner image once an hour."""
+    """Restart the slots that started long ago and have no running container."""
     slots = sorted(WANTS.glob("ci-runner@*.service"))
     for path in slots:
         shown = subprocess.run(
@@ -378,11 +458,6 @@ def watch():
         if stalled(age, container_running(path.name[len("ci-runner@"):-len(".service")])):
             print(f"restart {path.name}: no container {int(age)} s after the slot started", flush=True)
             systemctl("restart", path.name)
-    if slots and (not PULL_STAMP.exists() or time.time() - PULL_STAMP.stat().st_mtime > PULL_INTERVAL_SECONDS):
-        # Stamped even on failure: a daemon that cannot pull is tried again next hour, not every run.
-        pulled = subprocess.run(bounded([*docker(), "pull", "--quiet", IMAGE]), stdout=subprocess.DEVNULL)
-        PULL_STAMP.touch()
-        print(f"pull {IMAGE}: exit {pulled.returncode}", flush=True)
     return 0
 
 
@@ -393,6 +468,8 @@ def main(argv):
         return run(argv[1])
     if argv == ["watch"]:
         return watch()
+    if argv == ["image"]:
+        return refresh_image()
     print(__doc__, file=sys.stderr)
     return 2
 

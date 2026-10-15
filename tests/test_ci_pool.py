@@ -95,10 +95,12 @@ def slots(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "busy", lambda name: False)
     monkeypatch.setattr(pool_script, "remove_tree", shutil.rmtree)
     for attr, text in (("WATCH_SERVICE", pool_script.WATCH_SERVICE_TEXT),
-                       ("WATCH_TIMER", pool_script.WATCH_TIMER_TEXT)):
+                       ("WATCH_TIMER", pool_script.WATCH_TIMER_TEXT),
+                       ("IMAGE_SERVICE", pool_script.IMAGE_SERVICE_TEXT),
+                       ("IMAGE_TIMER", pool_script.IMAGE_TIMER_TEXT)):
         monkeypatch.setattr(pool_script, attr, units / getattr(pool_script, attr).name)
         getattr(pool_script, attr).write_text(text)
-    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)  # the watch timer is enabled
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)  # the timers are enabled
     calls = []
     monkeypatch.setattr(pool_script, "systemctl", lambda *args: calls.append(args))
 
@@ -371,7 +373,7 @@ def test_stalled_slot_decision(age, running, restart):
     assert pool_script.stalled(age, running) is restart
 
 
-def test_watch_restarts_only_stalled_slots_and_pulls_the_image_once_an_hour(
+def test_watch_restarts_only_stalled_slots(
     tmp_path, monkeypatch, capsys
 ):
     wants = tmp_path / "wants"
@@ -380,17 +382,15 @@ def test_watch_restarts_only_stalled_slots_and_pulls_the_image_once_an_hour(
     for name in ages:
         (wants / f"ci-runner@{name}.service").touch()
     monkeypatch.setattr(pool_script, "WANTS", wants)
-    monkeypatch.setattr(pool_script, "PULL_STAMP", tmp_path / "last-pull")
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
-    pulls, restarts = [], []
+    restarts = []
 
     def fake_run(argv, **kwargs):
         if argv[:3] == ["systemctl", "--user", "show"]:
             age = ages[argv[3][len("ci-runner@"):-len(".service")]]
             out = f"ActiveState=active\nActiveEnterTimestampMonotonic={int((time.monotonic() - age) * 1e6)}\n"
             return subprocess.CompletedProcess(argv, 0, out, "")
-        pulls.append(argv)
-        return subprocess.CompletedProcess(argv, 0)
+        raise AssertionError(argv)
 
     monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
     running = {"o-stuck-1": False, "o-job-1": True, "o-new-1": False}
@@ -400,7 +400,44 @@ def test_watch_restarts_only_stalled_slots_and_pulls_the_image_once_an_hour(
     assert pool_script.watch() == 0
     assert restarts == [("restart", "ci-runner@o-stuck-1.service")]
     assert "restart ci-runner@o-stuck-1.service" in capsys.readouterr().out
-    assert len(pulls) == 1 and pulls[0][-3:] == ["pull", "--quiet", pool_script.IMAGE]
 
-    pool_script.watch()
-    assert len(pulls) == 1  # stamped: no second pull within the hour
+
+def test_jobs_start_from_the_official_image_until_the_built_one_exists(monkeypatch):
+    built = {**pool_script.DEFAULTS}
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 1)  # `docker image inspect` fails
+    assert pool_script.job_image(built) == pool_script.IMAGE
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)
+    assert pool_script.job_image(built) == pool_script.BUILT_IMAGE
+    # A custom image is never replaced.
+    assert pool_script.job_image({"image": "mine:1"}) == "mine:1"
+
+
+def test_image_refresh_builds_the_dockerfile_for_the_default_and_pulls_any_other_image(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    calls = []
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: calls.append(argv) or 0)
+    runs = []
+
+    def fake_run(argv, **kwargs):
+        runs.append((argv, kwargs.get("input")))
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+
+    (tmp_path / "pool.json").write_text("{}")
+    assert pool_script.refresh_image() == 0
+    argv, stdin = runs[-1]
+    assert argv[:3] == ["timeout", "--kill-after=10", str(pool_script.BUILD_TIMEOUT)]
+    assert argv[-3:] == ["--tag", pool_script.BUILT_IMAGE, "-"]
+    assert stdin == pool_script.DOCKERFILE and stdin.startswith(f"FROM {pool_script.IMAGE}\n")
+    assert "postgresql-17" in stdin and "bun.sh/install" in stdin
+    assert calls[-1][-3:] == ["image", "prune", "--force"]
+
+    (tmp_path / "pool.json").write_text('{"image": "mine:1"}')
+    pool_script.refresh_image()
+    argv, stdin = runs[-1]
+    assert argv[-3:] == ["pull", "--quiet", "mine:1"] and stdin is None

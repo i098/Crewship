@@ -493,6 +493,10 @@
               "type": "integer",
               "minimum": 1
             },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
             "repos": {
               "type": "array",
               "items": {
