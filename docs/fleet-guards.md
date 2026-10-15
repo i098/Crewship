@@ -20,7 +20,7 @@ See [Project databases](project-databases.md#worktree-environment) for the separ
 | --- | --- |
 | `oss-fleet/doctor/docker-guard.sh` | Every hour: removes stopped containers that agents left behind and reports long-running ones that nothing claims. See [Docker guard](#docker-guard). |
 | `oss-fleet/doctor/dev-server-reaper.sh` | Every 2 minutes: kills `next dev`/`next-server`/`tsc --noEmit` trees in treehouse worktrees whose lane last reported `done:`/`paused:`/`blocked:`/`failed:`, has no agent process, or whose agent transcript is idle >= 30 min (`REAPER_IDLE_MIN`). A dev server is 3-4 GB and restarts in 10 s; idle ones from finished lanes are what filled swap. One `next dev` per branch is inherent - Next compiles the whole app per process - so the fix is lifetime, not sharing. |
-| `oss-fleet/doctor/storage-guard.sh` | Every 5 minutes: use% of the filesystems holding `/`, `/var/log`, the home and Docker's data root. WARN (85%) alerts once per episode, CRIT (92%) prunes only regenerable data (stale gitignored worktree output, then Docker data), and a fill rate projecting the disk full within 6 hours alerts even below WARN. See [Storage guard](#storage-guard). |
+| `oss-fleet/doctor/storage-guard.sh` | Every 5 minutes: use% of every mounted real block filesystem, including the ones holding `/`, `/var/log`, the home and Docker's data root. WARN (85%) alerts once per episode, CRIT (92%) prunes only regenerable data (stale gitignored worktree output, then Docker data), and a fill rate projecting the disk full within 6 hours alerts even below WARN. Alerts also reach Firstmate as an inbox note. See [Storage guard](#storage-guard). |
 | `oss-fleet/doctor/devtools-bridge-reaper.sh` | Every 10 minutes: stops attached chrome-devtools-axi bridges (`CHROME_DEVTOOLS_AXI_BROWSER_URL` set) whose process tree used no CPU and whose session state files did not change for 60 min (`REAPER_IDLE_MIN`). See [Devtools-bridge reaper](#devtools-bridge-reaper). |
 | `.config/systemd/user/crewship-*.{service,timer,path}` | `fleet_guards` enables the guard and reaper timers. Apply retires only selected `flotilla-*` guard units. |
 | `/etc/docker/daemon.json` | `init: true` and `live-restore: true` merged in (tasks/docker.yml, any profile with docker). |
@@ -33,21 +33,32 @@ Firstmate's orphan sweep on aged litter. Docker images, build cache, or one
 looping process writing to `/var/log` can take `/` to 100%.
 
 `crewship-storage-guard.timer` runs `storage-guard.sh` every 5 minutes. It
-measures the filesystems holding `/`, `/var/log`, the home and Docker's data
-root (`docker info`), each filesystem once. Thresholds are the
+measures every mounted real block filesystem (`findmnt`: ext4, xfs, btrfs, zfs,
+vfat and similar, once per device; never tmpfs, overlay, squashfs, loop devices
+or other pseudo filesystems), so data disks such as `/sdb-disk` are covered, and
+the filesystems holding `/`, `/var/log`, the home and Docker's data root
+(`docker info`). Thresholds are the
 `crewship_storage_guard_*` variables in `blueprint/ansible/group_vars/all/fleet.yml`.
 
 | Tier | Trigger (default) | Action |
 | --- | --- | --- |
 | FILL | Growth since the previous run projects the free space left after any CRIT reclaim full within 6 h | Alert at once, even below WARN; at most one every 30 min. |
-| WARN | 85% used | One log line, one `COMMS.md` line and one `notify-master.sh` alert per episode; re-armed only below 82%. |
+| WARN | 85% used | One log line, one `COMMS.md` line, one `notify-master.sh` alert and one Firstmate inbox note per episode and filesystem; re-armed only below 82%. |
 | CRIT | 92% used | On the filesystem holding the Treehouse pools: `worktree-prune.sh` first, which removes [stale gitignored worktree output](#stale-worktree-output). On Docker's filesystem only: `docker builder prune -f`, then `docker image prune -f` (dangling), then `docker image prune -af --filter until=168h` (images no container uses, created more than 168 h ago; the filter uses image creation time, not last use), re-measuring after each and stopping once under 92%. Every step is logged with what it freed. On every filesystem a CRIT alert reports what the reclaim freed, or that a human is needed while still at 92%; at most one every 30 min. |
 
 Every alert names the top consumers: the largest entries one level under the
-filesystem root, and under the home and `/var/log` when they live on it, from
+filesystem root, one level under its biggest entry, and under the home and
+`/var/log` when they live on it, from
 one `du` walk capped at 300 s,
-plus `docker system df` on Docker's filesystem. A FILL alert also names the
-entry that grew most since the previous scan.
+plus `docker system df` on Docker's filesystem. When the same filesystem was
+scanned before (at its previous alert), the alert also names the five entries
+that grew most since that scan.
+
+An alert also reaches the operator through Firstmate: with `FM_HOME` set (the
+unit sets it to `crewship_firstmate_dir`) and `$FM_HOME/bin/fm-inbox.sh`
+present, the guard runs `fm-inbox.sh note -- "[storage-guard <host>] <alert>"`,
+which wakes the main Firstmate to relay it. `WORKTREE_PRUNE_CMD` replaces the
+`worktree-prune.sh` the CRIT step runs, for a host that wraps it.
 
 The guard never deletes volumes, containers, repositories, `/tmp` content,
 logs or anything under the home except the worktree output below; it reports
@@ -56,7 +67,7 @@ and a runaway log needs whoever owns the process writing it.
 `storage-guard.sh --dry-run` prints the measurement, the tier, what each CRIT
 step would free (for the worktree step, each directory it would remove) and the
 alert a real run would send, and changes nothing. `tests/test_storage_guard.py`
-drives the tiers against stubbed `df`, `du` and `docker`.
+drives the tiers against stubbed `df`, `du`, `findmnt` and `docker`.
 
 ### Stale worktree output
 
