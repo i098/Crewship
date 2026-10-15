@@ -157,7 +157,7 @@ OnUnitActiveSec=1h
 WantedBy=timers.target
 """
 # The packages the jobs of the pool's repositories install on every start: a
-# compiler, the GTK runtime, Postgres 17 and 18 with pgvector (from the PostgreSQL apt repository),
+# compiler, the GTK runtime, the codex-gpui Rust/GUI build libraries, Postgres 17 and 18 with pgvector (from the PostgreSQL apt repository),
 # and bun. REFRESH changes daily, so apt and bun update once a day; the layers
 # before it stay cached. The apt archive is kept so a job's own `apt-get install`
 # can read the packages from a cache mount.
@@ -170,6 +170,8 @@ ARG REFRESH
 RUN apt-get update -qq \\
  && apt-get install -y -qq --no-install-recommends \\
       build-essential pkg-config libgtk-3-0 unzip git curl ca-certificates gnupg lsb-release postgresql-common \\
+      clang cmake libssl-dev libzstd-dev libfontconfig-dev libfreetype-dev libasound2-dev \\
+      libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libvulkan-dev \\
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \\
  && apt-get install -y -qq --no-install-recommends postgresql-17 postgresql-client-17 postgresql-18 postgresql-client-18 postgresql-18-pgvector \\
  && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
