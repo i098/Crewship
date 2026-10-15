@@ -114,8 +114,14 @@ A slot that waits for a job shows as an `online` runner that is not busy. In a j
 
 On a loaded host the Docker daemon can stall a call for good. A slot then holds a registered runner that shows `offline` and has no container, so jobs wait in the queue. Two guards stop this:
 
-- Every `docker create`, `docker pull`, and other short Docker call that the script starts ends after 180 seconds. The slot removes the half-created container and the runner, waits 60 seconds, and exits with an error, and systemd restarts it. Set `CI_POOL_DOCKER_TIMEOUT` (seconds) in the unit (`systemctl --user edit ci-runner@.service` and `ci-pool-watch.service`) to change the limit.
-- `ci-pool-watch.timer` runs `ci-pool.py watch` every 3 minutes. It restarts each slot that started more than 10 minutes ago and has no running container, and prints `restart <unit>` to the journal (`journalctl --user -u ci-pool-watch`). It does not restart a slot when Docker does not answer, and never a slot with a running container, so a job is not killed.
+- Every `docker create`, `docker pull`, and other short Docker call that the script starts ends after 600 seconds (a create takes minutes when the host load is high). The slot removes the half-created container and the runner, waits 60 seconds, and exits with an error, and systemd restarts it. Set `CI_POOL_DOCKER_TIMEOUT` (seconds) in the unit (`systemctl --user edit ci-runner@.service` and `ci-pool-image.service`) to change the limit.
+- `ci-pool-watch.timer` runs `ci-pool.py watch` every minute. It restarts a slot only when all of this holds:
+  - the slot started more than 5 minutes ago,
+  - GitHub shows its runner `offline` and not busy, and
+  - the Docker daemon listed no container for the slot (`docker ps --all`, any state) in two successful reads at least 2 minutes apart. The first sighting is kept in `~/.config/ci-pool/watch-state.json`.
+
+  A read that fails or takes more than 60 seconds acts on nothing and forgets the first sightings, because a loaded daemon answers slowly or in part. `watch` restarts at most 2 slots a run and prints `restart <unit>: <reason>` to the journal (`journalctl --user -u ci-pool-watch`). It also removes a container that is stuck in `removing` or `dead` when its slot unit is stopped. `ci-pool.py watch --dry-run` prints what it would do and changes nothing.
+- A slot that starts or stops waits for its old container: it stops it with a 60-second grace period, removes it, and waits until the daemon no longer lists it before it creates the next one. A slot whose old container still runs a job (a `Runner.Worker` process) does not touch it: the slot fails, waits 60 seconds, and systemd starts it again. The unit uses `KillMode=mixed`, so `systemctl stop` signals only `run`, which does this cleanup within `TimeoutStopSec=300`.
 
 Jobs create the container with `--pull missing`. `ci-pool-image.timer` refreshes the image once an hour instead, so the slots do not pull at the same time.
 

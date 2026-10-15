@@ -182,13 +182,15 @@ def test_busy_reads_docker_top_output_with_a_pid_column(monkeypatch):
         ok = listing is not None and "pid" in argv[-1]
         return subprocess.CompletedProcess(
             argv, 0 if ok else 1, listing if ok else "",
-            "" if ok else "Couldn't find PID field in ps output" if listing else "No such container",
+            "" if ok else "Couldn't find PID field in ps output" if listing else
+            "container abc is not running" if argv[-3] == "ci-runner-created" else "No such container",
         )
 
     monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
     assert not pool_script.busy("idle")
     assert pool_script.busy("busy")
     assert not pool_script.busy("missing")
+    assert not pool_script.busy("created")  # created, never started: no job
 
 
 def test_a_drained_slot_keeps_its_repository_cache_while_it_is_busy(slots, monkeypatch):
@@ -289,6 +291,8 @@ def test_failed_container_create_deletes_the_runner_and_pauses(tmp_path, monkeyp
         "data_dir": str(tmp_path / "data"), "job_cpus": 4, "job_memory_gb": 8,
         "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
     }))
+    monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    monkeypatch.setattr(pool_script, "clear_container", lambda name: True)
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
     monkeypatch.setattr(pool_script, "quiet", lambda argv: calls.append(argv) or 0)
     monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
@@ -314,6 +318,8 @@ def test_listener_failure_with_exit_zero_deletes_the_runner_and_pauses(tmp_path,
         "data_dir": str(tmp_path / "data"), "job_cpus": 4, "job_memory_gb": 8,
         "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
     }))
+    monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    monkeypatch.setattr(pool_script, "clear_container", lambda name: True)
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
     monkeypatch.setattr(pool_script, "quiet", lambda argv: calls.append(argv) or 0)
     monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
@@ -340,7 +346,11 @@ def test_a_hung_docker_create_is_cut_off_and_the_slot_fails_so_systemd_restarts_
     bin_dir.mkdir()
     log = tmp_path / "log"
     (bin_dir / "docker").write_text(
-        f'#!/bin/sh\necho "$@" >> {log}\n[ "$1" = create ] && exec sleep 60\nexit 0\n'
+        f'#!/bin/sh\necho "$@" >> {log}\n'
+        # `create` leaves a container behind and hangs; `ps` lists it until `rm` removes it.
+        f'case "$1" in\n create) touch {tmp_path}/created; exec sleep 60;;\n'
+        f' rm) touch {tmp_path}/removed;;\n'
+        f' ps) [ -e {tmp_path}/created ] && [ ! -e {tmp_path}/removed ] && echo "ci-runner-o-kept-1 created";;\nesac\nexit 0\n'
     )
     (bin_dir / "gh").write_text(
         f'#!/bin/sh\necho gh "$@" >> {log}\n'
@@ -365,50 +375,126 @@ def test_a_hung_docker_create_is_cut_off_and_the_slot_fails_so_systemd_restarts_
     started = time.monotonic()
     assert pool_script.run("o-kept-1") == 1
     assert time.monotonic() - started < 20
-    assert sleeps == [pool_script.FAILURE_PAUSE_SECONDS]
+    assert sleeps[-1] == pool_script.FAILURE_PAUSE_SECONDS  # after the 5 s wait for the removal
     lines = log.read_text().splitlines()
     assert any(line.startswith("create ") and "--pull missing" in line for line in lines)
     # The half-created container is removed by name and the runner is deleted.
-    assert lines[-2:] == ["rm --force ci-runner-o-kept-1", "gh api --method DELETE repos/o/kept/actions/runners/7"]
+    assert lines[-1] == "gh api --method DELETE repos/o/kept/actions/runners/7"
+    created = next(n for n, line in enumerate(lines) if line.startswith("create "))
+    assert "rm --force ci-runner-o-kept-1" in lines[created:]
 
 
-@pytest.mark.parametrize(("age", "running", "restart"), [
-    (601, False, True),    # registered long ago, no container: stalled
-    (599, False, False),   # still inside the grace period
-    (900, True, False),    # a job or an idle listener runs
-    (900, None, False),    # docker did not answer: unknown is not stalled
-])
-def test_stalled_slot_decision(age, running, restart):
-    assert pool_script.stalled(age, running) is restart
-
-
-def test_watch_restarts_only_stalled_slots(
-    tmp_path, monkeypatch, capsys
-):
-    wants = tmp_path / "wants"
-    wants.mkdir()
-    ages = {"o-stuck-1": 700, "o-job-1": 700, "o-new-1": 30}
-    for name in ages:
-        (wants / f"ci-runner@{name}.service").touch()
-    monkeypatch.setattr(pool_script, "WANTS", wants)
+@pytest.fixture
+def watching(tmp_path, monkeypatch):
+    """A pool of o/job slots; slot states, containers, and GitHub runners are set by the test."""
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    monkeypatch.setattr(pool_script, "WATCH_STATE", tmp_path / "watch-state.json")
+    (tmp_path / "pool.json").write_text(json.dumps({"repos": [{"repo": "o/job", "slots": 5, "labels": ["x"]}]}))
+    world = {"units": {}, "containers": {}, "runners": {}, "restarts": [], "removed": [], "now": 1000.0}
+    monkeypatch.setattr(pool_script, "slot_units", lambda: world["units"])
+    monkeypatch.setattr(pool_script, "container_states", lambda: world["containers"])
+    monkeypatch.setattr(pool_script, "github_runners", lambda repo: world["runners"])
+    monkeypatch.setattr(pool_script, "systemctl", lambda *args: world["restarts"].append(args[-1]))
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
-    restarts = []
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: world["removed"].append(argv[-1]) or 0)
+    monkeypatch.setattr(pool_script.time, "time", lambda: world["now"])
+    return world
 
-    def fake_run(argv, **kwargs):
-        if argv[:3] == ["systemctl", "--user", "show"]:
-            age = ages[argv[3][len("ci-runner@"):-len(".service")]]
-            out = f"ActiveState=active\nActiveEnterTimestampMonotonic={int((time.monotonic() - age) * 1e6)}\n"
-            return subprocess.CompletedProcess(argv, 0, out, "")
-        raise AssertionError(argv)
 
-    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
-    running = {"o-stuck-1": False, "o-job-1": True, "o-new-1": False}
-    monkeypatch.setattr(pool_script, "container_running", running.get)
-    monkeypatch.setattr(pool_script, "systemctl", lambda *args: restarts.append(args))
+OFFLINE = {"status": "offline", "busy": False}
 
-    assert pool_script.watch() == 0
-    assert restarts == [("restart", "ci-runner@o-stuck-1.service")]
-    assert "restart ci-runner@o-stuck-1.service" in capsys.readouterr().out
+
+def test_watch_restarts_an_offline_slot_without_container_only_on_the_second_sighting_two_minutes_later(
+    watching, capsys
+):
+    watching["units"] = {"o-job-1": ("active", 900)}
+    watching["runners"] = {"o-job-1": OFFLINE}
+
+    pool_script.watch()
+    assert watching["restarts"] == []  # first sighting: only noted
+
+    watching["now"] += pool_script.MISSING_SECONDS - 1
+    pool_script.watch()
+    assert watching["restarts"] == []
+
+    watching["now"] += 1
+    pool_script.watch()
+    assert watching["restarts"] == ["ci-runner@o-job-1.service"]
+    assert "restart ci-runner@o-job-1.service: runner offline on GitHub, no container for 120 s" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change", [
+    pytest.param({"containers": {"ci-runner-o-job-1": "created"}}, id="a container of any state exists"),
+    pytest.param({"runners": {"o-job-1": {"status": "offline", "busy": True}}}, id="GitHub shows a job"),
+    pytest.param({"runners": {"o-job-1": {"status": "online", "busy": False}}}, id="runner is online"),
+    pytest.param({"runners": {}}, id="GitHub does not list the runner"),
+    pytest.param({"units": {"o-job-1": ("active", 299)}}, id="the slot is younger than 5 minutes"),
+    pytest.param({"units": {"o-job-1": ("activating", 900)}}, id="the slot is not active"),
+])
+def test_watch_leaves_a_slot_alone_unless_every_condition_holds(watching, change):
+    watching.update({"units": {"o-job-1": ("active", 900)}, "runners": {"o-job-1": OFFLINE}, **change})
+    pool_script.watch()
+    watching["now"] += 600
+    pool_script.watch()
+    assert watching["restarts"] == []
+
+
+def test_a_failed_docker_read_acts_on_nothing_and_forgets_the_first_sighting(watching):
+    watching["units"] = {"o-job-1": ("active", 900)}
+    watching["runners"] = {"o-job-1": OFFLINE}
+    pool_script.watch()  # first sighting
+    watching["containers"] = None  # docker timed out
+    watching["now"] += 600
+    pool_script.watch()
+    assert watching["restarts"] == []
+    watching["containers"] = {}
+    pool_script.watch()  # a successful read starts counting again
+    assert watching["restarts"] == []
+
+
+def test_watch_restarts_at_most_two_slots_a_run_and_a_dry_run_changes_nothing(watching, capsys):
+    watching["units"] = {f"o-job-{n}": ("active", 900) for n in range(1, 6)}
+    watching["runners"] = {f"o-job-{n}": OFFLINE for n in range(1, 6)}
+    pool_script.watch()
+    watching["now"] += 600
+
+    pool_script.watch(dry_run=True)
+    assert watching["restarts"] == []
+    assert capsys.readouterr().out.count("would restart") == 2
+
+    pool_script.watch()
+    assert len(watching["restarts"]) == 2
+
+
+def test_watch_removes_a_stuck_container_only_when_its_slot_is_stopped(watching):
+    watching["units"] = {"o-job-1": ("active", 900), "o-job-2": ("inactive", 0)}
+    watching["containers"] = {"ci-runner-o-job-1": "removing", "ci-runner-o-job-2": "dead",
+                              "ci-runner-o-job-3": "removing", "ci-runner-o-job-4": "running"}
+    pool_script.watch()
+    assert sorted(watching["removed"]) == ["ci-runner-o-job-2", "ci-runner-o-job-3"]
+
+
+def test_clear_container_stops_removes_and_waits_until_the_daemon_forgets_it(monkeypatch):
+    listings = iter([{"ci-runner-s": "running"}, {"ci-runner-s": "removing"}, {}])
+    calls, sleeps = [], []
+    monkeypatch.setattr(pool_script, "container_states", lambda: next(listings))
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: calls.append(argv[1:]) or 0)
+    monkeypatch.setattr(pool_script.time, "sleep", sleeps.append)
+
+    assert pool_script.clear_container("ci-runner-s")
+    assert calls == [["stop", "--time", "60", "ci-runner-s"], ["rm", "--force", "ci-runner-s"]]
+    assert len(sleeps) == 2
+
+
+def test_clear_container_gives_up_when_the_daemon_keeps_listing_it(monkeypatch):
+    clock = iter(range(0, 10_000, 50))
+    monkeypatch.setattr(pool_script.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(pool_script.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)
+    monkeypatch.setattr(pool_script, "container_states", lambda: {"ci-runner-s": "removing"})
+    assert not pool_script.clear_container("ci-runner-s")
 
 
 def test_jobs_start_from_the_official_image_until_the_built_one_exists(monkeypatch):
@@ -458,6 +544,8 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tm
     (tmp_path / "pool.json").write_text(json.dumps({
         "data_dir": str(data), "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
     }))
+    monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    monkeypatch.setattr(pool_script, "clear_container", lambda name: True)
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
     scratch = data / "ci-pool/scratch/o-kept-1"
     (scratch / "tmp").mkdir(parents=True)
@@ -495,3 +583,27 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tm
     assert f"{root / 'cache/o-kept/cargo-registry'}:/home/runner/.cargo/registry" in mounts
     assert all(Path(m.split(":")[0]).is_dir() for m in mounts)
     assert "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun" in argv
+
+
+def test_a_slot_does_not_kill_the_job_of_its_previous_container(tmp_path, monkeypatch):
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    (tmp_path / "pool.json").write_text(json.dumps({
+        "data_dir": str(tmp_path / "data"), "repos": [{"repo": "o/kept", "slots": 1, "labels": ["x"]}],
+    }))
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)
+    monkeypatch.setattr(pool_script, "busy", lambda name: name == "o-kept-1")  # a Runner.Worker runs
+    monkeypatch.setattr(pool_script, "clear_container", lambda name: pytest.fail("removed a running job"))
+    monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
+    sleeps, runs = [], []
+    monkeypatch.setattr(pool_script.time, "sleep", sleeps.append)
+
+    def fake_run(argv, **kwargs):
+        runs.append(argv)
+        out = json.dumps({"runner": {"id": 7}, "encoded_jit_config": "jit"})
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    assert pool_script.run("o-kept-1") == 1
+    assert not any("create" in argv for argv in runs)
+    assert sleeps == [pool_script.FAILURE_PAUSE_SECONDS]
