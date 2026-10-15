@@ -1,0 +1,15 @@
+{{ ansible_managed | comment }}
+# Triggered by instagram-graph-refresh.timer; not enabled on its own. Refreshes the 60-day Instagram API token when it
+# is older than 24 h (docs/architecture.md#official-instagram-api).
+
+[Unit]
+Description=Refresh the Instagram API token (Crewship managed)
+ConditionPathExists={{ crewship_instagram_dm_state }}/graph-token.json
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ crewship_instagram_desk_dir }}
+Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
+EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
+UMask=0077
+ExecStart={{ crewship_local_bin }}/bun instagram-graph.ts refresh

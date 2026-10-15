@@ -16,6 +16,11 @@ crewship_instagram_dm_state: "{{ crewship_firstmate_dir }}/state/.instagram-dms"
 crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jsonl"
 # Command that takes `--request-id ID -- TEXT` and tells main (the request id makes a repeat harmless).
 crewship_instagram_dm_notify: "{{ crewship_firstmate_dir }}/bin/fm-inbox.sh note"
+# The backend: `instagrapi` (the session above, the listener and the poll timer) or `graph`, Meta's official
+# Instagram API with Instagram Login (docs/architecture.md#official-instagram-api). With `graph` the operator is his
+# Instagram-scoped id (IGSID), fm-insta-reply sends through graph.instagram.com, fm-imessage's card-page listener takes
+# the DM webhook at /instagram/webhook, and a weekly timer refreshes the token. The instagrapi units stay as they are.
+crewship_instagram_dm_backend: instagrapi
 # The front desk (docs/imessage.md#instagram-front-desk): when main has not answered a DM for
 # crewship_instagram_desk_quiet_ms, a one-shot model answers or reacts through fm-insta-reply.
 # The reel curator (docs/architecture.md#instagram-reel-curator): OFF by default. It scrapes feeds and downloads

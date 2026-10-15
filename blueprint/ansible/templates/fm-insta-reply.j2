@@ -6,4 +6,10 @@ export INSTAGRAM_DM_SESSION={{ crewship_instagram_dm_session | quote }}
 export INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state | quote }}
 export INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval | quote }}
 [ ! -f {{ (crewship_instagram_dm_session | dirname ~ '/dm.env') | quote }} ] || { set -a; . {{ (crewship_instagram_dm_session | dirname ~ '/dm.env') | quote }}; set +a; }
+{% if crewship_instagram_dm_backend == 'graph' %}
+# The official API (docs/architecture.md#official-instagram-api): the 24-hour window is read from the DM log.
+export INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log | quote }}
+exec {{ (crewship_local_bin ~ '/bun') | quote }} {{ (crewship_instagram_desk_dir ~ '/instagram-graph.ts') | quote }} reply "$@"
+{% else %}
 exec {{ crewship_uv_bin | quote }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script | quote }} reply "$@"
+{% endif %}
