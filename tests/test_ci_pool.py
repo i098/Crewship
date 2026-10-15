@@ -86,7 +86,8 @@ def slots(tmp_path, monkeypatch):
         (wants / f"ci-runner@{name}.service").touch()
     data = tmp_path / "data"
     for path in ("ci-pool/work/o-kept-1", "ci-pool/work/o-gone-1", "ci-pool/apt/o-kept-1",
-                 "ci-pool/apt/o-gone-1", "ci-pool/scratch/o-gone-1", "ci-pool/cache/o-kept",
+                 "ci-pool/apt/o-gone-1", "ci-pool/scratch/o-gone-1", "ci-pool/dind/o-gone-1",
+                 "ci-pool/dind/o-kept-1", "ci-pool/cache/o-kept",
                  "ci-pool/cache/o-gone", "work/projects", "cache/models"):
         (data / path).mkdir(parents=True)
     monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
@@ -128,6 +129,7 @@ def test_check_lists_removed_slots_and_their_directories_without_touching_them(
         f"remove {data / 'ci-pool/work/o-gone-1'}",
         f"remove {data / 'ci-pool/scratch/o-gone-1'}",
         f"remove {data / 'ci-pool/apt/o-gone-1'}",
+        f"remove {data / 'ci-pool/dind/o-gone-1'}",
         f"remove {data / 'ci-pool/cache/o-gone'}",
         "restart ci-runner@o-kept-1.service",
         "start ci-runner@o-kept-2.service",
@@ -145,6 +147,8 @@ def test_apply_deletes_only_what_the_pool_created(slots):
     assert not (data / "ci-pool/work/o-gone-1").exists()
     assert not (data / "ci-pool/scratch/o-gone-1").exists()
     assert not (data / "ci-pool/apt/o-gone-1").exists()
+    assert not (data / "ci-pool/dind/o-gone-1").exists()
+    assert (data / "ci-pool/dind/o-kept-1").is_dir()
     assert not (data / "ci-pool/cache/o-gone").exists()
     assert (data / "ci-pool/work/o-kept-1").is_dir()
     assert (data / "ci-pool/apt/o-kept-1").is_dir()
@@ -583,6 +587,45 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tm
     assert f"{root / 'cache/o-kept/cargo-registry'}:/home/runner/.cargo/registry" in mounts
     assert all(Path(m.split(":")[0]).is_dir() for m in mounts)
     assert "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun" in argv
+
+
+def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
+    data = tmp_path / "data"
+    (tmp_path / "pool.json").write_text(json.dumps({
+        "data_dir": str(data), "repos": [{"repo": "o/e", "slots": 1, "labels": ["x"], "docker": "dind"}],
+    }))
+    monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
+    monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(pool_script.time, "sleep", lambda seconds: None)
+    calls = []
+    monkeypatch.setattr(pool_script, "clear_container", lambda name: calls.append(["clear", name]) or True)
+    monkeypatch.setattr(pool_script, "quiet", lambda argv: calls.append(argv) or 0)
+
+    def fake_run(argv, **kwargs):
+        if argv[0] == "gh":
+            out = json.dumps({"runner": {"id": 7}, "encoded_jit_config": "jit"})
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    pool_script.run("o-e-1")
+
+    sidecar = next(argv for argv in calls if pool_script.DIND_IMAGE in argv)
+    job = next(argv for argv in calls if "--init" in argv)
+    assert "--privileged" in sidecar and "--privileged" not in job
+    assert sidecar[sidecar.index("--network") + 1] == "ci-dind-o-e-1"
+    assert sidecar[sidecar.index("--memory") + 1] == job[job.index("--memory") + 1] == "8g"
+    assert job[job.index("--network") + 1] == "container:ci-dind-o-e-1"
+    assert "DOCKER_HOST=tcp://localhost:2376" in job
+    assert f"{data / 'ci-pool/dind/o-e-1/certs/client'}:/certs/client:ro" in job
+    assert not any("docker.sock" in arg for argv in calls for arg in argv)
+    # The sidecar and its network go after the job container, in the same cleanup.
+    tail = [argv for argv in calls if argv[0] == "clear" or argv[1:3] == ["network", "rm"]][-3:]
+    assert tail == [["clear", "ci-runner-o-e-1"], ["clear", "ci-dind-o-e-1"],
+                    ["docker", "network", "rm", "ci-dind-o-e-1"]]
 
 
 def test_a_slot_does_not_kill_the_job_of_its_previous_container(tmp_path, monkeypatch):

@@ -27,6 +27,7 @@ flowchart LR
          - repo: owner/name
            slots: 2
            labels: [my-label]
+           # docker: dind           # a Docker daemon of its own in each slot; see "Docker in a job"
    ```
 
 2. Run `./ship.sh launch`. To change only the pool, without a full apply, use [Apply without the playbook](#apply-without-the-playbook).
@@ -52,6 +53,7 @@ To remove a repository, delete its entry and apply again. Its idle slots stop an
 | `repos[].repo` | required | `owner/name` on github.com. |
 | `repos[].slots` | required | Slots for this repository: the most jobs it runs at one time. |
 | `repos[].labels` | required | Runner labels that the workflow's `runs-on` selects. |
+| `repos[].docker` | none | `dind` gives each slot of the repository its own Docker daemon. See [Docker in a job](#docker-in-a-job). |
 
 `./ship.sh inspect` refuses the pool without the `docker` profile, a `data_dir` with `..`, and two repositories that make the same unit name.
 
@@ -74,9 +76,9 @@ When apply changes `pool.json`, it restarts the idle slots, so they register aga
 
 ## What a job gets
 
-- The pool's own image `crewship-ci-runner:latest`: the official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`) plus `build-essential`, `pkg-config`, the GTK 3 runtime, Postgres 17 and 18 with their clients, pgvector for 18, `unzip`, `git`, `curl`, and `bun`. A job that runs `apt-get install` for these finds them installed. `ci-pool-image.timer` rebuilds the image every hour from the latest official image (apt and bun update once a day), so a job never pulls or installs them. Until the first build ends, jobs start from the official image. The list is `DOCKERFILE` in `ci-pool.py`.
+- The pool's own image `crewship-ci-runner:latest`: the official runner image `ghcr.io/actions/actions-runner:latest` (Ubuntu, the `runner` user with passwordless `sudo`) plus `build-essential`, `pkg-config`, the GTK 3 runtime, Postgres 17 and 18 with their clients, pgvector for 18, `unzip`, `git`, `curl`, `bun`, and the `docker compose` plugin. A job that runs `apt-get install` for these finds them installed. `ci-pool-image.timer` rebuilds the image every hour from the latest official image (apt and bun update once a day), so a job never pulls or installs them. Until the first build ends, jobs start from the official image. The list is `DOCKERFILE` in `ci-pool.py`.
 - The CPU and memory caps above, and at most 8192 processes.
-- No Docker daemon: the host's Docker socket is not mounted. Jobs that build or run containers stay on GitHub-hosted runners.
+- No Docker daemon by default: the host's Docker socket is never mounted. A repository with `docker: dind` gets a daemon of its own (see [Docker in a job](#docker-in-a-job)). Other jobs that build or run containers stay on GitHub-hosted runners.
 - An empty `_work` directory for each job, emptied when the container starts.
 - Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), and the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`). The downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`) stay for each slot, not for the repository, because apt locks that directory.
 - Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, fresh Postgres 17 and 18 clusters. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
@@ -93,6 +95,18 @@ The image has a `main` cluster for Postgres 17 and for Postgres 18. Both cluster
 
 Stop the other version first (`sudo pg_ctlcluster 17 main stop`), or the start fails on port 5432. Postgres 18 has pgvector: `CREATE EXTENSION vector;` works after the start.
 
+## Docker in a job
+
+A repository entry with `docker: dind` gives each of its slots a Docker daemon of its own, for example for `docker compose up` in an end-to-end test. The job never gets the host's Docker socket.
+
+- For each job, the slot starts a sidecar container `ci-dind-<slot>` from `docker:dind-rootless` on a network `ci-dind-<slot>` of its own. The job container joins the sidecar's network namespace, so no other container reaches the daemon or the ports that it publishes.
+- The job gets `DOCKER_HOST=tcp://localhost:2376`, `DOCKER_TLS_VERIFY=1`, and `DOCKER_CERT_PATH=/certs/client` (the client certificate only, read-only). A port that a compose service publishes is on the job's `localhost`, as on a GitHub-hosted runner. The pool's image has the `docker` CLI and the compose plugin; a custom `image` must bring its own.
+- The daemon keeps its images and containers in `<data_dir>/ci-pool/dind/<slot>/`, which the slot deletes and makes again for each job. Each job starts with no images.
+- The sidecar has the same CPU, memory, and process caps as the job container. The containers inside it count against the sidecar's caps. A `docker: dind` slot can thus use two times `job_cpus` and `job_memory_gb`, which the [pool size](#pool-size) does not count: lower `total_slots` when many slots use it.
+- The slot waits until the daemon answers before it starts the job, and removes the sidecar and its network after the job container, with the same stop grace period and wait for the removal.
+
+The sidecar runs with `--privileged`, also in its rootless form. Code that gets root in the sidecar has root on the host. The job's code reaches only the daemon, which runs as a non-root user in a user namespace, so a container that a job starts is not root on the host. The job container itself is never privileged. Use `docker: dind` only for a private repository whose pull requests come from its own branches. The job-started hook already refuses code from forks.
+
 ## Files on the host
 
 | Path | Contents |
@@ -107,6 +121,7 @@ Stop the other version first (`sudo pg_ctlcluster 17 main stop`), or the start f
 | `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `home/`, `cargo-registry/`, `cargo-git/` | The repository's tool cache, `~/.cache`, and cargo directories. |
 | `<data_dir>/ci-pool/scratch/<slot>/` | The slot's `/tmp`, Postgres cluster directory, and `~/.bun`, deleted at each job start. |
 | `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
+| `<data_dir>/ci-pool/dind/<slot>/` | With `docker: dind`: the slot's Docker daemon data and TLS certificates, deleted at each job start. |
 
 No token is stored. Each slot reads the host's `gh` login when it starts. When an account is not in the `docker` group, the script runs `sudo -n docker`.
 
@@ -115,7 +130,7 @@ No token is stored. Each slot reads the host's `gh` login when it starts. When a
 ```bash
 systemctl --user list-units 'ci-runner@*'          # the slots and their state
 journalctl --user -u 'ci-runner@*' -f              # runner names, job progress, errors
-sudo docker ps --filter label=crewship.ci-pool # one container for each slot
+sudo docker ps --filter label=crewship.ci-pool # one container for each slot, two with docker: dind
 gh api repos/OWNER/NAME/actions/runners            # the runners GitHub knows
 ```
 

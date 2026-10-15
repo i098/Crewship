@@ -78,6 +78,15 @@ SCRATCH_DIRS = {"tmp": "/tmp", "postgresql": "/var/lib/postgresql", "bun": "/hom
 APT_DIRS = {"archives": "/var/cache/apt/archives", "lists": "/var/lib/apt/lists"}
 # Subdirectories of a repository's cache directory <data_dir>/ci-pool/cache/<owner>-<name>/.
 CACHE_DIRS = ("tool", "home", "cargo-registry", "cargo-git")
+# A repository entry with "docker": "dind" gets a Docker daemon of its own in each slot: a
+# rootless dockerd in a sidecar container on a network of the slot, never the host's socket.
+# The image still needs --privileged (for its user namespace and mounts); the job's code
+# reaches only the daemon, which runs as the image's non-root `rootless` user (DIND_UID).
+DIND_IMAGE = "docker:dind-rootless"
+DIND_UID = 1000
+# The job shares the sidecar's network namespace, so the daemon and every port that a
+# `docker compose` service publishes are on the job's localhost.
+DIND_ENV = {"DOCKER_HOST": "tcp://localhost:2376", "DOCKER_TLS_VERIFY": "1", "DOCKER_CERT_PATH": "/certs/client"}
 HOOK_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 UNIT_TEXT = """\
 # Written by ci-pool.py apply (Crewship); instances come from crewship.ci_pool.
@@ -172,6 +181,8 @@ RUN apt-get update -qq \\
 RUN [ -d /etc/postgresql/17/main ] || (pg_createcluster 17 main && pg_conftool 17 main set port 5432) \
  && for v in 17 18; do pg_ctlcluster $v main stop 2>/dev/null || true; echo manual > /etc/postgresql/$v/main/start.conf; done \
  && cp -a /var/lib/postgresql /opt/postgresql-seed
+# The compose plugin, for repositories whose jobs talk to their own daemon (DIND_IMAGE).
+COPY --from={DIND_IMAGE} /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/
 USER runner
 """
 # Runs as the image's `runner` user, which has passwordless sudo: empty the
@@ -324,7 +335,7 @@ def apply(check):
                 systemctl("disable", "--now", unit)
     stale, held = [], set()
     for path in [*sorted((root / "work").glob("*")), *sorted((root / "scratch").glob("*")),
-                 *sorted((root / "apt").glob("*"))]:
+                 *sorted((root / "apt").glob("*")), *sorted((root / "dind").glob("*"))]:
         if path.name in want:
             continue
         if busy(path.name):
@@ -381,6 +392,37 @@ def refresh_image():
     return done.returncode
 
 
+def env_args(env):
+    return [arg for key, value in env.items() for arg in ("--env", f"{key}={value}")]
+
+
+def start_dind(instance, limits, path):
+    """Start the slot's own Docker daemon in a fresh sidecar on its own network, with its data
+    and TLS certificates in `path`, and return once it answers the way the job will call it."""
+    name = f"ci-dind-{instance}"
+    if not clear_container(name):
+        raise RuntimeError("the previous Docker sidecar is still listed after its removal")
+    # The previous daemon's files belong to its user namespace's uids, hence sudo.
+    quiet(["sudo", "-n", "rm", "-rf", "--one-file-system", str(path)])
+    path.mkdir(parents=True)
+    quiet(["sudo", "-n", "install", "-d", "-o", str(DIND_UID), "-g", str(DIND_UID),
+           str(path / "data"), str(path / "certs")])
+    quiet([*docker(), "network", "rm", name])
+    subprocess.run(bounded([*docker(), "network", "create", name]), check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(bounded([
+        *docker(), "run", "--detach", "--rm", "--pull", "missing", "--name", name,
+        "--label", f"crewship.ci-pool={instance}", "--network", name, "--privileged", *limits,
+        "--volume", f"{path / 'data'}:/home/rootless/.local/share/docker",
+        "--volume", f"{path / 'certs'}:/certs",
+        DIND_IMAGE,
+    ]), check=True, stdout=subprocess.DEVNULL)
+    deadline = time.monotonic() + DOCKER_TIMEOUT
+    while quiet([*docker(), "exec", *env_args(DIND_ENV), name, "docker", "version"]):
+        if time.monotonic() > deadline:
+            raise RuntimeError("the slot's Docker daemon did not answer")
+        time.sleep(5)
+
+
 def run(instance):
     unit = f"ci-runner@{instance}.service"
     if quiet(["systemctl", "--user", "--quiet", "is-enabled", unit]):
@@ -427,9 +469,16 @@ def run(instance):
     # systemctl stop: unwind through `finally` so the container goes too.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     container, rc, started, ours = f"ci-runner-{instance}", 1, time.monotonic(), False
+    sidecar, dind = f"ci-dind-{instance}", root / "dind" / instance
+    limits = ["--cpus", str(pool["job_cpus"]),
+              "--memory", f"{pool['job_memory_gb']}g", "--memory-swap", f"{pool['job_memory_gb']}g",
+              "--pids-limit", "8192"]
+    own_docker = entry.get("docker") == "dind"
     try:
         claim_container(container)
         ours = True
+        if own_docker:
+            start_dind(instance, limits, dind)
         # The single-use JIT config travels in a 0600 env file, never in argv.
         with tempfile.NamedTemporaryFile("w", dir=os.environ.get("XDG_RUNTIME_DIR")) as env:
             env.write(f"ACTIONS_RUNNER_INPUT_JITCONFIG={jit['encoded_jit_config']}\n")
@@ -437,9 +486,7 @@ def run(instance):
             subprocess.run(bounded([
                 *docker(), "create", "--init", "--pull", "missing", "--rm", "--name", container,
                 "--label", f"crewship.ci-pool={instance}",
-                "--cpus", str(pool["job_cpus"]),
-                "--memory", f"{pool['job_memory_gb']}g", "--memory-swap", f"{pool['job_memory_gb']}g",
-                "--pids-limit", "8192",
+                *limits,
                 "--env-file", env.name,
                 "--env", "RUNNER_TOOL_CACHE=/opt/hostedtoolcache",
                 # Set on GitHub-hosted runners; tools such as Ansible read it.
@@ -455,6 +502,9 @@ def run(instance):
                 "--env", "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun",
                 "--env", "npm_config_cache=/home/runner/.cache/npm",
                 "--env", "npm_config_store_dir=/home/runner/.cache/pnpm-store",
+                # Never the host's socket: the slot's own daemon, and only its client certificate.
+                *(["--network", f"container:{sidecar}", "--volume", f"{dind / 'certs/client'}:/certs/client:ro",
+                   *env_args(DIND_ENV)] if own_docker else []),
                 # --mount, not --volume: a missing hook fails the create instead of
                 # becoming an empty directory, so no job runs without the check.
                 "--mount", f"type=bind,src={HOOK},dst=/home/runner/job-started.sh,readonly",
@@ -465,8 +515,11 @@ def run(instance):
     except Exception as error:
         print(f"{instance}: container start failed: {error}", file=sys.stderr)
     finally:
-        if ours:  # never the container of a previous start that still runs a job
+        if ours:  # never the containers of a previous start that still runs a job
             clear_container(container)
+            if own_docker:
+                clear_container(sidecar)
+                quiet([*docker(), "network", "rm", sidecar])
         # GitHub already removed a runner that finished a job, so this is then a harmless 404.
         quiet(["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/runners/{jit['runner']['id']}"])
     if not rc and time.monotonic() - started < MIN_JOB_SECONDS:
@@ -503,10 +556,10 @@ def slot_units():
 
 
 def container_states():
-    """{container name: state} of every slot container, stopped ones too; None unless docker
+    """{container name: state} of every slot container and Docker sidecar, stopped ones too; None unless docker
     answered in time."""
     done = subprocess.run(
-        bounded([*docker(), "ps", "--all", "--filter", "name=^/ci-runner-", "--format", "{{.Names}} {{.State}}"],
+        bounded([*docker(), "ps", "--all", "--filter", "name=^/ci-(runner|dind)-", "--format", "{{.Names}} {{.State}}"],
                 WATCH_TIMEOUT),
         capture_output=True, text=True,
     )
@@ -585,7 +638,7 @@ def stuck_containers(containers, units):
     return [
         name for name, state in sorted(containers.items())
         if state in ("removing", "dead")
-        and units.get(name[len("ci-runner-"):], ("inactive",))[0] in ("inactive", "failed")
+        and units.get(name.split("-", 2)[2], ("inactive",))[0] in ("inactive", "failed")
     ]
 
 
