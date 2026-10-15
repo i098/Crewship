@@ -199,8 +199,8 @@
       ansible.builtin.import_tasks: tasks/shared_postgres.yml
       when:
         - crewship_account_ready | bool
-        - crewship_cfg.profiles.shared_postgres | default(false) | bool
-      tags: [fleet, shared_postgres]
+        - crewship_cfg.profiles.project_databases | default(false) | bool
+      tags: [fleet, project_databases]
 
     - name: Fleet guard units - retire the flotilla units, render and start the crewship ones
       ansible.builtin.import_tasks: tasks/fleet_units.yml

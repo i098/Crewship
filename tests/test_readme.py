@@ -24,7 +24,7 @@ FEATURES = {
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
-    "crewship.profiles.shared_postgres": "docs/shared-postgres.md",
+    "crewship.profiles.project_databases": "docs/shared-postgres.md",
     "crewship.profiles.jj": "docs/jj.md",
     "crewship.profiles.fdu": "docs/configuration.md#profiles",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
@@ -51,8 +51,8 @@ EXCLUDED = {
     "crewship.imessage.bluebubbles",
     "crewship.imessage.cards",
     "crewship.instructions_mode",
-    # Another name of crewship.profiles.shared_postgres, folded into it.
-    "crewship.profiles.project_databases",
+    # The old name of crewship.profiles.project_databases, folded into it.
+    "crewship.profiles.shared_postgres",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",
 }

@@ -318,6 +318,10 @@ def test_dock_with_turns_on_the_choices_and_what_they_need(tmp_path, monkeypatch
     assert on(dock(tmp_path / "all", monkeypatch, with_=["all"])) == {*ship.OPT_IN, "agents", "firstmate"}
 
 
+def test_dock_with_still_takes_the_old_profile_name(tmp_path, monkeypatch):
+    assert on(dock(tmp_path, monkeypatch, with_=["shared_postgres"])) == {"agents", "firstmate", "project_databases", "docker"}
+
+
 @pytest.mark.parametrize("with_", [[""], ["none"]])
 def test_dock_with_nothing_keeps_the_core(tmp_path, monkeypatch, with_):
     assert on(dock(tmp_path, monkeypatch, with_=with_)) == {"agents", "firstmate"}
@@ -456,7 +460,7 @@ def test_second_apply_does_not_reopen_the_questions(
     assert ship.main() == 0
     assert not marker.exists()
     assert "New-host questions did not complete (omp exited 1)" in capsys.readouterr().out
-    assert f"crewship.profiles.shared_postgres to true in {host.resolve()} " in launches[0][1]
+    assert f"crewship.profiles.project_databases to true in {host.resolve()} " in launches[0][1]
     assert ship.main() == 0
     assert [command[0] for command in launches] == [tmp_path / ".local/bin/omp"] * 2
     assert marker.is_file()
