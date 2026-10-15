@@ -249,7 +249,7 @@ def test_fill_rate_alarm_fires_below_warn_and_names_the_fastest_grower(guard):
         f"{40 * G}\t/var\n{11 * G}\t/var/log/syslog\n{10 * G}\t/var/log\n"
         f"{20 * G}\t/home\n{5 * G}\t/home/tester/work\n"
     )
-    guard.run()
+    guard.run(STORAGE_FILL_MIN_PCT="0")  # the 70% floor has its own test below
     (alert,) = guard.alerts()
     assert alert.startswith("FILL / 50% used, 50.0G free: filling: +10.0G in 10m")
     assert "grew most in the 10m since the previous scan: /var/log/syslog +10.0G" in alert
@@ -395,3 +395,21 @@ def test_below_crit_and_in_dry_run_the_worktree_output_stays(guard):
     assert f"would remove {repo}/node_modules" in out
     assert "CRIT worktree step (would run now" in out
     assert (repo / "node_modules/pkg/index.js").is_file()
+
+
+@pytest.mark.parametrize(("pct", "alerted"), [(25, False), (75, True)])
+def test_fill_rate_alarm_waits_for_the_fill_floor(guard, pct, alerted):
+    state = guard.doctor / ".storage-guard"
+    state.mkdir()
+    now = int(time.time())
+    (state / "_").write_text(f"{now - 600} {(pct - 10) * G} 0 0 0\n")  # +10G in 10 min
+    guard.fs({"/": pct})
+    dry = guard.run("--dry-run").stdout
+    assert ("+10.0G in 10m" in dry) and (("below FILL floor 70%" in dry) == (not alerted))
+    guard.run()
+    if alerted:
+        (alert,) = guard.alerts()
+        assert alert.startswith(f"FILL / {pct}% used, {100 - pct}.0G free: filling: +10.0G in 10m")
+    else:
+        assert guard.alerts() == []
+    assert (state / "_").read_text().split()[1] == str(pct * G)  # sampled, so a rate exists at the crossing
