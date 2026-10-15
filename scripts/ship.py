@@ -324,7 +324,7 @@ def doctor(document):
         "HOME": str(home),
         "PATH": str(home / ".local/bin") + ":/usr/local/bin:/usr/bin:/bin",
     }
-    tools = ["herdr", "node", "bun", "uv", "git"]
+    tools = ["herdr", "node", "bun", "uv", "git", "rg", "sgrep"]
     if config["profiles"]["agents"]:
         tools += [
             "omp",
