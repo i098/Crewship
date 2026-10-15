@@ -46,28 +46,10 @@ function record(kind: string, thread: string, text = "") {
   } catch {}
 }
 
-async function reply(args: string[]) {
-  const a = (() => {
-    try {
-      return parseArgs({ args, allowPositionals: true, options: { thread: { type: "string" }, react: { type: "string" }, typing: { type: "boolean" } } });
-    } catch (e) {
-      die(String(e));
-    }
-  })();
-  const { thread, react = "", typing = false } = a.values;
-  const text = a.positionals.join(" ").replace(/\s+/g, " ").trim();
-  const length = [...text].length;
-  if (length > REPLY_MAX) die(`reply is ${length} characters: keep it under ${REPLY_MAX}, short and plain`);
-  if (!(text || react || typing)) die("nothing to send: give TEXT, --react or --typing");
-  const kinds = [typing && length > TYPING_MIN && "typing", react && "react", text && "text"].filter(Boolean);
-  if (!kinds.length) return console.log("no typing indicator for a short reply: nothing to send");
-
-  const operator = env.INSTAGRAM_DM_OPERATOR;
-  if (!operator) refuse("set INSTAGRAM_DM_OPERATOR");
-  if (thread && thread !== operator) refuse(`thread ${thread} is not the operator's`);
-  if (existsSync(`${dir}/stop`)) refuse(`the line is stopped (${readFileSync(`${dir}/stop`, "utf8").trim() || "stopped"})`);
+// The operator's latest DM, from the log the webhook writes.
+function lastDm(operator: string): Row | undefined {
   const log = env.INSTAGRAM_DM_LOG || `${dir}/messages.jsonl`;
-  const last = (existsSync(log) ? readFileSync(log, "utf8").split("\n") : [])
+  return (existsSync(log) ? readFileSync(log, "utf8").split("\n") : [])
     .flatMap((l) => {
       try {
         return [JSON.parse(l) as Row];
@@ -76,30 +58,59 @@ async function reply(args: string[]) {
       }
     })
     .findLast((r) => r.thread === operator);
+}
+
+// The operator, his latest DM and the token, or an exit with the reason no send may go out now.
+function cleared(thread?: string): { operator: string; last: Row; token: string } {
+  const operator = env.INSTAGRAM_DM_OPERATOR;
+  if (!operator) refuse("set INSTAGRAM_DM_OPERATOR");
+  if (thread && thread !== operator) refuse(`thread ${thread} is not the operator's`);
+  if (existsSync(`${dir}/stop`)) refuse(`the line is stopped (${readFileSync(`${dir}/stop`, "utf8").trim() || "stopped"})`);
+  const last = lastDm(operator);
   if (!last) refuse("no DM from the operator yet: the API answers only within 24 h of his last DM");
   const age = Date.now() / 1000 - last.at;
   if (age >= WINDOW_S) refuse(`outside the 24-hour window: his last DM was ${Math.floor(age / 3600)} h ago`);
   if (!existsSync(tokenFile)) refuse(NO_TOKEN);
   const { token }: Saved = JSON.parse(readFileSync(tokenFile, "utf8"));
   secret = token;
+  return { operator, last, token };
+}
 
-  for (const kind of kinds) {
-    const action =
-      kind === "typing"
-        ? { sender_action: "typing_on" }
-        : kind === "react"
-          ? { sender_action: "react", payload: { message_id: last.id, reaction: react } }
-          : { message: { text } };
+function parse(args: string[]) {
+  try {
+    return parseArgs({ args, allowPositionals: true, options: { thread: { type: "string" }, react: { type: "string" }, typing: { type: "boolean" } } });
+  } catch (e) {
+    die(String(e));
+  }
+}
+
+async function reply(args: string[]) {
+  const a = parse(args);
+  const { thread, react = "", typing = false } = a.values;
+  const text = a.positionals.join(" ").replace(/\s+/g, " ").trim();
+  const length = [...text].length;
+  if (length > REPLY_MAX) die(`reply is ${length} characters: keep it under ${REPLY_MAX}, short and plain`);
+  if (!(text || react || typing)) die("nothing to send: give TEXT, --react or --typing");
+  const kinds = [typing && length > TYPING_MIN && "typing", react && "react", text && "text"].filter(Boolean);
+  if (!kinds.length) return console.log("no typing indicator for a short reply: nothing to send");
+
+  const { operator, last, token } = cleared(thread);
+  const actions: Record<string, object> = {
+    typing: { sender_action: "typing_on" },
+    react: { sender_action: "react", payload: { message_id: last.id, reaction: react } },
+    text: { message: { text } },
+  };
+  for (const kind of kinds as string[]) {
     const res = await fetch(`${base}/v25.0/me/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ recipient: { id: operator }, ...action }),
+      body: JSON.stringify({ recipient: { id: operator }, ...actions[kind] }),
     }).catch((e) => die(`send failed: ${kind} ${e}`));
     if (!res.ok) {
       const body: GraphReply = await res.json().catch(() => ({}));
       die(`send failed: ${kind} HTTP ${res.status} ${body.error?.message ?? ""}`);
     }
-    record(kind, operator, kind === "react" ? react : kind === "text" ? text : "");
+    record(kind, operator, { react, text }[kind] ?? "");
     if (kind === "typing") await Bun.sleep(800); // a beat of typing before the text
   }
 }
