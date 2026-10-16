@@ -1,0 +1,213 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Crewship <noreply@example.invalid>
+Date: Thu, 15 Oct 2026 03:00:00 +0000
+Subject: [PATCH] fix(herdr): close a pane on clean agent exit and never
+ relaunch a closed pane
+
+The launch line closes the Herdr pane when the agent exits with status 0, 129,
+130, or 143; a crash leaves the pane as a dead husk. Secondmate liveness records
+a pane gone under a running server as closed on purpose and does not relaunch
+it. The stale wake and the stuck-crewmate-recovery skill say the same. fm-control
+exit keeps the pane for its own relaunch.
+---
+ .../skills/stuck-crewmate-recovery/SKILL.md   |  4 +-
+ bin/fm-control.sh                             |  4 ++
+ bin/fm-secondmate-liveness-lib.sh             | 10 +++++
+ bin/fm-spawn.sh                               | 15 ++++++-
+ bin/fm-teardown.sh                            |  4 +-
+ bin/fm-watch.sh                               |  2 +-
+ docs/herdr-backend.md                         |  8 ++++
+ tests/fm-secondmate-liveness.test.sh          | 39 +++++++++++++++++++
+ 8 files changed, 81 insertions(+), 5 deletions(-)
+
+diff --git a/.agents/skills/stuck-crewmate-recovery/SKILL.md b/.agents/skills/stuck-crewmate-recovery/SKILL.md
+index ffef2277..360cfc11 100644
+--- a/.agents/skills/stuck-crewmate-recovery/SKILL.md
++++ b/.agents/skills/stuck-crewmate-recovery/SKILL.md
+@@ -40,7 +40,9 @@ Do not sweep another home's endpoints or infer ownership from a matching window
+ 
+ Before relaunch, prove that no live agent still owns the recorded task and that the existing worktree remains available.
+ Preserve its uncommitted changes and commits, keep the same task identity, and resume or relaunch the recorded harness in that existing worktree with the same brief plus a concise progress note.
+-A HERDR endpoint that is not merely idle but destroyed - a pane or workspace removed in Herdr churn - is recovered by that same relaunch, which creates one fresh endpoint in the existing worktree and rebinds the task's record to it; nothing special is needed, and the worktree is untouched ([`docs/agent-control.md`](../../../docs/agent-control.md) "Reclaiming a task whose endpoint is gone").
++A Herdr pane that is gone while its server runs was closed on purpose: by the operator, or by the launch line after the agent exited cleanly, because a crash leaves the pane in place as a `dead` husk.
++Never relaunch such a task on your own; report it closed with its worktree and record intact, and relaunch it only when the operator asks.
++That operator-requested relaunch creates one fresh endpoint in the existing worktree and rebinds the task's record to it, and the worktree is untouched ([`docs/agent-control.md`](../../../docs/agent-control.md) "Reclaiming a task whose endpoint is gone").
+ That relaunch proves the endpoint is destroyed before it rebinds, so a Herdr server that was merely stopped is adopted back rather than duplicated.
+ On tmux there is no reclaim: a task record carries no socket identity for its endpoint, so a `missing` window cannot be told apart from one on a tmux server this seat cannot address, and both `exit` and `relaunch` refuse.
+ Do not work around either refusal by respawning - it means a live agent may still hold that worktree.
+diff --git a/bin/fm-control.sh b/bin/fm-control.sh
+index aa4c9af2..c2a9b7e1 100755
+--- a/bin/fm-control.sh
++++ b/bin/fm-control.sh
+@@ -641,6 +641,10 @@ do_exit() {
+   # authoritative proof is the agent-state wait below. The retried Enter still
+   # matters, because a slash command opens a completion popup on some TUIs that
+   # swallows the first Enter.
++  # This verb preserves the endpoint, so tell the Herdr launch line
++  # (bin/fm-spawn.sh) to keep the pane when the agent exits.
++  [ "$BACKEND" != herdr ] || : > "$STATE/$ID.keep-pane" \
++    || die "could not write $STATE/$ID.keep-pane, so the exit would close task $ID's pane"
+   verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+     || die "the exit command could not be sent to task $ID on $BACKEND"
+   [ "$verdict" != send-failed ] \
+diff --git a/bin/fm-secondmate-liveness-lib.sh b/bin/fm-secondmate-liveness-lib.sh
+index 9aaeb2e8..87ce7486 100644
+--- a/bin/fm-secondmate-liveness-lib.sh
++++ b/bin/fm-secondmate-liveness-lib.sh
+@@ -228,6 +228,16 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
+       FM_SM_LIVE_LINE="secondmate $id already live (backend=$backend)"
+       ;;
+     dead|missing)
++      # A Herdr pane that is gone while its server runs was closed on purpose:
++      # by the operator, or by the launch line after a clean agent exit
++      # (bin/fm-spawn.sh). A crash leaves the pane as a `dead` husk instead.
++      # Record the close once and never relaunch it.
++      if [ "$agent_state" = missing ] && [ "$backend" = herdr ] && fm_backend_source herdr \
++        && [ "$(fm_backend_herdr_server_running_state "${target%%:*}")" = running ]; then
++        [ -e "$STATE/.secondmate-closed-$id" ] || date +%s > "$STATE/.secondmate-closed-$id" 2>/dev/null || true
++        FM_SM_LIVE_REASON="herdr pane was closed on purpose; not relaunched (backend=$backend)"
++        return 0
++      fi
+       FM_SM_LIVE_STATUS=relaunchable
+       if [ "$agent_state" = dead ]; then
+         FM_SM_LIVE_KILL=1
+diff --git a/bin/fm-spawn.sh b/bin/fm-spawn.sh
+index 0603e651..50206909 100755
+--- a/bin/fm-spawn.sh
++++ b/bin/fm-spawn.sh
+@@ -1775,7 +1775,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
+   # here as well would be a second path to the same outcome, so this refuses
+   # and names the one that owns it.
+   if [ "$RELAUNCH_REBIND" -eq 1 ] && [ "$KIND" = secondmate ]; then
+-    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it)" >&2
++    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate; liveness never relaunches a closed Herdr pane)" >&2
+     exit 1
+   fi
+   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
+@@ -5287,6 +5287,19 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
+   fi
+   LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
+ fi
++# Herdr keeps a pane while its shell lives, and the agent runs as a child of
++# that shell (or of the nested treehouse subshell), so a clean agent exit used
++# to leave an idle shell pane behind. Close the pane when the agent ends on
++# purpose: status 0, or SIGHUP, SIGINT, or SIGTERM. Any other status is a crash,
++# so the shell and pane stay as a husk that recovery classifies `dead`.
++# bin/fm-control.sh exit writes state/<id>.keep-pane first, because that verb
++# preserves the endpoint for a relaunch into the same pane.
++if [ "$BACKEND" = herdr ]; then
++  keep_pane=$(shell_quote "$STATE_REAL/$ID.keep-pane")
++  # shellcheck disable=SC2016 # expands in the pane shell, not here.
++  LAUNCH="$LAUNCH"'
++case $? in 0|129|130|143) [ -e '"$keep_pane"' ] || if [ -n "${HERDR_SESSION:-}" ]; then "${HERDR_BIN_PATH:-herdr}" pane close "$HERDR_PANE_ID" --session "$HERDR_SESSION"; else "${HERDR_BIN_PATH:-herdr}" pane close "$HERDR_PANE_ID"; fi >/dev/null 2>&1 ;; esac; rm -f '"$keep_pane"
++fi
+ # Implement the launch-delivery contract in this script's header. The full
+ # home-identity hash isolates equal task ids across homes, and the spawn token in
+ # the final filename keeps a buffered source line bound to this incarnation.
+diff --git a/bin/fm-teardown.sh b/bin/fm-teardown.sh
+index 24ed4644..ee65e757 100755
+--- a/bin/fm-teardown.sh
++++ b/bin/fm-teardown.sh
+@@ -3784,8 +3784,8 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
+   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
+   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
+   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" "$STATE/$ID.devin-config.json" \
+-  "$STATE/.$ID.branch-outcome-index" \
+-  "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
++  "$STATE/.$ID.branch-outcome-index" "$STATE/$ID.keep-pane" \
++  "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID" "$STATE/.secondmate-closed-$ID"
+ # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
+ # retired endpoint; teardown only runs after landing is confirmed, so any
+ # leftover unhandled steer here is moot rather than unlanded work.
+diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
+index 8875e8fc..87a51b89 100755
+--- a/bin/fm-watch.sh
++++ b/bin/fm-watch.sh
+@@ -1480,7 +1480,7 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
+   agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
+   case "$agent_state" in
+     dead) detail='the endpoint is still there with no agent running in it' ;;
+-    missing) detail='the recorded endpoint is gone' ;;
++    missing) detail='the recorded endpoint is gone - it was closed on purpose (a crash leaves it in place), so do not relaunch it unless the operator asks' ;;
+     *) rm -f "$marker"; return 1 ;;
+   esac
+   # Re-arm the idle timer on BOTH paths below, so the backend probe above stays on
+diff --git a/docs/herdr-backend.md b/docs/herdr-backend.md
+index 429b4359..8807312f 100644
+--- a/docs/herdr-backend.md
++++ b/docs/herdr-backend.md
+@@ -670,6 +670,14 @@ A restored same-labeled tab with a missing pane or no registered agent is a husk
+ Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
+ This prevents closing the workspace's last tab before a replacement exists.
+ 
++### Agent exit and pane close
++
++The agent runs as a child of the pane shell, so the launch line closes its own pane after the agent ends on purpose: exit status 0, or SIGHUP, SIGINT, or SIGTERM.
++Any other status is a crash, and the pane stays as a `dead` husk that recovery can relaunch.
++`bin/fm-control.sh exit` preserves the endpoint, so it writes `state/<id>.keep-pane` before the exit command, and the launch line keeps the pane and removes that marker.
++A pane that is gone while its server runs was therefore closed on purpose, by the operator or by that launch line.
++Secondmate liveness records it in `state/.secondmate-closed-<id>` and never relaunches it; a stopped server still reads relaunchable, because a restart restores the pane.
++
+ ### Stale agent registrations
+ 
+ A registration alone never proves an agent.
+diff --git a/tests/fm-secondmate-liveness.test.sh b/tests/fm-secondmate-liveness.test.sh
+index e517cf91..7b47e6e3 100755
+--- a/tests/fm-secondmate-liveness.test.sh
++++ b/tests/fm-secondmate-liveness.test.sh
+@@ -602,6 +602,44 @@ test_sweep_noop_with_no_secondmate_meta() {
+   pass "sweep: a silent no-op with no kind=secondmate meta present (a secondmate home's own natural scoping)"
+ }
+ 
++# --- library level: a closed Herdr pane is never relaunched -----------------
++# A Herdr pane that is gone while its session server runs was closed on
++# purpose (by the operator, or by the launch line after a clean agent exit), so
++# the probe records it and does not relaunch it. A stopped server still reads
++# relaunchable, because a restart restores the pane.
++test_herdr_closed_pane_is_never_relaunched() {
++  local w fb running out
++  w="$TMP_ROOT/herdr-closed"
++  fb=$(fm_fakebin "$w")
++  mkdir -p "$w/home/state"
++  printf 'window=sess:w1:p1\nbackend=herdr\nkind=secondmate\nharness=omp\n' > "$w/home/state/sm1.meta"
++  cat > "$fb/herdr" <<'SH'
++#!/usr/bin/env bash
++case "$1 $2" in
++  'pane get') printf '{"error":{"code":"pane_not_found"}}\n'; exit 1 ;;
++  'status --json') printf '{"server":{"running":%s}}\n' "$FM_FAKE_HERDR_RUNNING"; exit 0 ;;
++esac
++exit 1
++SH
++  chmod +x "$fb/herdr"
++  for running in true false; do
++    rm -f "$w/home/state/.secondmate-closed-sm1"
++    # shellcheck disable=SC2016 # positional params expand in the child shell.
++    out=$(env PATH="$fb:$BASE_PATH" STATE="$w/home/state" FM_HOME="$w/home" FM_FAKE_HERDR_RUNNING=$running \
++      bash -c '. "$0/bin/fm-secondmate-liveness-lib.sh"
++        fm_secondmate_liveness_probe "$1" sm1 poll
++        printf "%s|%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"' "$ROOT" "$w/home/state/sm1.meta")
++    if [ "$running" = true ]; then
++      [ "$out" = 'skipped|missing' ] || fail "a pane gone under a running server must not be relaunched, got: $out"
++      [ -s "$w/home/state/.secondmate-closed-sm1" ] || fail "a closed pane must be recorded in .secondmate-closed-sm1"
++    else
++      [ "$out" = 'relaunchable|missing' ] || fail "a stopped server must stay relaunchable, got: $out"
++      [ ! -e "$w/home/state/.secondmate-closed-sm1" ] || fail "a stopped server is not a closed pane"
++    fi
++  done
++  pass "poll probe: a Herdr pane closed under a running server is recorded and never relaunched"
++}
++
+ # --- library level: the watcher's poll-mode remote probe ---------------------
+ # bin/fm-secondmate-liveness-lib.sh's `poll` mode is the read-only probe the
+ # watcher tick runs per cadence: exactly one remote `state` call, `dead` and
+@@ -719,6 +757,7 @@ test_sweep_skipped_under_detect_only
+ test_sweep_noop_with_no_secondmate_meta
+ test_sweep_skips_mate_whose_liveness_lock_is_held
+ test_sweep_refuses_relaunch_on_ledger_errors
++test_herdr_closed_pane_is_never_relaunched
+ test_remote_poll_probe_maps_states
+ test_remote_poll_probe_unreachable_preserves_route
+ 
+-- 
+2.53.0
+
