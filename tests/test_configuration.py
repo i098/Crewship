@@ -1197,8 +1197,9 @@ def test_mac_ssh_keeps_the_existing_key_and_other_host_entries(tmp_path):
 
 
 def test_herdr_config_does_not_resume_agents_on_restore():
-    import jinja2
     import tomllib
+
+    import jinja2
 
     env = jinja2.Environment(undefined=jinja2.ChainableUndefined)
     env.filters.update(comment=lambda text: "", bool=bool)
