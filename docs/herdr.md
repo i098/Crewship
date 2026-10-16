@@ -2,6 +2,8 @@
 
 Crewship renders `~/.config/herdr/config.toml` from [`blueprint/ansible/templates/herdr.toml.j2`](../blueprint/ansible/templates/herdr.toml.j2) and the `herdr` block of `.local/host.yml`. This guide covers the two sidebar layouts it ships, Spaces and Agents, and the two feeders that report their `$` tokens: an omp extension for Agents and a reporter timer for Spaces.
 
+The config sets `[session] resume_agents_on_restore = false`. After a Herdr server restart, each pane comes back as a plain shell: Firstmate relaunches its own agents through its launch line, which closes the pane when the agent exits on purpose. Start main Firstmate again by hand with `exec omp` in its pane, so that quitting omp also closes the pane.
+
 The sidebar is 46 columns wide (`sidebar_width`; it may grow to `sidebar_max_width`, 56). That fits the widest pull request line: a 4-digit pull request and issue, 5-digit line counts and a 3-digit file count. There is no status word: the state icon already shows it. The recipe sets `[ui] status_indicators = "symbols"`, so the state icon is a different symbol for each agent state, not only a different color. This guide calls it the state dot.
 
 ## Spaces: one entry per home

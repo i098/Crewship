@@ -1194,3 +1194,25 @@ def test_mac_ssh_keeps_the_existing_key_and_other_host_entries(tmp_path):
     assert "changed=0" in second
     assert (home / ".ssh/id_ed25519_mac").read_bytes() == key
     assert (home / ".ssh/config").read_text() == config
+
+
+def test_herdr_config_does_not_resume_agents_on_restore():
+    import tomllib
+
+    import jinja2
+
+    env = jinja2.Environment(undefined=jinja2.ChainableUndefined)
+    env.filters.update(comment=lambda text: "", bool=bool)
+    source = (ROOT / "blueprint/ansible/templates/herdr.toml.j2").read_text()
+    class Anything(dict):
+        def __getattr__(self, name):
+            return Anything()
+
+        def __int__(self):
+            return 1
+
+        def __str__(self):
+            return "1"
+
+    config = tomllib.loads(env.from_string(source).render(crewship_cfg=Anything()))
+    assert config["session"] == {"resume_agents_on_restore": False}

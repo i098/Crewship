@@ -143,6 +143,7 @@ Every host that starts services (`start_services: true`); the container worker i
 | `0002-watch-end-idle-wait-for-inbox-note.patch` | The watcher ends its idle wait within about 1 s when an inbox note arrives, instead of up to the full poll interval. Together, the two make a text from the iMessage bridge wake Firstmate in about 2 s. |
 | `0003-brief-crewboard.patch` | Adds the optional [Firstmate board instructions](board.md#firstmate-instructions). |
 | `0004-watch-crewboard-event-source.patch` | Needs 0001 and 0002. With the board on, a message on the board's `fm` topic wakes Firstmate within about 1 s, and an optional doorbell rings a task's pane for a `task/<id>` message ([Wake Firstmate from the board](board.md#wake-firstmate-from-the-board)). `jq` is a runtime need; the host packages already install it. |
+| `0005-herdr-pane-life.patch` | A Herdr pane closes when its agent exits cleanly, and a pane closed on purpose is never relaunched: not by secondmate liveness, not by the stale wake. A crash leaves the pane as a `dead` husk, and that is still recovered. Pairs with `[session] resume_agents_on_restore = false` in [Herdr](herdr.md). |
 
 How apply handles each case:
 
