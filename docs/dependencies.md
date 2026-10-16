@@ -23,6 +23,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 `scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. bun is installed first, from the release below. Superseded versions stay on disk.
 
 - Always: herdr ([herdrdev/herdr](https://github.com/herdrdev/herdr/releases/latest)), bun ([oven-sh/bun](https://github.com/oven-sh/bun/releases/latest), the x64 `baseline` build), uv ([astral-sh/uv](https://github.com/astral-sh/uv/releases/latest)), btop ([aristocratos/btop](https://github.com/aristocratos/btop/releases/latest), the static musl build, linked as `btop-bin`; `btop` is the launcher in [btop](herdr.md#btop)), sentrux ([sentrux/sentrux](https://github.com/sentrux/sentrux/releases/latest), the binary plus the same release's `grammars-<platform>.tar.gz`, whose grammars are linked into `~/.sentrux/plugins/<language>/grammars/` so sentrux never downloads them itself, unverified, on first run), fallow ([fallow-rs/fallow](https://github.com/fallow-rs/fallow/releases/latest), the static musl binary `fallow-linux-<arch>-musl`, for the [quality gate](omp.md#quality-gate)), verified against the GitHub release-asset digest. A herdr upgrade rewrites and restarts `herdr.service`.
+- Always: sgrep ([context-dot-dev/sgrep](https://github.com/context-dot-dev/sgrep)), a local search by meaning for code and documents. Apply runs `cargo install --git https://github.com/context-dot-dev/sgrep --locked`, so it builds the default branch, never a pinned release, and cargo checks the crates against the repository's `Cargo.lock`. The repository publishes no checksums for that build, like the omp plugins below. It needs Rust 1.90 or later: the Rust toolchain below installs on every host, not only with the `development` profile, and sgrep needs ripgrep from the base packages. Linux only, like every native tool here, so the macOS release binary is not used. After each build, apply runs one tiny search per model (code and text) so the models are downloaded once and a search needs no network. A failed warm-up prints a warning and does not stop the apply.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
 - Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
@@ -30,7 +31,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 - `agents` profile, native: gh ([cli/cli](https://github.com/cli/cli/releases/latest)), treehouse ([kunchenguid/treehouse](https://github.com/kunchenguid/treehouse/releases/latest)), verified against the GitHub release-asset digest.
 - `agents` profile, native: gws, the Google Workspace CLI ([googleworkspace/cli](https://github.com/googleworkspace/cli/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes. Signing in Google accounts is manual: see [Google Workspace CLI](google-workspace.md).
 - `agents` profile, no-mistakes ([kunchenguid/no-mistakes](https://github.com/kunchenguid/no-mistakes/releases)): the one tool that tracks the prerelease channel. Each apply resolves the newest non-draft release, betas included (not only the latest stable one), and verifies it against the GitHub release-asset digest.
-- `agents` profile, bun: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6. Shells and user units have `~/.bun/bin` on `PATH`, after `~/.local/bin`, for tools you add yourself with `bun add -g`.
+- `agents` profile, bun: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, forgejo-axi (the no-mistakes Forgejo provider; see [no-mistakes](forgejo.md#no-mistakes)), acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6. Shells and user units have `~/.bun/bin` on `PATH`, after `~/.local/bin`, for tools you add yourself with `bun add -g`.
 - `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `blueprint/config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
@@ -38,7 +39,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
   These plugins have no publisher checksums and track each author's default branch.
   They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
-- `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
+- Always (sgrep builds with it), and the `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
 - `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
 - `gateway` profile: cloudflared ([cloudflare/cloudflared](https://github.com/cloudflare/cloudflared/releases/latest), `cloudflared-linux-<arch>`), verified against the GitHub release-asset digest. See [Web pages from anywhere](gateway.md).
 
@@ -77,11 +78,11 @@ The Pyrefly configuration is the only added runtime file.
 
 `blueprint/ansible/group_vars/all/packages.yml`, `blueprint/ansible/tasks/packages.yml`. Distribution versions, not pinned.
 
-- Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
+- Base: ca-certificates, curl, git, gcc, libc6-dev, gnupg, jq, tar, unzip, xz-utils, zstd, procps, acl, python3, python3-venv, openssl, rsync, ripgrep, libgtk-3-0t64 (the sentrux binary links GTK 3 even for its CLI), mosh (`mosh-server` for `mosh <host>`).
   gcc and libc6-dev let LazyVim compile Treesitter parsers even when the `development` profile is disabled.
 - Headless browser libraries, every apply, without recommends: libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libasound2t64, libatk1.0-0t64, libatk-bridge2.0-0t64, libatspi2.0-0t64, libgbm1, libnss3, libnspr4, libxkbcommon0, fonts-dejavu-core. The chrome-headless-shell that omp's browser tool and puppeteer download needs the libraries to start and a font to draw text.
 - `chat`, without recommends: libegl1, libpipewire-0.3-0t64, libva2, libva-drm2 (the Concord binary links them).
-- `development`: build-essential, pkg-config, libssl-dev, python3-dev, cmake, ripgrep.
+- `development`: build-essential, pkg-config, libssl-dev, python3-dev, cmake.
 - `docker`: docker.io, docker-compose-v2 (Ubuntu's packages, never Docker CE).
 - `desktop`: xfce4, xfce4-terminal, dbus-x11, xauth, x11-xserver-utils, fonts-dejavu-core, tigervnc-standalone-server, tigervnc-common, tigervnc-tools, novnc, websockify, iproute2.
 - `tailscale`: `tailscale` from pkgs.tailscale.com, stable track. `crewship_tailscale_version` pins it; empty by default.
@@ -94,13 +95,19 @@ The Pyrefly configuration is the only added runtime file.
 ## Optional project databases
 
 The database profile uses the official database image of each project and the Docker Compose plugin.
-See [Project databases](shared-postgres.md) for setup, backups and removal.
+See [Project databases](project-databases.md) for setup, backups and removal.
 
 ## Koncreet
 
 Every host that starts services (`start_services: true`); the container worker image skips it.
 
 - [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `blueprint/patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
+
+## Forgejo
+
+`profiles.forgejo` (opt-in, [Self-hosted Forgejo](forgejo.md)).
+
+- [Forgejo](https://codeberg.org/forgejo/forgejo/releases), the newest non-draft, non-prerelease release on Codeberg, `forgejo-<version>-linux-<arch>`. The binary is verified against the `.sha256` file that the release publishes, and its `.asc` signature must come from the Forgejo release key (`crewship_forgejo_key_fingerprint`), fetched from keys.openpgp.org (`blueprint/ansible/tasks/forgejo.yml`). Each release installs into `~/.local/share/crewship/forgejo/<version>/`.
 
 ## Chrome autopruner
 
@@ -136,6 +143,7 @@ Every host that starts services (`start_services: true`); the container worker i
 | `0002-watch-end-idle-wait-for-inbox-note.patch` | The watcher ends its idle wait within about 1 s when an inbox note arrives, instead of up to the full poll interval. Together, the two make a text from the iMessage bridge wake Firstmate in about 2 s. |
 | `0003-brief-crewboard.patch` | Adds the optional [Firstmate board instructions](board.md#firstmate-instructions). |
 | `0004-watch-crewboard-event-source.patch` | Needs 0001 and 0002. With the board on, a message on the board's `fm` topic wakes Firstmate within about 1 s, and an optional doorbell rings a task's pane for a `task/<id>` message ([Wake Firstmate from the board](board.md#wake-firstmate-from-the-board)). `jq` is a runtime need; the host packages already install it. |
+| `0005-herdr-pane-life.patch` | A Herdr pane closes when its agent exits cleanly, and a pane closed on purpose is never relaunched: not by secondmate liveness, not by the stale wake. A crash leaves the pane as a `dead` husk, and that is still recovered. Pairs with `[session] resume_agents_on_restore = false` in [Herdr](herdr.md). |
 
 How apply handles each case:
 
@@ -156,8 +164,9 @@ To update a patch, edit its file in a pull request. To drop a patch, delete its 
 - The worker image is provisioned in a `builder` stage and copied into one layer. It omits files no worker process reads, so it differs from a host: no apt indexes, package-manager caches, rustup docs or node C headers; no source maps, and no TypeScript declarations outside omp's own packages, in the npm tool prefixes; in omp, no `onnxruntime-web`, no AVX2 build of `pi-natives` (omp loads the baseline build), and only the CPU `onnxruntime-node` binaries for the image's platform; and no Mesa GPU driver or its LLVM (`libgallium`, `libLLVM`), which libgbm loads only to open a GPU device. `sudo apt-get install --reinstall mesa-libgallium libllvm21` restores them. The rustup toolchain and the npm tools' native addons are stripped of symbol tables; the release binaries the installer verifies keep their published bytes.
 - Optional compose backing services, never installed by apply: `postgres:18-bookworm`, `redis:8-alpine`, from the same mirror, digest-pinned because a floating Postgres tag would move a data volume across major versions it cannot read.
 - CI pool job containers (`blueprint/maintenance/ci-pool.py`, only with `crewship.ci_pool`): the official `ghcr.io/actions/actions-runner:latest`, pulled again when a new image is available. It is the runner GitHub publishes, so it is not checksum-verified here; see [CI pool](ci-pool.md).
-- Project databases (`profiles.shared_postgres` only): the image each project's compose file names (Postgres, MySQL, MariaDB or Redis), pulled once when the container is first created. No other image is pulled.
-  A new major version needs a manual database upgrade; see [Project databases](shared-postgres.md#data-and-upgrades).
+- macOS runner (`blueprint/maintenance/mac-runner.sh`, run by hand on a Mac): the latest official `actions-runner-osx-arm64` release of [actions/runner](https://github.com/actions/runner), checked against the SHA-256 digest that GitHub lists for the release asset; see [macOS runner](ci-pool.md#macos-runner).
+- Project databases (`profiles.project_databases` only): the image each project's compose file names (Postgres, MySQL, MariaDB or Redis), pulled once when the container is first created. No other image is pulled.
+  A new major version needs a manual database upgrade; see [Project databases](project-databases.md#data-and-upgrades).
 
 ## Assumed on the host
 

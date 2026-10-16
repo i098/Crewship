@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+# Forgejo (docs/forgejo.md) on 127.0.0.1:{{ crewship_forgejo_port }} only. A new release
+# changes ExecStart, so an apply that installs it restarts the service.
+
+[Unit]
+Description=Forgejo git forge on 127.0.0.1:{{ crewship_forgejo_port }} (Crewship managed)
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart={{ crewship_forgejo_cli | join(' ') }} web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -2,6 +2,8 @@
 
 Crewship renders `~/.config/herdr/config.toml` from [`blueprint/ansible/templates/herdr.toml.j2`](../blueprint/ansible/templates/herdr.toml.j2) and the `herdr` block of `.local/host.yml`. This guide covers the two sidebar layouts it ships, Spaces and Agents, and the two feeders that report their `$` tokens: an omp extension for Agents and a reporter timer for Spaces.
 
+The config sets `[session] resume_agents_on_restore = false`. After a Herdr server restart, each pane comes back as a plain shell: Firstmate relaunches its own agents through its launch line, which closes the pane when the agent exits on purpose. Start main Firstmate again by hand with `exec omp` in its pane, so that quitting omp also closes the pane.
+
 The sidebar is 46 columns wide (`sidebar_width`; it may grow to `sidebar_max_width`, 56). That fits the widest pull request line: a 4-digit pull request and issue, 5-digit line counts and a 3-digit file count. There is no status word: the state icon already shows it. The recipe sets `[ui] status_indicators = "symbols"`, so the state icon is a different symbol for each agent state, not only a different color. This guide calls it the state dot.
 
 ## Spaces: one entry per home
@@ -9,7 +11,7 @@ The sidebar is 46 columns wide (`sidebar_width`; it may grow to `sidebar_max_wid
 Spaces shows one entry per home workspace. It never repeats per-agent detail, which lives in Agents.
 
 ```text
-● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43%
+● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
 ● firstmate · ⚑ 3 · ▶ 1 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ◷ 3
@@ -35,7 +37,7 @@ Herdr indents every line after an entry's first by two columns, so every entry's
 | `$queue` | `◷ N` (yellow) | Tasks queued and ready to start: `count` from the home's `bin/fm-tasks-axi.sh ready`, recounted when the home's `data/backlog.md` changes and at least once a minute. |
 | `$res` | `⚙ 29%  ▤ 8%  ⛁ 2%` | CPU (share of all cores) and resident memory (share of `MemTotal`) summed over every process whose environment carries the space's `HERDR_WORKSPACE_ID`, so its workers count. CPU is each process's own CPU time (`utime` + `stime`) gained between two runs, for every process present in both, clamped to 0–100%. Disk is the home plus the worktree pools of its projects, as `treehouse status --json` lists them, as a share of the filesystem holding the home; a pool worktree that is itself another home is left out. |
 | `$alert` | `⚠ watcher silent` (orange) | `fm_supervision_unhealthy` from the home's `bin/fm-supervision-lib.sh`: the home has work that needs a watcher and the watcher's beacon is stale. |
-| `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43%` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). Reported on the primary home, only while no `machine` workspace exists. |
+| `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). `◉` counts the agent panes (panes with an `agent`) that are working, over all agent panes. Reported on the primary home, only while no `machine` workspace exists. |
 | `$machine` | the same as `$host` | The same line, reported on the `machine` workspace instead. The two are never both set. |
 
 There is no rate-limit warning: a rate limit takes every home down at once, so a per-home flag adds nothing.

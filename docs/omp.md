@@ -25,7 +25,7 @@ With the `agents` profile on, `./ship.sh launch`:
 6. Installs the extension `~/.omp/agent/extensions/crewship-quality-gate.ts` from [`blueprint/config/omp-quality-gate.ts`](../blueprint/config/omp-quality-gate.ts), the sentrux and fallow check at the end of every agent turn. Every apply rewrites it. See [Quality gate](#quality-gate).
 7. Sets up omp as the no-mistakes pipeline agent. See [no-mistakes pipeline agent](#no-mistakes-pipeline-agent).
 8. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
-9. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex. See [Global instructions](#global-instructions).
+9. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex, when `profiles.agent_instructions` is on. See [Global instructions](#global-instructions).
 10. Installs the omp rules in [`blueprint/rules/`](../blueprint/rules/) to omp's global rules folder. See [Rules](#rules).
 
 The `config.yml` and `lsp.json` copies are first-write-only.
@@ -222,9 +222,19 @@ Otherwise, apply removes the manifest-owned installed rule.
 
 ## Global instructions
 
-[`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) holds generic working rules and nothing personal: it points each agent at the skills. Every apply writes it to `~/.claude/CLAUDE.md` (Claude Code), `~/.omp/agent/AGENTS.md` (omp) and `~/.codex/AGENTS.md` (Codex) with [`scripts/instructions.py`](../scripts/instructions.py). When `~/.claude/RTK.md` exists, the Claude Code copy also gets the `@RTK.md` import.
+[`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) holds generic working rules and nothing personal: it points each agent at the skills, sets one round of `ponytail-review` per PR, and tells it to search by meaning with [sgrep](dependencies.md#latest-releases) and by exact text with ripgrep. The feature is opt-in. `profiles.agent_instructions: true` turns it on, `false` turns it off, and with no key an apply installs it only on a host that already has it (the manifest below exists, or a file holds a Crewship block). Turning it off deletes nothing.
 
-The installer records the SHA-256 of each file it wrote in `~/.local/share/crewship/instructions.json`. If a file on the host matches neither that record nor the new text, the user changed it: the installer moves it to `<file>.<UTC time>.bak` in the same folder before it writes, and the apply prints the backup paths. An unchanged apply changes nothing.
+[`scripts/instructions.py`](../scripts/instructions.py) writes the text to `~/.claude/CLAUDE.md` (Claude Code) and `~/.codex/AGENTS.md` (Codex, which has no import). When `~/.claude/RTK.md` exists, the Claude Code file also gets the `@RTK.md` import. omp's own `~/.omp/agent/AGENTS.md` shadows `~/.claude/CLAUDE.md`, so that file is the single line `@~/.claude/CLAUDE.md`.
+
+`instructions_mode` says what happens to a target file that already exists. A missing file is always written.
+
+| Mode | Existing file |
+| --- | --- |
+| `append` (default) | One block between `<!-- crewship:begin -->` and `<!-- crewship:end -->` goes at the end. A re-run replaces that block in place and never adds a second. Text outside the markers stays. A file with only one marker is left alone and reported. |
+| `overwrite` | The file moves to `<file>.<UTC time>.bak` in the same folder, then the text is written. The apply prints the backup paths. |
+| `skip` | The file stays as it is. |
+
+The installer records the SHA-256 of each whole file it wrote in `~/.local/share/crewship/instructions.json`. A file that still matches is Crewship's own, so `overwrite` replaces it without a backup and `append` turns it into a block. An unchanged apply changes nothing.
 
 ## Updating an existing host
 

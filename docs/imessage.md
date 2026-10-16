@@ -88,14 +88,14 @@ A memory error never stops a send, a tapback, or the inbox note: the service log
 
 The same front desk answers Instagram DMs. `instagram-desk.service` runs `apps/imessage/instagram-desk.ts`, which reuses `desk.ts` and `memory.ts`: the prompt names the channel (`deskPrompt(..., "Instagram")`), and the rules, the model, the zoom tool and the 180,000-byte input cap are the same. It has no Instagram client. It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-dm/SKILL.md) listener:
 
-- `state/instagram-dms.jsonl` (`INSTAGRAM_DM_LOG`): one row for each new DM from the operator. Each DM restarts the quiet period, 8 seconds (`crewship_instagram_desk_quiet_ms`).
+- `state/instagram-dms.jsonl` (`INSTAGRAM_DM_LOG`): one row for each new DM from the operator. Each DM restarts the quiet period, 8 seconds (`crewship_instagram_desk_quiet_ms`), or 60 seconds (`crewship_instagram_desk_reel_quiet_ms`) once the burst holds a reel link.
 - `state/.instagram-dms/sent.jsonl` (`INSTAGRAM_DM_SENT`): one row for each `fm-insta-reply` text, tapback, and typing indicator, with `by`, the value of `INSTAGRAM_DM_ACTOR` (`firstmate` by default). Any row that is not `by: desk` stops the desk for that burst of DMs, like a Firstmate send on iMessage.
 
-When the quiet period ends and Firstmate stayed silent, the desk gets one turn for the whole burst. It answers `SKIP`, `REACT:` and one emoji, or a short text, and the service sends it with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`, so the desk's own send does not stop it for the next DM. If a DM or a Firstmate action arrives while the desk writes, the service kills the call and drops the draft. If the desk fails or times out after 45 seconds, it sends nothing: Firstmate has the note.
+When the quiet period ends and Firstmate stayed silent, the desk gets one turn for the whole burst. It answers `SKIP`, `REACT:` and one emoji, or a short text, and the service sends it with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`, so the desk's own send does not stop it for the next DM. If a DM or a Firstmate action arrives while the desk writes, the service kills the call and drops the draft. If the desk fails or times out after 45 seconds, it sends nothing: Firstmate has the note. A burst with two or more different reel links gets no model turn: after the long quiet the desk sends ONE text, `got N reels`, and ONE tapback (a 👀 on his last message) in one `fm-insta-reply` call, so ten links cost two writes. Its outcome in `desk.log` is `batch got N reels`.
 
 The Instagram thread has its own memory in `~/.local/state/instagram-desk/memory/`, with the design in [Desk memory](#desk-memory), and the outcome of each turn (time, message id, `skip`, `react <emoji>`, or the text) is in `~/.local/state/instagram-desk/desk.log`. The service saves how far it read each log. After a restart, rows from the last 60 seconds act on the desk, and older rows only fill the memory, so a DM from before the restart is never answered late. With no saved position, the service starts at the end of both logs. The desk shows no typing indicator.
 
-Set `crewship_instagram_dm_operator`, and the playbook installs the unit with the listener. The settings are the `crewship_instagram_desk_*` variables in `blueprint/ansible/group_vars/all/instagram_dm.yml`: `model` (default `claude-haiku-5-5`), `owner_name`, `supervisor_model`, and `quiet_ms`.
+Set `crewship_instagram_dm_operator`, and the playbook installs the unit with the listener. The settings are the `crewship_instagram_desk_*` variables in `blueprint/ansible/group_vars/all/instagram_dm.yml`: `model` (default `claude-haiku-5-5`), `owner_name`, `supervisor_model`, `quiet_ms`, and `reel_quiet_ms`.
 
 ## Set up the Photon project
 
@@ -313,6 +313,20 @@ Explicit threaded replies can use a configured fallback because the bridge canno
 - **Memory.** The desk memory records the send as `[image: name]`, then the caption. The name has the extension of the real format.
 - **Transport.** Photos go over the Photon line only. The BlueBubbles code of the bridge has no attachment send. When the owner's chat is on BlueBubbles, the photo uses the Photon line's latest chat. If the Photon line is not running, the command exits non-zero with HTTP 503.
 
+## Voice memos and audio
+
+A voice memo or an audio attachment (`.caf`, `.m4a`, `.amr`, `.mp3`, `.aac`, `.wav`, `.ogg`, `.opus`, `.flac`, `.aiff`, or any `audio/*` type) is saved in `~/.local/state/fm-imessage/attachments/`, then transcribed on the host. `apps/imessage/transcribe.ts` runs `ffmpeg` to make a 16 kHz mono wav, then `whisperx` on the CPU with `int8`. No API is called.
+
+The note reads `[voice memo, 4s] <words>`, then `(audio saved for Firstmate at <path>)`. The desk memory records the same text, so the desk sees the transcript. If the audio holds no speech, the words are `(no speech heard)`. If `ffmpeg` or `whisperx` fails or times out, the service logs the error, and the note still has the path and says `transcription failed`. If the file cannot be saved, the download retries as for any attachment, and the retry transcribes it.
+
+The inbound loop waits for the transcription, so the next inbound message waits too (about 15 s on a warm host, up to 45 s on a cold start). Sends are not held up.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_IMESSAGE_WHISPERX` | `~/.cache/watch/whisperx-venv/bin/whisperx` | The `whisperx` executable. The `watch` skill's venv has it. |
+| `FM_IMESSAGE_WHISPER_MODEL` | `small` | The Whisper model name. |
+| `FM_IMESSAGE_TRANSCRIBE_MS` | `120000` | The time limit for each of the two commands. |
+
 ## Cards
 
 `fm-imessage --card` sends a card: by default, a Spectrum app bubble. A tap opens the card's page as a full-width sheet inside Messages, in Photon's free "Spectrum" iMessage app; the bridge serves the page. He installs that app once, from the App Store prompt in Messages. The code is `apps/imessage/cards.ts`.
@@ -342,6 +356,7 @@ A bad card queues nothing, and the command names the first bad field.
 - **PNG cards stay the default.** `fm-text-card --send < text` and `eta_timeline.py --send` send their PNG with `fm-imessage --image`. With `--card`, they first send a `text` or a `timeline` card, and send the PNG only when `fm-imessage --card` queues nothing (cards off, or an older bridge). Choice cards are always cards.
 - **Page.** The page looks like an iOS view: the system font and text sizes, the system colours in light and dark mode, inset grouped rows of 44 pt or more, safe-area padding, and a pressed state with no tap delay. It has no script.
 - **Page listener.** A second listener serves the pages. It listens on `127.0.0.1:8767` (`FM_IMESSAGE_CARD_PORT`), apart from the private command port. It answers only `GET /c/<token>` and `POST /c/<token>/pick`; every other request gets `404`. The command port does not answer card paths. Cards are off until `FM_IMESSAGE_CARD_URL` is set: then `/card` queues cards, and the bubbles open `<FM_IMESSAGE_CARD_URL>/c/<token>`.
+- **Instagram webhook.** With `INSTAGRAM_DM_BACKEND=graph`, `INSTAGRAM_GRAPH_APP_SECRET` and `INSTAGRAM_GRAPH_VERIFY_TOKEN` set, the page listener also answers `/instagram/webhook` (`apps/imessage/instagram-webhook.ts`), even when cards are off. `GET` is Meta's verification: the right verify token gets the challenge, any other gets `403`. `POST` must carry a valid `X-Hub-Signature-256`; an unsigned or badly signed request gets `403` and files nothing. Each new DM from `INSTAGRAM_DM_OPERATOR` goes to `INSTAGRAM_DM_NOTIFY` first and then to `INSTAGRAM_DM_LOG`. A DM from any other sender files nothing, and the service logs its sender id once per DM. A refused note gets `500`, so that Meta sends the DM again; the mid stops a second copy. With the webhook on, the body limit is 64 KiB, not 4 KiB.
 - **Tokens.** Each card has its own token: 256 random bits, base64url. The token is the only key to the card: no login, no password. A wrong, unknown, or expired token gets the same `404` page. A choice card takes one pick: a second pick gets `409` and files no note. If the inbox refuses the note, the pick is undone and the page says to try again. The service never logs a token and never prints one; `fm-imessage` prints only the key. The pages send `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and a Content Security Policy that allows no script and no outside content.
 - **Records.** Each card is one file, `~/.local/state/fm-imessage/cards/<token>.json` (the directory is private to the account). The service deletes a card file one day after the card expires.
 

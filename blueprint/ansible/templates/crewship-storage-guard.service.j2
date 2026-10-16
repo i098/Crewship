@@ -1,6 +1,7 @@
 {{ ansible_managed | comment }}
 # Triggered by crewship-storage-guard.timer; not enabled on its own.
-# Measures the filesystems holding /, /var/log, the home and Docker's data root:
+# Measures every mounted real block filesystem (not tmpfs, overlay, squashfs or
+# loop devices) and the ones holding /, /var/log, the home and Docker's data root:
 # alerts at WARN once per episode and early when the fill rate projects full,
 # prunes only regenerable data at CRIT: gitignored build output in Treehouse
 # pool worktrees untouched for WORKTREE_PRUNE_AGE_DAYS (worktree-prune.sh), then
@@ -14,19 +15,20 @@ ConditionPathExists={{ crewship_fleet_doctor_dir }}/storage-guard.sh
 [Service]
 Type=oneshot
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=FM_HOME={{ crewship_firstmate_dir }}
 Environment=STORAGE_WARN_PCT={{ crewship_storage_guard_warn_pct }}
 Environment=STORAGE_CRIT_PCT={{ crewship_storage_guard_crit_pct }}
 Environment=STORAGE_HYSTERESIS_PCT={{ crewship_storage_guard_hysteresis_pct }}
 Environment=STORAGE_IMAGE_AGE_HOURS={{ crewship_storage_guard_image_age_hours }}
 Environment=STORAGE_FILL_HORIZON_HOURS={{ crewship_storage_guard_fill_horizon_hours }}
+Environment=STORAGE_FILL_MIN_PCT={{ crewship_storage_guard_fill_min_pct }}
 Environment=STORAGE_REPEAT_MIN={{ crewship_storage_guard_repeat_min }}
 Environment=WORKTREE_PRUNE_AGE_DAYS={{ crewship_storage_guard_worktree_age_days }}
 ExecStart={{ crewship_fleet_doctor_dir }}/storage-guard.sh
-# One du walk per measured filesystem (up to four: /, /var/log, the home and
-# Docker's data root; <= 300 s each), the worktree prune and three Docker prune
-# steps (<= 300 s each) and the docker info / system df queries (<= 80 s):
-# 2480 s at most.
-TimeoutStartSec=2700
+# One du walk per alerting filesystem (<= 300 s each), the worktree prune and
+# three Docker prune steps (<= 300 s each) and the docker info / system df
+# queries (<= 80 s): 3600 s covers seven alerting filesystems at once.
+TimeoutStartSec=3600
 Nice=5
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

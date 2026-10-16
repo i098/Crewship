@@ -44,3 +44,10 @@ channel = "{{ crewship_herdr_update_channel }}"
 [server]
 headless_cols = {{ crewship_cfg.herdr.headless_cols | int }}
 headless_rows = {{ crewship_cfg.herdr.headless_rows | int }}
+
+[session]
+# A restored pane comes back as a plain shell. Firstmate then relaunches its own
+# agents through its launch line, which closes the pane when the agent exits on
+# purpose. Herdr's resume runs `omp --resume` without that line, so quitting a
+# resumed agent would leave the pane, and secondmate liveness would relaunch it.
+resume_agents_on_restore = false

@@ -16,10 +16,22 @@ crewship_instagram_dm_state: "{{ crewship_firstmate_dir }}/state/.instagram-dms"
 crewship_instagram_dm_log: "{{ crewship_firstmate_dir }}/state/instagram-dms.jsonl"
 # Command that takes `--request-id ID -- TEXT` and tells main (the request id makes a repeat harmless).
 crewship_instagram_dm_notify: "{{ crewship_firstmate_dir }}/bin/fm-inbox.sh note"
+# The backend: `instagrapi` (the session above, the listener and the poll timer) or `graph`, Meta's official
+# Instagram API with Instagram Login (docs/architecture.md#official-instagram-api). With `graph` the operator is his
+# Instagram-scoped id (IGSID), fm-insta-reply sends through graph.instagram.com, fm-imessage's card-page listener takes
+# the DM webhook at /instagram/webhook, and a weekly timer refreshes the token. The instagrapi units stay as they are.
+crewship_instagram_dm_backend: instagrapi
 # The front desk (docs/imessage.md#instagram-front-desk): when main has not answered a DM for
 # crewship_instagram_desk_quiet_ms, a one-shot model answers or reacts through fm-insta-reply.
-# The reel curator (docs/architecture.md#instagram-reel-curator): three times a day it shares at most three
-# reels worth watching into the operator's thread. It stays idle until crewship_instagram_curator_config exists.
+# The reel curator (docs/architecture.md#instagram-reel-curator): OFF by default. It scrapes feeds and downloads
+# clips, which the DM bot never does, so it runs on its OWN Instagram account, never the DM bot's: set
+# crewship_instagram_curator_enabled, log that account in once with
+# `INSTAGRAM_DM_SESSION=<crewship_instagram_curator_session> INSTAGRAM_DM_TIMEZONE=<zone> instagram_dm.py login`,
+# and create crewship_instagram_curator_config. Three times a day it shares at most three reels worth watching into
+# the operator's thread, at most 40 Instagram calls a run, and not within 60 min of DM activity or 24 h of a halt.
+crewship_instagram_curator_enabled: false
+crewship_instagram_curator_session: "{{ crewship_cfg.home }}/.config/crewship/instagram/curator-session.json"
+crewship_instagram_curator_state: "{{ crewship_cfg.home }}/.local/state/crewship/instagram/curator-dm"
 crewship_instagram_curator_script: "{{ crewship_local_bin }}/reel_curator.py"
 crewship_instagram_curator_config: "{{ crewship_cfg.home }}/.config/crewship/instagram/curator.json"
 crewship_instagram_curator_log: "{{ crewship_cfg.home }}/.local/state/crewship/instagram/reels.jsonl"
@@ -28,3 +40,5 @@ crewship_instagram_desk_model: claude-haiku-5-5
 crewship_instagram_desk_owner_name: the owner
 crewship_instagram_desk_supervisor_model: ""
 crewship_instagram_desk_quiet_ms: 8000
+# The quiet period once a burst holds a reel link; two or more links get one "got N reels" and one tapback.
+crewship_instagram_desk_reel_quiet_ms: 60000

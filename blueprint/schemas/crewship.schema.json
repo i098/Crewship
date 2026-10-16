@@ -33,6 +33,13 @@
           "type": "string",
           "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$"
         },
+        "instructions_mode": {
+          "enum": [
+            "skip",
+            "overwrite",
+            "append"
+          ]
+        },
         "profiles": {
           "type": "object",
           "additionalProperties": false,
@@ -61,6 +68,9 @@
             "shared_postgres": {
               "type": "boolean"
             },
+            "project_databases": {
+              "type": "boolean"
+            },
             "jj": {
               "type": "boolean"
             },
@@ -79,7 +89,13 @@
             "public_skills": {
               "type": "boolean"
             },
+            "agent_instructions": {
+              "type": "boolean"
+            },
             "koncreet": {
+              "type": "boolean"
+            },
+            "forgejo": {
               "type": "boolean"
             }
           },
@@ -477,6 +493,10 @@
               "type": "integer",
               "minimum": 1
             },
+            "image": {
+              "type": "string",
+              "minLength": 1
+            },
             "repos": {
               "type": "array",
               "items": {
@@ -499,6 +519,9 @@
                     },
                     "minItems": 1,
                     "uniqueItems": true
+                  },
+                  "docker": {
+                    "const": "dind"
                   }
                 },
                 "required": [

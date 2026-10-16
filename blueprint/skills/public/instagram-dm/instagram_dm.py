@@ -3,13 +3,14 @@
 
 Run it with `uv run --quiet --with instagrapi python instagram_dm.py ...` (instagrapi is imported only when a command needs it).
 
-instagram_dm.py login                # one login, then the session file is reused; needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
+instagram_dm.py login [--force]     # the one manual login (a human, the app checked first); needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
 instagram_dm.py inbox [--limit N]    # thread id, "request" for a message request, title
 instagram_dm.py reels THREAD [--limit N] [--mark-seen]   # one normalised reel URL per line
 instagram_dm.py poll                 # read once: log and hand over every NEW message of the operator, mark it seen
 instagram_dm.py listen               # keep Instagram's realtime channel open and run `poll` on each event (a service)
 instagram_dm.py reply [TEXT] [--thread ID] [--react EMOJI] [--typing]   # DM the operator
-instagram_dm.py resume               # clear a halt (see below) after you fixed the account
+instagram_dm.py resume               # clear a halt (see below) after you fixed the account, or a `stop`
+instagram_dm.py stop                 # the kill switch: poll, listen, reply, the curator, the desk and reel_watch.py do nothing
 
 Settings come from the environment:
   INSTAGRAM_DM_SESSION    session file (default ~/.config/crewship/instagram/session.json)
@@ -22,10 +23,20 @@ Settings come from the environment:
   INSTAGRAM_DM_NOTIFY     command that takes `--request-id ID -- TEXT` and tells the agent (for Firstmate:
                           `<home>/bin/fm-inbox.sh note`); its request id makes a repeat harmless. Empty: log only
   INSTAGRAM_DM_CODE_CMD   shell command that prints the newest 6-digit Instagram email code (see SKILL.md)
+  INSTAGRAM_DM_TIMEZONE   IANA time zone of the host's public IP (America/Chicago): REQUIRED by the first `login`, which
+                          pins it in the session file; never the library's New York default
+  INSTAGRAM_DM_WRITE_GAP / _WRITE_JITTER   seconds between two writes: 20, plus 0-10 of random
+  INSTAGRAM_DM_REPLIES_HOUR / _REPLIES_DAY   texts allowed per hour and per day (10, 40)
+  INSTAGRAM_DM_SIGNALS_HOUR   tapbacks and typing indicators allowed per hour together (20)
+  INSTAGRAM_DM_ERROR_COOLDOWN   seconds without sends after any error (1800)
+  INSTAGRAM_DM_REALTIME_GAP   least seconds between two polls that realtime events cause (30)
   INSTAGRAM_DM_INTERVAL   base backoff in seconds after a failure (default 120); the cap is INSTAGRAM_DM_BACKOFF_MAX (1800)
-A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). A challenge, a feedback
-block, a suspension or a bad password halts everything instead: one notice goes to the agent and nothing calls
-Instagram again until `resume`. Nothing but `reply` sends anything, and no media is downloaded.
+A failure backs off for 2, 4, 8 ... times the base (poll, listen and reply share it). The first challenge, feedback
+block, suspension, login_required, please-wait, throttle (429), bad password or a challenge answer it could not parse
+(KeyError) halts everything instead, with no retry, and the log keeps Instagram's whole answer: one notice goes to the agent and nothing calls Instagram again until `resume`. Nothing here ever logs in
+again by itself: a missing or dead session is such a halt, and a human runs `login --force` after checking the app.
+Every failure is reported with its exception class and endpoint. Nothing but `reply` sends anything, and no media
+is downloaded.
 """
 
 import argparse
@@ -33,12 +44,16 @@ import contextlib
 import fcntl
 import json
 import os
+import random
 import re
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 # Any post link (post, reel, tv, or with a username prefix). "Always assume it is a reel."
 LINK = re.compile(
@@ -48,10 +63,38 @@ LINK = re.compile(
 SHARE = re.compile(r"https?://(?:www\.)?instagram\.com/share/[\w/-]+")
 SEEN_KEEP = 5000
 REPLY_MAX = 500  # characters: the operator asked for short plain texts
-REPLY_GAP = 3  # seconds between two sends
-REALTIME_GAP = 5  # seconds between two polls caused by realtime events
-# Exception class names that mean the account is flagged: stop, never retry.
-HALT = {"ChallengeError", "FeedbackRequired", "AccountSuspended", "BadPassword", "BadCredentials"}
+TYPING_MIN = 100  # characters: a typing indicator only comes before a reply longer than this
+# What the shared limiter counts: per write kind, (window in s, kinds counted together, env name, default cap).
+CAPS = {
+    "text": [
+        (3600, ("text",), "INSTAGRAM_DM_REPLIES_HOUR", 10),
+        (86400, ("text",), "INSTAGRAM_DM_REPLIES_DAY", 40),
+    ],
+    "react": [(3600, ("react", "typing"), "INSTAGRAM_DM_SIGNALS_HOUR", 20)],
+    "typing": [(3600, ("react", "typing"), "INSTAGRAM_DM_SIGNALS_HOUR", 20)],
+}
+# Exception class names that mean the account is flagged, throttled or logged out: stop, never retry.
+HALT = {
+    "ChallengeError",
+    "FeedbackRequired",
+    "AccountSuspended",
+    "BadPassword",
+    "BadCredentials",
+    "LoginRequired",
+    "SessionLost",
+    "PleaseWaitFewMinutes",
+    "RateLimitError",
+    "ClientThrottledError",
+    "SentryBlock",
+    "CaptchaChallengeRequired",
+    "KeyError",  # instagrapi reads a response["challenge"] it does not have: a challenge it could not parse
+}
+# What Instagram's own answer says when it flags the account, whatever exception class carried it.
+FLAGGED = re.compile(r"challenge_required|checkpoint_required|feedback_required|login_required|/suspended/", re.I)
+
+
+class SessionLost(Exception):
+    """No usable saved session. Nothing here logs in again: a human does."""
 
 
 def conf(name, default=""):
@@ -73,6 +116,25 @@ def backoff(fails, base, cap):
     return min(cap, base * 2 ** (max(fails, 1) - 1))
 
 
+def is_halt(e):
+    """True when e is one of HALT (a parent class counts), or Instagram's answer in e.last_json says flagged."""
+    return any(c.__name__ in HALT for c in type(e).__mro__) or bool(FLAGGED.search(json.dumps(getattr(e, "last_json", None), default=str)))
+
+
+def describe(e):
+    """One line for a failure: exception class, the endpoint path when the error carries its response, the message
+    (password masked, clipped). A halting failure adds Instagram's whole answer (last_json), so the next flag is read
+    from the log and not guessed."""
+    line = f"{type(e).__name__}"
+    if url := getattr(getattr(e, "response", None), "url", None):
+        line += f" at {urlsplit(url).path}"
+    line = f"{line}: {e}"[:300]
+    if (payload := getattr(e, "last_json", None)) and is_halt(e):
+        line += f" payload={json.dumps(payload, default=str)}"[:600]
+    secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
+    return line.replace(secret, "***") if secret else line
+
+
 def message_url(msg):
     """The reel or post link a DM carries, or None. Reads the shared media code first, then every link in the message."""
     for media in (msg.clip, msg.media_share):
@@ -80,6 +142,21 @@ def message_url(msg):
             return f"https://www.instagram.com/reel/{media.code}/"
     urls = reel_urls(msg.model_dump_json())
     return urls[0] if urls else None
+
+
+def message_meta(msg):
+    """What the DM itself says about a shared reel or post: author, caption and duration, from the payload the inbox read
+    already returned. Never a request of its own. Empty when the message shares no media."""
+    for media in (msg.clip, msg.media_share):
+        if media and media.code:
+            user, caption = getattr(media, "user", None), getattr(media, "caption_text", "")
+            meta = {
+                "author": getattr(user, "username", ""),
+                "caption": " ".join((caption or "").split())[:300],
+                "duration": round(getattr(media, "video_duration", 0) or 0, 1),
+            }
+            return {k: v for k, v in meta.items() if v}
+    return {}
 
 
 def collect(inbox, pending, me, operator, seen):
@@ -116,6 +193,8 @@ def collect(inbox, pending, me, operator, seen):
             }
             if url := message_url(m):
                 row["url"] = url
+            if meta := message_meta(m):
+                row["meta"] = meta
             if m.text:
                 row["text"] = m.text
             rows.append(row)
@@ -123,8 +202,12 @@ def collect(inbox, pending, me, operator, seen):
 
 
 def note_text(row):
-    """The one line the agent gets for a log row: sender, then the reel URL or the text."""
+    """The one line the agent gets for a log row: sender, then the reel URL with its author, duration and caption
+    from the DM, or the text."""
     what = row.get("url") or " ".join(row.get("text", "").split())[:300] or f"[{row.get('type')}]"
+    meta = row.get("meta", {})
+    by = ", ".join(filter(None, (meta.get("author") and f"by @{meta['author']}", meta.get("duration") and f"{meta['duration']:g} s")))
+    what += (f" ({by})" if by else "") + (f' caption: "{meta["caption"]}"' if meta.get("caption") else "")
     return f"[Instagram DM from {row['sender']}; answer with fm-insta-reply] {what}"
 
 
@@ -148,13 +231,19 @@ def locked():
         yield
 
 
+def num(name, default):
+    return float(conf(name, str(default)))
+
+
 def load_state():
     file = state_dir() / "poll.json"
     return {
         "seen": [],
         "fails": 0,
         "next": 0,
-        "sent": 0,
+        "writes": [],  # [time, kind] of every outbound write of the last day: the limiter's memory
+        "write_at": 0,  # no write before this time: the gap after the last one, jitter included
+        "cooldown": 0,  # no write before this time: the pause after an error
         **(json.loads(file.read_text()) if file.is_file() else {}),
     }
 
@@ -163,19 +252,56 @@ def save_state(state):
     (state_dir() / "poll.json").write_text(json.dumps(state))
 
 
+def allow(state, kind, now):
+    """Why a write of this kind may not go out now (the error cooldown or a cap), or None. `seen` has no cap."""
+    if now < state["cooldown"]:
+        return f"send cooldown, {int(state['cooldown'] - now)}s more after an error"
+    for window, kinds, env, default in CAPS.get(kind, ()):
+        cap = int(num(env, default))
+        if sum(k in kinds and now - at < window for at, k in state["writes"]) >= cap:
+            return f"limit of {cap} {'/'.join(kinds)} writes per {window // 3600} h reached"
+    return None
+
+
+def pace(state, kind):
+    """Wait out the gap since the last write, or exit when a cap or the cooldown forbids this one."""
+    if why := allow(state, kind, time.time()):
+        sys.exit(f"not sending: {why}")
+    time.sleep(max(0, state["write_at"] - time.time()))
+
+
+def record_write(state, kind, now=None):
+    """Remember a write and set the earliest time of the next one: INSTAGRAM_DM_WRITE_GAP (20 s) plus up to
+    INSTAGRAM_DM_WRITE_JITTER (10 s) of random."""
+    now = now or time.time()
+    state["writes"] = [[at, k] for at, k in state["writes"] if now - at < 86400] + [[now, kind]]
+    gap, jitter = num("INSTAGRAM_DM_WRITE_GAP", 20), num("INSTAGRAM_DM_WRITE_JITTER", 10)
+    state["write_at"] = now + gap + random.uniform(0, jitter)
+
+
+def write(state, kind, thread, call, text=None):
+    """One outbound write through the shared limiter: wait for the gap, make the call, count it, log it for the front
+    desk (a text of None is not logged)."""
+    pace(state, kind)
+    call()
+    record_write(state, kind)
+    if text is not None:
+        record_sent(kind, thread, text)
+
+
 def fail(state, e, now):
     """Record a failure in state and return its one-line report. A flagged account halts; anything else backs off."""
-    secret = os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD")
-    what = f"{type(e).__name__}: {str(e).replace(secret, '***') if secret else e}"[:300]
-    if any(c.__name__ in HALT for c in type(e).__mro__):
-        state["halted"] = what
+    what = describe(e)
+    if is_halt(e):
+        state["halted"], state["halted_at"] = what, now  # the curator waits 24 h after it, resume or not
+        stop_file().write_text(what)  # the one flag every process, and the desk, looks at
         with contextlib.suppress(Exception):
             notify(
                 [
                     {
                         "id": f"halt-{int(now)}",
                         "sender": "poller",
-                        "text": f"halted, run `instagram_dm.py resume` after you fix the account: {what}",
+                        "text": f"halted, a human must open the Instagram app first, then run `instagram_dm.py resume`: {what}",
                     }
                 ]
             )
@@ -187,13 +313,26 @@ def fail(state, e, now):
         int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
     )
     state["next"] = now + wait
+    state["cooldown"] = now + num("INSTAGRAM_DM_ERROR_COOLDOWN", 1800)  # reads may go on, sends wait
     return f"failed ({what}); next try in {wait}s"
+
+
+def stop_file():
+    return state_dir() / "stop"
+
+
+def why_stopped(state):
+    """Why the whole line is stopped (a halt, or `instagram_dm.py stop`), or None. The flag file is what every
+    process and the front desk look at; `halted` in the state is the same halt, kept from before the file existed."""
+    if stop_file().is_file():
+        return stop_file().read_text() or "stopped"
+    return state.get("halted")
 
 
 def blocked(state, now):
     """Why Instagram must not be called now, or None."""
-    if state.get("halted"):
-        return f"halted ({state['halted']}); run `instagram_dm.py resume` after you fix the account"
+    if why := why_stopped(state):
+        return f"halted ({why}); a human must open the Instagram app first, then run `instagram_dm.py resume`"
     if now < state["next"]:
         return f"backing off for {int(state['next'] - now)}s more"
     return None
@@ -220,8 +359,15 @@ def poll_once(cl, state):
     save_state(state)  # before the receipts: a failure there must not log the rows twice
     newest = {r["thread"]: r["id"] for r in rows}  # rows are oldest first
     for thread_id, message_id in newest.items():
-        with contextlib.suppress(Exception):  # a read receipt is best effort
+        if time.time() < state["write_at"]:
+            break  # a receipt is best effort: never wait for the gap, never go under it
+        try:
             cl.direct_message_seen(thread_id, message_id)
+            record_write(state, "seen")
+        except Exception as e:
+            if is_halt(e):
+                raise
+    save_state(state)
 
 
 def sync(get_client):
@@ -246,7 +392,7 @@ def poll():
 
 def halt_if_flagged(e):
     """Halt the account when e means Instagram flagged it. Returns True when halted."""
-    if not any(c.__name__ in HALT for c in type(e).__mro__):
+    if not is_halt(e):
         return False
     with locked():
         state = load_state()
@@ -263,17 +409,17 @@ def listen_once(cl):
     rt = cl.realtime_connect()
     rt.direct_subscribe()
     sync(lambda: cl)  # what arrived while the channel was down
-    last = time.time()
-    while not load_state().get("halted"):
+    last, pending = time.time(), False
+    while not why_stopped(load_state()):
         try:
             cl.realtime_read_once()
         except TimeoutError:  # idle: the broker must still answer a ping
             if not rt.ping():
                 raise ConnectionError("realtime ping unanswered") from None
-        if events:
-            time.sleep(max(0, REALTIME_GAP - (time.time() - last)))
-            events.clear()
-            last = time.time()
+        pending = pending or bool(events)  # events only ring the doorbell: any number of them mean one poll
+        events.clear()
+        if pending and time.time() - last >= num("INSTAGRAM_DM_REALTIME_GAP", 30):
+            pending, last = False, time.time()
             if err := sync(lambda: cl):
                 print(f"poll {err}", flush=True)
 
@@ -283,7 +429,7 @@ def listen():
     the HTTP poll supplies the data, so the private event format is never parsed. A dead channel reconnects
     with backoff. Return when the account is halted."""
     fails = 0
-    while not load_state().get("halted"):
+    while not why_stopped(load_state()):
         cl = None
         try:
             cl = client()
@@ -297,7 +443,7 @@ def listen():
                 int(conf("INSTAGRAM_DM_INTERVAL", "120")),
                 int(conf("INSTAGRAM_DM_BACKOFF_MAX", "1800")),
             )
-            print(f"realtime {type(e).__name__}: {str(e)[:200]}; reconnect in {wait}s", flush=True)
+            print(f"realtime {describe(e)}; reconnect in {wait}s", flush=True)
             time.sleep(wait)
         finally:
             if cl:
@@ -310,6 +456,15 @@ def resume():
         state = load_state()
         state.update(halted=None, fails=0, next=0)
         save_state(state)
+        stop_file().unlink(missing_ok=True)
+    print("resumed. The next call goes to Instagram: open the app first and make sure the account is fine.")
+
+
+def stop():
+    """The kill switch: poll, listen, reply, the curator, the desk and reel_watch.py do nothing until `resume`."""
+    with locked():
+        stop_file().write_text("stopped by hand")
+    print(f"stopped: nothing calls Instagram until `instagram_dm.py resume` (flag file {stop_file()})")
 
 
 def operator_thread(cl, thread, operator):
@@ -340,15 +495,17 @@ def record_sent(kind, thread, text=""):
 
 
 def send_actions(cl, state, t, operator, text, emoji, typing):
-    """Typing indicator, reaction to his latest message, then the text, each at least REPLY_GAP after the last send."""
-
-    def pause():
-        time.sleep(max(0, state["sent"] + REPLY_GAP - time.time()))
-
-    if typing:
-        cl.realtime_connect().direct_indicate_activity(t.id, True)
-        record_sent("typing", t.id)
-        time.sleep(min(4, 1 + len(text) / 25) if text else 3)  # typing time grows with the text
+    """Typing indicator (only before a text longer than TYPING_MIN), reaction to his latest message, then the text:
+    each through the shared limiter."""
+    if typing and len(text) > TYPING_MIN:
+        write(
+            state,
+            "typing",
+            t.id,
+            lambda: cl.realtime_connect().direct_indicate_activity(t.id, True),
+            "",
+        )
+        time.sleep(min(4, 1 + len(text) / 25))  # typing time grows with the text
     if emoji:
         latest = next(
             (m for m in t.messages if str(m.user_id) == operator and m.item_type != "action_log"),
@@ -356,15 +513,20 @@ def send_actions(cl, state, t, operator, text, emoji, typing):
         )
         if latest is None:
             sys.exit("no message of the operator to react to")
-        pause()
-        cl.direct_send_reaction(t.id, latest.id, emoji)
-        state["sent"] = time.time()
-        record_sent("react", t.id, emoji)
+        write(state, "react", t.id, lambda: cl.direct_send_reaction(t.id, latest.id, emoji), emoji)
     if text:
-        pause()
-        cl.direct_send(text, thread_ids=[int(t.id)])
-        state["sent"] = time.time()
-        record_sent("text", t.id, text)
+        write(state, "text", t.id, lambda: cl.direct_send(text, thread_ids=[int(t.id)]), text)
+
+
+def plan(text, emoji, typing):
+    """The kinds of write a reply makes, in order: a typing indicator (only before a text over TYPING_MIN characters),
+    a tapback, a text. Exits when the request is wrong."""
+    if len(text) > REPLY_MAX:
+        sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
+    if not (text or emoji or typing):
+        sys.exit("nothing to send: give TEXT, --react or --typing")
+    wanted = (("typing", typing and len(text) > TYPING_MIN), ("react", emoji), ("text", text))
+    return [kind for kind, on in wanted if on]
 
 
 def reply(text, thread, emoji, typing):
@@ -373,13 +535,11 @@ def reply(text, thread, emoji, typing):
     text = " ".join((text or "").split())
     if not operator:
         sys.exit("set INSTAGRAM_DM_OPERATOR")
-    if len(text) > REPLY_MAX:
-        sys.exit(f"reply is {len(text)} characters: keep it under {REPLY_MAX}, short and plain")
-    if not (text or emoji or typing):
-        sys.exit("nothing to send: give TEXT, --react or --typing")
+    if not (kinds := plan(text, emoji, typing)):
+        return print("no typing indicator for a short reply: nothing to send")
     with locked():
         state, now = load_state(), time.time()
-        if why := blocked(state, now):
+        if why := blocked(state, now) or next(filter(None, (allow(state, k, now) for k in kinds)), None):
             sys.exit(f"not sending: {why}")
         cl = None
         try:
@@ -391,13 +551,12 @@ def reply(text, thread, emoji, typing):
             raise
         except Exception as e:
             err = fail(state, e, now)
-            save_state(state)
             sys.exit(f"reply {err}")
         finally:
+            save_state(state)  # the writes made before a failure still count
             if cl:
                 with contextlib.suppress(Exception):
                     cl.realtime_disconnect()
-        save_state(state)
 
 
 def code_handler(username, choice):
@@ -417,45 +576,66 @@ def code_handler(username, choice):
     return False
 
 
-def login(cl):
-    """Log in once with the env credentials and save the session (mode 600)."""
+def session_file():
+    return Path(conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")).expanduser()
+
+
+def login(force=False):
+    """The one manual login: the env credentials, saved with the device it pinned to the session file (mode 600).
+    A session file already there means a second login, which needs --force and keeps that device."""
+    from instagrapi import Client
+
     user, password = (
         os.environ.get("INSTAGRAM_FIRSTMATE_USERNAME"),
         os.environ.get("INSTAGRAM_FIRSTMATE_PASSWORD"),
     )
     if not user or not password:
         sys.exit("set INSTAGRAM_FIRSTMATE_USERNAME and INSTAGRAM_FIRSTMATE_PASSWORD")
-    os.environ["INSTAGRAM_DM_CODE_SINCE"] = str(
-        int(time.time())
-    )  # the code command must ignore older mail
+    session = session_file()
+    if session.is_file() and not force:
+        sys.exit(f"{session} exists and nothing logs in again by itself: check the account in the app, then `login --force`")
+    cl = Client()
+    cl.challenge_code_handler = code_handler
+    if session.is_file():
+        cl.load_settings(session)  # the same device as the first login
+    else:
+        zone = conf("INSTAGRAM_DM_TIMEZONE")  # the zone of the egress IP, never the library's New York default
+        if not zone:
+            sys.exit("set INSTAGRAM_DM_TIMEZONE to the time zone of this host's public IP, e.g. America/Chicago")
+        cl.set_timezone_offset(int(datetime.now(ZoneInfo(zone)).utcoffset().total_seconds()), zone)
+    os.environ["INSTAGRAM_DM_CODE_SINCE"] = str(int(time.time()))  # the code command must ignore older mail
     cl.login(user, password)
-    session = Path(
-        conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")
-    ).expanduser()
     session.parent.mkdir(parents=True, exist_ok=True)
     cl.dump_settings(session)
     session.chmod(0o600)
+    print(f"logged in; device {cl.device_settings.get('model')}, pinned in {session}")
+
+
+def refuse(cl, e):
+    """instagrapi's handle_exception: raise at once, with Instagram's answer on the exception. Its default solves a
+    challenge and retries by itself."""
+    with contextlib.suppress(Exception):
+        e.last_json = cl.last_json
+    raise e
 
 
 def client():
-    """A client on the saved session; it logs in only when there is no session or Instagram rejects it."""
+    """A client on the saved session. It never logs in: no session file, or one without its pinned device, raises
+    SessionLost; a session Instagram rejects raises LoginRequired on its first call. Both halt the line."""
+    if why := why_stopped(load_state()):
+        sys.exit(f"halted ({why}): nothing calls Instagram until `instagram_dm.py resume`")
     from instagrapi import Client
-    from instagrapi.exceptions import LoginRequired
 
+    session = session_file()
+    if not session.is_file():
+        raise SessionLost(f"no session file {session}: a human runs `instagram_dm.py login`")
+    saved = json.loads(session.read_text())
+    if not (saved.get("uuids") and saved.get("device_settings")):
+        raise SessionLost(f"{session} holds no pinned device: a human runs `instagram_dm.py login --force`")
     cl = Client()
     cl.delay_range = [1, 3]
-    cl.challenge_code_handler = code_handler
-    session = Path(
-        conf("INSTAGRAM_DM_SESSION", "~/.config/crewship/instagram/session.json")
-    ).expanduser()
-    if not session.is_file():
-        login(cl)
-        return cl
-    cl.load_settings(session)
-    try:
-        cl.account_info()
-    except LoginRequired:
-        login(cl)
+    cl.handle_exception = refuse
+    cl.set_settings({**saved, "session_retry_total": 0})  # the HTTP layer would retry a 429 three times
     return cl
 
 
@@ -464,8 +644,9 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "poll", "listen", "resume"):
+    for name in ("poll", "listen", "resume", "stop"):
         sub.add_parser(name)
+    sub.add_parser("login").add_argument("--force", action="store_true")
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--limit", type=int, default=20)
     reels = sub.add_parser("reels")
@@ -484,15 +665,12 @@ def main():
         listen()
     elif a.cmd == "resume":
         resume()
+    elif a.cmd == "stop":
+        stop()
     elif a.cmd == "reply":
         reply(a.text, a.thread, a.react, a.typing)
     elif a.cmd == "login":
-        from instagrapi import Client
-
-        cl = Client()
-        cl.challenge_code_handler = code_handler
-        login(cl)
-        print("logged in")
+        login(a.force)
     elif a.cmd == "inbox":
         cl = client()
         for kind, threads in (

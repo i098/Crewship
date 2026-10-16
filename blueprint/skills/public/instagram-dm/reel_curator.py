@@ -12,6 +12,11 @@ Settings: the instagram_dm.py environment (session, operator, state), plus
   CURATOR_LOG     JSON lines of every pick, rejection, follow and halt (default ~/.local/state/crewship/instagram/reels.jsonl)
   WATCH_SCRIPT    watch.py of the video-watch skill (default: the one under ~/.omp/agent/skills or ~/.claude/skills)
 The curator likes, comments and posts nothing. A challenge, a 429 or feedback_required stops it for 24 h.
+It is opt-in and runs on its OWN account (a session file other than the DM bot's, never the bot's: it scrapes feeds
+and downloads clips, which the DM bot never does). It makes at most `max_calls` (40) Instagram calls a run, never
+starts within `dm_quiet_s` (60 min) of DM activity, and does nothing for `halt_quiet_s` (24 h) after a halt or while
+the DM line is stopped. Also: CURATOR_DM_SESSION (the DM bot's session file: the curator refuses to use it),
+CURATOR_DM_DIR (the DM line's state directory, default INSTAGRAM_DM_DIR), CURATOR_DM_LOG (its message log).
 """
 
 import argparse
@@ -41,9 +46,37 @@ DEFAULTS = {
     "model": "anthropic/claude-haiku-5-5",
     "jitter": [20, 60],  # seconds between two Instagram requests
     "follow_jitter": [180, 600],  # seconds before each follow
+    "max_calls": 40,  # Instagram calls per run: the run ends when they are spent
+    "dm_quiet_s": 3600,  # no run this soon after the last DM of the operator or send of the DM line
+    "halt_quiet_s": 86400,  # no run this soon after a halt of the DM line
 }
-# Errors that stop the curator for a day: the account is flagged (ig.HALT) or Instagram throttles it.
-STOP = ig.HALT | {"PleaseWaitFewMinutes", "RateLimitError", "ClientThrottledError", "CaptchaChallengeRequired", "SentryBlock"}
+
+
+class OutOfCalls(Exception):
+    """The run spent its max_calls: end it quietly. Not a halt, nothing is wrong with the account."""
+
+
+class Budget:
+    """The Instagram client with a call counter: every method call counts, the one after the cap raises OutOfCalls."""
+
+    def __init__(self, cl, cap):
+        self.cl, self.cap, self.used = cl, cap, 0
+
+    def __getattr__(self, name):
+        attr = getattr(self.cl, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            if self.used >= self.cap:
+                raise OutOfCalls(f"{self.cap} Instagram calls spent")
+            self.used += 1
+            return attr(*args, **kwargs)
+
+        return call
+
+
+# A 429, and every class in ig.HALT (flagged, throttled, logged out), stops the curator for a day.
 BAIT = re.compile(
     r"\bcomment\b.{0,60}?\b(link|repo|code|guide|send|dm|get)\b|\b(dm|message) me\b|\blink in (my |the )?bio\b|\bfollow (and|&) comment\b",
     re.I | re.S,
@@ -105,7 +138,12 @@ def halted_until(rows):
 
 def is_stop(e):
     status = getattr(getattr(e, "response", None), "status_code", None)
-    return status == 429 or any(c.__name__ in STOP for c in type(e).__mro__)
+    return status == 429 or ig.is_halt(e)
+
+
+def ends_run(e):
+    """A failure that ends the whole run, not just one source or one reel: a stop, or the call cap."""
+    return is_stop(e) or isinstance(e, OutOfCalls)
 
 
 def pause(cfg, key="jitter"):
@@ -137,9 +175,9 @@ def candidates(cl, cfg, seen, now):
             else:
                 medias = cl.hashtag_medias_reels_v1(name, cfg["per_source"])
         except Exception as e:
-            if is_stop(e):
+            if ends_run(e):
                 raise
-            print(f"{label}: {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+            print(f"{label}: {ig.describe(e)}", file=sys.stderr)
             continue
         for m in medias:
             fresh = now - m.taken_at.timestamp() < cfg["max_age_days"] * DAY
@@ -246,14 +284,17 @@ def compose(info, link):
 
 
 def send(cl, thread, media, line):
-    """Share the reel into his thread, then the one line. Holds the DM lock so poll and reply never overlap."""
+    """Share the reel into his thread, then the one line, both through the DM limiter. Holds the DM lock so poll and
+    reply never overlap."""
     with ig.locked():
-        if why := ig.blocked(ig.load_state(), time.time()):
+        state = ig.load_state()
+        if why := ig.blocked(state, time.time()) or ig.allow(state, "text", time.time()):
             sys.exit(f"not sending: {why}")
-        cl.direct_media_share(media.id, thread_ids=[int(thread.id)], media_type="video")
-        time.sleep(ig.REPLY_GAP)
-        cl.direct_send(line, thread_ids=[int(thread.id)])
-        ig.record_sent("text", thread.id, line)
+        try:
+            ig.write(state, "text", thread.id, lambda: cl.direct_media_share(media.id, thread_ids=[int(thread.id)], media_type="video"))
+            ig.write(state, "text", thread.id, lambda: cl.direct_send(line, thread_ids=[int(thread.id)]), line)
+        finally:
+            ig.save_state(state)
 
 
 def cycle(cl, cfg, now):
@@ -279,9 +320,9 @@ def cycle(cl, cfg, now):
             if ok and not link:
                 ok, reason = False, "no repo or link found"
         except Exception as e:
-            if is_stop(e):
+            if ends_run(e):
                 raise
-            write_log(action="reject", score=None, reason=f"{type(e).__name__}: {str(e)[:150]}", **row)
+            write_log(action="reject", score=None, reason=ig.describe(e), **row)
             continue
         row.update(score=info.get("score"), reason=reason, what=info.get("what"), link=link)
         if ok:
@@ -304,6 +345,24 @@ def follow(cl, cfg):
     return "following all"
 
 
+def hold_off(cfg, now):
+    """Why the curator must not run now, or None: it uses the DM bot's session; the DM line is stopped or halted
+    (a halt counts for halt_quiet_s after it); or the line saw DM activity in the last dm_quiet_s."""
+    bot, mine = ig.conf("CURATOR_DM_SESSION"), ig.session_file()
+    if bot and Path(bot).expanduser().resolve() == mine.resolve():
+        return f"{mine} is the DM bot's session: the curator runs on its own account"
+    dm = Path(ig.conf("CURATOR_DM_DIR", str(ig.state_dir())))
+    if (dm / "stop").is_file():
+        return f"the DM line is stopped ({(dm / 'stop').read_text()})"
+    state = json.loads((dm / "poll.json").read_text()) if (dm / "poll.json").is_file() else {}
+    if state.get("halted") or now - state.get("halted_at", 0) < cfg["halt_quiet_s"]:
+        return "the DM line halted less than 24 h ago"
+    logs = [Path(ig.conf("CURATOR_DM_LOG", str(dm / "messages.jsonl"))), dm / "sent.jsonl"]
+    if now - max((f.stat().st_mtime for f in logs if f.is_file()), default=0) < cfg["dm_quiet_s"]:
+        return "the DM line was active less than 60 min ago"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["run", "follow"])
@@ -312,17 +371,21 @@ def main():
     os.environ.setdefault("INSTAGRAM_DM_ACTOR", "curator")
     if now < halted_until(read_log()):
         sys.exit("stopped for 24 h after an Instagram stop (see the log)")
+    if why := hold_off(cfg, now):
+        sys.exit(f"not running: {why}")
     if why := ig.blocked(ig.load_state(), now):
         sys.exit(f"not calling Instagram: {why}")
     try:
-        cl = ig.client()
+        cl = Budget(ig.client(), cfg["max_calls"])
         print(cycle(cl, cfg, now) if a.cmd == "run" else follow(cl, cfg))
+    except OutOfCalls as e:
+        print(f"stopped: {e}")
     except Exception as e:
         if not is_stop(e):
             raise
-        write_log(action="halt", until=int(now) + DAY, error=f"{type(e).__name__}: {str(e)[:200]}")
-        ig.halt_if_flagged(e)  # a flagged account stops the DM poller too; a plain 429 only stops the curator
-        sys.exit(f"stopped for 24 h: {type(e).__name__}")
+        write_log(action="halt", until=int(now) + DAY, error=ig.describe(e))
+        ig.halt_if_flagged(e)  # a flagged or throttled account stops the DM poller too; a bare 429 only the curator
+        sys.exit(f"stopped for 24 h: {ig.describe(e)}")
 
 
 if __name__ == "__main__":

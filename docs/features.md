@@ -2,9 +2,11 @@
 
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
 - [Public skills and rules](omp.md#skills): the skills and rules that ship with Crewship, installed on request (opt-in)
-- [Project databases](shared-postgres.md): one dev database container per project, in the engine its compose file names, and worktree connection strings (opt-in)
+- [Global agent instructions](omp.md#global-instructions): the working rules for Claude Code, omp and Codex, installed on request and merged into a file you already have (opt-in)
+- [Project databases](project-databases.md): one dev database container per project, in the engine its compose file names, and worktree connection strings (opt-in)
 - [Jujutsu](jj.md): `jj` colocated with git for agents, digest-verified in `~/.local/bin` (opt-in)
 - [fdu](configuration.md#profiles): a fast gitignore-aware `du` for large worktrees, installed with uv (opt-in)
+- [Self-hosted Forgejo](forgejo.md): a loopback git forge for agent pushes, with nightly dumps, a GitHub feature-branch push and the no-mistakes forge profile (opt-in)
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](configuration.md#data-disk): Docker and the npm and pip caches on a second disk (opt-in)

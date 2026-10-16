@@ -14,12 +14,17 @@
 //   state directory, so a restart can still reach him.
 // Photos: POST a multipart form to /image (fm-imessage --image). image.ts checks and downscales it, and the file waits in
 //   the state directory while its outbox item is delivered. Photon only: the bridge has no BlueBubbles attachment send.
+// Voice: a voice memo or audio attachment is saved, then transcribed by local whisperx (transcribe.ts). The note reads
+//   "[voice memo, Ns] <words>" and the saved path, or the path and "transcription failed". Sends are not held up by it;
+//   the next inbound message waits for it.
 // Location: when he shares his location with the Photon line in Find My, GET /location (the fm-location command).
 // Edits: spectrum-ts drops the Photon line's message.edited events, so the bridge reads them from that line's own
 //   client and files each edit as a new note, "[edited] <new text> (was: <old text>)".
 // Cards: POST card JSON to /card (fm-imessage --card). The bubble is a Spectrum app card that opens
 //   FM_IMESSAGE_CARD_URL/c/<token>, which a second, card-only listener on 127.0.0.1:FM_IMESSAGE_CARD_PORT serves
 //   (cards.ts). A pick files "[iMessage card pick] <key>: <choice>" and edits the bubble in place.
+// Instagram: with INSTAGRAM_DM_BACKEND=graph, that listener also takes Meta's DM webhook on /instagram/webhook
+//   (instagram-webhook.ts).
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
 import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
@@ -27,10 +32,12 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { type Attachment, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, spawnDesk, typingPause, verdict } from "./desk.ts";
+import { bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause, verdict } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
+import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
+import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
 const children = new Set<Bun.Subprocess>();
@@ -86,7 +93,19 @@ const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment n
 const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
+const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
 const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
+const IG_MISSING = ["INSTAGRAM_GRAPH_APP_SECRET", "INSTAGRAM_GRAPH_VERIFY_TOKEN"].filter((name) => !env[name]);
+if (env.INSTAGRAM_DM_BACKEND === "graph" && IG_MISSING.length) console.error(`fm-imessage: the Instagram webhook is off: set ${IG_MISSING.join(" and ")}`);
+// Meta's DM webhook, on the card listener (instagram-webhook.ts); off unless the graph backend is fully set.
+const igWebhook = env.INSTAGRAM_DM_BACKEND === "graph" && !IG_MISSING.length ? instagramWebhook({
+  appSecret: env.INSTAGRAM_GRAPH_APP_SECRET!,
+  verifyToken: env.INSTAGRAM_GRAPH_VERIFY_TOKEN!,
+  operator: env.INSTAGRAM_DM_OPERATOR || "",
+  log: env.INSTAGRAM_DM_LOG || `${env.INSTAGRAM_DM_DIR || `${env.HOME}/.local/state/instagram-dm`}/messages.jsonl`,
+  notify: (env.INSTAGRAM_DM_NOTIFY || "").split(/\s+/).filter(Boolean),
+  say: (line) => console.log(`fm-imessage: ${line}`),
+}) : undefined;
 for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 let burstFrom: number | undefined; // the memory id of his first text the desk has not answered yet
 const recent: Ref[] = []; // his last texts, newest last, for a threaded reply to one a few bubbles up
@@ -342,16 +361,19 @@ async function photoOf(form: FormData): Promise<PreparedImage | Response> {
     throw e;
   }
 }
-if (cards) {
-  const routes = cardRoutes(cards, picked);
-  // This port is public through the tunnel: no debug page, and no error line that names a token.
-  Bun.serve({ hostname: "127.0.0.1", port: CARD_PORT, maxRequestBodySize: 4096, development: false,
-    fetch: (req) => stopping ? new Response("stopping\n", { status: 503 }) : routes(req),
+if (cards || igWebhook) {
+  const routes = cards ? cardRoutes(cards, picked) : () => new Response("not found\n", { status: 404 });
+  // This port is public through the tunnel: no debug page, and no error line that names a token. Meta's webhook
+  // payloads pass 4 KiB, so the body limit is larger with the webhook on.
+  Bun.serve({ hostname: "127.0.0.1", port: CARD_PORT, maxRequestBodySize: igWebhook ? 65536 : 4096, development: false,
+    fetch: (req) => stopping ? new Response("stopping\n", { status: 503 })
+      : igWebhook && new URL(req.url).pathname === "/instagram/webhook" ? igWebhook(req) : routes(req),
     error(e) {
       console.error(`fm-imessage: card page failed: ${brief(e).replace(/[A-Za-z0-9_-]{43}/g, "<token>")}`);
       return new Response("error\n", { status: 500 });
     } });
-  console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
+  if (cards) console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
+  if (igWebhook) console.log(`fm-imessage: Instagram webhook on 127.0.0.1:${CARD_PORT}/instagram/webhook`);
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
 
@@ -545,7 +567,7 @@ async function runDesk(current: () => boolean) {
   appendFileSync(DESK_LOG, `${new Date().toISOString()} ${target.id} ${outcome}\n`, { mode: 0o600 });
 }
 
-async function saveAttachment(c: Attachment, id: string) {
+async function saveAttachment(c: Saveable, id: string) {
   const path = `${ATTACH_DIR}/${id}-${String(c.name ?? "file").replace(/[^\w.-]/g, "_")}`;
   await Bun.write(path, await c.read());
   return path;
@@ -556,6 +578,9 @@ async function noteText(message: LineMessage) {
   let failed: unknown;
   const text = await describe(message.content, message.id, (c, id) => saveAttachment(c, id).catch((e) => {
     failed ??= e;
+    throw e;
+  }), (path) => transcribe(path, listen).catch((e) => {
+    log("transcribe")(e);
     throw e;
   }));
   return { text, failed };

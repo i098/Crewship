@@ -1,0 +1,53 @@
+{{ ansible_managed | comment }}
+# Forgejo (docs/forgejo.md). Every apply rewrites this file. The secrets stay in the
+# files the *_URI keys name, so this file holds none.
+APP_NAME = Forgejo
+RUN_USER = {{ crewship_cfg.user }}
+RUN_MODE = prod
+WORK_PATH = {{ crewship_forgejo_work }}
+
+[server]
+PROTOCOL = http
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = {{ crewship_forgejo_port }}
+ROOT_URL = {{ crewship_forgejo_root_url }}
+DISABLE_SSH = true
+START_SSH_SERVER = false
+OFFLINE_MODE = true
+LFS_START_SERVER = false
+
+[database]
+DB_TYPE = sqlite3
+PATH = {{ crewship_forgejo_work }}/data/forgejo.db
+SQLITE_JOURNAL_MODE = WAL
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY_URI = file:{{ crewship_forgejo_conf_dir }}/secret-key
+INTERNAL_TOKEN_URI = file:{{ crewship_forgejo_conf_dir }}/internal-token
+
+[oauth2]
+JWT_SECRET_URI = file:{{ crewship_forgejo_conf_dir }}/jwt-secret
+
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = true
+DEFAULT_KEEP_EMAIL_PRIVATE = true
+
+[repository]
+DEFAULT_PRIVATE = private
+
+[actions]
+ENABLED = false
+
+# A push mirror deletes every GitHub branch it does not push (docs/forgejo.md#github-push).
+# DISABLE_NEW_PUSH blocks only the web UI; ENABLED = false also refuses the API.
+[mirror]
+ENABLED = false
+
+[cron.update_checker]
+ENABLED = false
+
+[log]
+MODE = console
+LEVEL = Info

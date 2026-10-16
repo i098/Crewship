@@ -18,7 +18,7 @@ crewship:
     tailscale: false
     desktop: false
     fleet_guards: false
-    shared_postgres: false
+    project_databases: false
     # Jujutsu (jj) for agents, colocated with git (docs/jj.md).
     jj: false
     # fdu, a fast gitignore-aware du for large worktrees (docs/configuration.md#profiles).
@@ -27,6 +27,8 @@ crewship:
     chat: false
     # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md).
     gateway: false
+    # A self-hosted Forgejo on loopback for the agents' repositories (docs/forgejo.md).
+    forgejo: false
   gateway:
     # Hours an address stays allowed after the right password; the cookie lasts as long.
     allow_hours: 24

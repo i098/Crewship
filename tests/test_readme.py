@@ -17,16 +17,18 @@ SPEC.loader.exec_module(provisions)
 FEATURES = {
     "crewship.profiles.agents": "docs/omp.md",
     "crewship.profiles.public_skills": "docs/omp.md#skills",
+    "crewship.profiles.agent_instructions": "docs/omp.md#global-instructions",
     "crewship.profiles.chat": "docs/chat.md",
     "crewship.profiles.gateway": "docs/gateway.md",
     "crewship.profiles.koncreet": "docs/security.md#host-hardening",
     "crewship.profiles.tailscale": "docs/security.md#remote-access",
     "crewship.profiles.desktop": "docs/recovery.md#desktop-access",
     "crewship.profiles.fleet_guards": "docs/fleet-guards.md",
-    "crewship.profiles.shared_postgres": "docs/shared-postgres.md",
+    "crewship.profiles.project_databases": "docs/project-databases.md",
     "crewship.profiles.jj": "docs/jj.md",
     "crewship.profiles.fdu": "docs/configuration.md#profiles",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
+    "crewship.profiles.forgejo": "docs/forgejo.md",
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
     "crewship.mac_ssh": "docs/security.md#ssh-to-a-mac",
@@ -48,6 +50,9 @@ EXCLUDED = {
     "crewship.gateway",
     "crewship.imessage.bluebubbles",
     "crewship.imessage.cards",
+    "crewship.instructions_mode",
+    # The old name of crewship.profiles.project_databases, folded into it.
+    "crewship.profiles.shared_postgres",
     # Host-only skills: documented in docs/omp.md, not a README feature.
     "crewship.skills",
 }

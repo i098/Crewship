@@ -15,4 +15,6 @@ Environment=INSTAGRAM_DM_DIR={{ crewship_instagram_dm_state }}
 Environment=INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log }}
 Environment="INSTAGRAM_DM_NOTIFY={{ crewship_instagram_dm_notify }}"
 Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
+# Optional KEY=value lines: the limiter and timing settings of instagram_dm.py (docs/architecture.md#instagram-dm-alerts).
+EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
 ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script }} poll

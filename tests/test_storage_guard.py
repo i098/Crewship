@@ -27,6 +27,7 @@ echo "Used Avail Use% Mounted on"
 echo "$used $((size - used)) $(( (used * 100 + size - 1) / size ))% $best"
 """,
     "du": 'cat "$STUB/du" 2>/dev/null',
+    "findmnt": 'cat "$STUB/mounts" 2>/dev/null',
     "docker": r"""
 echo "$*" >> "$STUB/docker.log"
 free() {
@@ -77,6 +78,10 @@ class Guard:
     def fs(self, pcts: dict[str, int]):
         lines = [f"{m} {100 * G} {p * G}" for m, p in pcts.items()]
         (self.stub / "fs").write_text("\n".join(lines) + "\n")
+
+    def mounts(self, text: str):
+        """What `findmnt -rno TARGET,FSTYPE,SOURCE` prints; no file, no mounts."""
+        (self.stub / "mounts").write_text(text)
 
     def free(self, **gib: int):
         for step, amount in gib.items():
@@ -244,13 +249,85 @@ def test_fill_rate_alarm_fires_below_warn_and_names_the_fastest_grower(guard):
         f"{40 * G}\t/var\n{11 * G}\t/var/log/syslog\n{10 * G}\t/var/log\n"
         f"{20 * G}\t/home\n{5 * G}\t/home/tester/work\n"
     )
-    guard.run()
+    guard.run(STORAGE_FILL_MIN_PCT="0")  # the 70% floor has its own test below
     (alert,) = guard.alerts()
     assert alert.startswith("FILL / 50% used, 50.0G free: filling: +10.0G in 10m")
-    assert "grew most: /var/log/syslog +10.0G in the 10m since the previous scan" in alert
+    assert "grew most in the 10m since the previous scan: /var/log/syslog +10.0G" in alert
     assert "under /: var 40.0G, home 20.0G; under /var/log: syslog 11.0G" in alert
     assert "under /home/tester: work 5.0G" in alert
     assert guard.prunes() == []
+
+
+def test_every_real_block_filesystem_is_measured_once_and_pseudo_ones_are_skipped(guard):
+    guard.fs({"/": 50, "/sdb": 95, "/sdb/bind": 95, "/sdc": 86, "/snap/core": 100, "/ovl": 100, "/mnt/ram": 100})
+    guard.mounts(
+        "/ ext4 /dev/sda2\n/run tmpfs tmpfs\n/sdb ext4 /dev/sdb1\n/sdb/bind ext4 /dev/sdb1[/sub]\n"
+        "/sdc xfs /dev/sdc1\n/snap/core squashfs /dev/loop1\n/ovl overlay overlay\n"
+        "/mnt/ram ext4 /dev/loop9\n/nsfs nsfs nsfs[mnt:[1]]\n"
+    )
+    guard.run()
+    crit, warn = guard.alerts()
+    assert crit.startswith("CRIT /sdb 95% used")
+    assert warn.startswith("WARN /sdc 86% used")
+    assert guard.prunes() == []
+
+
+def test_each_mount_alerts_once_per_episode_and_rearms_on_its_own(guard):
+    guard.mounts("/ ext4 /dev/sda2\n/sdb ext4 /dev/sdb1\n/sdc ext4 /dev/sdc1\n")
+    guard.fs({"/": 50, "/sdb": 86, "/sdc": 86})
+    guard.run()
+    guard.run()
+    assert [a.split()[1] for a in guard.alerts()] == ["/sdb", "/sdc"]
+    guard.fs({"/": 50, "/sdb": 70, "/sdc": 86})  # only /sdb drops below WARN - hysteresis
+    guard.run()
+    guard.fs({"/": 50, "/sdb": 86, "/sdc": 86})
+    guard.run()
+    assert [a.split()[1] for a in guard.alerts()] == ["/sdb", "/sdc", "/sdb"]
+
+
+def test_alert_reaches_firstmate_through_fm_inbox_note(guard):
+    home = guard.stub / "firstmate"
+    (home / "bin").mkdir(parents=True)
+    Guard._exe(home / "bin/fm-inbox.sh", 'echo "$FM_HOME|$*" >> "$STUB/notes"')
+    guard.fs({"/": 86})
+    guard.run(FM_HOME=f"{home}/")
+    (note,) = guard._lines("notes")
+    assert note.startswith(f"{home}|note -- [storage-guard ")
+    assert "] WARN / 86% used, 14.0G free: at 86% (WARN 85%). top:" in note
+    assert guard.alerts()[0].startswith("WARN / 86%")  # notify-master.sh still runs
+
+
+def test_alert_names_the_five_entries_that_grew_most_since_the_previous_scan(guard):
+    now = int(time.time())
+    scan = "".join(f"\n{G}\t/{n}" for n in "abcdefg")
+    (guard.doctor / ".storage-guard").mkdir()
+    (guard.doctor / ".storage-guard/_.scan").write_text(f"{now - 3600} 1{scan}\n")
+    guard.fs({"/": 86})
+    (guard.stub / "du").write_text("".join(f"{(i + 2) * G}\t/{n}\n" for i, n in enumerate("abcdefg")))
+    guard.run()
+    (alert,) = guard.alerts()
+    assert "grew most in the 60m since the previous scan: /g +7.0G, /f +6.0G, /e +5.0G, /d +4.0G, /c +3.0G." in alert
+
+
+def test_scan_looks_one_level_under_the_biggest_entry_only(guard):
+    guard.fs({"/": 86})
+    # du prints a directory after its children
+    rows = [(4, "/x/big"), (1, "/x/small"), (10, "/x"), (2, "/y/z"), (3, "/y")]
+    (guard.stub / "du").write_text("".join(f"{g * G}\t{p}\n" for g, p in rows))
+    guard.run()
+    (alert,) = guard.alerts()
+    assert "under /: x 10.0G, y 3.0G; under /x: big 4.0G, small 1.0G" in alert
+    assert "/y/z" not in alert and "z 2.0G" not in alert
+
+
+def test_crit_runs_the_configured_prune_command_instead_of_the_bundled_script(guard):
+    home = guard.doctor.parent / "home"
+    (home / ".treehouse").mkdir(parents=True)
+    guard.env["HOME"] = str(home)
+    Guard._exe(guard.stub / "prune", 'echo "called $*" >> "$STUB/prune.log"')
+    guard.fs({"/": 95})
+    guard.run(WORKTREE_PRUNE_CMD=str(guard.stub / "prune"))
+    assert guard._lines("prune.log") == ["called "]
 
 
 def test_fill_eta_uses_the_free_space_left_after_a_crit_reclaim(guard):
@@ -318,3 +395,21 @@ def test_below_crit_and_in_dry_run_the_worktree_output_stays(guard):
     assert f"would remove {repo}/node_modules" in out
     assert "CRIT worktree step (would run now" in out
     assert (repo / "node_modules/pkg/index.js").is_file()
+
+
+@pytest.mark.parametrize(("pct", "alerted"), [(25, False), (75, True)])
+def test_fill_rate_alarm_waits_for_the_fill_floor(guard, pct, alerted):
+    state = guard.doctor / ".storage-guard"
+    state.mkdir()
+    now = int(time.time())
+    (state / "_").write_text(f"{now - 600} {(pct - 10) * G} 0 0 0\n")  # +10G in 10 min
+    guard.fs({"/": pct})
+    dry = guard.run("--dry-run").stdout
+    assert ("+10.0G in 10m" in dry) and (("below FILL floor 70%" in dry) == (not alerted))
+    guard.run()
+    if alerted:
+        (alert,) = guard.alerts()
+        assert alert.startswith(f"FILL / {pct}% used, {100 - pct}.0G free: filling: +10.0G in 10m")
+    else:
+        assert guard.alerts() == []
+    assert (state / "_").read_text().split()[1] == str(pct * G)  # sampled, so a rate exists at the crossing

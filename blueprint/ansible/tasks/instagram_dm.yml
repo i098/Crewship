@@ -44,7 +44,7 @@
     dest: "{{ crewship_instagram_desk_dir }}/{{ item }}"
     mode: "0644"
     remote_src: true
-  loop: [instagram-desk.ts, desk.ts, memory.ts, zoom.ts]
+  loop: [instagram-desk.ts, desk.ts, memory.ts, zoom.ts, instagram-graph.ts]
   notify: restart instagram-desk
 
 - name: Render the Instagram DM listener, poll unit and timer
@@ -56,9 +56,51 @@
     - instagram-dm-listen.service
     - instagram-dm-poll.service
     - instagram-dm-poll.timer
+  notify: reload user systemd
+
+# The reel curator is opt-in (crewship_instagram_curator_enabled): it runs on its own account, never the DM bot's.
+- name: Render the Instagram reel curator service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop:
     - instagram-reel-curator.service
     - instagram-reel-curator.timer
   notify: reload user systemd
+  when: crewship_instagram_curator_enabled | bool
+
+# The official API backend (crewship_instagram_dm_backend: graph): a weekly timer refreshes its token.
+- name: Render the Instagram API token refresh service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - instagram-graph-refresh.service
+    - instagram-graph-refresh.timer
+  notify: reload user systemd
+  when: crewship_instagram_dm_backend == 'graph'
+
+- name: Statically enable the Instagram API token refresh timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/instagram-graph-refresh.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/instagram-graph-refresh.timer"
+    state: link
+    force: true
+    follow: false
+  when: crewship_instagram_dm_backend == 'graph'
+
+- name: Enable and start the Instagram API token refresh timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: instagram-graph-refresh.timer
+    enabled: true
+    state: started
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - crewship_instagram_dm_backend == 'graph'
+    - crewship_manage_services | bool
 
 - name: Render the Instagram front desk unit
   ansible.builtin.template:
@@ -84,6 +126,7 @@
     state: link
     force: true
     follow: false
+  when: crewship_instagram_curator_enabled | bool
 
 - name: Statically enable the Instagram DM listener
   ansible.builtin.file:
@@ -99,9 +142,49 @@
     name: "{{ item }}"
     enabled: true
     state: started
-  loop: [instagram-dm-listen.service, instagram-dm-poll.timer, instagram-reel-curator.timer]
+  loop: [instagram-dm-listen.service, instagram-dm-poll.timer]
   environment: "{{ crewship_user_systemd_env }}"
   when: crewship_manage_services | bool
+
+- name: Enable and start the Instagram reel curator timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: instagram-reel-curator.timer
+    enabled: true
+    state: started
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - crewship_instagram_curator_enabled | bool
+    - crewship_manage_services | bool
+
+- name: Check for an installed Instagram reel curator timer
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/instagram-reel-curator.timer"
+  register: crewship_instagram_curator_installed
+  when: not (crewship_instagram_curator_enabled | bool)
+
+- name: Stop and disable the Instagram reel curator timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: instagram-reel-curator.timer
+    enabled: false
+    state: stopped
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - not (crewship_instagram_curator_enabled | bool)
+    - crewship_instagram_curator_installed.stat.exists
+    - crewship_manage_services | bool
+
+- name: Remove the Instagram reel curator units and their enablement link
+  ansible.builtin.file:
+    path: "{{ crewship_user_units }}/{{ item }}"
+    state: absent
+  loop:
+    - timers.target.wants/instagram-reel-curator.timer
+    - instagram-reel-curator.timer
+    - instagram-reel-curator.service
+  notify: reload user systemd
+  when: not (crewship_instagram_curator_enabled | bool)
 
 - name: Statically enable the Instagram front desk
   ansible.builtin.file:

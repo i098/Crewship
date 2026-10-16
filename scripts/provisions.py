@@ -8,10 +8,11 @@ Nothing is pinned: every tool tracks its latest release (no-mistakes its newest
 non-draft one, prereleases included). Native assets are
 verified against the SHA-256 their publisher lists for that exact release (the
 GitHub release-asset digest, or the release's own .sha256 file for gws and Pyrefly, Node's
-SHASUMS256.txt, rustup's .sha256), npm-registry tools (installed by bun)
+SHASUMS256.txt, rustup's .sha256, Forgejo's .sha256 on Codeberg), npm-registry tools (installed by bun)
 against the integrity the registry records for the resolved version, psutil against the
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
-marketplace plugins are the one exception: no publisher checksums them, so they
+marketplace plugins and sgrep (built by cargo from its default branch, crates locked by
+its Cargo.lock) are the exceptions: no publisher checksums them, so they
 track each author's default branch.
 """
 
@@ -37,6 +38,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
+FORGEJO_RELEASES = (
+    "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases?draft=false&pre-release=false"
+)
 # How release asset names spell each platform.
 ARCH = {
     "linux-x86_64": {
@@ -155,6 +159,7 @@ NPM_LATEST = {
     "tasks-axi": "tasks-axi",
     "acpx": "acpx",
     "chrome-devtools-mcp": "chrome-devtools-mcp",
+    "forgejo-axi": "forgejo-axi",
 }
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
@@ -163,6 +168,9 @@ PRERELEASE_CHANNEL = {"no-mistakes"}
 AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws"]
 # Attempts per download; transient 5xx and connection errors back off 1 s, then 2 s.
 DOWNLOAD_ATTEMPTS = 3
+SGREP_REPOSITORY = "https://github.com/context-dot-dev/sgrep"
+# One extension per language sgrep parses with Tree-sitter (its README).
+SGREP_LANGUAGES = ("py", "c", "cpp", "cs", "go", "java", "rs", "js", "jsx", "ts", "tsx")
 
 
 def digest(path):
@@ -322,6 +330,21 @@ def resolve_latest(key, names):
             match[1] if match else "",
             binaries,
         )
+    if "forgejo" in names:
+        # Installed by Ansible itself (blueprint/ansible/tasks/forgejo.yml), which also
+        # checks the release signature against the Forgejo release key.
+        releases = json.loads(fetch(FORGEJO_RELEASES, "forgejo release"))
+        release = max(
+            releases, key=lambda r: tuple(int(n) for n in re.findall(r"\d+", r["tag_name"]))
+        )
+        version = release["tag_name"].removeprefix("v")
+        name = f"forgejo-{version}-linux-{ARCH[key]['go']}"
+        urls = {asset["name"]: asset["browser_download_url"] for asset in release["assets"]}
+        checksum = fetch(urls[name + ".sha256"], "forgejo checksum").decode().split(" ")[0]
+        latest["forgejo"] = verified(
+            "forgejo", version, key, name, urls[name], checksum, {"forgejo": name}
+        )
+        latest["forgejo"]["assets"][key]["signature"] = urls[name + ".asc"]
     if "rustup-init" in names:
         toml = fetch("https://static.rust-lang.org/rustup/release-stable.toml", "rustup").decode()
         match = re.search(r"^version = '([0-9.]+)'$", toml, re.M)
@@ -588,15 +611,20 @@ def retire_legacy_npm(home):
     return changed
 
 
+def rust_environment(home, environment):
+    return {
+        **environment,
+        "CARGO_HOME": str(home / ".cargo"),
+        "RUSTUP_HOME": str(home / ".rustup"),
+        "PATH": f"{home / '.cargo/bin'}:{environment['PATH']}",
+    }
+
+
 def rust_install(home, environment):
     """The stable toolchain with rustfmt and clippy; an apply moves it to the newest stable."""
     version = "stable"
     rustup = home / ".cargo/bin/rustup"
-    environment = {
-        **environment,
-        "CARGO_HOME": str(home / ".cargo"),
-        "RUSTUP_HOME": str(home / ".rustup"),
-    }
+    environment = rust_environment(home, environment)
     profile = ["--profile", "minimal", "--component", "rustfmt", "--component", "clippy"]
     changed = False
     if not rustup.exists():
@@ -646,6 +674,40 @@ def rust_install(home, environment):
     ):
         changed = link_binary(home, name, home / ".cargo/bin" / name) or changed
     return changed
+
+
+def sgrep_install(home, environment):
+    """The latest sgrep from its default branch, built by cargo; an apply moves it to the newest."""
+    environment = rust_environment(home, environment)
+    binary = home / ".cargo/bin/sgrep"
+    before = digest(binary) if binary.exists() else ""
+    command(
+        [home / ".cargo/bin/cargo", "install", "--git", SGREP_REPOSITORY, "--locked"], environment
+    )
+    changed = digest(binary) != before
+    changed = link_binary(home, "sgrep", binary) or changed
+    warm_sgrep(binary, environment)
+    return changed
+
+
+def warm_sgrep(binary, environment):
+    """One tiny search per model, so the first real search downloads nothing.
+
+    sgrep loads a code parser only for a file longer than one passage, so the
+    scratch directory holds one long file per language it parses. A failed
+    download only warns: sgrep fetches what it lacks on its first search.
+    """
+    with tempfile.TemporaryDirectory(prefix="sgrep-warm-") as scratch:
+        for extension in SGREP_LANGUAGES:
+            Path(scratch, "warm." + extension).write_text("value = 1;\n" * 400)
+        for model in ("code", "text"):
+            result = subprocess.run(
+                [binary, "value", scratch, "-n", "1", "--model", model, "--no-cache"],
+                env=environment,
+                stdout=subprocess.DEVNULL,
+            )
+            if result.returncode not in (0, 1):
+                print(f"provisions: sgrep {model} model not warmed (exit {result.returncode})", file=sys.stderr)
 
 
 def fdu_install(home, environment):
@@ -710,12 +772,15 @@ def main():
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
     parser.add_argument("--development", action="store_true")
+    parser.add_argument(
+        "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
+    )
     parser.add_argument("--fdu", action="store_true", help="also install fdu with uv (needs uv in --tools)")
     parser.add_argument(
         "--also",
         default="",
         help="comma-separated extra sources to resolve that Ansible installs itself: "
-        "obscura, psutil, koncreet",
+        "obscura, psutil, koncreet, forgejo",
     )
     parser.add_argument(
         "--resolve",
@@ -730,7 +795,8 @@ def main():
     names = list(dict.fromkeys(args.tools.split(",") + (AGENT_TOOLS if args.npm else [])))
     if "sentrux" in names:
         names.append("sentrux-grammars")
-    if args.development:
+    rust = args.development or args.sgrep
+    if rust:
         names.append("rustup-init")
     sources = {*names, *(NPM_LATEST if args.npm else ()), *filter(None, args.also.split(","))}
     if args.resolve:
@@ -764,8 +830,10 @@ def main():
                 changed = bun_latest_install(home, tool, latest[tool], environment) or changed
             changed = retire_legacy_npm(home) or changed
             changed = omp_plugins(home, environment) or changed
-        if args.development:
+        if rust:
             changed = rust_install(home, environment) or changed
+        if args.sgrep:
+            changed = sgrep_install(home, environment) or changed
         if args.fdu:
             changed = fdu_install(home, environment) or changed
         if args.resolved:
