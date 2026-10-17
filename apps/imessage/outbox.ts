@@ -72,9 +72,15 @@ export class Queue<T> {
 
   add(item: T) {
     const id = this.key?.(item);
-    if (id && this.keys.has(id)) return;
-    this.write(this.next++, item);
-    if (id) this.keys.add(id);
+    if (id && this.keys.has(id)) this.syncDir();
+    else {
+      try { this.write(this.next++, item); }
+      catch (e) {
+        if (id && this.key) this.restoreKeys(this.dir, this.key);
+        throw e;
+      }
+      if (id) this.keys.add(id);
+    }
     void this.drain();
   }
 
@@ -112,6 +118,10 @@ export class Queue<T> {
       closeSync(fd);
     }
     renameSync(tmp, this.file(seq));
+    this.syncDir();
+  }
+
+  private syncDir() {
     const dir = openSync(this.dir, "r");
     try {
       fsyncSync(dir);

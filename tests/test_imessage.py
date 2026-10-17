@@ -1448,6 +1448,81 @@ process.exit(0);
     assert result["lost"] == [{"v": "bad"}]  # told of the parsed item only, not of the corrupt file
 
 
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("failure", [
+    "file-open", "file-write", "file-sync", "rename", "directory-open", "directory-sync",
+])
+def test_queue_retries_storage_failures_without_duplicate_keyed_delivery(tmp_path, failure):
+    queue = tmp_path / "queue"
+    result = bun(f"""
+import * as fs from "node:fs";
+import {{ mock }} from "bun:test";
+const real = {{ ...fs }};
+const dir = {json.dumps(str(queue))};
+let failure = "";
+function fail(at) {{
+  if (failure === at) throw Object.assign(new Error(`injected ${{at}} failure`), {{ code: "EIO" }});
+}}
+mock.module("node:fs", () => ({{
+  ...real,
+  openSync(path, flags, ...args) {{
+    fail(String(path) === dir ? "directory-open" : "file-open");
+    return real.openSync(path, flags, ...args);
+  }},
+  writeSync(...args) {{
+    fail("file-write");
+    return real.writeSync(...args);
+  }},
+  fsyncSync(fd) {{
+    fail(real.fstatSync(fd).isDirectory() ? "directory-sync" : "file-sync");
+    return real.fsyncSync(fd);
+  }},
+  renameSync(...args) {{
+    fail("rename");
+    return real.renameSync(...args);
+  }},
+}}));
+const {{ Queue }} = await import({OUTBOX});
+const delivered = [];
+const item = {{ requestId: "request-1", text: "The build is paused." }};
+const deliver = async (item, save) => {{
+  delivered.push(item);
+  save({{ ...item, done: true }});
+}};
+const key = (item) => item.requestId;
+const q = new Queue(dir, "answer", deliver, 5, undefined, key);
+const packets = (folder) => real.readdirSync(folder).filter((f) => f.endsWith(".json"))
+  .map((f) => JSON.parse(real.readFileSync(`${{folder}}/${{f}}`, "utf8")));
+const attempt = () => {{
+  try {{ q.add(item); return null; }}
+  catch (e) {{ return e.message; }}
+}};
+failure = {json.dumps(failure)};
+const errors = [attempt()];
+const first = packets(dir);
+errors.push(attempt());
+const second = packets(dir);
+failure = "";
+q.add(item);
+q.add(item);
+const end = Date.now() + 5000;
+while ((packets(dir).length || !packets(`${{dir}}-done`).length) && Date.now() < end) await Bun.sleep(5);
+q.add(item);
+const restarted = new Queue(dir, "answer", deliver, 5, undefined, key);
+restarted.add(item);
+await Bun.sleep(20);
+console.log(JSON.stringify({{ errors, first, second, delivered, pending: packets(dir), receipts: packets(`${{dir}}-done`) }}));
+process.exit(0);
+""")
+    item = {"requestId": "request-1", "text": "The build is paused."}
+    assert result["errors"] == [f"injected {failure} failure"] * 2
+    expected = [item] if failure.startswith("directory-") else []
+    assert result["first"] == result["second"] == expected
+    assert result["delivered"] == [item]
+    assert result["pending"] == []
+    assert result["receipts"] == [{**item, "done": True}]
+
+
 # A fake spectrum-ts for bridge.ts. Its state is in FAKE_DIR, so it outlives a bridge restart: `down` holds how
 # many more upstream calls fail with UNAVAILABLE, typing always fails while `typing-down` exists, `inbound/` holds
 # the owner's messages for the bridge to receive, `edits/` holds the line's raw message.edited events, `calls` logs
