@@ -1,0 +1,374 @@
+{
+  "schemaVersion": "v6",
+  "name": "crewship-model-usage",
+  "tags": [],
+  "spec": {
+    "display": {
+      "name": "Model usage",
+      "description": "Metadata-only request accounting. Inspect Details and coverage before using partial totals."
+    },
+    "variables": [],
+    "duration": "1h",
+    "refreshInterval": "1m",
+    "panels": {
+      "prompts": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Prompts sent",
+            "description": "Declared model-request completions. See Details for the counting basis."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT if(count() = 0, NULL, toNullable(toFloat64(count()))) AS value\nFROM completions WHERE completed_ns >= $start_timestamp_nano AND completed_ns < $end_timestamp_nano",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "requests": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Completed model requests per minute",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT toStartOfMinute(fromUnixTimestamp64Nano(toInt64(completed_ns))) AS ts,\n       toFloat64(count()) AS value\nFROM completions WHERE completed_ns >= $start_timestamp_nano AND completed_ns < $end_timestamp_nano GROUP BY ts ORDER BY ts",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "models": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Requested model ranking by model-request count",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT strings['usage.model'] AS model,\n       strings['usage.provider'] AS provider, toFloat64(count()) AS model_requests,\n       sumOrNull(tokens) AS counted_tokens, countIf(isNull(tokens)) AS unknown_token_requests\nFROM completions WHERE completed_ns >= $start_timestamp_nano AND completed_ns < $end_timestamp_nano\nGROUP BY model, provider ORDER BY model_requests DESC, model ASC, provider ASC LIMIT 20",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "calendar": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Pacific calendar totals - partial until coverage is proved",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      \n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT 'Today' AS period,\n    toString(toStartOfDay(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 'America/Los_Angeles') AS pacific_start,\n    if(count() = 0, NULL, toNullable(toFloat64(count()))) AS model_requests,\n    sumOrNull(tokens) AS counted_tokens,\n    countIf(isNull(tokens)) AS unknown_token_requests,\n    if(toUnixTimestamp64Nano(toDateTime64(toStartOfDay(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles')) < toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n       OR (SELECT count() FROM coverage) = 0, 1,\n       (SELECT countIf(origin = 'partial_import' OR missing != 0 OR gaps > 0\n                      OR registered * 1e9 > toUnixTimestamp64Nano(toDateTime64(toStartOfDay(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles'))\n                      OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0) AS partial\nFROM completions WHERE completed_ns >= toUnixTimestamp64Nano(toDateTime64(toStartOfDay(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles')) AND completed_ns < $end_timestamp_nano\nUNION ALL\nSELECT 'This week' AS period,\n    toString(toStartOfWeek(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles'), 1), 'America/Los_Angeles') AS pacific_start,\n    if(count() = 0, NULL, toNullable(toFloat64(count()))) AS model_requests,\n    sumOrNull(tokens) AS counted_tokens,\n    countIf(isNull(tokens)) AS unknown_token_requests,\n    if(toUnixTimestamp64Nano(toDateTime64(toStartOfWeek(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles'), 1), 9, 'America/Los_Angeles')) < toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n       OR (SELECT count() FROM coverage) = 0, 1,\n       (SELECT countIf(origin = 'partial_import' OR missing != 0 OR gaps > 0\n                      OR registered * 1e9 > toUnixTimestamp64Nano(toDateTime64(toStartOfWeek(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles'), 1), 9, 'America/Los_Angeles'))\n                      OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0) AS partial\nFROM completions WHERE completed_ns >= toUnixTimestamp64Nano(toDateTime64(toStartOfWeek(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles'), 1), 9, 'America/Los_Angeles')) AND completed_ns < $end_timestamp_nano\nUNION ALL\nSELECT 'This month' AS period,\n    toString(toStartOfMonth(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 'America/Los_Angeles') AS pacific_start,\n    if(count() = 0, NULL, toNullable(toFloat64(count()))) AS model_requests,\n    sumOrNull(tokens) AS counted_tokens,\n    countIf(isNull(tokens)) AS unknown_token_requests,\n    if(toUnixTimestamp64Nano(toDateTime64(toStartOfMonth(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles')) < toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n       OR (SELECT count() FROM coverage) = 0, 1,\n       (SELECT countIf(origin = 'partial_import' OR missing != 0 OR gaps > 0\n                      OR registered * 1e9 > toUnixTimestamp64Nano(toDateTime64(toStartOfMonth(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles'))\n                      OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0) AS partial\nFROM completions WHERE completed_ns >= toUnixTimestamp64Nano(toDateTime64(toStartOfMonth(toTimeZone(fromUnixTimestamp64Nano(toInt64($end_timestamp_nano)), 'America/Los_Angeles')), 9, 'America/Los_Angeles')) AND completed_ns < $end_timestamp_nano",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "tokens": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Completed-call counted tokens per second",
+            "description": "Closed one-minute accounting bins. Not live decoding speed. Clipped and unknown bins stay empty."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT toStartOfMinute(fromUnixTimestamp64Nano(toInt64(completed_ns))) AS ts,\n       sumOrNull(tokens) / 60 AS value\nFROM completions WHERE completed_ns >= intDiv($start_timestamp_nano + 59999999999, 60000000000) * 60000000000 AND completed_ns < intDiv($end_timestamp_nano, 60000000000) * 60000000000 GROUP BY ts ORDER BY ts",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "change": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Change in completed-call token rate",
+            "description": "The first change and changes across missing bins are unknown."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\n, bins AS (\n    SELECT toStartOfMinute(fromUnixTimestamp64Nano(toInt64(completed_ns))) AS ts,\n           sumOrNull(tokens) / 60 AS rate\n    FROM completions WHERE completed_ns >= intDiv($start_timestamp_nano + 59999999999, 60000000000) * 60000000000 AND completed_ns < intDiv($end_timestamp_nano, 60000000000) * 60000000000 GROUP BY ts\n), changes AS (\n    SELECT ts, rate,\n           lagInFrame(toNullable(ts), 1, NULL) OVER full_window AS previous_ts,\n           lagInFrame(rate, 1, NULL) OVER full_window AS previous_rate\n    FROM bins WINDOW full_window AS\n        (ORDER BY ts ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)\n)\nSELECT ts, if(previous_ts IS NULL OR dateDiff('second', previous_ts, ts) != 60,\n              NULL, (rate - previous_rate) / 60) AS value FROM changes ORDER BY ts",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "coverage": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Coverage of registered producers",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      \n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT producer_kind, toFloat64(count()) AS registered_producers,\n    sumIf(missing, missing > 0) AS missing_sequences,\n    countIf(missing < 0) AS inconsistent_producers, sum(gaps) AS retained_gap_intervals,\n    sum(shutdowns) AS shutdown_intervals,\n    min(checkpoint) AS earliest_checkpoint_utc_seconds,\n    min(registered) AS earliest_registration_utc_seconds,\n    countIf(origin = 'partial_import') AS partial_imports\nFROM coverage GROUP BY producer_kind ORDER BY producer_kind",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "outcomes": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Outcomes and unknown usage",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH records AS (\n    SELECT attributes_string['usage.producer'] AS producer,\n           attributes_string['usage.event'] AS event,\n           attributes_string['usage.kind'] AS kind,\n           any(toUInt64(attributes_number['usage.at_us'])) * 1000 AS completed_ns,\n           any(attributes_string) AS strings,\n           any(attributes_number) AS numbers,\n           any(attributes_bool) AS flags\n    FROM signoz_logs.distributed_logs_v2\n    WHERE scope_name = 'crewship.usage'\n      AND resource.service.name::String = 'crewship-usage'\n      AND attributes_number['usage.schema'] = 1\n      AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800\n      AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)\n      AND timestamp < toUnixTimestamp64Nano(now64(9))\n      AND attributes_string['usage.kind'] = 'complete' AND ts_bucket_start >= intDiv($start_timestamp_nano, 1000000000) - 1800 AND timestamp >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 >= $start_timestamp_nano AND toUInt64(attributes_number['usage.at_us']) * 1000 < $end_timestamp_nano\n    GROUP BY producer, event, kind\n), completions AS (\n    SELECT *, if(mapContains(numbers, 'usage.total'),\n                 toNullable(numbers['usage.total']), NULL) AS tokens\n    FROM records WHERE kind = 'complete'\n), producers AS (\n    SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,\n           any(strings['usage.origin']) AS origin,\n           min(numbers['usage.registered']) AS registered,\n           max(numbers['usage.sequence_through']) AS through,\n           maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,\n           uniqExactIf(numbers['usage.sequence'], kind = 'complete') AS completed_count,\n           max(numbers['usage.retired_completions']) AS retired,\n           countIf(kind = 'gap') AS gaps,\n           countIf(kind = 'shutdown') AS shutdowns\n    FROM records GROUP BY producer\n), coverage AS (\n    SELECT *, through - retired - completed_count AS missing\n    FROM producers\n)\nSELECT strings['usage.outcome'] AS outcome,\n    toFloat64(count()) AS model_requests,\n    countIf(NOT flags['usage.usage_present']) AS missing_or_unknown_usage,\n    countIf(isNull(tokens)) AS unknown_token_totals\nFROM completions WHERE completed_ns >= $start_timestamp_nano AND completed_ns < $end_timestamp_nano GROUP BY outcome ORDER BY outcome",
+                    "disabled": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "method": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Method and limits",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TextPanel",
+            "spec": {
+              "mode": "markdown",
+              "text": "**Prompts sent** counts declared model-request completions, not human submissions or physical HTTP retries.\n\nEach private producer/event identity counts once after replay. Identities are not metric labels. Tools, parent spans, repeated history, and user-role records do not add requests.\n\nThe source covers public stream and streamSimple calls. One-shot helpers and chat-backed judgments register separately. Calls that bypass those entry points, native judgments, embeddings, and media requests are outside this source. Declared completions include failures and cancellations. Ranking uses requested model labels.\n\nOpenAI Responses and Anthropic normalizers preserve reported usage presence. Other normalizers keep presence and tokens unknown. Codex and Azure share the Responses normalizer but their transports are not exercised here. The CLI needs a verified build with the native source patch; copying adapter assets does not activate collection.\n\n**Counted tokens** sum known input plus output. Cache-inclusive input already contains cache buckets. Cache-exclusive input adds cache read and cache write once. Reasoning stays inside output. Absent usage and unknown buckets stay null. Known totals can remain partial when some requests lack usage.\n\n**Estimated cost: unknown. Verified billing: unknown.** No price or invoice source is configured.\n\nCalendar bounds use [Pacific calendar start, selected end). Weeks start on Monday. Counts use UTC completion instants. A collection start, missing sequence, explicit gap, shutdown, partial import, retention loss, or an old checkpoint can make a period partial. No observed producer proves coverage of unrelated processes or provider accounts. An empty period is unknown, not zero. The coverage table reports only registered producers.\n\nThe ledger and SigNoz metadata log policy require 35 days, separate from sessions and raw traces. No history before collection can be recovered here. Native usage-presence support is required. Completed-call bins are not stream timing. The first rate change and changes across missing bins are unknown.\n\nRate graphs omit clipped first and last minutes instead of comparing partial bins with full bins.\n\nDetails uses a native collapsed section, not an HTML disclosure. Task/session state requires a separate trusted source and is not inferred from request completion. Jaeger and its 48-hour raw trace policy stay separate and unchanged."
+            }
+          },
+          "queries": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Usage",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/prompts"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/requests"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/models"
+              }
+            },
+            {
+              "x": 0,
+              "y": 18,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/calendar"
+              }
+            },
+            {
+              "x": 0,
+              "y": 24,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tokens"
+              }
+            },
+            {
+              "x": 0,
+              "y": 30,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/change"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Details",
+            "collapse": {
+              "open": false
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/coverage"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/outcomes"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/method"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
