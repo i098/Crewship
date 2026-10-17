@@ -1,11 +1,13 @@
 import importlib.util
 import json
+import os
 import re
 import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.request import Request, urlopen
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -328,6 +330,32 @@ def test_dashboard_panels_fit_signoz_twelve_column_grid():
                 assert 0 <= item["x"] <= 12 - item["width"]
 
 
+@pytest.fixture
+def clickhouse_ledger():
+    endpoint = os.environ.get("CREWSHIP_TEST_CLICKHOUSE_URL")
+    receipt = os.environ.get("CREWSHIP_TEST_USAGE_RECEIPT")
+    if not endpoint or not receipt:
+        pytest.skip("Set CREWSHIP_TEST_CLICKHOUSE_URL and CREWSHIP_TEST_USAGE_RECEIPT for the synthetic lab")
+    return endpoint, json.loads(Path(receipt).read_text())
+
+
+@pytest.mark.parametrize("panel", ["prompts", "calendar"])
+def test_generated_queries_match_clickhouse_ledger_receipt(clickhouse_ledger, panel):
+    endpoint, receipt = clickhouse_ledger
+    query = charts.dashboard()["spec"]["panels"][panel]["spec"]["queries"][0]["spec"]["plugin"]["spec"]["query"]
+    query = query.replace("$start_timestamp_nano", str(receipt["start_ns"]))
+    query = query.replace("$end_timestamp_nano", str(receipt["end_ns"]))
+    request = Request(endpoint.rstrip("/") + "/?readonly=1&output_format_json_quote_64bit_integers=0",
+                      data=(query + " FORMAT JSONEachRow").encode())
+
+    with urlopen(request, timeout=30) as response:
+        result = [json.loads(line) for line in response if line.strip()]
+
+    if panel == "calendar":
+        result.sort(key=lambda row: row["period"])
+    assert result == receipt[panel]
+
+
 def test_completed_call_rates_exclude_clipped_window_edges():
     with sqlite3.connect(":memory:") as connection:
         connection.create_function("intDiv", 2, lambda numerator, denominator: numerator // denominator)
@@ -392,7 +420,7 @@ def calendar_rows(gaps, *, missing=0, producers=1):
             ("toStartOfDay", 1, start("day")), ("toStartOfWeek", 2, week_start),
             ("toStartOfMonth", 1, start("month")), ("toNullable", 1, lambda value: value),
             ("toFloat64", 1, float), ("isNull", 1, lambda value: value is None),
-            ("toString", 2, lambda value, _: moment(value).astimezone(pacific).strftime("%Y-%m-%d %H:%M:%S")),
+            ("toString", 1, lambda value: moment(value).astimezone(pacific).strftime("%Y-%m-%d %H:%M:%S")),
         ]:
             connection.create_function(name, arity, function)
         connection.create_aggregate("countIf", 1, CountIf)

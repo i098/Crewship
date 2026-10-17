@@ -19,7 +19,7 @@ DEDUP = """WITH records AS (
     FROM signoz_logs.distributed_logs_v2
     WHERE scope_name = 'crewship.usage'
       AND resource.service.name::String = 'crewship-usage'
-      AND attributes_number['usage.schema'] = 1
+      AND attributes_number['usage.schema'] = toFloat64(1)
       AND ts_bucket_start >= toUnixTimestamp(now()) - 35 * 86400 - 1800
       AND timestamp >= toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)
       AND timestamp < toUnixTimestamp64Nano(now64(9))
@@ -83,7 +83,7 @@ def calendar_query():
         lower = f"toUnixTimestamp64Nano(toDateTime64({boundary}, 9, 'America/Los_Angeles'))"
         condition = f"completed_ns >= {lower} AND completed_ns < $end_timestamp_nano"
         queries.append(f"""SELECT '{name}' AS period,
-    toString({boundary}, 'America/Los_Angeles') AS pacific_start,
+    toString({boundary}) AS pacific_start,
     if(count() = 0, NULL, toNullable(toFloat64(count()))) AS model_requests,
     sumOrNull(tokens) AS counted_tokens,
     countIf(isNull(tokens)) AS unknown_token_requests,
