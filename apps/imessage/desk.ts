@@ -112,7 +112,7 @@ export function isSkip(answer: string): boolean {
   return /^skip\W*$/i.test(answer);
 }
 
-// What a desk turn does with its answer: nothing (SKIP, or a failed call: Firstmate still has the note), a tapback,
+// One Instagram desk turn's response: nothing (SKIP, or a failed call: Firstmate still has the note), a tapback,
 // or a text. `outcome` is the turn's line in the desk log.
 export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?: string; outcome: string } {
   const skip = !ok || isSkip(drafted);

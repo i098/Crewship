@@ -13,6 +13,7 @@ For each message from the owner, the service does these steps:
 4. It waits 4 seconds to combine a burst.
    Each new text cancels a running draft and starts the wait again.
    Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
+   A `desk_model` value other than `claude-haiku-5-5` also sends every request to Firstmate.
 5. Claude Haiku 5.5 classifies the whole pending burst through the existing one-shot `omp -p` runner.
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
@@ -28,6 +29,7 @@ For each message from the owner, the service does these steps:
    Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
+   It targets the last received request in the pending burst.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
@@ -74,7 +76,19 @@ The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE`
 - **Typing.** Typing bubbles are best effort. A typing error is logged and never fails or delays a send.
 - **Logs.** Each failed try writes one log line with the operation and the code, for example `outbox item 3 failed (try 4), next try in 6.2 s: UNAVAILABLE: ...`. A transient error never writes a stack trace.
 
-Only an item that is provably bad leaves the queue: a message or an attachment that is not found or has expired (HTTP 404 or 410, gRPC `NOT_FOUND`), an item that the upstream refuses as invalid (HTTP 400 or 422, gRPC `INVALID_ARGUMENT`), or a file that does not parse. The service moves its file to `~/.local/state/fm-imessage/outbox-dead/` (for a download: `downloads-dead/`), writes one log line, and goes on with the next item. Nothing is dropped without a trace. To send or fetch it again, move the file back to the queue directory under a new sequence number. To drop an item by hand, delete its file. An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds the queue in order while it retries, and the log shows each try. `FM_IMESSAGE_RETRY_MS` sets the first wait in milliseconds (default 1000); the longest wait is 60 times that value.
+Only an item that is provably bad leaves the queue.
+This includes missing or expired messages and attachments (HTTP 404 or 410, gRPC `NOT_FOUND`).
+It includes invalid items (HTTP 400 or 422, gRPC `INVALID_ARGUMENT`) and files that do not parse.
+The service moves the file to `~/.local/state/fm-imessage/outbox-dead/` (for a download: `downloads-dead/`).
+It writes one log line and continues with the next item.
+Nothing is dropped without a trace.
+Retry only unkeyed items by moving their files back to the queue directory under new sequence numbers.
+Never requeue a direct desk answer by hand; follow the [routing recovery contract](#what-it-does).
+Delete an unkeyed item's file to drop it by hand.
+Keep keyed receipts with the journal as [routing recovery](#what-it-does) requires.
+An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds the queue in order while it retries.
+The log shows each try.
+`FM_IMESSAGE_RETRY_MS` sets the first wait in milliseconds (default 1000); the longest wait is 60 times that value.
 
 ## Desk memory
 
@@ -250,12 +264,15 @@ The bridge uses these routing rules with one or both transports:
 - **Where a fallback text arrives.** A fallback send goes into the owner's latest conversation on that transport. Before he texts the BlueBubbles line, it goes to a new chat with his number from the line's Apple Account. Photon can only answer in a conversation that he started.
 - **Replies, typing, and tapbacks.** See [Commands](#commands) for reply behavior.
   A read-only failure can use a fallback because no send has happened yet.
-  Typing bubbles, tapbacks, and the desk go to his latest text on any transport: after a restart, the newest text of all the transports.
+  Typing bubbles and tapbacks target the latest text across transports, including after a restart.
+  See [What it does](#what-it-does) for direct desk answers.
   A typing error never fails a send.
   A tapback and typing are best effort and never block the outbox.
   A tapback that is not delivered in 2 minutes (`FM_IMESSAGE_REACT_MAX_MS`, in milliseconds) moves to the dead-letter folder with one log line.
   The sends behind it go on.
-- **Inbound.** The bridge takes his texts from both transports. It files each message id once. His latest text is the one with the newest message time (the transport's own timestamp, or the time received when it gives none). A text that arrives late, for example one that a catch-up finds, is filed as a note and kept in the memory log, but it does not become his latest text when a newer one exists.
+- **Inbound.** The bridge reads both transports and applies [the routing contract](#what-it-does) to each stable request id.
+  It selects the latest text by message time, or receipt time when the transport gives none.
+  A late text does not replace a newer latest text.
 - **Start.** If Photon cannot start while another transport is set, the bridge logs one line and runs on the others until its next restart.
   Saved destinations from every configured transport remain eligible even when that transport cannot start.
   Older `latest` files also qualify when they identify a direct chat.
@@ -280,7 +297,18 @@ The bridge uses these routing rules with one or both transports:
   Thread support follows the Private API rule above.
   A failed history read can use the transport fallback if no relay proves separation.
 - **No double sends.** Each outbox item keeps a client GUID, and each bubble sends with its own one (BlueBubbles `tempGuid`). If a relay may have sent a text but did not answer (a timeout, a server error, or an answer that cannot be read), the bridge asks the relays whether the text is in the chat before it sends that bubble again, on any relay or transport (see above). It looks for the same text from the line in the last minute or so. The relay that may have sent is asked first, even when its health check says it is down. Known limits: when that relay cannot answer, another relay can still send the text a second time; a text that reaches the other Macs through iCloud late can be sent twice; a text identical to one sent in the same minute counts as sent; and a text that may be out on Photon cannot be checked, so Photon sends it again (at least once).
-- **Inbound.** Every relay posts its webhook. A webhook carries only the message GUID that the bridge acts on: the bridge reads the message back from a relay with the password, so a forged webhook cannot inject text. The bridge keeps the last 1000 message GUIDs in `~/.local/state/fm-imessage/bluebubbles-seen`, so a message from several relays, or after a restart, is filed once. A GUID goes into that file only after the bridge has handled the message: it filed the inbox note, or it ignored the message (another sender, an outbound text, a tapback or other signal). If the bridge stops before that, or fails to handle the message, the message is not in the file, and the next webhook or catch-up files it again. At start and each minute, the bridge also asks every reachable relay for the messages of the last 15 minutes and files each one that it has not seen. Thus a message whose webhook was lost, or that came while the bridge restarted, is still filed if a relay is reachable within 15 minutes. A message that is older than that window and missed its webhook is not recovered.
+- **Inbound.** Every relay posts its webhook.
+  A webhook carries only the message GUID that the bridge acts on.
+  The bridge reads the message back from a relay with the password, so a forged webhook cannot inject text.
+  The bridge keeps the last 1000 message GUIDs in `~/.local/state/fm-imessage/bluebubbles-seen`.
+  It records a GUID only after it durably saves the request or ignores the message.
+  It ignores other senders, outbound texts, tapbacks, and other signals.
+  If handling fails or the bridge stops before completion, the next webhook or catch-up retries the message.
+  See [What it does](#what-it-does) for durable routing and duplicate suppression.
+  At start and each minute, the bridge asks every reachable relay for the last 15 minutes of messages.
+  It handles each unseen message.
+  This recovers a missed webhook or restart gap if a relay is reachable within 15 minutes.
+  It does not recover older messages that missed their webhooks.
 - **Attachments.** The bridge downloads a file from whichever relay has it. The first try runs while the bridge handles the message, so it has the short bound of 15 seconds, body included, and never holds up the next message. If it fails or is too slow, the note says that the attachment could not be saved yet, and the download queue tries again with a bound of 10 minutes, like a Photon download. A download that is cut off fails as a timeout, and the queue retries it. The item moves to the dead-letter folder only when every configured relay was asked and every one answered 404 (or another permanent error). If a relay is down, or its download was cut off, the queue retries, so a relay that comes back is asked again. The same rule holds for reading a message.
 - **Tapbacks.** BlueBubbles has six: ❤️ 👍 👎 😂 ‼️ ❓. A tapback with another emoji moves to the dead-letter folder.
 - **Location.** `fm-location` works only with Photon.
@@ -298,7 +326,7 @@ crewship:
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
 
-The desk tells the owner the true models when he asks: `desk_model` for itself, and `supervisor_model` for Firstmate. When `supervisor_model` is empty, the desk says that it does not know.
+See [What it does](#what-it-does) for model-identity evidence and handoff rules.
 
 Apply installs these items:
 
@@ -430,7 +458,7 @@ Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which 
 See [Commands](#commands) for plain sends and explicit replies.
 On Photon's free shared line, plain sends into the owner's conversation work.
 A conversation that the service opens itself is refused ("Target not allowed for this project").
-A refused send stays queued, and the service logs each try (see [Upstream outages](#upstream-outages)).
+See [Upstream outages](#upstream-outages) for retries and permanent refusals.
 Before the owner sends the first text, the commands fail with HTTP 503.
 
 ## Location is personal data

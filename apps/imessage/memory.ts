@@ -3,7 +3,7 @@
 // one-line summaries, and each desk turn sees the view: lines covering the whole chat, fine when recent, coarse
 // when old, at most VIEW_MAX bytes. Sizes are UTF-8 bytes. Free of spectrum-ts, so tests run without it.
 //
-//   main/YYYY-MM-DD.jsonl  messages, one per line: {i, kind, text, size, date}
+//   main/YYYY-MM-DD.jsonl  messages (Msg), one per line
 //   tree/YYYY-MM-DD.jsonl  tree nodes, one per line: {l, i, text, size}
 //   view.json              the view, as [l, i] pairs
 //
