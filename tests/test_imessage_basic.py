@@ -56,43 +56,82 @@ def basic_rig(tmp_path):
     return fake, state, notes, err, start, receive, cli, text, records
 
 
-def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(tmp_path):
+@pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("message,fact", [
+    ("What is the build status?", "The build is paused."),
+    ("Build status?", "The build is paused."),
+    ("Build status", "The build is paused."),
+    ("Run status?", "The run is paused."),
+    ("Change history?", "The latest change adds the iMessage desk."),
+    ("Restart policy?", "The worker restarts after failures."),
+])
+def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(tmp_path, message, fact, recover):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "status").write_text(fact)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "basic", "answer": fact, "evidence": [{"source": "status", "quote": fact}],
+    }))
     bridge = start(1)
     try:
-        receive("basic", "What is the build status?")
+        receive("basic", message)
+        if recover:
+            bridge.terminate()
+            bridge.wait(10)
+            bridge = start(2)
         wait_for(lambda: text(fake / "sent"), "the direct answer")
-        assert text(fake / "sent").splitlines() == ["send The build is paused."]
+        assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         call = json.loads(text(fake / "model-calls").splitlines()[0])
         assert call["args"][call["args"].index("--model") + 1] == "claude-haiku-5-5"
         bridge.terminate()
         bridge.wait(10)
-        bridge = start(2)
-        receive("basic", "What is the build status?")
+        bridge = start(3 if recover else 2)
+        receive("basic", message)
         time.sleep(4.5)
-        assert text(fake / "sent").splitlines() == ["send The build is paused."]
+        assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
-        assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the build status?"]
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
     finally:
         bridge.terminate()
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("message", ["Deploy the build", "Approved, proceed", "What should I do?", "What is the account password?"])
-def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message):
+@pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("message,classified", [
+    ("Deploy the build", False),
+    ("Build the dashboard", False),
+    ("Please run the checks", False),
+    ("Could you restart it?", False),
+    ("Approved, proceed", False),
+    ("What is the account password?", False),
+    ("Run tests", True),
+    ("What should I do?", True),
+])
+def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, classified, recover):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    if message == "What should I do?":
+    if classified:
         (fake / "answer").write_text('{"kind":"handoff"}')
+    if recover:
+        (fake / "inbox-fail").touch()
     bridge = start(1)
     try:
         receive("work", message)
+        if recover:
+            wait_for(lambda: "routing retains the request" in text(err), "the retained handoff")
+            bridge.terminate()
+            bridge.wait(10)
+            journal = state / "routing.jsonl"
+            events = [json.loads(line) for line in journal.read_text().splitlines()]
+            journal.write_text("".join(json.dumps(event) + "\n" for event in events if "received" in event))
+            (fake / "inbox-fail").unlink()
+            bridge = start(2)
         wait_for(lambda: "photon-work " in text(notes), "the supervisor handoff")
         receive("work", message)
         time.sleep(4.5)
         assert text(notes).count("photon-work ") == 1
         assert text(fake / "sent") == ""
-        if message != "What should I do?":
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
+        if not classified:
             assert text(fake / "model-calls") == ""
     finally:
         bridge.terminate()
@@ -125,6 +164,47 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
 
 
 @pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("question,fact", [
+    ("What is Firstmate?", "Firstmate is the coding-agent supervisor."),
+    ("What is your role?", "I am the iMessage front desk."),
+    ("Which desk model is in use?", "We use Claude Haiku 5.5 at the front desk."),
+    ("What is your role?", "My role is the front desk."),
+    ("What is the default region?", "Our default region is the US."),
+])
+def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source_kind, question, fact):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    if source_kind == "status":
+        (fake / "status").write_text(fact)
+        evidence = {"source": "status", "quote": fact}
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = {"source": "chat", "id": 0, "quote": fact}
+    (fake / "answer").write_text(json.dumps({
+        "kind": "basic", "answer": fact, "evidence": [evidence],
+    }))
+    bridge = start(1)
+    try:
+        receive("description", question)
+        wait_for(lambda: text(fake / "sent"), "the grounded description")
+        assert text(fake / "sent").splitlines() == [f"send {fact}"]
+        assert text(notes) == ""
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        receive("description", question)
+        time.sleep(4.5)
+        assert text(fake / "sent").splitlines() == [f"send {fact}"]
+        assert text(notes) == ""
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
 @pytest.mark.parametrize("claim", [
     "I fixed the bridge.",
     "I've deployed it.",
@@ -132,6 +212,8 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
     "We've repaired it.",
     "Firstmate’s deployed it.",
     "Our changes are live.",
+    "Firstmate has already fixed the bridge.",
+    "I have just merged the change.",
 ])
 def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
