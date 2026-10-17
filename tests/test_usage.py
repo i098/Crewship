@@ -81,9 +81,10 @@ def test_unknown_usage_and_known_zero_remain_distinct(ledger):
     start(ledger, 2)
     ledger.accept(event("complete", 2, sequence=2, outcome="success", usage_present=True,
                         input_basis="exclusive", **dict.fromkeys(usage.TOKENS, 0)), NOW)
-    rows = ledger.completions(NOW - timedelta(hours=1), NOW + timedelta(seconds=1))
+    rows = ledger.db.execute(
+        "SELECT total,payload FROM events WHERE kind='complete' ORDER BY sequence").fetchall()
     assert [row["total"] for row in rows] == [None, 0]
-    assert [row["outcome"] for row in rows] == ["error", "success"]
+    assert [json.loads(row["payload"])["outcome"] for row in rows] == ["error", "success"]
     assert ledger.summary(NOW - timedelta(hours=1), NOW + timedelta(seconds=1))["unknown_tokens"] == 1
 
 
@@ -135,12 +136,16 @@ def test_shutdown_never_claims_current_continuous_coverage(ledger):
 def test_pacific_bounds_observe_dst_and_monday_weeks():
     fall = datetime(2026, 11, 1, 20, tzinfo=UTC)
     spring = datetime(2026, 3, 8, 20, tzinfo=UTC)
-    assert usage.calendar_bounds("day", fall, full=True) == (
-        datetime(2026, 11, 1, 7, tzinfo=UTC), datetime(2026, 11, 2, 8, tzinfo=UTC))
-    lower, upper = usage.calendar_bounds("day", spring, full=True)
-    assert upper - lower == timedelta(hours=23)
-    assert usage.calendar_bounds("week", fall)[0] == datetime(2026, 10, 26, 7, tzinfo=UTC)
-    assert usage.calendar_bounds("month", NOW)[0] == datetime(2026, 11, 1, 7, tzinfo=UTC)
+    for snapshot, expected_start, hours in [
+        (fall, datetime(2026, 11, 1, 7, tzinfo=UTC), 25),
+        (spring, datetime(2026, 3, 8, 8, tzinfo=UTC), 23),
+    ]:
+        lower, upper = usage.calendar_bounds("day", snapshot)
+        next_start, _ = usage.calendar_bounds("day", snapshot + timedelta(days=1))
+        assert (lower, upper) == (expected_start, snapshot)
+        assert next_start - lower == timedelta(hours=hours)
+    assert usage.calendar_bounds("week", fall) == (datetime(2026, 10, 26, 7, tzinfo=UTC), fall)
+    assert usage.calendar_bounds("month", NOW) == (datetime(2026, 11, 1, 7, tzinfo=UTC), NOW)
 
 
 def test_retention_keeps_identity_and_coverage_for_35_days(ledger):
@@ -236,9 +241,12 @@ def test_late_completion_keeps_its_start_and_registration_for_the_full_window(le
                         usage_present=False, input_basis="unknown", **dict.fromkeys(usage.TOKENS)),
                   finished)
     ledger.prune(NOW + timedelta(days=36))
-    rows = ledger.completions(NOW, finished + timedelta(seconds=1))
-    assert rows[0]["provider"] == "example"
-    assert rows[0]["started"] == NOW.isoformat()
+    batches = []
+    ledger.export(lambda batch: batches.append(batch) or {}, NOW + timedelta(days=36))
+    completed = batches[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"][-1]
+    attributes = {entry["key"]: entry["value"] for entry in completed["attributes"]}
+    assert attributes["usage.provider"] == {"stringValue": "example"}
+    assert attributes["usage.started"] == {"doubleValue": NOW.timestamp()}
     assert ledger.coverage(finished)[0]["registered"] == NOW.isoformat()
 
 
@@ -267,8 +275,8 @@ def test_unknown_native_usage_presence_stays_unknown(ledger):
     start(ledger)
     ledger.accept(event("complete", sequence=1, outcome="unknown", usage_present=None,
                         input_basis="unknown", **dict.fromkeys(usage.TOKENS)), NOW)
-    row = ledger.completions(NOW, NOW + timedelta(seconds=1))[0]
-    assert row["usage_present"] is None
+    row = ledger.db.execute("SELECT total,payload FROM events WHERE kind='complete'").fetchone()
+    assert json.loads(row["payload"])["usage_present"] is None
     assert row["total"] is None
 
 

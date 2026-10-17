@@ -152,6 +152,7 @@ Offline storage cannot delete records without a running retention process.
 Run `report --period day`, `report --period week`, or `report --period month` after the common mount arguments.
 Use `--at` with a UTC instant for a bounded snapshot.
 The report uses UTC completion times and half-open America/Los_Angeles calendar bounds.
+Each report starts at the Pacific calendar boundary and excludes completions at or after the selected snapshot.
 Weeks start on Monday.
 Timezone-aware bounds include daylight-saving changes.
 

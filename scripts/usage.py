@@ -152,22 +152,18 @@ def normalize(event):
     return {"uncached_input": uncached, "input_total": total_input, "total": total}
 
 
-def calendar_bounds(period, snapshot, *, full=False):
+def calendar_bounds(period, snapshot):
     if snapshot.tzinfo is None:
         raise ValueError("calendar snapshot needs a timezone")
     local = snapshot.astimezone(PACIFIC)
     lower = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    if period == "day":
-        upper = lower + timedelta(days=1)
-    elif period == "week":
+    if period == "week":
         lower -= timedelta(days=lower.weekday())
-        upper = lower + timedelta(days=7)
     elif period == "month":
         lower = lower.replace(day=1)
-        upper = (lower.replace(day=28) + timedelta(days=4)).replace(day=1)
-    else:
+    elif period != "day":
         raise ValueError("invalid calendar period")
-    return lower.astimezone(UTC), (upper if full else snapshot).astimezone(UTC)
+    return lower.astimezone(UTC), snapshot.astimezone(UTC)
 
 
 def _acknowledge_sequence(ranges, sequence):
@@ -304,23 +300,6 @@ class Ledger:
             ).fetchone()[0]
             if latest is not None and instant(event["at"]).timestamp() < latest:
                 raise ValueError("checkpoint regresses time")
-
-    def completions(self, lower, upper):
-        rows = self.db.execute(
-            "SELECT completion.payload,completion.ingested,start.payload AS started "
-            "FROM events completion LEFT JOIN events start ON start.producer=completion.producer "
-            "AND start.event=completion.event AND start.kind='start' "
-            "WHERE completion.kind='complete' AND completion.at>=? AND completion.at<? "
-            "ORDER BY completion.ingested,completion.rowid", (lower.timestamp(), upper.timestamp()))
-        result = []
-        for stored in rows:
-            row = validate(json.loads(stored["payload"]))
-            start = validate(json.loads(stored["started"])) if stored["started"] else None
-            result.append({**row, **normalize(row), "ingested": stored["ingested"],
-                           "started": start["at"] if start else None,
-                           "provider": start["provider"] if start else "unknown",
-                           "model": start["model"] if start else "unknown"})
-        return result
 
     def coverage(self, now):
         result = []
