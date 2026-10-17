@@ -208,7 +208,8 @@ Closed one-minute bins measure completed-call accounting, not live decoding spee
 The rate queries omit clipped first and last minutes.
 The first rate change and changes across missing bins stay null.
 No empty bin is filled with zero.
-The Details section starts closed and contains methodology, coverage, outcomes, cost limits, and history limits.
+The definition requests a closed Details section with methodology, coverage, outcomes, cost limits, and history limits.
+The native renderer can start this section open.
 SigNoz supports a collapsed section, not the approved page's exact HTML disclosure or phone layout.
 This definition does not introduce another frontend.
 Task and session state need a separate trusted source and are not inferred here.
@@ -222,6 +223,19 @@ Such a period is unknown, not a proved zero-request interval.
 Coverage cannot prove requests from a producer that never registers.
 Periods before the current retention cutoff remain partial, even when current checkpoints appear healthy.
 The exporter does not import transcripts, mutable history indexes, or raw traces.
+
+### Read-only query regression checks
+
+Set `CREWSHIP_TEST_CLICKHOUSE_URL` to an explicitly supplied synthetic ClickHouse HTTP endpoint.
+Set `CREWSHIP_TEST_USAGE_RECEIPT` to a JSON receipt from the independent synthetic ledger.
+The receipt contains `start_ns`, `end_ns`, and expected `prompts` and `calendar` result arrays.
+Each calendar row contains `period`, `pacific_start`, `model_requests`, `counted_tokens`, `unknown_token_requests`, and `partial`.
+Sort the calendar rows by `period`.
+Use a snapshot inside the retained history.
+Run `uv run pytest tests/test_usage.py -k generated_queries_match_clickhouse_ledger_receipt`.
+These checks execute generated queries with `readonly=1`; they do not create tables or ingest records.
+The default test run skips these checks when either variable is absent.
+Use stored logs v2 metadata with Float64 numeric maps; constant-row queries do not test the storage predicate.
 
 ### Activation prerequisites
 
