@@ -334,6 +334,47 @@ def test_discovery_deduplicates_root_and_registered_checkout_aliases(database, t
 
 
 @pytest.mark.parametrize("operation", ["--seed", "app"])
+@pytest.mark.parametrize("source", ["default", "config", "override"])
+def test_linked_home_keeps_lexical_engine_detection_order(
+    database, tmp_path, monkeypatch, capsys, operation, source,
+):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    home = tmp_path / "home"
+    home.symlink_to(storage, target_is_directory=True)
+    linked = load(home, monkeypatch)
+    monkeypatch.setattr(linked, "docker", database.docker)
+    root = home if source == "default" else home / ".bulk"
+    first = checkout(root, "app-abc", 1, "app", POSTGRES)
+    second = checkout(root, "app-abc", 2, "app", LAB_REDIS)
+    registered = home / "Dev/firstmate/projects/app"
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(second, target_is_directory=True)
+    if source == "config":
+        config = home / ".config/treehouse/config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"root = {json.dumps(str(root))}\n")
+    elif source == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", str(root))
+    linked.apply()
+    capsys.readouterr()
+
+    linked.main([operation])
+
+    meta = json.loads((linked.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == ("postgres", "postgres:16-alpine")
+    if operation == "--seed":
+        assert env_url(first) == env_url(second) == env_url(registered)
+        assert urlsplit(env_url(first)).scheme == "postgresql"
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == linked.SECRETS / "app.env"
+        variable, url = path.read_text().strip().split("=", 1)
+        assert variable == "DATABASE_URL"
+        assert urlsplit(url).scheme == "postgresql"
+
+
+@pytest.mark.parametrize("operation", ["--seed", "app"])
 @pytest.mark.parametrize("source, relative, engine, image", [
     ("registered", "Dev/firstmate/projects/app", "postgres", "postgres:16-alpine"),
     ("registered", "!projects/app", "redis", "redis:alpine"),
