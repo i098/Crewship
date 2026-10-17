@@ -17,13 +17,13 @@ For each message from the owner, the service does these steps:
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
-   Informational noun phrases such as "Build status?" reach this classifier, including after recovery.
+   Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. A clear basic question can receive one direct answer without a Firstmate note or wake.
    The answer must quote complete source lines from supplied status or prior supervisor or desk records.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
-   It rejects unsupported facts and action claims, not safe personal or Firstmate descriptions.
+   It rejects unsupported facts and work claims, while allowing grounded simple-present descriptions.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
    Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.

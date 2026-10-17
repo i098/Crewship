@@ -64,6 +64,9 @@ def basic_rig(tmp_path):
     ("Run status?", "The run is paused."),
     ("Change history?", "The latest change adds the iMessage desk."),
     ("Restart policy?", "The worker restarts after failures."),
+    ("Approved PR count?", "Approved PRs: 2"),
+    ("OK response count?", "OK responses: 2"),
+    ("Go ahead policy?", "The policy requires owner approval."),
 ])
 def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(tmp_path, message, fact, recover):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -103,6 +106,11 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
     ("Please run the checks", False),
     ("Could you restart it?", False),
     ("Approved, proceed", False),
+    ("Approved.", False),
+    ("OK!", False),
+    ("Yes, go ahead.", False),
+    ("Proceed", False),
+    ("Approved for deployment", True),
     ("What is the account password?", False),
     ("Run tests", True),
     ("What should I do?", True),
@@ -170,6 +178,9 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
     ("Which desk model is in use?", "We use Claude Haiku 5.5 at the front desk."),
     ("What is your role?", "My role is the front desk."),
     ("What is the default region?", "Our default region is the US."),
+    ("Which OS do you run?", "I run Linux."),
+    ("What do you check?", "We check the supplied status."),
+    ("Which format do you send?", "I send plain text."),
 ])
 def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source_kind, question, fact):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -214,6 +225,15 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     "Our changes are live.",
     "Firstmate has already fixed the bridge.",
     "I have just merged the change.",
+    "I have run the checks.",
+    "I've run the checks.",
+    "I’m running the checks.",
+    "I will run the checks.",
+    "We are sending the report.",
+    "We’ll send the report.",
+    "We have checked the build.",
+    "I’ll check the build.",
+    "Firstmate will deploy the build.",
 ])
 def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)

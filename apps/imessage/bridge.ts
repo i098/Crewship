@@ -748,7 +748,7 @@ async function handle(line: Line, message: LineMessage) {
 function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) {
   if (routing.has(requestId)) return;
   // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
-  firstmate ||= /^\s*(?:(?:please\s+)?(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b|(?:approve|approved|yes|ok|go ahead|proceed|ship it|do it)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
+  firstmate ||= /^\s*(?:please\s+)?(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b|^\s*(?:(?:approve|approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+$|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
   const received = { requestId, text, ref, memoryId: memory.msgs.length, firstmate };
   recordRoute({ received });
   ensureRemembered(received);
