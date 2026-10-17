@@ -20,7 +20,7 @@ See [Project databases](project-databases.md#worktree-environment) for the separ
 | --- | --- |
 | `oss-fleet/doctor/docker-guard.sh` | Every hour: removes stopped containers that agents left behind and reports long-running ones that nothing claims. See [Docker guard](#docker-guard). |
 | `oss-fleet/doctor/dev-server-reaper.sh` | Every 2 minutes: kills `next dev`/`next-server`/`tsc --noEmit` trees in treehouse worktrees whose lane last reported `done:`/`paused:`/`blocked:`/`failed:`, has no agent process, or whose agent transcript is idle >= 30 min (`REAPER_IDLE_MIN`). A dev server is 3-4 GB and restarts in 10 s; idle ones from finished lanes are what filled swap. One `next dev` per branch is inherent - Next compiles the whole app per process - so the fix is lifetime, not sharing. |
-| `oss-fleet/doctor/storage-guard.sh` | Every 5 minutes: use% of every mounted real block filesystem, including the ones holding `/`, `/var/log`, the home and Docker's data root. WARN (85%) alerts once per episode, CRIT (92%) prunes only regenerable data (stale gitignored worktree output, then Docker data), and a fill rate projecting the disk full within 6 hours alerts even below WARN, once the mount is at or above 70% used (`STORAGE_FILL_MIN_PCT`). Alerts also reach Firstmate as an inbox note. See [Storage guard](#storage-guard). |
+| `oss-fleet/doctor/storage-guard.sh` | Measures disk pressure, attempts alerts, and reclaims eligible data. See [Storage guard](#storage-guard) for delivery, retry, and reclaim rules. |
 | `oss-fleet/doctor/devtools-bridge-reaper.sh` | Every 10 minutes: stops attached chrome-devtools-axi bridges (`CHROME_DEVTOOLS_AXI_BROWSER_URL` set) whose process tree used no CPU and whose session state files did not change for 60 min (`REAPER_IDLE_MIN`). See [Devtools-bridge reaper](#devtools-bridge-reaper). |
 | `.config/systemd/user/crewship-*.{service,timer,path}` | `fleet_guards` enables the guard and reaper timers. Apply retires only selected `flotilla-*` guard units. |
 | `/etc/docker/daemon.json` | `init: true` and `live-restore: true` merged in (tasks/docker.yml, any profile with docker). |
@@ -62,14 +62,15 @@ With `crewship.data_dir` configured, state, pending alerts, receipts, logs, and 
 The service passes `STORAGE_DATA_DIR` from `crewship.data_dir`.
 The configured data directory must exist on a mounted filesystem different from root.
 Apply checks the mount and creates the guard directory for the account with mode `0700`, including under a root-owned data directory.
-The guard checks this before creating state and fails visibly when the mount is unavailable.
+The guard checks the mount before creating state.
+When this check fails, the guard attempts a mount-error broadcast and exits before retries, discovery, diagnostics, or reclaim.
 It never creates a root-backed substitute.
 This check identifies the covering filesystem, not a pinned disk UUID.
 Without `data_dir`, state remains in `oss-fleet/doctor/.storage-guard`; logs now reside there too.
 This compatibility mode cannot retain new alerts when that filesystem cannot accept writes.
 If a pending record cannot be saved, the guard still attempts inbox delivery and fallback broadcast before scans or reclaim.
 It returns a nonzero status without recording retention or acknowledgement.
-If state creation or lock acquisition fails, the guard continues with unsaved notifications and returns a nonzero status.
+State creation or lock errors cause unsaved notifications and a nonzero status.
 Only the lock owner can change pending records, receipts, broadcast markers, samples, logs, or diagnostic files.
 Without the lock, the guard sends diagnostic output to standard error.
 Lock contention exits without delivery or maintenance.
@@ -87,7 +88,7 @@ After reclaim, the guard updates the usage sample so rapid growth from the reduc
 The image filter uses creation time, not last use.
 Existing worktree safety checks remain unchanged.
 
-Diagnostics follow notification and record the top consumers in the guard log and `<filesystem-key>.scan`.
+Diagnostics follow notification and record the top consumers in `storage-guard.log` and `<filesystem-key>.scan`.
 The bounded `du` walk includes the filesystem root, its largest entry, the home, and `/var/log` on that filesystem.
 The log also records growth since the previous scan and `docker system df` on Docker's filesystem.
 Reclaim results remain in the log rather than delaying or changing the original alert body.
@@ -292,5 +293,7 @@ systemctl --user status crewship-docker-guard.timer crewship-storage-guard.timer
 ~/oss-fleet/doctor/storage-guard.sh --dry-run
 ~/oss-fleet/doctor/devtools-bridge-reaper.sh --dry-run
 tail ~/oss-fleet/doctor/docker-guard.log
-tail ~/oss-fleet/doctor/.storage-guard/storage-guard.log ~/oss-fleet/doctor/devtools-bridge-reaper.log
+tail ~/oss-fleet/doctor/devtools-bridge-reaper.log
 ```
+
+Read the storage guard log from the [storage guard state directory](#storage-guard).

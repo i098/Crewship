@@ -26,9 +26,7 @@ Environment=STORAGE_FILL_MIN_PCT={{ crewship_storage_guard_fill_min_pct }}
 Environment=STORAGE_REPEAT_MIN={{ crewship_storage_guard_repeat_min }}
 Environment=WORKTREE_PRUNE_AGE_DAYS={{ crewship_storage_guard_worktree_age_days }}
 ExecStart={{ crewship_fleet_doctor_dir }}/storage-guard.sh
-# One du walk per alerting filesystem (<= 300 s each), the worktree prune and
-# three Docker prune steps (<= 300 s each) and the docker info / system df
-# queries (<= 80 s): 3600 s covers seven alerting filesystems at once.
+# Pending retries share this limit with diagnostics and reclaim.
 TimeoutStartSec=3600
 Nice=5
 IOSchedulingClass=best-effort
