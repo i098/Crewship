@@ -1,9 +1,7 @@
 // Two-way iMessage between the owner and Firstmate over the transports that FM_IMESSAGE_TRANSPORTS lists in order:
 //   photon (the default), the line of a Photon Spectrum project, and bluebubbles, self-hosted BlueBubbles servers on
 //   Macs (bluebubbles.ts). See routes for outbound transport selection and docs/imessage.md for the routing contract.
-// Inbound: save each request before transport acknowledgement. Haiku answers supported basic questions directly;
-//   work, approvals, unsafe or unsupported requests reach Firstmate once through the stable inbox request id.
-//   A new text cancels a draft. The existing memory, quiet-period timer and outbox own context and delivery.
+// Inbound routing: docs/imessage.md#what-it-does. Save each request before transport acknowledgement.
 // Outbound: POST text to http://127.0.0.1:$FM_IMESSAGE_PORT/send (the fm-imessage command does this).
 //   The text goes to a durable outbox (outbox.ts) and the answer comes once it is on disk; one loop sends the outbox
 //   in order, as plain messages by default, and tries again with backoff while the upstream
@@ -258,7 +256,7 @@ const refOn = (name: string, space: string, id: string): Ref => (name === "photo
 // Each transport's latest text, kept so a restart can still reach him: space, id and time, one per line.
 // Photon keeps the file name it always had. A file without the time (the older format) counts as the oldest.
 const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATEST_FILE}-${name}`);
-let latest: LineMessage | undefined; // his latest text on any transport: typing, tapbacks and the desk go there
+let latest: LineMessage | undefined; // his latest text on any transport: typing and tapbacks go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
 let proactiveRef: Ref | undefined;

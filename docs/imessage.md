@@ -36,12 +36,19 @@ For each message from the owner, the service does these steps:
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
-When the owner edits a text on the Photon line, the service files a new note, `[edited] <new text> (was: <old text>)`, and the note wakes Firstmate like a new text. The service keeps his last 100 texts in memory for the old text. If it does not know the old text (for example, the text came before the last restart), the note says so. spectrum-ts does not pass edits on, so the service reads them from its own event stream on the line's client. An edit that the owner makes while that stream is down is lost. The BlueBubbles line does not report edits: an edit there files no note.
+When the owner edits a text on the Photon line, the service files `[edited] <new text> (was: <old text>)`.
+The note wakes Firstmate.
+The service keeps his last 100 texts in memory for the old text.
+If it does not know the old text, the note says so.
+This can happen when the text came before the last restart.
+spectrum-ts does not pass edits on, so the service reads them from its own event stream on the line's client.
+An edit that the owner makes while that stream is down is lost.
+The BlueBubbles line does not report edits: an edit there files no note.
 
 The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
-Each outcome records the time, message id, and `basic` or `handoff` in the private `desk.log`.
+A completed desk turn records the time, message id, and `basic` or `handoff` in the private `desk.log`.
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
@@ -61,9 +68,11 @@ The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE`
 
 - **The outbox.** Each send and tapback enters the private `outbox/` directory as one file before delivery.
   This includes Firstmate answers and direct desk answers.
-  The service syncs each temporary file before its atomic rename.
-  The service answers `fm-imessage` only after the item is on disk.
-  A desk answer that waits through an outage still sends later; it does not also cause a supervisor handoff.
+  The service syncs each temporary file before its atomic rename, then syncs the queue directory.
+  The service acknowledges the enqueue only after both syncs succeed.
+  A failed directory sync can leave a renamed packet on disk.
+  A keyed retry syncs the directory without adding another packet.
+  During a transient outage, a desk answer stays queued without a supervisor handoff.
 - **Delivery.** One loop sends the oldest file.
   It archives keyed direct answers in `outbox-done/` and deletes other completed items.
   A failed send retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
@@ -94,7 +103,9 @@ The log shows each try.
 
 The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `apps/imessage/memory.ts`.
 
-- **The log.** The service appends one record for each text from the owner, each send and tapback from Firstmate, and each desk text and tapback. The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`. The service never edits or deletes a record.
+- **The log.** The service records owner texts, Firstmate texts and tapbacks, and direct desk answers.
+  The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`.
+  The service never edits or deletes a record.
   Inbound records also keep their stable request id, so a repaired memory write does not repeat after another restart.
 - **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
 - **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 64 KB, one batch merges lines until it is 32 KB or less. The view is in `memory/view.json`, and the service loads it at start.
@@ -351,6 +362,30 @@ It waits up to another 500 ms for those children to exit, then exits with status
 The unit sets `KillMode=mixed` and `TimeoutStopSec=10` so systemd kills remaining service processes if shutdown stalls.
 See [Desk memory](#desk-memory) for compaction recovery after a restart.
 
+For this routing update, main must apply the reviewed source after merge and verify the installed bridge.
+Isolated fixture checks do not complete this step.
+Run the following commands from the reviewed checkout as the bridge account, during an approved service window.
+Keep the existing unit, credentials, model settings, dependencies, and private state unchanged.
+Do not run a full host apply or restart another service.
+
+```bash
+runtime=$(systemctl --user show fm-imessage.service --property=WorkingDirectory --value)
+test -n "$runtime" && test -f "$runtime/bridge.ts" &&
+systemctl --user stop fm-imessage.service &&
+install -m 0644 apps/imessage/{bridge,desk,memory,outbox}.ts "$runtime/" &&
+systemctl --user start fm-imessage.service &&
+systemctl --user is-active fm-imessage.service
+```
+
+If installation fails, keep the bridge stopped until all four reviewed files are in place.
+Compare each installed file with its checkout source before verification.
+From the owner's phone, ask one basic question that the supplied status or configured model identity can answer.
+Confirm one direct reply, no inbox note for that request id, and no Firstmate wake for the request.
+Then send one work or approval request.
+Confirm one stable-id inbox note and one Firstmate response, with no desk answer.
+Check the private routing journal, memory, inbox records, and service logs without publishing their contents.
+Keep both installed checks pending until main observes these results.
+
 To turn it off, remove the block, then run `systemctl --user disable --now fm-imessage` and delete the unit.
 
 ## Commands
@@ -423,7 +458,11 @@ Every card has `kind`, `key` (1 to 40 letters, digits, `.`, `_` or `-`), and `ti
 
 A bad card queues nothing, and the command names the first bad field.
 
-- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`, which wakes Firstmate like a text. The desk memory records the note. The page shows the pick with a check. An app bubble also changes in place to "Picked B: ...".
+- **Pick.** A tap on an option files the inbox note `[iMessage card pick] <key>: <letter>. <option>`.
+  The note wakes Firstmate.
+  The desk memory records the note.
+  The page shows the pick with a check.
+  An app bubble also changes in place to "Picked B: ...".
 - **Delivery.** A card goes through the [outbox](#upstream-outages), in order with texts, to his latest direct chat, like a proactive text. The desk memory records `[card <key>: <title>]`, never the URL. An outage retries like a text.
 - **App bubbles.** The card uses spectrum-ts `app(url, {layout, live})` on the Photon transport. Photon's docs say that the app delivers the URL to the Spectrum extension on tap and opens it in Messages, so the view is the card's page. The page has no fixed width: it fills the sheet, and text, bars and tables reflow to it. spectrum-ts `app()` has no size or presentation option; the sheet is the full view, and the live bubble is the narrow one. The bubble's layout is the title and one status line (no trailing caption: without the app, Messages runs the two together). The service keeps the card session that the send returns, and uses it with `edit` for the change in place, also after a restart. Measured on the free shared line: Photon delivers the bubble with no error. Without the Spectrum app, his phone shows only a plain balloon with the layout text. Photon's pricing lists iMessage mini apps for the Business plan only. Any error other than an outage moves the card to `outbox-dead/`, files the note `(card <key> was not sent: <reason>)`, and the texts behind it go on.
 - **Link cards.** With `"app": false`, the card is its page's URL as a plain text, which iMessage shows as a link preview from the page's Open Graph tags (`og:title`, `og:description`). A link card goes on any transport, and a tap opens the browser.

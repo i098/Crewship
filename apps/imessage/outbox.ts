@@ -43,9 +43,9 @@ export function brief(e: unknown): string {
 // (fsync, then rename), so an item survives a crash or a restart once add() returns. One loop delivers the oldest
 // item. When that fails, the loop logs one line, waits one backoff step (at most 60 × `retryMs`) and tries the same
 // item again, so the order holds. Only an item that is provably bad (see `permanent`, or a file that does not
-// parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item. Deleting an item's file
-// drops it by hand. `deliver` may save progress (the bubbles already sent) with `save`. The constructor starts on
-// the items already queued. `lost` is told of each parsed item that moved to the dead-letter folder.
+// parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item.
+// See docs/imessage.md#upstream-outages before manually removing or replaying an item.
+// `deliver` may save progress with `save`. Startup resumes pending items; `lost` receives parsed dead letters.
 // An optional key deduplicates submissions against pending, completed, and dead-letter receipts.
 // Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
