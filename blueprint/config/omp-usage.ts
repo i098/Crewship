@@ -55,7 +55,7 @@ function sourceFor(kind: Kind): Source {
 		const producer = randomUUID();
 		source = { producer, sequence: 0, registered: false, registration: {
 			schema: 1, kind: "register", producer, event: randomUUID(), at: new Date().toISOString(),
-			producer_kind: kind, origin: "native",
+			producer_kind: kind,
 		} };
 		sources.set(kind, source);
 	}

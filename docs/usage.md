@@ -82,12 +82,12 @@ Additional fields are rejected at capture and checked again before export.
 
 | Kind | Additional fields | Meaning |
 | --- | --- | --- |
-| `register` | `producer_kind`, `origin` | Register `chat`, `judgment`, or `helper` with `native` or `partial_import` coverage. |
+| `register` | `producer_kind` | Register a native `chat`, `judgment`, or `helper` producer. |
 | `start` | `sequence`, `provider`, `model` | Persist a positive sequence, bounded model labels, and a request start before dispatch. |
 | `complete` | `sequence`, `outcome`, `usage_present`, `input_basis`, `input`, `cache_read`, `cache_write`, `output`, `reasoning` | Complete the matching start with the same private event identity. |
 | `checkpoint` | `sequence` | Declare the highest sequence produced through this UTC instant, including missing delivery. |
 | `shutdown` | `sequence` | End this producer's coverage through this instant. |
-| `gap` | `end`, `reason` | Record a half-open UTC interval with `delivery`, `shutdown`, `source`, or `import` as its reason. |
+| `gap` | `end`, `reason` | Record a half-open UTC interval with `delivery`, `shutdown`, or `source` as its reason. |
 
 A process restart needs a new producer identity unless it restores the previous sequence and pending metadata durably.
 Sequence values do not count requests by themselves.
@@ -214,7 +214,6 @@ Calendar queries use the selected end instant, not an assumed fixed UTC offset.
 The count panels return no value when no completions are observed.
 Such a period is unknown, not a proved zero-request interval.
 Coverage cannot prove requests from a producer that never registers.
-A partial import always remains partial.
 Periods before the current retention cutoff remain partial, even when current checkpoints appear healthy.
 The exporter does not import transcripts, mutable history indexes, or raw traces.
 

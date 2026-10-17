@@ -31,7 +31,6 @@ DEDUP = """WITH records AS (
     FROM records WHERE kind = 'complete'
 ), producers AS (
     SELECT producer, any(strings['usage.producer_kind']) AS producer_kind,
-           any(strings['usage.origin']) AS origin,
            min(numbers['usage.registered']) AS registered,
            max(numbers['usage.sequence_through']) AS through,
            maxIf(numbers['usage.at'], kind IN ('checkpoint', 'shutdown')) AS checkpoint,
@@ -90,7 +89,7 @@ def calendar_query():
     countIf(isNull(tokens)) AS unknown_token_requests,
     if({lower} < toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)
        OR (SELECT count() FROM coverage) = 0, 1,
-       (SELECT countIf(origin = 'partial_import' OR missing != 0 OR gaps > 0
+       (SELECT countIf(missing != 0 OR gaps > 0
                       OR registered * 1e9 > {lower}
                       OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0) AS partial
 FROM completions WHERE {condition}""")
@@ -129,8 +128,7 @@ SELECT ts, if(previous_ts IS NULL OR dateDiff('second', previous_ts, ts) != 60,
     countIf(missing < 0) AS inconsistent_producers, sum(gaps) AS retained_gap_intervals,
     sum(shutdowns) AS shutdown_intervals,
     min(checkpoint) AS earliest_checkpoint_utc_seconds,
-    min(registered) AS earliest_registration_utc_seconds,
-    countIf(origin = 'partial_import') AS partial_imports
+    min(registered) AS earliest_registration_utc_seconds
 FROM coverage GROUP BY producer_kind ORDER BY producer_kind"""
     outcomes = f"""SELECT strings['usage.outcome'] AS outcome,
     toFloat64(count()) AS model_requests,
@@ -173,7 +171,7 @@ FROM completions WHERE {SELECTED} GROUP BY outcome ORDER BY outcome"""
             "**Estimated cost: unknown. Verified billing: unknown.** No price or invoice source is configured.\n\n"
             "Calendar bounds use [Pacific calendar start, selected end). Weeks start on Monday. "
             "Counts use UTC completion instants. A collection start, missing sequence, explicit gap, shutdown, "
-            "partial import, retention loss, or an old checkpoint can make a period partial. "
+            "retention loss, or an old checkpoint can make a period partial. "
             "No observed producer proves coverage of unrelated processes or provider accounts. "
             "An empty period is unknown, not zero. The coverage table reports only registered producers.\n\n"
             "The ledger and SigNoz metadata log policy require 35 days, separate from sessions and raw traces. "

@@ -21,7 +21,7 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 TOKENS = ("input", "cache_read", "cache_write", "output", "reasoning")
 COMMON = {"schema", "kind", "producer", "event", "at"}
 FIELDS = {
-    "register": {"producer_kind", "origin"},
+    "register": {"producer_kind"},
     "start": {"sequence", "provider", "model"},
     "complete": {"sequence", "outcome", "usage_present", "input_basis", *TOKENS},
     "checkpoint": {"sequence"},
@@ -95,8 +95,6 @@ def validate(event):
     if kind == "register":
         if event["producer_kind"] not in {"chat", "judgment", "helper"}:
             raise ValueError("invalid producer kind")
-        if event["origin"] not in {"native", "partial_import"}:
-            raise ValueError("invalid coverage origin")
     elif kind == "start":
         for key in ("provider", "model"):
             if not isinstance(event[key], str) or not LABEL.fullmatch(event[key]):
@@ -110,7 +108,7 @@ def validate(event):
     elif kind == "gap":
         if instant(event["end"]) < instant(event["at"]):
             raise ValueError("invalid gap interval")
-        if event["reason"] not in {"delivery", "shutdown", "source", "import"}:
+        if event["reason"] not in {"delivery", "shutdown", "source"}:
             raise ValueError("invalid gap reason")
     return event
 
@@ -346,7 +344,7 @@ class Ledger:
             checkpoint = (datetime.fromtimestamp(state["checkpoint"], UTC).isoformat()
                           if state["checkpoint"] is not None else registration["at"])
             result.append({"producer": producer, "producer_kind": registration["producer_kind"],
-                           "origin": registration["origin"], "registered": registration["at"],
+                           "registered": registration["at"],
                            "checkpoint": checkpoint, "through": durable["sequence_through"],
                            "missing_sequences": json.loads(durable["missing_sequences"]),
                            "retired_completions": durable["retired_completions"],
@@ -368,7 +366,7 @@ class Ledger:
             ).fetchone()
             coverage = self.coverage(now)
             partial = lower < now - RETENTION or not coverage or any(
-                row["origin"] == "partial_import" or instant(row["registered"]) > lower
+                instant(row["registered"]) > lower
                 or instant(row["checkpoint"]) < upper or row["missing_sequences"]
                 or any(instant(gap["at"]) < upper and instant(gap["end"]) > lower
                        for gap in row["gaps"])
@@ -454,7 +452,7 @@ class Ledger:
         ).fetchone()
         if registration:
             source = validate(json.loads(registration[0]))
-            metadata.update(producer_kind=source["producer_kind"], origin=source["origin"],
+            metadata.update(producer_kind=source["producer_kind"],
                             registered=instant(source["at"]).timestamp())
         if event["kind"] == "complete":
             start = self.db.execute(

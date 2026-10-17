@@ -34,7 +34,7 @@ def event(kind, number=1, **fields):
 
 
 def register(ledger, *, now=NOW, **fields):
-    ledger.accept(event("register", producer_kind="chat", origin="native", **fields), now)
+    ledger.accept(event("register", producer_kind="chat", **fields), now)
 
 
 def start(ledger, number=1, *, now=NOW, **fields):
@@ -126,13 +126,10 @@ def test_checkpoint_gaps_close_only_when_the_missing_completions_arrive(ledger):
     assert ledger.summary(NOW, NOW + timedelta(minutes=1))["partial"] is True
 
 
-def test_shutdown_and_partial_import_never_claim_current_continuous_coverage(ledger):
+def test_shutdown_never_claims_current_continuous_coverage(ledger):
     register(ledger, at=(NOW - timedelta(hours=2)).isoformat())
     ledger.accept(event("shutdown", sequence=0), NOW)
     assert ledger.summary(NOW, NOW + timedelta(minutes=1))["partial"] is True
-    with usage.Ledger(":memory:") as imported:
-        imported.accept(event("register", producer_kind="helper", origin="partial_import"), NOW)
-        assert imported.summary(NOW, NOW)["partial"] is True
 
 
 def test_pacific_bounds_observe_dst_and_monday_weeks():
@@ -156,7 +153,7 @@ def test_retention_keeps_identity_and_coverage_for_35_days(ledger):
     ledger.prune(NOW + timedelta(days=35, microseconds=1))
     assert ledger.coverage(NOW + timedelta(days=35, microseconds=1)) == []
     with pytest.raises(ValueError):
-        ledger.accept(event("register", producer_kind="chat", origin="native"),
+        ledger.accept(event("register", producer_kind="chat"),
                       NOW + timedelta(days=36))
 
 
@@ -165,8 +162,7 @@ def test_retention_keeps_identity_and_coverage_for_35_days(ledger):
                                          ("attributes", {"secret": "private"})])
 def test_capture_rejects_extra_fields_without_storing_them(ledger, field, value):
     with pytest.raises(ValueError):
-        ledger.accept(event("register", producer_kind="chat", origin="native",
-                            **{field: value}), NOW)
+        ledger.accept(event("register", producer_kind="chat", **{field: value}), NOW)
     assert ledger.db.execute("SELECT count(*) FROM events").fetchone()[0] == 0
 
 
@@ -329,7 +325,7 @@ def test_completed_call_rates_exclude_clipped_window_edges():
 def test_expired_producer_history_cannot_make_an_old_period_complete(ledger):
     registered = NOW - timedelta(days=50)
     ledger.accept(event("register", at=registered.isoformat(),
-                        producer_kind="chat", origin="native"), registered)
+                        producer_kind="chat"), registered)
     checkpoint = NOW - timedelta(days=30)
     ledger.accept(event("checkpoint", 1, at=checkpoint.isoformat(), sequence=0), checkpoint)
     ledger.accept(event("checkpoint", 2, sequence=0), NOW)
