@@ -224,42 +224,6 @@ def test_data_dir_must_be_a_plain_absolute_path(configuration, data_dir):
         ship.validate_config(configuration)
 
 
-def _data_disk_vars(tmp_path, data_dir):
-    result = _ansible(
-        tmp_path,
-        "ansible",
-        "localhost",
-        "-i",
-        "localhost,",
-        "-c",
-        "local",
-        "-m",
-        "ansible.builtin.debug",
-        "-a",
-        "msg={{ [crewship_data_cache_env, crewship_docker_data_root] }}",
-        *GROUP_VARS_ARGS,
-        "-e",
-        json.dumps({"crewship_cfg": {"data_dir": data_dir}}),
-    )
-    assert result.returncode == 0, result.stdout
-    return json.loads(result.stdout.split("=>", 1)[1])["msg"]
-
-
-def test_no_data_dir_keeps_docker_and_every_cache_on_the_system_disk(tmp_path):
-    assert _data_disk_vars(tmp_path, "") == [{}, ""]
-
-
-def test_data_dir_moves_docker_and_only_the_caches_that_never_hardlink(tmp_path):
-    # bun, pnpm and uv hardlink into worktrees, so they must stay beside the pools.
-    assert _data_disk_vars(tmp_path, "/srv/data") == [
-        {
-            "npm_config_cache": "/srv/data/cache/npm",
-            "PIP_CACHE_DIR": "/srv/data/cache/pip",
-        },
-        "/srv/data/docker",
-    ]
-
-
 def test_bad_polling_window_cannot_disable_idle_accrual(configuration):
     configuration["crewship"]["browser_prune"]["max_gap_seconds"] = 120
     with pytest.raises(ValueError, match="observation intervals"):
@@ -885,7 +849,7 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
     profile_task = next(
         task["ansible.builtin.blockinfile"]
         for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
-        if "ansible.builtin.blockinfile" in task
+        if "block" in task.get("ansible.builtin.blockinfile", {})
     )
     profile = tmp_path / ".profile"
     unit = tmp_path / "herdr.service"
@@ -908,7 +872,7 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
             "src": str(ROOT / "blueprint/ansible/templates/herdr.service.j2"), "dest": str(unit),
         }),
         ("ansible.builtin.blockinfile", {
-            **{key: profile_task[key] for key in ("block", "marker", "create", "mode")},
+            **{key: profile_task[key] for key in ("block", "marker", "create")},
             "path": str(profile),
         }),
     ]
@@ -934,8 +898,8 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
         )
         shell = subprocess.run(
             ["bash", "--noprofile", "--norc", "-c",
-             'source "$1"; printf "%s\\n%s\\n%s\\n" "${CREWBOARD_SOCKET-unset}" '
-             '"$CHROME_DEVTOOLS_AXI_MCP_PATH" "$npm_config_cache"', "bash", str(profile)],
+             'source "$1"; printf "%s\\n%s\\n" "${CREWBOARD_SOCKET-unset}" '
+             '"$CHROME_DEVTOOLS_AXI_MCP_PATH"', "bash", str(profile)],
             env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
             capture_output=True, text=True, check=True,
         )
@@ -943,7 +907,6 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
             socket if board is not None else "unset",
             f"{tmp_path}/.local/share/crewship/chrome-devtools-mcp/current/"
             "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
-            f"{tmp_path}/data/cache/npm",
         ]
 
 

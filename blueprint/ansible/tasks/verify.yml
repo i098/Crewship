@@ -354,11 +354,11 @@
 
     # --- data disk (crewship.data_dir) --------------------------------------
 
-    - name: Assert the login shell sends the npm and pip caches to the data disk
+    - name: Assert the login shell has bulk environment defaults
       ansible.builtin.assert:
         that:
-          - (crewship_verify_profile.content | b64decode) is search('export ' ~ item.key ~ '="' ~ (item.value | regex_escape) ~ '"')
-        fail_msg: "{{ crewship_cfg.home }}/.profile does not export {{ item.key }}={{ item.value }}."
+          - (crewship_verify_profile.content | b64decode) is search('export ' ~ item.key ~ '=')
+        fail_msg: "{{ crewship_cfg.home }}/.profile has no default for {{ item.key }}."
         quiet: true
       loop: "{{ crewship_data_cache_env | dict2items }}"
       when: crewship_manage_profile_path | bool

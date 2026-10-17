@@ -25,6 +25,9 @@
         else:
             if not stat.S_ISDIR(info.st_mode):
                 sys.exit("Home must be a real directory, not a symlink")
+        for config in (home / ".config", home / ".config/environment.d"):
+            if config.is_symlink() and not config.exists():
+                sys.exit("Configuration directory link is unavailable: " + str(config))
       - "{{ crewship_cfg.home }}"
   changed_when: false
   check_mode: false
@@ -155,6 +158,7 @@
   environment: "{{ crewship_user_env }}"
   loop:
     - "{{ crewship_cfg.home }}/.config"
+    - "{{ crewship_cfg.home }}/.config/environment.d"
     - "{{ crewship_cfg.home }}/.local"
     - "{{ crewship_cfg.home }}/.local/bin"
     - "{{ crewship_cfg.home }}/.local/share"
@@ -164,27 +168,94 @@
     - "{{ crewship_cfg.workspace }}"
   when: crewship_account_ready | bool
 
-# A data disk mounts root-owned, so the account cannot create its cache root
-# there itself. Docker creates its own data root.
-- name: Ensure the account's cache directory on the data disk
+- name: Require a mounted data filesystem before creating bulk directories
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import pathlib, sys
+        path = pathlib.Path(sys.argv[1])
+        if not path.is_dir() or path.stat().st_dev == pathlib.Path('/').stat().st_dev:
+            sys.exit("crewship.data_dir must exist on a mounted non-root filesystem")
+      - "{{ crewship_data_dir }}"
+  changed_when: false
+  check_mode: false
+  when: crewship_data_dir | length > 0
+
+- name: Ensure the account's bulk directories on the data disk
   ansible.builtin.file:
-    path: "{{ crewship_data_dir }}/cache"
+    path: "{{ crewship_data_dir }}/{{ item }}"
     state: directory
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
-    mode: "0755"
   become: true
+  loop: [cache, .treehouse, tmp, downloads]
   when:
     - crewship_data_dir | length > 0
     - crewship_account_ready | bool
 
+- name: Add missing native bulk defaults without replacing user settings
+  ansible.builtin.command:
+    argv: >-
+      {{ ['python3', crewship_repo ~ '/scripts/bulk-defaults.py',
+          '--home', crewship_cfg.home, '--data-dir', crewship_data_dir]
+         + (['--check'] if ansible_check_mode else []) }}
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_bulk_defaults
+  changed_when: crewship_bulk_defaults.rc == 0 and (crewship_bulk_defaults.stdout | from_json).changed | bool
+  check_mode: false
+  no_log: true
+  when:
+    - crewship_data_dir | length > 0
+    - crewship_account_ready | bool
+
+- name: Write bulk defaults for future user-manager processes
+  ansible.builtin.copy:
+    dest: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-bulk.conf"
+    content: |
+      {% for key, value in crewship_data_cache_env | dictsort %}
+      {{ key }}=${{ '{' }}{{ key }}:-{{ value }}{{ '}' }}
+      {% endfor %}
+    mode: "0600"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  notify: reload user systemd
+  when:
+    - crewship_data_dir | length > 0
+    - crewship_account_ready | bool
+
+- name: Remove retired managed user-manager bulk defaults
+  ansible.builtin.file:
+    path: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-bulk.conf"
+    state: absent
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  notify: reload user systemd
+  when:
+    - crewship_data_dir | length == 0
+    - crewship_account_ready | bool
+
+- name: Remove the retired managed Bash environment block
+  ansible.builtin.blockinfile:
+    path: "{{ crewship_cfg.home }}/.bashrc"
+    marker: "# {mark} crewship managed environment"
+    state: absent
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  when:
+    - crewship_data_dir | length == 0
+    - crewship_manage_profile_path | bool
+    - crewship_account_ready | bool
+
 - name: Keep the managed bin directory and environment on the interactive shell
   ansible.builtin.blockinfile:
-    path: "{{ crewship_cfg.home }}/.profile"
+    path: "{{ crewship_cfg.home }}/{{ item }}"
     create: true
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
-    mode: "0644"
     marker: "# {mark} crewship managed environment"
     block: |
       for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
@@ -199,12 +270,16 @@
       export {{ key }}="{{ value }}"
       {% endfor %}
       {% endif %}
-      {% for key, value in crewship_data_cache_env | combine(crewship_board_env) | dictsort %}
+      {% for key, value in crewship_data_cache_env | dictsort %}
+      export {{ key }}="${{ '{' }}{{ key }}:-{{ value }}{{ '}' }}"
+      {% endfor %}
+      {% for key, value in crewship_board_env | dictsort %}
       export {{ key }}="{{ value }}"
       {% endfor %}
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_env }}"
+  loop: "{{ ['.profile'] + (['.bashrc'] if crewship_data_dir else []) }}"
   when:
     - crewship_manage_profile_path | bool
     - crewship_account_ready | bool

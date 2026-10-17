@@ -5,6 +5,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: true
   enable_linger: true
+  # Existing mounted data path for new bulk defaults and Docker's data root.
   # See docs/configuration.md#data-disk for path requirements and storage behavior.
   data_dir: ""
   # A new host gets the core only: agents and firstmate. Every other profile is

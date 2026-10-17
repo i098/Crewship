@@ -39,7 +39,7 @@
     chdir: "{{ crewship_repo }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
-  environment: "{{ crewship_user_env }}"
+  environment: "{{ crewship_data_cache_env | combine(crewship_user_env) }}"
   register: crewship_installer_run
   failed_when: >-
     crewship_installer_run.rc != 0
