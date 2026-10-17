@@ -519,7 +519,11 @@ def test_oversized_handoff_does_not_block_later_work_or_restart_recovery(tmp_pat
         receive("oversized", message)
         receive("later", "Deploy the next build.")
         receive("recovered", "Deploy the next build.")
-        wait_for(lambda: "photon-recovered " in text(notes), "work after restart")
+        wait_for(
+            lambda: any(event.get("route") == "done" and "photon-recovered" in event["ids"]
+                        for event in map(json.loads, text(state / "routing.jsonl").splitlines())),
+            "the durable recovered handoff",
+        )
         assert text(notes).count("photon-later ") == 1
         assert text(notes).count("photon-recovered ") == 1
         assert "photon-oversized " not in text(notes)
