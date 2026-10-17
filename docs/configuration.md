@@ -190,7 +190,7 @@ Apply changes only the general file action in the distribution `/etc/rsyslog.d/5
 The native rotation helper accepts no argument or its exact configured file path.
 It retains eight archives and one active file, approximately 1.125 GiB plus message batches.
 Authentication, kernel, mail, journal, audit rules and other operator settings remain unchanged.
-Only `/var/log/syslog` leaves the distribution rsyslog logrotate list.
+Only `/var/log/syslog` leaves the distribution rsyslog logrotate list, after validated logger activation succeeds.
 Existing `/var/log/syslog` files, links and archives remain intact; apply neither copies nor truncates them.
 Archive old files manually only after you confirm that no writer holds them.
 
@@ -206,6 +206,9 @@ The host must have distribution rsyslog and logrotate installed.
 The rsyslog build must accept `omfile` size-limit rotation; configuration validation fails for unsupported versions.
 Apply validates the complete configuration, including operator templates in other files.
 If validation fails, apply restores the original rules before it changes rotation ownership or restarts the logger.
+Apply activates the validated configuration inside the logging tasks, before unrelated provisioning tasks can fail.
+It records checksums for the helper, mount dependency, local AppArmor policy and general action only after a successful restart.
+An unchanged service-enabled apply retries deferred or failed activation.
 Custom general actions without the Crewship marker require operator reconciliation before apply.
 An empty `data_dir` leaves logging unchanged, including an earlier data-drive configuration.
 Removing or changing that configuration requires a planned log migration, not a silent fallback.
@@ -215,14 +218,17 @@ The profile must include `local/usr.sbin.rsyslogd`; other profile forms require 
 Apply keeps existing local rules; the distribution service hook reloads the profile at startup and safely handles disabled AppArmor.
 Custom service units must retain that distribution hook.
 With `start_services: false`, apply writes files and validates syntax but does not reload policy, reload systemd or start rsyslog.
+Old rotation ownership remains until a service-enabled apply completes activation.
 Check mode writes nothing.
 
 The focused tests run helper safety checks in the normal suite.
 Set `CREWSHIP_SYSLOG_CONTAINER=1` only inside a disposable root container to run the provisioning and native rotation checks.
 These checks need rsyslog, logrotate, systemd tools, a tmpfs mount at `/mnt/data`, and mount permission in the container namespace.
 They apply the logging task twice and require the second apply to report `changed=0`.
+The activation regression also requires systemd inside the container.
+It checks deferred starts, failed activation, recovery before an unrelated task failure, and an unchanged retry.
 Native checks use a copied distribution binary to avoid the host's executable AppArmor attachment.
-They validate profile syntax, but a separate systemd VM must verify kernel policy enforcement and service mount-loss behavior.
+The checks validate profile syntax, but a separate systemd VM must verify kernel policy enforcement and service mount-loss behavior.
 
 ### Moving an existing Docker data root
 

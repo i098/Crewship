@@ -76,16 +76,18 @@ def test_missing_active_log_leaves_archives_unchanged(rotation):
     assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
 
 
-def apply_syslog(tmp_path, data_dir="/mnt/data", check=False):
-    site = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]
+def apply_syslog(tmp_path, data_dir="/mnt/data", check=False, manage_services=False,
+                 fail_after=False):
     playbook = tmp_path / "syslog.yml"
+    tasks = [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/syslog.yml"),
+              "when": "crewship_data_dir | length > 0"}]
+    if fail_after:
+        tasks.append({"ansible.builtin.fail": {"msg": "unrelated later task failure"}})
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars": {"crewship_data_dir": data_dir, "crewship_blueprint": str(ROOT / "blueprint"),
-                 "crewship_manage_services": False},
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/syslog.yml"),
-                   "when": "crewship_data_dir | length > 0"}],
-        "handlers": [h for h in site["handlers"] if h.get("listen") == "restart bounded syslog"],
+                 "crewship_manage_services": manage_services},
+        "tasks": tasks,
     }]))
     return subprocess.run([
         str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
@@ -93,8 +95,35 @@ def apply_syslog(tmp_path, data_dir="/mnt/data", check=False):
     ], text=True, capture_output=True)
 
 
+@pytest.fixture
+def syslog_configuration(tmp_path):
+    paths = [
+        Path("/etc/rsyslog.d"),
+        Path("/etc/logrotate.d/rsyslog"),
+        Path("/etc/systemd/system/rsyslog.service.d"),
+        Path("/etc/apparmor.d/local/usr.sbin.rsyslogd"),
+        Path("/usr/local/libexec/crewship-syslog-rotate"),
+    ]
+    for number, path in enumerate(paths):
+        if path.is_dir():
+            shutil.copytree(path, tmp_path / str(number))
+        elif path.exists():
+            shutil.copy2(path, tmp_path / str(number))
+    yield
+    for number, path in enumerate(paths):
+        saved = tmp_path / str(number)
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+        if saved.is_dir():
+            shutil.copytree(saved, path)
+        elif saved.exists():
+            shutil.copy2(saved, path)
+
+
 @container_only
-def test_provisioning_preserves_history_rules_and_second_apply(tmp_path):
+def test_provisioning_preserves_history_rules_and_second_apply(tmp_path, syslog_configuration):
     rules = Path("/etc/rsyslog.d/50-default.conf")
     rotation_rules = Path("/etc/logrotate.d/rsyslog")
     Path("/etc/rsyslog.d/20-operator.conf").write_text(
@@ -129,7 +158,7 @@ def test_provisioning_preserves_history_rules_and_second_apply(tmp_path):
                 and not line.endswith("# crewship bounded syslog")]
 
     assert without_action(after) == without_action(original)
-    assert rotation_rules.read_bytes() == original_rotation.replace(b"/var/log/syslog\n", b"")
+    assert rotation_rules.read_bytes() == original_rotation
     assert old.read_text() == "existing general history\n"
     assert Path("/var/log/syslog.1").read_text() == "existing archived history\n"
     assert Path("/etc/rsyslog.d/60-audit.conf").read_text() == "local6.* /var/log/audit-preserved.log\n"
@@ -145,6 +174,83 @@ def test_provisioning_preserves_history_rules_and_second_apply(tmp_path):
     subprocess.run(["logrotate", "--debug", "/etc/logrotate.conf"], check=True)
     subprocess.run(["systemd-analyze", "verify", "rsyslog.service"], check=True)
     exercise_native_rotation(tmp_path)
+
+
+@container_only
+@pytest.mark.skipif(not Path("/run/systemd/system").exists(), reason="requires isolated systemd")
+def test_activation_survives_deferred_start_failure_and_unchanged_retry(
+    tmp_path, syslog_configuration,
+):
+    rotation_rules = Path("/etc/logrotate.d/rsyslog")
+    original_rotation = rotation_rules.read_bytes()
+    old = Path("/var/log/syslog")
+    old.write_text("preserved activation history\n")
+    data = Path(tempfile.mkdtemp(prefix="activation-", dir="/mnt/data"))
+    data.chmod(0o755)
+    active = data / "host-logs/rsyslog/syslog"
+    failure = Path("/etc/systemd/system/rsyslog.service.d/zz-test-failure.conf")
+
+    def emit(message):
+        subprocess.run(["logger", "-p", "user.notice", "-t", "crewship-activation", message],
+                       check=True)
+        wait_until(lambda: active.exists() and message in active.read_text())
+        assert old.read_text() == "preserved activation history\n"
+
+    try:
+        preview = apply_syslog(tmp_path, str(data), check=True, manage_services=True)
+        assert preview.returncode == 0, preview.stdout + preview.stderr
+        assert rotation_rules.read_bytes() == original_rotation
+        assert not active.exists()
+
+        deferred = apply_syslog(tmp_path, str(data))
+        assert deferred.returncode == 0, deferred.stdout + deferred.stderr
+        assert rotation_rules.read_bytes() == original_rotation
+        assert not active.exists()
+        assert subprocess.run(["systemctl", "is-active", "--quiet", "rsyslog.service"]).returncode != 0
+        configuration = Path("/etc/rsyslog.d/50-default.conf").read_bytes()
+        helper = Path("/usr/local/libexec/crewship-syslog-rotate").read_bytes()
+        executable = tmp_path / "rsyslog-isolated"
+        shutil.copy2("/usr/sbin/rsyslogd", executable)
+        for parent in (tmp_path, *tmp_path.parents):
+            if parent == Path("/tmp"):
+                break
+            parent.chmod(0o755)
+        (failure.parent / "zz-test-runtime.conf").write_text(
+            f"[Service]\nExecStart=\nExecStart={executable} -n -iNONE\nRestart=no\n"
+        )
+
+        failure.write_text("[Service]\nExecStartPre=/bin/false\n")
+        failed = apply_syslog(tmp_path, str(data), manage_services=True)
+        assert failed.returncode != 0
+        assert rotation_rules.read_bytes() == original_rotation
+        assert not active.exists()
+        failure.unlink()
+
+        recovered = apply_syslog(tmp_path, str(data), manage_services=True, fail_after=True)
+        assert recovered.returncode != 0 and "unrelated later task failure" in recovered.stdout, (
+            recovered.stdout + recovered.stderr
+        )
+        emit("activated-before-later-failure")
+        assert rotation_rules.read_bytes() == original_rotation.replace(b"/var/log/syslog\n", b"")
+        assert Path("/etc/rsyslog.d/50-default.conf").read_bytes() == configuration
+        assert Path("/usr/local/libexec/crewship-syslog-rotate").read_bytes() == helper
+        pid = subprocess.check_output(
+            ["systemctl", "show", "--property=MainPID", "--value", "rsyslog.service"], text=True,
+        )
+
+        unchanged = apply_syslog(tmp_path, str(data), manage_services=True)
+        assert unchanged.returncode == 0 and "changed=0" in unchanged.stdout, (
+            unchanged.stdout + unchanged.stderr
+        )
+        assert subprocess.check_output(
+            ["systemctl", "show", "--property=MainPID", "--value", "rsyslog.service"], text=True,
+        ) == pid
+        emit("unchanged-retry-keeps-bounded-writer")
+    finally:
+        failure.unlink(missing_ok=True)
+        subprocess.run(["systemctl", "stop", "syslog.socket", "rsyslog.service"], check=True)
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        shutil.rmtree(data)
 
 
 def wait_until(predicate):

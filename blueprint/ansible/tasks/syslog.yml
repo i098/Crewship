@@ -147,7 +147,6 @@
     group: root
     mode: "0755"
     validate: /bin/sh -n %s
-  notify: restart bounded syslog
 
 - name: Resolve the mount unit name
   ansible.builtin.command:
@@ -168,7 +167,6 @@
       After={{ crewship_syslog_mount_unit.stdout }}
       [Service]
       ExecStartPre=/usr/bin/mountpoint -q -- {{ crewship_syslog_mount.stdout }}
-  notify: restart bounded syslog
 
 - name: Detect the distribution rsyslog AppArmor profile
   ansible.builtin.stat:
@@ -213,7 +211,6 @@
           {% endfor %}
           /proc/*/mounts r,
           /proc/*/mountinfo r,
-      notify: restart bounded syslog
 
     - name: Validate the complete logger profile without loading kernel policy
       ansible.builtin.command:
@@ -228,7 +225,6 @@
         path: /etc/rsyslog.d/50-default.conf
         regexp: '^([^#\s][^\n]*?[ \t]+)(?:-?/var/log/syslog[ \t]*|action\(type="omfile"[^\n]*# crewship bounded syslog)$'
         replace: '\g<1>{{ crewship_syslog_action }}'
-      notify: restart bounded syslog
 
     - name: Validate the main configuration and all operator includes
       ansible.builtin.command:
@@ -245,15 +241,65 @@
       ansible.builtin.fail:
         msg: "Full rsyslog validation failed. The original general log rules were restored."
 
+- name: Activate the validated configuration before transferring rotation ownership
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+  block:
+    - name: Checksum every owned logger configuration input
+      ansible.builtin.command:
+        argv: >-
+          {{ ['sha256sum', '/usr/local/libexec/crewship-syslog-rotate',
+              '/etc/systemd/system/rsyslog.service.d/crewship-data-mount.conf',
+              '/etc/rsyslog.d/50-default.conf']
+             + (['/etc/apparmor.d/local/usr.sbin.rsyslogd']
+                if crewship_syslog_apparmor.stat.exists else []) }}
+      register: crewship_syslog_configuration
+      changed_when: false
+
+    - name: Read the last successfully activated configuration
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/rsyslog.service.d/crewship-active.sha256
+      register: crewship_syslog_active
+      failed_when: false
+
+    - name: Activate changed or previously deferred logger configuration
+      when: >-
+        crewship_syslog_active.content is not defined or
+        (crewship_syslog_active.content | b64decode) != crewship_syslog_configuration.stdout
+      block:
+        - name: Keep failed activation pending until a successful retry
+          ansible.builtin.file:
+            path: /etc/systemd/system/rsyslog.service.d/crewship-active.sha256
+            state: absent
+
+        - name: Reload the mount dependency and restart the bounded logger
+          ansible.builtin.systemd_service:
+            name: rsyslog.service
+            daemon_reload: true
+            state: restarted
+
+        - name: Record the successfully activated configuration
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/rsyslog.service.d/crewship-active.sha256
+            content: "{{ crewship_syslog_configuration.stdout }}"
+            owner: root
+            group: root
+            mode: "0600"
+
 - name: Remove only the moved syslog from distribution logrotate ownership
   ansible.builtin.replace:
     path: /etc/logrotate.d/rsyslog
     regexp: '(?m)^[ \t]*/var/log/syslog[ \t]*\n'
     replace: ''
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
 
 - name: Explain preserved log history
   ansible.builtin.debug:
     msg: >-
-      The general syslog now targets {{ crewship_syslog_dir }}/syslog.
+      The general syslog configuration targets {{ crewship_syslog_dir }}/syslog.
+      Old rotation ownership remains until a service-enabled apply activates the validated configuration.
       Existing /var/log/syslog files and archives remain unchanged; archive them manually after checking that no writer holds them.
       Other logging rules remain enabled. Empty data_dir leaves the installed logging configuration unchanged.
