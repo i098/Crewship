@@ -120,12 +120,13 @@ def checkouts():
     if native.is_absolute():
         roots.add(native.resolve())
     found = {
-        git.parent.resolve(): git.parent for root in roots
+        (git.parent.name, git.parent.resolve()): git.parent for root in roots
         for pattern in ("*/*/*/.git", "firstmate-*/*/firstmate/projects/*/.git")
         for git in (root / ".treehouse").glob(pattern)
     }
     if PROJECTS.exists():
-        found.update((git.parent.resolve(), git.parent) for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
+        found.update(((git.parent.name, git.parent.resolve()), git.parent)
+                     for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
     projects = {}
     for directory in sorted(found.values()):
         if NAME.fullmatch(directory.name):

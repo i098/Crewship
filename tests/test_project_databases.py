@@ -316,6 +316,71 @@ def test_registered_links_keep_their_project_name(database, tmp_path, target):
     assert not (database.STATE / target).exists()
 
 
+@pytest.mark.parametrize("relative", [
+    ".treehouse/app-abc/1/app",
+    "data/.treehouse/app-abc/1/app",
+    "data/.treehouse/firstmate-abc/1/firstmate/projects/app",
+])
+def test_named_lookup_keeps_pool_and_registered_project_names(database, tmp_path, monkeypatch, capsys, relative):
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    directory = tmp_path / relative
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    projects = tmp_path / "workspace/projects"
+    projects.mkdir(parents=True)
+    for name in ("shop", "store"):
+        (projects / name).symlink_to(directory, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(projects))
+    capsys.readouterr()
+
+    urls = []
+    for name in ("app", "shop", "store"):
+        database.main([name])
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / (name + ".env")
+        urls.append(path.read_text().strip().split("=", 1)[1])
+
+    assert all(urlsplit(url).scheme == "postgresql" for url in urls)
+    assert len(set(urls)) == 3
+
+
+@pytest.mark.parametrize("name", ["123", "bad.name", "a" * 49])
+def test_invalid_registered_alias_does_not_hide_an_eligible_pool_project(database, tmp_path, name):
+    app = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    projects = tmp_path / "workspace/projects"
+    projects.mkdir(parents=True)
+    (projects / name).symlink_to(app, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(projects))
+
+    database.seed()
+
+    assert urlsplit(env_url(app)).scheme == "postgresql"
+    assert (database.STATE / "app/meta.json").exists()
+    assert not (database.STATE / name).exists()
+
+
+def test_pool_links_keep_distinct_project_names(database, tmp_path, monkeypatch):
+    directory = tmp_path / "storage"
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    paths = {
+        "app": tmp_path / ".treehouse/app-abc/1/app",
+        "shop": tmp_path / "data/.treehouse/shop-abc/1/shop",
+        "store": tmp_path / "data/.treehouse/firstmate-abc/1/firstmate/projects/store",
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(directory, target_is_directory=True)
+
+    database.seed()
+
+    assert {path.parent.name for path in database.STATE.glob("*/meta.json")} == set(paths)
+    assert urlsplit(env_url(directory)).scheme == "postgresql"
+
+
 @pytest.mark.parametrize("root", ["42", "[]"])
 def test_native_root_rejects_non_path_values(database, tmp_path, root):
     config = tmp_path / ".config/treehouse/config.toml"
