@@ -41,7 +41,7 @@ def home(tmp_path):
 
 
 def apply(
-    home, *flags, start_services=False, fleet_guards=True, scripts=False
+    home, *flags, start_services=False, fleet_guards=True, scripts=False, data_dir=""
 ):
     playbook = home.parent / "units.yml"
     # Like site.yml, the playbook directory carries templates/.
@@ -81,6 +81,7 @@ def apply(
         "crewship_become_target": False,
         "crewship": {
             "user": getpass.getuser(), "home": str(home), "start_services": start_services,
+            "data_dir": data_dir,
             "profiles": {"fleet_guards": fleet_guards},
         },
     }
@@ -117,3 +118,22 @@ def test_an_upgraded_host_ends_with_only_the_crewship_units_and_a_second_apply_c
     assert names(home) == installed
 
 
+def test_data_disk_state_is_private_and_account_owned_before_the_timer_runs(home, monkeypatch):
+    data = home.parent / "data"
+    data.mkdir(mode=0o755)
+    commands = home.parent / "bin"
+    commands.mkdir()
+    findmnt = commands / "findmnt"
+    findmnt.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in *TARGET*) echo "/mnt/data 0:2" ;; *) echo "0:1" ;; esac\n'
+    )
+    findmnt.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{commands}:{os.environ['PATH']}")
+    state = data / "storage-guard"
+    assert apply(home, "--check", scripts=True, data_dir=str(data)) > 0
+    assert not state.exists()
+    assert apply(home, scripts=True, data_dir=str(data)) > 0
+    assert state.stat().st_uid == os.getuid()
+    assert state.stat().st_mode & 0o777 == 0o700
+    assert apply(home, scripts=True, data_dir=str(data)) == 0

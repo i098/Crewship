@@ -168,7 +168,9 @@ See [Project databases](project-databases.md) for existing-host management and s
 
 ## Data disk
 
-Set `data_dir` to an absolute path on a large data disk to keep fast-growing data off the system disk. The default `""` keeps today's layout.
+Set `data_dir` to an absolute path on a large data disk to keep fast-growing data off the system disk.
+The default is `""`.
+See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and mount requirements.
 
 | Data | Location with `data_dir` set | How |
 | --- | --- | --- |

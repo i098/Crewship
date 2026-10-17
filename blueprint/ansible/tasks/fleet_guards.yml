@@ -15,6 +15,46 @@
     - "{{ crewship_fleet_doctor_dir }}"
     - "{{ crewship_local_bin }}"
 
+- name: Prepare storage guard state on the configured data filesystem
+  when: crewship_data_dir | length > 0
+  block:
+    - name: Inspect the configured storage guard data directory
+      ansible.builtin.stat:
+        path: "{{ crewship_data_dir }}"
+      register: crewship_storage_data_path
+
+    - name: Inspect the storage guard data filesystem
+      ansible.builtin.command:
+        argv: [findmnt, -nro, "TARGET,MAJ:MIN", -T, "{{ crewship_data_dir }}"]
+      register: crewship_storage_data_mount
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect the root filesystem for storage guard state
+      ansible.builtin.command:
+        argv: [findmnt, -nro, "MAJ:MIN", -T, /]
+      register: crewship_storage_root_device
+      changed_when: false
+      check_mode: false
+
+    - name: Require a mounted non-root data filesystem for storage guard state
+      ansible.builtin.assert:
+        that:
+          - crewship_storage_data_path.stat.isdir | default(false)
+          - crewship_storage_data_mount.stdout.split() | length == 2
+          - crewship_storage_data_mount.stdout.split()[0] != '/'
+          - crewship_storage_data_mount.stdout.split()[1] != crewship_storage_root_device.stdout
+        fail_msg: "Storage guard data_dir must exist on a mounted filesystem different from root."
+
+    - name: Ensure the account can write storage guard state
+      ansible.builtin.file:
+        path: "{{ crewship_storage_guard_state_dir }}"
+        state: directory
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "0700"
+      become: true
+
 # --- scripts and static files (repository-owned, always converged) -----------
 
 - name: Install the fleet scripts

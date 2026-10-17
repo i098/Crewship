@@ -1,66 +1,17 @@
 #!/usr/bin/env bash
-# storage-guard.sh - watch disk use the way mem-guardian watches memory.
-#
-# Why: on 2026-09-23 the host's root filesystem reached 95% used (9.8 GB free)
-# and nothing alerted. docker-guard acts only on containers,
-# mem-guardian only on memory and swap, Firstmate's orphan sweep only on aged
-# litter; none of them measures disk. Docker held 45 GB of images (22 GB
-# reclaimable). Hours later /var/log/syslog grew to 39 GB at ~17 MB/s from one
-# looping process and took / to 100%, again with no alert.
-#
-# Measures use% of every mounted real block filesystem (ext4, xfs, btrfs, zfs,
-# vfat, ...; not tmpfs, overlay, squashfs, loop devices or other pseudo
-# filesystems; findmnt, once per device) and of the filesystems holding /,
-# /var/log, $HOME and Docker's data root (`docker info`), once per filesystem.
-# For each one:
-#   FILL  growth since the previous run projects the free space left after
-#         any CRIT reclaim full within STORAGE_FILL_HORIZON_HOURS (6): alert
-#         at once, even below WARN, naming the entry that grew most since the
-#         previous consumer scan. Only at or above STORAGE_FILL_MIN_PCT (70)
-#         use; below it the rate is sampled but not alerted.
-#   WARN  STORAGE_WARN_PCT (85): log, one COMMS.md line and one
-#         notify-master.sh alert per episode, re-armed only once usage falls
-#         below WARN - STORAGE_HYSTERESIS_PCT (3).
-#   CRIT  STORAGE_CRIT_PCT (92). On Docker's filesystem only, reclaim
-#         regenerable data cheapest first, re-measuring after each step and
-#         stopping once under CRIT: build cache, dangling images, then images
-#         no container (running or stopped) uses, created more than
-#         STORAGE_IMAGE_AGE_HOURS (168) ago (image creation time, not last
-#         use). On every filesystem a CRIT alert reports what the reclaim
-#         freed, or that a human is needed while still at CRIT, at most once
-#         per STORAGE_REPEAT_MIN (30); FILL repeats likewise.
-# Alerts name the top consumers: the largest entries one level under the
-# filesystem root, one level under its biggest entry, and under the home and
-# /var/log when they live on it, from one du walk bounded by
-# STORAGE_SCAN_TIMEOUT seconds (300), plus `docker system df` on Docker's
-# filesystem. When an earlier scan of the same filesystem exists, the alert
-# also names the (up to 5) entries that grew most since it.
-# Delivery: besides notify-master.sh when present, an alert goes to Firstmate
-# as `$FM_HOME/bin/fm-inbox.sh note` when FM_HOME points at a Firstmate home,
-# which wakes the main Firstmate to relay it.
-#
-# Never deleted, only reported: volumes, containers, repositories, /tmp, logs,
-# anything under the home but the worktree output below. A runaway log needs
-# whoever owns the process writing it.
-#
-# CRIT also runs worktree-prune.sh on the filesystem holding the Treehouse pools
-# ($WORKTREE_PRUNE_POOLS, default ~/.treehouse), before the Docker steps: it
-# removes only gitignored build output (node_modules, .venv, target, dist,
-# .next, ...) that nothing changed for WORKTREE_PRUNE_AGE_DAYS (7), found with
-# find; fdu, when installed, only reports the sizes.
-# Tracked files, uncommitted or unpushed work and anything outside the pools
-# stay; see that script for each guard. Firstmate's orphan sweep still owns
-# whole leaked worktrees and /tmp litter.
-#
-# --dry-run prints the measurement, the tier, what each CRIT step would free
-# and the alert a real run would send, and writes nothing: no state, log,
-# COMMS.md line or alert.
-# Runs every 5 minutes from crewship-storage-guard.timer.
+# Alert on disk pressure before diagnostics or guarded reclaim.
+# Save failed alerts with stable inbox request IDs and retry them next run.
+# --dry-run measures and previews without writing or delivering anything.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-LOG=$HERE/storage-guard.log
-COMMS=$HERE/COMMS.md
-STATE=$HERE/.storage-guard
+DATA_DIR=${STORAGE_DATA_DIR:-}
+STATE=${DATA_DIR:+$DATA_DIR/storage-guard}
+STATE=${STATE:-$HERE/.storage-guard}
+LOG=$STATE/storage-guard.log
+COMMS=$STATE/COMMS.md
+NOTIFY_TIMEOUT=${STORAGE_NOTIFY_TIMEOUT:-5}
+FAILED=0
+STATE_OWNED=0
 WARN=${STORAGE_WARN_PCT:-85}
 CRIT=${STORAGE_CRIT_PCT:-92}
 HYST=${STORAGE_HYSTERESIS_PCT:-3}
@@ -78,22 +29,63 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT; do
+for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT NOTIFY_TIMEOUT; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "storage-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 [ "$HYST" -lt "$WARN" ] && [ "$WARN" -lt "$CRIT" ] && [ "$CRIT" -le 100 ] \
   || { echo "storage-guard: need HYSTERESIS < WARN < CRIT <= 100, got $HYST/$WARN/$CRIT" >&2; exit 2; }
+[ "$NOTIFY_TIMEOUT" -gt 0 ] || { echo "storage-guard: notification timeout must be positive" >&2; exit 2; }
 
-log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
+log() {
+  if [ "$STATE_OWNED" != 1 ]; then printf '%s\n' "$*" >&2; return; fi
+  printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"
+}
 show() { [ "$DRY" = 1 ] && printf '%s\n' "$*"; return 0; }  # dry-run narration only
 say() { if [ "$DRY" = 1 ]; then printf '%s\n' "$*"; else log "$*"; fi; }  # events
 comms() { printf '\n## [storage-guard -> orchestrator] %s %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$COMMS"; }
-notify() {
-  [ -x "$HERE/notify-master.sh" ] && "$HERE/notify-master.sh" "$1" "storage-guard" >/dev/null 2>&1
-  local fm=${FM_HOME:-}; fm=${fm%/}
-  [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] \
-    && FM_HOME=$fm timeout 30 "$fm/bin/fm-inbox.sh" note -- "[storage-guard $(hostname -s)] $1" >/dev/null 2>&1
-  return 0
+valid_receipt() {
+  jq -e --arg id "$1" '
+    .schema == "fm-inbox-note.v1" and .request_id == $id and .saved == true
+    and (.announced == true or .acknowledged == true)
+    and (.outcome == "created" or .outcome == "replay")
+    and (.id | type == "string" and length > 0)' >/dev/null 2>&1
+}
+attempt_delivery() {
+  local id=$1 msg=$2 file=${3:-} receipt= fm=${FM_HOME:-}
+  if [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] \
+    && receipt=$(FM_HOME=${fm%/} timeout -k 2 "$NOTIFY_TIMEOUT" "$fm/bin/fm-inbox.sh" \
+      note --request-id "$id" --json -- "$msg" 2>&1) \
+    && valid_receipt "$id" <<<"$receipt"; then
+    printf '%s\n' "$receipt"
+    return 0
+  fi
+  printf 'storage-guard: delivery pending %s: %s\n' "$id" "${receipt:-inbox unavailable}" >&2
+  if [ -z "$file" ] || [ ! -f "$file.broadcast" ]; then
+    if { [ -x "$HERE/notify-master.sh" ] \
+      && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" storage-guard; } \
+      || printf '%s\n' "$msg" "${file:+Pending: $file}" | timeout -k 1 3 wall -n -t 2; then
+      [ -z "$file" ] || [ "$STATE_OWNED" != 1 ] || printf '%s\n' "$id" > "$file.broadcast"
+    fi
+  fi
+  return 1
+}
+deliver_pending() {
+  local file=$1 id event_state msg receipt ack=
+  read -r id event_state < "$file" || return 1
+  msg=$( { IFS= read -r _; cat; } < "$file")
+  [ ! -f "$file.ack" ] || read -r ack _ < "$file.ack"
+  if [ "$ack" != "$id" ]; then
+    if receipt=$(attempt_delivery "$id" "$msg" "$file"); then
+      [ "$STATE_OWNED" = 1 ] || return 1
+      printf '%s%s\n%s\n' "$id" "${event_state:+ $event_state}" "$receipt" > "$file.ack.tmp" \
+        && mv -f -- "$file.ack.tmp" "$file.ack" || return 1
+      log "DELIVERED $id $receipt"
+    else
+      return 1
+    fi
+  fi
+  [ "$STATE_OWNED" = 1 ] || return 1
+  rm -f -- "$file" "$file.broadcast"
 }
 join() { local sep=$1 out=$2 x; shift 2; for x in "$@"; do out+="$sep$x"; done; printf '%s' "$out"; }
 HUMAN_AWK='function h(b,  s, u, i) { s = b < 0 ? "-" : ""; b = b < 0 ? -b : b; split("B K M G T P", u, " ")
@@ -190,6 +182,35 @@ STEPS=("build cache|builder prune -f"
        "dangling images|image prune -f"
        "unused images created over ${AGE_H}h ago|image prune -af --filter until=${AGE_H}h")
 
+if [ "$DRY" != 1 ]; then
+  if [ -n "$DATA_DIR" ]; then
+    data_mount=$(findmnt -nro TARGET -T "$DATA_DIR") || data_mount=
+    data_device=$(findmnt -nro MAJ:MIN -T "$DATA_DIR") || data_device=
+    root_device=$(findmnt -nro MAJ:MIN -T /) || root_device=
+    if [ ! -d "$DATA_DIR" ] || [ -z "$data_mount" ] || [ "$data_mount" = / ] \
+      || [ -z "$data_device" ] || [ -z "$root_device" ] || [ "$data_device" = "$root_device" ] \
+      || ! mountpoint -q "$data_mount"; then
+      printf 'storage-guard: configured data mount unavailable: %s\n' "$DATA_DIR" >&2
+      printf 'storage-guard cannot save alerts: data mount unavailable\n' | timeout -k 1 3 wall -n -t 2
+      exit 1
+    fi
+  fi
+  umask 077
+  if mkdir -p "$STATE" && { exec 9>>"$STATE/lock"; }; then
+    flock -n -E 75 9
+    case $? in
+      0) STATE_OWNED=1 ;;
+      75) exit 0 ;;
+    esac
+  fi
+  if [ "$STATE_OWNED" != 1 ]; then
+    FAILED=1
+    printf 'storage-guard: state unavailable; continuing without state changes\n' >&2
+  fi
+  shopt -s nullglob
+  for pending in "$STATE"/*.pending; do deliver_pending "$pending" || FAILED=1; done
+fi
+
 # --- which filesystems ----------------------------------------------------------
 DOCKER_ROOT=$(timeout 20 docker info -f '{{.DockerRootDir}}' 2>/dev/null) || DOCKER_ROOT=
 DOCKER_MOUNT= POOLS_MOUNT=
@@ -222,33 +243,119 @@ for m in "${real[@]}"; do
 done
 
 show "storage-guard --dry-run: WARN ${WARN}% (re-armed below $((WARN - HYST))%), CRIT ${CRIT}%, fill horizon ${HORIZON_H}h, image age ${AGE_H}h, repeat ${REPEAT_MIN}m"
-if [ "$DRY" != 1 ]; then
-  mkdir -p "$STATE" 2>/dev/null
-  # Best effort: a full disk must not stop the reclaim for want of a lock file.
-  if { exec 9>"$STATE/lock"; } 2>/dev/null; then flock -n 9 || exit 0; fi
-fi
+declare -A needs_scan=() reclaim_eligible=()
 
 for m in "${mounts[@]}"; do
   key=$(printf '%s' "$m" | tr -c 'A-Za-z0-9' '_')
-  p_t=0 p_used=0 warn_on=0 crit_at=0 fill_at=0
-  [ -f "$STATE/$key" ] && read -r p_t p_used warn_on crit_at fill_at < "$STATE/$key"
-  for v in p_t p_used warn_on crit_at fill_at; do [[ ${!v} =~ ^[0-9]+$ ]] || printf -v "$v" 0; done
+  p_t=0 p_used=0 warn_on=0 crit_at=0 fill_at=0 alert_seq=0
+  [ -f "$STATE/$key" ] && read -r p_t p_used warn_on crit_at fill_at alert_seq < "$STATE/$key"
+  for v in p_t p_used warn_on crit_at fill_at alert_seq; do [[ ${!v} =~ ^[0-9]+$ ]] || printf -v "$v" 0; done
+  # Receipts also keep episode state if the sample replacement failed.
+  for record in "$STATE/$key".*.pending "$STATE/$key".*.pending.ack; do
+    [ -f "$record" ] || continue
+    read -r _ r_warn r_crit r_fill r_seq < "$record"
+    [[ $r_warn:$r_crit:$r_fill:$r_seq =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+$ ]] || continue
+    [ "$r_seq" -gt "$alert_seq" ] || continue
+    warn_on=$r_warn crit_at=$r_crit fill_at=$r_fill alert_seq=$r_seq
+  done
   read -r used avail pct _ <<<"$(measure "$m")"
   [[ $used$avail$pct =~ ^[0-9]+$ ]] || { say "cannot measure $m"; continue; }
-  now=$(date +%s) notes=() filling=0 keep_sample=0 reclaimed=
+  now=$(date +%s) notes=() keep_sample=0
   show "" && show "$m (holds ${holds[$m]}): ${pct}% used, $(human "$used") of $(human $((used + avail))), $(human "$avail") free"
 
   dt=$((now - p_t)) grow=$((used - p_used))
 
+  # Measure growth before reclaim. Gaps under a minute keep the older sample.
+  if [ "$p_t" -gt 0 ] && [ "$dt" -lt 60 ]; then
+    keep_sample=1
+    show "  previous sample ${dt}s old; no rate from so short a gap"
+  elif [ "$p_t" -gt 0 ] && [ "$grow" -gt 0 ]; then
+    eta=$((avail * dt / grow))
+    fill="+$(human "$grow") in $((dt / 60))m ($(human $((grow * 60 / dt)))/min), full in ~$(dur "$eta")"
+    if [ "$pct" -lt "$FILL_MIN" ]; then
+      show "  growing $fill - below FILL floor ${FILL_MIN}%"
+    elif [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
+      say "  FILL $m $fill - inside the ${HORIZON_H}h horizon"
+      if [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
+        notes+=("filling: $fill"); fill_at=$now
+      fi
+    else
+      show "  growing $fill - outside the ${HORIZON_H}h horizon"
+    fi
+  elif [ "$p_t" -gt 0 ]; then
+    show "  not growing: $(human "$grow") in $((dt / 60))m"
+  else
+    show "  no previous sample; the fill projection starts next run"
+  fi
+
+  if [ "$pct" -ge "$CRIT" ]; then
+    lvl=CRIT
+    reclaim_eligible[$m]=1
+    show "  tier CRIT: ${pct}% >= ${CRIT}%"
+    if [ $((now - crit_at)) -ge $((REPEAT_MIN * 60)) ]; then
+      n="at ${pct}% (CRIT ${CRIT}%) - needs a human; eligible safe reclaim follows this alert"
+      notes+=("$n"); crit_at=$now; warn_on=1
+    fi
+  elif [ "$pct" -ge "$WARN" ]; then
+    lvl=WARN
+    show "  tier WARN: ${pct}% >= ${WARN}%$([ "$warn_on" = 1 ] && echo ', episode already alerted')"
+    [ "$warn_on" = 1 ] || { notes+=("at ${pct}% (WARN ${WARN}%)"); warn_on=1; }
+  else
+    lvl=FILL
+    show "  tier OK: ${pct}% < ${WARN}%"
+    if [ "$warn_on" = 1 ] && [ "$pct" -lt $((WARN - HYST)) ]; then
+      say "  WARN episode over for $m at ${pct}% (< $((WARN - HYST))%); re-armed"; warn_on=0
+    fi
+  fi
+
+  pending=
+  if [ ${#notes[@]} -gt 0 ]; then
+    needs_scan[$m]=1
+    msg="[storage-guard $(hostname -s)] $lvl $m ${pct}% used, $(human "$avail") free: $(join '; ' "${notes[@]}"). Diagnostics follow in $STATE/$key.scan"
+    if [ "$DRY" = 1 ]; then
+      show "  a real run would alert: $msg"
+    else
+      file="$STATE/$key.$lvl.pending"
+      if [ ! -f "$file" ]; then
+        alert_seq=$((alert_seq + 1))
+        digest=$(printf '%s' "$m" | sha256sum); digest=${digest:0:24}
+        id="storage-${HOSTNAME:0:24}-$digest-$lvl-$alert_seq"
+        if [ "$STATE_OWNED" != 1 ] || ! { printf '%s %s %s %s %s\n%s\n' "$id" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" "$msg" > "$file.tmp" \
+          && mv -f -- "$file.tmp" "$file"; }; then
+          FAILED=1
+          printf 'storage-guard: cannot retain alert %s; attempting notification without saved state\n' "$id" >&2
+          attempt_delivery "$id" "$msg" >/dev/null
+          continue
+        fi
+        pending=$file
+        log "ALERT $id $msg"
+        comms "$msg"
+      fi
+    fi
+  fi
+
+  if [ "$DRY" = 1 ] || [ "$STATE_OWNED" != 1 ]; then continue; fi
+  [ "$keep_sample" = 1 ] && now=$p_t used=$p_used
+  printf '%s %s %s %s %s %s\n' "$now" "$used" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" \
+    > "$STATE/$key.tmp" && mv -f -- "$STATE/$key.tmp" "$STATE/$key" || FAILED=1
+  [ -z "$pending" ] || deliver_pending "$pending" || FAILED=1
+done
+
+# Attempt every alert before consumer scans and reclaim.
+for m in "${mounts[@]}"; do
+  key=$(printf '%s' "$m" | tr -c 'A-Za-z0-9' '_')
+  read -r used avail pct _ <<<"$(measure "$m")"
+  [[ $used$avail$pct =~ ^[0-9]+$ ]] || continue
+  before_reclaim=$used reclaimed=
   # CRIT, first: stale gitignored build output in the Treehouse pools. worktree-prune.sh
   # holds every safety check; this only decides when it runs and reports what it freed.
   wt_note=
   if [ "$m" = "$POOLS_MOUNT" ] && [ -x "$PRUNE_CMD" ]; then
     if [ "$DRY" = 1 ]; then
-      [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
+      [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
       show "  CRIT worktree step ($when, stopping once under ${CRIT}%): $(basename "$PRUNE_CMD") - stale gitignored build output in $POOLS:"
       timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" --dry-run 2>&1 | sed 's/^/    /'
-    elif [ "$pct" -ge "$CRIT" ]; then
+    elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       before=$used
       out=$(timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" 2>&1)
       read -r used avail pct _ <<<"$(measure "$m")"
@@ -262,13 +369,13 @@ for m in "${mounts[@]}"; do
   if [ "$m" = "$DOCKER_MOUNT" ]; then
     if [ "$DRY" = 1 ]; then
       read -r e1 e2 e3 <<<"$(estimates)"
-      [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
+      [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
       i=0
       for e in "${e1:-0}" "${e2:-0}" "${e3:-0}"; do
         s=${STEPS[$i]}; i=$((i + 1))
         show "  CRIT step $i ($when, stopping once under ${CRIT}%): docker ${s#*|} - ${s%%|*}, frees ~$(human "$e")"
       done
-    elif [ "$pct" -ge "$CRIT" ]; then
+    elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       start_used=$used freed=()
       for s in "${STEPS[@]}"; do
         [ "$pct" -ge "$CRIT" ] || break
@@ -285,88 +392,27 @@ for m in "${mounts[@]}"; do
 
   # Worktree output leads the combined note; Docker data follows.
   [ -n "$wt_note" ] && reclaimed="$wt_note${reclaimed:+, then $reclaimed}"
-
-  # FILL: project the growth since the previous run onto the free space left
-  # after any reclaim. A rerun within a minute keeps the older sample; its rate
-  # would be noise.
-  if [ "$p_t" -gt 0 ] && [ "$dt" -lt 60 ]; then
-    keep_sample=1
-    show "  previous sample ${dt}s old; no rate from so short a gap"
-  elif [ "$p_t" -gt 0 ] && [ "$grow" -gt 0 ]; then
-    eta=$((avail * dt / grow))
-    fill="+$(human "$grow") in $((dt / 60))m ($(human $((grow * 60 / dt)))/min), full in ~$(dur "$eta")"
-    if [ "$pct" -lt "$FILL_MIN" ]; then
-      show "  growing $fill - below FILL floor ${FILL_MIN}%"
-    elif [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
-      say "  FILL $m $fill - inside the ${HORIZON_H}h horizon"
-      if [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
-        notes+=("filling: $fill"); fill_at=$now; filling=1
-      fi
-    else
-      show "  growing $fill - outside the ${HORIZON_H}h horizon"
-    fi
-  elif [ "$p_t" -gt 0 ]; then
-    show "  not growing: $(human "$grow") in $((dt / 60))m"
-  else
-    show "  no previous sample; the fill projection starts next run"
+  if [ "$STATE_OWNED" = 1 ] && [ "$used" -lt "$before_reclaim" ] && [ -f "$STATE/$key" ]; then
+    read -r sample_time sample_used saved_warn saved_crit saved_fill saved_seq < "$STATE/$key"
+    printf '%s %s %s %s %s %s\n' "$(date +%s)" "$used" "$saved_warn" "$saved_crit" "$saved_fill" "$saved_seq" \
+      > "$STATE/$key.tmp" && mv -f -- "$STATE/$key.tmp" "$STATE/$key" || FAILED=1
   fi
-
-  if [ "$pct" -ge "$CRIT" ] || [ -n "$reclaimed" ]; then
-    lvl=CRIT
-    show "  tier CRIT: ${pct}% >= ${CRIT}%"
-    if [ $((now - crit_at)) -ge $((REPEAT_MIN * 60)) ]; then
-      if [ "$pct" -lt "$CRIT" ]; then n="back to ${pct}% after $reclaimed"
-      else
-        n="at ${pct}% (CRIT ${CRIT}%)"
-        if [ -n "$reclaimed" ]; then n="still $n after $reclaimed"
-        elif [ -z "$DOCKER_MOUNT" ]; then n+=", Docker unreachable so nothing reclaimed"
-        elif [ "$m" != "$DOCKER_MOUNT" ]; then n+=", no Docker data here to reclaim"; fi
-        n+=" - needs a human"
-      fi
-      notes+=("$n"); crit_at=$now; warn_on=1
-    fi
-  elif [ "$pct" -ge "$WARN" ]; then
-    lvl=WARN
-    show "  tier WARN: ${pct}% >= ${WARN}%$([ "$warn_on" = 1 ] && echo ', episode already alerted')"
-    [ "$warn_on" = 1 ] || { notes+=("at ${pct}% (WARN ${WARN}%)"); warn_on=1; }
-  else
-    lvl=FILL
-    show "  tier OK: ${pct}% < ${WARN}%"
-    if [ "$warn_on" = 1 ] && [ "$pct" -lt $((WARN - HYST)) ]; then
-      say "  WARN episode over for $m at ${pct}% (< $((WARN - HYST))%); re-armed"; warn_on=0
-    fi
-  fi
-
-  # Name the consumers for an alert, and always in a dry run.
-  top=
-  if [ ${#notes[@]} -gt 0 ] || [ "$DRY" = 1 ]; then
-    show "  scanning consumers (du, up to ${SCAN_TIMEOUT}s)..."
+  if [ -n "${needs_scan[$m]+x}" ] || [ "$DRY" = 1 ]; then
+    show "  scanning $m consumers (du, up to ${SCAN_TIMEOUT}s)..."
     scan "$m"
     top="top: $(printf '%s\n' "$SCAN_OUT" | top_consumers)"
     [ "$SCAN_PARTIAL" = 1 ] && top+=" (partial: du hit ${SCAN_TIMEOUT}s)"
     [ "$m" = "$DOCKER_MOUNT" ] && top+="; docker: $(docker_df)"
-    show "  $top"
-    snapshot=$(printf '%s %s\n%s\n' "$now" $((1 - SCAN_PARTIAL)) "$SCAN_OUT")
-    if [ ${#notes[@]} -gt 0 ] && [ -f "$STATE/$key.scan" ]; then
+    snapshot=$(printf '%s %s\n%s\n' "$(date +%s)" $((1 - SCAN_PARTIAL)) "$SCAN_OUT")
+    if [ -f "$STATE/$key.scan" ]; then
       g=$(printf '%s\n' "$snapshot" | growers "$STATE/$key.scan")
-      [ -n "$g" ] && notes[0]+=", grew most in the $g"
+      [ -z "$g" ] || top+="; grew most in the $g"
     fi
-    [ "$DRY" = 1 ] || printf '%s\n' "$snapshot" > "$STATE/$key.scan"
-  fi
-
-  if [ ${#notes[@]} -gt 0 ]; then
-    msg="$lvl $m ${pct}% used, $(human "$avail") free: $(join '; ' "${notes[@]}"). $top"
-    if [ "$DRY" = 1 ]; then
-      show "  a real run would alert: $msg"
-    else
-      log "ALERT $msg"
-      comms "$msg"
-      notify "$msg"
+    say "DIAGNOSTICS $m $top${reclaimed:+; $reclaimed}"
+    if [ "$STATE_OWNED" = 1 ]; then
+      printf '%s\n' "$snapshot" > "$STATE/$key.scan.tmp" \
+        && mv -f -- "$STATE/$key.scan.tmp" "$STATE/$key.scan" || FAILED=1
     fi
   fi
-
-  [ "$DRY" = 1 ] && continue
-  [ "$keep_sample" = 1 ] && now=$p_t used=$p_used
-  echo "$now $used $warn_on $crit_at $fill_at" > "$STATE/$key"
 done
-exit 0
+exit "$FAILED"
