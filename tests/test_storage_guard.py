@@ -5,6 +5,7 @@ docker's prune commands give back the GiB configured per step, so tier
 thresholds, hysteresis and the order of the reclaim steps are observable.
 """
 
+import fcntl
 import json
 import os
 import shutil
@@ -421,6 +422,132 @@ def test_all_pressure_alerts_precede_scans_and_reclaim(guard):
     slow = [i for i, event in enumerate(events) if event in ("scan", "reclaim")]
     assert len(attempts) == 2
     assert max(attempts) < min(slow)
+
+
+@pytest.mark.parametrize("failure", ["mkdir", "lock-open", "flock"])
+@pytest.mark.parametrize("delivery", ["success", "enospc"])
+def test_initialization_errors_notify_without_changing_saved_state(guard, failure, delivery):
+    state = guard.doctor / ".storage-guard"
+    original_body = "Original alert for the archive filesystem"
+    if failure == "mkdir":
+        Guard._exe(guard.stub / "bin/mkdir", 'echo "No space left on device" >&2; exit 1')
+    else:
+        state.mkdir()
+        now = int(time.time())
+        (state / "_").write_text(f"{now - 600} {80 * G} 0 0 0 0\n")
+        (state / "_data").write_text(f"{now - 600} {65 * G} 0 0 0 0\n")
+        (state / "_archive.WARN.pending").write_text(f"retained-request 1 0 0 1\n{original_body}\n")
+        (state / "storage-guard.log").write_text("Saved log\n")
+        (state / "COMMS.md").write_text("Saved communications\n")
+        (state / "_.scan").write_text(f"{now - 600} 1\n{70 * G}\t/var\n")
+        if failure == "lock-open":
+            (state / "lock").mkdir()
+        else:
+            (state / "lock").write_text("Lock contents\n")
+            Guard._exe(guard.stub / "bin/flock", 'echo "flock failed" >&2; exit 70')
+    before_names = {p.name for p in state.iterdir()} if state.exists() else set()
+    before = {p.name: p.read_bytes() for p in state.iterdir() if p.is_file()} if state.exists() else {}
+    if delivery == "enospc":
+        (guard.stub / "delivery").write_text(delivery)
+    Guard._exe(guard.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/events"')
+    pools = guard.doctor.parent / "pools"
+    pools.mkdir()
+    Guard._exe(guard.stub / "prune", 'echo worktree-reclaim >> "$STUB/events"')
+    guard.fs({"/": 95, "/home": 86, "/data": 95 if failure == "mkdir" else 75})
+    guard.mounts("/data ext4 /dev/data\n")
+    guard.free(builder=15)
+    result = guard.run(check=False, WORKTREE_PRUNE_POOLS=str(pools),
+                       WORKTREE_PRUNE_CMD=str(guard.stub / "prune"))
+    assert result.returncode != 0
+    events = guard._lines("events")
+    attempts = [i for i, event in enumerate(events) if event.startswith("notify ")]
+    slow = [i for i, event in enumerate(events) if event in ("scan", "reclaim", "worktree-reclaim")]
+    assert len(attempts) == (3 if failure == "mkdir" else 4)
+    assert max(attempts) < min(slow)
+    assert "worktree-reclaim" in events and "scan" in events
+    assert guard.prunes() == STEPS[:1]
+    assert guard.pct() == 80
+    if delivery == "enospc":
+        broadcasts = [i for i, event in enumerate(events) if event == "broadcast"]
+        assert len(broadcasts) == len(attempts)
+        assert max(broadcasts) < min(slow)
+    if failure == "mkdir":
+        assert not state.exists()
+    else:
+        assert events[0] == "notify retained-request"
+        assert events.index("discovery") > 0
+        if delivery == "success":
+            assert guard._lines("alerts")[0] == original_body
+        assert {p.name for p in state.iterdir()} == before_names
+        assert {p.name: p.read_bytes() for p in state.iterdir() if p.is_file()} == before
+
+
+def test_lock_contention_exits_without_delivery_maintenance_or_state_changes(guard):
+    state = guard.doctor / ".storage-guard"
+    state.mkdir()
+    (state / "lock").write_text("Lock contents\n")
+    (state / "_.WARN.pending").write_text("retained-request 1 0 0 1\nOriginal alert\n")
+    guard.fs({"/": 95})
+    before = {p.name: p.read_bytes() for p in state.iterdir()}
+    with (state / "lock").open("r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = guard.run(check=False)
+    assert result.returncode == 0
+    assert guard._lines("events") == []
+    assert guard._lines("attempts") == []
+    assert guard.prunes() == []
+    assert guard.pct() == 95
+    assert {p.name: p.read_bytes() for p in state.iterdir()} == before
+
+
+@pytest.mark.parametrize(("initial", "refreshed", "eligible"), [
+    (84, 95, False),
+    (86, 95, False),
+    (95, 80, False),
+    (95, 95, True),
+])
+@pytest.mark.parametrize("reclaimer", ["docker", "worktree", "both"])
+def test_reclaim_requires_first_pass_pressure_and_stops_after_usage_falls(
+    guard, initial, refreshed, eligible, reclaimer
+):
+    guard.fs({"/": refreshed, "/home": 86})
+    (guard.stub / "fs-after-notify").write_bytes((guard.stub / "fs").read_bytes())
+    guard.fs({"/": 80, "/home": 86})
+    (guard.stub / "fs-after-worktree").write_bytes((guard.stub / "fs").read_bytes())
+    if reclaimer != "docker":
+        pools = guard.doctor.parent / "pools"
+        pools.mkdir()
+        Guard._exe(guard.stub / "prune", r"""
+echo worktree-reclaim >> "$STUB/events"
+cat "$STUB/fs-after-worktree" > "$STUB/fs"
+""")
+        guard.env["WORKTREE_PRUNE_POOLS"] = str(pools)
+        guard.env["WORKTREE_PRUNE_CMD"] = str(guard.stub / "prune")
+    if reclaimer == "worktree":
+        (guard.stub / "docker-down").touch()
+    inbox = guard.home / "bin/fm-inbox.sh"
+    inbox.rename(guard.home / "bin/original-inbox")
+    Guard._exe(inbox, r"""
+cat "$STUB/fs-after-notify" > "$STUB/fs"
+exec "$FM_HOME/bin/original-inbox" "$@"
+""")
+    guard.fs({"/": initial, "/home": 86})
+    guard.free(builder=15)
+    guard.run()
+    root_alerts = [alert for alert in guard.alerts() if alert.split()[1] == "/"]
+    if initial >= 85:
+        assert len(root_alerts) == 1 and f"/ {initial}% used" in root_alerts[0]
+    else:
+        assert root_alerts == []
+    events = guard._lines("events")
+    attempts = [i for i, event in enumerate(events) if event.startswith("notify ")]
+    slow = [i for i, event in enumerate(events) if event in ("scan", "reclaim", "worktree-reclaim")]
+    assert max(attempts) < min(slow)
+    assert events.count("worktree-reclaim") == int(eligible and reclaimer != "docker")
+    assert guard.prunes() == (STEPS[:1] if eligible and reclaimer == "docker" else [])
+    assert guard.pct() == (80 if eligible else refreshed)
+    saved_usage = (guard.doctor / ".storage-guard/_").read_text().split()[1]
+    assert int(saved_usage) == (80 if eligible else initial) * G
 
 
 @pytest.mark.parametrize("staging", ["write", "rename"])

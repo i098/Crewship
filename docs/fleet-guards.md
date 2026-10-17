@@ -69,14 +69,20 @@ Without `data_dir`, state remains in `oss-fleet/doctor/.storage-guard`; logs now
 This compatibility mode cannot retain new alerts when that filesystem cannot accept writes.
 If a pending record cannot be saved, the guard still attempts inbox delivery and fallback broadcast before scans or reclaim.
 It returns a nonzero status without recording retention or acknowledgement.
+If state creation or lock acquisition fails, the guard continues with unsaved notifications and returns a nonzero status.
+Only the lock owner can change pending records, receipts, broadcast markers, samples, logs, or diagnostic files.
+Without the lock, the guard sends diagnostic output to standard error.
+Lock contention exits without delivery or maintenance.
 Changing the state directory does not migrate earlier samples or pending records; preserve and move them before switching.
 Earlier alerts without pending records cannot be reconstructed.
 Manual runs can set `STORAGE_DATA_DIR` to use the same placement.
 
 After notification, CRIT runs `worktree-prune.sh` on the filesystem that holds the Treehouse pools.
+Only filesystems measured at CRIT during the notification pass can start reclaim.
+Later measurements can stop reclaim but cannot make another filesystem eligible.
 `WORKTREE_PRUNE_CMD` can replace this command.
 On Docker's filesystem, it then prunes build cache, dangling images, and unused images created more than 168 hours ago.
-It re-measures after each step and stops Docker reclaim below CRIT.
+It re-measures before reclaim and after each step, and stops reclaim below CRIT.
 After reclaim, the guard updates the usage sample so rapid growth from the reduced usage still triggers FILL.
 The image filter uses creation time, not last use.
 Existing worktree safety checks remain unchanged.

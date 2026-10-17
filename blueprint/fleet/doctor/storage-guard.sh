@@ -11,6 +11,7 @@ LOG=$STATE/storage-guard.log
 COMMS=$STATE/COMMS.md
 NOTIFY_TIMEOUT=${STORAGE_NOTIFY_TIMEOUT:-5}
 FAILED=0
+STATE_OWNED=0
 WARN=${STORAGE_WARN_PCT:-85}
 CRIT=${STORAGE_CRIT_PCT:-92}
 HYST=${STORAGE_HYSTERESIS_PCT:-3}
@@ -35,7 +36,10 @@ done
   || { echo "storage-guard: need HYSTERESIS < WARN < CRIT <= 100, got $HYST/$WARN/$CRIT" >&2; exit 2; }
 [ "$NOTIFY_TIMEOUT" -gt 0 ] || { echo "storage-guard: notification timeout must be positive" >&2; exit 2; }
 
-log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
+log() {
+  if [ "$STATE_OWNED" != 1 ]; then printf '%s\n' "$*" >&2; return; fi
+  printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"
+}
 show() { [ "$DRY" = 1 ] && printf '%s\n' "$*"; return 0; }  # dry-run narration only
 say() { if [ "$DRY" = 1 ]; then printf '%s\n' "$*"; else log "$*"; fi; }  # events
 comms() { printf '\n## [storage-guard -> orchestrator] %s %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$COMMS"; }
@@ -60,7 +64,7 @@ attempt_delivery() {
     if { [ -x "$HERE/notify-master.sh" ] \
       && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" storage-guard; } \
       || printf '%s\n' "$msg" "${file:+Pending: $file}" | timeout -k 1 3 wall -n -t 2; then
-      [ -z "$file" ] || printf '%s\n' "$id" > "$file.broadcast"
+      [ -z "$file" ] || [ "$STATE_OWNED" != 1 ] || printf '%s\n' "$id" > "$file.broadcast"
     fi
   fi
   return 1
@@ -72,6 +76,7 @@ deliver_pending() {
   [ ! -f "$file.ack" ] || read -r ack _ < "$file.ack"
   if [ "$ack" != "$id" ]; then
     if receipt=$(attempt_delivery "$id" "$msg" "$file"); then
+      [ "$STATE_OWNED" = 1 ] || return 1
       printf '%s%s\n%s\n' "$id" "${event_state:+ $event_state}" "$receipt" > "$file.ack.tmp" \
         && mv -f -- "$file.ack.tmp" "$file.ack" || return 1
       log "DELIVERED $id $receipt"
@@ -79,6 +84,7 @@ deliver_pending() {
       return 1
     fi
   fi
+  [ "$STATE_OWNED" = 1 ] || return 1
   rm -f -- "$file" "$file.broadcast"
 }
 join() { local sep=$1 out=$2 x; shift 2; for x in "$@"; do out+="$sep$x"; done; printf '%s' "$out"; }
@@ -190,9 +196,17 @@ if [ "$DRY" != 1 ]; then
     fi
   fi
   umask 077
-  mkdir -p "$STATE" || exit 1
-  { exec 9>"$STATE/lock"; } || exit 1
-  flock -n 9 || exit 0
+  if mkdir -p "$STATE" && { exec 9>>"$STATE/lock"; }; then
+    flock -n -E 75 9
+    case $? in
+      0) STATE_OWNED=1 ;;
+      75) exit 0 ;;
+    esac
+  fi
+  if [ "$STATE_OWNED" != 1 ]; then
+    FAILED=1
+    printf 'storage-guard: state unavailable; continuing without state changes\n' >&2
+  fi
   shopt -s nullglob
   for pending in "$STATE"/*.pending; do deliver_pending "$pending" || FAILED=1; done
 fi
@@ -229,7 +243,7 @@ for m in "${real[@]}"; do
 done
 
 show "storage-guard --dry-run: WARN ${WARN}% (re-armed below $((WARN - HYST))%), CRIT ${CRIT}%, fill horizon ${HORIZON_H}h, image age ${AGE_H}h, repeat ${REPEAT_MIN}m"
-declare -A needs_scan=()
+declare -A needs_scan=() reclaim_eligible=()
 
 for m in "${mounts[@]}"; do
   key=$(printf '%s' "$m" | tr -c 'A-Za-z0-9' '_')
@@ -276,6 +290,7 @@ for m in "${mounts[@]}"; do
 
   if [ "$pct" -ge "$CRIT" ]; then
     lvl=CRIT
+    reclaim_eligible[$m]=1
     show "  tier CRIT: ${pct}% >= ${CRIT}%"
     if [ $((now - crit_at)) -ge $((REPEAT_MIN * 60)) ]; then
       n="at ${pct}% (CRIT ${CRIT}%) - needs a human; eligible safe reclaim follows this alert"
@@ -305,7 +320,7 @@ for m in "${mounts[@]}"; do
         alert_seq=$((alert_seq + 1))
         digest=$(printf '%s' "$m" | sha256sum); digest=${digest:0:24}
         id="storage-${HOSTNAME:0:24}-$digest-$lvl-$alert_seq"
-        if ! { printf '%s %s %s %s %s\n%s\n' "$id" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" "$msg" > "$file.tmp" \
+        if [ "$STATE_OWNED" != 1 ] || ! { printf '%s %s %s %s %s\n%s\n' "$id" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" "$msg" > "$file.tmp" \
           && mv -f -- "$file.tmp" "$file"; }; then
           FAILED=1
           printf 'storage-guard: cannot retain alert %s; attempting notification without saved state\n' "$id" >&2
@@ -319,7 +334,7 @@ for m in "${mounts[@]}"; do
     fi
   fi
 
-  [ "$DRY" = 1 ] && continue
+  if [ "$DRY" = 1 ] || [ "$STATE_OWNED" != 1 ]; then continue; fi
   [ "$keep_sample" = 1 ] && now=$p_t used=$p_used
   printf '%s %s %s %s %s %s\n' "$now" "$used" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" \
     > "$STATE/$key.tmp" && mv -f -- "$STATE/$key.tmp" "$STATE/$key" || FAILED=1
@@ -337,10 +352,10 @@ for m in "${mounts[@]}"; do
   wt_note=
   if [ "$m" = "$POOLS_MOUNT" ] && [ -x "$PRUNE_CMD" ]; then
     if [ "$DRY" = 1 ]; then
-      [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
+      [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
       show "  CRIT worktree step ($when, stopping once under ${CRIT}%): $(basename "$PRUNE_CMD") - stale gitignored build output in $POOLS:"
       timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" --dry-run 2>&1 | sed 's/^/    /'
-    elif [ "$pct" -ge "$CRIT" ]; then
+    elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       before=$used
       out=$(timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" 2>&1)
       read -r used avail pct _ <<<"$(measure "$m")"
@@ -354,13 +369,13 @@ for m in "${mounts[@]}"; do
   if [ "$m" = "$DOCKER_MOUNT" ]; then
     if [ "$DRY" = 1 ]; then
       read -r e1 e2 e3 <<<"$(estimates)"
-      [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
+      [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
       i=0
       for e in "${e1:-0}" "${e2:-0}" "${e3:-0}"; do
         s=${STEPS[$i]}; i=$((i + 1))
         show "  CRIT step $i ($when, stopping once under ${CRIT}%): docker ${s#*|} - ${s%%|*}, frees ~$(human "$e")"
       done
-    elif [ "$pct" -ge "$CRIT" ]; then
+    elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       start_used=$used freed=()
       for s in "${STEPS[@]}"; do
         [ "$pct" -ge "$CRIT" ] || break
@@ -377,7 +392,7 @@ for m in "${mounts[@]}"; do
 
   # Worktree output leads the combined note; Docker data follows.
   [ -n "$wt_note" ] && reclaimed="$wt_note${reclaimed:+, then $reclaimed}"
-  if [ "$DRY" != 1 ] && [ "$used" -lt "$before_reclaim" ] && [ -f "$STATE/$key" ]; then
+  if [ "$STATE_OWNED" = 1 ] && [ "$used" -lt "$before_reclaim" ] && [ -f "$STATE/$key" ]; then
     read -r sample_time sample_used saved_warn saved_crit saved_fill saved_seq < "$STATE/$key"
     printf '%s %s %s %s %s %s\n' "$(date +%s)" "$used" "$saved_warn" "$saved_crit" "$saved_fill" "$saved_seq" \
       > "$STATE/$key.tmp" && mv -f -- "$STATE/$key.tmp" "$STATE/$key" || FAILED=1
@@ -394,7 +409,7 @@ for m in "${mounts[@]}"; do
       [ -z "$g" ] || top+="; grew most in the $g"
     fi
     say "DIAGNOSTICS $m $top${reclaimed:+; $reclaimed}"
-    if [ "$DRY" != 1 ]; then
+    if [ "$STATE_OWNED" = 1 ]; then
       printf '%s\n' "$snapshot" > "$STATE/$key.scan.tmp" \
         && mv -f -- "$STATE/$key.scan.tmp" "$STATE/$key.scan" || FAILED=1
     fi
