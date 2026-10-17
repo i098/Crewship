@@ -1,11 +1,13 @@
 import importlib.util
 import json
+import re
 import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -330,6 +332,102 @@ def test_completed_call_rates_exclude_clipped_window_edges():
     assert [row[0] for row in rows] == [60_000_000_000, 119_999_999_999]
 
 
+def calendar_rows(gaps, *, missing=0, producers=1):
+    pacific = ZoneInfo("America/Los_Angeles")
+    upper = datetime(2026, 10, 14, 19, tzinfo=UTC)
+    def nano(value):
+        return round(value.timestamp() * 1_000_000) * 1000
+
+    def moment(value):
+        return datetime.fromtimestamp(value / 1e9, UTC)
+
+    def start(period):
+        return lambda value: nano(usage.calendar_bounds(period, moment(value))[0])
+
+    def week_start(value, mode):
+        local = moment(value).astimezone(pacific).replace(hour=0, minute=0, second=0, microsecond=0)
+        return nano(local - timedelta(days=(local.weekday() + (mode == 0)) % 7))
+
+    class CountIf:
+        def __init__(self):
+            self.value = 0
+
+        def step(self, condition):
+            self.value += bool(condition)
+
+        def finalize(self):
+            return self.value
+
+    class SumOrNull:
+        def __init__(self):
+            self.value = None
+
+        def step(self, value):
+            if value is not None:
+                self.value = (self.value or 0) + value
+
+        def finalize(self):
+            return self.value
+
+    query = charts.calendar_query().replace("INTERVAL 35 DAY", str(35 * 86400 * 1_000_000_000))
+    query = re.sub(r"numbers\['([^']+)'\]", r"""json_extract(numbers, '$."\1"')""", query)
+    query = query.replace("isNull(", '"isNull"(')
+    with sqlite3.connect(":memory:") as connection:
+        for name, arity, function in [
+            ("if", 3, lambda condition, yes, no: yes if condition else no),
+            ("toInt64", 1, int), ("fromUnixTimestamp64Nano", 1, int),
+            ("toTimeZone", 2, lambda value, _: value), ("toDateTime64", 3, lambda value, *_: value),
+            ("toUnixTimestamp64Nano", 1, int), ("now64", 1, lambda _: nano(upper)),
+            ("toStartOfDay", 1, start("day")), ("toStartOfWeek", 2, week_start),
+            ("toStartOfMonth", 1, start("month")), ("toNullable", 1, lambda value: value),
+            ("toFloat64", 1, float), ("isNull", 1, lambda value: value is None),
+            ("toString", 2, lambda value, _: moment(value).astimezone(pacific).strftime("%Y-%m-%d %H:%M:%S")),
+        ]:
+            connection.create_function(name, arity, function)
+        connection.create_aggregate("countIf", 1, CountIf)
+        connection.create_aggregate("sumOrNull", 1, SumOrNull)
+        connection.execute("CREATE TABLE records(producer TEXT,kind TEXT,completed_ns INTEGER,numbers TEXT)")
+        connection.execute("CREATE TABLE completions(completed_ns INTEGER,tokens REAL)")
+        connection.execute("CREATE TABLE coverage(missing INTEGER,gaps INTEGER,registered REAL,checkpoint REAL)")
+        connection.executemany("INSERT INTO records VALUES('p','register',?,'{}')",
+                               [(nano(datetime(2026, 9, 10, tzinfo=UTC)),)] * producers)
+        connection.executemany("INSERT INTO records VALUES('p','gap',?,?)", [
+            (nano(at), json.dumps({"usage.at": at.timestamp(), "usage.end": end.timestamp()}))
+            for at, end in gaps])
+        connection.executemany("INSERT INTO completions VALUES(?,?)", [
+            (nano(datetime(2026, 10, day, 18, tzinfo=UTC)), 10.0) for day in (2, 13, 14)])
+        connection.executemany("INSERT INTO coverage VALUES(?,?,?,?)", [
+            (missing, len(gaps), datetime(2026, 9, 10, tzinfo=UTC).timestamp(), upper.timestamp())] * producers)
+        rows = connection.execute(query, {"end_timestamp_nano": nano(upper)}).fetchall()
+    return [(period, pacific_start, requests, partial)
+            for period, pacific_start, requests, _, _, partial in rows]
+
+
+def test_calendar_partial_counts_only_gaps_that_overlap_each_pacific_period():
+    pacific = ZoneInfo("America/Los_Angeles")
+    day, week, month = (datetime(2026, 10, date, tzinfo=pacific) for date in (14, 12, 1))
+    upper = datetime(2026, 10, 14, 19, tzinfo=UTC)
+    hour = timedelta(hours=1)
+    starts = [("Today", "2026-10-14 00:00:00", 1.0), ("This week", "2026-10-12 00:00:00", 2.0),
+              ("This month", "2026-10-01 00:00:00", 3.0)]
+    for gaps, expected in [
+        ([], (0, 0, 0)),
+        ([(datetime(2026, 9, 20, tzinfo=UTC), datetime(2026, 9, 21, tzinfo=UTC))], (0, 0, 0)),
+        ([(month - hour, month)], (0, 0, 0)),
+        ([(upper, upper + hour)], (0, 0, 0)),
+        ([(month - hour, month + hour)], (0, 0, 1)),
+        ([(week - hour, week)], (0, 0, 1)),
+        ([(week - hour, week + hour)], (0, 1, 1)),
+        ([(day - hour, day + timedelta(seconds=1))], (1, 1, 1)),
+        ([(upper - hour, upper + hour)], (1, 1, 1)),
+    ]:
+        assert calendar_rows(gaps) == [
+            (*start, flag) for start, flag in zip(starts, expected)], gaps
+    assert [row[3] for row in calendar_rows([], missing=1)] == [1, 1, 1]
+    assert [row[3] for row in calendar_rows([], producers=0)] == [1, 1, 1]
+
+
+
 def test_expired_producer_history_cannot_make_an_old_period_complete(ledger):
     registered = NOW - timedelta(days=50)
     ledger.accept(event("register", at=registered.isoformat(),
@@ -430,3 +528,52 @@ def test_retirement_watermarks_preserve_retry_identity_and_reveal_export_gaps(le
         assert connection.execute(calculation).fetchone()[0] == 0
         connection.execute("DELETE FROM received WHERE kind='complete'")
         assert connection.execute(calculation).fetchone()[0] == 1
+
+
+def test_interleaved_pruners_retire_each_completion_once(tmp_path):
+    path = tmp_path / "retirement.sqlite"
+    with usage.Ledger(path) as first, usage.Ledger(path) as second:
+        old = NOW - timedelta(days=36)
+        register(first, now=old, at=old.isoformat())
+        start(first, now=old, at=old.isoformat())
+        complete(first, now=old, at=old.isoformat())
+        recent = NOW - timedelta(seconds=1)
+        start(first, 2, at=recent.isoformat())
+        start(first, 3, at=recent.isoformat())
+        complete(first, 3, at=recent.isoformat())
+        first.accept(event("checkpoint", sequence=3), NOW)
+        second.db.execute("PRAGMA busy_timeout=0")
+        interleaved = []
+
+        class InterleavedCursor(sqlite3.Cursor):
+            def fetchall(self):
+                rows = super().fetchall()
+                if not interleaved:
+                    interleaved.append(True)
+                    try:
+                        second.prune(NOW)
+                    except sqlite3.OperationalError as error:
+                        assert error.sqlite_errorcode in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+                return rows
+
+        class InterleavedConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                return self.cursor(factory=InterleavedCursor).execute(sql, parameters)
+
+        first.db.close()
+        first.db = sqlite3.connect(path, factory=InterleavedConnection)
+        first.db.row_factory = sqlite3.Row
+        first.prune(NOW)
+        second.prune(NOW)
+        report = second.summary(NOW - timedelta(minutes=1), NOW, now=NOW)
+        assert report["requests"] == 1
+        assert report["partial"] is True
+        assert report["coverage"][0]["missing_sequences"] == [[2, 2]]
+        assert report["coverage"][0]["retired_completions"] == 1
+        assert second.db.execute("SELECT count(*) FROM events WHERE kind='retention'").fetchone()[0] == 1
+        balance = second.db.execute(
+            "WITH producer AS (SELECT max(sequence_through) AS through,"
+            "max(retired_completions) AS retired,"
+            "count(DISTINCT CASE WHEN kind='complete' THEN sequence END) AS completed_count "
+            "FROM events) SELECT " + charts.COVERAGE_BALANCE + " FROM producer").fetchone()[0]
+        assert balance == 1

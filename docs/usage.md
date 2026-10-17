@@ -32,6 +32,8 @@ Enable capture on one process layer.
 Do not enable both a client and its forwarding server for the same calls.
 
 The patch preserves provider-reported presence for OpenAI Responses and Anthropic usage.
+Anthropic output stays null until a terminal usage update supplies the final count, including compaction totals.
+Interrupted streams retain known input and cache fields without inventing a complete token total.
 The shared Responses normalizer also serves Codex and Azure paths; those transports are not exercised here.
 Other normalizers keep usage presence unknown and export null token buckets.
 The adapter never treats their initialized zeroes as observed usage.
@@ -137,6 +139,7 @@ Records expire 35 days after the later of their event time and ingestion time.
 Active producer registration and matching starts stay at least as long as their dependent metadata.
 No replay extends that window.
 The ledger emits a `retention` control record when it retires completed records.
+Retirement counting, watermark updates, and deletion share one write transaction so concurrent collectors cannot retire a completion twice.
 The collector rejects producer-supplied retirement records.
 Exported `sequence_through` and `retired_completions` values are immutable snapshots, not account totals or metric labels.
 The dashboard uses the retirement watermark without hiding missing records from a partial export.
@@ -212,6 +215,7 @@ Task and session state need a separate trusted source and are not inferred here.
 The dashboard reads only the last 35 days of metadata logs.
 It counts each private producer/event/kind identity once before aggregation.
 Calendar queries use the selected end instant, not an assumed fixed UTC offset.
+A retained gap makes a calendar period partial only when its half-open interval overlaps that period.
 The count panels return no value when no completions are observed.
 Such a period is unknown, not a proved zero-request interval.
 Coverage cannot prove requests from a producer that never registers.

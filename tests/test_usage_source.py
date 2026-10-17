@@ -1,4 +1,5 @@
 import grp
+import importlib.util
 import json
 import os
 import pwd
@@ -7,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -48,7 +50,7 @@ def native_source():
         yield directory, native / "pi-ai/src", mount
 
 
-def execute(native_source, code, *, enabled=True, collector=None):
+def execute(native_source, code, *, enabled=True, collector=None, inspect=None):
     directory, native, mount = native_source
     with tempfile.TemporaryDirectory(prefix="case-", dir=directory) as temporary:
         case = Path(temporary)
@@ -75,6 +77,8 @@ def execute(native_source, code, *, enabled=True, collector=None):
             with sqlite3.connect(database) as connection:
                 records = [json.loads(row[0]) for row in connection.execute(
                     "SELECT payload FROM events ORDER BY ingested,rowid")]
+            if inspect:
+                inspect(case / "data")
         return result, records
 
 
@@ -262,6 +266,83 @@ if (terminal.stopReason === "error") throw new Error("synthetic Anthropic transp
     assert completion["usage_present"] is True
     assert {key: completion[key] for key in ("input", "output", "cache_read", "cache_write", "reasoning")} == {
         "input": 10, "output": 8, "cache_read": 20, "cache_write": 5, "reasoning": None}
+
+
+ANTHROPIC = TRANSPORT + r'''
+const anthropic = buildModel({ ...model, id: "model-b", name: "Model B",
+    api: "anthropic-messages", provider: "anthropic", baseUrl: "https://provider.invalid" });
+const scenario = SCENARIO;
+const usage = (output, compactionOutput) => ({ input_tokens: 10, output_tokens: output,
+    cache_read_input_tokens: 20, cache_creation_input_tokens: 5,
+    ...(scenario.compaction ? { iterations: [
+        { type: "compaction", input_tokens: 100, output_tokens: compactionOutput,
+          cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        { type: "message", input_tokens: 10, output_tokens: output,
+          cache_read_input_tokens: 20, cache_creation_input_tokens: 5 }] } : {}) });
+globalThis.fetch = async () => {
+    calls++;
+    const events = [
+        { type: "message_start", message: { id: "synthetic-response", type: "message", role: "assistant",
+          model: "model-b", content: [], usage: usage(1, 2) } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0,
+          delta: { type: "text_delta", text: "fixture-text-do-not-capture" } },
+        { type: "message_delta", delta: { stop_reason: null }, usage: { output_tokens: 5 } },
+    ];
+    if (scenario.final) events.push(
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: usage(8, 40) },
+        { type: "message_stop" },
+    );
+    return new Response(events.map(event => "event: " + event.type + "\ndata: " +
+        JSON.stringify(event) + "\n\n").join(""), { headers: { "content-type": "text/event-stream" } });
+};
+const response = stream(anthropic, context, { ...options, fetch: globalThis.fetch });
+for await (const event of response) {}
+const terminal = await response.result();
+if (calls !== 1 || (terminal.stopReason === "error") === scenario.final)
+    throw new Error("the synthetic Anthropic stream ended unexpectedly");
+'''
+
+
+def ledger_view(data):
+    spec = importlib.util.spec_from_file_location("usage_ledger", ROOT / "scripts/usage.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    now, sent = datetime.now(UTC), []
+    with module.Ledger(data / "usage.sqlite") as ledger:
+        report = ledger.summary(now - timedelta(hours=1), now + timedelta(hours=1))
+        ledger.export(lambda payload: sent.append(payload) or {})
+    logs = [{item["key"]: item["value"] for item in log["attributes"]}
+            for log in sent[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"]]
+    return report, next(log for log in logs if log["usage.kind"] == {"stringValue": "complete"})
+
+
+@pytest.mark.parametrize("compaction", [False, True])
+@pytest.mark.parametrize("final", [False, True])
+def test_actual_anthropic_output_counts_only_after_a_terminal_stop_reason(native_source, compaction, final):
+    view = {}
+    result, records = execute(
+        native_source, ANTHROPIC.replace("SCENARIO", json.dumps({"compaction": compaction, "final": final})),
+        inspect=lambda data: view.update(zip(("report", "export"), ledger_view(data))))
+    assert result.returncode == 0, result.stderr
+    completion = next(row for row in records if row["kind"] == "complete")
+    input_tokens, output = (110, 48) if compaction else (10, 8)
+    assert completion["outcome"] == ("success" if final else "error")
+    assert completion["usage_present"] is True and completion["input_basis"] == "exclusive"
+    assert {key: completion[key] for key in ("input", "output", "cache_read", "cache_write", "reasoning")} == {
+        "input": input_tokens, "output": output if final else None,
+        "cache_read": 20, "cache_write": 5, "reasoning": None}
+    total = input_tokens + 25 + output
+    assert view["report"]["requests"] == 1
+    assert view["report"]["counted_tokens"] == (total if final else None)
+    assert view["report"]["unknown_tokens"] == (0 if final else 1)
+    assert view["export"]["usage.input_total"] == {"intValue": str(input_tokens + 25)}
+    if final:
+        assert view["export"]["usage.total"] == {"intValue": str(total)}
+        assert view["export"]["usage.output"] == {"intValue": str(output)}
+    else:
+        assert "usage.total" not in view["export"] and "usage.output" not in view["export"]
 
 
 def test_idle_source_checkpoints_do_not_invent_completed_requests(native_source):

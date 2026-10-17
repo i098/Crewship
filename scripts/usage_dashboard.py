@@ -89,9 +89,11 @@ def calendar_query():
     countIf(isNull(tokens)) AS unknown_token_requests,
     if({lower} < toUnixTimestamp64Nano(now64(9) - INTERVAL 35 DAY)
        OR (SELECT count() FROM coverage) = 0, 1,
-       (SELECT countIf(missing != 0 OR gaps > 0
+       (SELECT countIf(missing != 0
                       OR registered * 1e9 > {lower}
-                      OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0) AS partial
+                      OR checkpoint * 1e9 < $end_timestamp_nano) FROM coverage) > 0
+       OR (SELECT countIf(kind = 'gap' AND completed_ns < $end_timestamp_nano
+                          AND numbers['usage.end'] * 1e9 > {lower}) FROM records) > 0) AS partial
 FROM completions WHERE {condition}""")
     return "\nUNION ALL\n".join(queries)
 

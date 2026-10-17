@@ -360,6 +360,7 @@ class Ledger:
     def prune(self, now=None):
         now = now or datetime.now(UTC)
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             retired = self.db.execute(
                 "SELECT producer,count(*) FROM events WHERE expires<? AND kind='complete' "
                 "GROUP BY producer", (now.timestamp(),)).fetchall()
