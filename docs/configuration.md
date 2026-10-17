@@ -209,6 +209,8 @@ If validation fails, apply restores the original rules before it changes rotatio
 Apply activates the validated configuration inside the logging tasks, before unrelated provisioning tasks can fail.
 It records checksums for the helper, mount dependency, local AppArmor policy and general action only after a successful restart.
 An unchanged service-enabled apply retries deferred or failed activation.
+Every service-enabled apply also starts a stopped or failed logger before rotation cleanup, without restarting a healthy unchanged logger.
+Apply clears failed logger and socket activation limits before it starts or restarts rsyslog.
 Custom general actions without the Crewship marker require operator reconciliation before apply.
 An empty `data_dir` leaves logging unchanged, including an earlier data-drive configuration.
 Removing or changing that configuration requires a planned log migration, not a silent fallback.
@@ -226,7 +228,7 @@ Set `CREWSHIP_SYSLOG_CONTAINER=1` only inside a disposable root container to run
 These checks need rsyslog, logrotate, systemd tools, a tmpfs mount at `/mnt/data`, and mount permission in the container namespace.
 They apply the logging task twice and require the second apply to report `changed=0`.
 The activation regression also requires systemd inside the container.
-It checks deferred starts, failed activation, recovery before an unrelated task failure, and an unchanged retry.
+It checks deferred starts, failed activation, recovery before an unrelated task failure, and unchanged recovery of stopped or rate-limited loggers.
 Native checks use a copied distribution binary to avoid the host's executable AppArmor attachment.
 The checks validate profile syntax, but a separate systemd VM must verify kernel policy enforcement and service mount-loss behavior.
 

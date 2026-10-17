@@ -246,6 +246,18 @@
     - crewship_manage_services | bool
     - not ansible_check_mode
   block:
+    - name: Read the logger and socket activation states
+      ansible.builtin.command:
+        argv: [systemctl, show, --property=ActiveState, --value, rsyslog.service, syslog.socket]
+      register: crewship_syslog_service_states
+      changed_when: false
+
+    - name: Clear activation limits for a failed logger or socket
+      ansible.builtin.command:
+        argv: [systemctl, reset-failed, rsyslog.service, syslog.socket]
+      when: "'failed' in crewship_syslog_service_states.stdout_lines"
+      changed_when: true
+
     - name: Checksum every owned logger configuration input
       ansible.builtin.command:
         argv: >-
@@ -286,6 +298,11 @@
             owner: root
             group: root
             mode: "0600"
+
+    - name: Ensure the validated logger is running before rotation cleanup
+      ansible.builtin.systemd_service:
+        name: rsyslog.service
+        state: started
 
 - name: Remove only the moved syslog from distribution logrotate ownership
   ansible.builtin.replace:

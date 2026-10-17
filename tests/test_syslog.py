@@ -246,6 +246,66 @@ def test_activation_survives_deferred_start_failure_and_unchanged_retry(
             ["systemctl", "show", "--property=MainPID", "--value", "rsyslog.service"], text=True,
         ) == pid
         emit("unchanged-retry-keeps-bounded-writer")
+        for state in ("stopped", "failed"):
+            subprocess.run(["systemctl", "stop", "syslog.socket", "rsyslog.service"], check=True)
+            if state == "failed":
+                with (failure.parent / "zz-test-runtime.conf").open("a") as unit:
+                    unit.write("[Unit]\nStartLimitIntervalSec=infinity\nStartLimitBurst=1\n")
+                failure.write_text("[Service]\nExecStartPre=/bin/false\n")
+                subprocess.run(["systemctl", "daemon-reload"], check=True)
+                subprocess.run(
+                    ["systemctl", "reset-failed", "rsyslog.service", "syslog.socket"], check=True,
+                )
+                for _ in range(2):
+                    assert subprocess.run(["systemctl", "start", "rsyslog.service"]).returncode != 0
+                failure.unlink()
+                subprocess.run(["systemctl", "daemon-reload"], check=True)
+                assert subprocess.run(["systemctl", "start", "rsyslog.service"]).returncode != 0
+                wait_until(lambda: subprocess.check_output(
+                    ["systemctl", "show", "--property=ActiveState", "--value", "rsyslog.service"],
+                    text=True,
+                ).strip() == "failed")
+            history = active.read_bytes()
+            rotation_rules.write_bytes(original_rotation)
+
+            deferred = apply_syslog(tmp_path, str(data))
+            assert deferred.returncode == 0 and "changed=0" in deferred.stdout, (
+                deferred.stdout + deferred.stderr
+            )
+            preview = apply_syslog(tmp_path, str(data), check=True, manage_services=True)
+            assert preview.returncode == 0 and "changed=0" in preview.stdout, (
+                preview.stdout + preview.stderr
+            )
+            assert subprocess.run(
+                ["systemctl", "is-active", "--quiet", "rsyslog.service"],
+            ).returncode != 0
+            assert rotation_rules.read_bytes() == original_rotation
+            if state == "failed":
+                assert subprocess.check_output(
+                    ["systemctl", "show", "--property=ActiveState", "--value", "rsyslog.service"],
+                    text=True,
+                ).strip() == "failed"
+
+            resumed = apply_syslog(tmp_path, str(data), manage_services=True)
+            assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+            assert subprocess.run(
+                ["systemctl", "is-active", "--quiet", "rsyslog.service"],
+            ).returncode == 0
+            emit(f"unchanged-apply-recovers-{state}-writer")
+            assert active.read_bytes().startswith(history)
+            assert rotation_rules.read_bytes() == original_rotation.replace(b"/var/log/syslog\n", b"")
+            assert Path("/etc/rsyslog.d/50-default.conf").read_bytes() == configuration
+            assert Path("/usr/local/libexec/crewship-syslog-rotate").read_bytes() == helper
+            pid = subprocess.check_output(
+                ["systemctl", "show", "--property=MainPID", "--value", "rsyslog.service"], text=True,
+            )
+            healthy = apply_syslog(tmp_path, str(data), manage_services=True)
+            assert healthy.returncode == 0 and "changed=0" in healthy.stdout, (
+                healthy.stdout + healthy.stderr
+            )
+            assert subprocess.check_output(
+                ["systemctl", "show", "--property=MainPID", "--value", "rsyslog.service"], text=True,
+            ) == pid
     finally:
         failure.unlink(missing_ok=True)
         subprocess.run(["systemctl", "stop", "syslog.socket", "rsyslog.service"], check=True)
