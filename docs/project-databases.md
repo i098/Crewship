@@ -79,8 +79,16 @@ These services are development databases, not a security boundary between untrus
 
 `crewship-postgres-env-seed.timer` first runs ten seconds after the user service manager starts, then two minutes after each service activation.
 Its service runs `crewship-db --seed` to discover checkouts in Treehouse pools and Firstmate project directories.
+The seeder reads `root` from `~/.config/treehouse/config.toml` without a login-shell export.
+`TREEHOUSE_ROOT`, when nonempty, overrides that setting.
+It expands environment variables in the root, then scans `<root>/.treehouse` and the legacy `~/.treehouse` pools.
+Unset variables expand to empty text, as they do in Treehouse.
+It scans each physical root and checkout once, including Firstmate project clones inside either pool location.
+Relative roots need a repository context, so the seeder skips them instead of using its current directory.
+Repository-local `treehouse.toml` files and per-command `treehouse --root` values are not global discovery settings.
 Apply records the configured `<workspace>/firstmate/projects` directory, so custom workspace paths also receive database settings.
 It finds each checkout by its `.git` entry and uses the checkout directory name as the project name.
+For a linked checkout, the link name stays the project name.
 It ignores names that start with anything but a letter or have more than 48 letters, digits, underscores or hyphens.
 Projects with the same directory name share a container, even when they come from different repositories.
 The seeder starts or updates one container per project, then writes the project's variable into `.env.local` of every checkout of that project, with mode `0600`.

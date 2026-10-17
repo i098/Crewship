@@ -40,6 +40,7 @@ def cli(home, *args, check=True):
 
 def load(home, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("TREEHOUSE_ROOT", raising=False)
     loader = importlib.machinery.SourceFileLoader("crewship_db_test", str(HELPER))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -247,6 +248,103 @@ def test_compose_document_binds_loopback_and_keeps_the_password_in_a_file(databa
                for key, value in service["environment"].items())
 
 
+@pytest.mark.parametrize("prefix", ["", "$CREWSHIP_TREEHOUSE_TEST_UNSET", "${CREWSHIP_TREEHOUSE_TEST_UNSET}"])
+def test_seed_finds_native_root_without_a_shell_export(database, tmp_path, monkeypatch, prefix):
+    native = tmp_path / "data"
+    monkeypatch.delenv("CREWSHIP_TREEHOUSE_TEST_UNSET", raising=False)
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(prefix + str(native))}\n")
+    app = checkout(native, "app-abc", 1, "app", POSTGRES)
+
+    database.seed()
+
+    assert urlsplit(env_url(app)).scheme == "postgresql"
+
+
+def test_explicit_root_overrides_native_config_and_keeps_legacy_projects(database, tmp_path, monkeypatch):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(str(tmp_path / 'ignored'))}\n")
+    ignored = checkout(tmp_path / "ignored", "ignored-abc", 1, "ignored", POSTGRES)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    native = checkout(tmp_path / "data", "app-abc", 1, "app", POSTGRES)
+    (native / ".git").rmdir()
+    (native / ".git").write_text("gitdir: unused-test-entry\n")
+    legacy = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    cache = tmp_path / "data/.treehouse/firstmate-abc/1/firstmate/projects/cache"
+    (cache / ".git").mkdir(parents=True)
+    (cache / "compose.yml").write_text(LAB_REDIS)
+    registered = tmp_path / "workspace/projects/app"
+    (registered / ".git").mkdir(parents=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+
+    database.seed()
+
+    assert env_url(native) == env_url(legacy) == env_url(registered)
+    assert urlsplit(env_url(cache, "REDIS_URL")).scheme == "redis"
+    assert not (ignored / ".env.local").exists()
+
+
+def test_discovery_deduplicates_root_and_registered_checkout_aliases(database, tmp_path, monkeypatch):
+    app = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    monkeypatch.setenv("TREEHOUSE_ROOT", str(alias))
+    database.apply()
+    database.PROJECTS.write_text(str(alias / ".treehouse/app-abc/1"))
+
+    assert {name: [path.resolve() for path in paths] for name, paths in database.checkouts().items()} == {"app": [app]}
+
+
+@pytest.mark.parametrize("target", ["123", "storage-app"])
+def test_registered_links_keep_their_project_name(database, tmp_path, target):
+    directory = tmp_path / "storage" / target
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    registered = tmp_path / "workspace/projects/app"
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(directory, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+
+    database.seed()
+
+    assert urlsplit(env_url(registered)).scheme == "postgresql"
+    assert (database.STATE / "app/meta.json").exists()
+    assert not (database.STATE / target).exists()
+
+
+@pytest.mark.parametrize("root", ["42", "[]"])
+def test_native_root_rejects_non_path_values(database, tmp_path, root):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {root}\n")
+
+    with pytest.raises(ValueError, match="Treehouse root"):
+        database.seed()
+
+
+def test_relative_native_root_does_not_hide_home_or_registered_projects(database, tmp_path, monkeypatch):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('root = "."\n')
+    legacy = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    registered = tmp_path / "workspace/projects/app"
+    (registered / ".git").mkdir(parents=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+    elsewhere = tmp_path / "elsewhere"
+    ignored = checkout(elsewhere, "ignored-abc", 1, "ignored", POSTGRES)
+    monkeypatch.chdir(elsewhere)
+
+    database.seed()
+
+    assert env_url(legacy) == env_url(registered)
+    assert not (ignored / ".env.local").exists()
+
+
 def test_seed_gives_each_project_one_stable_container_and_url_for_all_worktrees(database, tmp_path):
     first = checkout(tmp_path, "shop-abc", 1, "shop", POSTGRES)
     second = checkout(tmp_path, "shop-abc", 2, "shop", name="docker-compose.yml", compose=POSTGRES)
@@ -361,9 +459,10 @@ def test_seed_skips_checkouts_removed_at_file_boundaries(database, tmp_path, mon
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
     if os.environ.get("CREWSHIP_POSTGRES_LAB") != "1":
         pytest.skip("disposable Docker lab only")
+    monkeypatch.delenv("TREEHOUSE_ROOT", raising=False)
     home = tmp_path / "home"
     home.mkdir()
     cli(home, "--apply")
@@ -414,6 +513,45 @@ def test_projects_get_their_own_containers_shared_by_their_worktrees(service):
     printed = cli(service, "shop").stdout.strip()
     assert Path(printed).read_text() == f"DATABASE_URL={url}\n"
     assert urlsplit(url).password not in printed
+
+
+@lab
+@pytest.mark.parametrize("selection", ["config", "override"])
+def test_native_legacy_and_registered_checkouts_receive_working_services(service, tmp_path, monkeypatch, selection):
+    native = tmp_path / "data"
+    config = service / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    monkeypatch.delenv("CREWSHIP_TREEHOUSE_TEST_UNSET", raising=False)
+    configured = "${CREWSHIP_TREEHOUSE_TEST_UNSET}" + str(native if selection == "config" else tmp_path / "ignored")
+    config.write_text(f"root = {json.dumps(configured)}\n")
+    if selection == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", str(native))
+    app = checkout(native, "app-abc", 1, "app", LAB_POSTGRES)
+    legacy = checkout(service, "app-abc", 1, "app", LAB_POSTGRES)
+    cache = checkout(native, "cache-abc", 1, "cache", LAB_REDIS)
+    registered = tmp_path / "workspace/projects/app"
+    storage = tmp_path / "storage/123"
+    (storage / ".git").mkdir(parents=True)
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(storage, target_is_directory=True)
+    (service / ".local/state/code-factory/project-db/projects-dir").write_text(str(registered.parent))
+
+    cli(service, "--seed")
+
+    assert env_url(app) == env_url(legacy) == env_url(registered)
+    assert query(env_url(app), "CREATE TABLE proof (n integer); INSERT INTO proof VALUES (42)").returncode == 0
+    assert query(env_url(legacy), "SELECT n FROM proof").stdout.strip() == "42"
+    assert query(env_url(registered), "SELECT n FROM proof").stdout.strip() == "42"
+    authenticated = subprocess.run(
+        ["docker", "exec", "-e", "REDISCLI_AUTH", "crewship-db-cache", "redis-cli", "--no-auth-warning", "ping"],
+        env={**os.environ, "REDISCLI_AUTH": urlsplit(env_url(cache, "REDIS_URL")).password},
+        capture_output=True, text=True, check=True,
+    )
+    assert authenticated.stdout.strip() == "PONG"
+    files = [path / ".env.local" for path in (app, legacy, cache, registered)]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+    cli(service, "--seed")
+    assert before == {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
 
 
 @lab

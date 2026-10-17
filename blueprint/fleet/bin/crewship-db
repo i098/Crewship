@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 HOME = Path.home()
@@ -104,14 +105,29 @@ def password(path):
 
 def checkouts():
     """Map project name -> sorted checkout directories (every worktree of that project)."""
+    root = os.environ.get("TREEHOUSE_ROOT", "")
+    config = HOME / ".config/treehouse/config.toml"
+    if not root and config.exists():
+        root = tomllib.loads(config.read_text()).get("root", "")
+    if not isinstance(root, str):
+        raise ValueError("Treehouse root must be a string")
+    expanded = re.sub(
+        r"\$(?:\{([^}]*)\}|([A-Za-z_][A-Za-z0-9_]*|[0-9*#$@!?-]))",
+        lambda match: os.environ.get(match[1] or match[2] or "", ""), root,
+    )
+    native = Path(expanded) if root else HOME
+    roots = {HOME.resolve()}
+    if native.is_absolute():
+        roots.add(native.resolve())
     found = {
-        git.parent for pattern in ("*/*/*/.git", "firstmate-*/*/firstmate/projects/*/.git")
-        for git in (HOME / ".treehouse").glob(pattern)
+        git.parent.resolve(): git.parent for root in roots
+        for pattern in ("*/*/*/.git", "firstmate-*/*/firstmate/projects/*/.git")
+        for git in (root / ".treehouse").glob(pattern)
     }
     if PROJECTS.exists():
-        found.update(git.parent for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
+        found.update((git.parent.resolve(), git.parent) for git in Path(PROJECTS.read_text().strip()).glob("*/.git"))
     projects = {}
-    for directory in sorted(found):
+    for directory in sorted(found.values()):
         if NAME.fullmatch(directory.name):
             projects.setdefault(directory.name, []).append(directory)
     return projects
