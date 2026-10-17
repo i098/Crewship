@@ -69,7 +69,7 @@ No installed source, binary, process, or host configuration changes here.
 
 ## Durable protocol
 
-`scripts/usage.py --mount MOUNT --data-dir DATA_DIR collect` reads bounded JSON records from a producer's standard input.
+`python3 scripts/usage.py --mount MOUNT --data-dir DATA_DIR collect` reads bounded JSON records from a producer's standard input.
 It acknowledges each committed record on standard output.
 The native source must supply these records; operators must not fabricate production events.
 Synthetic fixtures use the same collector path.
@@ -161,7 +161,7 @@ Timezone-aware bounds include daylight-saving changes.
 
 `requests` counts retained declared completions.
 `counted_tokens` sums known totals; `unknown_tokens` reports completions without a known total.
-A total is partial when any retained request has unknown usage.
+A token total is incomplete when any selected completion lacks a known total.
 `partial` describes history coverage, not token completeness.
 Both conditions matter.
 An empty token period returns null, not an invented zero.
