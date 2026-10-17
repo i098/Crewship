@@ -59,7 +59,7 @@ Older Firstmate versions without request IDs and JSON receipts cannot confirm de
 Upgrade Firstmate to restore acknowledged delivery; pending records remain until then.
 
 With `crewship.data_dir` configured, state, pending alerts, receipts, logs, and diagnostics use `<data_dir>/storage-guard`.
-The service passes `STORAGE_DATA_DIR` and `STORAGE_STATE_DIR` through the existing fleet variables.
+The service passes `STORAGE_DATA_DIR` from `crewship.data_dir`.
 The configured data directory must exist on a mounted filesystem different from root.
 Apply checks the mount and creates the guard directory for the account with mode `0700`, including under a root-owned data directory.
 The guard checks this before creating state and fails visibly when the mount is unavailable.
@@ -67,9 +67,11 @@ It never creates a root-backed substitute.
 This check identifies the covering filesystem, not a pinned disk UUID.
 Without `data_dir`, state remains in `oss-fleet/doctor/.storage-guard`; logs now reside there too.
 This compatibility mode cannot retain new alerts when that filesystem cannot accept writes.
+If a pending record cannot be saved, the guard still attempts inbox delivery and fallback broadcast before scans or reclaim.
+It returns a nonzero status without recording retention or acknowledgement.
 Changing the state directory does not migrate earlier samples or pending records; preserve and move them before switching.
 Earlier alerts without pending records cannot be reconstructed.
-Manual runs can set `STORAGE_DATA_DIR` and `STORAGE_STATE_DIR` to use the same placement.
+Manual runs can set `STORAGE_DATA_DIR` to use the same placement.
 
 After notification, CRIT runs `worktree-prune.sh` on the filesystem that holds the Treehouse pools.
 `WORKTREE_PRUNE_CMD` can replace this command.

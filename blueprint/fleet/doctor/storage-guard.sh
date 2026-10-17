@@ -5,7 +5,7 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 DATA_DIR=${STORAGE_DATA_DIR:-}
-STATE=${STORAGE_STATE_DIR:-${DATA_DIR:+$DATA_DIR/storage-guard}}
+STATE=${DATA_DIR:+$DATA_DIR/storage-guard}
 STATE=${STATE:-$HERE/.storage-guard}
 LOG=$STATE/storage-guard.log
 COMMS=$STATE/COMMS.md
@@ -46,28 +46,36 @@ valid_receipt() {
     and (.outcome == "created" or .outcome == "replay")
     and (.id | type == "string" and length > 0)' >/dev/null 2>&1
 }
+attempt_delivery() {
+  local id=$1 msg=$2 file=${3:-} receipt= fm=${FM_HOME:-}
+  if [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] \
+    && receipt=$(FM_HOME=${fm%/} timeout -k 2 "$NOTIFY_TIMEOUT" "$fm/bin/fm-inbox.sh" \
+      note --request-id "$id" --json -- "$msg" 2>&1) \
+    && valid_receipt "$id" <<<"$receipt"; then
+    printf '%s\n' "$receipt"
+    return 0
+  fi
+  printf 'storage-guard: delivery pending %s: %s\n' "$id" "${receipt:-inbox unavailable}" >&2
+  if [ -z "$file" ] || [ ! -f "$file.broadcast" ]; then
+    if { [ -x "$HERE/notify-master.sh" ] \
+      && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" storage-guard; } \
+      || printf '%s\n' "$msg" "${file:+Pending: $file}" | timeout -k 1 3 wall -n -t 2; then
+      [ -z "$file" ] || printf '%s\n' "$id" > "$file.broadcast"
+    fi
+  fi
+  return 1
+}
 deliver_pending() {
-  local file=$1 id event_state msg receipt= fm=${FM_HOME:-} ack=
+  local file=$1 id event_state msg receipt ack=
   read -r id event_state < "$file" || return 1
   msg=$( { IFS= read -r _; cat; } < "$file")
   [ ! -f "$file.ack" ] || read -r ack _ < "$file.ack"
   if [ "$ack" != "$id" ]; then
-    if [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] \
-      && receipt=$(FM_HOME=${fm%/} timeout -k 2 "$NOTIFY_TIMEOUT" "$fm/bin/fm-inbox.sh" \
-        note --request-id "$id" --json -- "$msg" 2>&1) \
-      && valid_receipt "$id" <<<"$receipt"; then
+    if receipt=$(attempt_delivery "$id" "$msg" "$file"); then
       printf '%s%s\n%s\n' "$id" "${event_state:+ $event_state}" "$receipt" > "$file.ack.tmp" \
         && mv -f -- "$file.ack.tmp" "$file.ack" || return 1
       log "DELIVERED $id $receipt"
     else
-      printf 'storage-guard: delivery pending %s: %s\n' "$id" "${receipt:-inbox unavailable}" >&2
-      if [ ! -f "$file.broadcast" ]; then
-        if { [ -x "$HERE/notify-master.sh" ] \
-          && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" storage-guard; } \
-          || printf '%s\nPending: %s\n' "$msg" "$file" | timeout -k 1 3 wall -n -t 2; then
-          printf '%s\n' "$id" > "$file.broadcast"
-        fi
-      fi
       return 1
     fi
   fi
@@ -300,6 +308,8 @@ for m in "${mounts[@]}"; do
         if ! { printf '%s %s %s %s %s\n%s\n' "$id" "$warn_on" "$crit_at" "$fill_at" "$alert_seq" "$msg" > "$file.tmp" \
           && mv -f -- "$file.tmp" "$file"; }; then
           FAILED=1
+          printf 'storage-guard: cannot retain alert %s; attempting notification without saved state\n' "$id" >&2
+          attempt_delivery "$id" "$msg" >/dev/null
           continue
         fi
         pending=$file

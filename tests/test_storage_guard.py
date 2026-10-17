@@ -423,6 +423,81 @@ def test_all_pressure_alerts_precede_scans_and_reclaim(guard):
     assert max(attempts) < min(slow)
 
 
+@pytest.mark.parametrize("staging", ["write", "rename"])
+@pytest.mark.parametrize("delivery", ["success", "broadcast", "wall"])
+def test_failed_pending_staging_attempts_all_alerts_before_maintenance(guard, staging, delivery):
+    state = guard.doctor / ".storage-guard"
+    state.mkdir()
+    (state / "_data").write_text(f"{int(time.time()) - 600} {65 * G} 0 0 0 0\n")
+    records = ("_.CRIT.pending", "_home.WARN.pending", "_data.FILL.pending")
+    if staging == "write":
+        for record in records:
+            (state / f"{record}.tmp").symlink_to("/dev/full")
+    else:
+        Guard._exe(guard.stub / "bin/mv", r"""
+if [[ "${!#}" == *.pending ]]; then
+  echo "pending commit failed" >&2
+  exit 1
+fi
+exec /usr/bin/mv "$@"
+""")
+    if delivery != "success":
+        (guard.stub / "delivery").write_text("enospc")
+    Guard._exe(guard.doctor / "notify-master.sh",
+               'echo broadcast >> "$STUB/events"; echo broadcast >> "$STUB/broadcasts"')
+    if delivery == "wall":
+        (guard.doctor / "notify-master.sh").unlink()
+        Guard._exe(guard.stub / "bin/wall", 'echo wall >> "$STUB/events"; cat > "$STUB/wall"')
+    pools = guard.doctor.parent / "pools"
+    pools.mkdir()
+    Guard._exe(guard.stub / "prune", 'echo worktree-reclaim >> "$STUB/events"')
+    guard.fs({"/": 95, "/home": 86, "/data": 75})
+    guard.mounts("/data ext4 /dev/data\n")
+    result = guard.run(check=False, WORKTREE_PRUNE_POOLS=str(pools),
+                       WORKTREE_PRUNE_CMD=str(guard.stub / "prune"))
+    assert result.returncode != 0
+    assert result.stderr.count("cannot retain alert") == 3
+    events = guard._lines("events")
+    attempts = [i for i, event in enumerate(events) if event.startswith("notify ")]
+    slow = [i for i, event in enumerate(events) if event in ("scan", "reclaim", "worktree-reclaim")]
+    assert len(attempts) == 3
+    assert max(attempts) < min(slow)
+    assert "worktree-reclaim" in events and "reclaim" in events and "scan" in events
+    if delivery == "success":
+        assert [alert.split()[0] for alert in guard.alerts()] == ["CRIT", "WARN", "FILL"]
+        assert "broadcast" not in events
+    else:
+        fallback = "broadcast" if delivery == "broadcast" else "wall"
+        assert events.count(fallback) == 3
+        assert max(i for i, event in enumerate(events) if event == fallback) < min(slow)
+    assert not list(state.glob("*.pending"))
+    assert not list(state.glob("*.ack"))
+    assert not list(state.glob("*.broadcast"))
+    assert not (state / "_").exists()
+    assert not (state / "_home").exists()
+    assert (state / "_data").read_text().split()[2:] == ["0", "0", "0", "0"]
+
+
+@pytest.mark.parametrize("configured_data", [False, True])
+def test_state_location_uses_only_the_configured_data_directory(guard, configured_data):
+    unused = guard.doctor.parent / "unused-state"
+    guard.env["STORAGE_STATE_DIR"] = str(unused)
+    if configured_data:
+        data = guard.doctor.parent / "data"
+        data.mkdir()
+        (guard.stub / "state-mount").write_text("/mnt/data")
+        guard.env["STORAGE_DATA_DIR"] = str(data)
+        state = data / "storage-guard"
+    else:
+        state = guard.doctor / ".storage-guard"
+    guard.fs({"/": 86})
+    guard.run()
+    assert len(guard.alerts()) == 1
+    assert len(list(state.glob("*.ack"))) == 1
+    assert (state / "_").is_file()
+    assert not unused.exists()
+
+
 def test_enospc_keeps_original_alerts_and_retries_before_discovery(guard):
     data = guard.doctor.parent / "data"
     data.mkdir()
