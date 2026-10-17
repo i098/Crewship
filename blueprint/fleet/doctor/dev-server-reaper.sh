@@ -8,8 +8,8 @@
 # finished lanes held 6 GB of idle dev servers while the host swapped. A dev
 # server is throwaway (10 s to restart), so reaping it is always safe.
 #
-# Targets: node processes whose cwd is a treehouse pool worktree
-# (~/.treehouse/<pool>/<n>/<repo>) or a no-mistakes pipeline worktree
+# Targets: node processes whose cwd is a native or legacy home Treehouse pool
+# worktree (<root>/<pool>/<n>/<repo>) or a no-mistakes pipeline worktree
 # (~/.no-mistakes/worktrees/<repo>/<run>) and whose command is a Next.js
 # server (`next dev`, `next-server`) or a type-check (`tsc --noEmit`).
 #
@@ -30,10 +30,19 @@ LOG=$HERE/dev-server-reaper.log
 COMMS=$HERE/COMMS.md
 IDLE_MIN=${REAPER_IDLE_MIN:-30}
 DRY=${REAPER_DRY_RUN:-0}
-# treehouse pool worktrees (~/.treehouse/<pool>/<n>/<repo>) and no-mistakes
-# pipeline worktrees (~/.no-mistakes/worktrees/<repo-hash>/<run-id>), whose
-# review agents also run `next dev` and do not always take it down.
-POOL_RE="^$HOME/(\.treehouse/[^/]+/[0-9]+/[^/]+|\.no-mistakes/worktrees/[^/]+/[^/]+)$"
+mapfile -t POOL_ROOTS < <(python3 "$HERE/treehouse-roots.py")
+
+is_worktree() {
+  local root rel
+  for root in "${POOL_ROOTS[@]}"; do
+    [[ $1 == "$root/"* ]] || continue
+    rel=${1#"$root"/}
+    [[ $rel =~ ^[^/]+/[0-9]+/[^/]+$ ]] && return 0
+  done
+  [[ $1 == "$HOME/.no-mistakes/worktrees/"* ]] || return 1
+  rel=${1#"$HOME/.no-mistakes/worktrees/"}
+  [[ $rel =~ ^[^/]+/[^/]+$ ]]
+}
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 comms() { printf '\n## [dev-server-reaper -> orchestrator] %s %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$COMMS"; }
@@ -60,8 +69,12 @@ is_target() {  # <pid> -> 0 when this is a dev server / type-check process
 # Lane state for a worktree: prints "<state>" from the owning firstmate task's
 # status file, or "" when no lane record names this worktree.
 lane_state() {  # <worktree>
-  local meta status
-  meta=$(grep -lsx -- "worktree=$1" "$HOME"/.treehouse/firstmate-*/*/firstmate/state/*.meta 2>/dev/null | head -1)
+  local meta status root
+  meta=$(
+    for root in "${POOL_ROOTS[@]}"; do
+      grep -Flsx -- "worktree=$1" "$root"/firstmate-*/*/firstmate/state/*.meta 2>/dev/null
+    done | head -1
+  )
   [ -n "$meta" ] || return 0
   status=${meta%.meta}.status
   [ -f "$status" ] || return 0
@@ -126,7 +139,7 @@ for pid in $(pgrep -x 'node|bun|MainThread|next-server' 2>/dev/null) $(pgrep -f 
   [ -d "/proc/$pid" ] || continue
   is_target "$pid" || continue
   wt=$(cwd_of "$pid"); [ -n "$wt" ] || continue
-  [[ "$wt" =~ $POOL_RE ]] || continue
+  is_worktree "$wt" || continue
   if [ -z "${decided[$wt]+x}" ]; then
     reason=
     state=$(lane_state "$wt")

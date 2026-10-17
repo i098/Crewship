@@ -71,6 +71,7 @@
     - { src: doctor/dev-server-reaper.sh, dest: "{{ crewship_fleet_doctor_dir }}/dev-server-reaper.sh", mode: "0755" }
     - { src: doctor/storage-guard.sh, dest: "{{ crewship_fleet_doctor_dir }}/storage-guard.sh", mode: "0755" }
     - { src: doctor/worktree-prune.sh, dest: "{{ crewship_fleet_doctor_dir }}/worktree-prune.sh", mode: "0755" }
+    - { src: doctor/treehouse-roots.py, dest: "{{ crewship_fleet_doctor_dir }}/treehouse-roots.py", mode: "0755" }
     - { src: doctor/devtools-bridge-reaper.sh, dest: "{{ crewship_fleet_doctor_dir }}/devtools-bridge-reaper.sh", mode: "0755" }
   loop_control:
     label: "{{ item.dest }}"

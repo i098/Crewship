@@ -2,6 +2,15 @@
 # Alert on disk pressure before diagnostics or guarded reclaim.
 # Save failed alerts with stable inbox request IDs and retry them next run.
 # --dry-run measures and previews without writing or delivering anything.
+#
+# CRIT also runs worktree-prune.sh on filesystems holding native and legacy home
+# Treehouse pools ($WORKTREE_PRUNE_POOLS replaces both roots), before Docker:
+# it removes only gitignored build output (node_modules, .venv, target, dist,
+# .next, ...) that nothing changed for WORKTREE_PRUNE_AGE_DAYS (7), found with
+# find; fdu, when installed, only reports the sizes.
+# Tracked files, uncommitted or unpushed work and anything outside the pools
+# stay; see that script for each guard. Firstmate's orphan sweep still owns
+# whole leaked worktrees and /tmp litter.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 DATA_DIR=${STORAGE_DATA_DIR:-}
@@ -21,7 +30,11 @@ FILL_MIN=${STORAGE_FILL_MIN_PCT:-70}
 REPEAT_MIN=${STORAGE_REPEAT_MIN:-30}
 SCAN_TIMEOUT=${STORAGE_SCAN_TIMEOUT:-300}
 PRUNE_TIMEOUT=${STORAGE_PRUNE_TIMEOUT:-300}
-POOLS=${WORKTREE_PRUNE_POOLS:-$HOME/.treehouse}
+if [ -n "${WORKTREE_PRUNE_POOLS:-}" ]; then
+  POOL_ROOTS=("$WORKTREE_PRUNE_POOLS")
+else
+  mapfile -t POOL_ROOTS < <(python3 "$HERE/treehouse-roots.py")
+fi
 PRUNE_CMD=${WORKTREE_PRUNE_CMD:-$HERE/worktree-prune.sh}  # takes [--dry-run] like worktree-prune.sh
 DRY=0
 case "${1:-}" in
@@ -213,15 +226,21 @@ fi
 
 # --- which filesystems ----------------------------------------------------------
 DOCKER_ROOT=$(timeout 20 docker info -f '{{.DockerRootDir}}' 2>/dev/null) || DOCKER_ROOT=
-DOCKER_MOUNT= POOLS_MOUNT=
-POOLS_DIR=; [ -d "$POOLS" ] && POOLS_DIR=$POOLS
+DOCKER_MOUNT=
+declare -A pool_mounts=()
+POOL_DIRS=()
+for p in "${POOL_ROOTS[@]}"; do
+  [ -d "$p" ] || continue
+  m=$(mount_of "$p")
+  [ -n "$m" ] || continue
+  POOL_DIRS+=("$p"); pool_mounts[$p]=$m
+done
 declare -A holds=()
 mounts=()
-for p in / /var/log "$HOME" ${DOCKER_ROOT:+"$DOCKER_ROOT"} ${POOLS_DIR:+"$POOLS_DIR"}; do
+for p in / /var/log "$HOME" ${DOCKER_ROOT:+"$DOCKER_ROOT"} "${POOL_DIRS[@]}"; do
   m=$(mount_of "$p")
   [ -n "$m" ] || { say "cannot measure the filesystem holding $p"; continue; }
   [ "$p" = "$DOCKER_ROOT" ] && DOCKER_MOUNT=$m
-  [ "$p" = "$POOLS_DIR" ] && POOLS_MOUNT=$m
   [ -n "${holds[$m]+x}" ] || mounts+=("$m")
   holds[$m]+="${holds[$m]:+ and }$p"
 done
@@ -350,20 +369,21 @@ for m in "${mounts[@]}"; do
   # CRIT, first: stale gitignored build output in the Treehouse pools. worktree-prune.sh
   # holds every safety check; this only decides when it runs and reports what it freed.
   wt_note=
-  if [ "$m" = "$POOLS_MOUNT" ] && [ -x "$PRUNE_CMD" ]; then
+  for pool in "${POOL_DIRS[@]}"; do
+    [ "$m" = "${pool_mounts[$pool]}" ] && [ -x "$PRUNE_CMD" ] || continue
     if [ "$DRY" = 1 ]; then
       [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ] && when="would run now" || when="would run only at >= ${CRIT}%"
-      show "  CRIT worktree step ($when, stopping once under ${CRIT}%): $(basename "$PRUNE_CMD") - stale gitignored build output in $POOLS:"
-      timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" --dry-run 2>&1 | sed 's/^/    /'
+      show "  CRIT worktree step ($when, stopping once under ${CRIT}%): $(basename "$PRUNE_CMD") - stale gitignored build output in $pool:"
+      WORKTREE_PRUNE_POOLS=$pool timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" --dry-run 2>&1 | sed 's/^/    /'
     elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       before=$used
-      out=$(timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" 2>&1)
+      out=$(WORKTREE_PRUNE_POOLS=$pool timeout "$PRUNE_TIMEOUT" "$PRUNE_CMD" 2>&1)
       read -r used avail pct _ <<<"$(measure "$m")"
       log "  CRIT $m worktree-prune: freed $(human $((before - used))), now ${pct}%"
       while IFS= read -r line; do log "    $line"; done <<<"$out"
-      [ "$before" -gt "$used" ] && wt_note="reclaiming $(human $((before - used))) of stale gitignored worktree output"
+      [ "$before" -gt "$used" ] && wt_note="${wt_note:+$wt_note, then }reclaiming $(human $((before - used))) of stale gitignored worktree output"
     fi
-  fi
+  done
 
   # CRIT: reclaim regenerable Docker data, cheapest first.
   if [ "$m" = "$DOCKER_MOUNT" ]; then

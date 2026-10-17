@@ -6,8 +6,9 @@
 # user after Docker. storage-guard.sh runs this at CRIT; it also runs by hand.
 #
 # Candidates are directories named in WORKTREE_PRUNE_NAMES, inside a pool
-# worktree ($WORKTREE_PRUNE_POOLS/<pool>/<n>/<repo>, default ~/.treehouse),
-# that are gitignored and where nothing changed for WORKTREE_PRUNE_AGE_DAYS (7).
+# worktree (<root>/<pool>/<n>/<repo>) under the native and legacy home roots.
+# WORKTREE_PRUNE_POOLS replaces both roots. Nothing inside a candidate may have
+# changed for WORKTREE_PRUNE_AGE_DAYS (7).
 # `find` discovers them, by name and age: it stops at the first build directory
 # instead of walking the files inside it, which beat `fdu --ignored only` four
 # times over on a 165-worktree host (23 s against 94 s). A candidate then goes
@@ -29,7 +30,12 @@
 # --dry-run prints what a real run would remove and removes nothing.
 set -u
 export LC_ALL=C
-POOLS=${WORKTREE_PRUNE_POOLS:-$HOME/.treehouse}
+HERE=$(cd "$(dirname "$0")" && pwd)
+if [ -n "${WORKTREE_PRUNE_POOLS:-}" ]; then
+  POOL_ROOTS=("$WORKTREE_PRUNE_POOLS")
+else
+  mapfile -t POOL_ROOTS < <(python3 "$HERE/treehouse-roots.py")
+fi
 AGE_D=${WORKTREE_PRUNE_AGE_DAYS:-7}
 NAMES=${WORKTREE_PRUNE_NAMES:-node_modules .venv venv target dist build .next .nuxt .turbo .parcel-cache __pycache__ .pytest_cache .mypy_cache .ruff_cache}
 DRY=0
@@ -45,7 +51,6 @@ for n in "${NAME_LIST[@]}"; do
   [[ $n =~ ^[A-Za-z0-9._-]+$ && $n != . && $n != .. && $n != .git ]] \
     || { echo "worktree-prune: '$n' is not a plain directory name" >&2; exit 2; }
 done
-POOLS_REAL=$(realpath -e -- "$POOLS" 2>/dev/null) || { echo "worktree-prune: no pools at $POOLS"; exit 0; }
 CUTOFF=$(($(date +%s) - AGE_D * 86400))
 FDU=0
 command -v fdu >/dev/null 2>&1 && FDU=1
@@ -92,26 +97,30 @@ safe() {
 }
 
 count=0 total=0 skipped=0 scanned=0
-for wt in "$POOLS"/*/[0-9]*/*/; do
-  wt=${wt%/}
-  [ -d "$wt" ] && [ ! -L "$wt" ] && [ -e "$wt/.git" ] || continue
-  [ "$(realpath -e -- "$wt" 2>/dev/null)" = "$POOLS_REAL/${wt#"$POOLS"/}" ] || continue
-  scanned=$((scanned + 1))
-  list=$(candidates_find "$wt")
-  while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
-    rel=${rel#./}
-    if ! safe "$wt" "$rel"; then skipped=$((skipped + 1)); continue; fi
-    size=$(size_of "$wt/$rel")
-    if [ "$DRY" = 1 ]; then
-      echo "would remove $wt/$rel ($(human "$size"))"
-    elif rm -rf --one-file-system -- "$wt/$rel"; then
-      echo "removed $wt/$rel ($(human "$size"))"
-    else
-      echo "could not remove $wt/$rel" >&2; continue
-    fi
-    count=$((count + 1)) total=$((total + size))
-  done < <(printf '%s\n' "$list" | sort)
+for POOLS in "${POOL_ROOTS[@]}"; do
+  POOLS=${POOLS%/}
+  POOLS_REAL=$(realpath -e -- "$POOLS" 2>/dev/null) || continue
+  for wt in "$POOLS"/*/[0-9]*/*/; do
+    wt=${wt%/}
+    [ -d "$wt" ] && [ ! -L "$wt" ] && [ -e "$wt/.git" ] || continue
+    [ "$(realpath -e -- "$wt" 2>/dev/null)" = "$POOLS_REAL/${wt#"$POOLS"/}" ] || continue
+    scanned=$((scanned + 1))
+    list=$(candidates_find "$wt")
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      rel=${rel#./}
+      if ! safe "$wt" "$rel"; then skipped=$((skipped + 1)); continue; fi
+      size=$(size_of "$wt/$rel")
+      if [ "$DRY" = 1 ]; then
+        echo "would remove $wt/$rel ($(human "$size"))"
+      elif rm -rf --one-file-system -- "$wt/$rel"; then
+        echo "removed $wt/$rel ($(human "$size"))"
+      else
+        echo "could not remove $wt/$rel" >&2; continue
+      fi
+      count=$((count + 1)) total=$((total + size))
+    done < <(printf '%s\n' "$list" | sort)
+  done
 done
-echo "worktree-prune: $([ "$DRY" = 1 ] && echo "would remove" || echo removed) $count director$([ "$count" = 1 ] && echo y || echo ies), $(human "$total"), older than ${AGE_D}d, in $scanned worktree(s) under $POOLS (sizes: $([ "$FDU" = 1 ] && echo fdu || echo du), $skipped candidate(s) skipped by the checks)"
+echo "worktree-prune: $([ "$DRY" = 1 ] && echo "would remove" || echo removed) $count director$([ "$count" = 1 ] && echo y || echo ies), $(human "$total"), older than ${AGE_D}d, in $scanned worktree(s) under ${POOL_ROOTS[*]} (sizes: $([ "$FDU" = 1 ] && echo fdu || echo du), $skipped candidate(s) skipped by the checks)"
 exit 0

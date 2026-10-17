@@ -278,3 +278,87 @@ def test_a_name_that_could_escape_is_refused(tmp_path, pool):
             text=True,
         )
         assert result.returncode == 2, bad
+
+
+@pytest.mark.parametrize("setting", ["config", "environment", "expanded", "alias", "prune-override"])
+def test_native_and_legacy_roots_remove_only_eligible_output(tmp_path, pool, setting):
+    home = tmp_path / "home"
+    native = tmp_path / "native [root]"
+    legacy_repo = home / ".treehouse/old-1/1/repo"
+    native_repo = native / ".treehouse/new-1/2/repo"
+    for repo in (native_repo, legacy_repo):
+        shutil.copytree(pool, repo)
+        put(repo / "node_modules/pkg/index.js")
+        age(repo / "node_modules", 30)
+        put(repo / "dist/fresh.js")
+        put(repo / "target/notes.txt", "untracked work")
+        age(repo / "target", 30)
+        put(repo / "build/tracked.txt", "tracked work")
+        git(repo, "add", "-f", "build/tracked.txt")
+        git(repo, "commit", "-qm", "keep tracked output")
+        age(repo / "build", 30)
+    config = home / ".config/treehouse/config.toml"
+    put(config, f'root = "{native}"\n')
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
+    if setting == "environment":
+        put(config, 'root = "/not-the-effective-root"\n')
+        env["TREEHOUSE_ROOT"] = str(native)
+    elif setting == "expanded":
+        env["BULK"] = str(native)
+        put(config, 'root = "${MISSING}$BULK"\n')
+    elif setting == "alias":
+        alias = tmp_path / "alias"
+        alias.symlink_to(native, target_is_directory=True)
+        put(config, f'root = "{alias}"\n')
+    elif setting == "prune-override":
+        put(pool / "node_modules/pkg/index.js")
+        age(pool / "node_modules", 30)
+        env["WORKTREE_PRUNE_POOLS"] = str(tmp_path / "pools")
+
+    result = subprocess.run([str(SCRIPT)], env=env, capture_output=True, text=True, check=True)
+
+    for repo in (native_repo, legacy_repo):
+        assert (repo / "node_modules").exists() == (setting == "prune-override"), result.stdout
+        assert (repo / "dist/fresh.js").is_file()
+        assert (repo / "target/notes.txt").is_file()
+        assert (repo / "build/tracked.txt").is_file()
+    assert (pool / "tracked.txt").is_file()
+    if setting == "prune-override":
+        assert not (pool / "node_modules").exists()
+
+
+@pytest.mark.parametrize("config_text", [b'root = "."\n', b'root = "~"\n', b"not valid TOML =", b'root = "\xff"\n'])
+def test_unresolved_native_root_keeps_legacy_cleanup(tmp_path, pool, config_text):
+    home = tmp_path / "home"
+    repo = home / ".treehouse/proj-1/1/repo"
+    shutil.copytree(pool, repo)
+    put(repo / "node_modules/pkg/index.js")
+    age(repo / "node_modules", 30)
+    config = home / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(config_text)
+    result = subprocess.run(
+        [str(SCRIPT)], env={"PATH": "/usr/bin:/bin", "HOME": str(home)},
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert not (repo / "node_modules").exists(), result.stdout
+
+
+@pytest.mark.parametrize(
+    ("expression", "suffix"), [("$1x", "x"), ("$$x", "x"), ("${unterminated", "unterminated")]
+)
+def test_native_special_variable_expansion_finds_eligible_output(tmp_path, pool, expression, suffix):
+    home = tmp_path / "home"
+    native = tmp_path / suffix
+    repo = native / ".treehouse/proj-1/1/repo"
+    shutil.copytree(pool, repo)
+    put(repo / "node_modules/pkg/index.js")
+    age(repo / "node_modules", 30)
+    put(home / ".config/treehouse/config.toml", f'root = "{tmp_path}/{expression}"\n')
+
+    result = subprocess.run(
+        [str(SCRIPT)], env={"PATH": "/usr/bin:/bin", "HOME": str(home)},
+        capture_output=True, text=True, check=True,
+    )
+
+    assert not (repo / "node_modules").exists(), result.stdout + result.stderr
