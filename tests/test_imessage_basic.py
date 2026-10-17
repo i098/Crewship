@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sys
 import time
 
 import pytest
@@ -497,6 +498,36 @@ def test_clipped_latest_input_hands_off_the_full_durable_request(tmp_path):
         assert message in text(notes)
         assert text(fake / "sent") == ""
         assert any(r["text"] == message for r in records())
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="uses the Linux per-argument size limit")
+def test_oversized_handoff_does_not_block_later_work_or_restart_recovery(tmp_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    message = "What is the build status? " + "x" * 190_001
+    bridge = start(1)
+    try:
+        receive("oversized", message)
+        wait_for(lambda: "E2BIG" in text(err), "the oversized inbox argument failure")
+        receive("later", "Deploy the next build.")
+        wait_for(lambda: "photon-later " in text(notes), "work after the oversized handoff")
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        receive("oversized", message)
+        receive("later", "Deploy the next build.")
+        receive("recovered", "Deploy the next build.")
+        wait_for(lambda: "photon-recovered " in text(notes), "work after restart")
+        assert text(notes).count("photon-later ") == 1
+        assert text(notes).count("photon-recovered ") == 1
+        assert "photon-oversized " not in text(notes)
+        events = [json.loads(line) for line in text(state / "routing.jsonl").splitlines()]
+        assert [e["received"]["text"] for e in events if e.get("received", {}).get("requestId") == "photon-oversized"] == [message]
+        completed = {request for e in events if e.get("route") == "done" for request in e["ids"]}
+        assert completed == {"photon-later", "photon-recovered"}
+        assert text(fake / "sent") == ""
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -655,18 +655,20 @@ function handoffPending() {
 function flushRoutes() {
   if (stopping) return;
   clearTimeout(routingRetry);
-  try {
-    for (const item of routing.values()) {
+  let failed = false;
+  for (const item of routing.values()) {
+    try {
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
       } else if (item.route === "desk") outbox.add(item.out!);
       else continue;
       recordRoute({ ids: [item.requestId], route: "done" });
+    } catch (e) {
+      log("route delivery")(e);
+      failed = true;
     }
-  } catch (e) {
-    log("route delivery")(e);
-    routingRetry = setTimeout(flushRoutes, RETRY_MS);
   }
+  if (failed) routingRetry = setTimeout(flushRoutes, RETRY_MS);
 }
 
 async function saveAttachment(c: Saveable, id: string) {

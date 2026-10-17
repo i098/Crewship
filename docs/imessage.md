@@ -31,7 +31,7 @@ For each message from the owner, the service does these steps:
    A direct answer enters the existing outbox with a stable deduplication key.
    It targets the last received request in the pending burst.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
-   Inbox failures retry from the durable journal.
+   Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
