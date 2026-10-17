@@ -32,7 +32,7 @@ export const STATUS_MAX = 16_000; // the fleet status in a desk prompt
 export const LIMIT_REACHED = "context limit reached: answer from what you have, no more zooms";
 
 export type Kind = "owner" | "supervisor" | "desk";
-export type Msg = { i: number; kind: Kind; text: string; size: number; date: string };
+export type Msg = { i: number; kind: Kind; text: string; size: number; date: string; requestId?: string };
 export type Node = { l: number; i: number; text: string; size: number };
 export type Line = [l: number, i: number];
 // One model conversation: each say() sends the next user turn and returns the reply.
@@ -236,9 +236,9 @@ export class Memory {
   }
 
   // Log one message, append its line to the view, and start its node in the background.
-  append(kind: Kind, text: string): number {
+  append(kind: Kind, text: string, requestId?: string): number {
     const date = new Date().toISOString();
-    const msg: Msg = { i: this.msgs.length, kind, text, size: bytes(text), date };
+    const msg: Msg = { i: this.msgs.length, kind, text, size: bytes(text), date, requestId };
     appendFileSync(`${this.dir}/main/${date.slice(0, 10)}.jsonl`, `${JSON.stringify(msg)}\n`, { mode: 0o600 });
     this.msgs.push(msg);
     this.view.push([0, msg.i]);

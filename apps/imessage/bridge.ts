@@ -1,11 +1,9 @@
 // Two-way iMessage between the owner and Firstmate over the transports that FM_IMESSAGE_TRANSPORTS lists in order:
 //   photon (the default), the line of a Photon Spectrum project, and bluebubbles, self-hosted BlueBubbles servers on
 //   Macs (bluebubbles.ts). See routes for outbound transport selection and docs/imessage.md for the routing contract.
-// Inbound: each text the owner sends is filed first as a Firstmate inbox note, which wakes Firstmate for the
-//   real answer, then marked read. A one-shot front-desk model steps in only when Firstmate stays silent for the
-//   quiet period after his last text; it often skips or uses a tapback, like a person would. No transport reports
-//   inbound typing, so a new text is what restarts the wait. The desk sees the whole chat through its memory
-//   (memory.ts), which logs every text both ways.
+// Inbound: save each request before transport acknowledgement. Haiku answers supported basic questions directly;
+//   work, approvals, unsafe or unsupported requests reach Firstmate once through the stable inbox request id.
+//   A new text cancels a draft. The existing memory, quiet-period timer and outbox own context and delivery.
 // Outbound: POST text to http://127.0.0.1:$FM_IMESSAGE_PORT/send (the fm-imessage command does this).
 //   The text goes to a durable outbox (outbox.ts) and the answer comes once it is on disk; one loop sends the outbox
 //   in order, as plain messages by default, and tries again with backoff while the upstream
@@ -26,13 +24,13 @@
 // Instagram: with INSTAGRAM_DM_BACKEND=graph, that listener also takes Meta's DM webhook on /instagram/webhook
 //   (instagram-webhook.ts).
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
-import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause, verdict } from "./desk.ts";
+import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -78,7 +76,7 @@ const PORT = Number(env.FM_IMESSAGE_PORT || 8765);
 const TRANSPORTS = (env.FM_IMESSAGE_TRANSPORTS || "photon").split(/\s+/).filter(Boolean);
 const DESK_MODEL = env.FM_IMESSAGE_DESK_MODEL || "claude-haiku-5-5";
 const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, env.FM_IMESSAGE_SUPERVISOR_MODEL || "");
-const QUIET_MS = 4000; // the desk waits this long for Firstmate's own answer
+const QUIET_MS = 4000; // combine the owner's burst before classification
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -107,18 +105,23 @@ const igWebhook = env.INSTAGRAM_DM_BACKEND === "graph" && !IG_MISSING.length ? i
   say: (line) => console.log(`fm-imessage: ${line}`),
 }) : undefined;
 for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-let burstFrom: number | undefined; // the memory id of his first text the desk has not answered yet
 const recent: Ref[] = []; // his last texts, newest last, for a threaded reply to one a few bubbles up
 const said = new Map<string, string>(); // his last 100 texts by message id, for the "was:" part of an edit note
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
-const typing = (space: LineMessage["space"], on: boolean) =>
-  !stopping && void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
+const typing = (space: LineMessage["space"] | undefined, on: boolean) =>
+  space && !stopping && void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
 // This service is the memory's one writer: systemd runs one instance of the unit.
 const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
-const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch(log("desk failed")));
+const memoryByRequest = new Map<string, number>();
+for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
+const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((e) => {
+  log("desk failed")(e);
+  typing(latest?.space, false);
+  handoffPending();
+}));
 let deskRun: Bun.Subprocess | undefined;
 
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
@@ -130,7 +133,13 @@ type Ref = { line?: string; space: string; id: string };
 // `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
 // where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string };
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
+type Received = { requestId: string; text: string; ref: Ref; memoryId: number; firstmate: boolean };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
+const ROUTING_LOG = `${STATE}/routing.jsonl`;
+const routing = new Map<string, Routing>();
+let routingRetry: NodeJS.Timeout | undefined;
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -270,12 +279,33 @@ for (const name of TRANSPORTS) {
   }
 }
 if (latestRef) latest = await lineOf(latestRef)?.find(latestRef).catch((e) => void log("could not restore the latest text; sends still go to it")(e));
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS);
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
   }
 });
+
+// Replay routing before a transport can release ownership. A torn final line was never acknowledged.
+if (existsSync(ROUTING_LOG)) {
+  const saved = readFileSync(ROUTING_LOG, "utf8");
+  const rows = saved.split("\n");
+  let torn = false;
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i]) continue;
+    try { applyRoute(JSON.parse(rows[i])); }
+    catch (e) {
+      if (i !== rows.length - 1) throw e;
+      log("torn routing tail")(e);
+      torn = true;
+    }
+  }
+  if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
+  else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
+}
+for (const item of routing.values()) ensureRemembered(item);
+flushRoutes();
+if (pendingRoutes().length) desk.inboundText();
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
@@ -305,7 +335,7 @@ Bun.serve({
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
     desk.firstmateActive();
-    burstFrom = undefined;
+    handoffPending();
     cancelDesk();
     // Typing shows only while Firstmate is really composing: /typing starts it, and every send clears it.
     if (url.pathname === "/typing") {
@@ -540,31 +570,102 @@ function remember(kind: Kind, text: string): number | undefined {
   }
 }
 
-// One desk turn for his latest burst. It drops its draft if he sent more or Firstmate answered meanwhile.
+// One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
+  const pending = pendingRoutes();
+  if (!pending.length) return;
+  if (pending.some((r) => r.firstmate) || DESK_MODEL !== "claude-haiku-5-5") return handoffPending();
+  const at = pending.at(-1)!.ref;
   const target = latest;
-  const at = latestRef;
-  if (!target || !at) return;
-  typing(target.space, true);
-  const inbox = track(Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore" }));
+  typing(target?.space, true);
+  const answer = await draftBasic(pending, current);
+  typing(target?.space, false);
+  if (stopping || !current()) return;
+  if (answer === undefined) handoffPending();
+  else {
+    recordRoute({ ids: pending.map((r) => r.requestId), route: "desk",
+      out: { ...at, requestId: pending.at(-1)!.requestId, requests: pending.map((r) => r.requestId), bubbles: [answer], kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+    flushRoutes();
+  }
+  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${answer === undefined ? "handoff" : "basic"}\n`, { mode: 0o600 });
+}
+
+async function draftBasic(pending: Routing[], current: () => boolean) {
+  const inbox = track(Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
   const status = await new Response(inbox.stdout).text();
-  if (stopping || !current()) return typing(target.space, false);
-  // The view of the chat before his burst, then the per-turn state, then his burst, all under the ceiling.
-  const from = burstFrom ?? memory.msgs.length;
-  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, memory.msgs.slice(from).map((m) => `${m.kind}: ${m.text}`).join("\n"));
+  const statusOk = await inbox.exited === 0;
+  if (stopping || !current()) return;
+  const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
+  const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
+  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText);
+  if (!statusOk || !prompt.includes(latestText)) return;
   const proc = track(spawnDesk({ model: DESK_MODEL, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
   deskRun = proc;
   const { ok, drafted } = await readDesk(proc);
-  if (deskRun !== proc) return; // cancelled while drafting
+  if (deskRun !== proc) return;
   deskRun = undefined;
-  typing(target.space, false);
   if (stopping || !current()) return;
-  burstFrom = undefined;
-  const { skip, tapback, outcome } = verdict(ok, drafted);
-  if (tapback) put({ ...at, react: tapback, kind: "desk" });
-  else if (!skip) put({ ...at, bubbles: [drafted], kind: "desk" });
-  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${target.id} ${outcome}\n`, { mode: 0o600 });
+  return basicAnswer(ok, drafted, status, memory.msgs, DESK_MODEL);
+}
+
+function applyRoute(event: RouteEvent) {
+  if ("received" in event) routing.set(event.received.requestId, { ...event.received, route: "pending" });
+  else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out });
+}
+
+function recordRoute(event: RouteEvent) {
+  const fd = openSync(ROUTING_LOG, "a", 0o600);
+  try {
+    writeSync(fd, `${JSON.stringify(event)}\n`);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  const dir = openSync(STATE, "r");
+  try { fsyncSync(dir); } finally { closeSync(dir); }
+  applyRoute(event);
+}
+
+function ensureRemembered(item: Received) {
+  if (memoryByRequest.has(item.requestId)) return;
+  try { memoryByRequest.set(item.requestId, memory.append("owner", item.text, item.requestId)); }
+  catch (e) {
+    log("memory")(e);
+    if (routing.get(item.requestId)?.route === "pending") recordRoute({ ids: [item.requestId], route: "handoff" });
+  }
+}
+
+function lostDeskAnswer(item: Out) {
+  if (!item.requests?.length || item.done || Object.keys(item.maybe ?? {}).length) return;
+  recordRoute({ ids: item.requests, route: "handoff" });
+  flushRoutes();
+}
+
+function pendingRoutes() {
+  return [...routing.values()].filter((r) => r.route === "pending");
+}
+
+function handoffPending() {
+  const pending = pendingRoutes();
+  if (pending.length) recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
+  flushRoutes();
+}
+
+// The decision is durable before either side effect. Inbox ids and keyed outbox receipts close replay gaps.
+function flushRoutes() {
+  if (stopping) return;
+  clearTimeout(routingRetry);
+  try {
+    for (const item of routing.values()) {
+      if (item.route === "handoff") {
+        if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
+      } else if (item.route === "desk") outbox.add(item.out!);
+      else continue;
+      recordRoute({ ids: [item.requestId], route: "done" });
+    }
+  } catch (e) {
+    log("route delivery")(e);
+    routingRetry = setTimeout(flushRoutes, RETRY_MS);
+  }
 }
 
 async function saveAttachment(c: Saveable, id: string) {
@@ -618,7 +719,7 @@ async function handle(line: Line, message: LineMessage) {
   console.log(`fm-imessage: inbound ${line.name} ${message.content.type} -> ${text === undefined ? "ignored" : "note"}`);
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
-  if (!wake(`${line.name}-${message.id}`, text, ref)) return;
+  receive(`${line.name}-${message.id}`, text, ref, !plainText(message.content) || !directChat.test(ref.space));
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);
@@ -639,20 +740,27 @@ async function handle(line: Line, message: LineMessage) {
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
   await message.read().catch(log("mark read"));
+  if (pendingRoutes().some((r) => r.firstmate)) handoffPending();
 }
 
-// Hands his text to Firstmate first, so the wake never waits on the desk model, then starts the desk's quiet
-// period. False when the inbox refused the note: he is asked to send it again.
-function wake(requestId: string, text: string, ref: Ref): boolean {
-  if (!fileNote(requestId, text)) {
-    put({ ...ref, bubbles: ["firstmate did not get that, send it again"], silent: true });
-    return false;
-  }
-  const id = remember("owner", text);
-  if (id !== undefined) burstFrom ??= id;
+// Persist the full input before marking it read or seen. A duplicate never opens another routing decision.
+function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) {
+  if (routing.has(requestId)) return;
+  // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
+  firstmate ||= /^\s*(?:please\s+)?(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|approved|yes|ok|go ahead|proceed|ship it|do it)\b|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
+  const received = { requestId, text, ref, memoryId: memory.msgs.length, firstmate };
+  recordRoute({ received });
+  ensureRemembered(received);
+  flushRoutes();
   cancelDesk();
   desk.inboundText();
-  return true;
+}
+
+function plainText(content: LineMessage["content"]): boolean {
+  if (content.type === "text" || content.type === "markdown") return true;
+  if (content.type === "reply" || content.type === "effect") return plainText(content.content);
+  if (content.type === "group") return content.items.every((m) => plainText(m.content));
+  return false;
 }
 
 function heard(id: string, text: string) {
@@ -681,9 +789,9 @@ function edited(e: EventTypeMap["message.edited"]) {
   const text = e.content.text ?? "(no text)";
   const was = said.get(e.messageGuid) ?? "not known: the bridge did not see the text before the edit";
   console.log("fm-imessage: inbound edit -> note");
-  if (wake(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, { space: e.chatGuid, id: e.messageGuid })) {
-    heard(e.messageGuid, text);
-  }
+  receive(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, { space: e.chatGuid, id: e.messageGuid }, true);
+  heard(e.messageGuid, text);
+  handoffPending();
 }
 
 if (raw) void watchEdits(raw);

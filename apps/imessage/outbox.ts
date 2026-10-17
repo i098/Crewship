@@ -1,6 +1,6 @@
 // The bridge's durable queues (bridge.ts): the outbox of sends and tapbacks, and the attachment downloads to try
 // again. Kept free of spectrum-ts so tests run without it.
-import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 
 const NETWORK = /^(TimeoutError|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EPIPE|ConnectionRefused|ConnectionClosed|FailedToOpenSocket|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_CLOSED)$/;
 
@@ -46,9 +46,12 @@ export function brief(e: unknown): string {
 // parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item. Deleting an item's file
 // drops it by hand. `deliver` may save progress (the bubbles already sent) with `save`. The constructor starts on
 // the items already queued. `lost` is told of each parsed item that moved to the dead-letter folder.
+// An optional key deduplicates submissions against pending, completed, and dead-letter receipts.
+// Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
   private next: number;
   private busy = false;
+  private keys = new Set<string>();
 
   constructor(
     private dir: string,
@@ -56,14 +59,36 @@ export class Queue<T> {
     private deliver: (item: T, save: (item: T) => void) => Promise<void>,
     private retryMs: number,
     private lost?: (item: T) => void,
+    private key?: (item: T) => string | undefined,
   ) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.next = (this.seqs().at(-1) ?? 0) + 1;
+    if (key) {
+      mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
+      for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) {
+        if (!existsSync(folder)) continue;
+        for (const file of readdirSync(folder).filter((f) => f.endsWith(".json"))) {
+          let item: T;
+          try { item = JSON.parse(readFileSync(`${folder}/${file}`, "utf8")); }
+          catch { continue; } // The normal drain handles an unreadable pending item.
+          const id = key(item);
+          if (id) this.keys.add(id);
+          if (folder === `${dir}-done`) this.next = Math.max(this.next, parseInt(file, 10) + 1);
+          if (id && folder === `${dir}-dead`) queueMicrotask(() => {
+            try { this.lost?.(item); }
+            catch (e) { console.error(`fm-imessage: ${this.name} restored lost notice failed: ${brief(e)}`); }
+          });
+        }
+      }
+    }
     void this.drain();
   }
 
   add(item: T) {
+    const id = this.key?.(item);
+    if (id && this.keys.has(id)) return;
     this.write(this.next++, item);
+    if (id) this.keys.add(id);
     void this.drain();
   }
 
@@ -121,8 +146,12 @@ export class Queue<T> {
           } catch (e) {
             throw Object.assign(new Error(`unreadable queue file: ${brief(e)}`), { permanent: true });
           }
-          await this.deliver(item as T, (next) => this.write(seq, next));
-          unlinkSync(this.file(seq));
+          await this.deliver(item as T, (next) => {
+            this.write(seq, next);
+            item = next;
+          });
+          if (this.key?.(item as T)) renameSync(this.file(seq), `${this.dir}-done/${seq}.json`);
+          else unlinkSync(this.file(seq));
         } catch (e) {
           if (permanent(e) && this.bury(seq, e)) {
             if (item !== undefined) try { this.lost?.(item); } catch (x) { console.error(`fm-imessage: ${this.name} ${seq} lost notice failed: ${brief(x)}`); }

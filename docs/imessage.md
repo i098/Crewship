@@ -7,18 +7,44 @@ The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small
 For each message from the owner, the service does these steps:
 
 1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names the text that it replies to. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
-2. It files the text as a Firstmate inbox note (`fm-inbox.sh note`) first, so the wake never waits on a model. The note wakes Firstmate, which answers in full with `fm-imessage`. If the note fails, the service replies "firstmate did not get that, send it again" and stops there.
+2. It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
+   It also appends the owner text to desk memory.
 3. It marks the text as read.
-4. It starts the quiet period, 4 seconds. Each new text from the owner starts the quiet period again. Any send, tapback, or typing bubble from Firstmate since his last text stops the desk for that burst of texts.
-5. If the quiet period ends and Firstmate stayed silent, the front desk gets one turn for the whole burst. The front desk is a one-shot `omp -p` call with one tool, `zoom`. It gets its view of the whole conversation (see [Desk memory](#desk-memory)), the output of `fm-inbox.sh status`, and every message since his burst began, each with its kind as a prefix. It shows the typing bubble while it writes.
-6. The desk acts like a person who texts, not like a bot. Its answer is one of three things, in this order of preference: `SKIP` (it sends nothing), `REACT:` and one emoji that it picks itself (a tapback on his latest text), or a short text. The text style is short, blunt, Gen Z, and lowercase. The desk never claims work that it cannot see, never promises a time, and never invents facts.
-7. Before it sends, the service checks again. If the owner sent a new text or Firstmate became active while the desk wrote, the service drops the draft. The next quiet period reads the whole conversation again.
+4. It waits 4 seconds to combine a burst.
+   Each new text cancels a running draft and starts the wait again.
+   Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
+5. Claude Haiku 5.5 classifies the whole pending burst through the existing one-shot `omp -p` runner.
+   Its only tool is `zoom`.
+   It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
+   Reading status does not request a supervisor answer.
+6. A clear basic question can receive one direct answer without a Firstmate note or wake.
+   The answer must quote complete source lines from supplied status or prior supervisor or desk records.
+   Model-identity answers must use the full configured desk model name.
+   The service checks these quotes against their sources.
+   It rejects unsupported facts and action claims.
+   Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
+   Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
+7. The service saves its routing decision before either side effect.
+   A direct answer enters the existing outbox with a stable deduplication key.
+   A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
+   Inbox failures retry from the durable journal.
+   Firstmate activity cancels a draft and hands pending requests to Firstmate.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
 When the owner edits a text on the Photon line, the service files a new note, `[edited] <new text> (was: <old text>)`, and the note wakes Firstmate like a new text. The service keeps his last 100 texts in memory for the old text. If it does not know the old text (for example, the text came before the last restart), the note says so. spectrum-ts does not pass edits on, so the service reads them from its own event stream on the line's client. An edit that the owner makes while that stream is down is lost. The BlueBubbles line does not report edits: an edit there files no note.
 
-If the desk fails or times out after 45 seconds, the service sends nothing: Firstmate has the note. The service appends the outcome of each desk turn (time, message id, `skip`, `react <emoji>`, or the reply text) to `~/.local/state/fm-imessage/desk.log`, which is private to the account, so Firstmate can read what the desk did.
+The runner keeps its 45-second timeout.
+The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
+A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
+Each outcome records the time, message id, and `basic` or `handoff` in the private `desk.log`.
+The service replays unfinished routing after a restart.
+Completed routing records suppress repeated transport delivery.
+Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
+If the transport definitely refuses a direct answer, the saved burst ids cause one stable-id Firstmate handoff.
+Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
+A prior uncertain send never causes this fallback because a desk answer might already exist.
+Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
 
@@ -29,8 +55,13 @@ The service replaces latest-message files atomically, including the direct-chat 
 
 The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503. The service keeps every message through such an outage. The code is `apps/imessage/outbox.ts`.
 
-- **The outbox.** Each send and tapback goes to `~/.local/state/fm-imessage/outbox/` first, as one file. This covers the answers of Firstmate, the desk's text and tapback, and the "firstmate did not get that" reply, so they all keep one order. The service writes the file to a temporary name, syncs it to disk, and renames it. The file name is a sequence number that only goes up. The service answers `fm-imessage` only after the file is on disk. A desk message that waited out an outage is still sent, late.
-- **Delivery.** One loop sends the oldest file, then deletes it.
+- **The outbox.** Each send and tapback enters the private `outbox/` directory as one file before delivery.
+  This includes Firstmate answers and direct desk answers.
+  The service syncs each temporary file before its atomic rename.
+  The service answers `fm-imessage` only after the item is on disk.
+  A desk answer that waits through an outage still sends later; it does not also cause a supervisor handoff.
+- **Delivery.** One loop sends the oldest file.
+  It archives keyed direct answers in `outbox-done/` and deletes other completed items.
   A failed send retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
   Unknown errors also retry, so the queue keeps its order.
   After each accepted bubble, the service saves its progress.
@@ -48,6 +79,7 @@ Only an item that is provably bad leaves the queue: a message or an attachment t
 The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `apps/imessage/memory.ts`.
 
 - **The log.** The service appends one record for each text from the owner, each send and tapback from Firstmate, and each desk text and tapback. The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`. The service never edits or deletes a record.
+  Inbound records also keep their stable request id, so a repaired memory write does not repeat after another restart.
 - **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
 - **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 64 KB, one batch merges lines until it is 32 KB or less. The view is in `memory/view.json`, and the service loads it at start.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
@@ -80,13 +112,26 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   A restart restores this cooldown before rebuilding unfinished nodes from the unchanged message log.
   Missing retry state needs no migration; the service creates it after the first failure.
 
-The memory holds the owner's texts word for word, on the host only. The directory is private to the account (mode `0700`). To make the desk forget everything, stop the service, delete `~/.local/state/fm-imessage/memory/`, and start the service again.
+The memory and routing journal hold owner texts on the host in private state.
+Deleting only `memory/` does not erase this history; routing recovery restores missing inbound records.
+For complete erasure, first finish every pending routing request, download, and outbox delivery.
+Then stop the bridge through the normal service procedure.
+Remove `memory/`, `routing.jsonl`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
+This also clears local routing deduplication, so retain transport seen records and do not replay old message history.
+Never erase these files while requests or uncertain sends still need recovery.
 
-A memory error never stops a send, a tapback, or the inbox note: the service logs it and goes on. At start, the service skips a log line that does not parse (a torn last line after a crash).
+A memory error does not stop an outgoing send, a tapback, or a supervisor handoff.
+The service logs the error.
+An inbound memory-write failure hands the durable routing record to Firstmate instead of attempting a basic answer.
+At start, the service skips a memory log line that does not parse.
 
 ## Instagram front desk
 
-The same front desk answers Instagram DMs. `instagram-desk.service` runs `apps/imessage/instagram-desk.ts`, which reuses `desk.ts` and `memory.ts`: the prompt names the channel (`deskPrompt(..., "Instagram")`), and the rules, the model, the zoom tool and the 180,000-byte input cap are the same. It has no Instagram client. It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-dm/SKILL.md) listener:
+The Instagram desk keeps its existing acknowledgement contract.
+`instagram-desk.service` runs `apps/imessage/instagram-desk.ts` and reuses the memory, runner, input budget, and timing helpers.
+Its channel-specific prompt does not use iMessage direct routing.
+It has no Instagram client.
+It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-dm/SKILL.md) listener:
 
 - `state/instagram-dms.jsonl` (`INSTAGRAM_DM_LOG`): one row for each new DM from the operator. Each DM restarts the quiet period, 8 seconds (`crewship_instagram_desk_quiet_ms`), or 60 seconds (`crewship_instagram_desk_reel_quiet_ms`) once the burst holds a reel link.
 - `state/.instagram-dms/sent.jsonl` (`INSTAGRAM_DM_SENT`): one row for each `fm-insta-reply` text, tapback, and typing indicator, with `by`, the value of `INSTAGRAM_DM_ACTOR` (`firstmate` by default). Any row that is not `by: desk` stops the desk for that burst of DMs, like a Firstmate send on iMessage.

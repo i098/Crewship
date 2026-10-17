@@ -235,23 +235,18 @@ console.log(JSON.stringify(await transcribe({json.dumps(str(tone))}, listen).cat
     assert "failed" in run("slow", 1_500)["error"]
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-def test_desk_answer_and_prompt():
+def test_desk_parses_tapbacks_and_skip():
     result = bun(f"""
-import {{ deskPrompt, isSkip, parseReact }} from {DESK};
+import {{ isSkip, parseReact }} from {DESK};
 const answers = ["REACT:👍", "REACT: 🫡 ", "REACT:👍 thanks", "got it", "ok REACT:👍", "SKIP"];
 const skips = ["skip", "Skip", "SKIP.", "skip!!", "skip it", "REACT:👍", "ok"];
 console.log(JSON.stringify({{
   reacts: answers.map((a) => parseReact(a) ?? null),
   skips: skips.map(isSkip),
-  named: deskPrompt("Ana", "desk-model-a", "boss-model-b"),
-  unnamed: deskPrompt("the owner", "desk-model-a", ""),
 }}));
 """)
     assert result["reacts"] == ["👍", "🫡", None, None, None, None]
     assert result["skips"] == [True, True, True, True, False, False, False]
-    assert "Ana's AI supervisor" in result["named"]
-    assert "you're desk-model-a" in result["named"] and "Firstmate is boss-model-b" in result["named"]
-    assert "say you don't know" in result["unnamed"]
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -1466,6 +1461,7 @@ function call(op) {
   const left = outage ? Infinity : Number(readFileSync(`${dir}/down`, "utf8"));
   appendFileSync(`${dir}/calls`, `${op} ${left > 0 ? "UNAVAILABLE" : "ok"}\\n`);
   if (op === "send" && existsSync(`${dir}/send-unsure`)) throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
+  if (op === "send" && existsSync(`${dir}/send-refused`)) throw Object.assign(new Error("send refused"), { status: 404 });
   if (op === "last" && existsSync(`${dir}/read-timeout`)) throw Object.assign(new Error("read timed out"), { grpcCode: 4 });
   if (left > 0) {
     if (!outage) writeFileSync(`${dir}/down`, String(left - 1));
@@ -1608,8 +1604,9 @@ def fake_bridge(tmp_path):
     (fake / "down").write_text("0")
     (fake / "typing-down").touch()
     notes = tmp_path / "notes"
+    identity = json.dumps({"kind": "basic", "answer": "claude-haiku-5-5", "evidence": [{"source": "identity", "quote": "claude-haiku-5-5"}]})
     stubs = {
-        "omp": f'cat >/dev/null; [ -e {fake / "desk-on"} ] && echo "desk ok" || echo SKIP',
+        "omp": f"cat >/dev/null; [ -e {fake / 'desk-on'} ] && echo '{identity}' || echo SKIP",
         "fm-inbox": f'printf "%s\\n" "$*" >> {notes}; [ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ]',
     }
     for name, body in stubs.items():
@@ -1640,10 +1637,13 @@ def fake_bridge(tmp_path):
         wait_for(lambda: text(out).count("listening") == n, f"bridge start {n}")
         return bridge
 
-    def inbound(mid, **fields):
+    def inbound(mid, wait_note=True, **fields):
         record = {"id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", **fields}
         publish_json(fake / "inbound" / f"{mid}.json", record)
-        wait_for(lambda: f"photon-{mid} " in text(notes), f"the note for {mid}")
+        if wait_note:
+            wait_for(lambda: f"photon-{mid} " in text(notes), f"the note for {mid}")
+        else:
+            wait_for(lambda: f'"requestId":"photon-{mid}"' in text(state / "routing.jsonl"), f"durable ownership of {mid}")
 
     def cli(*args, fails=False):
         result = subprocess.run([str(SEND), *args], capture_output=True, text=True, env=env, timeout=30)
@@ -1671,27 +1671,27 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         "    print('owner: valid summary before teardown stalls', flush=True)\n"
         "    time.sleep(120)\n"
         "else:\n"
-        "    print('desk ok')\n"
+        "    print('{\"kind\":\"basic\",\"answer\":\"claude-haiku-5-5\",\"evidence\":[{\"source\":\"identity\",\"quote\":\"claude-haiku-5-5\"}]}')\n"
     )
     runner.chmod(0o755)
     bridge = start(1)
     try:
-        inbound("long", text="x" * 700)
+        inbound("long", wait_note=False, text="x" * 700)
         wait_for(lambda: text(attempts), "the compaction runner")
-        wait_for(lambda: text(fake / "sent").splitlines() == ["send desk ok"], "the first desk reply", timeout=15)
+        wait_for(lambda: text(fake / "sent").splitlines() == ["send claude-haiku-5-5"], "the first desk reply", timeout=15)
         retry_file = state / "memory/retry.json"
         wait_for(retry_file.exists, "the runner timeout and saved cooldown", timeout=75)
         assert "compaction call failed (exit 143)" in text(err)
         assert json.loads(retry_file.read_text())["nextAllowed"] > time.time() * 1000
-        inbound("during-cooldown", text="hello again")
+        inbound("during-cooldown", wait_note=False, text="What desk model answers?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the desk reply during cooldown", timeout=15)
         bridge.terminate()
         bridge.wait(10)
         bridge = start(2)
-        inbound("after-restart", text="still there")
+        inbound("after-restart", wait_note=False, text="What desk model answers now?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 3, "the desk reply after restart", timeout=15)
         assert text(attempts).splitlines() == ["attempt"]
-        assert text(fake / "sent").splitlines() == ["send desk ok"] * 3
+        assert text(fake / "sent").splitlines() == ["send claude-haiku-5-5"] * 3
         source = [json.loads(line) for path in (state / "memory/main").glob("*.jsonl") for line in path.read_text().splitlines()]
         assert any(record["text"] == "x" * 700 for record in source)
     finally:
@@ -1725,7 +1725,7 @@ def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
     bridge = start(1)
     pid = None
     try:
-        inbound("stop", text="x" * 600 if mode == "compaction" else "hello")
+        inbound("stop", wait_note=False, text="x" * 600 if mode == "compaction" else "hello")
         wait_for(lambda: text(child_file), "the model child")
         pid = int(text(child_file))
         if mode == "compaction":
@@ -1865,8 +1865,8 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
         inbound("m5", name="gone.jpg", data="X")  # its download is queued behind m2, then the message disappears upstream
         (fake / "messages" / "m5.json").unlink()
         (fake / "desk-on").touch()
-        inbound("m3", text="ping")
-        inbound("m4", text="ping again")  # nobody answers, so the desk writes a late ack into the queue
+        inbound("m3", wait_note=False, text="What desk model answers?")
+        inbound("m4", wait_note=False, text="Which model answers basic questions?")
         wait_for(lambda: len(list((state / "outbox").glob("*.json"))) == 5, "the desk item in the outbox")
         (fake / "outage").unlink()
         (fake / "down").write_text("3")  # three more failures, then the upstream recovers
@@ -1878,7 +1878,7 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
-    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send desk ok", "send five"]
+    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send claude-haiku-5-5", "send five"]
     assert text(fake / "sent").splitlines() == sent
     assert "typing UNAVAILABLE" in text(fake / "calls")
     saved = state / "attachments/m2-photo.jpg"
@@ -2528,7 +2528,7 @@ def test_owner_group_text_preserves_the_direct_proactive_destination(tmp_path, t
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_inbox_failure_notice_stays_plain_without_the_raw_photon_client(tmp_path):
+def test_inbox_failure_retains_the_request_without_the_raw_photon_client(tmp_path):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
     (fake / "raw-missing").touch()
     (fake / "inbox-fail").touch()
@@ -2539,10 +2539,9 @@ def test_inbox_failure_notice_stays_plain_without_the_raw_photon_client(tmp_path
         inbound("m2", text="the accepted note")
         cli("later response")
         wait_for(lambda: "send later response" in text(fake / "sent"), "the public SDK sends")
-        assert text(fake / "sent").splitlines() == [
-            "send firstmate did not get that, send it again",
-            "send later response",
-        ]
+        assert text(fake / "sent").splitlines() == ["send later response"]
+        events = [json.loads(line) for line in (state / "routing.jsonl").read_text().splitlines()]
+        assert any(e.get("ids") == ["photon-m1"] and e.get("route") == "done" for e in events)
     finally:
         bridge.terminate()
         bridge.wait(10)
