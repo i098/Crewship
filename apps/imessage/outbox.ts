@@ -1,6 +1,6 @@
 // The bridge's durable queues (bridge.ts): the outbox of sends and tapbacks, and the attachment downloads to try
 // again. Kept free of spectrum-ts so tests run without it.
-import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 
 const NETWORK = /^(TimeoutError|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EPIPE|ConnectionRefused|ConnectionClosed|FailedToOpenSocket|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_CLOSED)$/;
 
@@ -43,12 +43,15 @@ export function brief(e: unknown): string {
 // (fsync, then rename), so an item survives a crash or a restart once add() returns. One loop delivers the oldest
 // item. When that fails, the loop logs one line, waits one backoff step (at most 60 × `retryMs`) and tries the same
 // item again, so the order holds. Only an item that is provably bad (see `permanent`, or a file that does not
-// parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item. Deleting an item's file
-// drops it by hand. `deliver` may save progress (the bubbles already sent) with `save`. The constructor starts on
-// the items already queued. `lost` is told of each parsed item that moved to the dead-letter folder.
+// parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item.
+// See docs/imessage.md#upstream-outages before manually removing or replaying an item.
+// `deliver` may save progress with `save`. Startup resumes pending items; `lost` receives parsed dead letters.
+// An optional key deduplicates submissions against pending, completed, and dead-letter receipts.
+// Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
   private next: number;
   private busy = false;
+  private keys = new Set<string>();
 
   constructor(
     private dir: string,
@@ -56,15 +59,45 @@ export class Queue<T> {
     private deliver: (item: T, save: (item: T) => void) => Promise<void>,
     private retryMs: number,
     private lost?: (item: T) => void,
+    private key?: (item: T) => string | undefined,
   ) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.next = (this.seqs().at(-1) ?? 0) + 1;
+    if (key) {
+      mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
+      for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) this.restoreKeys(folder, key);
+    }
     void this.drain();
   }
 
   add(item: T) {
-    this.write(this.next++, item);
+    const id = this.key?.(item);
+    if (id && this.keys.has(id)) this.syncDir();
+    else {
+      try { this.write(this.next++, item); }
+      catch (e) {
+        if (id && this.key) this.restoreKeys(this.dir, this.key);
+        throw e;
+      }
+      if (id) this.keys.add(id);
+    }
     void this.drain();
+  }
+
+  private restoreKeys(folder: string, key: (item: T) => string | undefined) {
+    if (!existsSync(folder)) return;
+    for (const file of readdirSync(folder).filter((f) => f.endsWith(".json"))) {
+      let item: T;
+      try { item = JSON.parse(readFileSync(`${folder}/${file}`, "utf8")); }
+      catch { continue; } // The normal drain handles an unreadable pending item.
+      const id = key(item);
+      if (id) this.keys.add(id);
+      if (folder === `${this.dir}-done`) this.next = Math.max(this.next, parseInt(file, 10) + 1);
+      if (id && folder === `${this.dir}-dead`) queueMicrotask(() => {
+        try { this.lost?.(item); }
+        catch (e) { console.error(`fm-imessage: ${this.name} restored lost notice failed: ${brief(e)}`); }
+      });
+    }
   }
 
   private seqs(): number[] {
@@ -85,6 +118,10 @@ export class Queue<T> {
       closeSync(fd);
     }
     renameSync(tmp, this.file(seq));
+    this.syncDir();
+  }
+
+  private syncDir() {
     const dir = openSync(this.dir, "r");
     try {
       fsyncSync(dir);
@@ -121,8 +158,12 @@ export class Queue<T> {
           } catch (e) {
             throw Object.assign(new Error(`unreadable queue file: ${brief(e)}`), { permanent: true });
           }
-          await this.deliver(item as T, (next) => this.write(seq, next));
-          unlinkSync(this.file(seq));
+          await this.deliver(item as T, (next) => {
+            this.write(seq, next);
+            item = next;
+          });
+          if (this.key?.(item as T)) renameSync(this.file(seq), `${this.dir}-done/${seq}.json`);
+          else unlinkSync(this.file(seq));
         } catch (e) {
           if (permanent(e) && this.bury(seq, e)) {
             if (item !== undefined) try { this.lost?.(item); } catch (x) { console.error(`fm-imessage: ${this.name} ${seq} lost notice failed: ${brief(x)}`); }
