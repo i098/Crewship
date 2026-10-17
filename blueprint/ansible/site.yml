@@ -33,6 +33,12 @@
       ansible.builtin.import_tasks: tasks/packages.yml
       tags: [packages]
 
+    - name: Bounded native syslog on the configured data filesystem
+      ansible.builtin.import_tasks: tasks/syslog.yml
+      become: true
+      when: crewship_data_dir | length > 0
+      tags: [syslog]
+
     # Everything below writes files owned by the target account, so it needs a
     # resolvable uid. `crewship_account_ready` is false only in check mode on a
     # host where the account does not exist yet: `./ship.sh chart` then reports
@@ -280,6 +286,22 @@
       tags: [verify]
 
   handlers:
+    - name: Validate the bounded logger configuration
+      ansible.builtin.command:
+        argv: [/usr/sbin/rsyslogd, -N1]
+      become: true
+      changed_when: false
+      listen: restart bounded syslog
+
+    - name: Reload the mount dependency and restart the bounded logger
+      ansible.builtin.systemd_service:
+        name: rsyslog.service
+        daemon_reload: true
+        state: restarted
+      become: true
+      when: crewship_manage_services | bool
+      listen: restart bounded syslog
+
     # Handlers run in definition order, so the daemon-reload always precedes
     # the unit restarts it enables.
     - name: Reload the user systemd manager

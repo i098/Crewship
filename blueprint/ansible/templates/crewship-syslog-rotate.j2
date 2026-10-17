@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+[ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = '{{ crewship_syslog_dir }}/syslog' ]; } || exit 2
+/usr/bin/mountpoint -q -- '{{ crewship_syslog_mount.stdout }}' || exit 1
+cd -P -- '{{ crewship_syslog_dir }}'
+[ "$PWD" = '{{ crewship_syslog_dir }}' ] || exit 1
+for file in syslog syslog.1 syslog.2 syslog.3 syslog.4 syslog.5 syslog.6 syslog.7 syslog.8; do
+    [ ! -L "$file" ] || exit 1
+    [ ! -e "$file" ] || [ -f "$file" ] || exit 1
+done
+[ -f syslog ] || exit 1
+n=7
+while [ "$n" -ge 1 ]; do
+    if [ -f "syslog.$n" ]; then /usr/bin/mv -fT -- "syslog.$n" "syslog.$((n + 1))"; fi
+    n=$((n - 1))
+done
+/usr/bin/mv -T -- syslog syslog.1

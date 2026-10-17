@@ -1,0 +1,259 @@
+---
+- name: Validate the configured syslog data path
+  ansible.builtin.assert:
+    that:
+      - crewship_data_dir is match('^/([A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$')
+    fail_msg: "Syslog needs a canonical absolute data_dir without spaces or shell metacharacters."
+
+- name: Resolve the existing data directory
+  ansible.builtin.command:
+    argv: [readlink, -e, "{{ crewship_data_dir }}"]
+  register: crewship_syslog_real_dir
+  changed_when: false
+  check_mode: false
+
+- name: Reject a linked or absent data directory
+  ansible.builtin.assert:
+    that: crewship_syslog_real_dir.stdout == crewship_data_dir
+    fail_msg: "Create data_dir on its mounted data filesystem before applying; symlink paths are not supported."
+
+- name: Identify the configured data mount
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, TARGET, -T, "{{ crewship_data_dir }}"]
+  register: crewship_syslog_mount
+  changed_when: false
+  check_mode: false
+
+- name: Identify data and system filesystems
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, "MAJ:MIN", -T, "{{ item }}"]
+  loop: ["{{ crewship_data_dir }}", /]
+  register: crewship_syslog_devices
+  changed_when: false
+  check_mode: false
+
+- name: Require a separate mounted filesystem
+  ansible.builtin.assert:
+    that:
+      - crewship_syslog_mount.stdout != '/'
+      - crewship_syslog_mount.stdout is match('^/([A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$')
+      - crewship_syslog_devices.results[0].stdout != crewship_syslog_devices.results[1].stdout
+    fail_msg: "Syslog refuses a missing data mount or a data_dir backed by the system filesystem."
+
+- name: Require logger search access without widening parent permissions
+  ansible.builtin.command:
+    argv: [runuser, -u, syslog, --, test, -x, "{{ crewship_data_dir }}"]
+  changed_when: false
+  check_mode: false
+
+- name: Set the owned syslog location and action
+  ansible.builtin.set_fact:
+    crewship_syslog_dir: "{{ crewship_data_dir }}/host-logs/rsyslog"
+    crewship_syslog_action: >-
+      action(type="omfile" file="{{ crewship_data_dir }}/host-logs/rsyslog/syslog"
+      fileOwner="syslog" fileGroup="adm" fileCreateMode="0640" createDirs="off"
+      rotation.sizeLimit="134217728" rotation.sizeLimitCommand="/usr/local/libexec/crewship-syslog-rotate"
+      action.resumeRetryCount="-1") # crewship bounded syslog
+
+- name: Read the distribution syslog rules
+  ansible.builtin.slurp:
+    src: /etc/rsyslog.d/50-default.conf
+  register: crewship_syslog_rules
+
+- name: Require one supported general syslog action
+  ansible.builtin.assert:
+    that:
+      - >-
+        (crewship_syslog_rules.content | b64decode |
+         regex_findall('(?m)^[^#\s][^\n]*[ \t]+(?:-?/var/log/syslog[ \t]*|action\(type="omfile"[^\n]*# crewship bounded syslog)$') | length) == 1
+    fail_msg: "Expected one distribution syslog file action or Crewship-owned action. Reconcile custom syslog rules before applying."
+
+- name: Inspect the owned log paths without following links
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop:
+    - "{{ crewship_data_dir }}/host-logs"
+    - "{{ crewship_syslog_dir }}"
+    - "{{ crewship_syslog_dir }}/syslog"
+    - "{{ crewship_syslog_dir }}/syslog.1"
+    - "{{ crewship_syslog_dir }}/syslog.2"
+    - "{{ crewship_syslog_dir }}/syslog.3"
+    - "{{ crewship_syslog_dir }}/syslog.4"
+    - "{{ crewship_syslog_dir }}/syslog.5"
+    - "{{ crewship_syslog_dir }}/syslog.6"
+    - "{{ crewship_syslog_dir }}/syslog.7"
+    - "{{ crewship_syslog_dir }}/syslog.8"
+  register: crewship_syslog_paths
+
+- name: Reject unsafe existing log paths
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - >-
+        not item.stat.exists or
+        ((item.stat.isdir | default(false)) if index < 2 else
+         ((item.stat.isreg | default(false)) and item.stat.nlink == 1))
+    fail_msg: "Owned syslog paths must be real directories or single-link regular files."
+  loop: "{{ crewship_syslog_paths.results }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.item }}"
+
+- name: Create the root-owned log parent
+  ansible.builtin.file:
+    path: "{{ crewship_data_dir }}/host-logs"
+    state: directory
+    owner: root
+    group: adm
+    mode: "0755"
+
+- name: Create the private native syslog directory
+  ansible.builtin.file:
+    path: "{{ crewship_syslog_dir }}"
+    state: directory
+    owner: syslog
+    group: adm
+    mode: "0750"
+
+- name: Set narrow ownership on existing active and archived logs
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    owner: syslog
+    group: adm
+    mode: "0640"
+  loop: "{{ crewship_syslog_paths.results[2:] }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+- name: Create the rotation helper and service override directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [/usr/local/libexec, /etc/systemd/system/rsyslog.service.d]
+
+- name: Install the fixed-path rotation helper
+  ansible.builtin.template:
+    src: "{{ crewship_blueprint }}/ansible/templates/crewship-syslog-rotate.j2"
+    dest: /usr/local/libexec/crewship-syslog-rotate
+    owner: root
+    group: root
+    mode: "0755"
+    validate: /bin/sh -n %s
+  notify: restart bounded syslog
+
+- name: Resolve the mount unit name
+  ansible.builtin.command:
+    argv: [systemd-escape, --path, --suffix=mount, "{{ crewship_syslog_mount.stdout }}"]
+  register: crewship_syslog_mount_unit
+  changed_when: false
+  check_mode: false
+
+- name: Bind the logger to its data mount
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/rsyslog.service.d/crewship-data-mount.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      StopPropagatedFrom={{ crewship_syslog_mount_unit.stdout }}
+      After={{ crewship_syslog_mount_unit.stdout }}
+      [Service]
+      ExecStartPre=/usr/bin/mountpoint -q -- {{ crewship_syslog_mount.stdout }}
+  notify: restart bounded syslog
+
+- name: Detect the distribution rsyslog AppArmor profile
+  ansible.builtin.stat:
+    path: /etc/apparmor.d/usr.sbin.rsyslogd
+  register: crewship_syslog_apparmor
+
+- name: Add narrow access for a confined logger
+  when: crewship_syslog_apparmor.stat.exists
+  block:
+    - name: Read the logger confinement profile
+      ansible.builtin.slurp:
+        src: /etc/apparmor.d/usr.sbin.rsyslogd
+      register: crewship_syslog_profile
+
+    - name: Require the distribution local policy hook
+      ansible.builtin.assert:
+        that: "'local/usr.sbin.rsyslogd' in (crewship_syslog_profile.content | b64decode)"
+        fail_msg: "The rsyslog AppArmor profile needs its distribution local include before apply."
+
+    - name: Resolve the actual helper executables
+      ansible.builtin.command:
+        argv: [readlink, -f, "{{ item }}"]
+      loop: [/bin/sh, /usr/bin/mv, /usr/bin/mountpoint]
+      register: crewship_syslog_executables
+      changed_when: false
+      check_mode: false
+
+    - name: Extend only the logger local policy
+      ansible.builtin.blockinfile:
+        path: /etc/apparmor.d/local/usr.sbin.rsyslogd
+        create: true
+        owner: root
+        group: root
+        mode: "0644"
+        marker: "# {mark} CREWSHIP BOUNDED SYSLOG"
+        block: |
+          "{{ crewship_syslog_dir }}/" r,
+          "{{ crewship_syslog_dir }}/syslog{,.[1-8]}" rw,
+          /usr/local/libexec/crewship-syslog-rotate rix,
+          {% for executable in crewship_syslog_executables.results %}
+          "{{ executable.stdout }}" rix,
+          {% endfor %}
+          /proc/*/mounts r,
+          /proc/*/mountinfo r,
+      notify: restart bounded syslog
+
+    - name: Validate the complete logger profile without loading kernel policy
+      ansible.builtin.command:
+        argv: [apparmor_parser, -Q, -T, -K, /etc/apparmor.d/usr.sbin.rsyslogd]
+      changed_when: false
+      when: not ansible_check_mode
+
+- name: Update only the general action and validate the complete configuration
+  block:
+    - name: Replace the general syslog file action
+      ansible.builtin.replace:
+        path: /etc/rsyslog.d/50-default.conf
+        regexp: '^([^#\s][^\n]*?[ \t]+)(?:-?/var/log/syslog[ \t]*|action\(type="omfile"[^\n]*# crewship bounded syslog)$'
+        replace: '\g<1>{{ crewship_syslog_action }}'
+      notify: restart bounded syslog
+
+    - name: Validate the main configuration and all operator includes
+      ansible.builtin.command:
+        argv: [/usr/sbin/rsyslogd, -N1]
+      changed_when: false
+      when: not ansible_check_mode
+  rescue:
+    - name: Restore the original rules after validation failure
+      ansible.builtin.copy:
+        dest: /etc/rsyslog.d/50-default.conf
+        content: "{{ crewship_syslog_rules.content | b64decode }}"
+
+    - name: Stop before changing rotation ownership or restarting the logger
+      ansible.builtin.fail:
+        msg: "Full rsyslog validation failed. The original general log rules were restored."
+
+- name: Remove only the moved syslog from distribution logrotate ownership
+  ansible.builtin.replace:
+    path: /etc/logrotate.d/rsyslog
+    regexp: '(?m)^[ \t]*/var/log/syslog[ \t]*\n'
+    replace: ''
+
+- name: Explain preserved log history
+  ansible.builtin.debug:
+    msg: >-
+      The general syslog now targets {{ crewship_syslog_dir }}/syslog.
+      Existing /var/log/syslog files and archives remain unchanged; archive them manually after checking that no writer holds them.
+      Other logging rules remain enabled. Empty data_dir leaves the installed logging configuration unchanged.
