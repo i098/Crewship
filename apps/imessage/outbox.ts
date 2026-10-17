@@ -65,21 +65,7 @@ export class Queue<T> {
     this.next = (this.seqs().at(-1) ?? 0) + 1;
     if (key) {
       mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
-      for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) {
-        if (!existsSync(folder)) continue;
-        for (const file of readdirSync(folder).filter((f) => f.endsWith(".json"))) {
-          let item: T;
-          try { item = JSON.parse(readFileSync(`${folder}/${file}`, "utf8")); }
-          catch { continue; } // The normal drain handles an unreadable pending item.
-          const id = key(item);
-          if (id) this.keys.add(id);
-          if (folder === `${dir}-done`) this.next = Math.max(this.next, parseInt(file, 10) + 1);
-          if (id && folder === `${dir}-dead`) queueMicrotask(() => {
-            try { this.lost?.(item); }
-            catch (e) { console.error(`fm-imessage: ${this.name} restored lost notice failed: ${brief(e)}`); }
-          });
-        }
-      }
+      for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) this.restoreKeys(folder, key);
     }
     void this.drain();
   }
@@ -90,6 +76,22 @@ export class Queue<T> {
     this.write(this.next++, item);
     if (id) this.keys.add(id);
     void this.drain();
+  }
+
+  private restoreKeys(folder: string, key: (item: T) => string | undefined) {
+    if (!existsSync(folder)) return;
+    for (const file of readdirSync(folder).filter((f) => f.endsWith(".json"))) {
+      let item: T;
+      try { item = JSON.parse(readFileSync(`${folder}/${file}`, "utf8")); }
+      catch { continue; } // The normal drain handles an unreadable pending item.
+      const id = key(item);
+      if (id) this.keys.add(id);
+      if (folder === `${this.dir}-done`) this.next = Math.max(this.next, parseInt(file, 10) + 1);
+      if (id && folder === `${this.dir}-dead`) queueMicrotask(() => {
+        try { this.lost?.(item); }
+        catch (e) { console.error(`fm-imessage: ${this.name} restored lost notice failed: ${brief(e)}`); }
+      });
+    }
   }
 
   private seqs(): number[] {
