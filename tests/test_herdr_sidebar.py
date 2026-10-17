@@ -122,7 +122,7 @@ def write(path: Path, text: str, mode: int = 0o644) -> None:
 
 
 @pytest.fixture
-def fixture(tmp_path):
+def fixture(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".git").mkdir(parents=True)
     (home / "data").mkdir()
@@ -321,16 +321,13 @@ else:
 """,
         0o755,
     )
-    env = {
-        **os.environ,
-        "PATH": f"{stub}:{os.environ['PATH']}",
-        "HERDR_BIN_PATH": str(stub / "herdr"),
-        "XDG_CACHE_HOME": str(tmp_path / "cache"),
-    }
+    monkeypatch.setenv("PATH", f"{stub}:{os.environ['PATH']}")
+    monkeypatch.setattr(spaces, "HERDR", str(stub / "herdr"))
+    monkeypatch.setattr(spaces, "CACHE", tmp_path / "cache/crewship")
 
     def run() -> dict[str, dict[str, str | None]]:
         log.unlink(missing_ok=True)
-        subprocess.run(["python3", str(REPORTER)], env=env, check=True, timeout=120)
+        spaces.main()
         reported = {}
         for line in log.read_text().splitlines():
             args = json.loads(line)
@@ -553,10 +550,12 @@ def test_mobile_layout_carries_the_same_data(fixture, tmp_path):
     }
 
 
-def test_mobile_reports_settle_and_follow_a_changed_pane(fixture, tmp_path):
+def test_mobile_reports_settle_and_follow_a_changed_pane(fixture, tmp_path, monkeypatch):
     _, run = fixture
     calls = tmp_path / "mobile.jsonl"
     state = tmp_path / "panes.json"
+    # Live processes can share the fixture's workspace IDs and change its CPU labels.
+    monkeypatch.setattr(spaces, "processes", lambda: {})
 
     def reports():
         lines = calls.read_text().splitlines() if calls.exists() else []
