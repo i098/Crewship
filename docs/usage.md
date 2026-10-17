@@ -193,6 +193,7 @@ Content, content hashes, arbitrary attributes, headers, tool arguments, tool res
 
 `blueprint/usage/dashboard.json` is an importable current SigNoz v6 definition for the v2 dashboard API.
 It uses the documented logs v2 table and ClickHouse query panels.
+Each panel spans the 12 columns of the SigNoz v6 grid.
 It is not a screenshot or a running dashboard.
 
 Regenerate it with:

@@ -189,7 +189,7 @@ FROM completions WHERE {SELECTED} GROUP BY outcome ORDER BY outcome"""
     def section(title, keys, opened=True):
         return {"kind": "Grid", "spec": {
             "display": {"title": title, "collapse": {"open": opened}},
-            "items": [{"x": 0, "y": index * 6, "width": 24, "height": 6,
+            "items": [{"x": 0, "y": index * 6, "width": 12, "height": 6,
                        "content": {"$ref": f"#/spec/panels/{key}"}}
                       for index, key in enumerate(keys)],
         }}

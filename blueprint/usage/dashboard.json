@@ -275,7 +275,7 @@
             {
               "x": 0,
               "y": 0,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/prompts"
@@ -284,7 +284,7 @@
             {
               "x": 0,
               "y": 6,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/requests"
@@ -293,7 +293,7 @@
             {
               "x": 0,
               "y": 12,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/models"
@@ -302,7 +302,7 @@
             {
               "x": 0,
               "y": 18,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/calendar"
@@ -311,7 +311,7 @@
             {
               "x": 0,
               "y": 24,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/tokens"
@@ -320,7 +320,7 @@
             {
               "x": 0,
               "y": 30,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/change"
@@ -342,7 +342,7 @@
             {
               "x": 0,
               "y": 0,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/coverage"
@@ -351,7 +351,7 @@
             {
               "x": 0,
               "y": 6,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/outcomes"
@@ -360,7 +360,7 @@
             {
               "x": 0,
               "y": 12,
-              "width": 24,
+              "width": 12,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/method"

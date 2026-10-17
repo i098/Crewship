@@ -317,6 +317,17 @@ def test_report_uses_one_snapshot_while_another_collector_writes(ledger, monkeyp
     assert ledger.summary(NOW, NOW + timedelta(seconds=1))["requests"] == 2
 
 
+def test_dashboard_panels_fit_signoz_twelve_column_grid():
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/usage_dashboard.py")],
+                            capture_output=True, text=True, check=True)
+    for document in (json.loads(result.stdout),
+                     json.loads((ROOT / "blueprint/usage/dashboard.json").read_text())):
+        for layout in document["spec"]["layouts"]:
+            for item in layout["spec"]["items"]:
+                assert 1 <= item["width"] <= 12
+                assert 0 <= item["x"] <= 12 - item["width"]
+
+
 def test_completed_call_rates_exclude_clipped_window_edges():
     with sqlite3.connect(":memory:") as connection:
         connection.create_function("intDiv", 2, lambda numerator, denominator: numerator // denominator)
