@@ -262,6 +262,41 @@ def test_seed_finds_native_root_without_a_shell_export(database, tmp_path, monke
     assert urlsplit(env_url(app)).scheme == "postgresql"
 
 
+@pytest.mark.parametrize("source", ["config", "override"])
+@pytest.mark.parametrize("operation", ["--seed", "app"])
+def test_native_root_cleans_parent_segments_before_resolving_symlinks(
+    database, tmp_path, monkeypatch, capsys, source, operation,
+):
+    archive = tmp_path / "archive/user"
+    archive.mkdir(parents=True)
+    link = tmp_path / "bulk/link"
+    link.parent.mkdir()
+    link.symlink_to(archive, target_is_directory=True)
+    app = checkout(tmp_path / "bulk/pools", "app-abc", 1, "app", POSTGRES)
+    wrong_root = tmp_path / "archive/pools"
+    wrong = checkout(wrong_root, "app-abc", 1, "app", LAB_REDIS)
+    root = "$HOME/bulk/link/../pools"
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(root if source == 'config' else str(wrong_root))}\n")
+    if source == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", root)
+
+    database.main([operation])
+
+    meta = json.loads((database.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == ("postgres", "postgres:16-alpine")
+    if operation == "--seed":
+        assert urlsplit(env_url(app)).scheme == "postgresql"
+        assert not (wrong / ".env.local").exists()
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / "app.env"
+        variable, url = path.read_text().strip().split("=", 1)
+        assert variable == "DATABASE_URL"
+        assert urlsplit(url).scheme == "postgresql"
+
+
 def test_explicit_root_overrides_native_config_and_keeps_legacy_projects(database, tmp_path, monkeypatch):
     config = tmp_path / ".config/treehouse/config.toml"
     config.parent.mkdir(parents=True)

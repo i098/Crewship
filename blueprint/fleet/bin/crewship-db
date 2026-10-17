@@ -116,9 +116,10 @@ def checkouts():
         lambda match: os.environ.get(match[1] or match[2] or "", ""), root,
     )
     native = Path(expanded) if root else HOME
-    roots = {HOME.resolve()}
+    roots = {HOME}
     if native.is_absolute():
-        roots.add(native.resolve())
+        roots.add(native)
+    roots = {Path(os.path.normpath(root)).resolve() for root in roots}
     found = {
         git.parent for root in roots
         for pattern in ("*/*/*/.git", "firstmate-*/*/firstmate/projects/*/.git")

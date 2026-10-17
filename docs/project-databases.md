@@ -83,6 +83,7 @@ The seeder reads `root` from `~/.config/treehouse/config.toml` without a login-s
 `TREEHOUSE_ROOT`, when nonempty, overrides that setting.
 It expands environment variables in the root, then scans `<root>/.treehouse` and the legacy `~/.treehouse` pools.
 Unset variables expand to empty text, as they do in Treehouse.
+It removes `.` and `..` segments before it resolves symlinks and removes duplicate physical roots.
 It scans each physical root once and each physical checkout once per project name, including Firstmate project clones inside either pool location.
 Relative roots need a repository context, so the seeder skips them instead of using its current directory.
 Repository-local `treehouse.toml` files and per-command `treehouse --root` values are not global discovery settings.
