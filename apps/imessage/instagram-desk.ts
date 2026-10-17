@@ -1,5 +1,5 @@
-// The Instagram front desk shares desk.ts and memory.ts with the iMessage bridge.
-// It has no Instagram client and follows two logs of the instagram-dm skill's listener:
+// The Instagram front desk: the iMessage desk (desk.ts, memory.ts) on the Instagram DM line. A small service, with no
+// Instagram client of its own, that follows two logs of the instagram-dm skill's listener:
 //   INSTAGRAM_DM_LOG   one row per new DM from the operator (poll), after it went to the Firstmate inbox
 //   INSTAGRAM_DM_SENT  one row per fm-insta-reply send, tapback or typing, with `by`: "desk" for the desk's own calls
 // Each DM restarts the quiet period (8 s; 60 s once the burst holds a reel link, and with two or more links the desk
