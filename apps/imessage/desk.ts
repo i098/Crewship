@@ -55,8 +55,9 @@ export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: 
   const value = parseBasic(drafted);
   if (!value || !Array.isArray(value.evidence)) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
-  if (/\b(?:i|we|firstmate)(?:['’](?:ve|re|m|s|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(value.answer)) return;
-  if (/\b(?:i|we|firstmate)(?:['’](?:ve|s|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(value.answer)) return;
+  if (/\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(value.answer)) return;
+  if (/\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(value.answer)) return;
+  if (/\bfirstmate['’]s\s+(?:(?:already|just|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|run|running|sending|checked)\b(?=\s+(?:a|an|the|it|them|this|that|these|those|my|our|your|on|with|for|at|to)(?:\s|[.!?,;:]|$)|\s*(?:[.!?]|$))/i.test(value.answer)) return;
   const facts = value.evidence.map((e: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }) => quotedFact(e, status, msgs, models));
   if (facts.includes(undefined)) return;
   return value.answer === facts.join("\n") ? value.answer : undefined;

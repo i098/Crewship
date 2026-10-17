@@ -110,6 +110,13 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
     ("OK!", False),
     ("Yes, go ahead.", False),
     ("Proceed", False),
+    ("Approve PR 12", False),
+    ("Please approve PR 12", False),
+    ("Could you approve PR 12?", False),
+    ("yes please", False),
+    ("ok go ahead and merge", False),
+    ("Yes, merge PR 12", False),
+    ("OK, deploy staging", False),
     ("Approved for deployment", True),
     ("What is the account password?", False),
     ("Run tests", True),
@@ -181,6 +188,12 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
     ("Which OS do you run?", "I run Linux."),
     ("What do you check?", "We check the supplied status."),
     ("Which format do you send?", "I send plain text."),
+    ("Where is Firstmate's work directory?", "Firstmate's work directory is /workspace/firstmate."),
+    ("Where are Firstmate’s saved settings?", "Firstmate’s saved settings are local."),
+    ("What are Firstmate's working hours?", "Firstmate's working hours are 9am to 5pm."),
+    ("What is Firstmate’s sending limit?", "Firstmate’s sending limit is five messages."),
+    ("What is Firstmate's run status?", "Firstmate's run status is green."),
+    ("When does Firstmate start?", "Firstmate's start time is 9am."),
 ])
 def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source_kind, question, fact):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -234,6 +247,10 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     "We have checked the build.",
     "I’ll check the build.",
     "Firstmate will deploy the build.",
+    "Firstmate's saved it.",
+    "Firstmate's running the checks.",
+    "Firstmate’s working on it.",
+    "Firstmate's run the checks.",
 ])
 def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)

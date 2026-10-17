@@ -23,7 +23,7 @@ For each message from the owner, the service does these steps:
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
-   It rejects unsupported facts and work claims, while allowing grounded simple-present descriptions.
+   It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
    Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
