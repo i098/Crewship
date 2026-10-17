@@ -79,6 +79,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 - [Security](.github/SECURITY.md)
 - [Code of conduct](.github/CODE_OF_CONDUCT.md)
 - [Default config](docs/default-config.md)
+- [Model usage metadata](docs/usage.md)
 
 ## Built with
 
