@@ -384,6 +384,67 @@ if (after.requests !== 1 || after.counted_tokens !== null
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("recovery", ["shutdown", "completion", "checkpoint"])
+def test_pending_outage_is_durable_before_recovered_source_records(native_source, recovery):
+    view = {}
+
+    def inspect(data):
+        report = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/usage.py"), "--mount", str(native_source[2]),
+             "--data-dir", str(data), "report"],
+            check=True, capture_output=True, text=True)
+        view.update(json.loads(report.stdout))
+
+    result, records = execute(native_source, r'''
+import { AssistantMessageEventStream } from "NATIVE_SOURCE/utils/event-stream.ts";
+const originalInterval = globalThis.setInterval;
+let pulse: (() => void) | undefined;
+globalThis.setInterval = (callback) => {
+    pulse = () => callback();
+    return originalInterval(() => {}, 86_400_000);
+};
+const { capture } = await import("ADAPTER_SOURCE");
+const underlying = new AssistantMessageEventStream();
+const pending = capture({ provider: "example", model: "model-a", producer_kind: "chat" }, () => underlying);
+const recovery = RECOVERY;
+function finish() {
+    underlying.push({ type: "done", reason: "stop", message: {
+        role: "assistant", stopReason: "stop", usageMetadata: null } });
+}
+if (recovery === "shutdown") {
+    finish();
+    await pending.result();
+}
+if (!pulse) throw new Error("the checkpoint callback is missing");
+const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
+process.env.CREWSHIP_USAGE_COLLECTOR = "/missing-collector.py";
+pulse();
+process.env.CREWSHIP_USAGE_COLLECTOR = collector;
+if (recovery === "completion") {
+    finish();
+    await pending.result();
+} else if (recovery === "checkpoint") {
+    pulse();
+}
+'''.replace("RECOVERY", json.dumps(recovery)),
+        inspect=inspect)
+    assert result.returncode == 0, result.stderr
+    assert "usage metadata checkpoint acknowledgement failed" in result.stderr
+    gaps = [row for row in records if row["kind"] == "gap"]
+    assert len(gaps) == 1
+    gap = gaps[0]
+    recovered_kind = "complete" if recovery == "completion" else recovery
+    recovered = next(row for row in records if row["kind"] == recovered_kind)
+    assert records.index(gap) < records.index(recovered)
+    assert gap["reason"] == "delivery" and gap["producer"] == recovered["producer"]
+    coverage = view["coverage"][0]
+    assert coverage["gap_intervals"] == 1
+    assert coverage["missing_sequences"] == ([[1, 1]] if recovery == "checkpoint" else [])
+    assert coverage["shutdown"] is True
+    assert view["requests"] == (0 if recovery == "checkpoint" else 1)
+    assert view["counted_tokens"] is None
+
+
 def test_native_cancellation_keeps_a_completion_with_unknown_tokens(native_source):
     result, records = execute(native_source, TRANSPORT + r'''
 const response = stream(model, context, { ...options, signal: AbortSignal.abort() });

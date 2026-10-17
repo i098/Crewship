@@ -39,7 +39,7 @@ Other normalizers keep usage presence unknown and export null token buckets.
 The adapter never treats their initialized zeroes as observed usage.
 It reads only selected terminal metadata and awaits durable acknowledgements.
 Delivery failure escapes instead of disappearing inside `onChatUsage`.
-The next successful delivery records a gap.
+After registration, every source record persists a pending gap first, including completion, checkpoint, and shutdown.
 Graceful exit records a shutdown checkpoint.
 An unreferenced one-minute timer records idle checkpoints without keeping a source process alive.
 Start a new source process after an outage exceeds the retained producer horizon.

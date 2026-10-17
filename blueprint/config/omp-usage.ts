@@ -44,6 +44,11 @@ function send(source: Source, row: Record<string, unknown>) {
 }
 
 function record(source: Source, kind: string, event: string, at: string, fields = {}) {
+	if (source.gap) {
+		send(source, { schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
+			at: source.gap, end: at, reason: "delivery" });
+		source.gap = undefined;
+	}
 	send(source, { schema: 1, kind, producer: source.producer, event, at, ...fields });
 }
 
@@ -62,10 +67,6 @@ function sourceFor(kind: Kind): Source {
 	if (!source.registered) {
 		send(source, source.registration);
 		source.registered = true;
-	}
-	if (source.gap) {
-		record(source, "gap", randomUUID(), source.gap, { end: new Date().toISOString(), reason: "delivery" });
-		source.gap = undefined;
 	}
 	return source;
 }
