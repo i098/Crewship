@@ -298,6 +298,44 @@ def test_discovery_deduplicates_root_and_registered_checkout_aliases(database, t
     assert {name: [path.resolve() for path in paths] for name, paths in database.checkouts().items()} == {"app": [app]}
 
 
+@pytest.mark.parametrize("operation", ["--seed", "app"])
+@pytest.mark.parametrize("source, relative, engine, image", [
+    ("registered", "Dev/firstmate/projects/app", "postgres", "postgres:16-alpine"),
+    ("registered", "!projects/app", "redis", "redis:alpine"),
+    ("pool", ".treehouse/firstmate-abc/1/firstmate/projects/app", "postgres", "postgres:16-alpine"),
+    ("pool", "data/.treehouse/app-abc/1/app", "postgres", "postgres:16-alpine"),
+])
+def test_checkout_aliases_keep_sorted_engine_detection_order(
+    database, tmp_path, monkeypatch, capsys, operation, source, relative, engine, image,
+):
+    first = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    second = checkout(tmp_path, "app-abc", 2, "app", LAB_REDIS)
+    alias = tmp_path / relative
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(first if engine == "postgres" else second, target_is_directory=True)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    if source == "registered":
+        database.apply()
+        database.PROJECTS.write_text(str(alias.parent))
+    capsys.readouterr()
+
+    database.main([operation])
+
+    meta = json.loads((database.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == (engine, image)
+    variable = "DATABASE_URL" if engine == "postgres" else "REDIS_URL"
+    scheme = "postgresql" if engine == "postgres" else "redis"
+    if operation == "--seed":
+        assert env_url(first, variable) == env_url(second, variable) == env_url(alias, variable)
+        assert urlsplit(env_url(first, variable)).scheme == scheme
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / "app.env"
+        key, url = path.read_text().strip().split("=", 1)
+        assert key == variable
+        assert urlsplit(url).scheme == scheme
+
+
 @pytest.mark.parametrize("target", ["123", "storage-app"])
 def test_registered_links_keep_their_project_name(database, tmp_path, target):
     directory = tmp_path / "storage" / target

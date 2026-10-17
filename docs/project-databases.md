@@ -89,6 +89,7 @@ Repository-local `treehouse.toml` files and per-command `treehouse --root` value
 Apply records the configured `<workspace>/firstmate/projects` directory, so custom workspace paths also receive database settings.
 It finds each checkout by its `.git` entry and uses the checkout directory name as the project name.
 For a linked checkout, the link name stays the project name.
+For multiple paths to the same named checkout, it keeps the first path in sorted order.
 It ignores names that start with anything but a letter or have more than 48 letters, digits, underscores or hyphens.
 Projects with the same directory name share a container, even when they come from different repositories.
 The seeder starts or updates one container per project, then writes the project's variable into `.env.local` of every checkout of that project, with mode `0600`.
