@@ -124,6 +124,89 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("claim", [
+    "I fixed the bridge.",
+    "I've deployed it.",
+    "I’ve deployed it.",
+    "We've repaired it.",
+    "Firstmate’s deployed it.",
+    "Our changes are live.",
+])
+def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    if source_kind == "status":
+        (fake / "status").write_text(claim)
+        evidence = {"source": "status", "quote": claim}
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = {"source": "chat", "id": 0, "quote": claim}
+    (fake / "answer").write_text(json.dumps({
+        "kind": "basic", "answer": claim, "evidence": [evidence],
+    }))
+    bridge = start(1)
+    try:
+        receive("claim", "What is the bridge status?")
+        wait_for(lambda: "photon-claim " in text(notes), "the action-claim handoff")
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        receive("claim", "What is the bridge status?")
+        time.sleep(4.5)
+        assert text(notes).count("photon-claim ") == 1
+        assert text(fake / "sent") == ""
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the bridge status?"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("subject,quote,supervisor,direct", [
+    ("desk", "claude-haiku-5-5", "claude-opus-5-5", True),
+    ("supervisor", "claude-opus-5-5", "claude-opus-5-5", True),
+    ("supervisor", "claude-opus-5-5", "", False),
+    ("supervisor", "claude-haiku-5-5", "claude-opus-5-5", False),
+    ("desk", "claude-opus-5-5", "claude-opus-5-5", False),
+    ("supervisor", "claude-opus-5-5", "claude-opus-5-5\nother-model", False),
+    ("unknown", "claude-haiku-5-5", "claude-opus-5-5", False),
+    (None, "claude-haiku-5-5", "claude-opus-5-5", False),
+])
+def test_model_identity_is_bound_to_its_configured_subject(tmp_path, monkeypatch, subject, quote, supervisor, direct):
+    monkeypatch.setenv("FM_IMESSAGE_SUPERVISOR_MODEL", supervisor)
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "basic", "answer": quote,
+        "evidence": [{"source": "identity", "subject": subject, "quote": quote}],
+    }))
+    question = "Which model does Firstmate use?" if subject == "supervisor" else "Which model does the desk use?"
+    bridge = start(1)
+    try:
+        receive("identity", question)
+        if direct:
+            wait_for(lambda: text(fake / "sent"), "the direct identity answer")
+            assert text(fake / "sent").splitlines() == [f"send {quote}"]
+            assert text(notes) == ""
+        else:
+            wait_for(lambda: "photon-identity " in text(notes), "the unsupported-identity handoff")
+            assert text(fake / "sent") == ""
+        call = json.loads(text(fake / "model-calls").splitlines()[0])
+        assert call["args"][call["args"].index("--model") + 1] == "claude-haiku-5-5"
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        receive("identity", question)
+        time.sleep(4.5)
+        assert text(fake / "sent").splitlines() == ([f"send {quote}"] if direct else [])
+        assert text(notes).count("photon-identity ") == (0 if direct else 1)
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "model-hold").touch()
@@ -385,7 +468,7 @@ def test_multiline_work_bypasses_a_ready_basic_answer(tmp_path):
 
 @pytest.mark.parametrize("status,evidence,answer", [
     ("The build did not pass.", {"source": "status", "quote": "pass"}, "pass"),
-    ("The build is paused.", {"source": "identity", "quote": "haiku"}, "haiku"),
+    ("The build is paused.", {"source": "identity", "subject": "desk", "quote": "haiku"}, "haiku"),
 ])
 def test_partial_evidence_cannot_reverse_a_fact_or_shorten_model_identity(tmp_path, status, evidence, answer):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)

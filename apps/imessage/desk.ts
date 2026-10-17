@@ -23,7 +23,8 @@ A mixed burst MUST hand off in full. Never claim an action was done, promise wor
 Return ONLY JSON: {"kind":"handoff"} or {"kind":"basic","answer":"exact quoted fact","evidence":[
 {"source":"status","quote":"exact quoted fact"}]}.
 For chat evidence use {"source":"chat","id":MESSAGE_ID,"quote":"exact quoted fact"}.
-For your model identity use {"source":"identity","quote":"${deskModel}"}.
+For your model identity use {"source":"identity","subject":"desk","quote":"${deskModel}"}.
+${supervisorModel ? `For Firstmate's model identity use {"source":"identity","subject":"supervisor","quote":"${supervisorModel}"}.` : "Firstmate's model identity is unknown; hand off questions about it."}
 The answer must equal the evidence quotes joined with a newline. Use complete source lines, preserving their
 subject and negation, or the full model name for identity. If no safe complete quote answers the question, hand off.
 Never return SKIP, a tapback, free text, markdown fences, or an acknowledgement. You have no action tools.`
@@ -49,13 +50,13 @@ and zoom(id, 1) gives the message whole.`;
 }
 
 // Accept only exact facts from trusted records; a failed or unsupported draft requires a handoff.
-export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], model: string): string | undefined {
+export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }): string | undefined {
   if (!ok) return;
   const value = parseBasic(drafted);
   if (!value || !Array.isArray(value.evidence)) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
-  if (/\b(?:i|we|firstmate)\s+(?:(?:have|has|already|am|are|is|will)\s+)*(?:sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|run|send|check)\b/i.test(value.answer)) return;
-  const facts = value.evidence.map((e: { source?: unknown; quote?: unknown; id?: unknown }) => quotedFact(e, status, msgs, model));
+  if (/\b(?:i|me|my|mine|myself|we|us|our|ours|ourselves|firstmate)\b/i.test(value.answer)) return;
+  const facts = value.evidence.map((e: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }) => quotedFact(e, status, msgs, models));
   if (facts.includes(undefined)) return;
   return value.answer === facts.join("\n") ? value.answer : undefined;
 }
@@ -68,13 +69,16 @@ function parseBasic(drafted: string) {
   return value;
 }
 
-function quotedFact(evidence: { source?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: { i: number; kind: string; text: string }[], model: string) {
+function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }) {
   if (typeof evidence?.quote !== "string") return;
   if (!evidence.quote.trim()) return;
   let source: string | undefined;
   switch (evidence.source) {
     case "status": source = status; break;
-    case "identity": source = model; break;
+    case "identity": {
+      const model = evidence.subject === "desk" ? models.desk : evidence.subject === "supervisor" ? models.supervisor : undefined;
+      return evidence.quote === model ? evidence.quote : undefined;
+    }
     case "chat": {
       const message = msgs.find((m) => m.i === evidence.id);
       if (message?.kind === "owner") return;

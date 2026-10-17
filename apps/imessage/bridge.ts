@@ -75,7 +75,8 @@ const INBOX = env.FM_INBOX_CMD || `${FM_HOME}/bin/fm-inbox.sh`;
 const PORT = Number(env.FM_IMESSAGE_PORT || 8765);
 const TRANSPORTS = (env.FM_IMESSAGE_TRANSPORTS || "photon").split(/\s+/).filter(Boolean);
 const DESK_MODEL = env.FM_IMESSAGE_DESK_MODEL || "claude-haiku-5-5";
-const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, env.FM_IMESSAGE_SUPERVISOR_MODEL || "");
+const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
+const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL);
 const QUIET_MS = 4000; // combine the owner's burst before classification
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
@@ -606,7 +607,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
-  return basicAnswer(ok, drafted, status, memory.msgs, DESK_MODEL);
+  return basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
 }
 
 function applyRoute(event: RouteEvent) {
