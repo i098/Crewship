@@ -80,6 +80,9 @@ crewship:
           { token = "$host", fg = "#a6adc8" },
         ],
         [
+          { token = "$usage", fg = "#a6adc8" },
+        ],
+        [
           { token = "$alert", fg = "#fab387" },
         ],
       ]
