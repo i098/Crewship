@@ -56,7 +56,7 @@ TICK = os.sysconf("SC_CLK_TCK")
 PAGE = os.sysconf("SC_PAGE_SIZE")
 STATES = ("idle", "working", "done", "unknown")  # "blocked" keeps Herdr's own word
 GLYPH = re.compile(r"([⚑▶◷⎇✎]) ")
-# Nerd Fonts 3.5.1 Codicons glyphs "cod-claude" and "cod-openai" (glyphnames.json);
+# Nerd Fonts Codicons glyphs "cod-claude" and "cod-openai" (present in Hack Nerd Font, Nerd Fonts 3.5.0);
 # their outlines are the vendors' marks, so the client terminal font must be Nerd Font patched.
 CLAUDE, OPENAI = "\uec82", "\uec81"
 

@@ -57,8 +57,8 @@ An account listed under `accountsWithoutUsage` also makes its provider unknown.
 A failed command or an absent provider shows unknown, never zero usage.
 The reporter reads only the usage command's output; it does not open or change credential stores.
 
-The marks are the `cod-claude` (U+EC82) and `cod-openai` (U+EC81) glyphs of [Nerd Fonts 3.5.1](https://github.com/ryanoasis/nerd-fonts/blob/v3.5.1/glyphnames.json), which come from the Codicons [`claude.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/claude.svg) and [`openai.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/openai.svg) sources.
-Herdr's sidebar draws text cells only, so the terminal font on the machine that shows Herdr must be Nerd Font patched, or these two cells show a missing-glyph box.
+The marks are the `cod-claude` (U+EC82) and `cod-openai` (U+EC81) glyphs of Nerd Fonts (the Hack Nerd Font 3.5.0 file already contains both), which come from the Codicons [`claude.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/claude.svg) and [`openai.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/openai.svg) sources.
+Herdr's sidebar draws text cells only, so the terminal font on the machine that shows Herdr must be Nerd Font patched with these glyphs (older fonts may lack them), or these two cells show a missing-glyph box.
 
 ### The machine entry
 
