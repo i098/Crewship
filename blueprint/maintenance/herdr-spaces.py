@@ -19,7 +19,7 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
-  usage      "✳ ▰▱▱▱▱▱▱▱  12%  ◎ ▰▰▰▱▱▱▱▱  38%"  provider account means
+  usage      "<claude> ▰▱▱▱▱▱▱▱  12%  <openai> ▰▰▰▱▱▱▱▱  38%"  provider account means
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
@@ -56,6 +56,9 @@ TICK = os.sysconf("SC_CLK_TCK")
 PAGE = os.sysconf("SC_PAGE_SIZE")
 STATES = ("idle", "working", "done", "unknown")  # "blocked" keeps Herdr's own word
 GLYPH = re.compile(r"([⚑▶◷⎇✎]) ")
+# Nerd Fonts 3.5.1 Codicons glyphs "cod-claude" and "cod-openai" (glyphnames.json);
+# their outlines are the vendors' marks, so the client terminal font must be Nerd Font patched.
+CLAUDE, OPENAI = "\uec82", "\uec81"
 
 
 def short_name(label: str) -> str:
@@ -176,7 +179,7 @@ def usage_row(cache: dict) -> str:
             print("herdr-spaces: omp usage unavailable", file=sys.stderr)
         hit = cache["usage"] = {"at": now, "averages": averages}
     halves = []
-    for provider, icon in (("anthropic", "✳"), ("openai-codex", "◎")):
+    for provider, icon in (("anthropic", CLAUDE), ("openai-codex", OPENAI)):
         value = hit["averages"][provider]
         if value is None:
             bar, percent = "░░░?░░░░", "  ?%"

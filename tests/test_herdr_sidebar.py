@@ -365,7 +365,7 @@ def test_reporter_counts_from_a_fixture_home(fixture):
         "alert": "⚠ watcher silent",
         # No machine workspace: the machine line is its host row instead.
         "machine": None,
-        "usage": "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%",
+        "usage": "\uec82 ░░░?░░░░   ?%  \uec81 ░░░?░░░░   ?%",
     }
     # Shares of the machine; CPU needs a baseline, so it waits for run two.
     # Herdr's own continuation indent puts it under the name: no padding.
@@ -452,7 +452,7 @@ def test_a_machine_workspace_carries_the_machine_line_alone(fixture, tmp_path):
     reported = run()
     machine = reported["w0"]
     assert machine.pop("machine").startswith("⌂ ")
-    assert machine.pop("usage") == "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%"
+    assert machine.pop("usage") == "\uec82 ░░░?░░░░   ?%  \uec81 ░░░?░░░░   ?%"
     assert machine == dict.fromkeys(k for k in spaces.TOKENS if k not in ("machine", "usage"))
     # Never both: no Space carries the host row under its resource line.
     assert all(tokens["host"] is None for tokens in reported.values())
@@ -1061,7 +1061,7 @@ def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tm
         f"#!/bin/sh\nprintf '%s\\n' '{json.dumps({'reports': rows})}'\n",
         0o755,
     )
-    expected = "✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%"
+    expected = "\uec82 ▰▰▱▱▱▱▱▱  25%  \uec81 ▰▰▰▰▱▱▱▱  50%"
     assert run()["w1"]["usage"] == expected
     write(tmp_path / "stub/omp", "#!/bin/sh\nexit 2\n", 0o755)
     assert run()["w1"]["usage"] == expected
@@ -1069,7 +1069,7 @@ def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tm
     cache = json.loads(path.read_text())
     cache["usage"]["at"] -= spaces.USAGE_TTL
     path.write_text(json.dumps(cache))
-    assert run()["w1"]["usage"] == "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%"
+    assert run()["w1"]["usage"] == "\uec82 ░░░?░░░░   ?%  \uec81 ░░░?░░░░   ?%"
 
 
 def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
@@ -1083,7 +1083,7 @@ def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
         f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(report)}'\n",
         0o755,
     )
-    assert run()["w1"]["usage"] == "✳ ░░░?░░░░   ?%  ◎ ▱▱▱▱▱▱▱▱   0%"
+    assert run()["w1"]["usage"] == "\uec82 ░░░?░░░░   ?%  \uec81 ▱▱▱▱▱▱▱▱   0%"
 
 
 @pytest.mark.parametrize("width", [46, 38])
@@ -1103,7 +1103,7 @@ def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, wi
     halves = row[:15], row[17:]
     assert len(row) <= width - 6
     assert [len(h) for h in halves] == [15, 15]
-    assert [h[0] for h in halves] == ["✳", "◎"]
+    assert [h[0] for h in halves] == ["\uec82", "\uec81"]
     assert all(h[1] == h[10] == " " and h[-1] == "%" for h in halves)
     if fraction is None:
         assert [h[2:10] for h in halves] == ["░░░?░░░░"] * 2
