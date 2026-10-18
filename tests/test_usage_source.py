@@ -50,7 +50,7 @@ def native_source():
         yield directory, native / "pi-ai/src", mount
 
 
-def execute(native_source, code, *, enabled=True, collector=None, inspect=None):
+def execute(native_source, code, *, enabled=True, collector=None, inspect=None, store=None):
     directory, native, mount = native_source
     with tempfile.TemporaryDirectory(prefix="case-", dir=directory) as temporary:
         case = Path(temporary)
@@ -67,9 +67,11 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None):
                        "CREWSHIP_USAGE_MOUNT": str(mount)}
         if enabled:
             environment["CREWSHIP_USAGE_ADAPTER"] = str(ADAPTER)
+        if store:
+            environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
                                 capture_output=True, text=True, timeout=60)
-        database = case / "data/usage.sqlite"
+        database = case / "data" / ("spool.sqlite" if store == "spool" else "usage.sqlite")
         records = []
         if result.returncode != 0:
             return result, records
@@ -173,6 +175,31 @@ if (!rejected || calls !== 0) throw new Error("the durable start must fail befor
 ''', collector=ROOT / "missing-collector.py")
     assert result.returncode == 0, result.stderr
     assert records == []
+
+
+def test_stale_spool_refuses_the_native_call_before_dispatch_and_keeps_the_ledger_closed(native_source):
+    stored = {}
+    result, records = execute(native_source, TRANSPORT + r'''
+import { Database } from "bun:sqlite";
+await request();
+const spool = new Database(process.env.CREWSHIP_USAGE_DATA_DIR + "/spool.sqlite");
+const stale = Date.now() / 1000 - 8 * 86400;
+spool.run("INSERT INTO events(producer,event,kind,at,ingested,expires,payload,sequence_through,"
+    + "retired_completions) VALUES(?,?,'gap',?,?,?,'{}',0,0)",
+    [crypto.randomUUID(), crypto.randomUUID(), stale, stale, stale + 35 * 86400]);
+let refused = false;
+try { await request(); } catch { refused = true; }
+if (!refused || calls !== 1) throw new Error("a stale spool must refuse the call before dispatch");
+spool.run("DELETE FROM events WHERE payload = '{}'");
+spool.close();
+await request();
+if (calls !== 2) throw new Error("the spool must accept calls after the stale record leaves");
+''', store="spool", inspect=lambda data: stored.update(ledger=(data / "usage.sqlite").exists()))
+    assert result.returncode == 0, result.stderr
+    assert stored == {"ledger": False}
+    assert [row["kind"] for row in records] == [
+        "register", "start", "complete", "gap", "start", "complete", "checkpoint", "shutdown"]
+    assert [row["sequence"] for row in records if row["kind"] == "start"] == [1, 3]
 
 
 def test_native_helper_calls_register_separately_from_chat(native_source):

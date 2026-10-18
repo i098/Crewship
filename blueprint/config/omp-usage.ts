@@ -20,7 +20,8 @@ function command() {
 	const mount = process.env.CREWSHIP_USAGE_MOUNT;
 	if (!collector || !isAbsolute(collector) || !data || !isAbsolute(data) || !mount || !isAbsolute(mount))
 		throw new Error("usage metadata configuration is incomplete");
-	return ["-I", collector, "--data-dir", data, "--mount", mount, "collect"];
+	return ["-I", collector, "--data-dir", data, "--mount", mount,
+		"--store", process.env.CREWSHIP_USAGE_STORE ?? "ledger", "collect"];
 }
 
 function send(source: Source, row: Record<string, unknown>) {

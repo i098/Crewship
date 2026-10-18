@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Collect allowlisted model-request metadata in a separate 35-day SQLite ledger."""
+"""Collect allowlisted model-request metadata in a 35-day ledger or a bounded retry spool."""
 
 import argparse
+import fcntl
 import ipaddress
 import json
 import os
@@ -10,6 +11,7 @@ import sqlite3
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -17,6 +19,10 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 RETENTION = timedelta(days=35)
+BATCH, BATCHES = 100, 50
+SPOOL_BYTES, SPOOL_AGE = 64 * 1024 * 1024, timedelta(days=7)
+SPOOL_PAGES, SPOOL_SPARE = 32768, 256
+TRANSIENT = ("complete", "checkpoint", "gap")
 PACIFIC = ZoneInfo("America/Los_Angeles")
 TOKENS = ("input", "cache_read", "cache_write", "output", "reasoning")
 COMMON = {"schema", "kind", "producer", "event", "at"}
@@ -30,11 +36,12 @@ FIELDS = {
     "retention": set(),
 }
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}\Z")
-SCHEMA = """
-PRAGMA journal_mode=WAL;
+DURABLE = """
 PRAGMA synchronous=FULL;
 PRAGMA secure_delete=ON;
 PRAGMA busy_timeout=10000;
+"""
+TABLES = """
 CREATE TABLE IF NOT EXISTS events (
     producer TEXT NOT NULL, event TEXT NOT NULL, kind TEXT NOT NULL,
     sequence INTEGER, at REAL NOT NULL, ingested REAL NOT NULL,
@@ -56,6 +63,23 @@ CREATE TABLE IF NOT EXISTS producer_state (
     missing_sequences TEXT NOT NULL, retired_completions INTEGER NOT NULL,
     expires REAL NOT NULL
 );
+"""
+SCHEMA = "PRAGMA journal_mode=WAL;" + DURABLE + TABLES
+# A rollback journal holds one transaction, so no WAL grows beside the capped database.
+SPOOL_SCHEMA = f"""
+PRAGMA page_size=4096;
+PRAGMA journal_mode=TRUNCATE;
+PRAGMA temp_store=MEMORY;
+PRAGMA max_page_count={SPOOL_PAGES};
+{DURABLE}{TABLES}
+CREATE TABLE IF NOT EXISTS budget (bytes INTEGER NOT NULL);
+INSERT INTO budget SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM budget);
+CREATE TRIGGER IF NOT EXISTS budget_insert AFTER INSERT ON events BEGIN
+    UPDATE budget SET bytes=bytes+length(new.payload);
+END;
+CREATE TRIGGER IF NOT EXISTS budget_delete AFTER DELETE ON events BEGIN
+    UPDATE budget SET bytes=bytes-length(old.payload);
+END;
 """
 
 
@@ -179,10 +203,12 @@ def _acknowledge_sequence(ranges, sequence):
 
 
 class Ledger:
+    schema = SCHEMA
+
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
-        self.db.executescript(SCHEMA)
+        self.db.executescript(self.schema)
 
     def __enter__(self):
         return self
@@ -190,6 +216,11 @@ class Ledger:
     def __exit__(self, *_):
         self.db.close()
 
+    def locked(self):
+        return nullcontext()
+
+    def _admitted(self, event, now):
+        pass
 
     def accept(self, payload, now=None):
         now = now or datetime.now(UTC)
@@ -225,6 +256,7 @@ class Ledger:
                             "WHERE producer=? AND (kind='register' OR "
                             "(kind='start' AND event=?))",
                             (expiry, event["producer"], event["event"]))
+            self._admitted(event, now)
             self.db.commit()
         except sqlite3.IntegrityError as error:
             self.db.rollback()
@@ -394,32 +426,31 @@ class Ledger:
 
     def export(self, send, now=None):
         now = now or datetime.now(UTC)
-        pending = self.db.execute("SELECT rowid,* FROM events WHERE sent IS NULL AND expires>=? "
-                                  "ORDER BY ingested,rowid LIMIT 100", (now.timestamp(),)).fetchall()
-        if not pending:
-            return 0
-        logs = [self._log_record(row) for row in pending]
-        payload = {"resourceLogs": [{"resource": {"attributes": [
-            {"key": "service.name", "value": {"stringValue": "crewship-usage"}}]},
-            "scopeLogs": [{"scope": {"name": "crewship.usage", "version": "1"},
-                           "logRecords": logs}]}]}
-        reply = send(payload)
-        if not isinstance(reply, dict) or set(reply) - {"partialSuccess"}:
-            raise ValueError("invalid export acknowledgement")
-        partial = reply.get("partialSuccess", {})
-        if (not isinstance(partial, dict)
-                or set(partial) - {"rejectedLogRecords", "errorMessage"}):
-            raise ValueError("invalid export acknowledgement")
-        rejected = partial.get("rejectedLogRecords", 0)
-        if type(rejected) is bool or rejected not in (0, "0"):
-            raise ValueError("export rejected metadata records")
-        if partial.get("errorMessage"):
-            raise ValueError("export returned a partial acknowledgement")
+        exported = 0
+        with self.locked():
+            high = self.db.execute("SELECT coalesce(max(rowid),0) FROM events").fetchone()[0]
+        for _ in range(BATCHES):
+            with self.locked():
+                pending = self.db.execute("SELECT rowid,* FROM events WHERE sent IS NULL AND expires>=? "
+                                          "AND rowid<=? ORDER BY ingested,rowid LIMIT ?",
+                                          (now.timestamp(), high, BATCH)).fetchall()
+                logs = [self._log_record(row) for row in pending]
+            if not pending:
+                break
+            acknowledged(send({"resourceLogs": [{"resource": {"attributes": [
+                {"key": "service.name", "value": {"stringValue": "crewship-usage"}}]},
+                "scopeLogs": [{"scope": {"name": "crewship.usage", "version": "1"},
+                               "logRecords": logs}]}]}))
+            with self.locked():
+                self._acknowledged(pending, now)
+            exported += len(pending)
+        return exported
+
+    def _acknowledged(self, rows, now):
         with self.db:
             self.db.executemany("UPDATE events SET sent=? WHERE producer=? AND event=? AND kind=?",
                                 [(now.timestamp(), row["producer"], row["event"], row["kind"])
-                                 for row in pending])
-        return len(pending)
+                                 for row in rows])
 
     def _log_record(self, stored):
         event = validate(json.loads(stored["payload"]))
@@ -469,6 +500,84 @@ class Ledger:
                 "body": {"stringValue": "Model request metadata"}, "attributes": attributes}
 
 
+def acknowledged(reply):
+    if not isinstance(reply, dict) or set(reply) - {"partialSuccess"}:
+        raise ValueError("invalid export acknowledgement")
+    partial = reply.get("partialSuccess", {})
+    if (not isinstance(partial, dict)
+            or set(partial) - {"rejectedLogRecords", "errorMessage"}):
+        raise ValueError("invalid export acknowledgement")
+    rejected = partial.get("rejectedLogRecords", 0)
+    if type(rejected) is bool or rejected not in (0, "0"):
+        raise ValueError("export rejected metadata records")
+    if partial.get("errorMessage"):
+        raise ValueError("export returned a partial acknowledgement")
+
+
+class Spool(Ledger):
+    """Keep unexported metadata plus the registrations and starts that later records need."""
+
+    schema = SPOOL_SCHEMA
+
+    def __init__(self, path):
+        self.lock = os.open(Path(path).with_suffix(".lock"),
+                            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with self.locked():
+            super().__init__(path)
+
+    def __exit__(self, *_):
+        super().__exit__()
+        os.close(self.lock)
+
+    @contextmanager
+    def locked(self):
+        # SQLite's busy handler polls and can starve a waiter; a blocking flock queues it.
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+
+    def accept(self, payload, now=None):
+        with self.locked():
+            return super().accept(payload, now)
+
+    def _admitted(self, event, now):
+        if event["kind"] == "checkpoint":
+            self.db.execute("DELETE FROM events WHERE producer=? AND kind='checkpoint' "
+                            "AND sent IS NULL AND event!=?", (event["producer"], event["event"]))
+        oldest, size, used = self.db.execute(
+            "SELECT (SELECT min(ingested) FROM events WHERE sent IS NULL),(SELECT bytes FROM budget),"
+            "(SELECT page_count FROM pragma_page_count())"
+            "-(SELECT freelist_count FROM pragma_freelist_count())").fetchone()
+        if oldest < (now - SPOOL_AGE).timestamp():
+            raise ValueError("retry spool is too old")
+        # Collectors stop short of max_page_count: an acknowledgement also needs free pages.
+        if size > SPOOL_BYTES or used > SPOOL_PAGES - SPOOL_SPARE:
+            raise ValueError("retry spool is full")
+
+    def _acknowledged(self, rows, now):
+        done = [(row["producer"], row["event"], row["kind"]) for row in rows
+                if row["kind"] in TRANSIENT]
+        with self.db:
+            self.db.executemany("DELETE FROM events WHERE producer=? AND event=? AND kind=?", done)
+            self.db.executemany("UPDATE events SET sent=? WHERE producer=? AND event=? AND kind=?",
+                                [(now.timestamp(), row["producer"], row["event"], row["kind"])
+                                 for row in rows if row["kind"] not in TRANSIENT])
+            self.db.executemany("DELETE FROM events WHERE producer=? AND event=? AND kind='start' "
+                                "AND sent IS NOT NULL",
+                                [identity[:2] for identity in done if identity[2] == "complete"])
+
+    def prune(self, now=None):
+        now = (now or datetime.now(UTC)).timestamp()
+        with self.locked(), self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            removed = self.db.execute("DELETE FROM events WHERE sent IS NOT NULL AND expires<?",
+                                      (now,)).rowcount
+            self.db.execute("DELETE FROM producer_state WHERE expires<?", (now,))
+        return removed
+
+
 def configured_data_dir(data_dir, mount):
     mount, data_dir = Path(mount), Path(data_dir)
     if not mount.is_absolute() or not data_dir.is_absolute() or ".." in data_dir.parts:
@@ -488,12 +597,12 @@ def configured_data_dir(data_dir, mount):
     return resolved
 
 
-def data_path(data_dir, mount):
+def data_path(data_dir, mount, name):
     directory = configured_data_dir(data_dir, mount)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = directory / "usage.sqlite"
+    path = directory / name
     if path.is_symlink():
-        raise ValueError("ledger must not be a symlink")
+        raise ValueError("metadata storage must not be a symlink")
     return path
 
 
@@ -545,6 +654,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--mount", required=True)
+    parser.add_argument("--store", choices=("ledger", "spool"), default="ledger",
+                        help="spool keeps only unexported metadata in a bounded retry buffer")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("collect")
     commands.add_parser("prune")
@@ -559,8 +670,12 @@ def main(argv=None):
         configured_data_dir(args.data_dir, args.mount)
         print(json.dumps({"mounted": True}))
         return
+    spool = args.store == "spool"
+    if spool and args.command == "report":
+        raise ValueError("the retry spool keeps no local history")
     os.umask(0o077)
-    with Ledger(data_path(args.data_dir, args.mount)) as ledger:
+    path = data_path(args.data_dir, args.mount, "spool.sqlite" if spool else "usage.sqlite")
+    with (Spool if spool else Ledger)(path) as ledger:
         if args.command not in {"prune", "collect"}:
             ledger.prune()
         if args.command == "collect":

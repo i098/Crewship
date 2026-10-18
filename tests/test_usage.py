@@ -5,6 +5,8 @@ import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -626,3 +628,171 @@ def test_interleaved_pruners_retire_each_completion_once(tmp_path):
             "count(DISTINCT CASE WHEN kind='complete' THEN sequence END) AS completed_count "
             "FROM events) SELECT " + charts.COVERAGE_BALANCE + " FROM producer").fetchone()[0]
         assert balance == 1
+
+
+def logs(batch):
+    return batch["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+
+
+def stored(store):
+    return [tuple(row) for row in store.db.execute(
+        "SELECT kind,sent IS NULL FROM events ORDER BY rowid")]
+
+
+def test_spool_exports_ledger_records_and_keeps_only_what_later_records_need(tmp_path):
+    records = [event("register", producer_kind="chat"),
+               event("start", sequence=1, provider="example", model="model-a"),
+               event("complete", sequence=1, outcome="success", usage_present=True,
+                     input_basis="exclusive", input=10, cache_read=20, cache_write=5, output=8,
+                     reasoning=3),
+               event("checkpoint", sequence=1), event("checkpoint", 2, sequence=1),
+               event("start", 2, sequence=2, provider="example", model="model-b")]
+    sent = {}
+    with usage.Ledger(tmp_path / "usage.sqlite") as ledger, \
+            usage.Spool(tmp_path / "spool.sqlite") as spool:
+        for store in (ledger, spool):
+            for record in records:
+                store.accept(record, NOW)
+            sent[store] = []
+            store.export(lambda batch, store=store: sent[store].append(batch) or {}, NOW)
+        replaced = event("checkpoint", sequence=1)["event"]
+        assert [log for log in logs(sent[ledger][0])
+                if {"key": "usage.event", "value": {"stringValue": replaced}} not in log["attributes"]
+                ] == logs(sent[spool][0])
+        assert stored(spool) == [("register", 0), ("start", 0)]
+        spool.accept(event("complete", 2, sequence=2, outcome="aborted", usage_present=False,
+                           input_basis="unknown", **dict.fromkeys(usage.TOKENS)), NOW)
+        late = []
+        assert spool.export(lambda batch: late.append(batch) or {}, NOW) == 1
+        attributes = {item["key"]: item["value"] for item in logs(late[0])[0]["attributes"]}
+        assert attributes["usage.model"] == {"stringValue": "model-b"}
+        assert attributes["usage.producer_kind"] == {"stringValue": "chat"}
+        assert stored(spool) == [("register", 0)]
+        assert spool.db.execute("SELECT bytes FROM budget").fetchone()[0] == len(
+            spool.db.execute("SELECT payload FROM events").fetchone()[0])
+        assert spool.prune(NOW + timedelta(days=35, microseconds=1)) == 1
+
+
+def test_spool_keeps_unacknowledged_batches_and_retries_identical_bytes(tmp_path):
+    with usage.Spool(tmp_path / "spool.sqlite") as spool:
+        register(spool)
+        start(spool)
+        complete(spool)
+        attempts = []
+
+        def lost(batch):
+            attempts.append(json.dumps(batch))
+            raise OSError("acknowledgement lost")
+
+        for send in (lost, lambda batch: attempts.append(json.dumps(batch)) or {
+                "partialSuccess": {"rejectedLogRecords": "1"}}):
+            with pytest.raises((OSError, ValueError)):
+                spool.export(send, NOW)
+            assert spool.db.execute("SELECT count(*) FROM events WHERE sent IS NULL").fetchone()[0] == 3
+        assert spool.export(lambda batch: attempts.append(json.dumps(batch)) or {}, NOW) == 3
+        assert len(set(attempts)) == 1 and len(attempts) == 3
+        assert stored(spool) == [("register", 0)]
+
+
+def test_spool_refuses_records_beyond_its_age_and_payload_bounds(tmp_path, monkeypatch):
+    with usage.Spool(tmp_path / "spool.sqlite") as spool:
+        register(spool)
+        week = NOW + timedelta(days=7)
+        spool.accept(event("checkpoint", sequence=0, at=week.isoformat()), week)
+        late = week + timedelta(microseconds=1)
+        with pytest.raises(ValueError, match="too old"):
+            spool.accept(event("checkpoint", 2, sequence=0, at=late.isoformat()), late)
+        spool.export(lambda _: {}, late)
+        spool.accept(event("checkpoint", 2, sequence=0, at=late.isoformat()), late)
+        size = spool.db.execute("SELECT bytes FROM budget").fetchone()[0]
+        monkeypatch.setattr(usage, "SPOOL_BYTES", size)
+        spool.accept(event("checkpoint", 3, sequence=0, at=late.isoformat()), late)
+        with pytest.raises(ValueError, match="full"):
+            start(spool, now=late, at=late.isoformat())
+        assert spool.db.execute("SELECT bytes FROM budget").fetchone()[0] == size
+        assert stored(spool) == [("register", 0), ("checkpoint", 1)]
+
+
+def test_a_spool_at_its_page_limit_still_acknowledges_open_starts(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage, "SPOOL_PAGES", 120)
+    monkeypatch.setattr(usage, "SPOOL_SPARE", 40)
+    with usage.Spool(tmp_path / "spool.sqlite") as spool:
+        spool.db.execute("PRAGMA max_page_count=120")
+        register(spool)
+        number = 0
+        with pytest.raises(ValueError, match="full"):
+            while True:
+                number += 1
+                start(spool, number)
+        assert spool.export(lambda _: {}, NOW) == number
+        assert stored(spool) == [("register", 0)] + [("start", 0)] * (number - 1)
+
+
+def test_export_drains_a_high_water_snapshot_in_bounded_batches(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage, "BATCH", 2)
+    monkeypatch.setattr(usage, "BATCHES", 2)
+    with usage.Spool(tmp_path / "spool.sqlite") as spool:
+        register(spool)
+        for number in (1, 2):
+            start(spool, number)
+            complete(spool, number)
+        sizes = []
+
+        def send(batch):
+            sizes.append(len(logs(batch)))
+            if len(sizes) == 1:
+                start(spool, 3)
+            return {}
+
+        assert spool.export(send, NOW) == 4
+        assert spool.export(send, NOW) == 2
+        assert sizes == [2, 2, 2]
+        assert spool.export(send, NOW) == 0
+
+
+def test_spool_writers_wait_for_a_long_transaction_instead_of_failing_busy(tmp_path):
+    path = tmp_path / "spool.sqlite"
+    ready, go, outcome = threading.Event(), threading.Event(), []
+
+    def collector():
+        with usage.Spool(path) as waiter:
+            waiter.db.execute("PRAGMA busy_timeout=50")
+            ready.set()
+            go.wait()
+            outcome.append(waiter.accept(event("start", sequence=1, provider="example",
+                                               model="model-a"), NOW))
+
+    with usage.Spool(path) as holder:
+        register(holder)
+        thread = threading.Thread(target=collector)
+        thread.start()
+        ready.wait()
+        with holder.locked():
+            holder.db.execute("BEGIN IMMEDIATE")
+            go.set()
+            thread.join(0.3)
+            assert thread.is_alive()
+            holder.db.commit()
+        thread.join()
+    assert outcome == [{"accepted": True, "duplicate": False}]
+
+
+def test_spool_cli_keeps_no_history_and_never_opens_the_ledger():
+    mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
+    if mount is None:
+        pytest.skip("needs a separate mounted worktree")
+    with tempfile.TemporaryDirectory(prefix=".usage-spool-", dir=ROOT) as temporary:
+        data = Path(temporary) / "usage"
+
+        def cli(*command, stdin=""):
+            return subprocess.run([sys.executable, str(ROOT / "scripts/usage.py"), "--data-dir",
+                                   str(data), "--mount", str(mount), "--store", "spool", *command],
+                                  input=stdin, capture_output=True, text=True)
+
+        assert cli("report").returncode == 1 and not data.exists()
+        record = {**event("register", producer_kind="chat"), "at": datetime.now(UTC).isoformat()}
+        accepted = cli("collect", stdin=json.dumps(record) + "\n")
+        assert json.loads(accepted.stdout) == {"accepted": True, "duplicate": False}
+        assert sorted(path.name for path in data.iterdir()) == [
+            "spool.lock", "spool.sqlite", "spool.sqlite-journal"]
+        assert {oct(path.stat().st_mode & 0o777) for path in data.iterdir()} == {"0o600"}

@@ -1,6 +1,6 @@
 # Model usage metadata
 
-This source provides a native metadata adapter, an upstream source patch, a durable ledger, an OTLP/HTTP exporter, and a SigNoz dashboard.
+This source provides a native metadata adapter, an upstream source patch, a durable ledger, a bounded retry spool, an OTLP/HTTP exporter, and a SigNoz dashboard.
 It does not install or activate a collector, a source adapter, or a SigNoz service.
 Jaeger and its 48-hour raw trace policy remain separate and unchanged.
 
@@ -54,7 +54,7 @@ The Ansible `crewship_usage_install` variable defaults to false.
 Setting it true copies the collector, adapter, dashboard, and source patch after a read-only data-mount check.
 It does not apply the upstream patch, rebuild OMP, set agent configuration, start a service, or activate capture.
 It preserves unknown settings and explicit user overrides.
-The future process opt-in requires four explicit variables:
+The future process opt-in requires four explicit variables and accepts one optional variable:
 
 | Variable | Value |
 | --- | --- |
@@ -62,6 +62,7 @@ The future process opt-in requires four explicit variables:
 | `CREWSHIP_USAGE_COLLECTOR` | The absolute installed `usage.py` path. |
 | `CREWSHIP_USAGE_DATA_DIR` | A dedicated directory below the verified large data mount. |
 | `CREWSHIP_USAGE_MOUNT` | The actual configured mount path. |
+| `CREWSHIP_USAGE_STORE` | Optional: `ledger` (the default) or `spool`, passed to the collector as `--store`. Another value fails every record. |
 
 The default asset directory is `~/.local/share/crewship/usage`.
 The source does not activate unless a patched runtime receives the adapter opt-in.
@@ -129,7 +130,7 @@ Pass a dedicated child directory and the actual mount path explicitly.
 For example, use `--mount /srv/agent-data --data-dir /srv/agent-data/usage` only after that mount exists.
 The collector refuses a missing mount, the root filesystem mount, path traversal, and paths outside the configured mount.
 It does not create a fallback root-backed directory.
-It creates private ledger files with mode `0600` under a private directory.
+It creates private ledger and spool files with mode `0600` under a private directory.
 The `check` command verifies these paths without creating a directory or database.
 It preserves existing host and agent configuration because it writes neither.
 
@@ -144,11 +145,58 @@ The collector rejects producer-supplied retirement records.
 Exported `sequence_through` and `retired_completions` values are immutable snapshots, not account totals or metric labels.
 The dashboard uses the retirement watermark without hiding missing records from a partial export.
 
-Every collector, report, and export invocation prunes expired records.
+Every ledger collector, report, and export invocation prunes expired records.
 A long-running collector also prunes hourly when it receives records.
 Run the `prune` command from an independently authorized scheduler to remove expired data when collection is idle.
 No scheduler or service is installed by this change.
 Offline storage cannot delete records without a running retention process.
+
+## Retry spool
+
+Add `--store spool` before the command to keep metadata only until the OTLP endpoint acknowledges it.
+The default `--store ledger` keeps the 35-day ledger described above.
+The spool uses `spool.sqlite` in the same data directory and never opens `usage.sqlite`.
+An existing ledger stays unchanged; its unsent rows still export with `--store ledger export`.
+Set `CREWSHIP_USAGE_STORE=spool` for new producer processes.
+A running process keeps the store that it started with, so restart producers to change the store.
+
+The spool applies the same allowlist, identity, and transition rules as the ledger.
+It keeps each record until an export acknowledges it.
+After the acknowledgement, it deletes completions, checkpoints, and gaps.
+It keeps registrations, shutdowns, and starts without an acknowledged completion, because later records need their producer and model labels.
+These kept rows expire 35 days after their last use, as in the ledger; `prune` and `export` remove them.
+A new pending checkpoint replaces the older pending checkpoint of the same producer.
+The dashboard reads only the latest checkpoint of each producer, so this replacement removes no reported value.
+For the same records, the spool exports the same OTLP log records as the ledger.
+The spool keeps no totals, calendar periods, coverage, or reports, so `report` fails.
+It cannot recognize a replay of a record that it already deleted.
+
+| Limit | Value |
+| --- | --- |
+| Stored record bytes, pending and kept | 64 MiB |
+| Age of the oldest pending record | 7 days |
+| Database file | 128 MiB: 32,768 pages of 4,096 bytes |
+| Pages in use when `collect` refuses | More than 32,512, so 256 pages stay free |
+
+`collect` refuses a record that would go past the byte, age, or page limit.
+The 256 free pages let an export acknowledge and remove records from a full spool.
+With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
+SQLite refuses any page above the database limit with `SQLITE_FULL`.
+A refusal has the fixed error message and exit status 1, and it stores nothing.
+The adapter then records a delivery gap and fails the metered model call, as for any other collector failure.
+An export that removes records lets collection continue.
+Records that are still below the limits wait through an endpoint outage and then export in order.
+
+The spool uses a rollback journal, so no write-ahead log grows beside the database.
+The directory holds only `spool.sqlite`, `spool.sqlite-journal`, and the empty `spool.lock`.
+Each collector and export transaction takes an exclusive lock on `spool.lock`.
+The exporter does not keep the lock during the HTTP request.
+A collector waits for another transaction instead of failing with a busy database.
+
+The spool keeps no exported completions, so it cannot count completions that expire later in SigNoz.
+Its exported `retired_completions` value stays 0.
+A producer that runs longer than 35 days therefore shows its expired completions as missing sequences, and the dashboard marks its periods partial.
+A restarted producer registers a new identity without this effect.
 
 ## Reports and export
 
@@ -174,8 +222,9 @@ Run `export --endpoint https://AUTHORIZED-ENDPOINT/v1/logs` only after separate 
 `SIGNOZ_INGESTION_KEY`, when supplied by the operator, sets the ingestion header and never enters the ledger or exported metadata.
 The exporter refuses endpoint credentials, redirects, and remote plain HTTP.
 Loopback HTTP is supported for isolated protocol fixtures.
-It sends at most 100 metadata log records per invocation.
-Run again to drain more records.
+Each run takes a snapshot of the pending records and sends at most 50 batches of 100 records, oldest first.
+Records that arrive during the run wait for the next run.
+The run stops at the first failed batch; the batches before it stay acknowledged.
 
 The exporter acknowledges a batch only after a successful OTLP response with no rejected records.
 A transport error, rejected batch, or invalid acknowledgement keeps the complete batch pending.
