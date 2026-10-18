@@ -103,3 +103,15 @@ Check: input height ≥ 56px, one chunk per decision.
 ## 12. Less content [DYMhapEoAHC]
 Why: filler splits attention. Show the primary thing large (event, team logos), demote the date, remove the extra actions.
 Check: name the one thing the screen is about. It is the largest item.
+
+## 13. Fewer symbols, clearer groups [Dej3pg9IYNv]
+Source: the supplied visible-frame takeaway, not an audio transcript.
+Why: decorative or ambiguous icons make related values harder to read.
+Do: remove decorative or ambiguous icons and group related values.
+Use labels, spacing and type before symbol codes such as icons or glyphs.
+Make the critical value or action readable at the real viewing size.
+Use helper text only for information needed to act.
+Show direct progress when progress is the data.
+Retain accessibility, necessary labels and uncertainty disclosure.
+Don't: imply unmeasured progress or add helper text that repeats the label.
+Check: at the real viewing size, can the reader identify the critical value, its group and the action without decoding symbols?
