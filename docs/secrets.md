@@ -11,7 +11,7 @@ Never paste a value from this file into a repository, issue, PR, log, or chat. C
 | Source of truth | `~/super.env` on the primary VPS, mode `600` | Edit here, then push. |
 | The whole file | Account Secrets Store (`default_secrets_store`), secrets `super_env_<hash>_0`, `super_env_<hash>_1`, …, comment `super.env`, scope `workers` | The file's base64, cut into chunks of at most 65,536 characters. `<hash>` is the first 12 hex digits of the file's sha256. The comments hold retired credentials, so they stay a secret too. |
 | Client id for the Worker's own check | Secret `FLEET_SECRETS_ACCESS_CLIENT_ID`, comment `super.env`, scope `workers` | A copy of that variable's last assignment, without one surrounding pair of matching quotes. |
-| Single secrets | Secrets in `default_secrets_store` that `scripts/put-secret.sh` stored, comment `put-secret.sh`, scope `workers` | Not part of `super.env`. The Worker serves one only when its name is in `FLEET_SECRETS_READABLE`. |
+| Single secrets | Secrets in `default_secrets_store` that `scripts/put-secret.sh` stored, comment `put-secret.sh`, scope `workers` | Not part of `super.env`. The Worker serves one only when `FLEET_SECRETS_READABLE` is its name. |
 | Fetch endpoint | Worker `fleet-secrets` on the custom domain `host` names in `scripts/stow-secrets.sh` | No `workers.dev` or preview URL. Answers with `Cache-Control: no-store`. |
 | Gate | Cloudflare Access app `fleet-secrets`, one policy: Service Auth for service token `fleet-secrets-fetch` | The Worker also verifies the Access JWT: issuer, audience, expiry, signature, and the token's client id. Anything else gets `403`. |
 | Fetch credential | `FLEET_SECRETS_ACCESS_CLIENT_ID`, `FLEET_SECRETS_ACCESS_CLIENT_SECRET` at the end of `~/super.env` | Expires one year after creation. |
@@ -58,7 +58,7 @@ It refuses a secret with comment `super.env`, because `stow-secrets.sh` owns tho
 The Worker serves a single secret at `GET /NAME` only when it binds that secret as `read_NAME`.
 It answers `403` without a valid Access JWT, and `404` for every name it does not bind this way, which includes the chunks and `FLEET_SECRETS_ACCESS_CLIENT_ID`.
 
-1. Add the name to `FLEET_SECRETS_READABLE` in `~/super.env` on the VPS; separate more names with spaces or commas:
+1. Set `FLEET_SECRETS_READABLE` to the name in `~/super.env` on the VPS. It takes one name only, not a list:
 
    ```bash
    FLEET_SECRETS_READABLE=EXAMPLE_ADMIN_PASSWORD
@@ -71,7 +71,7 @@ It answers `403` without a valid Access JWT, and `404` for every name it does no
    ```
 
    This is the only step that changes what the live Worker can read.
-   It stops before any change when a listed name is missing from the store or has comment `super.env`.
+   It stops before any change when the value is not one name, or the name is missing from the store or has comment `super.env`.
    No GitHub workflow deploys the `fleet-secrets` Worker: `harbor.yml` deploys only the `crewship` site Worker.
 
 3. On a host with the fetch credential (see below), print the value:
@@ -82,7 +82,7 @@ It answers `403` without a valid Access JWT, and `404` for every name it does no
 
    It writes only to stdout and leaves `~/super.env` unchanged.
 
-To stop serving a secret, remove its name from `FLEET_SECRETS_READABLE` and run `scripts/stow-secrets.sh` again.
+To stop serving the secret, remove `FLEET_SECRETS_READABLE` and run `scripts/stow-secrets.sh` again.
 
 ## Fetch on a new host
 

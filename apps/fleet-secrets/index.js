@@ -5,7 +5,7 @@
 // tag) come from the Access API at push time. Secret bindings, written by
 // scripts/stow-secrets.sh: super_env_0, super_env_1, ... hold the file's base64 in order, and
 // FLEET_SECRETS_ACCESS_CLIENT_ID names the one service token allowed in. GET /NAME serves one
-// secret only when it is bound as read_NAME (the names in FLEET_SECRETS_READABLE).
+// secret only when it is bound as read_NAME (the name in FLEET_SECRETS_READABLE).
 const headers = { "Cache-Control": "no-store" };
 const deny = (status = 403) => new Response(null, { status, headers });
 const bytes = (s) =>

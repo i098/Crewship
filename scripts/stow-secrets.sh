@@ -44,17 +44,20 @@ send() { api "$1" "$2" -H 'Content-Type: application/json' --data-binary @"$3" >
 # The Worker checks the Access JWT against these, so they are looked up, never hand-set.
 team=$(api GET /access/organizations | jq -er .result.auth_domain)
 aud=$(api GET /access/apps | jq -er --arg h "$host" '[.result[] | select(.domain == $h)] | .[0].aud')
-store=$(api GET /secrets_store/stores | jq -er '.result[0].id')
+store=$(api GET /secrets_store/stores | jq -er '[.result[] | select(.name == "default_secrets_store")]
+  | if length == 1 then .[0].id else error("no single store named default_secrets_store") end')
 secrets=/secrets_store/stores/$store/secrets
 # ponytail: one page; the store holds at most 100 secrets per account during the beta.
 api GET "$secrets?per_page=100" | jq '[.result[] | {(.name): {id, comment}}] | add // {}' \
   >"$tmp/existing.json"
-# Secrets that put-secret.sh stored and hosts may read one at a time at GET /NAME: the names in
-# FLEET_SECRETS_READABLE, bound as read_NAME. Never a super.env secret or a missing one.
+# The secret that put-secret.sh stored and hosts may read at GET /NAME: the one name in
+# FLEET_SECRETS_READABLE, bound as read_NAME. Never a list, a super.env secret or a missing one.
 jq --slurpfile have "$tmp/existing.json" '
-    [.vars.FLEET_SECRETS_READABLE // "" | splits("[ ,]+") | select(. != "")]
-    | map(if $have[0][.] and $have[0][.].comment != "super.env"
-          then . else error("FLEET_SECRETS_READABLE: no secret \(.) outside super.env") end)' \
+    [.vars.FLEET_SECRETS_READABLE // "" | select(. != "")]
+    | map(if test("^[A-Za-z0-9_]+$") | not
+          then error("FLEET_SECRETS_READABLE: one name of letters, digits and _")
+          elif $have[0][.] and $have[0][.].comment != "super.env" then .
+          else error("FLEET_SECRETS_READABLE: no secret \(.) outside super.env") end)' \
   "$tmp/split.json" >"$tmp/readable.json"
 
 jq -r --slurpfile have "$tmp/existing.json" \

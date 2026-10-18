@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetch super.env from the fleet-secrets Worker into ~/super.env (mode 600, atomic replace).
 # With NAME, print only that secret to stdout and leave ~/super.env alone; the Worker serves
-# the names in FLEET_SECRETS_READABLE.
+# the name in FLEET_SECRETS_READABLE.
 # Credentials: FLEET_SECRETS_ACCESS_CLIENT_ID and FLEET_SECRETS_ACCESS_CLIENT_SECRET as NAME=value
 # lines in ~/.config/fleet-secrets.env (mode 600); never arguments or the environment.
 # Usage: scripts/fetch-secrets.sh [NAME]      See docs/secrets.md.
@@ -32,9 +32,9 @@ headers=$(mktemp)
 trap 'rm -f "$tmp" "$headers"' EXIT
 printf 'CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s\n' \
   "${FLEET_SECRETS_ACCESS_CLIENT_ID:?}" "${FLEET_SECRETS_ACCESS_CLIENT_SECRET:?}" >"$headers"
-status=$(curl -sS -H @"$headers" -o "$tmp" -w '%{http_code}' "$url$name")
+status=$(curl -sS -H @"$headers" -o "$tmp" -w '%{http_code}' "${url%/}/$name")
 if [[ $status != 200 || ! -s $tmp ]]; then
-  echo "fetch failed: HTTP $status from $url$name; $dest left unchanged." >&2
+  echo "fetch failed: HTTP $status from ${url%/}/$name; $dest left unchanged." >&2
   exit 1
 fi
 if [[ -n $name ]]; then

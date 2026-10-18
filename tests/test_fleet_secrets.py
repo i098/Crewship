@@ -234,7 +234,7 @@ def test_fetch_name_prints_one_secret_and_leaves_super_env(tmp_path, server):
     creds.chmod(0o600)
     dest = tmp_path / "super.env"
     dest.write_text("OLD=1\n")
-    result = fetch(tmp_path, server, "EXAMPLE_SECRET")
+    result = fetch(tmp_path, server.rstrip("/"), "EXAMPLE_SECRET")
     assert (result.returncode, result.stdout, result.stderr) == (0, "example value\n", "")
     assert fetch(tmp_path, server, "OTHER_SECRET").returncode != 0
     assert fetch(tmp_path, server, "../x").returncode == 2
@@ -376,7 +376,12 @@ def stow_store(old_secrets: int) -> dict:
 
 @needs_jq_curl
 @pytest.mark.parametrize("old_secrets, full", [(98, True), (10, False)], ids=["full", "roomy"])
-def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_secrets, full):
+def test_stow_makes_room_in_a_full_store_before_creating_chunks(
+    tmp_path, monkeypatch, old_secrets, full
+):
+    monkeypatch.setattr(
+        FakeCloudflare, "stores", [{"id": "store-0", "name": "other_store"}, *FakeCloudflare.stores]
+    )
     env_text = f"FLEET_SECRETS_READABLE=KEEP\n{BIG_ENV}"
     result = run_script(tmp_path, ["stow-secrets.sh"], stow_store(old_secrets), env_text)
     assert result.returncode == 0, result.stderr
@@ -397,6 +402,11 @@ def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_se
         "FLEET_SECRETS_ACCESS_CLIENT_ID": "FLEET_SECRETS_ACCESS_CLIENT_ID",
         **{re.sub("_[0-9a-f]{12}_", "_", n): n for n in chunks},
     }
+    assert {
+        b["store_id"]
+        for b in FakeCloudflare.metadata["bindings"]
+        if b["type"] == "secrets_store_secret"
+    } == {"store-1"}
 
     mutations = [
         c for c in FakeCloudflare.calls if c[0] in ("POST", "DELETE") and "workers" not in c[1]
@@ -416,7 +426,7 @@ def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_se
 
 
 @needs_jq_curl
-@pytest.mark.parametrize("readable", ["FLEET_SECRETS_ACCESS_CLIENT_ID", "MISSING", "KEEP,OLD_0"])
+@pytest.mark.parametrize("readable", ["FLEET_SECRETS_ACCESS_CLIENT_ID", "MISSING", "KEEP,KEEP"])
 def test_stow_refuses_readable_names_it_must_not_bind_before_any_change(tmp_path, readable):
     env_text = f"FLEET_SECRETS_READABLE={readable}\n{BIG_ENV}"
     result = run_script(tmp_path, ["stow-secrets.sh"], stow_store(3), env_text)
