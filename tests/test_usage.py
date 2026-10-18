@@ -319,15 +319,25 @@ def test_report_uses_one_snapshot_while_another_collector_writes(ledger, monkeyp
     assert ledger.summary(NOW, NOW + timedelta(seconds=1))["requests"] == 2
 
 
-def test_dashboard_panels_fit_signoz_twelve_column_grid():
+def test_dashboard_layout_places_each_panel_once_with_line_graphs_first():
     result = subprocess.run([sys.executable, str(ROOT / "scripts/usage_dashboard.py")],
                             capture_output=True, text=True, check=True)
-    for document in (json.loads(result.stdout),
-                     json.loads((ROOT / "blueprint/usage/dashboard.json").read_text())):
-        for layout in document["spec"]["layouts"]:
-            for item in layout["spec"]["items"]:
-                assert 1 <= item["width"] <= 12
-                assert 0 <= item["x"] <= 12 - item["width"]
+    document = json.loads(result.stdout)
+    assert document == json.loads((ROOT / "blueprint/usage/dashboard.json").read_text())
+    placed = []
+    for layout in document["spec"]["layouts"]:
+        cells = set()
+        for item in layout["spec"]["items"]:
+            assert item["width"] >= 1 and 0 <= item["x"] <= 12 - item["width"]
+            area = {(item["x"] + column, item["y"] + row)
+                    for column in range(item["width"]) for row in range(item["height"])}
+            assert not cells & area
+            cells |= area
+            placed.append(item["content"]["$ref"].rsplit("/", 1)[1])
+    assert sorted(placed) == sorted(document["spec"]["panels"])
+    usage_items = document["spec"]["layouts"][0]["spec"]["items"]
+    assert {item["content"]["$ref"].rsplit("/", 1)[1]
+            for item in usage_items if item["y"] == 0} == {"requests", "tokens"}
 
 
 @pytest.fixture

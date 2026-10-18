@@ -275,55 +275,55 @@
             {
               "x": 0,
               "y": 0,
-              "width": 12,
-              "height": 6,
-              "content": {
-                "$ref": "#/spec/panels/prompts"
-              }
-            },
-            {
-              "x": 0,
-              "y": 6,
-              "width": 12,
-              "height": 6,
+              "width": 6,
+              "height": 5,
               "content": {
                 "$ref": "#/spec/panels/requests"
               }
             },
             {
-              "x": 0,
-              "y": 12,
-              "width": 12,
-              "height": 6,
-              "content": {
-                "$ref": "#/spec/panels/models"
-              }
-            },
-            {
-              "x": 0,
-              "y": 18,
-              "width": 12,
-              "height": 6,
-              "content": {
-                "$ref": "#/spec/panels/calendar"
-              }
-            },
-            {
-              "x": 0,
-              "y": 24,
-              "width": 12,
-              "height": 6,
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 5,
               "content": {
                 "$ref": "#/spec/panels/tokens"
               }
             },
             {
               "x": 0,
-              "y": 30,
-              "width": 12,
-              "height": 6,
+              "y": 5,
+              "width": 3,
+              "height": 4,
+              "content": {
+                "$ref": "#/spec/panels/prompts"
+              }
+            },
+            {
+              "x": 3,
+              "y": 5,
+              "width": 3,
+              "height": 4,
               "content": {
                 "$ref": "#/spec/panels/change"
+              }
+            },
+            {
+              "x": 6,
+              "y": 5,
+              "width": 6,
+              "height": 4,
+              "content": {
+                "$ref": "#/spec/panels/models"
+              }
+            },
+            {
+              "x": 0,
+              "y": 9,
+              "width": 12,
+              "height": 5,
+              "content": {
+                "$ref": "#/spec/panels/calendar"
               }
             }
           ]
@@ -342,24 +342,24 @@
             {
               "x": 0,
               "y": 0,
-              "width": 12,
-              "height": 6,
+              "width": 6,
+              "height": 5,
               "content": {
                 "$ref": "#/spec/panels/coverage"
               }
             },
             {
-              "x": 0,
-              "y": 6,
-              "width": 12,
-              "height": 6,
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 5,
               "content": {
                 "$ref": "#/spec/panels/outcomes"
               }
             },
             {
               "x": 0,
-              "y": 12,
+              "y": 5,
               "width": 12,
               "height": 6,
               "content": {

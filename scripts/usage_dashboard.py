@@ -186,20 +186,23 @@ FROM completions WHERE {SELECTED} GROUP BY outcome ORDER BY outcome"""
         ),
     }
 
-    def section(title, keys, opened=True):
+    def section(title, items, opened=True):
         return {"kind": "Grid", "spec": {
             "display": {"title": title, "collapse": {"open": opened}},
-            "items": [{"x": 0, "y": index * 6, "width": 12, "height": 6,
+            "items": [{"x": x, "y": y, "width": width, "height": height,
                        "content": {"$ref": f"#/spec/panels/{key}"}}
-                      for index, key in enumerate(keys)],
+                      for key, x, y, width, height in items],
         }}
 
     return {"schemaVersion": "v6", "name": "crewship-model-usage", "tags": [], "spec": {
         "display": {"name": "Model usage", "description":
                     "Metadata-only request accounting. Inspect Details and coverage before using partial totals."},
         "variables": [], "duration": "1h", "refreshInterval": "1m", "panels": panels,
-        "layouts": [section("Usage", ["prompts", "requests", "models", "calendar", "tokens", "change"]),
-                    section("Details", ["coverage", "outcomes", "method"], False)],
+        "layouts": [section("Usage", [("requests", 0, 0, 6, 5), ("tokens", 6, 0, 6, 5),
+                                      ("prompts", 0, 5, 3, 4), ("change", 3, 5, 3, 4),
+                                      ("models", 6, 5, 6, 4), ("calendar", 0, 9, 12, 5)]),
+                    section("Details", [("coverage", 0, 0, 6, 5), ("outcomes", 6, 0, 6, 5),
+                                        ("method", 0, 5, 12, 6)], False)],
     }}
 
 

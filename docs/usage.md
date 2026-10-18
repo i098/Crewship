@@ -193,7 +193,7 @@ Content, content hashes, arbitrary attributes, headers, tool arguments, tool res
 
 `blueprint/usage/dashboard.json` is an importable current SigNoz v6 definition for the v2 dashboard API.
 It uses the documented logs v2 table and ClickHouse query panels.
-Each panel spans the 12 columns of the SigNoz v6 grid.
+Panels share rows on the 12-column SigNoz v6 grid.
 It is not a screenshot or a running dashboard.
 
 Regenerate it with:
@@ -202,15 +202,26 @@ Regenerate it with:
 uv run python scripts/usage_dashboard.py --output blueprint/usage/dashboard.json
 ```
 
-The Usage section leads with **Prompts sent**, followed by request history, model ranking, Pacific calendar totals, and completed-call token accounting.
+The Usage section has three rows:
+
+| Row | Panels (width of 12) |
+| --- | --- |
+| 1 | Completed model requests per minute (6) and completed-call counted tokens per second (6) |
+| 2 | **Prompts sent** (3), change in completed-call token rate (3), and requested model ranking (6) |
+| 3 | Pacific calendar totals (12) |
+
+The Details section puts producer coverage (6) beside outcomes (6), with the method notes (12) below.
+
 Model ranking orders by the declared request count and shows known tokens and unknown totals separately.
+It shows about one model at a time and scrolls inside its panel.
 Closed one-minute bins measure completed-call accounting, not live decoding speed.
 The rate queries omit clipped first and last minutes.
 The first rate change and changes across missing bins stay null.
 No empty bin is filled with zero.
 The definition requests a closed Details section with methodology, coverage, outcomes, cost limits, and history limits.
 The native renderer can start this section open.
-SigNoz supports a collapsed section, not the approved page's exact HTML disclosure or phone layout.
+SigNoz supports a collapsed section, not an HTML disclosure.
+On a narrow phone screen, SigNoz shrinks each row instead of stacking its panels, so it cuts panel titles short and tables need sideways scrolling.
 This definition does not introduce another frontend.
 Task and session state need a separate trusted source and are not inferred here.
 
