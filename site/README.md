@@ -218,7 +218,7 @@ To run the checks locally:
 
 ```bash
 python3 site/build.py
-cd harbor
+cd site
 npm install --no-save --no-package-lock --prefix . playwright
 npx playwright install --with-deps webkit chromium
 node webkit-check.mjs
@@ -233,7 +233,7 @@ To deploy by hand with a token that can edit the `crewship` Worker:
 
 ```bash
 python3 site/build.py
-cd harbor
+cd site
 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 ```
 
