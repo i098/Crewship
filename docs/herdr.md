@@ -12,7 +12,7 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
 
 ```text
 ● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
-  ✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%
+  <Claude> ▰▰▱▱▱▱▱▱  25%  <OpenAI> ▰▰▰▰▱▱▱▱  50%
 ● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ▶ 0/2 · ◷ 3
@@ -29,7 +29,7 @@ See [The machine entry](#the-machine-entry) for the optional top entry.
 | 1 | The state dot, then the short name (`$short`): the primary home (`firstmate`) in bold blue, other homes in mauve. A dead helper space (label contains `-afk-daemon-`) shows `☾ afk`, dimmed, and nothing else. A space with no short name shows its own label, dimmed. Then the decision, working/total agent and queue counts, each in its own color. Zero decision and queue counts are hidden. On the `machine` workspace only, the whole machine (`$machine`) instead. |
 | 2 | What the space costs the machine, as shares, in light grey (`#a6adc8`): `⚙` CPU, `▤` RAM, `⛁` disk. |
 | 3 | The whole machine (`$host`), on the primary home's entry only (the workspace labelled `firstmate`; without one, the first workspace listed), and only while no `machine` workspace exists. Every other entry leaves this line empty, and Herdr hides it. |
-| 4 | Provider usage (`$usage`), immediately below the whole-machine row. Claude (`✳`) occupies the left half; OpenAI Codex (`◎`) occupies the right half. Each half has an eight-cell bar and a percentage used. |
+| 4 | Provider usage (`$usage`), immediately below the whole-machine row. The Claude mark (U+EC82) occupies the left half; the OpenAI mark (U+EC81) occupies the right half. Each half has an eight-cell bar and a percentage used. |
 | 5 | `⚠ watcher silent` in orange, only when the home's watcher stopped reporting. |
 
 | Token | Value | Source |
@@ -42,7 +42,7 @@ See [The machine entry](#the-machine-entry) for the optional top entry.
 | `$alert` | `⚠ watcher silent` (orange) | `fm_supervision_unhealthy` from the home's `bin/fm-supervision-lib.sh`: the home has work that needs a watcher and the watcher's beacon is stale. |
 | `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). `◉` counts the agent panes (panes with an `agent`) that are working, over all agent panes. Reported on the primary home, only while no `machine` workspace exists. |
 | `$machine` | the same as `$host` | The same line, reported on the `machine` workspace instead. The two are never both set. |
-| `$usage` | `✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%` | The arithmetic mean of account usage for each provider, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
+| `$usage` | `<Claude> ▰▰▱▱▱▱▱▱  25%  <OpenAI> ▰▰▰▰▱▱▱▱  50%` | The arithmetic mean of account usage for each provider, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
 
 The provider row reads `reports[]` from `omp usage --json`.
 Claude uses provider `anthropic`; OpenAI uses `openai-codex`.
@@ -56,6 +56,9 @@ If an account has no measured limits or an unknown limit, that provider shows `�
 An account listed under `accountsWithoutUsage` also makes its provider unknown.
 A failed command or an absent provider shows unknown, never zero usage.
 The reporter reads only the usage command's output; it does not open or change credential stores.
+
+The marks are the `cod-claude` (U+EC82) and `cod-openai` (U+EC81) glyphs of Nerd Fonts (the Hack Nerd Font 3.5.0 file already contains both), which come from the Codicons [`claude.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/claude.svg) and [`openai.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/openai.svg) sources.
+Herdr's sidebar draws text cells only, so the terminal font on the machine that shows Herdr must be Nerd Font patched with these glyphs (older fonts may lack them), or these two cells show a missing-glyph box.
 
 ### The machine entry
 
