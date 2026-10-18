@@ -15,13 +15,14 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
   ✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%
 ● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
-● webapp · ⚑ 2 · ◷ 3
+● webapp · ⚑ 2 · ▶ 0/2 · ◷ 3
   ⚙ 1%  ▤ 3%  ⛁ 4%
   ⚠ watcher silent
 ○ ☾ afk
 ```
 
-Herdr indents every line after an entry's first by two columns, so every entry's state dot sits in the same column and the lines below sit under the name. The top entry is the optional `machine` workspace (see [The machine entry](#the-machine-entry)): it carries only the whole-machine line, on its first line, so it starts at the left edge too.
+Herdr indents every line after an entry's first by two columns, so every entry's state dot sits in the same column and the lines below sit under the name.
+See [The machine entry](#the-machine-entry) for the optional top entry.
 
 | Line | Shows |
 | --- | --- |
@@ -89,7 +90,7 @@ The other mobile fields follow the existing mechanism (see [On a phone](#on-a-ph
 | Provider usage | every 3 minutes | One `omp usage --json` call with a 20-second timeout. The reporter also caches failures for 3 minutes. |
 
 The caches live in `~/.cache/crewship/herdr-spaces.json`.
-A failed quota refresh replaces the provider percentages with unknown; other failed sources keep their previous values.
+A failed usage refresh replaces the provider percentages with unknown; other failed sources keep their previous values.
 A failed run never fails the unit: errors go to the journal (`journalctl --user -u herdr-spaces.service`).
 Herdr drops workspace tokens when its server restarts; the next run reports them again.
 
@@ -184,11 +185,11 @@ At or below Herdr's `mobile_width_threshold` (64 columns by default; a phone in 
 ```text
   agents
    ● Local · firstmate
-   1 · ⚑3 ▶1 ◷4 ⚙11% ▤36% ⛁71% · Planning the release checklist
+   1 · ⚑3 ▶1/5 ◷4 ⚙11% ▤36% ⛁71% · Planning the release checklist
    ● Local · firstmate
    fix-token-race · ⎇1537 +12847 −3902 ✎214 · └ f…
    ● Local · 2ndmate-webapp-mate-s4
-   ⚑2 ◷3 ⚙4% ▤9% ⛁12% ⚠watcher ⎇1561 +84 −12 ✎3 · Fix ratings …
+   ⚑2 ▶0/2 ◷3 ⚙4% ▤9% ⛁12% ⚠watcher ⎇1561 +84 −12 ✎3 · Fix ratings …
   spaces
    + new workspace
    · Local · machine
