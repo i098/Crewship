@@ -12,7 +12,8 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
 
 ```text
 ● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
-● firstmate · ⚑ 3 · ▶ 1 · ◷ 4
+  ✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%
+● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ◷ 3
   ⚙ 1%  ▤ 3%  ⛁ 4%
@@ -24,23 +25,36 @@ Herdr indents every line after an entry's first by two columns, so every entry's
 
 | Line | Shows |
 | --- | --- |
-| 1 | The state dot, then the short name (`$short`): the primary home (`firstmate`) in bold blue, other homes in mauve. A dead helper space (label contains `-afk-daemon-`) shows `☾ afk`, dimmed, and nothing else. A space with no short name shows its own label, dimmed. Then the decision, worker and queue counts below, each in its own color. A count of zero is not shown. On the `machine` workspace only, the whole machine (`$machine`) instead. |
+| 1 | The state dot, then the short name (`$short`): the primary home (`firstmate`) in bold blue, other homes in mauve. A dead helper space (label contains `-afk-daemon-`) shows `☾ afk`, dimmed, and nothing else. A space with no short name shows its own label, dimmed. Then the decision, working/total agent and queue counts, each in its own color. Zero decision and queue counts are hidden. On the `machine` workspace only, the whole machine (`$machine`) instead. |
 | 2 | What the space costs the machine, as shares, in light grey (`#a6adc8`): `⚙` CPU, `▤` RAM, `⛁` disk. |
 | 3 | The whole machine (`$host`), on the primary home's entry only (the workspace labelled `firstmate`; without one, the first workspace listed), and only while no `machine` workspace exists. Every other entry leaves this line empty, and Herdr hides it. |
-| 4 | `⚠ watcher silent` in orange, only when the home's watcher stopped reporting. |
+| 4 | Provider usage (`$usage`), immediately below the whole-machine row. Claude (`✳`) occupies the left half; OpenAI Codex (`◎`) occupies the right half. Each half has an eight-cell bar and a percentage used. |
+| 5 | `⚠ watcher silent` in orange, only when the home's watcher stopped reporting. |
 
 | Token | Value | Source |
 | --- | --- | --- |
 | `$short` | `webapp` for `2ndmate-webapp-mate-s4` | The workspace label: `firstmate` stays as is, `2ndmate-<name>-mate-<id>` becomes `<name>`, `└ <task> · p:<token>` becomes `└ <task>`. Other labels have no short name. |
 | `$decisions` | `⚑ N` (red, bold) | Fresh decisions waiting on the operator, counted where they can be acted on. Every count comes from the primary home's status logs, through the read-only `status_open_decisions` fold of its `bin/fm-classify-lib.sh`, cached until each log changes. The primary home here is only the workspace labelled `firstmate`: without one, no Space shows `⚑`. A second-level home's Space counts the open decisions in its own status log (`state/<home>.status`, the record whose `herdr_workspace_id` is that Space). The primary Space counts only its own workers' logs. A second-level home's own workers are not counted: it decides for them, and escalates anything it cannot decide into its status log in the primary home, which is what its Space counts. Parked holds (keys starting `captain-hold-`) never count, and a second-level home without a live Space is not counted anywhere. |
-| `$crew` | `▶ N` (green) | Workers running: the home's live task records, `state/*.meta`, without second-level home records (`kind=secondmate`). |
+| `$crew` | `▶ working/total` (green) | Actual agent panes in this workspace. Only `agent_status = working` counts as working. Idle, blocked and unknown agents count only in the total. Shell panes and task records do not count. |
 | `$queue` | `◷ N` (yellow) | Tasks queued and ready to start: `count` from the home's `bin/fm-tasks-axi.sh ready`, recounted when the home's `data/backlog.md` changes and at least once a minute. |
 | `$res` | `⚙ 29%  ▤ 8%  ⛁ 2%` | CPU (share of all cores) and resident memory (share of `MemTotal`) summed over every process whose environment carries the space's `HERDR_WORKSPACE_ID`, so its workers count. CPU is each process's own CPU time (`utime` + `stime`) gained between two runs, for every process present in both, clamped to 0–100%. Disk is the home plus the worktree pools of its projects, as `treehouse status --json` lists them, as a share of the filesystem holding the home; a pool worktree that is itself another home is left out. |
 | `$alert` | `⚠ watcher silent` (orange) | `fm_supervision_unhealthy` from the home's `bin/fm-supervision-lib.sh`: the home has work that needs a watcher and the watcher's beacon is stale. |
 | `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). `◉` counts the agent panes (panes with an `agent`) that are working, over all agent panes. Reported on the primary home, only while no `machine` workspace exists. |
 | `$machine` | the same as `$host` | The same line, reported on the `machine` workspace instead. The two are never both set. |
+| `$usage` | `✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%` | The arithmetic mean of account usage for each provider, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
 
-There is no rate-limit warning: a rate limit takes every home down at once, so a per-home flag adds nothing.
+The provider row reads `reports[]` from `omp usage --json`.
+Claude uses provider `anthropic`; OpenAI uses `openai-codex`.
+Each account contributes its tightest window: the highest `limits[].amount.usedFraction`.
+The reporter averages these account values, not unrelated quota windows.
+Account IDs identify duplicate credential aliases; organization IDs keep distinct subscriptions separate.
+When an account ID is absent, the reporter uses its email if available, or keeps the report separate.
+Both halves have 15 terminal columns and fit at sidebar widths 46 and 38.
+
+If an account has no measured limits or an unknown limit, that provider shows `░░░?░░░░   ?%`.
+An account listed under `accountsWithoutUsage` also makes its provider unknown.
+A failed command or an absent provider shows unknown, never zero usage.
+The reporter reads only the usage command's output; it does not open or change credential stores.
 
 ### The machine entry
 
@@ -50,7 +64,8 @@ The whole-machine line goes on a workspace labelled `machine` when one exists. I
 herdr workspace create --cwd ~ --label machine --no-focus
 ```
 
-Its entry shows the state dot and the machine line, nothing else: no name, no label, no counts and no CPU and RAM line.
+Its entry shows the state dot and the machine line, followed by the provider row.
+It shows no name, label, workspace counts or workspace resource line.
 
 Without a `machine` workspace, the machine line is the primary home's `$host` line (the workspace labelled `firstmate`; without one, the first workspace listed), below its CPU and RAM line.
 
@@ -58,15 +73,25 @@ Without a `machine` workspace, the machine line is the primary home's `$host` li
 
 [`blueprint/maintenance/herdr-spaces.py`](../blueprint/maintenance/herdr-spaces.py) is installed as `~/.local/bin/herdr-spaces.py` and run by the user timer `herdr-spaces.timer` every second. It uses only the Python standard library.
 
-For every Herdr workspace it finds the home from its panes' directories: the nearest git top-level that holds both `state/` and `data/`. It then reports the tokens above as workspace metadata under the source `crewship:spaces`, with `herdr workspace report-metadata`, and clears every token that has no value. Helper spaces and per-task spaces (`└ …`) get `short` only. A space with no home gets `short` and CPU and RAM only. The `machine` workspace gets `machine` only; without one, the primary home gets `host`. It also writes the same data where the phone layout shows it (see [On a phone](#on-a-phone)).
+For every Herdr workspace it finds the home from its panes' directories: the nearest git top-level that holds both `state/` and `data/`.
+It reports the tokens above under `crewship:spaces` and clears tokens without values.
+Helper and per-task spaces (`└ …`) keep their short name only.
+A space without a home keeps its short name, CPU and RAM.
+The `machine` workspace receives `machine` and `usage`; without one, the primary home receives `host` and `usage`.
+Provider usage stays out of mobile metadata.
+The other mobile fields follow the existing mechanism (see [On a phone](#on-a-phone)).
 
 | Source | Refresh | Cost |
 | --- | --- | --- |
 | CPU, RAM, counts, watcher, machine | every run (1 s) | One pass over `/proc` and file reads. CPU needs two runs, so it appears from the second run on. |
 | Queue | when the backlog changes, else every minute | One `fm-tasks-axi.sh ready` per home, most of a run's cost when it runs. |
 | Disk | every 15 minutes | One `du` over each home and its pools. On a host with large pools this run can take a minute; the other values wait for it. |
+| Provider usage | every 3 minutes | One `omp usage --json` call with a 20-second timeout. The reporter also caches failures for 3 minutes. |
 
-The caches live in `~/.cache/crewship/herdr-spaces.json`. A source that fails keeps its previous value, and a failed run never fails the unit: errors go to the journal (`journalctl --user -u herdr-spaces.service`), which leaves out systemd's own start and finish lines for each run. Herdr drops workspace tokens when its server restarts; the next run reports them again.
+The caches live in `~/.cache/crewship/herdr-spaces.json`.
+A failed quota refresh replaces the provider percentages with unknown; other failed sources keep their previous values.
+A failed run never fails the unit: errors go to the journal (`journalctl --user -u herdr-spaces.service`).
+Herdr drops workspace tokens when its server restarts; the next run reports them again.
 
 Inspect what a space reports:
 

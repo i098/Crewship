@@ -9,7 +9,7 @@ workspace tokens under the source `crewship:spaces`:
   decisions  "⚑ N"  fresh open decisions (parked captain-hold-* keys left out):
                     a second-level home's own, or the primary home's own workers';
                     only while a workspace is labelled firstmate
-  crew       "▶ N"  live worker task records (state/*.meta, homes excluded)
+  crew       "▶ working/total"  agent panes belonging to this workspace
   queue      "◷ N"  queued tasks ready to start (bin/fm-tasks-axi.sh ready),
                     recounted when data/backlog.md changes, else once a minute
   res        "⚙ 29%  ▤ 8%  ⛁ 2%"  CPU, RAM and disk, as shares of the machine
@@ -19,10 +19,12 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
+  usage      "✳ ▰▱▱▱▱▱▱▱  12%  ◎ ▰▰▰▱▱▱▱▱  38%"  provider account means
 
-Zero counts are cleared. Disk is cached 15 minutes, and the queue count as
-above, in ~/.cache/crewship/herdr-spaces.json. A source that fails keeps
-its previous value, and the script always exits 0.
+Zero decision and queue counts are cleared. Disk is cached 15 minutes,
+provider usage three minutes, and the queue count as above, in
+~/.cache/crewship/herdr-spaces.json. Failed usage refreshes show unknown;
+other failed sources keep their previous value. The script always exits 0.
 
 Herdr's mobile layout ignores sidebar rows, so the same data also goes where
 it shows. A home's agent pane (one with a `who` token) gets its session topic
@@ -45,10 +47,11 @@ from pathlib import Path
 SOURCE = "crewship:spaces"
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "crewship"
-TOKENS = ("short", "decisions", "crew", "queue", "res", "alert", "host", "machine")
+TOKENS = ("short", "decisions", "crew", "queue", "res", "alert", "host", "machine", "usage")
 DISK_TTL = 15 * 60
 QUEUE_TTL = 60  # "ready" also moves with date gates, so recount at least once a minute
 TAB_TTL = 30  # seconds between looks at the machine tab: its shares move every second
+USAGE_TTL = 3 * 60
 TICK = os.sysconf("SC_CLK_TCK")
 PAGE = os.sysconf("SC_PAGE_SIZE")
 STATES = ("idle", "working", "done", "unknown")  # "blocked" keeps Herdr's own word
@@ -129,9 +132,59 @@ def decisions(primary: Path, wid: str, is_primary: bool, cached: dict, folds: di
     return total
 
 
-def crew(home: Path) -> int:
-    metas = (m.read_text() for m in (home / "state").glob("*.meta"))
-    return sum("\nkind=secondmate\n" not in f"\n{text}\n" for text in metas)
+def crew(panes: list[dict]) -> str:
+    agents = [p for p in panes if p.get("agent")]
+    working = sum(p.get("agent_status") == "working" for p in agents)
+    return f"{working}/{len(agents)}"
+
+
+def usage_average(reports: list[dict]) -> float | None:
+    """Average each account's tightest limit; aliases do not add capacity."""
+    accounts = {}
+    for index, report in enumerate(reports):
+        metadata = report.get("metadata") or {}
+        identity = metadata.get("accountId") or metadata.get("email")
+        key = (identity, metadata.get("orgId")) if identity else index
+        limits = report.get("limits") or []
+        values = [(limit.get("amount") or {}).get("usedFraction") for limit in limits]
+        if not values or any(
+            limit.get("status") == "unknown"
+            or type(value) not in (int, float)
+            or not 0 <= value <= 1
+            for limit, value in zip(limits, values)
+        ):
+            return None
+        accounts[key] = max(accounts.get(key, 0), *values)
+    return sum(accounts.values()) / len(accounts) * 100 if accounts else None
+
+
+def usage_row(cache: dict) -> str:
+    now = time.time()
+    hit = cache.get("usage", {})
+    if now - hit.get("at", 0) >= USAGE_TTL:
+        averages = dict.fromkeys(("anthropic", "openai-codex"))
+        try:
+            report = json.loads(run("omp", "usage", "--json", timeout=20))
+            for provider in averages:
+                if not any(
+                    a.get("provider") == provider for a in report.get("accountsWithoutUsage", [])
+                ):
+                    averages[provider] = usage_average(
+                        [r for r in report["reports"] if r.get("provider") == provider]
+                    )
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            print("herdr-spaces: omp usage unavailable", file=sys.stderr)
+        hit = cache["usage"] = {"at": now, "averages": averages}
+    halves = []
+    for provider, icon in (("anthropic", "✳"), ("openai-codex", "◎")):
+        value = hit["averages"][provider]
+        if value is None:
+            bar, percent = "░░░?░░░░", "  ?%"
+        else:
+            filled = round(value * 8 / 100)
+            bar, percent = "▰" * filled + "▱" * (8 - filled), f"{value:3.0f}%"
+        halves.append(f"{icon} {bar} {percent}")
+    return "  ".join(halves)
 
 
 def queue(home: Path, saved: dict) -> int:
@@ -335,9 +388,7 @@ def main() -> None:
         st = os.statvfs("/")
         disk_total, disk_used = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize
         parts.append(f"⛁ {used_of(disk_used, disk_total)} {pct(disk_used, disk_total)}")
-        agents = [p for p in panes if p.get("agent")]
-        running = sum(p.get("agent_status") == "working" for p in agents)
-        parts.append(f"◉ {running}/{len(agents)}")
+        parts.append(f"◉ {crew(panes)}")
         return ["⌂ " + " ".join(parts)]
 
     first = workspaces[0] if workspaces else {}
@@ -378,7 +429,7 @@ def main() -> None:
                         )
                     ],
                 )
-            fill(["crew"], lambda: [count(crew(home), "▶ ")])
+            fill(["crew"], lambda: [f"▶ {crew([p for p in panes if p['workspace_id'] == wid])}"])
             fill(["queue"], lambda: [count(queue(home, cache.setdefault("queue", {})), "◷ ")])
             fill(["alert"], lambda: ["⚠ watcher silent" if watcher_silent(home) else ""])
         if not helper:
@@ -393,6 +444,8 @@ def main() -> None:
                     print(f"{label}: tab: {err}", file=sys.stderr)
         elif wid == primary and not machine:
             fill(["host"], host)
+        if wid == (machine or primary):
+            values["usage"] = usage_row(cache)
 
         args = [HERDR, "workspace", "report-metadata", wid, "--source", SOURCE]
         for key, value in values.items():

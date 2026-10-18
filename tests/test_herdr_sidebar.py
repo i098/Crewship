@@ -149,6 +149,11 @@ def fixture(tmp_path, monkeypatch):
     write(home / "bin/fm-supervision-lib.sh", "fm_supervision_unhealthy() { return 0; }\n")
 
     stub = tmp_path / "stub"
+    write(
+        stub / "omp",
+        '#!/bin/sh\nprintf \'%s\\n\' \'{"reports":[],"accountsWithoutUsage":[]}\'\n',
+        0o755,
+    )
     log = tmp_path / "reports.jsonl"
     workspaces = tmp_path / "workspaces.json"
     workspaces.write_text(
@@ -355,11 +360,12 @@ def test_reporter_counts_from_a_fixture_home(fixture):
         # Its own worker's fresh decision only: not the parked hold, not the
         # second-level homes' decisions.
         "decisions": "⚑ 1",
-        "crew": "▶ 3",
+        "crew": "▶ 0/2",
         "queue": "◷ 4",
         "alert": "⚠ watcher silent",
         # No machine workspace: the machine line is its host row instead.
         "machine": None,
+        "usage": "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%",
     }
     # Shares of the machine; CPU needs a baseline, so it waits for run two.
     # Herdr's own continuation indent puts it under the name: no padding.
@@ -410,6 +416,7 @@ def test_host_line_counts_working_agent_panes(fixture, tmp_path):
     (tmp_path / "panes.json").write_text(json.dumps(panes))
     # Agent panes only: the plain shell pane is left out of both counts.
     assert run()["w1"]["host"].endswith(" ◉ 1/2")
+    assert run()["w1"]["crew"] == "▶ 1/2"
 
 
 def test_reporter_forgets_status_logs_it_no_longer_reads(fixture):
@@ -445,8 +452,8 @@ def test_a_machine_workspace_carries_the_machine_line_alone(fixture, tmp_path):
     reported = run()
     machine = reported["w0"]
     assert machine.pop("machine").startswith("⌂ ")
-    # Nothing else, not even a short name: the line sits alone at the left edge.
-    assert machine == dict.fromkeys(spaces.TOKENS[:-1])
+    assert machine.pop("usage") == "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%"
+    assert machine == dict.fromkeys(k for k in spaces.TOKENS if k not in ("machine", "usage"))
     # Never both: no Space carries the host row under its resource line.
     assert all(tokens["host"] is None for tokens in reported.values())
     assert all(tokens["machine"] is None for wid, tokens in reported.items() if wid != "w0")
@@ -543,7 +550,7 @@ def test_mobile_layout_carries_the_same_data(fixture, tmp_path):
     assert sent[::2] == ["--state-label"] * len(spaces.STATES)
     states, texts = zip(*(s.split("=", 1) for s in sent[1::2]))
     assert list(states) == list(spaces.STATES) and len(set(texts)) == 1
-    assert re.fullmatch(r"⚑1 ▶3 ◷4 ▤\d+% ⛁\d+% ⚠watcher ⎇1561 \+84 −12 ✎3", texts[0])
+    assert re.fullmatch(r"⚑1 ▶0/2 ◷4 ▤\d+% ⛁\d+% ⚠watcher ⎇1561 \+84 −12 ✎3", texts[0])
     # A worker keeps Firstmate's display agent and shows its size only.
     source = ["--source", "crewship:spaces", "--agent", "omp"]
     assert reports == {
@@ -594,7 +601,7 @@ def test_mobile_reports_settle_and_follow_a_changed_pane(fixture, tmp_path, monk
     ]
     texts = {s.partition("=")[2] for s in sent["w1:p2"][7::2]}
     assert len(texts) == 1
-    assert re.fullmatch(r"⚑1 ▶3 ◷4 ⚙\d+% ▤\d+% ⛁\d+% ⚠watcher ⎇1561 \+90 −12 ✎3", texts.pop())
+    assert re.fullmatch(r"⚑1 ▶0/2 ◷4 ⚙\d+% ▤\d+% ⛁\d+% ⚠watcher ⎇1561 \+90 −12 ✎3", texts.pop())
     run()
     assert reports() == {}
 
@@ -983,3 +990,125 @@ def test_client_script_creates_the_config_dir_and_surfaces_ssh_errors(tmp_path):
     failed = subprocess.run(script, env=env, capture_output=True, text=True)
     assert failed.returncode == 1
     assert failed.stderr == "ssh: Could not resolve hostname host\n"
+
+
+def usage_account(provider, key, *fractions):
+    return {
+        "provider": provider,
+        "metadata": {"accountId": key},
+        "limits": [{"amount": {"usedFraction": f}, "status": "ok"} for f in fractions],
+    }
+
+
+def test_provider_mean_uses_each_accounts_tightest_window_not_a_window_average():
+    a = usage_account("anthropic", "work", 0.1, 0.8)
+    b = usage_account("anthropic", "personal", 0.2, 0.3)
+    assert spaces.usage_average([a, b]) == pytest.approx(55)
+
+
+def test_duplicate_aliases_do_not_add_account_capacity():
+    a = usage_account("anthropic", "work", 0.8)
+    alias = usage_account("anthropic", "work", 0.9)
+    b = usage_account("anthropic", "personal", 0.2)
+    assert spaces.usage_average([a, alias, b]) == pytest.approx(55)
+
+
+def test_distinct_organization_subscriptions_stay_separate():
+    a, b = usage_account("anthropic", "a", 0.8), usage_account("anthropic", "a", 0.2)
+    a["metadata"]["orgId"], b["metadata"]["orgId"] = "work", "personal"
+    assert spaces.usage_average([a, b]) == 50
+
+
+@pytest.mark.parametrize("fraction", [None, -0.1, 1.01, True, "0.4", float("nan")])
+def test_unmeasured_account_never_becomes_zero_usage(fraction):
+    assert spaces.usage_average([usage_account("anthropic", "a", fraction)]) is None
+
+
+def test_one_unknown_limit_withholds_the_provider_mean():
+    a, b = usage_account("openai-codex", "a", 0.8), usage_account("openai-codex", "b", 0.2)
+    b["limits"][0]["status"] = "unknown"
+    assert spaces.usage_average([a, b]) is None
+
+
+def test_workspace_counts_exclude_idle_blocked_shells_and_other_workspaces(fixture, tmp_path):
+    home, run = fixture
+    panes = [
+        {"workspace_id": "w1", "agent": "omp", "agent_status": state, "cwd": str(home)}
+        for state in ("working", "idle", "blocked", "unknown")
+    ]
+    panes += [
+        {"workspace_id": "w1", "cwd": str(home), "agent_status": "working"},
+        {"workspace_id": "w4", "agent": "omp", "agent_status": "working", "cwd": str(home)},
+    ]
+    for n, pane in enumerate(panes):
+        pane["pane_id"] = f"p{n}"
+    (tmp_path / "panes.json").write_text(json.dumps(panes))
+    reported = run()
+    assert reported["w1"]["crew"] == "▶ 1/4"
+    assert reported["w4"]["crew"] == "▶ 1/1"
+    assert reported["w1"]["host"].endswith("◉ 2/5")
+
+
+def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tmp_path):
+    _, run = fixture
+    rows = [
+        usage_account("anthropic", "default", 0.25),
+        usage_account("openai-codex", "a", 0.2),
+        usage_account("openai-codex", "b", 0.8),
+    ]
+    write(
+        tmp_path / "stub/omp",
+        f"#!/bin/sh\nprintf '%s\\n' '{json.dumps({'reports': rows})}'\n",
+        0o755,
+    )
+    expected = "✳ ▰▰▱▱▱▱▱▱  25%  ◎ ▰▰▰▰▱▱▱▱  50%"
+    assert run()["w1"]["usage"] == expected
+    write(tmp_path / "stub/omp", "#!/bin/sh\nexit 2\n", 0o755)
+    assert run()["w1"]["usage"] == expected
+    path = tmp_path / "cache/crewship/herdr-spaces.json"
+    cache = json.loads(path.read_text())
+    cache["usage"]["at"] -= spaces.USAGE_TTL
+    path.write_text(json.dumps(cache))
+    assert run()["w1"]["usage"] == "✳ ░░░?░░░░   ?%  ◎ ░░░?░░░░   ?%"
+
+
+def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
+    _, run = fixture
+    report = {
+        "reports": [usage_account("anthropic", "a", 0.1), usage_account("openai-codex", "b", 0)],
+        "accountsWithoutUsage": [{"provider": "anthropic", "accountId": "missing"}],
+    }
+    write(
+        tmp_path / "stub/omp",
+        f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(report)}'\n",
+        0o755,
+    )
+    assert run()["w1"]["usage"] == "✳ ░░░?░░░░   ?%  ◎ ▱▱▱▱▱▱▱▱   0%"
+
+
+@pytest.mark.parametrize("width", [46, 38])
+@pytest.mark.parametrize("fraction", [0, 0.5, 1, None])
+def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, width, fraction):
+    _, run = fixture
+    report = {"reports": [
+        usage_account("anthropic", "a", fraction),
+        usage_account("openai-codex", "b", fraction),
+    ]}
+    write(
+        tmp_path / "stub/omp",
+        f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(report)}'\n",
+        0o755,
+    )
+    row = run()["w1"]["usage"]
+    halves = row[:15], row[17:]
+    assert len(row) <= width - 6
+    assert [len(h) for h in halves] == [15, 15]
+    assert [h[0] for h in halves] == ["✳", "◎"]
+    assert all(h[1] == h[10] == " " and h[-1] == "%" for h in halves)
+    if fraction is None:
+        assert [h[2:10] for h in halves] == ["░░░?░░░░"] * 2
+        assert [h[11:] for h in halves] == ["  ?%"] * 2
+    else:
+        filled = round(fraction * 8)
+        assert [h[2:10] for h in halves] == ["▰" * filled + "▱" * (8 - filled)] * 2
+        assert [h[11:] for h in halves] == [f"{fraction * 100:3.0f}%"] * 2
