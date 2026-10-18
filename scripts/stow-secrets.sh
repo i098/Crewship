@@ -49,6 +49,13 @@ secrets=/secrets_store/stores/$store/secrets
 # ponytail: one page; the store holds at most 100 secrets per account during the beta.
 api GET "$secrets?per_page=100" | jq '[.result[] | {(.name): {id, comment}}] | add // {}' \
   >"$tmp/existing.json"
+# Secrets that put-secret.sh stored and hosts may read one at a time at GET /NAME: the names in
+# FLEET_SECRETS_READABLE, bound as read_NAME. Never a super.env secret or a missing one.
+jq --slurpfile have "$tmp/existing.json" '
+    [.vars.FLEET_SECRETS_READABLE // "" | splits("[ ,]+") | select(. != "")]
+    | map(if $have[0][.] and $have[0][.].comment != "super.env"
+          then . else error("FLEET_SECRETS_READABLE: no secret \(.) outside super.env") end)' \
+  "$tmp/split.json" >"$tmp/readable.json"
 
 jq -r --slurpfile have "$tmp/existing.json" \
   'map(select($have[0][.name] and $have[0][.name].comment != "super.env") | .name)
@@ -78,7 +85,8 @@ jq -r --slurpfile have "$tmp/existing.json" \
     send PATCH "$secrets/$id" "$tmp/body"
   done
 
-jq --arg store "$store" --arg team "$team" --arg aud "$aud" '{
+jq --arg store "$store" --arg team "$team" --arg aud "$aud" \
+  --slurpfile readable "$tmp/readable.json" '{
     main_module: "index.js",
     compatibility_date: "2026-09-01",
     observability: {enabled: false},
@@ -86,7 +94,9 @@ jq --arg store "$store" --arg team "$team" --arg aud "$aud" '{
     bindings: (map({type: "secrets_store_secret", store_id: $store, secret_name: .name,
                     name: (.name | sub("^super_env_[0-9a-f]{12}_"; "super_env_"))})
       + [{type: "plain_text", name: "team_domain", text: $team},
-         {type: "plain_text", name: "aud", text: $aud}])
+         {type: "plain_text", name: "aud", text: $aud}]
+      + ($readable[0] | map({type: "secrets_store_secret", store_id: $store, secret_name: .,
+                             name: "read_\(.)"})))
   }' "$tmp/entries.json" >"$tmp/metadata.json"
 api PUT "/workers/scripts/$worker" \
   -F "metadata=@$tmp/metadata.json;type=application/json" \

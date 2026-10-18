@@ -3,9 +3,11 @@
 The Worker runs under Node with a stubbed Access certs endpoint and an RSA key made per run.
 """
 
+import email
 import http.server
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -56,7 +58,8 @@ async function jwt(claims, key = good.privateKey) {
   return `${head}.${body}.${b64(sig)}`;
 }
 const env = { team_domain: "team.example", aud: "aud-1",
-  FLEET_SECRETS_ACCESS_CLIENT_ID: { get: async () => vars.FLEET_SECRETS_ACCESS_CLIENT_ID } };
+  FLEET_SECRETS_ACCESS_CLIENT_ID: { get: async () => vars.FLEET_SECRETS_ACCESS_CLIENT_ID },
+  read_EXAMPLE_SECRET: { get: async () => "example value \u00e9\\n" } };
 chunks.forEach((c, i) => { env[`super_env_${i}`] = { get: async () => c }; });
 const now = Date.now() / 1000;
 const ok = { iss: "https://team.example", aud: ["aud-1"], exp: now + 60, nbf: now - 1,
@@ -73,16 +76,27 @@ const cases = {
   not_yet: await jwt({ ...ok, nbf: now + 60 }),
   wrong_key: await jwt(ok, evil.privateKey),
 };
-const out = {};
-for (const [name, token] of Object.entries(cases)) {
+async function get(path, token) {
   const headers = token ? { "Cf-Access-Jwt-Assertion": token } : {};
-  const r = await worker.fetch(new Request("https://x/", { headers }), env);
-  out[name] = { status: r.status, cache: r.headers.get("cache-control"), body: await r.text() };
+  const r = await worker.fetch(new Request(`https://x/${path}`, { headers }), env);
+  return { status: r.status, cache: r.headers.get("cache-control"), body: await r.text() };
 }
+const out = {};
+for (const [name, token] of Object.entries(cases)) out[name] = await get("", token);
+const reads = {
+  bound: await get("EXAMPLE_SECRET", cases.valid),
+  no_token: await get("EXAMPLE_SECRET", null),
+  wrong_client: await get("EXAMPLE_SECRET", cases.wrong_client),
+  unbound: await get("OTHER_SECRET", cases.valid),
+  client_id: await get("FLEET_SECRETS_ACCESS_CLIENT_ID", cases.valid),
+  chunk: await get("super_env_0", cases.valid),
+  prefixed: await get("read_EXAMPLE_SECRET", cases.valid),
+  bad_name: await get("EXAMPLE-SECRET", cases.valid),
+};
 const post = new Request("https://x/", { method: "POST",
   headers: { "Cf-Access-Jwt-Assertion": cases.valid } });
 out.post = { status: (await worker.fetch(post, env)).status };
-console.log(JSON.stringify(out));
+console.log(JSON.stringify({ out, reads }));
 """
 
 
@@ -116,7 +130,7 @@ def test_split_cuts_a_large_file_into_chunks_one_secret_can_hold():
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
 @pytest.mark.parametrize("text", [FAKE_ENV, BIG_ENV], ids=["small", "big"])
-def test_worker_serves_exact_file_only_to_the_service_token(text):
+def test_worker_serves_exact_file_and_readable_secrets_only_to_the_service_token(text):
     harness = HARNESS % (WORKER / "index.js").as_uri()
     result = subprocess.run(
         ["node", "--input-type=module", "-e", harness],
@@ -125,12 +139,20 @@ def test_worker_serves_exact_file_only_to_the_service_token(text):
         text=True,
         check=True,
     )
-    out = json.loads(result.stdout)
+    out, reads = json.loads(result.stdout).values()
     assert out["valid"] == {"status": 200, "cache": "no-store", "body": text}
     for name, r in out.items():
         if name != "valid":
             assert r["status"] == 403, name
             assert r.get("body", "") == "", name
+    assert reads.pop("bound") == {
+        "status": 200,
+        "cache": "no-store",
+        "body": "example value \u00e9\n",
+    }
+    for name, r in reads.items():
+        assert r["status"] == (403 if name in ("no_token", "wrong_client") else 404), name
+        assert r["body"] == "", name
 
 
 class Fake(http.server.BaseHTTPRequestHandler):
@@ -139,7 +161,9 @@ class Fake(http.server.BaseHTTPRequestHandler):
             self.headers["CF-Access-Client-Id"] == "fake-id"
             and self.headers["CF-Access-Client-Secret"] == "fake-secret"
         )
-        body = FAKE_ENV.encode() if good else b"denied"
+        bodies = {"/": FAKE_ENV.encode(), "/EXAMPLE_SECRET": b"example value\n"}
+        good = good and self.path in bodies
+        body = bodies[self.path] if good else b"denied"
         self.send_response(200 if good else 403)
         self.end_headers()
         self.wfile.write(body)
@@ -156,9 +180,9 @@ def server():
     httpd.shutdown()
 
 
-def fetch(tmp_path: Path, url: str) -> subprocess.CompletedProcess:
+def fetch(tmp_path: Path, url: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [ROOT / "scripts/fetch-secrets.sh"],
+        [ROOT / "scripts/fetch-secrets.sh", *args],
         env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "FLEET_SECRETS_URL": url},
         capture_output=True,
         text=True,
@@ -201,16 +225,34 @@ def test_fetch_failure_leaves_existing_file(tmp_path, server):
     assert sorted(p.name for p in tmp_path.iterdir()) == [".config", "super.env"]
 
 
+def test_fetch_name_prints_one_secret_and_leaves_super_env(tmp_path, server):
+    creds = tmp_path / ".config/fleet-secrets.env"
+    creds.parent.mkdir()
+    creds.write_text(
+        "FLEET_SECRETS_ACCESS_CLIENT_ID=fake-id\nFLEET_SECRETS_ACCESS_CLIENT_SECRET=fake-secret\n"
+    )
+    creds.chmod(0o600)
+    dest = tmp_path / "super.env"
+    dest.write_text("OLD=1\n")
+    result = fetch(tmp_path, server, "EXAMPLE_SECRET")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "example value\n", "")
+    assert fetch(tmp_path, server, "OTHER_SECRET").returncode != 0
+    assert fetch(tmp_path, server, "../x").returncode == 2
+    assert dest.read_text() == "OLD=1\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".config", "super.env"]
+
+
 class FakeCloudflare(http.server.BaseHTTPRequestHandler):
     """Secrets Store API with the 100-secret cap; `store` maps name -> {id, comment, value}."""
 
     store: dict
     calls: list
+    metadata: dict
     prefix = "/secrets_store/stores/store-1/secrets"
+    stores = [{"id": "store-1", "name": "default_secrets_store"}]
     static = {
         "/access/organizations": {"auth_domain": "team.example"},
         "/access/apps": [{"domain": "fleet-secrets.iterative.sh", "aud": "aud-1"}],
-        "/secrets_store/stores": [{"id": "store-1"}],
     }
 
     def reply(self, result=None, errors=None, status=200):
@@ -227,7 +269,19 @@ class FakeCloudflare(http.server.BaseHTTPRequestHandler):
             return self.secrets(path[len(self.prefix) + 1 :], raw)
         if path.startswith("/workers/"):
             self.calls.append((self.command, path))
+            if self.command == "PUT":
+                form = email.message_from_bytes(
+                    f"Content-Type: {self.headers['Content-Type']}\r\n\r\n".encode() + raw
+                )
+                part = next(
+                    p
+                    for p in form.get_payload()
+                    if p.get_param("name", header="content-disposition") == "metadata"
+                )
+                FakeCloudflare.metadata = json.loads(part.get_payload(decode=True))
             return self.reply({})
+        if path == "/secrets_store/stores":
+            return self.reply(self.stores)
         self.reply(self.static[path])
 
     def secrets(self, sid, raw):
@@ -244,7 +298,7 @@ class FakeCloudflare(http.server.BaseHTTPRequestHandler):
         if self.command == "DELETE":
             del self.store[name]
         else:
-            self.store[name]["value"] = json.loads(raw)["value"]
+            self.store[name].update(json.loads(raw))
         self.reply({})
 
     def create(self, new):
@@ -267,13 +321,19 @@ class FakeCloudflare(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def run_stow(tmp_path: Path, old_secrets: int, token: str) -> subprocess.CompletedProcess:
-    """Run stow-secrets.sh against the fake store; curl's argv lands in tmp_path/argv."""
+TOKEN = "fake-token-value-123"
+needs_jq_curl = pytest.mark.skipif(
+    not shutil.which("jq") or not shutil.which("curl"), reason="needs jq and curl"
+)
+
+
+def run_script(tmp_path: Path, args: list, store: dict, env_text: str, stdin: str = ""):
+    """Run scripts/<args[0]> against a fake holding `store`; curl's argv lands in tmp_path/argv."""
     (tmp_path / "super.env").write_text(
-        f"CLOUDFLARE_ACCOUNT_ID=acct\nCF_API_TOKEN_GLOBAL={token}\n{BIG_ENV}"
+        f"CLOUDFLARE_ACCOUNT_ID=acct\nCF_API_TOKEN_GLOBAL={TOKEN}\n{env_text}"
     )
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     (bin_dir / "sleep").write_text("#!/bin/sh\n")
     (bin_dir / "curl").write_text(
         f'#!/bin/sh\nprintf "%s\\n" "$@" >>{tmp_path}/argv\nexec {shutil.which("curl")} "$@"\n'
@@ -281,26 +341,18 @@ def run_stow(tmp_path: Path, old_secrets: int, token: str) -> subprocess.Complet
     for tool in bin_dir.iterdir():
         tool.chmod(0o755)
     FakeCloudflare.calls = []
-    FakeCloudflare.store = {
-        f"OLD_{i}": {"id": f"id-old-{i}", "comment": "super.env", "value": "x"}
-        for i in range(old_secrets)
-    }
-    FakeCloudflare.store["KEEP"] = {"id": "id-keep", "comment": "other", "value": "x"}
-    FakeCloudflare.store["FLEET_SECRETS_ACCESS_CLIENT_ID"] = {
-        "id": "id-client",
-        "comment": "super.env",
-        "value": "old",
-    }
+    FakeCloudflare.store = store
     httpd = http.server.HTTPServer(("127.0.0.1", 0), FakeCloudflare)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         return subprocess.run(
-            [ROOT / "scripts/stow-secrets.sh"],
+            [ROOT / "scripts" / args[0], *args[1:]],
             env={
                 "PATH": f"{bin_dir}:{os.environ['PATH']}",
                 "HOME": str(tmp_path),
                 "CF_API_BASE": f"http://127.0.0.1:{httpd.server_port}",
             },
+            input=stdin,
             capture_output=True,
             text=True,
         )
@@ -308,11 +360,25 @@ def run_stow(tmp_path: Path, old_secrets: int, token: str) -> subprocess.Complet
         httpd.shutdown()
 
 
-@pytest.mark.skipif(not shutil.which("jq") or not shutil.which("curl"), reason="needs jq and curl")
+def stow_store(old_secrets: int) -> dict:
+    store = {
+        f"OLD_{i}": {"id": f"id-old-{i}", "comment": "super.env", "value": "x"}
+        for i in range(old_secrets)
+    }
+    store["KEEP"] = {"id": "id-keep", "comment": "other", "value": "x"}
+    store["FLEET_SECRETS_ACCESS_CLIENT_ID"] = {
+        "id": "id-client",
+        "comment": "super.env",
+        "value": "old",
+    }
+    return store
+
+
+@needs_jq_curl
 @pytest.mark.parametrize("old_secrets, full", [(98, True), (10, False)], ids=["full", "roomy"])
 def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_secrets, full):
-    token = "fake-token-value-123"
-    result = run_stow(tmp_path, old_secrets, token)
+    env_text = f"FLEET_SECRETS_READABLE=KEEP\n{BIG_ENV}"
+    result = run_script(tmp_path, ["stow-secrets.sh"], stow_store(old_secrets), env_text)
     assert result.returncode == 0, result.stderr
 
     store = FakeCloudflare.store
@@ -321,6 +387,16 @@ def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_se
     assert sorted(store) == sorted(["KEEP", "FLEET_SECRETS_ACCESS_CLIENT_ID", *chunks])
     assert store["KEEP"]["value"] == "x"
     assert store["FLEET_SECRETS_ACCESS_CLIENT_ID"]["value"] == "client-1"
+    secret_bindings = {
+        b["name"]: b["secret_name"]
+        for b in FakeCloudflare.metadata["bindings"]
+        if b["type"] == "secrets_store_secret"
+    }
+    assert secret_bindings == {
+        "read_KEEP": "KEEP",
+        "FLEET_SECRETS_ACCESS_CLIENT_ID": "FLEET_SECRETS_ACCESS_CLIENT_ID",
+        **{re.sub("_[0-9a-f]{12}_", "_", n): n for n in chunks},
+    }
 
     mutations = [
         c for c in FakeCloudflare.calls if c[0] in ("POST", "DELETE") and "workers" not in c[1]
@@ -335,5 +411,73 @@ def test_stow_makes_room_in_a_full_store_before_creating_chunks(tmp_path, old_se
     assert sorted(deleted) == sorted(f"OLD_{i}" for i in range(old_secrets))
 
     argv = (tmp_path / "argv").read_text()
-    values = [token, *(s["value"] for s in store.values())]
+    values = [TOKEN, *(s["value"] for s in store.values())]
     assert not any(v in argv or v in result.stdout + result.stderr for v in values if len(v) > 1)
+
+
+@needs_jq_curl
+@pytest.mark.parametrize("readable", ["FLEET_SECRETS_ACCESS_CLIENT_ID", "MISSING", "KEEP,OLD_0"])
+def test_stow_refuses_readable_names_it_must_not_bind_before_any_change(tmp_path, readable):
+    env_text = f"FLEET_SECRETS_READABLE={readable}\n{BIG_ENV}"
+    result = run_script(tmp_path, ["stow-secrets.sh"], stow_store(3), env_text)
+    assert result.returncode != 0
+    assert "FLEET_SECRETS_READABLE" in result.stderr
+    assert all(c[0] == "GET" for c in FakeCloudflare.calls)
+    assert sorted(FakeCloudflare.store) == sorted(stow_store(3))
+
+
+def put_store() -> dict:
+    return {
+        "EXAMPLE_SECRET_OLD": {"id": "id-a", "comment": "other", "value": "keep-a"},
+        "XEXAMPLE_SECRET": {"id": "id-b", "comment": "put-secret.sh", "value": "keep-b"},
+        "FLEET_SECRETS_ACCESS_CLIENT_ID": {"id": "id-c", "comment": "super.env", "value": "keep-c"},
+    }
+
+
+@needs_jq_curl
+@pytest.mark.parametrize("existing", [None, "other"], ids=["create", "update"])
+def test_put_secret_writes_exactly_one_secret_from_stdin(tmp_path, monkeypatch, existing):
+    # The first store is another one; only the store named default_secrets_store may change.
+    monkeypatch.setattr(
+        FakeCloudflare, "stores", [{"id": "store-0", "name": "other_store"}, *FakeCloudflare.stores]
+    )
+    store = put_store()
+    if existing:
+        store["EXAMPLE_SECRET"] = {"id": "id-x", "comment": existing, "value": "old-value"}
+    value = "synthetic value \u00e9 with = and spaces\n\n"
+    result = run_script(tmp_path, ["put-secret.sh", "EXAMPLE_SECRET"], store, FAKE_ENV, value)
+    assert result.returncode == 0, result.stderr
+    assert (
+        result.stdout
+        == f"{'Updated' if existing else 'Created'} EXAMPLE_SECRET in default_secrets_store.\n"
+    )
+
+    after = FakeCloudflare.store
+    assert after["EXAMPLE_SECRET"]["value"] == value[:-1]
+    assert after["EXAMPLE_SECRET"]["comment"] == (existing or "put-secret.sh")
+    assert {n: s for n, s in after.items() if n != "EXAMPLE_SECRET"} == put_store()
+    writes = [c for c in FakeCloudflare.calls if c[0] != "GET"]
+    assert writes == ([("PATCH", "EXAMPLE_SECRET")] if existing else [("POST", ["EXAMPLE_SECRET"])])
+
+    argv = (tmp_path / "argv").read_text()
+    assert "synthetic value" not in argv + result.stdout + result.stderr
+    assert TOKEN not in argv + result.stdout + result.stderr
+
+
+@needs_jq_curl
+@pytest.mark.parametrize(
+    "args, stdin",
+    [
+        (["FLEET_SECRETS_ACCESS_CLIENT_ID"], "new"),
+        (["EXAMPLE_SECRET"], ""),
+        (["EXAMPLE-SECRET"], "new"),
+        (["EXAMPLE_SECRET", "synthetic-arg-value"], "new"),
+        ([], "new"),
+    ],
+    ids=["owned-by-stow", "empty-value", "bad-name", "value-as-argument", "no-name"],
+)
+def test_put_secret_refuses_without_writing(tmp_path, args, stdin):
+    result = run_script(tmp_path, ["put-secret.sh", *args], put_store(), FAKE_ENV, stdin)
+    assert result.returncode != 0
+    assert all(c[0] == "GET" for c in FakeCloudflare.calls)
+    assert FakeCloudflare.store == put_store()

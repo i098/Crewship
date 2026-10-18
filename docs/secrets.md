@@ -11,6 +11,7 @@ Never paste a value from this file into a repository, issue, PR, log, or chat. C
 | Source of truth | `~/super.env` on the primary VPS, mode `600` | Edit here, then push. |
 | The whole file | Account Secrets Store (`default_secrets_store`), secrets `super_env_<hash>_0`, `super_env_<hash>_1`, …, comment `super.env`, scope `workers` | The file's base64, cut into chunks of at most 65,536 characters. `<hash>` is the first 12 hex digits of the file's sha256. The comments hold retired credentials, so they stay a secret too. |
 | Client id for the Worker's own check | Secret `FLEET_SECRETS_ACCESS_CLIENT_ID`, comment `super.env`, scope `workers` | A copy of that variable's last assignment, without one surrounding pair of matching quotes. |
+| Single secrets | Secrets in `default_secrets_store` that `scripts/put-secret.sh` stored, comment `put-secret.sh`, scope `workers` | Not part of `super.env`. The Worker serves one only when its name is in `FLEET_SECRETS_READABLE`. |
 | Fetch endpoint | Worker `fleet-secrets` on the custom domain `host` names in `scripts/stow-secrets.sh` | No `workers.dev` or preview URL. Answers with `Cache-Control: no-store`. |
 | Gate | Cloudflare Access app `fleet-secrets`, one policy: Service Auth for service token `fleet-secrets-fetch` | The Worker also verifies the Access JWT: issuer, audience, expiry, signature, and the token's client id. Anything else gets `403`. |
 | Fetch credential | `FLEET_SECRETS_ACCESS_CLIENT_ID`, `FLEET_SECRETS_ACCESS_CLIENT_SECRET` at the end of `~/super.env` | Expires one year after creation. |
@@ -32,6 +33,56 @@ It reads `CLOUDFLARE_ACCOUNT_ID` and the account token `CF_API_TOKEN_GLOBAL` fro
 A changed file gets new chunk names, so a push never changes a chunk that a running Worker reads. After the redeploy, the script waits 30 seconds for every edge to run the new Worker, then deletes every secret with comment `super.env` that the new Worker does not bind: older chunks and the secrets of the earlier one-secret-per-variable layout. It never deletes a secret with another comment.
 
 If the store has no room for the new chunks (secret count plus chunks to create above 100), the script deletes just enough of those replaced `super.env` secrets before it creates the chunks, then continues as above. The running Worker then loses some bindings until the redeploy finishes, so `fetch-secrets.sh` can fail for a few seconds. This happens whenever the store lacks room, normally only once, on the move from the one-secret-per-variable layout. The fetch works again after the redeploy.
+
+## Put one secret
+
+On the VPS, from this repository, pipe the value on stdin:
+
+```bash
+scripts/put-secret.sh EXAMPLE_ADMIN_PASSWORD <value-file
+```
+
+It creates or updates exactly the secret named `EXAMPLE_ADMIN_PASSWORD` in the store named `default_secrets_store`.
+A new secret gets comment `put-secret.sh` and scope `workers`; an update changes only the value.
+It reads the value only from stdin and drops one trailing newline.
+It refuses a terminal on stdin, an empty value, a second argument, and a name with characters other than letters, digits and `_`.
+It never prints the value.
+It uses `CLOUDFLARE_ACCOUNT_ID` and `CF_API_TOKEN_GLOBAL` from `~/super.env`, as `stow-secrets.sh` does.
+
+It changes no other secret, deletes nothing, and does not deploy the Worker.
+It refuses a secret with comment `super.env`, because `stow-secrets.sh` owns those.
+`stow-secrets.sh` never deletes or overwrites a secret with another comment, so a later push keeps it.
+
+### Let hosts read it
+
+The Worker serves a single secret at `GET /NAME` only when it binds that secret as `read_NAME`.
+It answers `403` without a valid Access JWT, and `404` for every name it does not bind this way, which includes the chunks and `FLEET_SECRETS_ACCESS_CLIENT_ID`.
+
+1. Add the name to `FLEET_SECRETS_READABLE` in `~/super.env` on the VPS; separate more names with spaces or commas:
+
+   ```bash
+   FLEET_SECRETS_READABLE=EXAMPLE_ADMIN_PASSWORD
+   ```
+
+2. Deploy the binding, as a separate step:
+
+   ```bash
+   scripts/stow-secrets.sh
+   ```
+
+   This is the only step that changes what the live Worker can read.
+   It stops before any change when a listed name is missing from the store or has comment `super.env`.
+   No GitHub workflow deploys the `fleet-secrets` Worker: `harbor.yml` deploys only the `crewship` site Worker.
+
+3. On a host with the fetch credential (see below), print the value:
+
+   ```bash
+   scripts/fetch-secrets.sh EXAMPLE_ADMIN_PASSWORD
+   ```
+
+   It writes only to stdout and leaves `~/super.env` unchanged.
+
+To stop serving a secret, remove its name from `FLEET_SECRETS_READABLE` and run `scripts/stow-secrets.sh` again.
 
 ## Fetch on a new host
 
