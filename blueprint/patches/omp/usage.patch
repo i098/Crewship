@@ -1,6 +1,6 @@
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
-@@ -475,6 +475,9 @@
+@@ -477,6 +477,9 @@
  	| "message.output_text.logprobs";
  
  export interface StreamOptions {
@@ -10,7 +10,7 @@
  	temperature?: number;
  	topP?: number;
  	topK?: number;
-@@ -1239,6 +1242,15 @@
+@@ -1304,6 +1307,15 @@
  	 */
  	serviceTier?: ServiceTier;
  	usage: Usage;
@@ -23,12 +23,12 @@
 +		output: number | null;
 +		reasoning: number | null;
 +	} | null;
- 	stopReason: StopReason;
- 	stopDetails?: StopDetails | null;
- 	errorMessage?: string;
+ 	/**
+ 	 * Visible output tokens a history rewrite (shake) has since removed from
+ 	 * `content`. `usage.output` still counts them, so a replay estimate subtracts
 --- a/packages/ai/src/stream.ts
 +++ b/packages/ai/src/stream.ts
-@@ -965,6 +965,13 @@
+@@ -830,6 +830,13 @@
  	context: Context,
  	options?: OptionsForApi<TApi>,
  ): AssistantMessageEventStream {
@@ -42,7 +42,7 @@
  	if (model.resolveHeaders) {
  		return withResolvedModelHeaders(model, options?.signal, resolvedModel => stream(resolvedModel, context, options));
  	}
-@@ -1190,6 +1197,7 @@
+@@ -1055,6 +1062,7 @@
  	context: Context,
  	options?: OptionsForApi<TApi>,
  ): Promise<AssistantMessage> {
@@ -50,7 +50,7 @@
  	return resolveWithThinkingLoopRetries(options?.signal, () => stream(model, context, options));
  }
  
-@@ -1305,6 +1313,13 @@
+@@ -1170,6 +1178,13 @@
  	context: Context,
  	options?: SimpleStreamOptions,
  ): AssistantMessageEventStream {
@@ -62,9 +62,9 @@
 +		);
 +	}
  	const sessionOptions = withInferenceSessionId(options);
- 	if (!model.requiresGlyphTokenization) {
- 		return streamSimpleRequest(model, context, sessionOptions);
-@@ -1645,6 +1660,7 @@
+ 	// Unverified thinking is opt-in: without a requested effort the request is
+ 	// byte-identical to a non-reasoning model's.
+@@ -1515,6 +1530,7 @@
  	},
  ): Promise<AssistantMessage> {
  	const { onAttempt, ...streamOptions } = options ?? {};
@@ -72,7 +72,7 @@
  	const sessionOptions = withInferenceSessionId(streamOptions);
  	return resolveWithThinkingLoopRetries(
  		options?.signal,
-@@ -1888,6 +1904,8 @@
+@@ -1758,6 +1774,8 @@
  	const options = normalizeMandatoryReasoningOptions(model, rawOptions);
  	const simpleProviderOptions = getProviderDefinition(model.provider)?.mapSimpleOptions?.(options ?? {});
  	const base = {
@@ -83,7 +83,7 @@
  		topK: options?.topK,
 --- a/packages/ai/src/judgment/chat.ts
 +++ b/packages/ai/src/judgment/chat.ts
-@@ -65,6 +65,7 @@
+@@ -81,6 +81,7 @@
  							toolChoice: prompt.retry ? { type: "function", name: SUBMIT_JUDGMENT.name } : undefined,
  							signal: judge.signal,
  							onAttempt: options.onAttempt,
@@ -93,7 +93,7 @@
  				{ signal: judge.signal, provider: model.provider },
 --- a/packages/ai/src/providers/openai-shared.ts
 +++ b/packages/ai/src/providers/openai-shared.ts
-@@ -3899,6 +3899,7 @@
+@@ -4030,6 +4030,7 @@
  		api,
  		provider,
  		model: modelId,
@@ -101,7 +101,7 @@
  		usage: {
  			input: 0,
  			output: 0,
-@@ -4153,6 +4154,18 @@
+@@ -4284,6 +4285,18 @@
  	// Wholesale replacement must not drop provider-annotated extras (Copilot
  	// premium-request accounting): the failed/cancelled paths throw right after
  	// this call with no later chance to re-apply.
@@ -122,7 +122,7 @@
  		...accounting,
 --- a/packages/ai/src/providers/openai-responses.ts
 +++ b/packages/ai/src/providers/openai-responses.ts
-@@ -1111,6 +1111,7 @@
+@@ -1179,6 +1179,7 @@
  							const deadContent = [...output.content];
  							const deadResponseId = output.responseId;
  							const deadUsage = structuredCloneJSON(output.usage);
@@ -130,7 +130,7 @@
  							const deadUpstreamModel = output.upstreamModel;
  							const deadUpstreamProvider = output.upstreamProvider;
  							const deadStopDetails = output.stopDetails;
-@@ -1175,6 +1176,7 @@
+@@ -1243,6 +1244,7 @@
  								output.content.push(...deadContent);
  								output.responseId = deadResponseId;
  								output.usage = deadUsage;
@@ -138,7 +138,7 @@
  								output.upstreamModel = deadUpstreamModel;
  								output.upstreamProvider = deadUpstreamProvider;
  								output.stopDetails = deadStopDetails;
-@@ -1215,6 +1217,7 @@
+@@ -1283,6 +1285,7 @@
  					output.stopDetails = undefined;
  					output.providerPayload = undefined;
  					output.usage = retryOutput.usage;
@@ -148,7 +148,7 @@
  					output.duration = undefined;
 --- a/packages/ai/src/providers/openai-codex-responses.ts
 +++ b/packages/ai/src/providers/openai-codex-responses.ts
-@@ -1376,6 +1376,7 @@
+@@ -1396,6 +1396,7 @@
  
  function resetOutputState(output: AssistantMessage): void {
  	output.content.length = 0;
@@ -158,7 +158,7 @@
  		output: 0,
 --- a/packages/ai/src/providers/anthropic.ts
 +++ b/packages/ai/src/providers/anthropic.ts
-@@ -1578,6 +1578,26 @@
+@@ -1661,6 +1661,26 @@
  	server_tool_use?: { web_search_requests?: number | null; web_fetch_requests?: number | null } | null;
  };
  
@@ -185,7 +185,7 @@
  /**
   * Capture Anthropic's optional cache-creation TTL breakdown and server-tool-use
   * counters into the harness Usage shape. Omitted/null fields are no-ops; explicit
-@@ -2008,6 +2028,7 @@
+@@ -2153,6 +2173,7 @@
  			provider: model.provider,
  			model: model.id,
  			usage: createEmptyUsage(),
@@ -193,7 +193,7 @@
  			stopReason: "stop",
  			timestamp: Date.now(),
  		};
-@@ -2427,6 +2448,7 @@
+@@ -2675,6 +2696,7 @@
  				output.stopDetails = undefined;
  				output.inputTransformations = undefined;
  				output.providerPayload = undefined;
@@ -201,7 +201,7 @@
  				output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  				output.stopReason = "stop";
  				firstTokenTime = undefined;
-@@ -2667,6 +2689,7 @@
+@@ -2959,6 +2981,7 @@
  							);
  							const startUsage = startMessage?.usage;
  							if (startUsage) {
@@ -209,7 +209,7 @@
  								applyAnthropicUsageExtras(output.usage, startUsage);
  								output.usage.input = startUsage.input_tokens || 0;
  								output.usage.output = startUsage.output_tokens || 0;
-@@ -3032,6 +3055,7 @@
+@@ -3327,6 +3350,7 @@
  							}
  							const deltaUsage = event.usage;
  							if (deltaUsage) {
@@ -217,7 +217,7 @@
  								if (deltaUsage.input_tokens != null) {
  									output.usage.input = deltaUsage.input_tokens;
  								}
-@@ -3214,6 +3238,7 @@
+@@ -3509,6 +3533,7 @@
  						output.upstreamModel = undefined;
  						output.errorMessage = undefined;
  						output.providerPayload = undefined;
@@ -225,7 +225,7 @@
  						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  						output.stopReason = "stop";
  						firstTokenTime = undefined;
-@@ -3243,6 +3268,7 @@
+@@ -3538,6 +3563,7 @@
  						output.errorMessage = undefined;
  						output.inputTransformations = undefined;
  						output.providerPayload = undefined;
@@ -233,7 +233,7 @@
  						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  						output.stopReason = "stop";
  						firstTokenTime = undefined;
-@@ -3276,6 +3302,7 @@
+@@ -3615,6 +3641,7 @@
  						output.upstreamModel = undefined;
  						output.errorMessage = undefined;
  						output.providerPayload = undefined;
@@ -241,7 +241,7 @@
  						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  						output.stopReason = "stop";
  						firstTokenTime = undefined;
-@@ -3318,6 +3345,7 @@
+@@ -3657,6 +3684,7 @@
  						output.errorMessage = undefined;
  						output.inputTransformations = undefined;
  						output.providerPayload = undefined;
@@ -249,7 +249,7 @@
  						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  						output.stopReason = "stop";
  						firstTokenTime = undefined;
-@@ -3345,6 +3373,7 @@
+@@ -3684,6 +3712,7 @@
  						output.upstreamModel = undefined;
  						output.errorMessage = undefined;
  						output.providerPayload = undefined;
@@ -257,7 +257,7 @@
  						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
  						output.stopReason = "stop";
  						firstTokenTime = undefined;
-@@ -3433,6 +3462,7 @@
+@@ -3832,6 +3861,7 @@
  					output.errorMessage = undefined;
  					output.stopDetails = undefined;
  					output.providerPayload = undefined;
