@@ -2,10 +2,13 @@
 """Install the repository's skills for omp and Claude Code, and its rules for omp.
 
 blueprint/skills/public/<name>/ and blueprint/rules/public/<name>.md ship with Crewship;
+a folder with no SKILL.md of its own groups skills as <group>/<name>/: the group installs whole, with its
+links kept, and each skill in it installs as a link <name> -> <group>/<name>, so they share the group's files.
 blueprint/skills/private/<name>/ and blueprint/rules/private/<name>.md stay on the host and win
-over a public one of the same name. With --private-source (a local directory,
-or a git URL fetched at --private-ref, default HEAD), the skills at its top
-level and the rules in its rules/ folder are first copied into blueprint/skills/private/
+over a public one of the same name; a private item named like a public group replaces the
+whole group, with all its skills. With --private-source (a local directory,
+or a git URL fetched at --private-ref, default HEAD), its skills (<name>/ or <group>/<name>/)
+and the rules in its rules/ folder are first copied into blueprint/skills/private/
 and blueprint/rules/private/; without it, the items an earlier fill added are removed
 from there. Each item is then copied into every root of its kind in KINDS. A
 manifest records the names this script installed, so an item the operator put
@@ -21,16 +24,28 @@ import json
 import os
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def find_skills(d):
+    """Skills by installed name; a skill in a group maps to a PurePosixPath, installed as a link into the group."""
+    found = {p.parent.name: p.parent for p in sorted(d.glob("*/SKILL.md"))}
+    for p in sorted(d.glob("*/*/SKILL.md")):
+        group = p.parent.parent
+        if not (group / "SKILL.md").exists():
+            for name, path in ((group.name, group), (p.parent.name, PurePosixPath(group.name, p.parent.name))):
+                old = found.get(name, path)
+                if old != path and not (isinstance(old, Path) and old.is_symlink() and old.readlink() == Path(path)):
+                    raise ValueError(f"skill name {name} is used by both {old} and {path}")
+                found[name] = path
+    return found
+
+
 # kind: (its items in a folder by installed name, its folder in the private source, its roots)
 KINDS = {
-    "skills": (
-        lambda d: {p.parent.name: p.parent for p in sorted(d.glob("*/SKILL.md"))},
-        ".",
-        (".omp/agent/skills", ".claude/skills"),
-    ),
+    "skills": (find_skills, ".", (".omp/agent/skills", ".claude/skills")),
     "rules": (
         lambda d: {p.name: p for p in sorted(d.glob("*.md")) if p.name != "README.md"},
         "rules",
@@ -80,14 +95,20 @@ def sync(wanted, base, mine, skipped, keep=()):
             skipped.append(str(target))
             continue
         mine.add(name)  # claimed before the copy, so a failed copy is retried
-        if tree(target) != tree(source):
-            remove(target)
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                base.mkdir(parents=True, exist_ok=True)
-                shutil.copy(source, target)
-            changed = True
+        link = not isinstance(source, Path)
+        same = target.is_symlink() and target.readlink() == Path(source) if link else tree(target) == tree(source)
+        if same:
+            continue
+        remove(target)
+        base.mkdir(parents=True, exist_ok=True)
+        if link:
+            target.symlink_to(source)
+        elif source.is_dir():
+            # a group keeps its links, so its skills share one copy of its files
+            shutil.copytree(source, target, symlinks=not (source / "SKILL.md").exists())
+        else:
+            shutil.copy(source, target)
+        changed = True
     for name in mine - wanted.keys() - set(keep):
         remove(base / name)
         mine.discard(name)
@@ -112,13 +133,15 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
         for kind, (find, folder, roots) in KINDS.items():
             filled = find(private / folder) if private else {}
             changed |= sync(filled, blueprint / kind / "private", owned[f"{kind}/private"], skipped)
+            mine = find(blueprint / kind / "private")
+            stale = {n for n, p in publics[kind].items() if not isinstance(p, Path) and p.parts[0] in mine}
             # private last, so it wins a name clash
-            wanted = {**(publics[kind] if public == "yes" else {}), **find(blueprint / kind / "private")}
+            wanted = {**{n: p for n, p in publics[kind].items() if n not in stale and public == "yes"}, **mine}
             if kind == "rules":
                 wanted = {name: path for name, path in wanted.items() if name not in skip_rules}
             installed[kind] = sorted(wanted)
             # public items already on the host stay when public is off, except a skipped rule
-            keep = set() if public == "yes" else publics[kind].keys() - (set(skip_rules) if kind == "rules" else set())
+            keep = set() if public == "yes" else publics[kind].keys() - stale - (set(skip_rules) if kind == "rules" else set())
             for root in roots:
                 changed |= sync(wanted, home / root, owned[root], skipped, keep)
     finally:

@@ -68,6 +68,45 @@ def test_install_both_sets_private_wins_and_hand_added_skills_stay(tmp_path):
     assert (hand / "SKILL.md").read_text() == "operator"
 
 
+def test_grouped_skills_install_by_name_and_share_one_copy_of_the_group_file(tmp_path):
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
+    group = source / "public/ui"
+    for name in ("app", "site"):
+        skill(group, ".", name, name)
+        (group / name / "shared.md").symlink_to("../shared.md")
+    (group / "shared.md").write_text("basics")
+    skill(source, "public", "plain", "plain")
+    skill(source / "public/plain", ".", "inner", "inner")  # a folder inside a skill is not a group
+
+    assert skills.install(home, tmp_path)["installed"]["skills"] == ["app", "plain", "site", "ui"]
+    for root in SKILL_ROOTS:
+        base = home / root
+        for name in ("app", "site"):
+            assert (base / name / "SKILL.md").read_text() == name
+            assert (base / name / "shared.md").resolve() == (base / "ui/shared.md").resolve()
+        assert not (base / "ui/shared.md").is_symlink()
+        assert not (base / "inner").exists()
+    assert not skills.install(home, tmp_path)["changed"]
+
+    # the group's file changes once and both skills read the change
+    (group / "shared.md").write_text("newer")
+    assert skills.install(home, tmp_path)["changed"]
+    assert (home / SKILL_ROOTS[0] / "site/shared.md").read_text() == "newer"
+
+
+@pytest.mark.parametrize("clash", ["flat", "group"])
+def test_a_grouped_skill_that_reuses_a_name_stops_the_install(tmp_path, clash):
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
+    skill(source / "public/ui", ".", "app", "grouped")
+    if clash == "flat":
+        skill(source, "public", "app", "flat")
+    else:
+        skill(source / "public/web", ".", "app", "other group")
+    with pytest.raises(ValueError, match="app"):
+        skills.install(home, tmp_path)
+    assert not home.exists()
+
+
 def test_install_rules_private_wins_and_hand_added_rules_stay(tmp_path):
     source, home = tmp_path / "blueprint/rules", tmp_path / "home"
     rule(source, "public", "shared", "public shared")
@@ -230,10 +269,10 @@ def test_failed_copy_still_records_what_was_installed(tmp_path, monkeypatch):
     skill(source, "public", "b", "b")
     real = skills.shutil.copytree
 
-    def flaky(src, dst):
+    def flaky(src, dst, **kwargs):
         if Path(src).name == "b":
             raise OSError("disk full")
-        return real(src, dst)
+        return real(src, dst, **kwargs)
 
     monkeypatch.setattr(skills.shutil, "copytree", flaky)
     try:
@@ -332,6 +371,26 @@ def test_private_local_directory_source_fills_private(tmp_path):
     assert (source / "private/solo/SKILL.md").read_text() == "local solo"
     for root in SKILL_ROOTS:
         assert (home / root / "solo/SKILL.md").read_text() == "local solo"
+
+
+def test_private_source_group_installs_by_name_and_reinstalls_unchanged(tmp_path):
+    home, local = tmp_path / "home", tmp_path / "local"
+    skill(local / "g", ".", "a", "grouped a")
+    assert skills.install(home, tmp_path, str(local))["installed"]["skills"] == ["a", "g"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "a/SKILL.md").read_text() == "grouped a"
+    assert not skills.install(home, tmp_path, str(local))["changed"]
+
+
+def test_a_private_group_replaces_the_whole_public_group(tmp_path):
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
+    for name in ("app", "site"):
+        skill(source / "public/ui", ".", name, f"public {name}")
+    skill(source / "private/ui", ".", "app", "private app")
+    assert skills.install(home, tmp_path)["installed"]["skills"] == ["app", "ui"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "app/SKILL.md").read_text() == "private app"
+        assert not (home / root / "site").is_symlink()
 
 
 # Shapes of private detail, never the real values: a home directory, an email,
