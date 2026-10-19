@@ -5,7 +5,8 @@ blueprint/skills/public/<name>/ and blueprint/rules/public/<name>.md ship with C
 a folder with no SKILL.md of its own groups skills as <group>/<name>/: the group installs whole, with its
 links kept, and each skill in it installs as a link <name> -> <group>/<name>, so they share the group's files.
 blueprint/skills/private/<name>/ and blueprint/rules/private/<name>.md stay on the host and win
-over a public one of the same name. With --private-source (a local directory,
+over a public one of the same name; a private item named like a public group replaces the
+whole group, with all its skills. With --private-source (a local directory,
 or a git URL fetched at --private-ref, default HEAD), its skills (<name>/ or <group>/<name>/)
 and the rules in its rules/ folder are first copied into blueprint/skills/private/
 and blueprint/rules/private/; without it, the items an earlier fill added are removed
