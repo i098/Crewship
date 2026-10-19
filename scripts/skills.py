@@ -2,6 +2,8 @@
 """Install the repository's skills for omp and Claude Code, and its rules for omp.
 
 blueprint/skills/public/<name>/ and blueprint/rules/public/<name>.md ship with Crewship;
+a folder with no SKILL.md of its own groups skills as <group>/<name>/: the group installs whole, with its
+links kept, and each skill in it installs as a link <name> -> <group>/<name>, so they share the group's files.
 blueprint/skills/private/<name>/ and blueprint/rules/private/<name>.md stay on the host and win
 over a public one of the same name. With --private-source (a local directory,
 or a git URL fetched at --private-ref, default HEAD), the skills at its top
@@ -21,16 +23,25 @@ import json
 import os
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def find_skills(d):
+    """Skills by installed name; a skill in a group maps to a PurePosixPath, installed as a link into the group."""
+    found = {p.parent.name: p.parent for p in sorted(d.glob("*/SKILL.md"))}
+    for p in sorted(d.glob("*/*/SKILL.md")):
+        group = p.parent.parent
+        if not (group / "SKILL.md").exists():
+            found[group.name] = group
+            found[p.parent.name] = PurePosixPath(group.name, p.parent.name)
+    return found
+
+
 # kind: (its items in a folder by installed name, its folder in the private source, its roots)
 KINDS = {
-    "skills": (
-        lambda d: {p.parent.name: p.parent for p in sorted(d.glob("*/SKILL.md"))},
-        ".",
-        (".omp/agent/skills", ".claude/skills"),
-    ),
+    "skills": (find_skills, ".", (".omp/agent/skills", ".claude/skills")),
     "rules": (
         lambda d: {p.name: p for p in sorted(d.glob("*.md")) if p.name != "README.md"},
         "rules",
@@ -80,14 +91,20 @@ def sync(wanted, base, mine, skipped, keep=()):
             skipped.append(str(target))
             continue
         mine.add(name)  # claimed before the copy, so a failed copy is retried
-        if tree(target) != tree(source):
-            remove(target)
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                base.mkdir(parents=True, exist_ok=True)
-                shutil.copy(source, target)
-            changed = True
+        link = not isinstance(source, Path)
+        same = target.is_symlink() and target.readlink() == Path(source) if link else tree(target) == tree(source)
+        if same:
+            continue
+        remove(target)
+        base.mkdir(parents=True, exist_ok=True)
+        if link:
+            target.symlink_to(source)
+        elif source.is_dir():
+            # a group keeps its links, so its skills share one copy of its files
+            shutil.copytree(source, target, symlinks=not (source / "SKILL.md").exists())
+        else:
+            shutil.copy(source, target)
+        changed = True
     for name in mine - wanted.keys() - set(keep):
         remove(base / name)
         mine.discard(name)

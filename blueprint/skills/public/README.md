@@ -1,6 +1,6 @@
 # Public skills
 
-Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
+Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. A folder with no `SKILL.md` of its own groups skills as `<group>/<name>/SKILL.md`: a file the skills share sits once in the group folder, with a relative symlink to it in each skill. The group installs whole, with its links, and each skill in it installs as a link `<name>` to `<group>/<name>`. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
 
 - [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
 - [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
@@ -15,7 +15,6 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
-- [`frontend-ui-craft`](frontend-ui-craft/SKILL.md): eighteen hierarchy rules for UI screens, cards, forms, dialogs, dark mode, motion, loading states and units (credits Zander Whitehurst's reels).
 - [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`instagram-dm`](instagram-dm/SKILL.md): read the agent Instagram DMs with `instagrapi` (session reuse, email-code login), normalise shared posts to `/reel/` URLs for yt-dlp, wake the agent within seconds on a new DM from the operator, reply with `fm-insta-reply`, and curate a few worthwhile reels a day with `reel_curator.py`.
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
@@ -31,5 +30,6 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`slack-relay`](slack-relay/SKILL.md): text the operator the important Slack messages (DMs, mentions, threads, decisions, deadlines, asks, incidents) from the slk cache, read-only, filtered by one `omp -p` call, at most one `fm-imessage` text per minute, every decision logged; opt-in `systemd --user` unit.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
 - [`third-party-signups`](third-party-signups/SKILL.md): act on an owner's standing authorization for signups, email codes and app approvals, with the bounds that always hold.
+- [`ui-ux`](ui-ux/): two UI skills that share [`shared-basics.md`](ui-ux/shared-basics.md) (alignment, one primary button per view, relative units, accessibility): [`app-dashboard`](ui-ux/app-dashboard/SKILL.md) for app screens, dashboards, forms, dialogs and loading states, and [`landing-marketing`](ui-ux/landing-marketing/SKILL.md) for landing pages, CTA copy, entrance motion and gradients (credits Zander Whitehurst's reels).
 - [`usage-card`](usage-card/SKILL.md): answer usage, quota, resource, load and disk questions with the `fm-usage-brief --png` card; notes the hourly `fm-usage-remind` reminder.
 - [`tooling-conventions`](tooling-conventions/SKILL.md): bun, gh-axi, lavish, no-mistakes, herdr, skillspector, caveman and ponytail.
