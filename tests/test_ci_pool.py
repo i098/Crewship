@@ -1,3 +1,4 @@
+import configparser
 import importlib.util
 import io
 import json
@@ -95,6 +96,8 @@ def slots(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "WANTS", wants)
     monkeypatch.setattr(pool_script, "HOOK", tmp_path / "job-started.sh")
     monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    monkeypatch.setattr(pool_script, "github_runners",
+                        lambda repo: {f"o-kept-{n}": {"busy": False} for n in (1, 2)})
     monkeypatch.setattr(pool_script, "remove_tree", shutil.rmtree)
     for attr, text in (("WATCH_SERVICE", pool_script.WATCH_SERVICE_TEXT),
                        ("WATCH_TIMER", pool_script.WATCH_TIMER_TEXT),
@@ -242,6 +245,90 @@ def test_a_config_change_restarts_idle_slots_and_leaves_busy_ones(slots, monkeyp
 
     assert ("restart", "ci-runner@o-kept-1.service") in calls
     assert "restart ci-runner@o-kept-1.service" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("listed", [
+    {"o-kept-1": {"busy": True}},  # GitHub gave the runner a job; its worker has not started
+    {},  # the GitHub read failed or does not list the runner
+])
+def test_a_config_change_restarts_no_slot_that_github_does_not_show_idle(slots, monkeypatch, listed):
+    data, calls, apply = slots
+    assert apply() == 0
+    calls.clear()
+    monkeypatch.setattr(pool_script, "github_runners", lambda repo: listed)
+
+    assert apply(repos=[{"repo": "o/kept", "slots": 2, "labels": ["y"]}]) == 0
+
+    assert ("restart", "ci-runner@o-kept-1.service") not in calls
+    assert json.loads(pool_script.CONFIG.read_text())["repos"][0]["labels"] == ["y"]
+
+
+@pytest.fixture
+def ci_slice(monkeypatch):
+    """The system manager's ci.slice as `systemctl show` and `sudo -n systemctl set-property` see it."""
+    state = {"weight": "[not set]", "refuse": False, "sets": 0}
+
+    def fake_run(argv, **kwargs):
+        if argv[:2] == ["sudo", "-n"]:
+            assert argv[2:5] == ["systemctl", "set-property", "ci.slice"]
+            if state["refuse"]:
+                return subprocess.CompletedProcess(argv, 1)
+            state["weight"], state["sets"] = argv[5].removeprefix("CPUWeight="), state["sets"] + 1
+            return subprocess.CompletedProcess(argv, 0)
+        assert "show" in argv and "ci.slice" in argv
+        return subprocess.CompletedProcess(argv, 0, state["weight"] + "\n", "")
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    return state
+
+
+def test_nice_lowers_the_ci_slice_weight_once_and_gives_the_slots_that_nice(slots, ci_slice, capsys):
+    data, calls, apply = slots
+    assert apply() == 0
+    assert ci_slice["sets"] == 0 and "Nice=" not in pool_script.TEMPLATE.read_text()
+    capsys.readouterr()
+
+    assert apply(check=True, nice=10) == 0
+    assert ci_slice["weight"] == "[not set]"
+    assert "set ci.slice CPUWeight=11" in capsys.readouterr().out
+
+    assert apply(nice=10) == 0
+    assert ci_slice["weight"] == "11"
+    unit = configparser.ConfigParser(strict=False, interpolation=None)
+    unit.read_string(pool_script.TEMPLATE.read_text())
+    # systemd merges a repeated [Service] section the same way.
+    assert unit["Service"]["Nice"] == "10" and unit["Service"]["Restart"] == "always"
+    assert ("daemon-reload",) in calls
+    capsys.readouterr()
+
+    assert apply(nice=10) == 0
+    assert ci_slice["sets"] == 1
+    assert not [line for line in capsys.readouterr().out.splitlines() if line.startswith(("set", "write"))]
+
+
+def test_a_refused_slice_weight_leaves_the_pool_unchanged(slots, ci_slice, tmp_path):
+    data, calls, apply = slots
+    ci_slice["refuse"] = True
+
+    with pytest.raises(SystemExit, match=r"ci\.slice.*exited 1"):
+        apply(nice=10)
+
+    assert not (tmp_path / "pool.json").exists()
+    assert calls == []
+    assert "Nice=" not in pool_script.TEMPLATE.read_text()
+    ci_slice["refuse"] = False
+    assert apply(nice=10) == 0
+    assert ci_slice["weight"] == "11"
+
+
+@pytest.mark.parametrize("nice, valid", [(0, True), (19, True), (-1, False), (20, False), (1.5, False)])
+def test_nice_only_lowers_the_priority(configuration, nice, valid):
+    configuration["crewship"]["ci_pool"]["nice"] = nice
+    if valid:
+        ship.validate_config(configuration)
+    else:
+        with pytest.raises(Exception, match="nice"):
+            ship.validate_config(configuration)
 
 
 def test_a_failed_apply_keeps_the_old_config_so_the_rerun_restarts_idle_slots(slots, monkeypatch):

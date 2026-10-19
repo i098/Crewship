@@ -550,6 +550,11 @@
               "type": "integer",
               "minimum": 1
             },
+            "nice": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 19
+            },
             "image": {
               "type": "string",
               "minLength": 1
