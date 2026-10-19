@@ -522,7 +522,13 @@
                   },
                   "docker": {
                     "const": "dind"
+                  },
+                  "userns": {
+                    "type": "boolean"
                   }
+                },
+                "dependentRequired": {
+                  "userns": ["docker"]
                 },
                 "required": [
                   "repo",

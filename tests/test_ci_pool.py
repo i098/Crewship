@@ -614,11 +614,15 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tm
     assert "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun" in argv
 
 
-def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(tmp_path, monkeypatch):
+@pytest.mark.parametrize("userns", [False, True])
+def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(
+    tmp_path, monkeypatch, userns
+):
     monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
     data = tmp_path / "data"
     (tmp_path / "pool.json").write_text(json.dumps({
-        "data_dir": str(data), "repos": [{"repo": "o/e", "slots": 1, "labels": ["x"], "docker": "dind"}],
+        "data_dir": str(data),
+        "repos": [{"repo": "o/e", "slots": 1, "labels": ["x"], "docker": "dind", "userns": userns}],
     }))
     monkeypatch.setattr(pool_script, "busy", lambda name: False)
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
@@ -641,6 +645,9 @@ def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(t
     sidecar = next(argv for argv in calls if pool_script.DIND_IMAGE in argv)
     job = next(argv for argv in calls if "--init" in argv)
     assert "--privileged" in sidecar and "--privileged" not in job
+    # Only a userns repository's sidecar gets the pool profile; the job container never does.
+    assert (f"apparmor={pool_script.USERNS_PROFILE}" in sidecar) == userns
+    assert "--security-opt" not in job
     assert sidecar[sidecar.index("--network") + 1] == "ci-dind-o-e-1"
     assert sidecar[sidecar.index("--memory") + 1] == job[job.index("--memory") + 1] == "8g"
     assert job[job.index("--network") + 1] == "container:ci-dind-o-e-1"
@@ -651,6 +658,40 @@ def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(t
     tail = [argv for argv in calls if argv[0] == "clear" or argv[1:3] == ["network", "rm"]][-3:]
     assert tail == [["clear", "ci-runner-o-e-1"], ["clear", "ci-dind-o-e-1"],
                     ["docker", "network", "rm", "ci-dind-o-e-1"]]
+
+
+def test_apply_installs_the_sidecar_profile_once_when_a_repository_asks_for_it(
+    slots, tmp_path, monkeypatch, capsys
+):
+    data, calls, apply = slots
+    path = tmp_path / "apparmor.d" / pool_script.USERNS_PROFILE
+    monkeypatch.setattr(pool_script, "USERNS_PROFILE_PATH", path)
+    installs = []
+
+    def install():
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(pool_script.USERNS_PROFILE_TEXT)
+        installs.append(path)
+
+    monkeypatch.setattr(pool_script, "install_profile", install)
+    userns = [{"repo": "o/kept", "slots": 2, "labels": ["x"], "docker": "dind", "userns": True}]
+
+    assert apply() == 0
+    assert installs == [] and f"write {path}" not in capsys.readouterr().out
+    assert apply(check=True, repos=userns) == 0
+    assert installs == [] and f"write {path}" in capsys.readouterr().out
+    assert apply(repos=userns) == 0
+    assert installs == [path] and f"write {path}" in capsys.readouterr().out
+    assert apply(repos=userns) == 0
+    assert installs == [path] and f"write {path}" not in capsys.readouterr().out
+
+
+def test_userns_requires_a_dind_repository(configuration):
+    configuration["crewship"]["ci_pool"]["repos"].append(
+        {"repo": "o/plain", "slots": 1, "labels": ["plain"], "userns": True}
+    )
+    with pytest.raises(Exception, match=r"repos\.1 \(dependentRequired\)"):
+        ship.validate_config(configuration)
 
 
 def test_a_slot_does_not_kill_the_job_of_its_previous_container(tmp_path, monkeypatch):

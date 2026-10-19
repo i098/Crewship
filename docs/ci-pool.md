@@ -28,6 +28,7 @@ flowchart LR
            slots: 2
            labels: [my-label]
            # docker: dind           # a Docker daemon of its own in each slot; see "Docker in a job"
+           # userns: true           # with docker: dind, on a host that restricts user namespaces
    ```
 
 2. Run `./ship.sh launch`. To change only the pool, without a full apply, use [Apply without the playbook](#apply-without-the-playbook).
@@ -54,6 +55,7 @@ To remove a repository, delete its entry and apply again. Its idle slots stop an
 | `repos[].slots` | required | Slots for this repository: the most jobs it runs at one time. |
 | `repos[].labels` | required | Runner labels that the workflow's `runs-on` selects. |
 | `repos[].docker` | none | `dind` gives each slot of the repository its own Docker daemon. See [Docker in a job](#docker-in-a-job). |
+| `repos[].userns` | `false` | With `docker: dind`: run the repository's sidecars under the AppArmor profile `ci-dind-userns`, which allows the user namespace that rootless Docker needs on a host with `kernel.apparmor_restrict_unprivileged_userns=1`. See [Docker in a job](#docker-in-a-job). |
 
 `./ship.sh inspect` refuses the pool without the `docker` profile, a `data_dir` with `..`, and two repositories that make the same unit name.
 
@@ -107,6 +109,8 @@ A repository entry with `docker: dind` gives each of its slots a Docker daemon o
 
 The sidecar runs with `--privileged`, also in its rootless form. Code that gets root in the sidecar has root on the host. The job's code reaches only the daemon, which runs as a non-root user in a user namespace, so a container that a job starts is not root on the host. The job container itself is never privileged. Use `docker: dind` only for a private repository whose pull requests come from its own branches. The job-started hook already refuses code from forks.
 
+On a host with `kernel.apparmor_restrict_unprivileged_userns=1` (Ubuntu's default), the kernel moves the sidecar's `rootlesskit`, which is not root, into the `unprivileged_userns` profile when it creates its user namespace, and that profile denies the capabilities it needs: the sidecar exits a few seconds after it starts, and the slot fails after the daemon timeout. Leave the sysctl alone and set `userns: true` on the repository entry instead. Apply then writes `/etc/apparmor.d/ci-dind-userns` (with `sudo`) and loads it: a profile that confines nothing and allows only the user namespace. Only the sidecars of that repository run under it (`--security-opt apparmor=ci-dind-userns`); every other sidecar, every job container, and the host's setting stay as they are. `apparmor.service` loads the file again at boot.
+
 ## Files on the host
 
 | Path | Contents |
@@ -122,6 +126,7 @@ The sidecar runs with `--privileged`, also in its rootless form. Code that gets 
 | `<data_dir>/ci-pool/scratch/<slot>/` | The slot's `/tmp`, Postgres cluster directory, and `~/.bun`, deleted at each job start. |
 | `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
 | `<data_dir>/ci-pool/dind/<slot>/` | With `docker: dind`: the slot's Docker daemon data and TLS certificates, deleted at each job start. |
+| `/etc/apparmor.d/ci-dind-userns` | With `userns: true`: the sidecar's AppArmor profile. Apply writes it with `sudo` and loads it. |
 
 No token is stored. Each slot reads the host's `gh` login when it starts. When an account is not in the `docker` group, the script runs `sudo -n docker`.
 

@@ -87,6 +87,22 @@ DIND_UID = 1000
 # The job shares the sidecar's network namespace, so the daemon and every port that a
 # `docker compose` service publishes are on the job's localhost.
 DIND_ENV = {"DOCKER_HOST": "tcp://localhost:2376", "DOCKER_TLS_VERIFY": "1", "DOCKER_CERT_PATH": "/certs/client"}
+# A host with kernel.apparmor_restrict_unprivileged_userns=1 (Ubuntu's default) moves an
+# unconfined process that creates a user namespace into the `unprivileged_userns` profile,
+# which denies the capabilities rootlesskit needs, so the sidecar exits at start. An entry
+# with "userns": true runs its sidecars under this profile instead: it confines nothing
+# (flags=(unconfined)) and allows the user namespace. Apply installs it when an entry asks
+# for it; other sidecars and every job container keep Docker's own profiles.
+USERNS_PROFILE = "ci-dind-userns"
+USERNS_PROFILE_PATH = Path("/etc/apparmor.d") / USERNS_PROFILE
+USERNS_PROFILE_TEXT = f"""\
+# Written by ci-pool.py apply (Crewship): the Docker sidecar of a `userns: true` repository.
+abi <abi/4.0>,
+include <tunables/global>
+profile {USERNS_PROFILE} flags=(unconfined) {{
+  userns,
+}}
+"""
 HOOK_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 UNIT_TEXT = """\
 # Written by ci-pool.py apply (Crewship); instances come from crewship.ci_pool.
@@ -324,6 +340,12 @@ def apply(check):
             changes.append(f"start {timer.name}")
             if not check:
                 systemctl("enable", "--now", timer.name)
+    if any(entry.get("userns") for entry in pool["repos"]) and not (
+        USERNS_PROFILE_PATH.exists() and USERNS_PROFILE_PATH.read_text() == USERNS_PROFILE_TEXT
+    ):
+        changes.append(f"write {USERNS_PROFILE_PATH}")
+        if not check:
+            install_profile()
     for name in sorted(set(have) - set(want)):
         unit = f"ci-runner@{name}.service"
         if busy(name):
@@ -398,9 +420,20 @@ def env_args(env):
     return [arg for key, value in env.items() for arg in ("--env", f"{key}={value}")]
 
 
-def start_dind(instance, limits, path):
+def install_profile():
+    """Write the sidecar profile below /etc/apparmor.d (root-owned, hence sudo; apparmor.service
+    loads that directory at boot) and load it now with the same parser."""
+    with tempfile.NamedTemporaryFile("w") as text:
+        text.write(USERNS_PROFILE_TEXT)
+        text.flush()
+        subprocess.run(["sudo", "-n", "install", "-m", "0644", text.name, str(USERNS_PROFILE_PATH)], check=True)
+    subprocess.run(["sudo", "-n", "apparmor_parser", "--replace", str(USERNS_PROFILE_PATH)], check=True)
+
+
+def start_dind(instance, limits, path, userns=False):
     """Start the slot's own Docker daemon in a fresh sidecar on its own network, with its data
-    and TLS certificates in `path`, and return once it answers the way the job will call it."""
+    and TLS certificates in `path`, and return once it answers the way the job will call it.
+    With `userns`, the sidecar runs under USERNS_PROFILE (see there)."""
     name = f"ci-dind-{instance}"
     if not clear_container(name):
         raise RuntimeError("the previous Docker sidecar is still listed after its removal")
@@ -414,6 +447,7 @@ def start_dind(instance, limits, path):
     subprocess.run(bounded([
         *docker(), "run", "--detach", "--rm", "--pull", "missing", "--name", name,
         "--label", f"crewship.ci-pool={instance}", "--network", name, "--privileged", *limits,
+        *(["--security-opt", f"apparmor={USERNS_PROFILE}"] if userns else []),
         "--volume", f"{path / 'data'}:/home/rootless/.local/share/docker",
         "--volume", f"{path / 'certs'}:/certs",
         DIND_IMAGE,
@@ -480,7 +514,7 @@ def run(instance):
         claim_container(container)
         ours = True
         if own_docker:
-            start_dind(instance, limits, dind)
+            start_dind(instance, limits, dind, entry.get("userns", False))
         # The single-use JIT config travels in a 0600 env file, never in argv.
         with tempfile.NamedTemporaryFile("w", dir=os.environ.get("XDG_RUNTIME_DIR")) as env:
             env.write(f"ACTIONS_RUNNER_INPUT_JITCONFIG={jit['encoded_jit_config']}\n")
