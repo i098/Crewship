@@ -115,3 +115,18 @@ Show direct progress when progress is the data.
 Retain accessibility, necessary labels and uncertainty disclosure.
 Don't: imply unmeasured progress or add helper text that repeats the label.
 Check: at the real viewing size, can the reader identify the critical value, its group and the action without decoding symbols?
+
+## 14. Optical alignment, not bounding-box centering [DeAcXnovBqX]
+Source: a reel by @pikacodes, not Zander Whitehurst.
+Why: an alignment tool centers the bounding box, not the visual mass. A play triangle centered by its box leaves more shape on the left, so it looks off.
+Do: place the glyph where it looks balanced to the eye. For an equilateral triangle, put the centroid (where the medians meet) on the circle's center: the triangle moves right and its three corners end equidistant from the circle edge. Other shapes need other adjustments. Judge the result at the size people will see it, not zoomed in.
+Keep the offset inside the icon asset or component, so every reuse inherits it.
+Implementation example (not from the reel): shift the glyph, keep the button box and hit target as they are.
+```html
+<!-- don't: center the box, leave the glyph as is -->
+<button class="grid size-14 place-items-center rounded-full"><svg class="size-6">…play…</svg></button>
+<!-- do: nudge the glyph only; the button, its size and its layout do not change -->
+<button class="grid size-14 place-items-center rounded-full"><svg class="size-6 translate-x-px">…play…</svg></button>
+```
+Don't: use one pixel offset for every icon, or fix balance with negative margins on the container.
+Check: at the real size, is each tip or edge of the glyph the same distance from the container edge? Hide the glyph; the button must keep its size and position.
