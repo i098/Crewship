@@ -19,7 +19,7 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
-  usage      "<claude> ▰▱▱▱▱▱▱▱  12%  <openai> ▰▰▰▱▱▱▱▱  38%"  provider account means
+  usage      "7d left <claude> ▰▰▰▱  70%  <openai> ▰▱▱▱  20%"  worst account's weekly quota left
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
@@ -141,53 +141,55 @@ def crew(panes: list[dict]) -> str:
     return f"{working}/{len(agents)}"
 
 
-def usage_average(reports: list[dict]) -> float | None:
-    """Average each account's tightest limit; aliases do not add capacity."""
-    accounts = {}
-    for index, report in enumerate(reports):
-        metadata = report.get("metadata") or {}
-        identity = metadata.get("accountId") or metadata.get("email")
-        key = (identity, metadata.get("orgId")) if identity else index
-        limits = report.get("limits") or []
-        values = [(limit.get("amount") or {}).get("usedFraction") for limit in limits]
+def usage_left(reports: list[dict]) -> float | None:
+    """Percent left in the worst account's shared seven-day window, the one that gates
+    every model; five-hour windows and model tiers (scope.tier) do not count."""
+    used = None
+    for report in reports:
+        weekly = [
+            limit
+            for limit in report.get("limits") or []
+            if (limit.get("scope") or {}).get("windowId") == "7d" and not limit["scope"].get("tier")
+        ]
+        values = [(limit.get("amount") or {}).get("usedFraction") for limit in weekly]
         if not values or any(
             limit.get("status") == "unknown"
             or type(value) not in (int, float)
             or not 0 <= value <= 1
-            for limit, value in zip(limits, values)
+            for limit, value in zip(weekly, values)
         ):
             return None
-        accounts[key] = max(accounts.get(key, 0), *values)
-    return sum(accounts.values()) / len(accounts) * 100 if accounts else None
+        used = max(used or 0, *values)
+    return None if used is None else (1 - used) * 100
 
 
 def usage_row(cache: dict) -> str:
     now = time.time()
     hit = cache.get("usage", {})
-    if now - hit.get("at", 0) >= USAGE_TTL:
-        averages = dict.fromkeys(("anthropic", "openai-codex"))
+    if "left" not in hit or now - hit["at"] >= USAGE_TTL:
+        left = dict.fromkeys(("anthropic", "openai-codex"))
         try:
             report = json.loads(run("omp", "usage", "--json", timeout=20))
-            for provider in averages:
+            for provider in left:
                 if not any(
                     a.get("provider") == provider for a in report.get("accountsWithoutUsage", [])
                 ):
-                    averages[provider] = usage_average(
+                    left[provider] = usage_left(
                         [r for r in report["reports"] if r.get("provider") == provider]
                     )
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
             print("herdr-spaces: omp usage unavailable", file=sys.stderr)
-        hit = cache["usage"] = {"at": now, "averages": averages}
+        hit = cache["usage"] = {"at": now, "left": left}
     halves = []
     for provider, icon in (("anthropic", CLAUDE), ("openai-codex", OPENAI)):
-        value = hit["averages"][provider]
+        value = hit["left"][provider]
         if value is None:
-            bar, percent = "░░░?░░░░", "  ?%"
+            bar, percent = "░░?░", "  ?%"
         else:
-            filled = round(value * 8 / 100)
-            bar, percent = "▰" * filled + "▱" * (8 - filled), f"{value:3.0f}%"
+            filled = round(value * 4 / 100)
+            bar, percent = "▰" * filled + "▱" * (4 - filled), f"{value:3.0f}%"
         halves.append(f"{icon} {bar} {percent}")
-    return "  ".join(halves)
+    return "7d left " + "  ".join(halves)
 
 
 def queue(home: Path, saved: dict) -> int:
