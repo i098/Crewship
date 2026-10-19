@@ -12,7 +12,7 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
 
 ```text
 ● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
-  <Claude> ▰▰▱▱▱▱▱▱  25%  <OpenAI> ▰▰▰▰▱▱▱▱  50%
+  7d left <Claude> ▰▱▱▱ !22%  <OpenAI> ▰▰▱▱  50%
 ● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ▶ 0/2 · ◷ 3

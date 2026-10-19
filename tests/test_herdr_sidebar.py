@@ -1015,7 +1015,10 @@ def test_aliases_count_once_and_organizations_stay_separate():
     a, alias = usage_account("anthropic", 0.8), usage_account("anthropic", 0.9)
     b, c = usage_account("anthropic", 0.2), usage_account("anthropic", 0.2)
     a["metadata"] = alias["metadata"] = {"accountId": "work"}
-    b["metadata"], c["metadata"] = {"accountId": "x", "orgId": "1"}, {"accountId": "x", "orgId": "2"}
+    b["metadata"], c["metadata"] = (
+        {"accountId": "x", "orgId": "1"},
+        {"accountId": "x", "orgId": "2"},
+    )
     assert spaces.usage_left([a, alias, b, c]) == (57, False)
 
 
@@ -1092,10 +1095,12 @@ def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
 @pytest.mark.parametrize("fraction", [0, 0.5, 1, None])
 def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, width, fraction):
     _, run = fixture
-    report = {"reports": [
-        usage_account("anthropic", fraction),
-        usage_account("openai-codex", fraction),
-    ]}
+    report = {
+        "reports": [
+            usage_account("anthropic", fraction),
+            usage_account("openai-codex", fraction),
+        ]
+    }
     write(
         tmp_path / "stub/omp",
         f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(report)}'\n",
