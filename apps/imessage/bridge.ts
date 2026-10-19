@@ -79,7 +79,8 @@ const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
 const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
 const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL);
-const QUIET_MS = 8000; // eight seconds of silence close the owner's burst before classification
+// Eight seconds of silence close the owner's burst before classification. Only the test suite may shorten them.
+const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 8000;
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -601,7 +602,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (stopping || !current()) return;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
   const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
-  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText);
+  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER);
   if (!statusOk || !prompt.includes(latestText)) return;
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
   deskRun = proc;

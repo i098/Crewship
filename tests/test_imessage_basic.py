@@ -1,21 +1,23 @@
 """Run the actual bridge with isolated fake Photon and model processes. No live provider calls."""
 
 import json
+import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from test_imessage import fake_bridge, publish_json, wait_for
+from test_imessage import ROOT, TEST_QUIET_MS, bun, fake_bridge, publish_json, wait_for
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-PAST_QUIET = 8.5  # seconds: past the bridge's eight-second quiet period, so a desk turn would have run
+PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
 
 
-def basic_rig(tmp_path):
-    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+def basic_rig(tmp_path, test_mode=True):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path, test_mode)
     (fake / "status").write_text("The build is paused.")
     answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
     (fake / "answer").write_text(json.dumps(answer))
@@ -383,7 +385,8 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
     for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3", "FM_IMESSAGE_DESK_REASONING": "low",
                         "INCEPTION_API_KEY": "test-inception-key", "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
         monkeypatch.setenv(name, value)
-    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    # The answer mode runs without test mode, so it proves the real eight-second trigger and ignores the override.
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path, test_mode=mode != "answer")
     bridge = start(1)
     try:
         published = time.monotonic()
@@ -404,7 +407,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         if mode != "answer":
             assert text(fake / "sent") == ""
         first = requests[0]
-        assert first["at"] - published >= 8  # the desk runs only after eight seconds of silence
+        assert first["at"] - published >= (8 if mode == "answer" else TEST_QUIET_MS / 1000)  # the desk runs only after the quiet period
         assert first["auth"] == "Bearer test-inception-key"
         assert (first["body"]["model"], first["body"]["reasoning_effort"]) == ("mercury-3", "low")
         assert [t["function"]["name"] for t in first["body"]["tools"]] == ["zoom"]
@@ -418,6 +421,66 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         bridge.wait(10)
         server.shutdown()
 
+
+@pytest.mark.parametrize("latest", ["short", "huge"])
+def test_inception_requests_stay_within_100000_bytes_and_zoom_ends_with_limit_reached(tmp_path, latest):
+    """A full memory view, then zooms of quote-heavy messages: every body fits and the model hears LIMIT_REACHED."""
+    memory = tmp_path / "memory"
+    (memory / "main").mkdir(parents=True)
+    noisy = 'he said "go"\\ then\n' * 2000  # JSON escapes grow this text by about a quarter
+    (memory / "main" / "2026-01-01.jsonl").write_text("".join(
+        json.dumps({"i": i, "kind": "owner", "text": noisy, "size": len(noisy), "date": "2026-01-01"}) + "\n" for i in range(8)))
+    made = bun(f"""
+import {{ deskInput, deskPrompt, INCEPTION_MAX }} from {json.dumps(str(ROOT / "apps/imessage/desk.ts"))};
+import {{ LIMIT_REACHED }} from {json.dumps(str(ROOT / "apps/imessage/memory.ts"))};
+const system = deskPrompt("the owner", "mercury-3", "");
+const view = Array.from({{ length: 2000 }}, (_, i) => `${{i}}+1|the owner wrote about the trip and the build plan`).join("\\n");
+const ask = {json.dumps(latest)} === "short" ? "What did I say?" : "HEAD" + 'he "asked"\\n'.repeat(20000) + "TAIL";
+const {{ prompt }} = deskInput(system, view, "The build is paused.", ask, "inception");
+console.log(JSON.stringify({{ system, prompt, LIMIT_REACHED, INCEPTION_MAX }}));
+""")
+    sizes, results = [], []
+
+    class Server(BaseHTTPRequestHandler):
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            sizes.append(len(raw))
+            tools = [m["content"] for m in json.loads(raw)["messages"] if m["role"] == "tool"]
+            results[:] = tools
+            if made["LIMIT_REACHED"] in tools or len(sizes) > 6:
+                message = {"role": "assistant", "content": "SKIP"}
+            else:  # two zooms per turn, so a later call's refusal is reserved too
+                calls = [{"id": f"call-{k}", "type": "function", "function": {"name": "zoom", "arguments": json.dumps({"id": k, "n": 1})}}
+                         for k in (len(tools), len(tools) + 1)]
+                message = {"role": "assistant", "content": None, "tool_calls": calls}
+            data = json.dumps({"choices": [{"message": message}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        done = subprocess.run(
+            ["bun", str(ROOT / "apps/imessage/inception-desk.ts"), "mercury-3", "low", made["system"]], input=made["prompt"],
+            capture_output=True, text=True, timeout=60,
+            env={"PATH": os.environ["PATH"], "INCEPTION_API_KEY": "test-key", "FM_DESK_MEMORY": str(memory),
+                 "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"})
+    finally:
+        server.shutdown()
+    assert (done.returncode, done.stdout) == (0, "SKIP"), done.stderr
+    assert max(sizes) <= made["INCEPTION_MAX"]
+    assert results[-1] == made["LIMIT_REACHED"] and len(sizes) == 2
+    taken = [r for r in results if r != made["LIMIT_REACHED"]]
+    if latest == "short":  # room for one zoom of the large view's call, not two
+        assert len(taken) == 1 and taken[0].startswith("2026-01-01 owner: ") and sizes[0] > 64_000
+    else:  # the escaped burst fills the first body; it keeps both ends and leaves room only for the refusal
+        assert taken == [] and sizes[0] > 90_000 and "HEAD" in made["prompt"] and "TAIL" in made["prompt"]
+    assert "test-key" not in done.stderr and "he said" not in done.stderr
 
 
 def test_restart_recovers_owned_inbound_and_keeps_an_uncertain_send_out_of_firstmate(tmp_path):

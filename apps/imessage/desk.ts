@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Message } from "spectrum-ts";
-import { CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
@@ -91,15 +91,26 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
   return source?.split(/\r?\n/).includes(evidence.quote) ? evidence.quote : undefined;
 }
 
+// The hard limit on each serialized Inception request body, in UTF-8 bytes, JSON escapes included: a conservative
+// form of the 100k-token input bound. inception-desk.ts checks every body against it.
+export const INCEPTION_MAX = 100_000;
+
 // One desk call's input: the view, the fleet status (clipped to STATUS_MAX) and his latest messages (clipped to
-// what is left), so the system prompt and the input stay ZOOM_RESERVE under CEILING. `spent` is the call's size
-// in bytes so far, for the zoom tool's budget.
-export function deskInput(system: string, view: string, status: string, latest: string): { prompt: string; spent: number } {
+// what is left). For omp the system prompt and the input stay ZOOM_RESERVE under CEILING. For Inception they are
+// measured as JSON strings and keep room for one zoom turn's LIMIT_REACHED under INCEPTION_MAX. `spent` is the
+// call's size in bytes so far, for zoom.ts's budget.
+export function deskInput(system: string, view: string, status: string, latest: string, provider = "omp"): { prompt: string; spent: number } {
   const head = `<chat>\n${clip(view, VIEW_MAX)}\n</chat>\n\nFleet status (durable records, may lag):\n${clip(status, STATUS_MAX)}\n\nLatest messages, after the chat:\n`;
   const tail = "\n\nDecide your response to his latest texts.";
-  const room = CEILING - OVERHEAD - ZOOM_RESERVE - Buffer.byteLength(system + head + tail);
-  const prompt = head + clip(latest, room) + tail;
-  return { prompt, spent: OVERHEAD + Buffer.byteLength(system + prompt) };
+  const inception = provider === "inception";
+  const size = (s: string) => Buffer.byteLength(inception ? JSON.stringify(s).slice(1, -1) : s);
+  const allowance = inception ? INCEPTION_MAX - 2 * CALL_OVERHEAD : CEILING - ZOOM_RESERVE;
+  const room = Math.max(0, allowance - OVERHEAD - size(system + head + tail));
+  let part = clip(latest, room);
+  // JSON escapes can grow the clipped text past its room: clip again, shorter by the excess.
+  for (let max = room; size(part) > room;) part = clip(latest, max -= size(part) - room);
+  const prompt = head + part + tail;
+  return { prompt, spent: OVERHEAD + size(system + prompt) };
 }
 
 // The tapback emoji when the desk's whole answer is REACT:<emoji>, else undefined (send the answer as text).

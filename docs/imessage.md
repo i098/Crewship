@@ -18,7 +18,7 @@ For each message from the owner, the service does these steps:
    The default is Claude Haiku 5.5 with thinking off, through the existing one-shot `omp -p` runner.
    With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
-   It reads `INCEPTION_API_KEY` from `~/super.env`, keeps the shared desk input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, and time.
+   It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
    A failed Inception call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
@@ -115,10 +115,14 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
 - **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
 - **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 64 KB, one batch merges lines until it is 32 KB or less. The view is in `memory/view.json`, and the service loads it at start.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
-- **The input cap.** The desk limits request input to 180,000 bytes, including reserved framing.
-  The byte limit estimates 60,000 tokens as bytes / 3; it is not an exact token count.
+- **The input cap.** With omp, the desk limits request input to 180,000 bytes, including reserved framing.
+  That byte limit estimates 60,000 tokens as bytes / 3; it is not an exact token count.
+  With Inception, each serialized request body, JSON escapes and framing included, is at most 100,000 bytes.
+  A byte-level token covers at least one byte, so this keeps the input within the 100k-token bound.
+  The first Inception body keeps room for one zoom turn; a body that passes the limit is never sent.
   The desk clips the fleet status, long texts, and each zoom result (16 KB) to their head and tail.
-  After the cap, zoom returns "context limit reached".
+  After the cap, zoom returns "context limit reached", so the model answers from what it has.
+  With Inception, a zoom result is taken only while one more refused zoom turn still fits.
   Compaction uses the smaller budget below and does not clip source text.
 - **Compaction size.** Each conversation starts with at most 2,048 bytes of context and 4,096 bytes of source text.
   Long messages use complete UTF-8 chunks; the model then merges their summaries.
