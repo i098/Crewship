@@ -456,6 +456,31 @@ def test_a_failed_docker_read_acts_on_nothing_and_forgets_the_first_sighting(wat
     assert watching["restarts"] == []
 
 
+def test_a_write_the_disk_cut_short_leaves_the_old_state_and_an_empty_state_is_forgotten(watching, capsys):
+    watching["units"] = {"o-job-1": ("active", 900)}
+    watching["runners"] = {"o-job-1": OFFLINE}
+    pool_script.watch()  # first sighting, kept
+    kept = pool_script.WATCH_STATE.read_text()
+
+    def no_space(path, data, **kwargs):
+        path.open("w").close()  # `open` truncated the file, then the write failed
+        raise OSError(28, "No space left on device")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_script.Path, "write_text", no_space)
+        with pytest.raises(OSError):
+            pool_script.watch()
+    assert pool_script.WATCH_STATE.read_text() == kept  # the old sighting survives the failed write
+
+    pool_script.WATCH_STATE.write_text("")  # what the old writer left behind
+    watching["now"] += 600
+    pool_script.watch()  # must not crash: the sighting starts again
+    assert "is empty" in capsys.readouterr().out
+    assert watching["restarts"] == []
+    watching["now"] += pool_script.MISSING_SECONDS
+    pool_script.watch()
+    assert watching["restarts"] == ["ci-runner@o-job-1.service"]
+
+
 def test_watch_restarts_at_most_two_slots_a_run_and_a_dry_run_changes_nothing(watching, capsys):
     watching["units"] = {f"o-job-{n}": ("active", 900) for n in range(1, 6)}
     watching["runners"] = {f"o-job-{n}": OFFLINE for n in range(1, 6)}
