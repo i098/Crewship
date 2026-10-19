@@ -1,3 +1,4 @@
+import gzip
 import importlib.util
 import json
 import os
@@ -7,7 +8,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import zlib
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request, urlopen
 from uuid import UUID
@@ -656,9 +659,10 @@ def test_spool_exports_ledger_records_and_keeps_only_what_later_records_need(tmp
             sent[store] = []
             store.export(lambda batch, store=store: sent[store].append(batch) or {}, NOW)
         replaced = event("checkpoint", sequence=1)["event"]
-        assert [log for log in logs(sent[ledger][0])
-                if {"key": "usage.event", "value": {"stringValue": replaced}} not in log["attributes"]
-                ] == logs(sent[spool][0])
+        assert sorted(json.dumps(log, sort_keys=True) for log in logs(sent[ledger][0])
+                      if {"key": "usage.event", "value": {"stringValue": replaced}}
+                      not in log["attributes"]) \
+            == sorted(json.dumps(log, sort_keys=True) for log in logs(sent[spool][0]))
         assert stored(spool) == [("register", 0), ("start", 0)]
         spool.accept(event("complete", 2, sequence=2, outcome="aborted", usage_present=False,
                            input_basis="unknown", **dict.fromkeys(usage.TOKENS)), NOW)
@@ -673,6 +677,11 @@ def test_spool_exports_ledger_records_and_keeps_only_what_later_records_need(tmp
         assert spool.prune(NOW + timedelta(days=35, microseconds=1)) == 1
 
 
+def pending(spool):
+    return spool.db.execute("SELECT (SELECT count(*) FROM events WHERE sent IS NULL)"
+                            "+(SELECT coalesce(sum(records),0) FROM packs)").fetchone()[0]
+
+
 def test_spool_keeps_unacknowledged_batches_and_retries_identical_bytes(tmp_path):
     with usage.Spool(tmp_path / "spool.sqlite") as spool:
         register(spool)
@@ -684,14 +693,96 @@ def test_spool_keeps_unacknowledged_batches_and_retries_identical_bytes(tmp_path
             attempts.append(json.dumps(batch))
             raise OSError("acknowledgement lost")
 
-        for send in (lost, lambda batch: attempts.append(json.dumps(batch)) or {
-                "partialSuccess": {"rejectedLogRecords": "1"}}):
+        later = NOW + timedelta(hours=2)
+        for moment, send in ((NOW, lost), (later, lambda batch: attempts.append(json.dumps(batch))
+                                           or {"partialSuccess": {"rejectedLogRecords": "1"}})):
             with pytest.raises((OSError, ValueError)):
-                spool.export(send, NOW)
-            assert spool.db.execute("SELECT count(*) FROM events WHERE sent IS NULL").fetchone()[0] == 3
-        assert spool.export(lambda batch: attempts.append(json.dumps(batch)) or {}, NOW) == 3
-        assert len(set(attempts)) == 1 and len(attempts) == 3
-        assert stored(spool) == [("register", 0)]
+                spool.export(send, moment)
+            assert pending(spool) == 3
+        spool.accept(event("checkpoint", sequence=1, at=later.isoformat()), later)
+        assert spool.export(lambda batch: attempts.append(json.dumps(batch)) or {}, later) == 4
+        assert attempts[0] == attempts[1] == attempts[2] != attempts[3]
+        assert stored(spool) == [("register", 0)] and pending(spool) == 0
+
+
+def test_backlog_packs_by_window_and_model_and_sends_the_ledger_records(tmp_path):
+    earlier = NOW - timedelta(hours=3)
+    sent = {}
+    with usage.Ledger(tmp_path / "usage.sqlite") as ledger, \
+            usage.Spool(tmp_path / "spool.sqlite") as spool:
+        for store in (ledger, spool):
+            register(store, now=earlier, at=earlier.isoformat())
+            for number, model in enumerate(("model-b", "model-a", "model-b", "model-a", "model-b"), 1):
+                moment = earlier + timedelta(minutes=20 * number)
+                store.accept(event("start", number, sequence=number, provider="example",
+                                   model=model, at=moment.isoformat()), moment)
+                complete(store, number, now=moment, at=moment.isoformat())
+            sent[store] = []
+            store.export(lambda batch, store=store: sent[store].append(batch) or {}, NOW)
+        assert sorted(json.dumps(log, sort_keys=True) for batch in sent[spool] for log in logs(batch)) \
+            == sorted(json.dumps(log, sort_keys=True) for batch in sent[ledger] for log in logs(batch))
+        models = [[next((item["value"]["stringValue"] for item in log["attributes"]
+                         if item["key"] == "usage.model"), "") for log in logs(batch)]
+                  for batch in sent[spool]]
+        assert models == [["", "model-a", "model-a", "model-b", "model-b"],
+                          ["model-a", "model-a", "model-b", "model-b", "model-b", "model-b"]]
+        assert pending(spool) == 0
+
+
+def test_spool_holds_records_past_signoz_retention_and_admits_new_ones(tmp_path):
+    with usage.Spool(tmp_path / "spool.sqlite") as spool:
+        register(spool)
+        start(spool)
+        complete(spool)
+        with pytest.raises(OSError):
+            spool.export(lambda _: (_ for _ in ()).throw(OSError("offline")), NOW)
+
+        def other(moment):
+            return {**event("register", producer_kind="helper"), "producer": str(UUID(int=2)),
+                    "at": moment.isoformat()}
+
+        week = NOW + timedelta(days=8)
+        with pytest.raises(ValueError, match="too old"):
+            spool.accept(other(week), week)
+        late = NOW + timedelta(days=36)
+        assert spool.export(lambda _: pytest.fail("a held record must not be sent"), late) == 0
+        assert spool.held(late) == 3
+        spool.prune(late)
+        spool.accept(other(late), late)
+        assert spool.export(lambda _: {}, late) == 1
+        body = spool.db.execute("SELECT body FROM packs").fetchone()[0]
+        kept = [{item["key"]: item["value"] for item in log["attributes"]}
+                for log in json.loads(zlib.decompress(body))]
+        assert [(log["usage.kind"]["stringValue"], log["usage.event"]["stringValue"]) for log in kept] \
+            == [(kind, event(kind)["event"]) for kind in ("register", "start", "complete")]
+        assert spool.held(late) == 3
+
+
+def test_sender_compresses_and_spaces_requests(monkeypatch):
+    bodies, pauses = [], []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def do_POST(self):
+            bodies.append((self.headers["Content-Encoding"],
+                           self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *_):
+            pass
+
+    monkeypatch.setattr(usage.time, "sleep", pauses.append)
+    with ThreadingHTTPServer(("127.0.0.1", 0), Receiver) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        send = usage.sender(f"http://127.0.0.1:{server.server_port}/v1/logs")
+        payload = usage.batch([{"body": {"stringValue": "Model request metadata"}}])
+        assert send(payload) == send(payload) == {}
+        server.shutdown()
+    assert [(encoding, json.loads(gzip.decompress(body))) for encoding, body in bodies] \
+        == [("gzip", payload)] * 2
+    assert len(pauses) == 1 and 0 <= pauses[0] <= usage.JITTER
 
 
 def test_spool_refuses_records_beyond_its_age_and_payload_bounds(tmp_path, monkeypatch):

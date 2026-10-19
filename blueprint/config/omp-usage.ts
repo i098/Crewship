@@ -21,7 +21,7 @@ function command() {
 	if (!collector || !isAbsolute(collector) || !data || !isAbsolute(data) || !mount || !isAbsolute(mount))
 		throw new Error("usage metadata configuration is incomplete");
 	return ["-I", collector, "--data-dir", data, "--mount", mount,
-		"--store", process.env.CREWSHIP_USAGE_STORE ?? "ledger", "collect"];
+		"--store", process.env.CREWSHIP_USAGE_STORE ?? "spool", "collect"];
 }
 
 function send(source: Source, row: Record<string, unknown>) {

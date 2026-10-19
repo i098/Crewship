@@ -71,7 +71,7 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
             environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
                                 capture_output=True, text=True, timeout=60)
-        database = case / "data" / ("spool.sqlite" if store == "spool" else "usage.sqlite")
+        database = case / "data" / ("usage.sqlite" if store == "ledger" else "spool.sqlite")
         records = []
         if result.returncode != 0:
             return result, records
@@ -194,7 +194,7 @@ spool.run("DELETE FROM events WHERE payload = '{}'");
 spool.close();
 await request();
 if (calls !== 2) throw new Error("the spool must accept calls after the stale record leaves");
-''', store="spool", inspect=lambda data: stored.update(ledger=(data / "usage.sqlite").exists()))
+''', inspect=lambda data: stored.update(ledger=(data / "usage.sqlite").exists()))
     assert result.returncode == 0, result.stderr
     assert stored == {"ledger": False}
     assert [row["kind"] for row in records] == [
@@ -351,7 +351,7 @@ def test_actual_anthropic_output_counts_only_after_a_terminal_stop_reason(native
     view = {}
     result, records = execute(
         native_source, ANTHROPIC.replace("SCENARIO", json.dumps({"compaction": compaction, "final": final})),
-        inspect=lambda data: view.update(zip(("report", "export"), ledger_view(data))))
+        inspect=lambda data: view.update(zip(("report", "export"), ledger_view(data))), store="ledger")
     assert result.returncode == 0, result.stderr
     completion = next(row for row in records if row["kind"] == "complete")
     input_tokens, output = (110, 48) if compaction else (10, 8)
@@ -407,7 +407,7 @@ const after = report();
 if (after.requests !== 1 || after.counted_tokens !== null
     || after.coverage[0].missing_sequences.length !== 0)
     throw new Error("the acknowledged completion must close the sequence gap exactly once");
-''')
+''', store="ledger")
     assert result.returncode == 0, result.stderr
 
 
@@ -454,7 +454,7 @@ if (recovery === "completion") {
     pulse();
 }
 '''.replace("RECOVERY", json.dumps(recovery)),
-        inspect=inspect)
+        inspect=inspect, store="ledger")
     assert result.returncode == 0, result.stderr
     assert "usage metadata checkpoint acknowledgement failed" in result.stderr
     gaps = [row for row in records if row["kind"] == "gap"]

@@ -62,7 +62,7 @@ The future process opt-in requires four explicit variables and accepts one optio
 | `CREWSHIP_USAGE_COLLECTOR` | The absolute installed `usage.py` path. |
 | `CREWSHIP_USAGE_DATA_DIR` | A dedicated directory below the verified large data mount. |
 | `CREWSHIP_USAGE_MOUNT` | The actual configured mount path. |
-| `CREWSHIP_USAGE_STORE` | Optional: `ledger` (the default) or `spool`, passed to the collector as `--store`. Another value fails every record. |
+| `CREWSHIP_USAGE_STORE` | Optional: `spool` (the default) or `ledger`, passed to the collector as `--store`. Another value fails every record. |
 
 The default asset directory is `~/.local/share/crewship/usage`.
 The source does not activate unless a patched runtime receives the adapter opt-in.
@@ -154,27 +154,42 @@ Offline storage cannot delete records without a running retention process.
 ## Retry spool
 
 Add `--store spool` before the command to keep metadata only until the OTLP endpoint acknowledges it.
-The default `--store ledger` keeps the 35-day ledger described above.
+The operator CLI default `--store ledger` keeps the 35-day ledger described above.
 The spool uses `spool.sqlite` in the same data directory and never opens `usage.sqlite`.
 An existing ledger stays unchanged; its unsent rows still export with `--store ledger export`.
-Set `CREWSHIP_USAGE_STORE=spool` for new producer processes.
+The native adapter uses the spool unless `CREWSHIP_USAGE_STORE=ledger` is set.
 A running process keeps the store that it started with, so restart producers to change the store.
 
 The spool applies the same allowlist, identity, and transition rules as the ledger.
-It keeps each record until an export acknowledges it.
-After the acknowledgement, it deletes completions, checkpoints, and gaps.
-It keeps registrations, shutdowns, and starts without an acknowledged completion, because later records need their producer and model labels.
+`collect` only validates and stores each record; it never compresses or sends.
+Each `export` run first moves the backlog of closed UTC hours into packs.
+A pack holds the rendered OTLP log records of up to 500 records from one closed hour, grouped by model and compressed with zlib.
+The current hour stays unpacked until the export sends it.
+The export sends the oldest packs first; then it packs and sends the current hour in batches of up to 100 records.
+A pack never changes after it is made, so a retry sends the same records in the same request.
+The exporter deletes a pack only after the OTLP acknowledgement.
+
+Moving records into a pack deletes their completions, checkpoints, and gaps from the record table.
+Registrations, shutdowns, and starts without a packed completion stay, because later records need their producer and model labels.
 These kept rows expire 35 days after their last use, as in the ledger; `prune` and `export` remove them.
-A new pending checkpoint replaces the older pending checkpoint of the same producer.
+A new unpacked checkpoint replaces the older unpacked checkpoint of the same producer.
 The dashboard reads only the latest checkpoint of each producer, so this replacement removes no reported value.
 For the same records, the spool exports the same OTLP log records as the ledger.
 The spool keeps no totals, calendar periods, coverage, or reports, so `report` fails.
-It cannot recognize a replay of a record that it already deleted.
+It cannot recognize a replay of a record that it already packed.
+
+SigNoz drops a log record when its timestamp is older than the log retention.
+The exporter therefore holds a pack when its oldest record is less than one hour from the end of 35 days.
+A held pack stays in the spool, compressed and unchanged, and it is never sent or deleted.
+`export` reports held records as `held`.
+Held records count toward the byte and page limits, but not toward the age limit.
+So collection can continue after an outage longer than 35 days.
+Removing held packs needs a separate operator decision; this source does not delete them.
 
 | Limit | Value |
 | --- | --- |
-| Stored record bytes, pending and kept | 64 MiB |
-| Age of the oldest pending record | 7 days |
+| Stored bytes: unpacked records and compressed packs | 64 MiB |
+| Age of the oldest pending record that is not held | 7 days |
 | Database file | 128 MiB: 32,768 pages of 4,096 bytes |
 | Pages in use when `collect` refuses | More than 32,512, so 256 pages stay free |
 
@@ -184,13 +199,15 @@ With adapter records, the page limit stops collection at about 42 MiB of record 
 SQLite refuses any page above the database limit with `SQLITE_FULL`.
 A refusal has the fixed error message and exit status 1, and it stores nothing.
 The adapter then records a delivery gap and fails the metered model call, as for any other collector failure.
-An export that removes records lets collection continue.
-Records that are still below the limits wait through an endpoint outage and then export in order.
+An export that packs or removes records lets collection continue.
+Records that are still below the limits wait through an endpoint outage and then export.
 
 The spool uses a rollback journal, so no write-ahead log grows beside the database.
 The directory holds only `spool.sqlite`, `spool.sqlite-journal`, and the empty `spool.lock`.
 Each collector and export transaction takes an exclusive lock on `spool.lock`.
 The exporter does not keep the lock during the HTTP request.
+Each packing transaction handles at most 500 records.
+After each transaction, the process pauses for one millisecond, because `flock` wakes waiting processes in no fixed order.
 A collector waits for another transaction instead of failing with a busy database.
 
 The spool keeps no exported completions, so it cannot count completions that expire later in SigNoz.
@@ -222,9 +239,12 @@ Run `export --endpoint https://AUTHORIZED-ENDPOINT/v1/logs` only after separate 
 `SIGNOZ_INGESTION_KEY`, when supplied by the operator, sets the ingestion header and never enters the ledger or exported metadata.
 The exporter refuses endpoint credentials, redirects, and remote plain HTTP.
 Loopback HTTP is supported for isolated protocol fixtures.
-Each run takes a snapshot of the pending records and sends at most 50 batches of 100 records, oldest first.
+Each run takes a snapshot of the pending records and makes at most 50 requests.
 Records that arrive during the run wait for the next run.
-The run stops at the first failed batch; the batches before it stay acknowledged.
+The sender compresses each request body with gzip and waits a random time of up to one second between requests.
+These waits spread the requests of many hosts that reconnect at the same time.
+The run stops at the first failed, throttled, or rejected request; the requests before it stay acknowledged.
+The next scheduled run continues, so a slow or busy endpoint receives fewer requests.
 
 The exporter acknowledges a batch only after a successful OTLP response with no rejected records.
 A transport error, rejected batch, or invalid acknowledgement keeps the complete batch pending.
