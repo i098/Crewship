@@ -17,13 +17,5 @@ REFUSE.write_text(
 )
 REFUSE.chmod(0o755)
 os.environ["PATH"] = f"{REFUSE.parent}{os.pathsep}{os.environ.get('PATH', '')}"
-for name in (
-    "HERDR_BIN_PATH",
-    "HERDR_SESSION",
-    "HERDR_SOCKET_PATH",
-    "HERDR_PANE_ID",
-    "HERDR_TAB_ID",
-    "HERDR_WORKSPACE_ID",
-    "HERDR_ENV",
-):
+for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
     os.environ.pop(name, None)
