@@ -129,14 +129,14 @@ Implementation example (not from the reel): shift the glyph, keep the button box
 <button class="grid size-14 place-items-center rounded-full"><svg class="size-6 translate-x-px">…play…</svg></button>
 ```
 Don't: use one pixel offset for every icon, or fix balance with negative margins on the container.
-Check: at the real size, is each tip or edge of the glyph the same distance from the container edge? Hide the glyph; the button must keep its size and position.
+Check: for the play triangle in a circle, are the three corners the same distance from the circle edge? For any other shape, does it look balanced at the real size? Hide the glyph; the button must keep its size and position.
 
 ## 15. One loading policy, by expected wait [DbQ-cgmu56T, DYkRtX1oKKN]
 Source: two reels by @synsation_. The seconds are the creator's heuristics, not a timing guarantee.
 Why: a spinner under one second flashes and feels slower. A bare spinner past about five seconds feels broken. Looped animation past about ten seconds raises frustration. A skeleton reads as "slow connection" and gives no duration information.
 Do, by expected wait:
 - Under about 1 s: no indicator. Show the result.
-- About 1 to 5 s: a spinner, or a skeleton when the final layout is known. The skeleton must match that layout so nothing jumps when content lands, and must animate with a slow, steady, left-to-right shimmer, not a pulse.
+- About 1 to 5 s: a spinner. For a known wait under about 3 s with a known final layout, a skeleton may replace it; it must match that layout so nothing jumps when content lands, and must animate with a slow, steady, left-to-right shimmer, not a pulse.
 - About 5 to 10 s: spinner plus text that names the real step in progress ("Connecting…", "Fetching orders…"). Static "Loading" buys about one second only.
 - Past about 10 s, or an unknown wait: a progress bar when progress is measured, else a step indicator or an indeterminate bar, not a loop.
 - On failure: show the error as soon as it is known. Never hold a spinner and fail later.
