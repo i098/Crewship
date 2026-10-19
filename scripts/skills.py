@@ -35,8 +35,10 @@ def find_skills(d):
         group = p.parent.parent
         if not (group / "SKILL.md").exists():
             for name, path in ((group.name, group), (p.parent.name, PurePosixPath(group.name, p.parent.name))):
-                if found.setdefault(name, path) != path:
-                    raise ValueError(f"skill name {name} is used by both {found[name]} and {path}")
+                old = found.get(name, path)
+                if old != path and not (isinstance(old, Path) and old.is_symlink() and old.readlink() == Path(path)):
+                    raise ValueError(f"skill name {name} is used by both {old} and {path}")
+                found[name] = path
     return found
 
 

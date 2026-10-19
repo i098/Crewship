@@ -373,6 +373,15 @@ def test_private_local_directory_source_fills_private(tmp_path):
         assert (home / root / "solo/SKILL.md").read_text() == "local solo"
 
 
+def test_private_source_group_installs_by_name_and_reinstalls_unchanged(tmp_path):
+    home, local = tmp_path / "home", tmp_path / "local"
+    skill(local / "g", ".", "a", "grouped a")
+    assert skills.install(home, tmp_path, str(local))["installed"]["skills"] == ["a", "g"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "a/SKILL.md").read_text() == "grouped a"
+    assert not skills.install(home, tmp_path, str(local))["changed"]
+
+
 # Shapes of private detail, never the real values: a home directory, an email,
 # a tailnet host, a non-loopback IPv4, a GitHub owner URL, a secrets file, and
 # the word for the person who owns a fleet.
