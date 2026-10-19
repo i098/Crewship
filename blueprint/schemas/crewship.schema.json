@@ -277,9 +277,26 @@
               "type": "string",
               "pattern": "^[^\\n`$\"\\\\%]{1,40}$"
             },
+            "desk_provider": {
+              "enum": [
+                "omp",
+                "inception"
+              ]
+            },
             "desk_model": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9_./:-]*$"
+            },
+            "desk_reasoning": {
+              "enum": [
+                "off",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
             },
             "supervisor_model": {
               "type": "string",
@@ -357,23 +374,63 @@
           "required": [
             "owner"
           ],
-          "if": {
-            "properties": {
-              "transports": {
-                "contains": {
-                  "const": "bluebubbles"
-                }
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "transports": {
+                    "contains": {
+                      "const": "bluebubbles"
+                    }
+                  }
+                },
+                "required": [
+                  "transports"
+                ]
+              },
+              "then": {
+                "required": [
+                  "bluebubbles"
+                ]
               }
             },
-            "required": [
-              "transports"
-            ]
-          },
-          "then": {
-            "required": [
-              "bluebubbles"
-            ]
-          }
+            {
+              "if": {
+                "properties": {
+                  "desk_provider": {
+                    "const": "inception"
+                  }
+                },
+                "required": [
+                  "desk_provider"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "desk_reasoning": {
+                    "enum": [
+                      "instant",
+                      "low",
+                      "medium",
+                      "high"
+                    ]
+                  }
+                },
+                "required": [
+                  "desk_reasoning"
+                ]
+              },
+              "else": {
+                "properties": {
+                  "desk_reasoning": {
+                    "not": {
+                      "const": "instant"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         },
         "github_board": {
           "type": "object",

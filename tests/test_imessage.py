@@ -1325,6 +1325,9 @@ def load_ship():
         (lambda f: f["profiles"].update(firstmate=False, fleet_guards=False), "firstmate profile"),
         (lambda f: f["imessage"].update(owner="5550100"), "imessage.owner"),
         (lambda f: f["imessage"].pop("owner"), "imessage"),
+        (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3"), "imessage"),
+        (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3", desk_reasoning="off"), "imessage"),
+        (lambda f: f["imessage"].update(desk_reasoning="instant"), "imessage"),
     ],
 )
 def test_config_rejects_a_bridge_it_cannot_run(change, error):
@@ -1664,9 +1667,13 @@ def publish_json(path, record):
     pending.replace(path)
 
 
-def fake_bridge(tmp_path):
+TEST_QUIET_MS = 2000  # the bridge's quiet period in test mode; production always waits eight seconds
+
+
+def fake_bridge(tmp_path, test_mode=True):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
-    start(n), inbound(mid, ...), cli(*args) and text(path) helpers."""
+    start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
+    FM_IMESSAGE_TEST_QUIET_MS and waits its real eight seconds."""
     app, fake, state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
     shutil.copytree(ROOT / "apps/imessage", app, ignore=shutil.ignore_patterns("fm-*"))
     pkg = app / "node_modules/spectrum-ts"
@@ -1702,6 +1709,8 @@ def fake_bridge(tmp_path):
         "PHOTON_PROJECT_ID": "fake",
         "PHOTON_PROJECT_SECRET": "fake",
         "STATE_DIRECTORY": str(state),
+        "FM_IMESSAGE_TEST_QUIET_MS": str(TEST_QUIET_MS),
+        **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
     }
     out, err = tmp_path / "out", tmp_path / "err"
     text = lambda p: p.read_text() if p.exists() else ""  # noqa: E731

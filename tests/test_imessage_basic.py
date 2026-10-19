@@ -1,18 +1,23 @@
 """Run the actual bridge with isolated fake Photon and model processes. No live provider calls."""
 
 import json
+import os
 import shutil
+import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from test_imessage import fake_bridge, publish_json, wait_for
+from test_imessage import ROOT, TEST_QUIET_MS, bun, fake_bridge, publish_json, wait_for
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
 
 
-def basic_rig(tmp_path):
-    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+def basic_rig(tmp_path, test_mode=True):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path, test_mode)
     (fake / "status").write_text("The build is paused.")
     answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
     (fake / "answer").write_text(json.dumps(answer))
@@ -87,11 +92,12 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
         assert text(notes) == ""
         call = json.loads(text(fake / "model-calls").splitlines()[0])
         assert call["args"][call["args"].index("--model") + 1] == "claude-haiku-5-5"
+        assert "--thinking=off" in call["args"]
         bridge.terminate()
         bridge.wait(10)
         bridge = start(3 if recover else 2)
         receive("basic", message)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
@@ -143,7 +149,7 @@ def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, c
             bridge = start(2)
         wait_for(lambda: "photon-work " in text(notes), "the supervisor handoff")
         receive("work", message)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(notes).count("photon-work ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
@@ -220,7 +226,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
         bridge.wait(10)
         bridge = start(2)
         receive("description", question)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -275,7 +281,7 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, sourc
         bridge.wait(10)
         bridge = start(2)
         receive("claim", "What is the bridge status?")
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(notes).count("photon-claim ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the bridge status?"]
@@ -318,7 +324,7 @@ def test_model_identity_is_bound_to_its_configured_subject(tmp_path, monkeypatch
         bridge.wait(10)
         bridge = start(2)
         receive("identity", question)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ([f"send {quote}"] if direct else [])
         assert text(notes).count("photon-identity ") == (0 if direct else 1)
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -344,6 +350,137 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize("mode", ["answer", "refused", "cancelled"])
+def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp_path, monkeypatch, mode):
+    """The real bridge and inception-desk.ts against a local chat-completions server."""
+    requests, release = [], threading.Event()
+
+    class Server(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append({"auth": self.headers["Authorization"], "body": body, "at": time.monotonic()})
+            if mode == "cancelled":
+                release.wait(20)
+            if mode == "refused":
+                status, reply = 500, {"error": "upstream echo body-secret"}
+            elif len(requests) == 1:
+                call = {"id": "c1", "type": "function", "function": {"name": "zoom", "arguments": '{"id": 0, "n": 1}'}}
+                status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
+            else:
+                answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
+                status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": json.dumps(answer)}}]}
+            data = json.dumps(reply).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3", "FM_IMESSAGE_DESK_REASONING": "low",
+                        "INCEPTION_API_KEY": "test-inception-key", "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
+        monkeypatch.setenv(name, value)
+    # The answer mode runs without test mode, so it proves the real eight-second trigger and ignores the override.
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path, test_mode=mode != "answer")
+    bridge = start(1)
+    try:
+        published = time.monotonic()
+        receive("first", "What is the build status?")
+        if mode == "answer":
+            wait_for(lambda: text(fake / "sent"), "the direct answer")
+            assert text(fake / "sent").splitlines() == ["send The build is paused."]
+            assert text(notes) == ""
+            result = requests[1]["body"]["messages"][-1]
+            assert (result["role"], result["tool_call_id"]) == ("tool", "c1") and "What is the build status?" in result["content"]
+        elif mode == "refused":
+            wait_for(lambda: "photon-first " in text(notes), "the handoff")
+        else:
+            wait_for(lambda: requests, "the held desk request")
+            receive("second", "Deploy it instead")
+            wait_for(lambda: "photon-second " in text(notes), "the replacement handoff")
+            assert text(notes).count("photon-first ") == 1
+        if mode != "answer":
+            assert text(fake / "sent") == ""
+        first = requests[0]
+        assert first["at"] - published >= (8 if mode == "answer" else TEST_QUIET_MS / 1000)  # the desk runs only after the quiet period
+        assert first["auth"] == "Bearer test-inception-key"
+        assert (first["body"]["model"], first["body"]["reasoning_effort"]) == ("mercury-3", "low")
+        assert [t["function"]["name"] for t in first["body"]["tools"]] == ["zoom"]
+        assert "zoom.ts" not in text(fake / "model-calls")
+        if mode != "cancelled":
+            assert f"inception mercury-3 reasoning=low HTTP {200 if mode == 'answer' else 500}" in text(err)
+        assert "test-inception-key" not in text(err) and "body-secret" not in text(err)
+    finally:
+        release.set()
+        bridge.terminate()
+        bridge.wait(10)
+        server.shutdown()
+
+
+@pytest.mark.parametrize("latest", ["short", "huge"])
+def test_inception_requests_stay_within_100000_bytes_and_zoom_ends_with_limit_reached(tmp_path, latest):
+    """A full memory view, then zooms of quote-heavy messages: every body fits and the model hears LIMIT_REACHED."""
+    memory = tmp_path / "memory"
+    (memory / "main").mkdir(parents=True)
+    noisy = 'he said "go"\\ then\n' * 2000  # JSON escapes grow this text by about a quarter
+    (memory / "main" / "2026-01-01.jsonl").write_text("".join(
+        json.dumps({"i": i, "kind": "owner", "text": noisy, "size": len(noisy), "date": "2026-01-01"}) + "\n" for i in range(8)))
+    made = bun(f"""
+import {{ deskInput, deskPrompt, INCEPTION_MAX }} from {json.dumps(str(ROOT / "apps/imessage/desk.ts"))};
+import {{ LIMIT_REACHED }} from {json.dumps(str(ROOT / "apps/imessage/memory.ts"))};
+const system = deskPrompt("the owner", "mercury-3", "");
+const view = Array.from({{ length: 2000 }}, (_, i) => `${{i}}+1|the owner wrote about the trip and the build plan`).join("\\n");
+const ask = {json.dumps(latest)} === "short" ? "What did I say?" : "HEAD" + 'he "asked"\\n'.repeat(20000) + "TAIL";
+const {{ prompt }} = deskInput(system, view, "The build is paused.", ask, "inception");
+console.log(JSON.stringify({{ system, prompt, LIMIT_REACHED, INCEPTION_MAX }}));
+""")
+    sizes, results = [], []
+
+    class Server(BaseHTTPRequestHandler):
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            sizes.append(len(raw))
+            tools = [m["content"] for m in json.loads(raw)["messages"] if m["role"] == "tool"]
+            results[:] = tools
+            if made["LIMIT_REACHED"] in tools or len(sizes) > 6:
+                message = {"role": "assistant", "content": "SKIP"}
+            else:  # two zooms per turn, so a later call's refusal is reserved too
+                calls = [{"id": f"call-{k}", "type": "function", "function": {"name": "zoom", "arguments": json.dumps({"id": k, "n": 1})}}
+                         for k in (len(tools), len(tools) + 1)]
+                message = {"role": "assistant", "content": None, "tool_calls": calls}
+            data = json.dumps({"choices": [{"message": message}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        done = subprocess.run(
+            ["bun", str(ROOT / "apps/imessage/inception-desk.ts"), "mercury-3", "low", made["system"]], input=made["prompt"],
+            capture_output=True, text=True, timeout=60,
+            env={"PATH": os.environ["PATH"], "INCEPTION_API_KEY": "test-key", "FM_DESK_MEMORY": str(memory),
+                 "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"})
+    finally:
+        server.shutdown()
+    assert (done.returncode, done.stdout) == (0, "SKIP"), done.stderr
+    assert max(sizes) <= made["INCEPTION_MAX"]
+    assert results[-1] == made["LIMIT_REACHED"] and len(sizes) == 2
+    taken = [r for r in results if r != made["LIMIT_REACHED"]]
+    if latest == "short":  # room for one zoom of the large view's call, not two
+        assert len(taken) == 1 and taken[0].startswith("2026-01-01 owner: ") and sizes[0] > 64_000
+    else:  # the escaped burst fills the first body; it keeps both ends and leaves room only for the refusal
+        assert taken == [] and sizes[0] > 90_000 and "HEAD" in made["prompt"] and "TAIL" in made["prompt"]
+    assert "test-key" not in done.stderr and "he said" not in done.stderr
 
 
 def test_restart_recovers_owned_inbound_and_keeps_an_uncertain_send_out_of_firstmate(tmp_path):
@@ -392,7 +529,7 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         events = [json.loads(line) for line in journal.read_text().splitlines()]
         journal.write_text("".join(json.dumps(e) + "\n" for e in events if e.get("route") != "done") + '{"ids":')
         bridge = start(2)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert text(notes) == ""
         bridge.terminate()
@@ -400,7 +537,7 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         bridge = start(3)
         receive("burst1", "What is the build status?")
         receive("burst2", "Is the build paused?")
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert len([r for r in records() if r["kind"] == "owner"]) == 2
     finally:

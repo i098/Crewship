@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Message } from "spectrum-ts";
-import { CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
@@ -91,15 +91,26 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
   return source?.split(/\r?\n/).includes(evidence.quote) ? evidence.quote : undefined;
 }
 
+// The hard limit on each serialized Inception request body, in UTF-8 bytes, JSON escapes included: a conservative
+// form of the 100k-token input bound. inception-desk.ts checks every body against it.
+export const INCEPTION_MAX = 100_000;
+
 // One desk call's input: the view, the fleet status (clipped to STATUS_MAX) and his latest messages (clipped to
-// what is left), so the system prompt and the input stay ZOOM_RESERVE under CEILING. `spent` is the call's size
-// in bytes so far, for the zoom tool's budget.
-export function deskInput(system: string, view: string, status: string, latest: string): { prompt: string; spent: number } {
+// what is left). For omp the system prompt and the input stay ZOOM_RESERVE under CEILING. For Inception they are
+// measured as JSON strings and keep room for one zoom turn's LIMIT_REACHED under INCEPTION_MAX. `spent` is the
+// call's size in bytes so far, for zoom.ts's budget.
+export function deskInput(system: string, view: string, status: string, latest: string, provider = "omp"): { prompt: string; spent: number } {
   const head = `<chat>\n${clip(view, VIEW_MAX)}\n</chat>\n\nFleet status (durable records, may lag):\n${clip(status, STATUS_MAX)}\n\nLatest messages, after the chat:\n`;
   const tail = "\n\nDecide your response to his latest texts.";
-  const room = CEILING - OVERHEAD - ZOOM_RESERVE - Buffer.byteLength(system + head + tail);
-  const prompt = head + clip(latest, room) + tail;
-  return { prompt, spent: OVERHEAD + Buffer.byteLength(system + prompt) };
+  const inception = provider === "inception";
+  const size = (s: string) => Buffer.byteLength(inception ? JSON.stringify(s).slice(1, -1) : s);
+  const allowance = inception ? INCEPTION_MAX - 2 * CALL_OVERHEAD : CEILING - ZOOM_RESERVE;
+  const room = Math.max(0, allowance - OVERHEAD - size(system + head + tail));
+  let part = clip(latest, room);
+  // JSON escapes can grow the clipped text past its room: clip again, shorter by the excess.
+  for (let max = room; size(part) > room;) part = clip(latest, max -= size(part) - room);
+  const prompt = head + part + tail;
+  return { prompt, spent: OVERHEAD + size(system + prompt) };
 }
 
 // The tapback emoji when the desk's whole answer is REACT:<emoji>, else undefined (send the answer as text).
@@ -120,15 +131,24 @@ export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?
   return { skip, tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
 }
 
-// One desk turn's omp call (a process whose stdout is its answer), with zoom.ts as its only tool; `memoryDir` and
-// `spent` reach zoom.ts through the environment. The caller tracks the process and may kill it.
-export type DeskProc = Bun.Subprocess<any, "pipe", "ignore">;
-export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined> }): DeskProc {
-  return Bun.spawn(
-    ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
-      "--thinking=off", "--model", o.model, "--system-prompt", o.system],
-    { cwd: o.cwd, env: { ...o.env, FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) }, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: "ignore", timeout: 45_000 },
-  );
+// One desk turn's call (a process whose stdout is its answer), with zoom as its only tool; `memoryDir` and
+// `spent` reach the zoom tool through the environment. The caller tracks the process and may kill it.
+// `provider` "omp" runs a one-shot omp call with `reasoning` as its thinking level; "inception" runs
+// inception-desk.ts with only the variables it needs, and `reasoning` as its reasoning effort.
+export type DeskProc = Bun.Subprocess<any, "pipe", any>;
+export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string }): DeskProc {
+  const desk = { FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) };
+  const { reasoning = "off" } = o;
+  const inception = o.provider === "inception";
+  const argv = inception
+    ? [process.execPath, `${import.meta.dir}/inception-desk.ts`, o.model, reasoning, o.system]
+    : ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
+      `--thinking=${reasoning}`, "--model", o.model, "--system-prompt", o.system];
+  const env = inception
+    ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
+    : { ...o.env, ...desk };
+  // inception-desk.ts writes only safe call metadata to stderr; omp's stderr stays out of the journal.
+  return Bun.spawn(argv, { cwd: o.cwd, env, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: inception ? "inherit" : "ignore", timeout: 45_000 });
 }
 
 // What a desk call answered, and whether it exited cleanly with an answer.
