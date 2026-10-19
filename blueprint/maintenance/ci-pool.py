@@ -17,6 +17,7 @@ GitHub removes a JIT runner after its one job, so nothing is registered or
 deregistered by hand. docs/ci-pool.md has the operator guide.
 """
 
+import hashlib
 import json
 import math
 import os
@@ -70,6 +71,9 @@ STOP_GRACE_SECONDS = 60
 BUILD_TIMEOUT = 3600
 HOME = Path.home()
 CONFIG = HOME / ".config/ci-pool/pool.json"
+# Each job container carries this label with the stamp of the pool.json its slot started from,
+# so apply and watch can find the slots that still wait for a restart into the current file.
+STAMP_LABEL = "crewship.ci-pool.config"
 UNITS = HOME / ".config/systemd/user"
 TEMPLATE = UNITS / "ci-runner@.service"
 WANTS = UNITS / "default.target.wants"
@@ -308,6 +312,23 @@ def idle(name, repo, runners):
     return runner is not None and not runner["busy"] and not busy(name)
 
 
+def stamp(text):
+    """The short hash of a pool.json text."""
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def started_from():
+    """{slot: stamp of the pool.json its container started from ("" for a container from before
+    the stamps)}, from one `docker ps --all`; {} unless docker answered in time."""
+    done = subprocess.run(bounded([*docker(), "ps", "--all", "--filter", "name=^/ci-runner-", "--format",
+                                   f'{{{{.Names}}}} {{{{.Label "{STAMP_LABEL}"}}}}'], WATCH_TIMEOUT),
+                          capture_output=True, text=True)
+    if done.returncode:
+        return {}
+    lines = (line.partition(" ") for line in done.stdout.splitlines())
+    return {name.removeprefix("ci-runner-"): label for name, _, label in lines}
+
+
 def set_slice_weight(weight):
     """Set SLICE's CPUWeight with `systemctl set-property` (a system unit, hence sudo), which
     applies it at once and keeps it below /etc/systemd/system.control. A refusal stops apply
@@ -410,16 +431,17 @@ def apply(check):
     if reconfigured and not check:
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         CONFIG.write_text(config)
-    repos, runners = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}
+    repos, runners, current = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}, stamp(config)
+    stamps = started_from()
     for name in want:
         unit = f"ci-runner@{name}.service"
         if name not in have:
             changes.append(f"start {unit}")
             if not check:
                 systemctl("enable", "--now", unit)
-        elif reconfigured and idle(name, repos[name.rpartition("-")[0]], runners):
-            # A busy slot, or one that a read could not show idle, reads the new config when
-            # its next job starts.
+        elif stamps.get(name) not in (None, current) and idle(name, repos[name.rpartition("-")[0]], runners):
+            # A slot that is busy, or that a read could not show idle, keeps its container; a later
+            # apply or watch restarts it once it is idle, or its next start reads the new file.
             changes.append(f"restart {unit}")
             if not check:
                 systemctl("restart", unit)
@@ -508,7 +530,8 @@ def run(instance):
         # Drained by apply while it held a job: that job is done, leave for good.
         systemctl("stop", unit)
         return 0
-    pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
+    text = CONFIG.read_text()
+    pool = {**DEFAULTS, **json.loads(text)}
     base = instance.rpartition("-")[0]
     entry = next((e for e in pool["repos"] if slug(e["repo"]) == base), None)
     if entry is None:
@@ -564,7 +587,7 @@ def run(instance):
             env.flush()
             subprocess.run(bounded([
                 *docker(), "create", "--init", "--pull", "missing", "--rm", "--name", container,
-                "--label", f"crewship.ci-pool={instance}",
+                "--label", f"crewship.ci-pool={instance}", "--label", f"{STAMP_LABEL}={stamp(text)}",
                 *limits,
                 "--env-file", env.name,
                 "--env", "RUNNER_TOOL_CACHE=/opt/hostedtoolcache",
@@ -727,9 +750,11 @@ def watch(dry_run=False):
     in two successful reads MISSING_SECONDS apart (the first sighting is kept in WATCH_STATE).
     A failed or timed-out read acts on nothing and forgets every first sighting, and so does
     an empty WATCH_STATE (an interrupted or failed write of the old writer left one; the file
-    is now replaced whole, so a failed write keeps the old state). Also removes containers
-    stuck in `removing` or `dead` whose slot unit is stopped."""
-    pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
+    is now replaced whole, so a failed write keeps the old state). Also restarts an idle slot
+    whose container started from an older pool.json, and removes containers stuck in
+    `removing` or `dead` whose slot unit is stopped."""
+    config = CONFIG.read_text()
+    pool, current = {**DEFAULTS, **json.loads(config)}, stamp(config)
     entries = {slug(entry["repo"]): entry for entry in pool["repos"]}
     containers, units, now = container_states(), slot_units(), time.time()
     if containers is None:
@@ -747,6 +772,14 @@ def watch(dry_run=False):
               f"{int(now - missing.pop(instance))} s", flush=True)
         if not dry_run:
             systemctl("restart", "--no-block", f"ci-runner@{instance}.service")
+    runners, stamps = {}, started_from() if containers else {}
+    for instance, (state, _) in sorted(units.items()):
+        base = instance.rpartition("-")[0]
+        if (state == "active" and base in entries and stamps.get(instance) not in (None, current)
+                and idle(instance, entries[base]["repo"], runners)):
+            print(f"{verb}restart ci-runner@{instance}.service: idle, started from an older {CONFIG.name}", flush=True)
+            if not dry_run:
+                systemctl("restart", "--no-block", f"ci-runner@{instance}.service")
     for name in stuck_containers(containers, units):
         print(f"{verb}remove {name}: stuck, its slot is stopped", flush=True)
         if not dry_run:

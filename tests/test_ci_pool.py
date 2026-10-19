@@ -106,8 +106,17 @@ def slots(tmp_path, monkeypatch):
         monkeypatch.setattr(pool_script, attr, units / getattr(pool_script, attr).name)
         getattr(pool_script, attr).write_text(text)
     monkeypatch.setattr(pool_script, "quiet", lambda argv: 0)  # the timers are enabled
+    # The stamp label of each slot's container; kept-1 runs one from before the first apply.
+    stamps = {"o-kept-1": ""}
+    monkeypatch.setattr(pool_script, "started_from", stamps.copy)
     calls = []
-    monkeypatch.setattr(pool_script, "systemctl", lambda *args: calls.append(args))
+
+    def systemctl(*args):
+        calls.append(args)
+        if args[0] == "restart" or args[:2] == ("enable", "--now"):  # the slot starts from the current file
+            stamps[args[-1][len("ci-runner@"):-len(".service")]] = pool_script.stamp(pool_script.CONFIG.read_text())
+
+    monkeypatch.setattr(pool_script, "systemctl", systemctl)
 
     def apply(check=False, **overrides):
         config = {"data_dir": str(data), "total_slots": 5,
@@ -115,6 +124,7 @@ def slots(tmp_path, monkeypatch):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(config)))
         return pool_script.apply(check=check)
 
+    apply.stamps = stamps
     return data, calls, apply
 
 
@@ -251,16 +261,56 @@ def test_a_config_change_restarts_idle_slots_and_leaves_busy_ones(slots, monkeyp
     {"o-kept-1": {"busy": True}},  # GitHub gave the runner a job; its worker has not started
     {},  # the GitHub read failed or does not list the runner
 ])
-def test_a_config_change_restarts_no_slot_that_github_does_not_show_idle(slots, monkeypatch, listed):
+def test_a_slot_that_github_does_not_show_idle_keeps_its_container_until_a_later_apply(slots, monkeypatch, listed):
     data, calls, apply = slots
+    repos = [{"repo": "o/kept", "slots": 2, "labels": ["y"]}]
     assert apply() == 0
     calls.clear()
     monkeypatch.setattr(pool_script, "github_runners", lambda repo: listed)
 
-    assert apply(repos=[{"repo": "o/kept", "slots": 2, "labels": ["y"]}]) == 0
+    assert apply(repos=repos) == 0
+    assert apply(repos=repos) == 0  # pool.json is current now, the read still shows no idle runner
 
     assert ("restart", "ci-runner@o-kept-1.service") not in calls
     assert json.loads(pool_script.CONFIG.read_text())["repos"][0]["labels"] == ["y"]
+    monkeypatch.setattr(pool_script, "github_runners", lambda repo: {"o-kept-1": {"busy": False}})
+    assert apply(repos=repos) == 0
+    assert ("restart", "ci-runner@o-kept-1.service") in calls
+    calls.clear()
+    assert apply(repos=repos) == 0  # its new container started from the current file
+    assert ("restart", "ci-runner@o-kept-1.service") not in calls
+
+
+def test_watch_restarts_a_slot_that_registered_from_the_old_file_during_apply_once_it_is_idle(
+    slots, monkeypatch, tmp_path, capsys
+):
+    data, calls, apply = slots
+    assert apply() == 0
+    old = apply.stamps.pop("o-kept-1")  # it read pool.json and now waits for its JIT config
+    monkeypatch.setattr(pool_script, "github_runners", lambda repo: {})  # its new runner is not listed yet
+    calls.clear()
+    assert apply(repos=[{"repo": "o/kept", "slots": 2, "labels": ["y"]}]) == 0
+    assert not [call for call in calls if call[0] == "restart"]
+    calls.clear()
+
+    apply.stamps["o-kept-1"] = old  # its container starts with the old labels
+    monkeypatch.setattr(pool_script, "WATCH_STATE", tmp_path / "watch-state.json")
+    monkeypatch.setattr(pool_script, "container_states", lambda: {"ci-runner-o-kept-1": "running"})
+    monkeypatch.setattr(pool_script, "slot_units", lambda: {"o-kept-1": ("active", 30)})
+    for listed, worker in (({"o-kept-1": {"busy": True}}, False), ({}, False), ({"o-kept-1": {"busy": False}}, True)):
+        monkeypatch.setattr(pool_script, "github_runners", lambda repo: listed)
+        monkeypatch.setattr(pool_script, "busy", lambda name: worker)
+        pool_script.watch()
+        assert not [call for call in calls if call[0] == "restart"]
+
+    monkeypatch.setattr(pool_script, "busy", lambda name: False)
+    pool_script.watch(dry_run=True)
+    assert not [call for call in calls if call[0] == "restart"]
+    pool_script.watch()
+    assert calls == [("restart", "--no-block", "ci-runner@o-kept-1.service")]
+    assert "restart ci-runner@o-kept-1.service: idle, started from an older pool.json" in capsys.readouterr().out
+    pool_script.watch()  # its new container started from the current file
+    assert len(calls) == 1
 
 
 @pytest.fixture
@@ -485,6 +535,7 @@ def watching(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "slot_units", lambda: world["units"])
     monkeypatch.setattr(pool_script, "container_states", lambda: world["containers"])
     monkeypatch.setattr(pool_script, "github_runners", lambda repo: world["runners"])
+    monkeypatch.setattr(pool_script, "started_from", dict)
     monkeypatch.setattr(pool_script, "systemctl", lambda *args: world["restarts"].append(args[-1]))
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
     monkeypatch.setattr(pool_script, "quiet", lambda argv: world["removed"].append(argv[-1]) or 0)
@@ -699,6 +750,8 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(tm
     assert f"{root / 'cache/o-kept/cargo-registry'}:/home/runner/.cargo/registry" in mounts
     assert all(Path(m.split(":")[0]).is_dir() for m in mounts)
     assert "BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun" in argv
+    stamp = pool_script.stamp((tmp_path / "pool.json").read_text())
+    assert argv[argv.index(f"{pool_script.STAMP_LABEL}={stamp}") - 1] == "--label"
 
 
 @pytest.mark.parametrize("userns", [False, True])

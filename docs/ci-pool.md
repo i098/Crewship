@@ -76,7 +76,7 @@ Slots are assigned in list order. When the repository entries ask for more slots
 
 When the total drops, apply stops the idle slots that are over it. A slot that runs a job is never stopped: apply disables it, and it leaves after its current job. A job is never killed by apply.
 
-When apply changes `pool.json`, it restarts the idle slots, so they register again with the new labels and caps. A slot is idle only when GitHub shows its runner not busy and its container runs no job; a failed read counts as busy. A slot that runs a job keeps its settings until the job ends; its next start reads the new file.
+When apply changes `pool.json`, it restarts the idle slots, so they register again with the new labels and caps. A slot is idle only when GitHub shows its runner not busy and its container runs no job; a failed read counts as busy. A slot that runs a job keeps its settings until the job ends; its next start reads the new file. Each job container has the label `crewship.ci-pool.config` with a hash of the `pool.json` it started from. A slot that was not idle, or that was still registering, keeps a container with the old hash: the next apply or `watch` run restarts it when a fresh read shows it idle. A container from before these labels counts as old, so an idle slot restarts once.
 
 ## CPU priority
 
@@ -88,7 +88,7 @@ Set `nice` above `0` to lower the CPU priority of all CI work. CI still uses eve
 
 The per-job `job_cpus` and `job_memory_gb` caps stay as they are.
 
-A change of `nice` applies only to slots that start after it. Apply restarts a slot only when GitHub shows its runner not busy and its container runs no job; when a read fails, it counts the slot as busy. A busy slot keeps its job, its container, and its old priority, and its next start after the job uses the new setting. To see where a job runs:
+A change of `nice` applies only to slots that start after it. Apply and `watch` restart a slot only when GitHub shows its runner not busy and its container runs no job; when a read fails, they count the slot as busy and try again later. A busy slot keeps its job, its container, and its old priority, and its next start after the job uses the new setting. To see where a job runs:
 
 ```bash
 cat /sys/fs/cgroup/ci.slice/cpu.weight                                  # 11
@@ -171,7 +171,7 @@ On a loaded host the Docker daemon can stall a call for good. A slot then holds 
   - GitHub shows its runner `offline` and not busy, and
   - the Docker daemon listed no container for the slot (`docker ps --all`, any state) in two successful reads at least 2 minutes apart. The first sighting is kept in `~/.config/ci-pool/watch-state.json`, written whole through a temporary file, so an interrupted or failed write keeps the old file. An empty file (what an interrupted or failed write of the old writer left behind) counts as no sightings; `watch` logs it and starts them again.
 
-  A read that fails or takes more than 60 seconds acts on nothing and forgets the first sightings, because a loaded daemon answers slowly or in part. `watch` restarts at most 2 slots a run and prints `restart <unit>: <reason>` to the journal (`journalctl --user -u ci-pool-watch`). It also removes a container that is stuck in `removing` or `dead` when its slot unit is stopped. `ci-pool.py watch --dry-run` prints what it would do and changes nothing.
+  A read that fails or takes more than 60 seconds acts on nothing and forgets the first sightings, because a loaded daemon answers slowly or in part. `watch` restarts at most 2 such slots a run and prints `restart <unit>: <reason>` to the journal (`journalctl --user -u ci-pool-watch`). It also restarts each idle slot whose container started from an older `pool.json` (see [Pool size](#pool-size)), and removes a container that is stuck in `removing` or `dead` when its slot unit is stopped. `ci-pool.py watch --dry-run` prints what it would do and changes nothing.
 - A slot that starts or stops waits for its old container: it stops it with a 60-second grace period, removes it, and waits until the daemon no longer lists it before it creates the next one. A slot whose old container still runs a job (a `Runner.Worker` process) does not touch it: the slot fails, waits 60 seconds, and systemd starts it again. The unit uses `KillMode=mixed`, so `systemctl stop` signals only `run`, which does this cleanup within `TimeoutStopSec=300`.
 
 Jobs create the container with `--pull missing`. `ci-pool-image.timer` refreshes the image once an hour instead, so the slots do not pull at the same time.
