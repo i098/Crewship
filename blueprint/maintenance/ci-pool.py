@@ -648,8 +648,10 @@ def watch(dry_run=False):
     """Restart a slot that has no container, and whose runner GitHub shows offline and not busy.
     The slot must have run STALL_SECONDS, and the daemon must have listed no container for it
     in two successful reads MISSING_SECONDS apart (the first sighting is kept in WATCH_STATE).
-    A failed or timed-out read acts on nothing and forgets every first sighting. Also removes
-    containers stuck in `removing` or `dead` whose slot unit is stopped."""
+    A failed or timed-out read acts on nothing and forgets every first sighting, and so does
+    an empty WATCH_STATE (an interrupted or failed write of the old writer left one; the file
+    is now replaced whole, so a failed write keeps the old state). Also removes containers
+    stuck in `removing` or `dead` whose slot unit is stopped."""
     pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     entries = {slug(entry["repo"]): entry for entry in pool["repos"]}
     containers, units, now = container_states(), slot_units(), time.time()
@@ -657,7 +659,10 @@ def watch(dry_run=False):
         containers = {}
         missing = {}
     else:
-        seen = json.loads(WATCH_STATE.read_text()) if WATCH_STATE.exists() else {}
+        text = WATCH_STATE.read_text().strip() if WATCH_STATE.exists() else "{}"
+        if not text:
+            print(f"{WATCH_STATE} is empty: the last write did not finish, first sightings forgotten", flush=True)
+        seen = json.loads(text or "{}")
         missing = missing_slots(units, containers, entries, seen, now)
     verb = "would " if dry_run else ""
     for instance in restart_due(missing, entries, now):
@@ -671,7 +676,9 @@ def watch(dry_run=False):
             quiet([*docker(), "rm", "--force", name])
     if not dry_run:
         WATCH_STATE.parent.mkdir(parents=True, exist_ok=True)
-        WATCH_STATE.write_text(json.dumps(missing))
+        staged = WATCH_STATE.with_suffix(".json.tmp")
+        staged.write_text(json.dumps(missing))
+        staged.replace(WATCH_STATE)
     return 0
 
 
