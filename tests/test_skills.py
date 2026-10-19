@@ -382,6 +382,17 @@ def test_private_source_group_installs_by_name_and_reinstalls_unchanged(tmp_path
     assert not skills.install(home, tmp_path, str(local))["changed"]
 
 
+def test_a_private_group_replaces_the_whole_public_group(tmp_path):
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
+    for name in ("app", "site"):
+        skill(source / "public/ui", ".", name, f"public {name}")
+    skill(source / "private/ui", ".", "app", "private app")
+    assert skills.install(home, tmp_path)["installed"]["skills"] == ["app", "ui"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "app/SKILL.md").read_text() == "private app"
+        assert not (home / root / "site").is_symlink()
+
+
 # Shapes of private detail, never the real values: a home directory, an email,
 # a tailnet host, a non-loopback IPv4, a GitHub owner URL, a secrets file, and
 # the word for the person who owns a fleet.

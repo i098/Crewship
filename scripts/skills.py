@@ -6,8 +6,8 @@ a folder with no SKILL.md of its own groups skills as <group>/<name>/: the group
 links kept, and each skill in it installs as a link <name> -> <group>/<name>, so they share the group's files.
 blueprint/skills/private/<name>/ and blueprint/rules/private/<name>.md stay on the host and win
 over a public one of the same name. With --private-source (a local directory,
-or a git URL fetched at --private-ref, default HEAD), the skills at its top
-level and the rules in its rules/ folder are first copied into blueprint/skills/private/
+or a git URL fetched at --private-ref, default HEAD), its skills (<name>/ or <group>/<name>/)
+and the rules in its rules/ folder are first copied into blueprint/skills/private/
 and blueprint/rules/private/; without it, the items an earlier fill added are removed
 from there. Each item is then copied into every root of its kind in KINDS. A
 manifest records the names this script installed, so an item the operator put
@@ -132,13 +132,15 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
         for kind, (find, folder, roots) in KINDS.items():
             filled = find(private / folder) if private else {}
             changed |= sync(filled, blueprint / kind / "private", owned[f"{kind}/private"], skipped)
+            mine = find(blueprint / kind / "private")
+            stale = {n for n, p in publics[kind].items() if not isinstance(p, Path) and p.parts[0] in mine}
             # private last, so it wins a name clash
-            wanted = {**(publics[kind] if public == "yes" else {}), **find(blueprint / kind / "private")}
+            wanted = {**{n: p for n, p in publics[kind].items() if n not in stale and public == "yes"}, **mine}
             if kind == "rules":
                 wanted = {name: path for name, path in wanted.items() if name not in skip_rules}
             installed[kind] = sorted(wanted)
             # public items already on the host stay when public is off, except a skipped rule
-            keep = set() if public == "yes" else publics[kind].keys() - (set(skip_rules) if kind == "rules" else set())
+            keep = set() if public == "yes" else publics[kind].keys() - stale - (set(skip_rules) if kind == "rules" else set())
             for root in roots:
                 changed |= sync(wanted, home / root, owned[root], skipped, keep)
     finally:
