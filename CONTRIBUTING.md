@@ -103,6 +103,18 @@ uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/sit
 
 See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
 
+### Testing against Herdr
+
+The operator's Herdr runs the `default` session on the same host, and its workspace labels route Firstmate's work.
+A test or smoke must never send a call to that session.
+
+- In pytest, stub `herdr` (put the stub first in `PATH`, or set `HERDR_BIN_PATH`). [`tests/conftest.py`](tests/conftest.py) puts a `herdr` that refuses every call first in `PATH`, so a test without a stub fails and changes nothing.
+- For a real Herdr, use a named lab session `fm-lab-*`. Start it with Firstmate's `bin/fm-herdr-lab.sh provision <session>` and remove it with `bin/fm-herdr-lab.sh teardown <session>`.
+- Send every other call through [`tests/herdr-lab`](tests/herdr-lab) `<session> <herdr arguments...>`, including `workspace create`, `rename` and `close`. For a script such as the Spaces reporter, set `HERDR_BIN_PATH` to a wrapper that runs `exec env -u HERDR_BIN_PATH <checkout>/tests/herdr-lab <session> "$@"`: `tests/herdr-lab` runs `HERDR_BIN_PATH` itself, so the wrapper must clear it.
+  It adds `--session <session>` and clears `HERDR_SOCKET_PATH`. It refuses, before it runs Herdr, a session that is empty, `default` or not `fm-lab-*`, an `HERDR_SESSION` that names another session, a leading option, a `--session` of your own, and `server` or `session` operations.
+- [`tests/container-smoke.sh`](tests/container-smoke.sh) runs its real Herdr server in a named `fm-lab-*` session inside the smoke image, and refuses `--in-container` outside that image.
+- Do not isolate with `HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SESSION` or an environment file. One call that runs without them reaches the `default` session.
+
 ## Adding a new tool
 
 1. Add it to `GITHUB_LATEST` (a GitHub release whose assets carry a SHA-256 digest; when the release publishes its own `<asset>.sha256` files, also list it in `SHA256_FILE` to verify against those) or `NPM_LATEST` in `scripts/provisions.py`. A tool from elsewhere needs its own resolver in `resolve_latest` that reads the checksum its publisher posts for the release.

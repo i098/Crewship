@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# The one way a Crewship test or smoke drives a real Herdr (CONTRIBUTING.md,
+# "Testing against Herdr"):
+#
+#   tests/herdr-lab <fm-lab-session> <herdr arguments...>
+#
+# It runs "${HERDR_BIN_PATH:-herdr}" with --session <fm-lab-session> added, or
+# refuses before it runs anything. A session that is empty, `default`, or not
+# named fm-lab-*, a caller --session, an HERDR_SESSION that names another
+# session, a leading option, and server or session operations are refused:
+# the named lab is started and removed by Firstmate's bin/fm-herdr-lab.sh
+# provision and teardown, never from here. HERDR_SOCKET_PATH is cleared so
+# only --session selects the server.
+set -euo pipefail
+
+refuse() {
+  echo "herdr-lab: refused: $*" >&2
+  exit 2
+}
+
+session=${1:-}
+[[ "$session" =~ ^fm-lab-[A-Za-z0-9][A-Za-z0-9_-]*$ ]] ||
+  refuse "session '$session' is not a named fm-lab-* session"
+shift
+[ "$#" -gt 0 ] || refuse "no Herdr arguments"
+[ -z "${HERDR_SESSION:-}" ] || [ "$HERDR_SESSION" = "$session" ] ||
+  refuse "HERDR_SESSION=$HERDR_SESSION contradicts '$session'"
+[[ "$1" != -* ]] || refuse "leading option '$1'"
+case "$1" in server | session) refuse "'$1' operations belong to fm-herdr-lab.sh" ;; esac
+for arg in "$@"; do
+  case "$arg" in --session | --session=*) refuse "caller-supplied --session" ;; esac
+done
+
+unset HERDR_SOCKET_PATH
+args=("$@")
+for i in "${!args[@]}"; do
+  if [ "${args[i]}" = -- ]; then
+    exec "${HERDR_BIN_PATH:-herdr}" "${args[@]:0:i}" --session "$session" "${args[@]:i}"
+  fi
+done
+exec "${HERDR_BIN_PATH:-herdr}" "$@" --session "$session"

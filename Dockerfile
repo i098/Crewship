@@ -173,8 +173,8 @@ RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \
 COPY --chown=${CREWSHIP_USER}:${CREWSHIP_USER} . /opt/crewship
 
 # Executable bits are part of the interface: ./onboard.sh, ./ship.sh and the
-# smoke script are invoked directly, including from a context that lost them.
-RUN set -eux; chmod +x onboard.sh ship.sh tests/container-smoke.sh
+# smoke scripts are invoked directly, including from a context that lost them.
+RUN set -eux; chmod +x onboard.sh ship.sh tests/container-smoke.sh tests/herdr-lab
 
 # Schema validation through the repository's own validator.
 RUN set -eux; ./ship.sh inspect --config "${CREWSHIP_CONFIG_FILE}"
