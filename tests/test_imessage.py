@@ -1325,6 +1325,9 @@ def load_ship():
         (lambda f: f["profiles"].update(firstmate=False, fleet_guards=False), "firstmate profile"),
         (lambda f: f["imessage"].update(owner="5550100"), "imessage.owner"),
         (lambda f: f["imessage"].pop("owner"), "imessage"),
+        (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3"), "imessage"),
+        (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3", desk_reasoning="off"), "imessage"),
+        (lambda f: f["imessage"].update(desk_reasoning="instant"), "imessage"),
     ],
 )
 def test_config_rejects_a_bridge_it_cannot_run(change, error):

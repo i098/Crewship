@@ -7,9 +7,6 @@ import { Budget, load, zoom } from "./memory.ts";
 const [model, reasoning, system] = process.argv.slice(2);
 const url = process.env.FM_DESK_INCEPTION_URL || "https://api.inceptionlabs.ai/v1/chat/completions";
 const key = process.env.INCEPTION_API_KEY;
-// The input token cap. A token covers at least one byte of its text, so a request body of at most this many
-// bytes holds at most this many input tokens, whatever the provider's tokenizer.
-const TOKENS_MAX = 100_000;
 // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
 const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));
 const tools = [{
@@ -45,7 +42,6 @@ if (!key) fail("INCEPTION_API_KEY is not set");
 const messages: unknown[] = [{ role: "system", content: system }, { role: "user", content: await Bun.stdin.text() }];
 for (;;) {
   const body = JSON.stringify({ model, reasoning_effort: reasoning, messages, tools });
-  if (Buffer.byteLength(body) > TOKENS_MAX) fail(`input over ${TOKENS_MAX} tokens`);
   const started = performance.now();
   const response = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body })
     .catch((e: unknown) => fail(`request failed: ${e instanceof Error ? e.name : "error"}`));

@@ -17,7 +17,8 @@ For each message from the owner, the service does these steps:
 5. The desk model classifies the whole pending burst.
    The default is Claude Haiku 5.5 with thinking off, through the existing one-shot `omp -p` runner.
    With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
-   It reads `INCEPTION_API_KEY` from `~/super.env`, sends no request body over 100,000 bytes (so no input over 100,000 tokens), and logs only the provider, model, reasoning, HTTP status, and time.
+   Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
+   It reads `INCEPTION_API_KEY` from `~/super.env`, keeps the shared desk input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, and time.
    A failed Inception call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
