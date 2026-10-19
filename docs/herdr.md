@@ -12,7 +12,7 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
 
 ```text
 ● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
-  7d left <Claude> ▰▱▱▱ 22%  <OpenAI> ▰▰▱▱  50%
+  7d left <Claude> ▰▱▱▱  22%  <OpenAI> ▰▰▱▱  50%
 ● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ▶ 0/2 · ◷ 3
@@ -42,7 +42,7 @@ See [The machine entry](#the-machine-entry) for the optional top entry.
 | `$alert` | `⚠ watcher silent` (orange) | `fm_supervision_unhealthy` from the home's `bin/fm-supervision-lib.sh`: the home has work that needs a watcher and the watcher's beacon is stale. |
 | `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). `◉` counts the agent panes (panes with an `agent`) that are working, over all agent panes. Reported on the primary home, only while no `machine` workspace exists. |
 | `$machine` | the same as `$host` | The same line, reported on the `machine` workspace instead. The two are never both set. |
-| `$usage` | `7d left <Claude> ▰▱▱▱ 22%  <OpenAI> ▰▰▱▱  50%` | The weekly quota left, as the mean over each provider's accounts, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
+| `$usage` | `7d left <Claude> ▰▱▱▱  22%  <OpenAI> ▰▰▱▱  50%` | The weekly quota left, as the mean over each provider's accounts, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
 
 The provider row reads `reports[]` from `omp usage --json`.
 Claude uses provider `anthropic`; OpenAI uses `openai-codex`.

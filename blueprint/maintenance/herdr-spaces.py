@@ -19,7 +19,7 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
-  usage      "7d left <claude> ▰▱▱▱ 22%  <openai> ▰▰▱▱  50%"  weekly quota left, account mean
+  usage      "7d left <claude> ▰▱▱▱  22%  <openai> ▰▰▱▱  50%"  weekly quota left, account mean
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
