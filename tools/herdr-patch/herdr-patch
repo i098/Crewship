@@ -92,7 +92,9 @@ CUP_END = re.compile(rb"\x1b\[(\d*)(?:;(\d*))?[Hf]\Z")
 CONTROL = re.compile(rb"[\x00-\x1f\x7f]")
 NEUTRAL = b"mhlnctuq"  # CSI finals that move no cursor and change no cell
 TOKEN_FORM = re.compile(r"[A-Za-z0-9_-]{16,64}")
-RUNTIME = "/tmp"  # the channel sockets go in RUNTIME/herdr-patch-<uid>/
+# The channel sockets go in RUNTIME/herdr-patch-<uid>/. /run/user/<uid> lives as long as the
+# login, and /tmp cleaners never move it; mosh-server drops XDG_RUNTIME_DIR, so name it directly.
+RUNTIME = f"/run/user/{os.getuid()}" if os.path.isdir(f"/run/user/{os.getuid()}") else "/tmp"
 UPPER = "\u2580".encode()  # ▀: fg is the top half of the cell, bg the bottom half
 DELETE_ALL = b"\x1b_Ga=d,d=A,q=2\x1b\\"
 # The computer's side: a channel graphic (with its CUP), and one complete piece
