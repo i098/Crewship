@@ -649,9 +649,9 @@ def watch(dry_run=False):
     The slot must have run STALL_SECONDS, and the daemon must have listed no container for it
     in two successful reads MISSING_SECONDS apart (the first sighting is kept in WATCH_STATE).
     A failed or timed-out read acts on nothing and forgets every first sighting, and so does
-    an empty WATCH_STATE (a write the disk cut short; the file is replaced whole, so only the
-    old writer left one). Also removes containers stuck in `removing` or `dead` whose slot
-    unit is stopped."""
+    an empty WATCH_STATE (an interrupted or failed write of the old writer left one; the file
+    is now replaced whole, so a failed write keeps the old state). Also removes containers
+    stuck in `removing` or `dead` whose slot unit is stopped."""
     pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     entries = {slug(entry["repo"]): entry for entry in pool["repos"]}
     containers, units, now = container_states(), slot_units(), time.time()

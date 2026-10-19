@@ -456,7 +456,7 @@ def test_a_failed_docker_read_acts_on_nothing_and_forgets_the_first_sighting(wat
     assert watching["restarts"] == []
 
 
-def test_a_write_the_disk_cut_short_leaves_the_old_state_and_an_empty_state_is_forgotten(watching, capsys):
+def test_a_failed_write_leaves_the_old_state_and_an_empty_state_is_forgotten(watching, capsys):
     watching["units"] = {"o-job-1": ("active", 900)}
     watching["runners"] = {"o-job-1": OFFLINE}
     pool_script.watch()  # first sighting, kept
