@@ -4,7 +4,8 @@
 // Plain-text bindings team_domain (<team>.cloudflareaccess.com) and aud (the Access app AUD
 // tag) come from the Access API at push time. Secret bindings, written by
 // scripts/stow-secrets.sh: super_env_0, super_env_1, ... hold the file's base64 in order, and
-// FLEET_SECRETS_ACCESS_CLIENT_ID names the one service token allowed in.
+// FLEET_SECRETS_ACCESS_CLIENT_ID names the one service token allowed in. GET /NAME serves one
+// secret only when it is bound as read_NAME (the name in FLEET_SECRETS_READABLE).
 const headers = { "Cache-Control": "no-store" };
 const deny = (status = 403) => new Response(null, { status, headers });
 const bytes = (s) =>
@@ -41,12 +42,16 @@ export default {
   async fetch(request, env) {
     if (request.method !== "GET") return deny();
     if (!(await authorized(request, env).catch(() => false))) return deny();
+    const name = new URL(request.url).pathname.slice(1);
+    const text = { ...headers, "Content-Type": "text/plain; charset=utf-8" };
     try {
+      if (name) {
+        const secret = env[`read_${name}`];
+        return secret ? new Response(await secret.get(), { headers: text }) : deny(404);
+      }
       let b64 = "";
       for (let i = 0; env[`super_env_${i}`]; i++) b64 += await env[`super_env_${i}`].get();
-      return new Response(bytes(b64), {
-        headers: { ...headers, "Content-Type": "text/plain; charset=utf-8" },
-      });
+      return new Response(bytes(b64), { headers: text });
     } catch {
       // Error text can quote secret material; answer without it.
       return deny(500);
