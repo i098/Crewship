@@ -1007,8 +1007,8 @@ def test_provider_shows_the_shared_weekly_window_left_as_the_account_mean():
     a = usage_account("anthropic", 0.6)
     a["limits"] += [limit(0.99, "5h"), limit(1, tier="fable")]
     b = usage_account("anthropic", 0.3)
-    assert spaces.usage_left([a, b]) == (55, False)
-    assert spaces.usage_left([usage_account("anthropic", 1), b]) == (35, True)
+    assert spaces.usage_left([a, b]) == 55
+    assert spaces.usage_left([usage_account("anthropic", 1), b]) == 35
 
 
 def test_aliases_count_once_and_organizations_stay_separate():
@@ -1019,7 +1019,7 @@ def test_aliases_count_once_and_organizations_stay_separate():
         {"accountId": "x", "orgId": "1"},
         {"accountId": "x", "orgId": "2"},
     )
-    assert spaces.usage_left([a, alias, b, c]) == (57, False)
+    assert spaces.usage_left([a, alias, b, c]) == 57
 
 
 @pytest.mark.parametrize("fraction", [None, -0.1, 1.01, True, "0.4", float("nan")])
@@ -1118,5 +1118,5 @@ def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, wi
     else:
         filled = round((1 - fraction) * 4)
         assert [h[2:6] for h in halves] == ["▰" * filled + "▱" * (4 - filled)] * 2
-        percent = f"{'!' * (fraction == 1)}{(1 - fraction) * 100:.0f}%".rjust(4)
+        percent = f"{(1 - fraction) * 100:.0f}%".rjust(4)
         assert [h[7:] for h in halves] == [percent] * 2

@@ -12,7 +12,7 @@ Spaces shows one entry per home workspace. It never repeats per-agent detail, wh
 
 ```text
 ● ⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42
-  7d left <Claude> ▰▱▱▱ !22%  <OpenAI> ▰▰▱▱  50%
+  7d left <Claude> ▰▱▱▱ 22%  <OpenAI> ▰▰▱▱  50%
 ● firstmate · ⚑ 3 · ▶ 1/5 · ◷ 4
   ⚙ 29%  ▤ 8%  ⛁ 2%
 ● webapp · ⚑ 2 · ▶ 0/2 · ◷ 3
@@ -29,7 +29,7 @@ See [The machine entry](#the-machine-entry) for the optional top entry.
 | 1 | The state dot, then the short name (`$short`): the primary home (`firstmate`) in bold blue, other homes in mauve. A dead helper space (label contains `-afk-daemon-`) shows `☾ afk`, dimmed, and nothing else. A space with no short name shows its own label, dimmed. Then the decision, working/total agent and queue counts, each in its own color. Zero decision and queue counts are hidden. On the `machine` workspace only, the whole machine (`$machine`) instead. |
 | 2 | What the space costs the machine, as shares, in light grey (`#a6adc8`): `⚙` CPU, `▤` RAM, `⛁` disk. |
 | 3 | The whole machine (`$host`), on the primary home's entry only (the workspace labelled `firstmate`; without one, the first workspace listed), and only while no `machine` workspace exists. Every other entry leaves this line empty, and Herdr hides it. |
-| 4 | Provider usage (`$usage`), immediately below the whole-machine row. The label `7d left`, then the Claude mark (U+EC82) and the OpenAI mark (U+EC81), each with a four-cell bar and the percentage of the weekly quota left; `!` before a percentage means one account has none left. |
+| 4 | Provider usage (`$usage`), immediately below the whole-machine row. The label `7d left`, then the Claude mark (U+EC82) and the OpenAI mark (U+EC81), each with a four-cell bar and the percentage of the weekly quota left. |
 | 5 | `⚠ watcher silent` in orange, only when the home's watcher stopped reporting. |
 
 | Token | Value | Source |
@@ -42,14 +42,13 @@ See [The machine entry](#the-machine-entry) for the optional top entry.
 | `$alert` | `⚠ watcher silent` (orange) | `fm_supervision_unhealthy` from the home's `bin/fm-supervision-lib.sh`: the home has work that needs a watcher and the watcher's beacon is stale. |
 | `$host` | `⌂ ⚙ 41% ▤ 18.2/31.0G 59% ⛁ 402/937G 43% ◉ 13/42` (light grey) | The whole machine: CPU busy share from `/proc/stat`, used memory (`MemTotal` − `MemAvailable`) from `/proc/meminfo`, and the root filesystem from `statvfs`, each with its share. Memory keeps one decimal while the total is under 100G (`18.2/31.0G`); disk is in whole G (`45/93G`, `402/937G`). Both are whole G from 100G and switch to T from 1000G (`1.4/1.9T`, whole T from 10T). `◉` counts the agent panes (panes with an `agent`) that are working, over all agent panes. Reported on the primary home, only while no `machine` workspace exists. |
 | `$machine` | the same as `$host` | The same line, reported on the `machine` workspace instead. The two are never both set. |
-| `$usage` | `7d left <Claude> ▰▱▱▱ !22%  <OpenAI> ▰▰▱▱  50%` | The weekly quota left, as the mean over each provider's accounts, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
+| `$usage` | `7d left <Claude> ▰▱▱▱ 22%  <OpenAI> ▰▰▱▱  50%` | The weekly quota left, as the mean over each provider's accounts, from `omp usage --json`. Only the workspace carrying `$machine` or `$host` receives this row. |
 
 The provider row reads `reports[]` from `omp usage --json`.
 Claude uses provider `anthropic`; OpenAI uses `openai-codex`.
 Each account contributes its shared seven-day window: the `limits[]` entry whose `scope.windowId` is `7d` and that has no `scope.tier`.
 That window gates every model; five-hour windows and model-tier windows (for example Fable) do not count.
 Each provider shows the mean of its accounts' `usedFraction` as percent left, rounded as the `omp usage` panel rounds it, so the row and the panel's seven-day figure agree.
-`!` before the percentage means at least one account has used all of its seven-day window.
 Account IDs identify duplicate credential aliases, which count once; organization IDs keep distinct subscriptions separate.
 When an account ID is absent, the reporter uses its email if available, or keeps the report separate.
 The row has 32 terminal columns and fits at sidebar widths 46 and 38.

@@ -19,8 +19,7 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
-  usage      "7d left <claude> ▰▱▱▱ !22%  <openai> ▰▰▱▱  50%"  weekly quota left, account mean
-             ("!": an account has none left)
+  usage      "7d left <claude> ▰▱▱▱ 22%  <openai> ▰▰▱▱  50%"  weekly quota left, account mean
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
@@ -143,10 +142,10 @@ def crew(panes: list[dict]) -> str:
     return f"{working}/{len(agents)}"
 
 
-def usage_left(reports: list[dict]) -> tuple[int, bool] | None:
+def usage_left(reports: list[dict]) -> int | None:
     """Percent left in the shared seven-day window (it gates every model; five-hour
     windows and model tiers do not count), as the mean over accounts that `omp usage`
-    shows, and whether any account has none left. Aliases count once."""
+    shows. Aliases count once."""
     accounts = {}
     for index, report in enumerate(reports):
         metadata = report.get("metadata") or {}
@@ -170,13 +169,13 @@ def usage_left(reports: list[dict]) -> tuple[int, bool] | None:
         return None
     mean = sum(accounts.values()) / len(accounts)
     # omp's own rounding: Math.round((1 - fraction) * 100), half up.
-    return max(0, math.floor((1 - mean) * 100 + 0.5)), max(accounts.values()) == 1
+    return max(0, math.floor((1 - mean) * 100 + 0.5))
 
 
 def usage_row(cache: dict) -> str:
     now = time.time()
     hit = cache.get("usage", {})
-    if "left" not in hit or now - hit["at"] >= USAGE_TTL:
+    if "pct" not in hit or now - hit["at"] >= USAGE_TTL:
         left = dict.fromkeys(("anthropic", "openai-codex"))
         try:
             report = json.loads(run("omp", "usage", "--json", timeout=20))
@@ -189,16 +188,15 @@ def usage_row(cache: dict) -> str:
                     )
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
             print("herdr-spaces: omp usage unavailable", file=sys.stderr)
-        hit = cache["usage"] = {"at": now, "left": left}
+        hit = cache["usage"] = {"at": now, "pct": left}
     halves = []
     for provider, icon in (("anthropic", CLAUDE), ("openai-codex", OPENAI)):
-        if hit["left"][provider] is None:
+        if hit["pct"][provider] is None:
             bar, percent = "░░?░", "  ?%"
         else:
-            value, empty_account = hit["left"][provider]
+            value = hit["pct"][provider]
             filled = round(value * 4 / 100)
-            # "!": an account has nothing left. ponytail: "!100%" overflows, needs 200+ accounts.
-            percent = f"{'!' * empty_account}{value}%".rjust(4)
+            percent = f"{value}%".rjust(4)
             bar = "▰" * filled + "▱" * (4 - filled)
         halves.append(f"{icon} {bar} {percent}")
     return "7d left " + "  ".join(halves)
