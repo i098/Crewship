@@ -94,6 +94,19 @@ def test_grouped_skills_install_by_name_and_share_one_copy_of_the_group_file(tmp
     assert (home / SKILL_ROOTS[0] / "site/shared.md").read_text() == "newer"
 
 
+@pytest.mark.parametrize("clash", ["flat", "group"])
+def test_a_grouped_skill_that_reuses_a_name_stops_the_install(tmp_path, clash):
+    source, home = tmp_path / "blueprint/skills", tmp_path / "home"
+    skill(source / "public/ui", ".", "app", "grouped")
+    if clash == "flat":
+        skill(source, "public", "app", "flat")
+    else:
+        skill(source / "public/web", ".", "app", "other group")
+    with pytest.raises(ValueError, match="app"):
+        skills.install(home, tmp_path)
+    assert not home.exists()
+
+
 def test_install_rules_private_wins_and_hand_added_rules_stay(tmp_path):
     source, home = tmp_path / "blueprint/rules", tmp_path / "home"
     rule(source, "public", "shared", "public shared")

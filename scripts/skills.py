@@ -34,8 +34,9 @@ def find_skills(d):
     for p in sorted(d.glob("*/*/SKILL.md")):
         group = p.parent.parent
         if not (group / "SKILL.md").exists():
-            found[group.name] = group
-            found[p.parent.name] = PurePosixPath(group.name, p.parent.name)
+            for name, path in ((group.name, group), (p.parent.name, PurePosixPath(group.name, p.parent.name))):
+                if found.setdefault(name, path) != path:
+                    raise ValueError(f"skill name {name} is used by both {found[name]} and {path}")
     return found
 
 
