@@ -329,6 +329,12 @@ def apply(check):
     reconfigured = not CONFIG.exists() or CONFIG.read_text() != config
     if reconfigured:
         changes.append(f"write {CONFIG}")
+    if any(entry.get("userns") for entry in pool["repos"]) and not (
+        USERNS_PROFILE_PATH.exists() and USERNS_PROFILE_PATH.read_text() == USERNS_PROFILE_TEXT
+    ):
+        changes.append(f"write {USERNS_PROFILE_PATH}")
+        if not check:
+            install_profile()
     write(HOOK, HOOK_TEXT)
     # A list, not `or`: every file is written even when the first one changed.
     units = [(TEMPLATE, UNIT_TEXT), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT),
@@ -340,12 +346,6 @@ def apply(check):
             changes.append(f"start {timer.name}")
             if not check:
                 systemctl("enable", "--now", timer.name)
-    if any(entry.get("userns") for entry in pool["repos"]) and not (
-        USERNS_PROFILE_PATH.exists() and USERNS_PROFILE_PATH.read_text() == USERNS_PROFILE_TEXT
-    ):
-        changes.append(f"write {USERNS_PROFILE_PATH}")
-        if not check:
-            install_profile()
     for name in sorted(set(have) - set(want)):
         unit = f"ci-runner@{name}.service"
         if busy(name):
@@ -421,13 +421,18 @@ def env_args(env):
 
 
 def install_profile():
-    """Write the sidecar profile below /etc/apparmor.d (root-owned, hence sudo; apparmor.service
-    loads that directory at boot) and load it now with the same parser."""
+    """Load the sidecar profile with apparmor_parser (root-owned, hence sudo), then write it
+    below /etc/apparmor.d for apparmor.service to load at boot. A refused sudo or a rejected
+    profile leaves no file behind, so the next apply tries again."""
     with tempfile.NamedTemporaryFile("w") as text:
         text.write(USERNS_PROFILE_TEXT)
         text.flush()
-        subprocess.run(["sudo", "-n", "install", "-m", "0644", text.name, str(USERNS_PROFILE_PATH)], check=True)
-    subprocess.run(["sudo", "-n", "apparmor_parser", "--replace", str(USERNS_PROFILE_PATH)], check=True)
+        for argv in (["apparmor_parser", "--replace", text.name],
+                     ["install", "-m", "0644", text.name, str(USERNS_PROFILE_PATH)]):
+            done = subprocess.run(["sudo", "-n", *argv])
+            if done.returncode:
+                raise SystemExit(f"userns repository needs AppArmor profile {USERNS_PROFILE}: "
+                                 f"`sudo -n {argv[0]}` exited {done.returncode}; pool left unchanged")
 
 
 def start_dind(instance, limits, path, userns=False):

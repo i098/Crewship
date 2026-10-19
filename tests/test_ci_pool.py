@@ -660,30 +660,74 @@ def test_a_dind_slot_gives_the_job_its_own_daemon_and_removes_it_after_the_job(
                     ["docker", "network", "rm", "ci-dind-o-e-1"]]
 
 
-def test_apply_installs_the_sidecar_profile_once_when_a_repository_asks_for_it(
-    slots, tmp_path, monkeypatch, capsys
-):
-    data, calls, apply = slots
+@pytest.fixture
+def sudo(tmp_path, monkeypatch):
+    """`sudo -n` as the pool sees it: apparmor_parser loads the profile from the file it is
+    given; install copies that file. `refuse` names the command sudo rejects."""
     path = tmp_path / "apparmor.d" / pool_script.USERNS_PROFILE
     monkeypatch.setattr(pool_script, "USERNS_PROFILE_PATH", path)
-    installs = []
+    state = {"loaded": [], "refuse": None}
 
-    def install():
-        path.parent.mkdir(exist_ok=True)
-        path.write_text(pool_script.USERNS_PROFILE_TEXT)
-        installs.append(path)
+    def fake_run(argv, **kwargs):
+        assert argv[:2] == ["sudo", "-n"]
+        if argv[2] == state["refuse"]:
+            return subprocess.CompletedProcess(argv, 1)
+        if argv[2] == "apparmor_parser":
+            state["loaded"].append(Path(argv[-1]).read_text())
+        else:
+            assert argv[2:5] == ["install", "-m", "0644"]
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(Path(argv[5]).read_text())
+        return subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(pool_script, "install_profile", install)
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+    return path, state
+
+
+def test_apply_loads_and_installs_the_sidecar_profile_once_when_a_repository_asks_for_it(
+    slots, sudo, capsys
+):
+    data, calls, apply = slots
+    path, state = sudo
     userns = [{"repo": "o/kept", "slots": 2, "labels": ["x"], "docker": "dind", "userns": True}]
 
     assert apply() == 0
-    assert installs == [] and f"write {path}" not in capsys.readouterr().out
+    assert state["loaded"] == [] and f"write {path}" not in capsys.readouterr().out
     assert apply(check=True, repos=userns) == 0
-    assert installs == [] and f"write {path}" in capsys.readouterr().out
+    assert state["loaded"] == [] and not path.exists()
+    assert f"write {path}" in capsys.readouterr().out
     assert apply(repos=userns) == 0
-    assert installs == [path] and f"write {path}" in capsys.readouterr().out
+    assert state["loaded"] == [pool_script.USERNS_PROFILE_TEXT]
+    assert path.read_text() == pool_script.USERNS_PROFILE_TEXT
+    assert f"write {path}" in capsys.readouterr().out
     assert apply(repos=userns) == 0
-    assert installs == [path] and f"write {path}" not in capsys.readouterr().out
+    assert state["loaded"] == [pool_script.USERNS_PROFILE_TEXT]
+    assert f"write {path}" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("refuse", ["apparmor_parser", "install"])
+def test_a_refused_profile_leaves_the_pool_and_the_profile_directory_unchanged(
+    slots, sudo, tmp_path, refuse
+):
+    data, calls, apply = slots
+    path, state = sudo
+    state["refuse"] = refuse
+    userns = [{"repo": "o/kept", "slots": 2, "labels": ["x"], "docker": "dind", "userns": True}]
+
+    with pytest.raises(SystemExit, match=rf"`sudo -n {refuse}` exited 1"):
+        apply(repos=userns)
+
+    assert not path.exists()
+    assert not (tmp_path / "pool.json").exists()
+    assert not (tmp_path / "job-started.sh").exists()
+    assert calls == []
+    assert sorted(p.name for p in (tmp_path / "units/default.target.wants").iterdir()) == [
+        "ci-runner@o-gone-1.service", "ci-runner@o-kept-1.service"]
+    assert (data / "ci-pool/work/o-gone-1").is_dir()
+    # The next apply, once sudo allows both commands, completes the same change.
+    state["refuse"] = None
+    assert apply(repos=userns) == 0
+    assert path.read_text() == pool_script.USERNS_PROFILE_TEXT and (tmp_path / "pool.json").exists()
 
 
 def test_userns_requires_a_dind_repository(configuration):
