@@ -1001,13 +1001,22 @@ def usage_account(provider, *fractions):
     return {"provider": provider, "limits": [limit(f) for f in fractions]}
 
 
-def test_provider_shows_the_worst_accounts_shared_weekly_window_left():
+def test_provider_shows_the_shared_weekly_window_left_as_the_account_mean():
     # omp's real shape: a nearly full five-hour window and an exhausted model
     # tier must not hide the shared weekly window that gates every model.
     a = usage_account("anthropic", 0.6)
     a["limits"] += [limit(0.99, "5h"), limit(1, tier="fable")]
     b = usage_account("anthropic", 0.3)
-    assert spaces.usage_left([a, b]) == pytest.approx(40)
+    assert spaces.usage_left([a, b]) == (55, False)
+    assert spaces.usage_left([usage_account("anthropic", 1), b]) == (35, True)
+
+
+def test_aliases_count_once_and_organizations_stay_separate():
+    a, alias = usage_account("anthropic", 0.8), usage_account("anthropic", 0.9)
+    b, c = usage_account("anthropic", 0.2), usage_account("anthropic", 0.2)
+    a["metadata"] = alias["metadata"] = {"accountId": "work"}
+    b["metadata"], c["metadata"] = {"accountId": "x", "orgId": "1"}, {"accountId": "x", "orgId": "2"}
+    assert spaces.usage_left([a, alias, b, c]) == (57, False)
 
 
 @pytest.mark.parametrize("fraction", [None, -0.1, 1.01, True, "0.4", float("nan")])
@@ -1054,7 +1063,7 @@ def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tm
         f"#!/bin/sh\nprintf '%s\\n' '{json.dumps({'reports': rows})}'\n",
         0o755,
     )
-    expected = "7d left \uec82 ▰▰▰▱  75%  \uec81 ▰▱▱▱  20%"
+    expected = "7d left \uec82 ▰▰▰▱  75%  \uec81 ▰▰▱▱  50%"
     assert run()["w1"]["usage"] == expected
     write(tmp_path / "stub/omp", "#!/bin/sh\nexit 2\n", 0o755)
     assert run()["w1"]["usage"] == expected
@@ -1104,4 +1113,5 @@ def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, wi
     else:
         filled = round((1 - fraction) * 4)
         assert [h[2:6] for h in halves] == ["▰" * filled + "▱" * (4 - filled)] * 2
-        assert [h[7:] for h in halves] == [f"{(1 - fraction) * 100:3.0f}%"] * 2
+        percent = f"{'!' * (fraction == 1)}{(1 - fraction) * 100:.0f}%".rjust(4)
+        assert [h[7:] for h in halves] == [percent] * 2

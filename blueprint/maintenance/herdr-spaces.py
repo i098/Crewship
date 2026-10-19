@@ -19,7 +19,8 @@ workspace tokens under the source `crewship:spaces`:
              on the primary home (labelled firstmate, else the first listed),
              only while no workspace is labelled machine
   machine    the same line, on the workspace labelled machine
-  usage      "7d left <claude> ▰▰▰▱  70%  <openai> ▰▱▱▱  20%"  worst account's weekly quota left
+  usage      "7d left <claude> ▰▱▱▱ !22%  <openai> ▰▰▱▱  50%"  weekly quota left, account mean
+             ("!": an account has none left)
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
@@ -36,6 +37,7 @@ only while its label is Herdr's own number or the reporter's last text.
 """
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -141,11 +143,15 @@ def crew(panes: list[dict]) -> str:
     return f"{working}/{len(agents)}"
 
 
-def usage_left(reports: list[dict]) -> float | None:
-    """Percent left in the worst account's shared seven-day window, the one that gates
-    every model; five-hour windows and model tiers (scope.tier) do not count."""
-    used = None
-    for report in reports:
+def usage_left(reports: list[dict]) -> tuple[int, bool] | None:
+    """Percent left in the shared seven-day window (it gates every model; five-hour
+    windows and model tiers do not count), as the mean over accounts that `omp usage`
+    shows, and whether any account has none left. Aliases count once."""
+    accounts = {}
+    for index, report in enumerate(reports):
+        metadata = report.get("metadata") or {}
+        identity = metadata.get("accountId") or metadata.get("email")
+        key = (identity, metadata.get("orgId")) if identity else index
         weekly = [
             limit
             for limit in report.get("limits") or []
@@ -159,8 +165,12 @@ def usage_left(reports: list[dict]) -> float | None:
             for limit, value in zip(weekly, values)
         ):
             return None
-        used = max(used or 0, *values)
-    return None if used is None else (1 - used) * 100
+        accounts[key] = max(accounts.get(key, 0), *values)
+    if not accounts:
+        return None
+    mean = sum(accounts.values()) / len(accounts)
+    # omp's own rounding: Math.round((1 - fraction) * 100), half up.
+    return max(0, math.floor((1 - mean) * 100 + 0.5)), max(accounts.values()) == 1
 
 
 def usage_row(cache: dict) -> str:
@@ -182,12 +192,14 @@ def usage_row(cache: dict) -> str:
         hit = cache["usage"] = {"at": now, "left": left}
     halves = []
     for provider, icon in (("anthropic", CLAUDE), ("openai-codex", OPENAI)):
-        value = hit["left"][provider]
-        if value is None:
+        if hit["left"][provider] is None:
             bar, percent = "░░?░", "  ?%"
         else:
+            value, empty_account = hit["left"][provider]
             filled = round(value * 4 / 100)
-            bar, percent = "▰" * filled + "▱" * (4 - filled), f"{value:3.0f}%"
+            # "!": an account has nothing left. ponytail: "!100%" overflows, needs 200+ accounts.
+            percent = f"{'!' * empty_account}{value}%".rjust(4)
+            bar = "▰" * filled + "▱" * (4 - filled)
         halves.append(f"{icon} {bar} {percent}")
     return "7d left " + "  ".join(halves)
 
