@@ -997,34 +997,30 @@ def limit(fraction, window="7d", tier=None):
     return {"scope": scope, "amount": {"usedFraction": fraction}, "status": "ok"}
 
 
-def usage_account(provider, key, *fractions):
-    return {
-        "provider": provider,
-        "metadata": {"accountId": key},
-        "limits": [limit(f) for f in fractions],
-    }
+def usage_account(provider, *fractions):
+    return {"provider": provider, "limits": [limit(f) for f in fractions]}
 
 
 def test_provider_shows_the_worst_accounts_shared_weekly_window_left():
     # omp's real shape: a nearly full five-hour window and an exhausted model
     # tier must not hide the shared weekly window that gates every model.
-    a = usage_account("anthropic", "a", 0.6)
+    a = usage_account("anthropic", 0.6)
     a["limits"] += [limit(0.99, "5h"), limit(1, tier="fable")]
-    b = usage_account("anthropic", "b", 0.3)
+    b = usage_account("anthropic", 0.3)
     assert spaces.usage_left([a, b]) == pytest.approx(40)
 
 
 @pytest.mark.parametrize("fraction", [None, -0.1, 1.01, True, "0.4", float("nan")])
 def test_unmeasured_account_never_becomes_a_percentage(fraction):
-    assert spaces.usage_left([usage_account("anthropic", "a", fraction)]) is None
+    assert spaces.usage_left([usage_account("anthropic", fraction)]) is None
 
 
 def test_unknown_or_missing_weekly_window_withholds_the_provider():
-    a, b = usage_account("openai-codex", "a", 0.8), usage_account("openai-codex", "b", 0.2)
+    a, b = usage_account("openai-codex", 0.8), usage_account("openai-codex", 0.2)
     b["limits"][0]["status"] = "unknown"
     assert spaces.usage_left([a, b]) is None
     short_only = {"provider": "anthropic", "limits": [limit(0.1, "5h")]}
-    assert spaces.usage_left([usage_account("anthropic", "a", 0.2), short_only]) is None
+    assert spaces.usage_left([usage_account("anthropic", 0.2), short_only]) is None
 
 
 def test_workspace_counts_exclude_idle_blocked_shells_and_other_workspaces(fixture, tmp_path):
@@ -1049,9 +1045,9 @@ def test_workspace_counts_exclude_idle_blocked_shells_and_other_workspaces(fixtu
 def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tmp_path):
     _, run = fixture
     rows = [
-        usage_account("anthropic", "default", 0.25),
-        usage_account("openai-codex", "a", 0.2),
-        usage_account("openai-codex", "b", 0.8),
+        usage_account("anthropic", 0.25),
+        usage_account("openai-codex", 0.2),
+        usage_account("openai-codex", 0.8),
     ]
     write(
         tmp_path / "stub/omp",
@@ -1072,7 +1068,7 @@ def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tm
 def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
     _, run = fixture
     report = {
-        "reports": [usage_account("anthropic", "a", 0.1), usage_account("openai-codex", "b", 0)],
+        "reports": [usage_account("anthropic", 0.1), usage_account("openai-codex", 0)],
         "accountsWithoutUsage": [{"provider": "anthropic", "accountId": "missing"}],
     }
     write(
@@ -1088,8 +1084,8 @@ def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
 def test_emitted_provider_halves_fit_sidebar_content_width(fixture, tmp_path, width, fraction):
     _, run = fixture
     report = {"reports": [
-        usage_account("anthropic", "a", fraction),
-        usage_account("openai-codex", "b", fraction),
+        usage_account("anthropic", fraction),
+        usage_account("openai-codex", fraction),
     ]}
     write(
         tmp_path / "stub/omp",
