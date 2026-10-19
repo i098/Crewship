@@ -57,7 +57,7 @@ To remove a repository, delete its entry and apply again. Its idle slots stop an
 | `repos[].docker` | none | `dind` gives each slot of the repository its own Docker daemon. See [Docker in a job](#docker-in-a-job). |
 | `repos[].userns` | `false` | With `docker: dind`: run the repository's sidecars under the AppArmor profile `ci-dind-userns`, which allows the user namespace that rootless Docker needs on a host with `kernel.apparmor_restrict_unprivileged_userns=1`. See [Docker in a job](#docker-in-a-job). |
 
-`./ship.sh inspect` refuses the pool without the `docker` profile, a `data_dir` with `..`, and two repositories that make the same unit name.
+`./ship.sh inspect` refuses the pool without the `docker` profile, a `data_dir` with `..`, `userns` without `docker`, and two repositories that make the same unit name.
 
 ## Pool size
 
