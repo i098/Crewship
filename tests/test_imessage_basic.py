@@ -11,6 +11,7 @@ import pytest
 from test_imessage import fake_bridge, publish_json, wait_for
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+PAST_QUIET = 8.5  # seconds: past the bridge's eight-second quiet period, so a desk turn would have run
 
 
 def basic_rig(tmp_path):
@@ -94,7 +95,7 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
         bridge.wait(10)
         bridge = start(3 if recover else 2)
         receive("basic", message)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
@@ -146,7 +147,7 @@ def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, c
             bridge = start(2)
         wait_for(lambda: "photon-work " in text(notes), "the supervisor handoff")
         receive("work", message)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(notes).count("photon-work ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
@@ -223,7 +224,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
         bridge.wait(10)
         bridge = start(2)
         receive("description", question)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -278,7 +279,7 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, sourc
         bridge.wait(10)
         bridge = start(2)
         receive("claim", "What is the bridge status?")
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(notes).count("photon-claim ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the bridge status?"]
@@ -321,7 +322,7 @@ def test_model_identity_is_bound_to_its_configured_subject(tmp_path, monkeypatch
         bridge.wait(10)
         bridge = start(2)
         receive("identity", question)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ([f"send {quote}"] if direct else [])
         assert text(notes).count("photon-identity ") == (0 if direct else 1)
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -357,7 +358,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
     class Server(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            requests.append({"auth": self.headers["Authorization"], "body": body})
+            requests.append({"auth": self.headers["Authorization"], "body": body, "at": time.monotonic()})
             if mode == "cancelled":
                 release.wait(20)
             if mode == "refused":
@@ -385,6 +386,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
+        published = time.monotonic()
         receive("first", "What is the build status?")
         if mode == "answer":
             wait_for(lambda: text(fake / "sent"), "the direct answer")
@@ -402,6 +404,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         if mode != "answer":
             assert text(fake / "sent") == ""
         first = requests[0]
+        assert first["at"] - published >= 8  # the desk runs only after eight seconds of silence
         assert first["auth"] == "Bearer test-inception-key"
         assert (first["body"]["model"], first["body"]["reasoning_effort"]) == ("mercury-3", "low")
         assert [t["function"]["name"] for t in first["body"]["tools"]] == ["zoom"]
@@ -463,7 +466,7 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         events = [json.loads(line) for line in journal.read_text().splitlines()]
         journal.write_text("".join(json.dumps(e) + "\n" for e in events if e.get("route") != "done") + '{"ids":')
         bridge = start(2)
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert text(notes) == ""
         bridge.terminate()
@@ -471,7 +474,7 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         bridge = start(3)
         receive("burst1", "What is the build status?")
         receive("burst2", "Is the build paused?")
-        time.sleep(4.5)
+        time.sleep(PAST_QUIET)
         assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert len([r for r in records() if r["kind"] == "owner"]) == 2
     finally:
