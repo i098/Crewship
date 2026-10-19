@@ -10,13 +10,13 @@ The collector accepts declared model-request completions from registered produce
 The protocol separates `chat`, `judgment`, and `helper` producers.
 A producer registration declares its scope; it does not prove coverage of other processes or provider accounts.
 
-OMP 18.7.0 does not expose a sufficient metadata-only completion callback.
+OMP 18.12.1 does not expose a sufficient metadata-only completion callback.
 Its `onChatUsage` callback skips absent usage and catches delivery errors.
 Its provider messages initialize token fields with zeroes before provider usage arrives.
 An adapter cannot determine usage presence from those zeroes.
 The message events carry content and are not an authorized substitute.
 
-`blueprint/patches/omp/usage.patch` adds the missing metadata contract to the OMP 18.7.0 source.
+`blueprint/patches/omp/usage.patch` adds the missing metadata contract to the OMP 18.12.1 source.
 It targets the upstream `packages/ai` directory.
 It observes public `stream` and `streamSimple` calls before dispatch and after provider settlement.
 It acknowledges metadata before it delivers a terminal result.
