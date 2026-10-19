@@ -3,7 +3,9 @@
 import json
 import shutil
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from test_imessage import fake_bridge, publish_json, wait_for
@@ -87,6 +89,7 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
         assert text(notes) == ""
         call = json.loads(text(fake / "model-calls").splitlines()[0])
         assert call["args"][call["args"].index("--model") + 1] == "claude-haiku-5-5"
+        assert "--thinking=off" in call["args"]
         bridge.terminate()
         bridge.wait(10)
         bridge = start(3 if recover else 2)
@@ -344,6 +347,74 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize("mode", ["answer", "refused", "cancelled"])
+def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp_path, monkeypatch, mode):
+    """The real bridge and inception-desk.ts against a local chat-completions server."""
+    requests, release = [], threading.Event()
+
+    class Server(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append({"auth": self.headers["Authorization"], "body": body})
+            if mode == "cancelled":
+                release.wait(20)
+            if mode == "refused":
+                status, reply = 500, {"error": "upstream echo body-secret"}
+            elif len(requests) == 1:
+                call = {"id": "c1", "type": "function", "function": {"name": "zoom", "arguments": '{"id": 0, "n": 1}'}}
+                status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
+            else:
+                answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
+                status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": json.dumps(answer)}}]}
+            data = json.dumps(reply).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3", "FM_IMESSAGE_DESK_REASONING": "low",
+                        "INCEPTION_API_KEY": "test-inception-key", "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
+        monkeypatch.setenv(name, value)
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("first", "What is the build status?")
+        if mode == "answer":
+            wait_for(lambda: text(fake / "sent"), "the direct answer")
+            assert text(fake / "sent").splitlines() == ["send The build is paused."]
+            assert text(notes) == ""
+            result = requests[1]["body"]["messages"][-1]
+            assert (result["role"], result["tool_call_id"]) == ("tool", "c1") and "What is the build status?" in result["content"]
+        elif mode == "refused":
+            wait_for(lambda: "photon-first " in text(notes), "the handoff")
+        else:
+            wait_for(lambda: requests, "the held desk request")
+            receive("second", "Deploy it instead")
+            wait_for(lambda: "photon-second " in text(notes), "the replacement handoff")
+            assert text(notes).count("photon-first ") == 1
+        if mode != "answer":
+            assert text(fake / "sent") == ""
+        first = requests[0]
+        assert first["auth"] == "Bearer test-inception-key"
+        assert (first["body"]["model"], first["body"]["reasoning_effort"]) == ("mercury-3", "low")
+        assert [t["function"]["name"] for t in first["body"]["tools"]] == ["zoom"]
+        assert "zoom.ts" not in text(fake / "model-calls")
+        if mode != "cancelled":
+            assert f"inception mercury-3 reasoning=low HTTP {200 if mode == 'answer' else 500}" in text(err)
+        assert "test-inception-key" not in text(err) and "body-secret" not in text(err)
+    finally:
+        release.set()
+        bridge.terminate()
+        bridge.wait(10)
+        server.shutdown()
+
 
 
 def test_restart_recovers_owned_inbound_and_keeps_an_uncertain_send_out_of_firstmate(tmp_path):

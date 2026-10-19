@@ -120,15 +120,24 @@ export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?
   return { skip, tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
 }
 
-// One desk turn's omp call (a process whose stdout is its answer), with zoom.ts as its only tool; `memoryDir` and
-// `spent` reach zoom.ts through the environment. The caller tracks the process and may kill it.
-export type DeskProc = Bun.Subprocess<any, "pipe", "ignore">;
-export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined> }): DeskProc {
-  return Bun.spawn(
-    ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
-      "--thinking=off", "--model", o.model, "--system-prompt", o.system],
-    { cwd: o.cwd, env: { ...o.env, FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) }, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: "ignore", timeout: 45_000 },
-  );
+// One desk turn's call (a process whose stdout is its answer), with zoom as its only tool; `memoryDir` and
+// `spent` reach the zoom tool through the environment. The caller tracks the process and may kill it.
+// `provider` "omp" runs a one-shot omp call with `reasoning` as its thinking level; "inception" runs
+// inception-desk.ts with only the variables it needs, and `reasoning` as its reasoning effort.
+export type DeskProc = Bun.Subprocess<any, "pipe", any>;
+export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string }): DeskProc {
+  const desk = { FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) };
+  const { reasoning = "off" } = o;
+  const inception = o.provider === "inception";
+  const argv = inception
+    ? [process.execPath, `${import.meta.dir}/inception-desk.ts`, o.model, reasoning, o.system]
+    : ["omp", "-p", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`, "--no-tools", "--no-skills", "--no-rules", "--no-session",
+      `--thinking=${reasoning}`, "--model", o.model, "--system-prompt", o.system];
+  const env = inception
+    ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
+    : { ...o.env, ...desk };
+  // inception-desk.ts writes only safe call metadata to stderr; omp's stderr stays out of the journal.
+  return Bun.spawn(argv, { cwd: o.cwd, env, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: inception ? "inherit" : "ignore", timeout: 45_000 });
 }
 
 // What a desk call answered, and whether it exited cleanly with an answer.

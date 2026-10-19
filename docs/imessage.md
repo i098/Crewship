@@ -13,8 +13,12 @@ For each message from the owner, the service does these steps:
 4. It waits 4 seconds to combine a burst.
    Each new text cancels a running draft and starts the wait again.
    Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
-   A `desk_model` value other than `claude-haiku-5-5` also sends every request to Firstmate.
-5. Claude Haiku 5.5 classifies the whole pending burst through the existing one-shot `omp -p` runner.
+   A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
+5. The desk model classifies the whole pending burst.
+   The default is Claude Haiku 5.5 with thinking off, through the existing one-shot `omp -p` runner.
+   With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
+   It reads `INCEPTION_API_KEY` from `~/super.env`, sends no request body over 100,000 bytes (so no input over 100,000 tokens), and logs only the provider, model, reasoning, HTTP status, and time.
+   A failed Inception call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
@@ -333,7 +337,9 @@ crewship:
   imessage:
     owner: "+<country code><number>"  # the owner's phone number, E.164 form
     owner_name: the owner           # optional; this is the default; how the desk prompt names him
-    desk_model: claude-haiku-5-5    # optional; this is the default
+    desk_provider: omp              # optional; this is the default; or inception
+    desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
+    desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
 

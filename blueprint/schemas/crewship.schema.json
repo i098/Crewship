@@ -277,9 +277,26 @@
               "type": "string",
               "pattern": "^[^\\n`$\"\\\\%]{1,40}$"
             },
+            "desk_provider": {
+              "enum": [
+                "omp",
+                "inception"
+              ]
+            },
             "desk_model": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9_./:-]*$"
+            },
+            "desk_reasoning": {
+              "enum": [
+                "off",
+                "instant",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
             },
             "supervisor_model": {
               "type": "string",

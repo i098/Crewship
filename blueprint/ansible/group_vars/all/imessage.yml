@@ -3,7 +3,10 @@
 # The service runs from this copy of apps/imessage/ with the latest spectrum-ts,
 # resolved once per run (crewship_latest). Photon and relay credentials stay in ~/super.env.
 crewship_imessage_dir: "{{ crewship_share_dir }}/imessage"
+# The front desk: omp or inception (INCEPTION_API_KEY in ~/super.env), its model, and its reasoning level.
+crewship_imessage_desk_provider: "{{ crewship_cfg.imessage.desk_provider | default('omp') }}"
 crewship_imessage_desk_model: "{{ crewship_cfg.imessage.desk_model | default('claude-haiku-5-5') }}"
+crewship_imessage_desk_reasoning: "{{ crewship_cfg.imessage.desk_reasoning | default('off') }}"
 crewship_imessage_supervisor_model: "{{ crewship_cfg.imessage.supervisor_model | default('') }}"
 crewship_imessage_owner_name: "{{ crewship_cfg.imessage.owner_name | default('the owner') }}"
 # App cards (crewship.imessage.cards, docs/imessage.md#cards): the card-only loopback port, the named tunnel's

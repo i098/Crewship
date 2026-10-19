@@ -72,7 +72,11 @@ const FM_HOME = need("FM_HOME");
 const INBOX = env.FM_INBOX_CMD || `${FM_HOME}/bin/fm-inbox.sh`;
 const PORT = Number(env.FM_IMESSAGE_PORT || 8765);
 const TRANSPORTS = (env.FM_IMESSAGE_TRANSPORTS || "photon").split(/\s+/).filter(Boolean);
+const DESK_PROVIDER = env.FM_IMESSAGE_DESK_PROVIDER || "omp";
 const DESK_MODEL = env.FM_IMESSAGE_DESK_MODEL || "claude-haiku-5-5";
+const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
+// The desks vetted for direct answers; any other provider and model hands every request to Firstmate.
+const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
 const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL);
 const QUIET_MS = 4000; // combine the owner's burst before classification
@@ -574,7 +578,7 @@ async function runDesk(current: () => boolean) {
   if (stopping) return;
   const pending = pendingRoutes();
   if (!pending.length) return;
-  if (pending.some((r) => r.firstmate) || DESK_MODEL !== "claude-haiku-5-5") return handoffPending();
+  if (pending.some((r) => r.firstmate) || !DESK_VETTED) return handoffPending();
   const at = pending.at(-1)!.ref;
   const target = latest;
   typing(target?.space, true);
@@ -599,7 +603,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText);
   if (!statusOk || !prompt.includes(latestText)) return;
-  const proc = track(spawnDesk({ model: DESK_MODEL, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
   deskRun = proc;
   const { ok, drafted } = await readDesk(proc);
   if (deskRun !== proc) return;
