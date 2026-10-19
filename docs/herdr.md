@@ -90,7 +90,7 @@ The other mobile fields follow the existing mechanism (see [On a phone](#on-a-ph
 | CPU, RAM, counts, watcher, machine | every run (1 s) | One pass over `/proc` and file reads. CPU needs two runs, so it appears from the second run on. |
 | Queue | when the backlog changes, else every minute | One `fm-tasks-axi.sh ready` per home, most of a run's cost when it runs. |
 | Disk | every 15 minutes | One `du` over each home and its pools. On a host with large pools this run can take a minute; the other values wait for it. |
-| Provider usage | every 3 minutes | One `omp usage --json` call with a 20-second timeout. The reporter also caches failures for 3 minutes. `omp` itself reuses each account's report for 5 minutes ±25%, so a value can be up to about 9 minutes old. |
+| Provider usage | every 3 minutes | One `omp usage --json` call with a 20-second timeout. The reporter also caches failures for 3 minutes. `omp` itself reuses each account's report for 5 minutes ±25%, so with healthy fetches the cache lifetimes add up to about 9 minutes 16 seconds, plus run time. A failed `omp` fetch can return an older last good report. |
 
 The caches live in `~/.cache/crewship/herdr-spaces.json`.
 A failed usage refresh replaces the provider percentages with unknown; other failed sources keep their previous values.
