@@ -74,3 +74,23 @@ def test_runs_the_call_in_the_named_lab(tmp_path):
 
 def test_bare_herdr_under_pytest_is_the_refusing_one():
     assert Path(shutil.which("herdr")).read_text().endswith("exit 97\n")
+
+
+@pytest.mark.skipif(Path("/etc/crewship-image").exists(), reason="inside the Crewship image")
+def test_container_smoke_refuses_in_container_mode_outside_the_image(tmp_path):
+    calls = tmp_path / "calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("dirname", "basename"):
+        (bin_dir / name).symlink_to(shutil.which(name))
+    for name in ("mktemp", "herdr", "python3", "sudo", "docker", "uname"):
+        (bin_dir / name).write_text(f'#!/bin/sh\necho "{name} $*" >> {calls}\nexit 97\n')
+        (bin_dir / name).chmod(0o755)
+    done = subprocess.run(
+        ["/bin/bash", str(GUARD.parent / "container-smoke.sh"), "--in-container"],
+        env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 2 and "refused" in done.stderr
+    assert not calls.exists()

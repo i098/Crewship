@@ -7,14 +7,14 @@
 #   resulting container with bounded memory/CPU/PID limits, then removes the
 #   container and the image it created.
 #
-# Container mode (inside the image; CMD of the `smoke` target):
+# Container mode (refused outside the image; CMD of the `smoke` target):
 #   tests/container-smoke.sh --in-container [--only NAME,NAME]
 #   Exercises what the image actually contains, through the programs a user
 #   would run: managed tool versions compared with the releases the build
 #   resolved, a Herdr
 #   configuration that Herdr itself accepts and that matches the Crewship
 #   document, the user unit's ExecStart resolved and executed, a real headless
-#   `herdr server` brought up and shut down over its API socket, the repository
+#   `herdr server` in an fm-lab-* session brought up and shut down over its API socket, the repository
 #   CLI (validate, invalid-input rejection, init overwrite refusal), a second
 #   installer pass reporting changed=false, a `./ship.sh launch` that migrates
 #   a pre-rename layout, and a second `./ship.sh launch` reporting changed=0.
@@ -68,13 +68,18 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [ "${MODE}" = auto ]; then
-    if [ -n "${CREWSHIP_IMAGE:-}" ] || [ -f /etc/crewship-image ]; then
-        MODE=container
-    else
-        MODE=host
-    fi
+IN_IMAGE=0
+if [ -n "${CREWSHIP_IMAGE:-}" ] || [ -f /etc/crewship-image ]; then
+    IN_IMAGE=1
 fi
+case "${MODE}:${IN_IMAGE}" in
+    auto:1) MODE=container ;;
+    auto:0) MODE=host ;;
+    container:0)
+        printf 'refused: --in-container runs only inside the Crewship image (CREWSHIP_IMAGE or /etc/crewship-image)\n' >&2
+        exit 2
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Host mode: build the smoke image, run this script inside it, clean up.
@@ -514,11 +519,13 @@ check_herdr_unit() {
 }
 
 check_herdr_server_headless() {
-    local binary log pid socket status waited started_after limit stopped leftover
+    local binary log pid socket status waited started_after limit stopped leftover lab
     binary=$(herdr_installed_bin)
     log="${SMOKE_TMP}/herdr-server.log"
     limit=${CF_SMOKE_SERVER_WAIT:-30}
     pid=""
+    lab="fm-lab-smoke-$$"
+    lab_herdr() { "${REPO_ROOT}/tests/herdr-lab" "${lab}" "$@"; }
 
     stop_server() {
         if [ -n "${pid:-}" ] && kill -0 "${pid}" 2>/dev/null; then
@@ -534,7 +541,7 @@ check_herdr_server_headless() {
 
     # Exactly what the user unit would run: the locked build, headless, no
     # DISPLAY, no terminal. Nothing here opens a browser or an interactive login.
-    ( unset DISPLAY; exec "${binary}" server ) >"${log}" 2>&1 &
+    ( unset DISPLAY; HERDR_SESSION=${lab} exec "${binary}" server --session "${lab}" ) >"${log}" 2>&1 &
     pid=$!
 
     waited=0
@@ -544,7 +551,7 @@ check_herdr_server_headless() {
             tail -n 20 "${log}" || true
             fail "herdr server exited after ${waited}s instead of serving"
         fi
-        status=$(herdr status server 2>&1 || true)
+        status=$(lab_herdr status server 2>&1 || true)
         case "${status}" in
             *"status: running"*) break ;;
         esac
@@ -571,9 +578,9 @@ check_herdr_server_headless() {
     esac
 
     # Documented shutdown path: over the API socket, not a signal.
-    herdr server stop >"${SMOKE_TMP}/herdr-stop.log" 2>&1 || {
+    HERDR_SESSION=${lab} "${binary}" session stop "${lab}" --session "${lab}" >"${SMOKE_TMP}/herdr-stop.log" 2>&1 || {
         tail -n 20 "${SMOKE_TMP}/herdr-stop.log" || true
-        fail "herdr server stop failed while a server was running"
+        fail "herdr session stop failed while the ${lab} server was running"
     }
 
     stopped=0
@@ -587,12 +594,12 @@ check_herdr_server_headless() {
     if [ "${stopped}" -ne 1 ]; then
         stop_server
         trap - EXIT
-        fail "the server process survived 'herdr server stop'"
+        fail "the server process survived 'herdr session stop ${lab}'"
     fi
     wait "${pid}" 2>/dev/null || true
     trap - EXIT
 
-    status=$(herdr status server 2>&1 || true)
+    status=$(lab_herdr status server 2>&1 || true)
     case "${status}" in
         *"status: running"*) fail "herdr still reports a running server after stop" ;;
     esac
