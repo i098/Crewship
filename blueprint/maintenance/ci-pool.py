@@ -17,7 +17,6 @@ GitHub removes a JIT runner after its one job, so nothing is registered or
 deregistered by hand. docs/ci-pool.md has the operator guide.
 """
 
-import hashlib
 import json
 import math
 import os
@@ -61,14 +60,8 @@ DOCKER_TIMEOUT = int(os.environ.get("CI_POOL_DOCKER_TIMEOUT", 600))
 STALL_SECONDS = 300
 MISSING_SECONDS = 120
 # One `watch` call to docker, systemd, or GitHub ends after this long, so a
-# stalled daemon cannot hold the check that exists to find it. `timeout` kills a call that
-# ignores its TERM KILL_SECONDS later.
+# stalled daemon cannot hold the check that exists to find it.
 WATCH_TIMEOUT = 60
-KILL_SECONDS = 10
-# systemd ends a `watch` run after WATCH_RUN_SECONDS, so a run makes at most WATCH_CALLS such
-# calls in all; the restarts of idle slots from an older pool.json stop before they would pass it.
-WATCH_RUN_SECONDS = 300
-WATCH_CALLS = WATCH_RUN_SECONDS // (WATCH_TIMEOUT + KILL_SECONDS)
 # `watch` restarts at most this many slots in one run.
 MAX_RESTARTS = 2
 # A slot's container gets this long to stop before docker kills it.
@@ -77,9 +70,6 @@ STOP_GRACE_SECONDS = 60
 BUILD_TIMEOUT = 3600
 HOME = Path.home()
 CONFIG = HOME / ".config/ci-pool/pool.json"
-# Each start of a slot writes the stamp of the pool.json it read to <STARTED>/<slot>, so apply
-# and watch can find the slots that still wait for a restart into the current file.
-STARTED = "started"
 UNITS = HOME / ".config/systemd/user"
 TEMPLATE = UNITS / "ci-runner@.service"
 WANTS = UNITS / "default.target.wants"
@@ -144,14 +134,14 @@ SuccessExitStatus=143
 [Install]
 WantedBy=default.target
 """
-WATCH_SERVICE_TEXT = f"""\
+WATCH_SERVICE_TEXT = """\
 # Written by ci-pool.py apply (Crewship).
 [Unit]
 Description=CI pool watch: restart stalled slots
 
 [Service]
 Type=oneshot
-TimeoutStartSec={WATCH_RUN_SECONDS}
+TimeoutStartSec=300
 ExecStart=/usr/bin/python3 %h/.local/bin/ci-pool.py watch
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 """
@@ -291,18 +281,18 @@ def docker():
 
 def bounded(argv, seconds=None):
     """Prefix argv with coreutils `timeout`: TERM after `seconds` (default DOCKER_TIMEOUT; sudo
-    relays it to docker, which SIGKILL from Python would not reach), KILL KILL_SECONDS later. A timeout exits 124."""
-    return ["timeout", f"--kill-after={KILL_SECONDS}", str(seconds or DOCKER_TIMEOUT), *argv]
+    relays it to docker, which SIGKILL from Python would not reach), KILL 10 s later. A timeout exits 124."""
+    return ["timeout", "--kill-after=10", str(seconds or DOCKER_TIMEOUT), *argv]
 
 
-def quiet(argv, seconds=None):
-    return subprocess.run(bounded(argv, seconds), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+def quiet(argv):
+    return subprocess.run(bounded(argv), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
 
-def busy(name, seconds=None):
+def busy(name):
     """True while the slot's container runs a job; unknown counts as busy. A container that
     does not exist or is not running (created, exited, dead) runs no job."""
-    result = subprocess.run(bounded([*docker(), "top", f"ci-runner-{name}", "-eo", "pid,comm"], seconds),
+    result = subprocess.run(bounded([*docker(), "top", f"ci-runner-{name}", "-eo", "pid,comm"]),
                             capture_output=True, text=True)
     return "Runner.Worker" in result.stdout or (
         result.returncode != 0 and not any(text in result.stderr for text in ("No such container", "is not running"))
@@ -315,18 +305,7 @@ def idle(name, repo, runners):
     if repo not in runners:
         runners[repo] = github_runners(repo)
     runner = runners[repo].get(name)
-    return runner is not None and not runner["busy"] and not busy(name, WATCH_TIMEOUT)
-
-
-def stamp(text):
-    """The short hash of a pool.json text."""
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
-
-
-def started_from():
-    """{slot: stamp of the pool.json its last start read}; a slot without a record (a start from
-    before the records) counts as started from an older file."""
-    return {path.name: path.read_text() for path in (CONFIG.parent / STARTED).glob("*")}
+    return runner is not None and not runner["busy"] and not busy(name)
 
 
 def set_slice_weight(weight):
@@ -431,17 +410,16 @@ def apply(check):
     if reconfigured and not check:
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         CONFIG.write_text(config)
-    repos, runners, current = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}, stamp(config)
-    stamps = started_from()
+    repos, runners = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}
     for name in want:
         unit = f"ci-runner@{name}.service"
         if name not in have:
             changes.append(f"start {unit}")
             if not check:
                 systemctl("enable", "--now", unit)
-        elif stamps.get(name, "") != current and idle(name, repos[name.rpartition("-")[0]], runners):
-            # A slot that is busy, or that a read could not show idle, keeps its container; a later
-            # apply or watch restarts it once it is idle, or its next start reads the new file.
+        elif reconfigured and idle(name, repos[name.rpartition("-")[0]], runners):
+            # A busy slot, or one that a read could not show idle, reads the new config when
+            # its next job starts.
             changes.append(f"restart {unit}")
             if not check:
                 systemctl("restart", unit)
@@ -530,16 +508,13 @@ def run(instance):
         # Drained by apply while it held a job: that job is done, leave for good.
         systemctl("stop", unit)
         return 0
-    text = CONFIG.read_text()
-    pool = {**DEFAULTS, **json.loads(text)}
+    pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     base = instance.rpartition("-")[0]
     entry = next((e for e in pool["repos"] if slug(e["repo"]) == base), None)
     if entry is None:
         print(f"{instance}: no repository in {CONFIG}; run ci-pool.py apply", file=sys.stderr)
         time.sleep(FAILURE_PAUSE_SECONDS)
         return 1
-    (CONFIG.parent / STARTED).mkdir(parents=True, exist_ok=True)
-    (CONFIG.parent / STARTED / instance).write_text(stamp(text))
     repo = entry["repo"]
     root = Path(pool["data_dir"]) / "ci-pool"
     work, cache = root / "work" / instance, root / "cache" / base
@@ -721,10 +696,10 @@ def missing_slots(units, containers, entries, seen, now):
     }
 
 
-def restart_due(missing, entries, now, runners):
+def restart_due(missing, entries, now):
     """The slots (at most MAX_RESTARTS) that were missing for MISSING_SECONDS and whose runner
-    GitHub shows offline and not busy. `runners` caches github_runners by repo."""
-    due = []
+    GitHub shows offline and not busy."""
+    runners, due = {}, []
     for instance, since in sorted(missing.items()):
         repo = entries[instance.rpartition("-")[0]]["repo"]
         if now - since < MISSING_SECONDS or len(due) == MAX_RESTARTS:
@@ -746,37 +721,15 @@ def stuck_containers(containers, units):
     ]
 
 
-def outdated_idle(units, entries, current, runners, calls):
-    """Yield, each as soon as idle() proves it idle, the active slots that started from a pool.json
-    other than `current`. Spends at most `calls` bounded calls: a GitHub read of a repo not in
-    `runners`, and a `docker top` for a runner that GitHub shows not busy. Each minute starts
-    at another of these slots, so a slot that never shows idle keeps no other one waiting."""
-    stamps = started_from()
-    old = [instance for instance, (state, _) in sorted(units.items())
-           if state == "active" and instance.rpartition("-")[0] in entries and stamps.get(instance, "") != current]
-    start = int(time.time() // 60) % len(old) if old else 0
-    for instance in old[start:] + old[:start]:
-        repo = entries[instance.rpartition("-")[0]]["repo"]
-        calls -= repo not in runners
-        if calls < 1:
-            return
-        if idle(instance, repo, runners):
-            yield instance
-        runner = runners[repo].get(instance)
-        calls -= bool(runner and not runner["busy"])
-
-
 def watch(dry_run=False):
     """Restart a slot that has no container, and whose runner GitHub shows offline and not busy.
     The slot must have run STALL_SECONDS, and the daemon must have listed no container for it
     in two successful reads MISSING_SECONDS apart (the first sighting is kept in WATCH_STATE).
     A failed or timed-out read acts on nothing and forgets every first sighting, and so does
     an empty WATCH_STATE (an interrupted or failed write of the old writer left one; the file
-    is now replaced whole, so a failed write keeps the old state). Also removes containers stuck
-    in `removing` or `dead` whose slot unit is stopped, and last, after the state is written,
-    restarts each idle slot whose container started from an older pool.json."""
-    config = CONFIG.read_text()
-    pool, current = {**DEFAULTS, **json.loads(config)}, stamp(config)
+    is now replaced whole, so a failed write keeps the old state). Also removes containers
+    stuck in `removing` or `dead` whose slot unit is stopped."""
+    pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     entries = {slug(entry["repo"]): entry for entry in pool["repos"]}
     containers, units, now = container_states(), slot_units(), time.time()
     if containers is None:
@@ -788,28 +741,21 @@ def watch(dry_run=False):
             print(f"{WATCH_STATE} is empty: the last write did not finish, first sightings forgotten", flush=True)
         seen = json.loads(text or "{}")
         missing = missing_slots(units, containers, entries, seen, now)
-    verb, runners = "would " if dry_run else "", {}
-    for instance in restart_due(missing, entries, now, runners):
+    verb = "would " if dry_run else ""
+    for instance in restart_due(missing, entries, now):
         print(f"{verb}restart ci-runner@{instance}.service: runner offline on GitHub, no container for "
               f"{int(now - missing.pop(instance))} s", flush=True)
         if not dry_run:
             systemctl("restart", "--no-block", f"ci-runner@{instance}.service")
-    stuck = stuck_containers(containers, units)
-    for name in stuck:
+    for name in stuck_containers(containers, units):
         print(f"{verb}remove {name}: stuck, its slot is stopped", flush=True)
         if not dry_run:
-            quiet([*docker(), "rm", "--force", name], WATCH_TIMEOUT)
+            quiet([*docker(), "rm", "--force", name])
     if not dry_run:
         WATCH_STATE.parent.mkdir(parents=True, exist_ok=True)
         staged = WATCH_STATE.with_suffix(".json.tmp")
         staged.write_text(json.dumps(missing))
         staged.replace(WATCH_STATE)
-    # The calls so far: `docker ps`, `systemctl show`, the removals, and the GitHub reads in `runners`.
-    calls = WATCH_CALLS - 2 - len(stuck) - len(runners)
-    for instance in outdated_idle(units, entries, current, runners, calls) if containers else []:
-        print(f"{verb}restart ci-runner@{instance}.service: idle, started from an older {CONFIG.name}", flush=True)
-        if not dry_run:
-            systemctl("restart", "--no-block", f"ci-runner@{instance}.service")
     return 0
 
 
