@@ -100,7 +100,8 @@ site
 
 # The image never reads these: the tests, the docs, the changelog and its
 # fragments, the contributor and host setup guides, and the host installer.
-# The smoke target runs tests/container-smoke.sh, so that one script stays.
+# The smoke target runs tests/container-smoke.sh and its tests/herdr-lab guard,
+# so those two scripts stay.
 # LICENSE, CREDITS.md and README.md stay with the code. The Dockerfile stays
 # out too: BuildKit reads it on its own, and in the context an edit to it
 # would invalidate every layer after `COPY . /opt/crewship`.
@@ -113,3 +114,4 @@ SETUP.md
 install.sh
 tests/*
 !tests/container-smoke.sh
+!tests/herdr-lab

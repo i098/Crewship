@@ -526,6 +526,7 @@ check_herdr_server_headless() {
     pid=""
     lab="fm-lab-smoke-$$"
     lab_herdr() { "${REPO_ROOT}/tests/herdr-lab" "${lab}" "$@"; }
+    unset HERDR_SOCKET_PATH
 
     stop_server() {
         if [ -n "${pid:-}" ] && kill -0 "${pid}" 2>/dev/null; then

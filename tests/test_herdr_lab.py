@@ -14,7 +14,7 @@ LAB = "fm-lab-sidebar-1"
 def guard(tmp_path, *argv, **env):
     calls = tmp_path / "calls"
     fake = tmp_path / "herdr"
-    fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {calls}\n')
+    fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*${{HERDR_SOCKET_PATH:+ socket=$HERDR_SOCKET_PATH}}" >> {calls}\n')
     fake.chmod(0o755)
     done = subprocess.run(
         [str(GUARD), *argv],
@@ -65,15 +65,18 @@ def test_refuses_a_caller_session_and_server_or_session_operations(tmp_path, arg
 
 
 def test_runs_the_call_in_the_named_lab(tmp_path):
-    done, calls = guard(tmp_path, LAB, "workspace", "rename", "w1", "firstmate", HERDR_SESSION=LAB)
+    done, calls = guard(
+        tmp_path, LAB, "workspace", "rename", "w1", "firstmate", HERDR_SESSION=LAB, HERDR_SOCKET_PATH="/run/default.sock"
+    )
     assert done.returncode == 0
     assert calls == [f"workspace rename w1 firstmate --session {LAB}"]
     done, calls = guard(tmp_path, LAB, "agent", "start", "--", "omp")
     assert calls[-1] == f"agent start --session {LAB} -- omp"
 
 
-def test_bare_herdr_under_pytest_is_the_refusing_one():
-    assert Path(shutil.which("herdr")).read_text().endswith("exit 97\n")
+def test_bare_herdr_under_pytest_refuses():
+    done = subprocess.run(["herdr", "workspace", "rename", "w1", "x"], capture_output=True, text=True)
+    assert done.returncode == 97 and "refused" in done.stderr
 
 
 @pytest.mark.skipif(Path("/etc/crewship-image").exists(), reason="inside the Crewship image")

@@ -9,7 +9,8 @@
 # named fm-lab-*, a caller --session, an HERDR_SESSION that names another
 # session, a leading option, and server or session operations are refused:
 # the named lab is started and removed by Firstmate's bin/fm-herdr-lab.sh
-# provision and teardown, never from here.
+# provision and teardown, never from here. HERDR_SOCKET_PATH is cleared so
+# only --session selects the server.
 set -euo pipefail
 
 refuse() {
@@ -30,6 +31,7 @@ for arg in "$@"; do
   case "$arg" in --session | --session=*) refuse "caller-supplied --session" ;; esac
 done
 
+unset HERDR_SOCKET_PATH
 args=("$@")
 for i in "${!args[@]}"; do
   if [ "${args[i]}" = -- ]; then
