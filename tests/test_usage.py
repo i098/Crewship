@@ -823,7 +823,47 @@ def test_sender_compresses_and_spaces_requests(monkeypatch):
         server.shutdown()
     assert [(encoding, json.loads(gzip.decompress(body))) for encoding, body in bodies] \
         == [("gzip", payload)] * 2
-    assert len(pauses) == 1 and 0 <= pauses[0] <= usage.JITTER
+    assert len(pauses) == 2 and all(0 <= pause <= usage.JITTER for pause in pauses)
+
+
+def test_sender_delays_the_first_request(monkeypatch):
+    waiting, release, received = threading.Event(), threading.Event(), threading.Event()
+    pauses, replies = [], []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        waiting.set()
+        release.wait()
+
+    class Receiver(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            received.set()
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *_):
+            pass
+
+    monkeypatch.setattr(usage.time, "sleep", pause)
+    with ThreadingHTTPServer(("127.0.0.1", 0), Receiver) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        send = usage.sender(f"http://127.0.0.1:{server.server_port}/v1/logs")
+        worker = threading.Thread(target=lambda: replies.append(send(usage.batch([]))), daemon=True)
+        worker.start()
+        try:
+            assert waiting.wait(5)
+            assert not received.is_set()
+            assert len(pauses) == 1 and 0 <= pauses[0] <= usage.JITTER
+        finally:
+            release.set()
+            worker.join(20)
+            server.shutdown()
+        assert not worker.is_alive()
+    assert received.is_set() and replies == [{}]
+
 
 
 def test_spool_refuses_records_beyond_its_age_and_payload_bounds(tmp_path, monkeypatch):

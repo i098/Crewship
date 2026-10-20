@@ -82,7 +82,9 @@ A missing configured file stops export instead of sending without its key.
 Run `./ship.sh chart` to preview and `./ship.sh launch` to install.
 The installation copies the client, adapter, dashboard, source patch, and `capture.env` into `~/.local/share/crewship/usage`.
 It installs `crewship-usage.service` and `crewship-usage.timer` as user units.
-The timer runs five minutes after boot and five minutes after each export finishes, plus up to five minutes of random delay.
+The timer schedules export five minutes after boot and after each export finishes, plus up to five minutes of random delay.
+An expired timer deadline can start export immediately on activation or resume.
+The sender delays every request, including the first, by a random interval of up to one second.
 One service instance exports at a time, with a twenty-minute timeout.
 Each run uses the bounded spool, gzip requests, request limit, and per-request random delay described below.
 It does not open or drain an old `usage.sqlite` ledger.
@@ -295,7 +297,8 @@ The exporter refuses endpoint credentials, redirects, and remote plain HTTP.
 Loopback HTTP is supported for isolated protocol fixtures.
 Each run takes a snapshot of the pending records and makes at most 50 requests.
 Records that arrive during the run wait for the next run.
-The sender compresses each request body with gzip and waits a random time of up to one second between requests.
+The sender compresses each request body with gzip.
+Before every request, including the first, it waits a random interval of up to one second.
 These waits spread the requests of many hosts that reconnect at the same time.
 The run stops at the first failed, throttled, or rejected request; the requests before it stay acknowledged.
 The next scheduled run continues, so a slow or busy endpoint receives fewer requests.

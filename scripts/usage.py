@@ -721,14 +721,9 @@ def sender(endpoint):
             return None
 
     opener = urllib.request.build_opener(NoRedirect)
-    requests = 0
 
     def send(payload):
-        nonlocal requests
-        if requests:
-            # Random gaps spread the requests of many hosts that reconnect at the same time.
-            time.sleep(random.uniform(0, JITTER))
-        requests += 1
+        time.sleep(random.uniform(0, JITTER))
         body = gzip.compress(json.dumps(payload).encode(), mtime=0)
         request = urllib.request.Request(endpoint, body, headers)
         with opener.open(request, timeout=15) as response:
