@@ -2,9 +2,9 @@
 # Run the ponytail over-engineering review on a diff, from ANY harness.
 #
 # WHY THIS EXISTS
-#   The captain's PR rule (2026-08-25) is: no line cap, instead run
-#   /ponytail-review on the diff, cut everything it names, and ship when it
-#   answers "Lean already. Ship."
+#   The PR rule is: no line cap, instead run /ponytail-review on the diff,
+#   cut everything it names, and accept exactly one approved positive verdict
+#   with only approved progress and information lines around it.
 #
 #   But /ponytail-review is a Claude plugin slash command, and crewmates run on
 #   pi, where it is not registered. Abstract's worker hit this: it got a real
@@ -23,9 +23,9 @@
 #   git diff main... | ponytail-review --stdin
 #
 # EXIT CODES
-#   0  "Lean already. Ship." - the gate passes
+#   0  exactly one approved positive verdict and no unapproved output lines
 #   1  usage, missing plugin or omp, empty diff, model refusal, or omp failure - NEVER a pass
-#   2  findings remain: cut them and run again
+#   2  unapproved output, missing verdict, or multiple verdicts: not a pass
 #
 # FAIL-CLOSED
 #   A missing plugin or agent exits 1 with a named reason. It never prints a
@@ -109,11 +109,18 @@ done
 
 printf '%s\n' "$out"
 
-# "Lean already. Ship." is the plugin's own pass phrase.
-if grep -qxE "[[:space:]*\`'\"]*Lean already\. Ship\.[[:space:]*\`'\"]*" <<<"$out" \
-  && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out"; then
+verdicts=0
+while IFS= read -r line; do
+  case "$line" in
+    ""|"Working..."|"What this change does:"*|"Checked:"*|"Not checked:"*) ;;
+    "Lean already. Ship."|"Looks good. Ship."|"Nothing to cut. Ship.")
+      verdicts=$((verdicts+1)) ;;
+    *) verdicts=0; break ;;
+  esac
+done < <(sed -E "s/[*_\`'\"]//g; s/^[[:space:]>]+//; s/[[:space:]]+$//" <<<"$out")
+if [ "$verdicts" -eq 1 ]; then
   exit 0
 fi
 echo >&2
-echo "ponytail-review: findings remain - cut them and run again. Not a pass." >&2
+echo "ponytail-review: findings remain - cut them; do not run another round. Not a pass." >&2
 exit 2
