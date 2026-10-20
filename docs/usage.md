@@ -20,7 +20,7 @@ The message events carry content and are not an authorized substitute.
 `blueprint/patches/omp/usage.patch` adds the missing metadata contract to the OMP 18.12.1 source.
 It targets the upstream `packages/ai` directory.
 It observes public `stream` and `streamSimple` calls before dispatch and after provider settlement.
-It acknowledges metadata before it delivers a terminal result.
+It sends metadata in the background without delaying provider dispatch or terminal results.
 Nested calls count once.
 Separate public calls keep separate event identities.
 `complete` and `completeSimple` calls register as helpers.
@@ -38,10 +38,14 @@ Interrupted streams retain known input and cache fields without inventing a comp
 The shared Responses normalizer also serves Codex and Azure paths; those transports are not exercised here.
 Other normalizers keep usage presence unknown and export null token buckets.
 The adapter never treats their initialized zeroes as observed usage.
-It reads only selected terminal metadata and awaits durable acknowledgements.
-Delivery failure escapes instead of disappearing inside `onChatUsage`.
-After registration, every source record persists a pending gap first, including completion, checkpoint, and shutdown.
-Graceful exit records a shutdown checkpoint.
+It reads only selected terminal metadata.
+Registration and record batches each have a 15-second collector timeout.
+Each producer keeps at most 64 waiting records; overflow drops the waiting batch and marks a delivery gap.
+A collector failure drops the current and waiting batches, reports unknown coverage, and leaves the model call unchanged.
+The next successful delivery registers the producer if needed and stores the gap before later records.
+Sequence checkpoints preserve skipped requests as unknown, never as zero-token completions.
+Normal event-loop exit sends a shutdown checkpoint after pending delivery finishes.
+A forced exit can lose metadata that has not reached the collector.
 An unreferenced one-minute timer records idle checkpoints without keeping a source process alive.
 Start a new source process after an outage exceeds the retained producer horizon.
 The collector cannot recover metadata that already expired.
@@ -137,7 +141,7 @@ Additional fields are rejected at capture and checked again before export.
 | Kind | Additional fields | Meaning |
 | --- | --- | --- |
 | `register` | `producer_kind` | Register a native `chat`, `judgment`, or `helper` producer. |
-| `start` | `sequence`, `provider`, `model` | Persist a positive sequence, bounded model labels, and a request start before dispatch. |
+| `start` | `sequence`, `provider`, `model` | Record a positive sequence, bounded model labels, and the request start time. |
 | `complete` | `sequence`, `outcome`, `usage_present`, `input_basis`, `input`, `cache_read`, `cache_write`, `output`, `reasoning` | Complete the matching start with the same private event identity. |
 | `checkpoint` | `sequence` | Declare the highest sequence produced through this UTC instant, including missing delivery. |
 | `shutdown` | `sequence` | End this producer's coverage through this instant. |
@@ -253,7 +257,7 @@ The 256 free pages let an export acknowledge and remove records from a full spoo
 With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
 SQLite refuses any page above the database limit with `SQLITE_FULL`.
 A refusal has the fixed error message and exit status 1, and it stores nothing.
-The adapter then records a delivery gap and fails the metered model call, as for any other collector failure.
+The adapter reports unknown coverage and stores a delivery gap when collection resumes; the metered model call continues.
 An export that packs or removes records lets collection continue.
 Records that are still below the limits wait through an endpoint outage and then export.
 
