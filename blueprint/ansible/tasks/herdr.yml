@@ -91,6 +91,12 @@
     follow: false
   become: true
 
+- name: Check for the installed Herdr user service
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/herdr.service"
+  register: crewship_herdr_service
+  when: ansible_check_mode
+
 - name: Enable and start the Herdr user service
   ansible.builtin.systemd_service:
     scope: user
@@ -101,7 +107,9 @@
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_systemd_env }}"
-  when: crewship_manage_services | bool
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode or crewship_herdr_service.stat.exists
 
 - name: Report the deferred service start
   ansible.builtin.debug:
@@ -240,6 +248,12 @@
     follow: false
   become: true
 
+- name: Check for the installed Herdr Spaces reporter timer
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/herdr-spaces.timer"
+  register: crewship_herdr_spaces_timer
+  when: ansible_check_mode
+
 - name: Enable and start the Herdr Spaces reporter timer
   ansible.builtin.systemd_service:
     scope: user
@@ -249,7 +263,9 @@
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_systemd_env }}"
-  when: crewship_manage_services | bool
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode or crewship_herdr_spaces_timer.stat.exists
 
 # Herdr's own omp extension reports each omp pane's state (working, blocked,
 # idle) to the sidebar; without it every omp agent shows as idle. herdr refuses
