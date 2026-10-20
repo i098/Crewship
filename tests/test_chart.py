@@ -1,9 +1,11 @@
 import getpass
 import grp
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -102,3 +104,71 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         (".local/share/crewship/instagram-desk", profiles.get("firstmate", False)),
     ):
         assert (home / path).is_dir() == (existing_home or enabled)
+
+
+@pytest.mark.parametrize("check_mode", [True, False])
+@pytest.mark.parametrize("release_state", ["absent", "empty", "installed"])
+def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state):
+    browsers = tmp_path / "home/oss-fleet/browsers"
+    browsers.mkdir(parents=True)
+    release = browsers / "obscura-test"
+    binaries = ("obscura", "obscura-worker")
+    if release_state != "absent":
+        release.mkdir(mode=0o700)
+    if release_state == "installed":
+        for binary in binaries:
+            (release / binary).write_bytes(b"existing release\n")
+    archive = tmp_path / "release.tar.gz"
+    if not check_mode and release_state != "installed":
+        source = tmp_path / "source"
+        source.mkdir()
+        with tarfile.open(archive, "w:gz") as bundle:
+            for binary in binaries:
+                (source / binary).write_bytes(b"archive release\n")
+                bundle.add(source / binary, arcname=binary)
+    before_files = {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
+                    for path in browsers.rglob("*") if path.is_file()}
+    before_dirs = {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
+                   for path in browsers.rglob("*") if path.is_dir()}
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/fleet-browsers.yml").read_text())
+    start = next(i for i, task in enumerate(tasks)
+                 if task["name"] == "Stat the resolved Obscura release")
+    end = next(i for i, task in enumerate(tasks)
+               if task["name"] == "Inject the shared-browser env into shell profiles")
+    playbook = tmp_path / "obscura.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": tasks[start:end],
+    }]))
+    variables = {
+        "crewship_cfg": {"user": getpass.getuser()},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_fleet_browsers_dir": str(browsers),
+        "crewship_browser_obscura_dir": str(release),
+        "crewship_browser_obscura": {
+            "url": archive.as_uri(),
+            "sha256": hashlib.sha256(archive.read_bytes()).hexdigest() if archive.exists() else "0" * 64,
+        },
+        "ansible_become": False,
+    }
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
+         *(["--check"] if check_mode else []), "-e", json.dumps(variables)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not release.with_suffix(".tar.gz").exists()
+    if check_mode:
+        assert {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
+                for path in browsers.rglob("*") if path.is_file()} == before_files
+        assert {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
+                for path in browsers.rglob("*") if path.is_dir()} == before_dirs
+        assert (f"would download and extract Obscura into {release}." in result.stdout) == (
+            release_state != "installed"
+        )
+    else:
+        expected = b"existing release\n" if release_state == "installed" else b"archive release\n"
+        for binary in binaries:
+            assert (release / binary).read_bytes() == expected
+            assert (browsers / binary).is_symlink()
+            assert (browsers / binary).resolve() == release / binary

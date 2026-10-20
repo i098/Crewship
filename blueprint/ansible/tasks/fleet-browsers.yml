@@ -82,10 +82,19 @@
   changed_when: false
   check_mode: false
 
+- name: Report the Obscura installation that check mode cannot perform
+  ansible.builtin.debug:
+    msg: "check mode: would download and extract Obscura into {{ crewship_browser_obscura_dir }}."
+  when:
+    - ansible_check_mode
+    - not crewship_obscura_stat.stat.exists
+
 # Each release extracts into its own directory, so an unchanged release is a
 # no-op and a new one never overwrites binaries a running tier holds open.
 - name: Download and extract the latest Obscura release
-  when: not crewship_obscura_stat.stat.exists
+  when:
+    - not ansible_check_mode
+    - not crewship_obscura_stat.stat.exists
   block:
     - name: Create the Obscura release directory
       ansible.builtin.file:
