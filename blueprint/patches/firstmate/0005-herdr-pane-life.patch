@@ -10,18 +10,18 @@ a pane gone under a running server as closed on purpose and does not relaunch
 it. The stale wake and the stuck-crewmate-recovery skill say the same. fm-control
 exit keeps the pane for its own relaunch.
 ---
- .../skills/stuck-crewmate-recovery/SKILL.md   |  4 +-
- bin/fm-control.sh                             |  4 ++
- bin/fm-secondmate-liveness-lib.sh             | 10 +++++
- bin/fm-spawn.sh                               | 15 ++++++-
- bin/fm-teardown.sh                            |  4 +-
- bin/fm-watch.sh                               |  2 +-
- docs/herdr-backend.md                         |  8 ++++
- tests/fm-secondmate-liveness.test.sh          | 39 +++++++++++++++++++
+ .agents/skills/stuck-crewmate-recovery/SKILL.md |  4 ++-
+ bin/fm-control.sh                               |  4 +++
+ bin/fm-secondmate-liveness-lib.sh               | 10 +++++++
+ bin/fm-spawn.sh                                 | 15 +++++++++-
+ bin/fm-teardown.sh                              |  4 +--
+ bin/fm-watch.sh                                 |  2 +-
+ docs/herdr-backend.md                           |  8 +++++
+ tests/fm-secondmate-liveness.test.sh            | 39 +++++++++++++++++++++++++
  8 files changed, 81 insertions(+), 5 deletions(-)
 
 diff --git a/.agents/skills/stuck-crewmate-recovery/SKILL.md b/.agents/skills/stuck-crewmate-recovery/SKILL.md
-index ffef2277..360cfc11 100644
+index 41db7f86f1ad13801083c88ce2c78bcaef7117b6..c1df515f368e17db85dfc9b9710c2b23fde12953 100644
 --- a/.agents/skills/stuck-crewmate-recovery/SKILL.md
 +++ b/.agents/skills/stuck-crewmate-recovery/SKILL.md
 @@ -40,7 +40,9 @@ Do not sweep another home's endpoints or infer ownership from a matching window
@@ -36,10 +36,10 @@ index ffef2277..360cfc11 100644
  On tmux there is no reclaim: a task record carries no socket identity for its endpoint, so a `missing` window cannot be told apart from one on a tmux server this seat cannot address, and both `exit` and `relaunch` refuse.
  Do not work around either refusal by respawning - it means a live agent may still hold that worktree.
 diff --git a/bin/fm-control.sh b/bin/fm-control.sh
-index aa4c9af2..c2a9b7e1 100755
+index 71290092d62409b37672dc673c566d37300d925a..47bad6e94b72812603c4262a5668dbe01b78b600 100755
 --- a/bin/fm-control.sh
 +++ b/bin/fm-control.sh
-@@ -641,6 +641,10 @@ do_exit() {
+@@ -754,6 +754,10 @@ do_exit() {
    # authoritative proof is the agent-state wait below. The retried Enter still
    # matters, because a slash command opens a completion popup on some TUIs that
    # swallows the first Enter.
@@ -51,10 +51,10 @@ index aa4c9af2..c2a9b7e1 100755
      || die "the exit command could not be sent to task $ID on $BACKEND"
    [ "$verdict" != send-failed ] \
 diff --git a/bin/fm-secondmate-liveness-lib.sh b/bin/fm-secondmate-liveness-lib.sh
-index 9aaeb2e8..87ce7486 100644
+index 4118cc9b771f6531a353fbfa78cb526de112632d..6eaff3d256c23ba445c74143cc032b6dd371d5c9 100644
 --- a/bin/fm-secondmate-liveness-lib.sh
 +++ b/bin/fm-secondmate-liveness-lib.sh
-@@ -228,6 +228,16 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
+@@ -231,6 +231,16 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
        FM_SM_LIVE_LINE="secondmate $id already live (backend=$backend)"
        ;;
      dead|missing)
@@ -72,10 +72,10 @@ index 9aaeb2e8..87ce7486 100644
        if [ "$agent_state" = dead ]; then
          FM_SM_LIVE_KILL=1
 diff --git a/bin/fm-spawn.sh b/bin/fm-spawn.sh
-index 0603e651..50206909 100755
+index 702db035a0ebc020a73ab2d2c2ec5111547c05cf..bfbae73b6c2e9afa474a1ce4c9d8fdc5aca17596 100755
 --- a/bin/fm-spawn.sh
 +++ b/bin/fm-spawn.sh
-@@ -1775,7 +1775,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
+@@ -2166,7 +2166,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
    # here as well would be a second path to the same outcome, so this refuses
    # and names the one that owns it.
    if [ "$RELAUNCH_REBIND" -eq 1 ] && [ "$KIND" = secondmate ]; then
@@ -84,7 +84,7 @@ index 0603e651..50206909 100755
      exit 1
    fi
    MODE=$(fm_meta_get "$RELAUNCH_META" mode)
-@@ -5287,6 +5287,19 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
+@@ -6328,6 +6328,19 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
    fi
    LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
  fi
@@ -101,17 +101,17 @@ index 0603e651..50206909 100755
 +  LAUNCH="$LAUNCH"'
 +case $? in 0|129|130|143) [ -e '"$keep_pane"' ] || if [ -n "${HERDR_SESSION:-}" ]; then "${HERDR_BIN_PATH:-herdr}" pane close "$HERDR_PANE_ID" --session "$HERDR_SESSION"; else "${HERDR_BIN_PATH:-herdr}" pane close "$HERDR_PANE_ID"; fi >/dev/null 2>&1 ;; esac; rm -f '"$keep_pane"
 +fi
- # Implement the launch-delivery contract in this script's header. The full
- # home-identity hash isolates equal task ids across homes, and the spawn token in
- # the final filename keeps a buffered source line bound to this incarnation.
+ if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
+   if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||
+     [ -n "$(find "$LAUNCH_DIR" -prune \( -perm -g=w -o -perm -o=w \) -print 2>/dev/null)" ] ||
 diff --git a/bin/fm-teardown.sh b/bin/fm-teardown.sh
-index 24ed4644..ee65e757 100755
+index 9e3d0413184cd4b01a443011b11847a5c892e27c..9583af73c92abf79b9344878cdcd9a89895b12b4 100755
 --- a/bin/fm-teardown.sh
 +++ b/bin/fm-teardown.sh
-@@ -3784,8 +3784,8 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
-   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
-   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
-   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" "$STATE/$ID.devin-config.json" \
+@@ -3890,8 +3890,8 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
+   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
+   "$STATE/$ID.claude-settings.json" "$STATE/$ID.devin-config.json" \
+   "$STATE/$ID.polytoken-busy.sh" \
 -  "$STATE/.$ID.branch-outcome-index" \
 -  "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
 +  "$STATE/.$ID.branch-outcome-index" "$STATE/$ID.keep-pane" \
@@ -120,10 +120,10 @@ index 24ed4644..ee65e757 100755
  # retired endpoint; teardown only runs after landing is confirmed, so any
  # leftover unhandled steer here is moot rather than unlanded work.
 diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
-index 8875e8fc..87a51b89 100755
+index 4ab206b62c8a2b5bb4fd8533a5722fe1c1802b15..044746e19a7b0d4368f1daa278e93a8eb4be969b 100755
 --- a/bin/fm-watch.sh
 +++ b/bin/fm-watch.sh
-@@ -1480,7 +1480,7 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
+@@ -1518,7 +1518,7 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
    agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
    case "$agent_state" in
      dead) detail='the endpoint is still there with no agent running in it' ;;
@@ -133,10 +133,10 @@ index 8875e8fc..87a51b89 100755
    esac
    # Re-arm the idle timer on BOTH paths below, so the backend probe above stays on
 diff --git a/docs/herdr-backend.md b/docs/herdr-backend.md
-index 429b4359..8807312f 100644
+index 825f16b3f0fd159c985dbd50a164fbe4f76edef1..571c3899bd8f727065f17a956aa6d696b644fb44 100644
 --- a/docs/herdr-backend.md
 +++ b/docs/herdr-backend.md
-@@ -670,6 +670,14 @@ A restored same-labeled tab with a missing pane or no registered agent is a husk
+@@ -796,6 +796,14 @@ A restored same-labeled tab with a missing pane or no registered agent is a husk
  Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
  This prevents closing the workspace's last tab before a replacement exists.
  
@@ -152,10 +152,10 @@ index 429b4359..8807312f 100644
  
  A registration alone never proves an agent.
 diff --git a/tests/fm-secondmate-liveness.test.sh b/tests/fm-secondmate-liveness.test.sh
-index e517cf91..7b47e6e3 100755
+index 07ce85ec55057d016cf479269ed22f355a6b93da..c26136fa60b94d165731c27475941374783e19ce 100755
 --- a/tests/fm-secondmate-liveness.test.sh
 +++ b/tests/fm-secondmate-liveness.test.sh
-@@ -602,6 +602,44 @@ test_sweep_noop_with_no_secondmate_meta() {
+@@ -720,6 +720,44 @@ test_sweep_noop_with_no_secondmate_meta() {
    pass "sweep: a silent no-op with no kind=secondmate meta present (a secondmate home's own natural scoping)"
  }
  
@@ -200,9 +200,9 @@ index e517cf91..7b47e6e3 100755
  # --- library level: the watcher's poll-mode remote probe ---------------------
  # bin/fm-secondmate-liveness-lib.sh's `poll` mode is the read-only probe the
  # watcher tick runs per cadence: exactly one remote `state` call, `dead` and
-@@ -719,6 +757,7 @@ test_sweep_skipped_under_detect_only
- test_sweep_noop_with_no_secondmate_meta
+@@ -840,6 +878,7 @@ test_sweep_noop_with_no_secondmate_meta
  test_sweep_skips_mate_whose_liveness_lock_is_held
+ test_relaunch_waits_for_other_mates_relaunch_lock
  test_sweep_refuses_relaunch_on_ledger_errors
 +test_herdr_closed_pane_is_never_relaunched
  test_remote_poll_probe_maps_states
@@ -210,4 +210,3 @@ index e517cf91..7b47e6e3 100755
  
 -- 
 2.53.0
-
