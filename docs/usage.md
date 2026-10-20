@@ -410,3 +410,83 @@ The isolated HTTP receiver proves the exporter protocol, not a SigNoz deployment
 - [SigNoz logs v2 schema and ClickHouse panels](https://signoz.io/docs/userguide/logs_clickhouse_queries/)
 - [Signal retention policy](https://signoz.io/docs/userguide/retention-period/)
 - [OTLP/HTTP export responses](https://opentelemetry.io/docs/specs/otlp/#otlphttp-response)
+
+## Private token-saving suggestions
+
+`scripts/token_suggestions.py` reads an explicitly configured existing ledger and saved `caveman.learn.v1` reports.
+It does not scan sessions, run Caveman, query raw traces, change agents, or run experiments.
+It makes no paid report calls.
+SigNoz is shown as `source_unavailable` because no authorized query path is integrated.
+The ingestion key is not a query credential.
+
+Create a private JSON configuration with absolute paths:
+
+```json
+{
+  "fm_home": "/path/to/owning-home",
+  "ledger": "/path/to/existing/usage.sqlite",
+  "snapshots": ["/path/to/existing/learn.json"]
+}
+```
+
+Omit `ledger` or `snapshots` when that source is not available.
+Never point `ledger` at the retry spool.
+The reader rejects spool databases and opens a history ledger with SQLite `mode=ro` and `query_only`.
+It never creates, migrates, prunes, drains, or exports that database.
+SQLite may create or update `usage.sqlite-wal` and `usage.sqlite-shm` coordination files during read-only access.
+The two aggregate queries each have a 20-second deadline and share a 2 MiB result limit.
+At most eight explicitly named snapshots are read, with a 1 MiB limit each.
+The reader does not search other homes or session roots.
+
+Run one manual cycle:
+
+```sh
+python3 scripts/token_suggestions.py --config /path/to/private-config.json
+```
+
+The cutoff selects the previous complete Pacific day, including daylight-saving changes.
+Only cache comparison reads the preceding seven complete days.
+Saved reports must have a window inside the selected day.
+Older reports and reports that span a wider window are unavailable; their totals cannot be split safely.
+Source caveats or a shorter saved window make coverage partial.
+The reader collapses matching exports even when their configured paths differ.
+Distinct exports keep separate measurements.
+Conflicting copies of a finding within one export make that source unavailable.
+Ignored prose and unknown fields do not affect matching or conflict checks.
+Identical accepted findings appear once across overlapping snapshots; different measurements remain separate.
+Unknown fields and source prose never enter the report.
+Source references use the configured snapshot index, not private paths or identifiers.
+
+The report shows all four detector statuses and at most five review candidates.
+Repeated context uses saved recurrence counts and local token estimates.
+Large tool outputs retain numeric calls, tokens, largest-call size, and error counts for each shape, but omit raw signatures.
+Missing error counts remain unknown.
+Retry loops use saved normalized-call counts and measured output estimates, not request failures alone.
+Missing retry token estimates remain null and appear in a separate, unranked count-only list.
+Cache shares require known normalized input and both cache buckets.
+The report excludes unknown rows and compares only matching models with complete coverage.
+Unobserved request sequences keep coverage partial, even when a later checkpoint reports them.
+Known request starts after a window do not count as missing requests in that window.
+Known completions account for their sequences across windows; their counts and tokens stay in the completion-time window.
+Duplicate gap and shutdown records count once per producer, event, and kind.
+Zero denominators remain unavailable.
+Cache reuse changes pricing, not total input tokens.
+
+Token ranks apply only within one window and measurement basis.
+The report never adds overlapping detector estimates.
+Saved retrospective reductions remain separate from observed tokens.
+Repeated retrospective and confirmed measurements appear once per window.
+An intact `deterministic_remeasure` record can show an existing artifact's before/after rate and sample count.
+That rate does not establish achieved stream savings.
+Unsupported attribution methods remain unknown.
+No money, monthly forecast, or total savings headline is produced.
+No-commit sessions and agent counts are not findings.
+
+Output is `FM_HOME/data/token-savings/latest.md`, with at most eight dated Markdown snapshots and `status.json`.
+The directory has mode `0700`; each output file has mode `0600`.
+The reader publishes each report atomically, prevents overlapping runs, and stops after 60 seconds without retries.
+The reader does not write Python bytecode files beside its source assets.
+A failed cycle keeps the last successful report and records failure in `status.json`.
+The next successful report states that a prior cycle failed.
+No permitted source means failure, not a zero-saving report.
+This manual reader does not install or enable a timer.
