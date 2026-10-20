@@ -7,10 +7,10 @@ This file says how it is built and how it works.
 
 ## Architecture
 
-<!-- ondine:eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c -->
+<!-- ondine:eNplkDFPxDAMhXd-xdtOQlS3nxALEhMDQscUdUhSt4mul1S2w_HzURMOlWOKHH9-z8_jnC8-WFa8vt8BgPX-GHWmA56ZLi5bHuDnSEkFQmnAmUTsRAINnMsUYPGR4hck-xMpNEPzEj1cGUdiefgppTjxHF39smmABsIYmUIW2nTrEktxxv_aL8X16LqnamE2Zn2F5Q8sxWEPtXFen9VasIeo1R6PV5E2l_2pyg6WzjltNYg_qYm3XsU4pknMG3HXEq31NWWDK9E2LU7M8Tb4LbXGNy__b3CoKXb3u_4bzJCNTw -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c.svg?scheme=dark">
-  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c.svg?scheme=light">
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNplkDFPxDAMhXd-xdtOQlS3nxALEhMDQscUdUhSt4mul1S2w_HzURMOlWOKHH9-z8_jnC8-WFa8vt8BgPX-GHWmA56ZLi5bHuDnSEkFQmnAmUTsRAINnMsUYPGR4hck-xMpNEPzEj1cGUdiefgppTjxHF39smmABsIYmUIW2nTrEktxxv_aL8X16LqnamE2Zn2F5Q8sxWEPtXFen9VasIeo1R6PV5E2l_2pyg6WzjltNYg_qYm3XsU4pknMG3HXEq31NWWDK9E2LU7M8Tb4LbXGNy__b3CoKXb3u_4bzJCNTw.svg?scheme=dark">
+  <img alt="Crewboard clients send messages through a Unix socket to topic buffers, topic subscribers, and the firehose subscriber" src="https://ondine.sh/eNplkDFPxDAMhXd-xdtOQlS3nxALEhMDQscUdUhSt4mul1S2w_HzURMOlWOKHH9-z8_jnC8-WFa8vt8BgPX-GHWmA56ZLi5bHuDnSEkFQmnAmUTsRAINnMsUYPGR4hck-xMpNEPzEj1cGUdiefgppTjxHF39smmABsIYmUIW2nTrEktxxv_aL8X16LqnamE2Zn2F5Q8sxWEPtXFen9VasIeo1R6PV5E2l_2pyg6WzjltNYg_qYm3XsU4pknMG3HXEq31NWWDK9E2LU7M8Tb4LbXGNy__b3CoKXb3u_4bzJCNTw.svg?scheme=light">
 </picture>
 <!-- /ondine -->
 

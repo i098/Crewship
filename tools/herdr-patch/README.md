@@ -86,10 +86,10 @@ This removes the fill and shows each image as half-block characters, but not as 
 
 ![The same two test images in WezTerm over mosh: as half-block characters with plain mosh (left), and at full resolution with herdr-patch on the computer (right)](images.png)
 
-<!-- ondine:eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq -->
+<!-- ondine:eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq.svg?scheme=dark">
-  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq.svg?scheme=light">
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ.svg?scheme=dark">
+  <img alt="Herdr sends text and half-blocks over mosh and images over an SSH socket; the client combines them in WezTerm or kitty" src="https://ondine.sh/eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ.svg?scheme=light">
 </picture>
 <!-- /ondine -->
 

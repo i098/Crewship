@@ -20,7 +20,7 @@ The public [diagram rule](../blueprint/rules/public/ondine-diagrams.md) makes On
 
 Run `ondine diagram.mmd` to render compatible Mermaid source as `diagram.svg`, then link the SVG from Markdown.
 The documentation uses Ondine's GitHub image blocks with light and dark variants.
-Each `<!-- ondine:... -->` marker preserves the original source without data loss.
+Each `<!-- ondine:... -->` marker preserves the original source without data loss, with an added `accTitle` that describes the flow.
 The public service at `ondine.sh` renders the source encoded in each image URL.
 Do not send private diagrams to this service.
 Use `ondine file.md --svg` to write local SVG files instead.

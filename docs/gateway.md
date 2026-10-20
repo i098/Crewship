@@ -77,10 +77,10 @@ Other addresses can still sign in.
 
 ## How it works
 
-<!-- ondine:eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA -->
+<!-- ondine:eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA.svg?scheme=dark">
-  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA.svg?scheme=light">
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA.svg?scheme=dark">
+  <img alt="Browser requests pass through Cloudflare and the tunnel to the password gateway, which routes them to loopback web pages" src="https://ondine.sh/eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA.svg?scheme=light">
 </picture>
 <!-- /ondine -->
 
