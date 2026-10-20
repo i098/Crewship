@@ -7,6 +7,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-20
+
+### Added
+
+- `instagram_dm.py stop` and a halt now write one flag file that `poll`, `listen`, `reply`, the reel curator, the Instagram front desk and `reel_watch.py` all honor ([#497](https://github.com/i098/Crewship/issues/497)).
+- Watch Instagram reels without a login with `reel_watch.py` in the `instagram-dm` skill: one fetch at a time, at least 20 s apart, no cookies ([#499](https://github.com/i098/Crewship/issues/499)).
+- Route anonymous Instagram reel fetches through the Geonode residential proxy when `GEONODE_*` settings are present in `reel_watch.py` (`instagram-dm` skill); with none set, the fetch stays direct ([#508](https://github.com/i098/Crewship/issues/508)).
+- Install the global agent instructions only with `profiles.agent_instructions` (a host that already has them keeps them), set `instructions_mode` to skip, overwrite after a backup, or append one marked block to a file that exists, and make `~/.omp/agent/AGENTS.md` a one-line import of `~/.claude/CLAUDE.md` ([#510](https://github.com/i098/Crewship/issues/510)).
+- Offer the global agent instructions on the installer checklist, off by default, and ask whether to skip, overwrite or append when one of the files already exists ([#511](https://github.com/i098/Crewship/issues/511)).
+- Transcribe iMessage voice memos and audio attachments on the host with ffmpeg and whisperx, and file the note as `[voice memo, Ns] <words>` with the saved path; the front desk sees the same text ([#512](https://github.com/i098/Crewship/issues/512)).
+- Install sgrep (local search by meaning for code and documents) on every host, with ripgrep and the Rust toolchain it needs, warm its models once, and tell agents in the global instructions to use it ([#519](https://github.com/i098/Crewship/issues/519)).
+- The herdr Spaces host line shows how many agent panes are working, as "◉ working/total", after the machine shares ([#534](https://github.com/i098/Crewship/issues/534)).
+- Seven public skills, `clean-code-classes`, `-comments`, `-errors`, `-formatting`, `-functions`, `-naming` and `-tests`, give rules for class design, comments, error handling, layout, functions, names and unit tests; they install only with `profiles.public_skills` ([#536](https://github.com/i098/Crewship/issues/536)).
+- Four more public skills, `frontend-ui-craft`, `credentials`, `fleet-browser` and `third-party-signups`, cover UI hierarchy, handling secrets, the browser ladder and signups on an owner's standing authorization; they install only with `profiles.public_skills` ([#537](https://github.com/i098/Crewship/issues/537)).
+- `blueprint/maintenance/mac-runner.sh` runs macOS GitHub Actions jobs on a Mac with just-in-time runners, one launchd agent per repository, all in one folder that one command removes ([#541](https://github.com/i098/Crewship/issues/541)).
+- The CI pool job image now has Postgres 18 with pgvector. Postgres 17 stays. Each job starts the version it needs with `pg_ctlcluster` ([#552](https://github.com/i098/Crewship/issues/552)).
+- A CI pool repository with `docker: dind` gets a Docker daemon of its own in each slot: a rootless `docker:dind-rootless` sidecar on the slot's own network, reached over TLS through `DOCKER_HOST`, never the host's socket. The job image now has the `docker compose` plugin ([#553](https://github.com/i098/Crewship/issues/553)).
+- The `fm-imessage` card-page listener takes signed Instagram DM webhooks at `/instagram/webhook` and files each DM of the operator like the instagrapi poller does ([#556](https://github.com/i098/Crewship/issues/556)).
+- `instagram-graph.ts` sends Instagram replies through the official API inside the 24-hour window, stores the API token with mode 600, and refreshes it ([#557](https://github.com/i098/Crewship/issues/557)).
+- With `crewship_instagram_dm_backend: graph`, `fm-insta-reply` sends through the official Instagram API, `fm-imessage` takes the DM webhook, and a weekly timer refreshes the API token ([#558](https://github.com/i098/Crewship/issues/558)).
+- The CI pool job image now includes the codex-gpui build dependencies (clang, cmake, OpenSSL, font, audio, Wayland, X11 and Vulkan development packages), so those jobs no longer install them on every run ([#559](https://github.com/i098/Crewship/issues/559)).
+- Add opt-in request metadata, durable 35-day storage, retry-safe OTLP export, Pacific reports, and SigNoz custom dashboards ([#577](https://github.com/i098/Crewship/issues/577)).
+- The harbor site now includes `/llms.txt` with links to the canonical Crewship documentation ([#588](https://github.com/i098/Crewship/issues/588)).
+- The native usage adapter now keeps metadata in a bounded retry spool (`scripts/usage.py --store spool`) until SigNoz acknowledges it, packs an offline backlog by hour and model with lossless compression, and sends it in gzip requests with jittered spacing ([#593](https://github.com/i098/Crewship/issues/593)).
+- `scripts/put-secret.sh NAME` creates or updates one Cloudflare Secrets Store secret from stdin without deletes or a Worker deploy, and the fleet-secrets Worker serves the one secret named in `FLEET_SECRETS_READABLE` at `GET /NAME`, which `scripts/fetch-secrets.sh NAME` prints ([#594](https://github.com/i098/Crewship/issues/594)).
+- The Herdr Spaces sidebar shows cached Claude and OpenAI account quota means and each workspace's working/total agent count ([#597](https://github.com/i098/Crewship/issues/597)).
+- Add an optical alignment rule to the `frontend-ui-craft` skill: center glyphs by visual mass, not bounding box, and check at the real viewing size ([#603](https://github.com/i098/Crewship/issues/603)).
+- Add loading-policy, enabled-submit, relative-unit and UX-law rules to the `frontend-ui-craft` skill from five routed reels ([#606](https://github.com/i098/Crewship/issues/606)).
+- The iMessage front desk takes `desk_provider` (`omp` or `inception`) and `desk_reasoning` settings; the default stays Claude Haiku 5.5 through omp with thinking off ([#615](https://github.com/i098/Crewship/issues/615)).
+- `crewship.ci_pool.nice` lowers the CPU priority of CI: the slots get that `Nice=`, and job containers start in `ci.slice` with a lower `CPUWeight` and no CPU cap, so CI yields the CPU to agents and interactive work and still uses idle CPU ([#624](https://github.com/i098/Crewship/issues/624)).
+- Add the `signal-chunks` public skill: a weekly deadline and eighteen-hour chunk method with CHUNK status updates ([#627](https://github.com/i098/Crewship/issues/627)).
+- Add the public `mobile-app-first-build` skill for idea validation, platform choice, flow planning, building, testing, and release, with credit to u/olenami's guide ([#642](https://github.com/i098/Crewship/issues/642)).
+- Add optional SigNoz usage installation with storage access checks, authenticated export, randomized scheduling and requests, deferred unit reloads, and data-preserving removal ([#644](https://github.com/i098/Crewship/issues/644)).
+
+### Changed
+
+- `instagram_dm.py` sends, tapbacks, typing indicators and read receipts now share one limiter (20-30 s apart, 10 texts an hour and 40 a day, 20 tapbacks and typing an hour, no sends for 30 min after an error), realtime events cause at most one poll every 30 s, and the poll timer jitters by 60 s ([#494](https://github.com/i098/Crewship/issues/494)).
+- The Instagram front desk now waits 60 s of quiet after a reel link and answers a run of two or more links with one "got N reels" text and one tapback ([#495](https://github.com/i098/Crewship/issues/495)).
+- The Instagram reel curator is now off by default (`crewship_instagram_curator_enabled`) and runs only on its own account, never the DM bot's, with at most 40 Instagram calls a run, no run within 60 min of DM activity or 24 h of a halt, and no run while the line is stopped ([#496](https://github.com/i098/Crewship/issues/496)).
+- The Instagram DM note now carries a shared reel's author, caption and duration from the DM payload, and the bot makes no media, clip, user or download request of its own ([#498](https://github.com/i098/Crewship/issues/498)).
+- Rename the `shared_postgres` profile to `project_databases`, because it holds a database of any engine for each project; a host config that still says `shared_postgres` keeps working ([#520](https://github.com/i098/Crewship/issues/520)).
+- The storage guard now watches every mounted real block filesystem, not only the ones holding `/`, `/var/log`, the home and Docker, names the entries that grew most, and sends each alert to Firstmate as an inbox note ([#530](https://github.com/i098/Crewship/issues/530)).
+- The storage guard FILL alert ignores a mount below STORAGE_FILL_MIN_PCT (70) use; WARN and CRIT are unchanged ([#532](https://github.com/i098/Crewship/issues/532)).
+- The CI pool builds one runner image on the host with a compiler, GTK, Postgres 17, and bun, rebuilds it every hour, and starts every job from it ([#545](https://github.com/i098/Crewship/issues/545)).
+- CI pool jobs keep the bun, npm, pnpm, cargo, and apt package caches between jobs, and write their heavy temporary data (/tmp, Postgres, apt) to the data disk ([#546](https://github.com/i098/Crewship/issues/546)).
+- The CI pool watch runs every minute and restarts a slot only when GitHub shows its runner offline and the Docker daemon twice lists no container for it; slots stop their container with a grace period and wait for its removal ([#547](https://github.com/i098/Crewship/issues/547)).
+- A Herdr pane and its agent now end together: closing either one ends both, a pane you close is never relaunched, and a crashed agent is still recovered. Herdr no longer resumes agents after a server restart, and the Firstmate patch layer gains `0005-herdr-pane-life.patch` ([#565](https://github.com/i098/Crewship/issues/565)).
+- The iMessage desk answers supported basic questions with Haiku 5.5 and uses durable, deduplicated Firstmate handoffs for all other requests ([#578](https://github.com/i098/Crewship/issues/578)).
+- The dependency patch table now describes queued inbox note timing independently of iMessage routing and links to the routing documentation ([#582](https://github.com/i098/Crewship/issues/582)).
+- Arrange the SigNoz usage dashboard in shared rows, with the request and token line graphs side by side at the top ([#587](https://github.com/i098/Crewship/issues/587)).
+- The `frontend-ui-craft` skill now covers fewer symbols, clearer value groups, readable actions and measured progress ([#591](https://github.com/i098/Crewship/issues/591)).
+- The `frontend-ui-craft` skill is now two skills in one `ui-ux` folder, `app-dashboard` and `landing-marketing`, that share one `shared-basics.md`; the skill installer installs a skill in a group folder under its own name ([#612](https://github.com/i098/Crewship/issues/612)).
+- The eta-timeline skill separates an ETA (when the current task or tasks finish) from a timeline (how long each project needs to reach its full vision, phase by phase with estimated dates) ([#616](https://github.com/i098/Crewship/issues/616)).
+- The Herdr sidebar usage row shows each provider's percentage with no extra mark, also when an account has no weekly quota left ([#625](https://github.com/i098/Crewship/issues/625)).
+- The agents profile installs the latest Ondine release, and public agent rules use it by default.
+  Documentation diagrams use Ondine images with preserved source and flow-specific alternative text ([#645](https://github.com/i098/Crewship/issues/645)).
+- The dashboard UI skill now requires Playwright measurements for skeleton layouts and a check for zero layout shift, with credit to Aiden Bai ([#646](https://github.com/i098/Crewship/issues/646)).
+
+### Removed
+
+- Remove the Updated badge from the README and preserve all other badges ([#567](https://github.com/i098/Crewship/issues/567)).
+
+### Fixed
+
+- `instagram_dm.py` no longer logs in by itself: a missing or dead session, or the first challenge, suspension, `feedback_required`, `login_required` or please-wait, halts the Instagram line until a human runs `resume`, and every failure names its exception class and endpoint ([#493](https://github.com/i098/Crewship/issues/493)).
+- README feature and layout bullets now fit on one line, and the star history chart URL has a cache-busting parameter ([#517](https://github.com/i098/Crewship/issues/517)).
+- A CI pool slot that hangs in `docker create` now times out and restarts, jobs no longer pull the runner image each time, and a watch timer restarts slots that stay without a container ([#543](https://github.com/i098/Crewship/issues/543)).
+- The storage guard attempts alerts before scans or reclaim even when state initialization or pending writes fail.
+  It retains saved requests for stable-ID retries.
+  It derives state placement from the configured data directory.
+  Only the lock owner changes saved state; only first-pass CRIT pressure enables reclaim ([#569](https://github.com/i098/Crewship/issues/569)).
+- Configured data disks now supply supported native bulk defaults without replacing existing tool settings, credentials, or data.
+  New bulk directories use mode `0700`; existing directory modes remain unchanged.
+  Explicit environment values win, and bulk-only Herdr changes wait for its next start.
+  Apply and preview reject unavailable pnpm configuration links before writing native defaults.
+  Native settings that share a symbolic-link target retain all defaults after one apply.
+  Legacy apply and preview tolerate a missing Bash startup file.
+  User-manager defaults load before inactive services start without restarting active services.
+  Pip cache overrides retain precedence across supported configuration locations and equivalent key spellings.
+  Read-only pip override checks skip unavailable files, as pip does.
+  Herdr reloads updated units before startup so stopped services do not inherit retired cache overrides.
+  Worktree pruning tests disable automatic Git maintenance to prevent repository-copy races ([#570](https://github.com/i098/Crewship/issues/570)).
+- Configured data filesystems now hold general syslog with native 128 MiB rotation, eight archives, mount protection and narrow access, while existing history remains intact.
+  Validated activation now completes before old rotation ownership changes; unchanged service-enabled applies retry deferred or failed activation.
+  Service-enabled applies clear failed activation limits and start an unchanged stopped or failed logger before rotation cleanup, without restarting a healthy logger.
+  The setgid log directory preserves `adm` reader access after native rotation recreates the active file ([#571](https://github.com/i098/Crewship/issues/571)).
+- Project database discovery now includes native configured Treehouse roots while keeping explicit root overrides, legacy home pools and registered projects ([#572](https://github.com/i098/Crewship/issues/572)).
+- Fleet cleanup now covers native configured Treehouse roots and legacy home pools while preserving output-pruning checks and No-Mistakes reaper coverage ([#573](https://github.com/i098/Crewship/issues/573)).
+- The mobile settlement test isolates host process metrics while keeping its no-change and changed-pane checks and the sidebar suite's subprocess entrypoint coverage ([#574](https://github.com/i098/Crewship/issues/574)).
+- Fix the generated usage dashboard's Float64 metadata predicate and Pacific calendar labels for ClickHouse 25.12 ([#581](https://github.com/i098/Crewship/issues/581)).
+- The preview and manual deploy commands in `site/README.md` now use the correct `site/` directory ([#595](https://github.com/i098/Crewship/issues/595)).
+- The Spaces usage row now shows the Claude and OpenAI marks (Nerd Font glyphs) in place of the stand-in symbols `✳` and `◎` ([#600](https://github.com/i098/Crewship/issues/600)).
+- `ci-pool.py watch` no longer fails on every run after an interrupted or failed write left its state file empty: the file is replaced whole, so a failed write keeps the old state, and an empty one counts as no sightings ([#602](https://github.com/i098/Crewship/issues/602)).
+- A CI pool repository with `docker: dind` can set `userns: true`, so its sidecars run under an AppArmor profile that allows the user namespace rootless Docker needs on a host with `kernel.apparmor_restrict_unprivileged_userns=1`; other sidecars, job containers, and the host setting stay unchanged ([#607](https://github.com/i098/Crewship/issues/607)).
+- Correct `frontend-ui-craft` rules 14 and 15 to match their reels: the equal-corner check applies to the play triangle only, and a skeleton is for known waits under about three seconds ([#609](https://github.com/i098/Crewship/issues/609)).
+- The Herdr sidebar usage row shows the shared weekly quota left as the account mean that `omp usage` shows, labelled `7d left`, instead of an unlabelled mean of each account's fullest window of any length or model tier ([#614](https://github.com/i098/Crewship/issues/614)).
+- The OMP usage patch applies again to the installed omp 18.12.1 release, so native usage collection and its tests work again ([#618](https://github.com/i098/Crewship/issues/618)).
+- Herdr tests can no longer reach the live `default` session: pytest refuses an unstubbed `herdr`, and `tests/herdr-lab` runs real Herdr calls only in a named `fm-lab-*` session ([#622](https://github.com/i098/Crewship/issues/622)).
+- `herdr-patch` keeps its image channel socket in `/run/user/<uid>`, so a cleaner of idle `/tmp` folders no longer turns the images of a long mosh connection into half-block characters ([#626](https://github.com/i098/Crewship/issues/626)).
+- Document that the CI pool image has the `docker` CLI and `buildx`, and that a job that builds an image, such as `wrangler deploy` for a Worker with containers, needs `docker: dind` for a daemon ([#632](https://github.com/i098/Crewship/issues/632)).
+- CI pool slots of one repository no longer share their tool, `~/.cache`, and cargo caches, so a job's cache cleanup cannot delete files under another job's running build. Each slot keeps its own caches in `<data_dir>/ci-pool/cache/<slot>/` ([#635](https://github.com/i098/Crewship/issues/635)).
+- The messaging front desk accepts only structured replies or explicit actions, so raw model reasoning cannot become a text bubble.
+  The worktree-prune tests disable automatic Git maintenance to prevent repository copy races in CI ([#638](https://github.com/i098/Crewship/issues/638)).
+- The `ponytail-review` wrapper now requires exactly one approved positive verdict and permits only approved progress and information lines after Markdown normalization.
+  Unapproved output, including cuts, negative summaries, findings, and free prose, fails the review ([#652](https://github.com/i098/Crewship/issues/652)).
+- The iMessage bridge bounds startup requests, starts fallback transports in the background, and opens the listener without waiting for saved-message reads ([#654](https://github.com/i098/Crewship/issues/654)).
+- Keep metered model calls independent of slow or failed usage collection, including process exit, with a bounded shutdown write and explicit unknown coverage ([#655](https://github.com/i098/Crewship/issues/655)).
+
 ## [0.4.4] - 2026-10-14
 
 ### Added
@@ -323,7 +431,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/i098/Crewship/releases/tag/v0.4.5
 [0.4.4]: https://github.com/i098/Crewship/releases/tag/v0.4.4
 [0.4.3]: https://github.com/i098/Crewship/releases/tag/v0.4.3
 [0.4.2]: https://github.com/i098/Crewship/releases/tag/v0.4.2
