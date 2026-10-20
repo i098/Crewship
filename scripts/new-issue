@@ -4,6 +4,7 @@
 scripts/new-issue <feature|bug> --title "..." --field problem=@file|text --field proposal=...
 scripts/new-issue feature --json input.json    # {"title": "...", "fields": {"problem": "..."}}
 --dry-run prints the title, the labels and the body; without it the issue is created with gh api.
+On failure, child errors and any HTTP response body go to stderr; the child exit code is preserved.
 """
 
 import argparse
@@ -66,11 +67,13 @@ def main(argv=None):
     if a.dry_run:
         print(f"title: {title}\nlabels: {', '.join(labels)}\n\n{body}", end="")
         return
-    cmd = ["gh", "api", "repos/{owner}/{repo}/issues", "-f", f"title={title}", "-f", f"body={body}"]
-    for label in labels:
-        cmd += ["-f", f"labels[]={label}"]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    print(json.loads(out)["html_url"])
+    cmd = ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/issues", "--input", "-"]
+    payload = json.dumps({"title": title, "body": body, "labels": labels})
+    result = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, text=True)
+    if result.returncode:
+        sys.stderr.write(result.stdout)
+        sys.exit(result.returncode)
+    print(json.loads(result.stdout)["html_url"])
 
 
 if __name__ == "__main__":
