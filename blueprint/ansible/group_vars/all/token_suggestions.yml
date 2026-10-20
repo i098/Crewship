@@ -1,0 +1,4 @@
+---
+crewship_token_suggestions_configured: "{{ crewship_cfg.token_suggestions is defined }}"
+crewship_token_suggestions: "{{ {'enabled': false, 'ledger': '', 'snapshots': []} | combine(crewship_cfg.token_suggestions | default({})) }}"
+crewship_token_suggestions_assets: "{{ crewship_share_dir }}/token-suggestions"

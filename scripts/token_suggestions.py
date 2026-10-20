@@ -239,7 +239,7 @@ def publish(config, cutoff):
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         signal.signal(signal.SIGALRM, timeout)
-        signal.alarm(60)
+        signal.alarm(50)
         status_path = directory / "status.json"
         previous = read_json(status_path) if status_path.exists() else {}
         try:

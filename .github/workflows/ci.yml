@@ -151,6 +151,30 @@ jobs:
           echo "::endgroup::"
           [[ "$tests_status" == 0 && "$smoke_status" == 0 ]]
 
+      - name: Token suggestion installation and runtime smoke
+        if: needs.changes.outputs.scope != 'imessage'
+        run: |
+          user=crewship-token-proof
+          home=/home/$user
+          sudo useradd --create-home --shell /bin/bash "$user"
+          cleanup() {
+            sudo loginctl disable-linger "$user" || true
+            sudo loginctl terminate-user "$user" || true
+            sudo userdel --remove "$user" || true
+          }
+          trap cleanup EXIT
+          sudo loginctl enable-linger "$user"
+          uid=$(id -u "$user")
+          sudo install -d -o "$user" -g "$user" "$home/source"
+          tar -cf - blueprint scripts tests pyproject.toml uv.lock | sudo tar -xf - -C "$home/source"
+          sudo cp "$(command -v uv)" "$home/uv"
+          sudo chown -R "$user:$user" "$home"
+          sudo -u "$user" env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            CREWSHIP_TOKEN_SUGGESTIONS_VM=1 \
+            "$home/uv" --directory "$home/source" run --locked --group dev \
+            pytest -q tests/test_token_suggestions_install.py
+
       # herdr-patch also runs on the operator's computer: macOS ships Python 3.9.
       - name: herdr-patch tests on Python 3.9
         run: uvx --python 3.9 pytest tests/test_herdr_patch.py

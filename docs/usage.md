@@ -484,9 +484,45 @@ No-commit sessions and agent counts are not findings.
 
 Output is `FM_HOME/data/token-savings/latest.md`, with at most eight dated Markdown snapshots and `status.json`.
 The directory has mode `0700`; each output file has mode `0600`.
-The reader publishes each report atomically, prevents overlapping runs, and stops after 60 seconds without retries.
+The reader publishes each report atomically, prevents overlapping runs, and interrupts work after 50 seconds without retries.
 The reader does not write Python bytecode files beside its source assets.
 A failed cycle keeps the last successful report and records failure in `status.json`.
 The next successful report states that a prior cycle failed.
 No permitted source means failure, not a zero-saving report.
 This manual reader does not install or enable a timer.
+
+### Optional reader installation
+
+Add `crewship.token_suggestions` to the host configuration to install the private reader and its manual user service:
+
+```yaml
+crewship:
+  token_suggestions:
+    enabled: false
+    fm_home: /path/to/owning-home
+    ledger: /path/to/existing/usage.sqlite
+    snapshots:
+      - /path/to/existing/learn.json
+```
+
+The object is omitted by default.
+The reader requires an explicit `fm_home`; either metadata source can be omitted.
+The installer writes private assets and `config.json` under `~/.local/share/crewship/token-suggestions`.
+It does not open metadata sources or run the report during apply.
+This delivery installs no timer and starts no report, even when `enabled` is true.
+The service has a 60-second limit, low CPU priority, and a private umask.
+The reader leaves time for failure status before the service limit.
+
+Run the installed service manually after reviewing its configured inputs:
+
+```sh
+systemctl --user start crewship-token-suggestions.service
+```
+
+Setting `enabled: false` stops the timer before checking and stopping an active report when service management is on.
+It also removes any timer activation link.
+With `start_services: false`, apply changes files only; it makes no runtime systemd calls.
+Removing `token_suggestions` removes the managed reader, configuration, and units.
+Existing metadata, authentication files, and private reports remain untouched.
+Deleting reports requires a separate explicit request.
+CI runs installation and runtime checks in a fresh non-root account on its disposable Ubuntu runner.
