@@ -22,6 +22,7 @@ flowchart LR
        # total_slots: auto        # or a number; see "Pool size"
        # job_cpus: 4              # CPU cap of each job container
        # job_memory_gb: 8         # memory cap of each job container
+       # nice: 10                 # CI CPU priority; see "CPU priority"
        # image: crewship-ci-runner:latest   # see "What a job gets"
        repos:
          - repo: owner/name
@@ -50,6 +51,7 @@ To remove a repository, delete its entry and apply again. Its idle slots stop an
 | `total_slots` | `auto` | Most slots the pool runs. `auto` computes it at apply (see below). A number fixes it. |
 | `job_cpus` | `4` | `docker --cpus` of each job container. |
 | `job_memory_gb` | `8` | `docker --memory` and `--memory-swap` of each job container, in GiB. |
+| `nice` | `0` | CPU priority of the pool, from `0` to `19`. Above `0`, CI work yields the CPU to the rest of the host. See [CPU priority](#cpu-priority). |
 | `image` | `crewship-ci-runner:latest` | Image of each job container. The default is built on the host (see [What a job gets](#what-a-job-gets)). Any other name is pulled hourly and used as it is. |
 | `repos[].repo` | required | `owner/name` on github.com. |
 | `repos[].slots` | required | Slots for this repository: the most jobs it runs at one time. |
@@ -74,7 +76,24 @@ Slots are assigned in list order. When the repository entries ask for more slots
 
 When the total drops, apply stops the idle slots that are over it. A slot that runs a job is never stopped: apply disables it, and it leaves after its current job. A job is never killed by apply.
 
-When apply changes `pool.json`, it restarts the idle slots, so they register again with the new labels and caps. A slot that runs a job keeps its settings until the job ends; its next start reads the new file.
+When apply changes `pool.json`, it restarts the idle slots, so they register again with the new labels and caps. A slot is idle only when GitHub shows its runner not busy and its container runs no job; a failed read counts as busy. A slot that runs a job keeps its settings until the job ends; its next start reads the new file. Apply restarts idle slots for labels, caps, and image only in the run that changes `pool.json`. A later apply does not try again for a slot that it skipped then (busy, or GitHub could not show its runner or did not list it). That slot gets the new settings, labels included, at its next start after a job. The one exception is the CPU slice: see [CPU priority](#cpu-priority).
+
+## CPU priority
+
+Set `nice` above `0` to lower the CPU priority of all CI work. CI still uses every CPU that nothing else wants; this is not a cap. `nice: 10` gives:
+
+- `Nice=10` on each slot unit `ci-runner@<slot>.service`. This is the priority of the slot's own processes (`ci-pool.py run` and the `docker` client) only. The Docker daemon starts the job containers, so they do not inherit it.
+- The job containers and Docker sidecars start in `ci.slice` (`docker --cgroup-parent ci.slice`), a slice at the cgroup root beside `system.slice` and `user.slice`. Without `nice`, Docker puts them in `system.slice`, so a lower weight per container would only rank CI below other system services.
+- `CPUWeight=11` on `ci.slice`, against the default `100` of `system.slice` and `user.slice`. When all three want the CPU, CI gets about 5% of it, and agents and interactive work in `user.slice` get about 47%. Each step of `nice` divides the weight by 1.25, as the kernel does for a process. Apply sets it with `sudo -n systemctl set-property ci.slice CPUWeight=11`, which keeps it in `/etc/systemd/system.control/`. When `sudo` refuses, apply exits with an error before it changes any unit or `pool.json`.
+
+The per-job `job_cpus` and `job_memory_gb` caps stay as they are.
+
+A change of `nice` between two values above `0` changes the `CPUWeight` of `ci.slice` at once, for every container that is already in `ci.slice`, busy ones included. `Nice=` on the slot unit and the move into or out of `ci.slice` apply only when a slot starts again. When `nice` goes back to `0`, apply does not change `ci.slice`, so jobs that still run in it keep its weight until their slots start again. Apply restarts a slot only when GitHub shows its runner not busy and its container runs no job; when a read fails, it counts the slot as busy. A busy slot keeps its job, its container, and its unit priority, and its next start after the job uses the new setting. Every apply also reads the cgroup parent of each slot's job container (one `docker inspect`). It restarts a slot whose container is outside the slice that `nice` asks for when that slot is idle, also when `pool.json` did not change. A slot that apply skipped because it was busy or a read failed is thus restarted by a later apply once it is idle. A container that does not exist or that `docker inspect` does not show counts as in place. A change between two values above `0` keeps the slice, so it does not cause a restart, and the unit `Nice=` waits for the next start. To see where a job runs:
+
+```bash
+cat /sys/fs/cgroup/ci.slice/cpu.weight                                  # 11
+sudo docker inspect ci-runner-<slot> --format '{{.HostConfig.CgroupParent}}'   # ci.slice
+```
 
 ## What a job gets
 
@@ -127,6 +146,7 @@ On a host with `kernel.apparmor_restrict_unprivileged_userns=1` (Ubuntu's defaul
 | `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
 | `<data_dir>/ci-pool/dind/<slot>/` | With `docker: dind`: the slot's Docker daemon data and TLS certificates, deleted at each job start. |
 | `/etc/apparmor.d/ci-dind-userns` | With `userns: true`: the sidecar's AppArmor profile. Apply loads it with `sudo -n apparmor_parser`, then installs the file. |
+| `/etc/systemd/system.control/ci.slice.d/` | With `nice` above `0`: the `CPUWeight` of `ci.slice`. Apply writes it with `sudo -n systemctl set-property`. |
 
 No token is stored. Each slot reads the host's `gh` login when it starts. When an account is not in the `docker` group, the script runs `sudo -n docker`.
 

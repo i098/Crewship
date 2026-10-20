@@ -36,6 +36,14 @@ BUILT_IMAGE = "crewship-ci-runner:latest"
 DEFAULTS = {"total_slots": "auto", "job_cpus": 4, "job_memory_gb": 8, "image": BUILT_IMAGE}
 # The auto size takes this share of the host's CPUs and memory.
 SHARE = 0.5
+# With crewship.ci_pool.nice (0-19, 0 or absent keeps the old behavior) above 0, slots run
+# with that Nice=, and every job container and Docker sidecar starts in SLICE: a slice at the
+# cgroup root, beside system.slice and user.slice, so its CPUWeight ranks all CI work below
+# them as one group. Docker puts containers in system.slice by default, where a lower weight
+# would only rank CI below other system services. The weight is that of a task at the same
+# nice (each step is 1.25 times less), and it holds only while those slices want the CPU:
+# CI still takes every idle CPU. A dash in a slice name nests it, hence none.
+SLICE = "ci.slice"
 # A failed GitHub call or container start waits this long before systemd's
 # restart, so a broken slot costs at most two API calls a minute.
 FAILURE_PAUSE_SECONDS = 60
@@ -291,6 +299,36 @@ def busy(name):
     )
 
 
+def idle(name, repo, runners):
+    """True only when GitHub lists the slot's runner as not busy and its container runs no
+    job. A failed or missing read counts as busy. `runners` caches github_runners by repo."""
+    if repo not in runners:
+        runners[repo] = github_runners(repo)
+    runner = runners[repo].get(name)
+    return runner is not None and not runner["busy"] and not busy(name)
+
+
+def drifted(names, nice):
+    """The slots whose job container sits outside the slice that `nice` asks for, so a later
+    apply retries a slot that it could not show idle before. One bounded `docker inspect`; a
+    container that does not exist or does not answer counts as in place."""
+    shown = subprocess.run(bounded([*docker(), "inspect", "--format", "{{.Name}} {{.HostConfig.CgroupParent}}",
+                                    *(f"ci-runner-{name}" for name in names)]), capture_output=True, text=True)
+    parent = SLICE if nice else ""
+    return {line.partition(" ")[0].removeprefix("/ci-runner-") for line in shown.stdout.splitlines()
+            if line.partition(" ")[2] != parent}
+
+
+def set_slice_weight(weight):
+    """Set SLICE's CPUWeight with `systemctl set-property` (a system unit, hence sudo), which
+    applies it at once and keeps it below /etc/systemd/system.control. A refusal stops apply
+    before it changes any unit or pool.json, so the next apply tries again."""
+    done = subprocess.run(["sudo", "-n", "systemctl", "set-property", SLICE, f"CPUWeight={weight}"])
+    if done.returncode:
+        raise SystemExit(f"ci_pool.nice needs CPUWeight on {SLICE}: `sudo -n systemctl set-property` "
+                         f"exited {done.returncode}; pool left unchanged")
+
+
 def remove_tree(path):
     # Job files belong to the container's runner uid, so delete as root inside
     # the runner image rather than needing sudo rights on the host path.
@@ -335,9 +373,18 @@ def apply(check):
         changes.append(f"write {USERNS_PROFILE_PATH}")
         if not check:
             install_profile()
+    nice = pool.get("nice", 0)
+    weight = max(1, round(100 / 1.25**nice))  # systemd's CPUWeight scale: 100 at nice 0
+    if nice and subprocess.run(bounded(["systemctl", "show", SLICE, "-p", "CPUWeight", "--value"], WATCH_TIMEOUT),
+                               capture_output=True, text=True).stdout.strip() != str(weight):
+        changes.append(f"set {SLICE} CPUWeight={weight}")
+        if not check:
+            set_slice_weight(weight)
     write(HOOK, HOOK_TEXT)
+    # A repeated section adds to the first one; Nice= applies when each slot starts again.
+    unit_text = UNIT_TEXT + (f"\n[Service]\nNice={nice}\n" if nice else "")
     # A list, not `or`: every file is written even when the first one changed.
-    units = [(TEMPLATE, UNIT_TEXT), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT),
+    units = [(TEMPLATE, unit_text), (WATCH_SERVICE, WATCH_SERVICE_TEXT), (WATCH_TIMER, WATCH_TIMER_TEXT),
              (IMAGE_SERVICE, IMAGE_SERVICE_TEXT), (IMAGE_TIMER, IMAGE_TIMER_TEXT)]
     if any([write(path, text) for path, text in units]) and not check:
         systemctl("daemon-reload")
@@ -374,14 +421,18 @@ def apply(check):
     if reconfigured and not check:
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         CONFIG.write_text(config)
+    repos, runners = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}
+    outdated = drifted(want, nice)
     for name in want:
         unit = f"ci-runner@{name}.service"
         if name not in have:
             changes.append(f"start {unit}")
             if not check:
                 systemctl("enable", "--now", unit)
-        elif reconfigured and not busy(name):
-            # A busy slot reads the new config when its next job starts.
+        elif (reconfigured or name in outdated) and idle(name, repos[name.rpartition("-")[0]], runners):
+            # A busy slot, or one that a read could not show idle, reads the new config when
+            # its next job starts; a later apply restarts it once it is idle and its container
+            # is still outside the slice of `nice`.
             changes.append(f"restart {unit}")
             if not check:
                 systemctl("restart", unit)
@@ -513,7 +564,7 @@ def run(instance):
     sidecar, dind = f"ci-dind-{instance}", root / "dind" / instance
     limits = ["--cpus", str(pool["job_cpus"]),
               "--memory", f"{pool['job_memory_gb']}g", "--memory-swap", f"{pool['job_memory_gb']}g",
-              "--pids-limit", "8192"]
+              "--pids-limit", "8192", *(["--cgroup-parent", SLICE] if pool.get("nice") else [])]
     own_docker = entry.get("docker") == "dind"
     try:
         claim_container(container)
