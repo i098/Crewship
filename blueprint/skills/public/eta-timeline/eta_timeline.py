@@ -5,7 +5,7 @@ eta_timeline.py items.json --tz America/Los_Angeles [--now ISO] [--out eta.png] 
 Without --out the PNG goes to a temp file; --send deletes it right after fm-imessage returns.
 --send --card without --out first sends a timeline card (fm-imessage --card -); the PNG is the fallback.
 items.json: [{"label": "...", "group": "...", "start": "ISO", "end": "ISO", "state": "planned|done|moved", "percent": 0-100}]
-percent is optional: default is the share of start..end that has passed at --now, clamped to 0-100.
+percent is optional: without it, the bar shows duration only, with no completion fill.
 An ISO time without an offset is read in --tz. start == end draws a dot; done always draws a dot at its end.
 """
 
@@ -37,16 +37,19 @@ def duration(m):
     return f"{m} min" if m < 60 else f"{h} h {r} min" if r else f"{h} h"
 
 
-def tick_label(t):
-    return t.strftime("%-I:%M %p") if t.hour or t.minute else t.strftime("%a 12:00 AM")
+def tick_label(t, step):
+    if step >= 28 * 1440:
+        return t.strftime("%b %Y")
+    if step >= 1440:
+        return t.strftime("%b %-d")
+    return t.strftime("%a %-I%p") if not (t.hour or t.minute) else t.strftime("%-I:%M %p")
 
 
 def build_page(items, tz, now):
     """Return (html, height). items: dicts with datetime start/end."""
     times = [i[k] for i in items for k in ("start", "end")] + [now]
-    step = next(
-        (s for s in STEPS if (max(times) - min(times)).total_seconds() / 60 / s <= 5), STEPS[-1]
-    )
+    minutes = (max(times) - min(times)).total_seconds() / 60
+    step = next((s for s in STEPS if minutes / s <= 4), -(-int(minutes) // (4 * 1440)) * 1440)
     t0 = min(times).replace(second=0, microsecond=0)
     t0 -= timedelta(
         minutes=(t0.hour * 60 + t0.minute) % step
@@ -70,24 +73,24 @@ def build_page(items, tz, now):
         else:
             left, mins = x(it["start"]), round((it["end"] - it["start"]).total_seconds() / 60)
             pct = it.get("percent")
-            if pct is None:  # elapsed share of the planned span
-                pct = round((now - it["start"]).total_seconds() / 60 * 100 / mins)
-            pct = max(0, min(100, pct))
+            if pct is not None:
+                pct = max(0, min(100, pct))
             fill = (
                 f'<div style="position:absolute;left:0;top:0;bottom:0;width:{pct}%;background:rgba(0,0,0,.28);border-radius:14px"></div>'
-                if 0 < pct < 100
+                if pct is not None and 0 < pct < 100
                 else ""
             )
+            label = duration(mins) if pct is None else f"{pct}% · {duration(mins)}"
             rows.append(
-                f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{fill}<span style="position:relative">{pct}% · {duration(mins)}</span></div>'
+                f'<div class="bar" style="top:{y + 2}px;left:{left}px;width:{x(it["end"]) - left}px;background:{col}">{fill}<span style="position:relative">{label}</span></div>'
             )
         y += 40
     ticks = "".join(
-        f'<div class="tick" style="left:{x(t)}px">{tick_label(t)}</div><div class="vline" style="left:{x(t)}px;height:{y - 50}px"></div>'
+        f'<div class="tick" style="left:{x(t)}px">{tick_label(t, step)}</div><div class="vline" style="left:{x(t)}px;height:{y - 50}px"></div>'
         for t in (t0 + timedelta(minutes=m) for m in range(0, span + 1, step))
     )
     nowx = x(now)
-    now_html = f'<div class="now" style="left:{nowx}px;height:{y - 40}px"></div><div class="nowl" style="left:{nowx - 14}px">now</div>'
+    now_html = f'<div class="now" style="left:{nowx}px;height:{y - 60}px"></div><div class="nowl" style="left:{nowx - 14}px">now</div>'
     page = f"""<html><head><style>
 body{{margin:0;background:#0d1117;color:#e6edf3;font:22px DejaVu Sans,sans-serif}}
 .c{{position:relative;width:{W + 40}px;height:{y + 40}px;padding:24px}}
@@ -95,10 +98,10 @@ h1{{font-size:30px;margin:0;position:absolute;top:18px;left:24px}}
 .grp{{position:absolute;left:24px;color:#8b949e;font-size:18px;letter-spacing:2px;text-transform:uppercase}}
 .lbl{{position:absolute;left:24px;width:{LEFT - 40}px;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 .bar{{position:absolute;height:28px;border-radius:14px;color:#0d1117;font-size:15px;font-weight:bold;line-height:28px;text-align:center;white-space:nowrap;overflow:visible;min-width:60px}} .dot{{position:absolute;width:16px;height:16px;border-radius:8px}}
-.tick{{position:absolute;top:{y + 4}px;transform:translateX(-50%);color:#8b949e;font-size:17px}}
+.tick{{position:absolute;top:{y + 4}px;transform:translateX(-50%);color:#8b949e;font-size:17px;white-space:nowrap}}
 .vline{{position:absolute;top:60px;width:1px;background:#21262d}}
 .leg{{position:absolute;top:24px;left:400px;font-size:15px;color:#8b949e}} .leg span{{display:inline-block;width:14px;height:14px;border-radius:7px;margin:0 6px 0 14px;vertical-align:-2px}}
-.now{{position:absolute;top:56px;width:2px;background:#e5534b}} .nowl{{position:absolute;top:40px;color:#e5534b;font-size:15px}}
+.now{{position:absolute;top:76px;width:2px;background:#e5534b}} .nowl{{position:absolute;top:58px;color:#e5534b;font-size:15px}}
 </style></head><body><div class="c"><h1>Timeline, your time</h1><div class="leg"><span style="background:#57ab5a"></span>done <span style="background:#539bf5"></span>planned <span style="background:#d29922"></span>moved <span style="background:#e5534b;width:4px;border-radius:0"></span>now</div>{ticks}{now_html}{"".join(rows)}</div></body></html>"""
     return page, y
 
