@@ -453,6 +453,7 @@ The reader collapses matching exports even when their configured paths differ.
 Distinct exports keep separate measurements.
 Conflicting copies of a finding within one export make that source unavailable.
 Ignored prose and unknown fields do not affect matching or conflict checks.
+Identical accepted findings appear once across overlapping snapshots; different measurements remain separate.
 Unknown fields and source prose never enter the report.
 Source references use the configured snapshot index, not private paths or identifiers.
 
@@ -474,6 +475,7 @@ Cache reuse changes pricing, not total input tokens.
 Token ranks apply only within one window and measurement basis.
 The report never adds overlapping detector estimates.
 Saved retrospective reductions remain separate from observed tokens.
+Repeated retrospective and confirmed measurements appear once per window.
 An intact `deterministic_remeasure` record can show an existing artifact's before/after rate and sample count.
 That rate does not establish achieved stream savings.
 Unsupported attribution methods remain unknown.
@@ -483,6 +485,7 @@ No-commit sessions and agent counts are not findings.
 Output is `FM_HOME/data/token-savings/latest.md`, with at most eight dated Markdown snapshots and `status.json`.
 The directory has mode `0700`; each output file has mode `0600`.
 The reader publishes each report atomically, prevents overlapping runs, and stops after 60 seconds without retries.
+The reader does not write Python bytecode files beside its source assets.
 A failed cycle keeps the last successful report and records failure in `status.json`.
 The next successful report states that a prior cycle failed.
 No permitted source means failure, not a zero-saving report.

@@ -13,17 +13,24 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from token_suggestions_sources import (
-    ACTIONS,
-    DETECTORS,
-    PACIFIC,
-    candidate,
-    instant,
-    read_json,
-    read_ledger,
-    read_snapshot,
-    windows,
-)
+previous_bytecode_setting = sys.dont_write_bytecode
+try:
+    sys.dont_write_bytecode = True
+    from token_suggestions_sources import (
+        ACTIONS,
+        DETECTORS,
+        PACIFIC,
+        candidate,
+        instant,
+        metadata_identity,
+        read_json,
+        read_ledger,
+        read_snapshot,
+        windows,
+    )
+finally:
+    sys.dont_write_bytecode = previous_bytecode_setting
+    del previous_bytecode_setting
 
 SOURCE_ERRORS = (OSError, ValueError, KeyError, TypeError, RecursionError, sqlite3.Error)
 
@@ -79,6 +86,17 @@ def cache_candidates(rows, coverage, bounds):
     return result
 
 
+def deduplicate_source_measurements(source, seen):
+    for kind in ("retro", "confirmed"):
+        unique = []
+        for measurement in source[kind]:
+            identity = metadata_identity([{"window": source["window"], kind: measurement}])
+            if identity not in seen:
+                seen.add(identity)
+                unique.append(measurement)
+        source[kind] = unique
+
+
 def collect(config, bounds):
     candidates, sources, notes = [], [], []
     available = False
@@ -105,18 +123,23 @@ def collect(config, bounds):
     else:
         notes.append("Local ledger source_unavailable: not configured.")
     notes.append("SigNoz source_unavailable: no authorized read-only query path is integrated.")
-    seen = set()
+    seen_snapshots, seen_findings, seen_measurements = set(), set(), set()
     for index, path in enumerate(config.get("snapshots", []), 1):
         try:
             rows, source = read_snapshot(path, bounds, index)
             identity = source.pop("identity")
-            if identity in seen:
+            if identity in seen_snapshots:
                 continue
-            seen.add(identity)
+            seen_snapshots.add(identity)
             available = True
+            deduplicate_source_measurements(source, seen_measurements)
             sources.append(source)
-            candidates.extend(rows)
             for row in rows:
+                identity = metadata_identity([row])
+                if identity in seen_findings:
+                    continue
+                seen_findings.add(identity)
+                candidates.append(row)
                 statuses[row["detector"]] = "available: saved measurement"
         except TimeoutError:
             raise

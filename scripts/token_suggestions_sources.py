@@ -277,9 +277,9 @@ def snapshot_candidates(sinks, window, source, partial):
     return rows
 
 
-def snapshot_identity(rows, summary):
+def metadata_identity(records):
     accepted = [{key: value for key, value in record.items() if key != "source"}
-                for record in [*rows, summary]]
+                for record in records]
     return hashlib.sha256(json.dumps(accepted, sort_keys=True).encode()).digest()
 
 
@@ -307,5 +307,5 @@ def read_snapshot(path, bounds, index):
     confirmed = confirmed_measurements(data.get("confirmed", []))
     summary = {"source": source, "window": window, "partial": partial,
                "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed}
-    summary["identity"] = snapshot_identity(rows, summary)
+    summary["identity"] = metadata_identity([*rows, summary])
     return rows, summary

@@ -1,6 +1,7 @@
 import importlib
 import json
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -89,7 +90,8 @@ def snapshot_fixture(bounds):
                                            "confounders": [CANARY]}}]}
 
 
-def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report):
+@pytest.mark.parametrize("direct", [False, True])
+def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report, direct):
     bounds = report.windows(CUTOFF)
     ledger = tmp_path / "usage.sqlite"
     ledger_fixture(ledger, bounds, duplicate=True)
@@ -102,10 +104,19 @@ def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report):
                                                str(tmp_path / "missing.json")]}))
     with closing(sqlite3.connect(ledger.as_uri() + "?mode=ro", uri=True)) as db:
         before = tuple(db.iterdump()), snapshot.read_bytes()
-    result = subprocess.run([sys.executable, str(ROOT / "scripts/token_suggestions.py"),
-                             "--config", str(config), "--cutoff", CUTOFF.isoformat()],
-                            env={**os.environ, "HOME": str(home)}, text=True,
-                            capture_output=True, timeout=120)
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name in ("token_suggestions.py", "token_suggestions_sources.py", "usage.py"):
+        shutil.copy2(ROOT / "scripts" / name, assets / name)
+    reader = assets / "token_suggestions.py"
+    reader.chmod(0o755)
+    before_assets = {path.name: path.read_bytes() for path in assets.iterdir()}
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+    environment["HOME"] = str(home)
+    command = [str(reader)] if direct else [sys.executable, str(reader)]
+    result = subprocess.run([*command, "--config", str(config), "--cutoff", CUTOFF.isoformat()],
+                            env=environment, text=True, capture_output=True, timeout=120)
     assert result.returncode == 0, result.stderr
     directory = home / "data/token-savings"
     content = (directory / "latest.md").read_text()
@@ -126,6 +137,10 @@ def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report):
     assert all(p.stat().st_mode & 0o777 == 0o600 for p in directory.iterdir())
     with closing(sqlite3.connect(ledger.as_uri() + "?mode=ro", uri=True)) as db:
         assert before == (tuple(db.iterdump()), snapshot.read_bytes())
+    assert before_assets == {
+        str(path.relative_to(assets)): path.read_bytes() if path.is_file() else None
+        for path in assets.rglob("*")
+    }
 
 
 def test_complete_cache_windows_compare_only_matching_models(tmp_path, report):
@@ -526,6 +541,63 @@ def test_distinct_exports_keep_same_key_measurements(tmp_path, report):
     text = report.markdown(bounds, collected, False)
     assert text.index("Observed tokens: 4000") < text.index("Observed tokens: 3000")
     assert "Source: saved report 1" in text and "Source: saved report 2" in text
+
+
+@pytest.mark.parametrize("changed_detector", [0, 1, 2])
+@pytest.mark.parametrize("unknown_retry", [False, True])
+def test_overlapping_snapshots_keep_only_distinct_findings(tmp_path, report,
+                                                         changed_detector, unknown_retry):
+    bounds = report.windows(CUTOFF)
+    ledger = tmp_path / "usage.sqlite"
+    ledger_fixture(ledger, bounds, unknown=False)
+    paths = []
+    field = ("occurrence_tokens_total", "tool_output_tokens", "calls")[changed_detector]
+    for index in range(2):
+        data = snapshot_fixture(bounds)
+        if unknown_retry:
+            data["sinks"][2].pop("tokens_observed")
+        data["sinks"][changed_detector]["evidence"][field] += index
+        data["retro"]["families"] *= 2
+        data["confirmed"] *= 2
+        path = tmp_path / f"saved-{index}.json"
+        path.write_text(json.dumps(data))
+        paths.append(str(path))
+    collected = report.collect({"ledger": str(ledger), "snapshots": paths}, bounds)
+    kinds = [row["detector"] for row in collected[0]]
+    expected = [1, 1, 1, 1]
+    expected[changed_detector] = 2
+    assert [kinds.count(kind) for kind in range(4)] == expected
+    assert len(collected[1]) == 2
+    text = report.markdown(bounds, collected, False)
+    assert text.count("**Repeated context**") == expected[0]
+    assert text.count("**Large tool outputs**") == expected[1]
+    assert text.count("**Retry loops**") == expected[2]
+    assert text.count("**Cache inefficiency**") == 1
+    assert text.count("Estimated retrospective reduction (tool_outputs)") == 1
+    assert text.count("Estimated retrospective reduction (repeated_blocks)") == 1
+    assert text.count("Saved artifact measurement:") == 1
+    assert CANARY not in text
+
+
+@pytest.mark.parametrize("difference", ["value", "window"])
+def test_distinct_auxiliary_measurements_remain_separate(tmp_path, report, difference):
+    bounds = report.windows(CUTOFF)
+    paths = []
+    for index in range(2):
+        data = snapshot_fixture(bounds)
+        if difference == "value":
+            for family in data["retro"]["families"]:
+                family["tokens"] += index
+            data["confirmed"][0]["after"] += index
+        else:
+            data["window"]["from"] = (bounds[1] + timedelta(hours=index)).isoformat()
+        path = tmp_path / f"saved-{index}.json"
+        path.write_text(json.dumps(data))
+        paths.append(str(path))
+    text = report.markdown(bounds, report.collect({"snapshots": paths}, bounds), False)
+    assert text.count("Estimated retrospective reduction (tool_outputs)") == 2
+    assert text.count("Estimated retrospective reduction (repeated_blocks)") == 2
+    assert text.count("Saved artifact measurement:") == 2
 
 
 @pytest.mark.parametrize("detector", [0, 1, 2])
