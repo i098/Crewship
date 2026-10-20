@@ -233,9 +233,11 @@ def retry_candidate(sink, evidence, window, source, partial):
     if (calls < 3 or (tokens is not None and tokens != floor)
             or evidence["tokens_observed_basis"] != "bytes4_estimate"):
         raise ValueError("invalid retry evidence")
-    return candidate(2, sink["sink_id"], window, source, tokens, "bytes4_estimate",
-                     f"{calls} normalized calls; at least half failed. Exact failure count unknown.",
-                     partial)
+    row = candidate(2, sink["sink_id"], window, source, tokens, "bytes4_estimate",
+                    f"{calls} normalized calls; at least half failed. Exact failure count unknown.",
+                    partial)
+    row["observed_output_token_floor"] = floor
+    return row
 
 
 def confirmed_measurements(records):
@@ -267,12 +269,18 @@ def snapshot_candidates(sinks, window, source, partial):
             continue
         key = row["detector"], row["key"]
         if key in seen:
-            if seen[key] != sink:
+            if seen[key] != row:
                 raise ValueError("conflicting saved findings")
             continue
-        seen[key] = sink
+        seen[key] = row
         rows.append(row)
     return rows
+
+
+def snapshot_identity(rows, summary):
+    accepted = [{key: value for key, value in record.items() if key != "source"}
+                for record in [*rows, summary]]
+    return hashlib.sha256(json.dumps(accepted, sort_keys=True).encode()).digest()
 
 
 def read_snapshot(path, bounds, index):
@@ -297,6 +305,7 @@ def read_snapshot(path, bounds, index):
             if family["id"] in ("repeated_blocks", "tool_outputs"):
                 retro.append((family["id"], number(family["tokens"])))
     confirmed = confirmed_measurements(data.get("confirmed", []))
-    return rows, {"source": source, "window": window, "partial": partial,
-                  "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed,
-                  "identity": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).digest()}
+    summary = {"source": source, "window": window, "partial": partial,
+               "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed}
+    summary["identity"] = snapshot_identity(rows, summary)
+    return rows, summary

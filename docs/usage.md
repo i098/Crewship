@@ -452,6 +452,7 @@ Source caveats or a shorter saved window make coverage partial.
 The reader collapses matching exports even when their configured paths differ.
 Distinct exports keep separate measurements.
 Conflicting copies of a finding within one export make that source unavailable.
+Ignored prose and unknown fields do not affect matching or conflict checks.
 Unknown fields and source prose never enter the report.
 Source references use the configured snapshot index, not private paths or identifiers.
 

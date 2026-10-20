@@ -480,6 +480,37 @@ def test_copied_exports_do_not_repeat_any_measurement(tmp_path, report):
     assert CANARY not in text
 
 
+def test_ignored_metadata_does_not_distinguish_snapshot_copies(tmp_path, report):
+    bounds = report.windows(CUTOFF)
+    data = snapshot_fixture(bounds)
+    data["caveats"] = [CANARY]
+    original, copy = tmp_path / "original.json", tmp_path / "copy.json"
+    original.write_text(json.dumps(data))
+    ignored = CANARY + "-changed"
+    data["unknown"] = {"text": ignored}
+    data["title"] = ignored
+    data["caveats"] = [ignored]
+    for sink in data["sinks"]:
+        sink["title"] = ignored
+        sink["suggestion"] = ignored
+        sink["evidence"]["unknown"] = ignored
+    data["sinks"][0]["evidence"]["locators"] = [ignored]
+    data["sinks"][1]["evidence"]["top_signatures"][0]["signature"] = ignored
+    data["sinks"][1]["evidence"]["top_signatures"][0]["unknown"] = ignored
+    data["sinks"][2]["evidence"]["session_ref"] = ignored
+    data["sinks"][3]["evidence"]["agent_count"] = 1000
+    data["retro"]["families"][0]["unknown"] = ignored
+    data["confirmed"][0]["attribution"]["target_path"] = ignored
+    data["confirmed"][0]["attribution"]["confounders"] = [ignored]
+    copy.write_text(json.dumps(data))
+    collected = report.collect({"snapshots": [str(original), str(copy)]}, bounds)
+    assert len(collected[0]) == 3 and len(collected[1]) == 1
+    text = report.markdown(bounds, collected, False)
+    assert text.count("Estimated retrospective reduction (tool_outputs)") == 1
+    assert text.count("Saved artifact measurement:") == 1
+    assert CANARY not in text
+
+
 def test_distinct_exports_keep_same_key_measurements(tmp_path, report):
     bounds = report.windows(CUTOFF)
     paths = []
@@ -504,6 +535,9 @@ def test_duplicate_findings_are_collapsed_or_rejected(tmp_path, report, detector
     data = snapshot_fixture(bounds)
     sink = data["sinks"][detector]
     duplicate = json.loads(json.dumps(sink))
+    duplicate["title"] = CANARY + "-different-title"
+    duplicate["suggestion"] = CANARY + "-different-suggestion"
+    duplicate["evidence"]["unknown"] = {"text": CANARY}
     if conflict:
         field = ("occurrence_tokens_total", "tool_output_tokens", "calls")[detector]
         duplicate["evidence"][field] += 1
@@ -516,6 +550,32 @@ def test_duplicate_findings_are_collapsed_or_rejected(tmp_path, report, detector
         assert any("Saved report 1 source_unavailable" in note for note in notes)
     else:
         assert len(rows) == 1 and len(sources) == 1 and available
+
+
+@pytest.mark.parametrize("same_snapshot", [False, True])
+def test_unknown_retry_estimates_keep_distinct_accepted_floors(tmp_path, report, same_snapshot):
+    bounds = report.windows(CUTOFF)
+    data = snapshot_fixture(bounds)
+    retry = data["sinks"][2]
+    retry.pop("tokens_observed")
+    retry["evidence"]["observed_output_token_floor"] = 0
+    other = json.loads(json.dumps(retry))
+    other["evidence"]["observed_output_token_floor"] = 800
+    data["sinks"] = [retry, other] if same_snapshot else [retry]
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    first.write_text(json.dumps(data))
+    paths = [str(first)]
+    if not same_snapshot:
+        data["sinks"] = [other]
+        second.write_text(json.dumps(data))
+        paths.append(str(second))
+    rows, sources, _, _, available = report.collect({"snapshots": paths}, bounds)
+    if same_snapshot:
+        assert not rows and not sources and not available
+    else:
+        assert [row["observed_output_token_floor"] for row in rows] == [0, 800]
+        assert all(row["tokens"] is None for row in rows)
+        assert len(sources) == 2 and available
 
 
 @pytest.mark.parametrize("errors", ["missing", None])
