@@ -49,13 +49,13 @@ you have it whole, before you answer or say you don't know: zoom(id, n) opens li
 and zoom(id, 1) gives the message whole.`;
 }
 
-// Accept only exact facts from trusted records; a failed or unsupported draft requires a handoff.
-export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }): string | undefined {
+export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }): string | { react: string } | undefined {
   if (!ok) return;
   const value = parseBasic(drafted);
+  const action = verdict(true, value?.answer ?? drafted);
+  if (action.skip) return;
+  if (action.tapback) return { react: action.tapback };
   if (!value || !Array.isArray(value.evidence)) return;
-  const action = verdict(true, value.answer);
-  if (action.skip || action.tapback) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
   if (/\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(value.answer)) return;
   if (/\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(value.answer)) return;
@@ -124,13 +124,17 @@ export function parseReact(answer: string): string | undefined {
 
 // A skip directive takes precedence over text and reactions.
 export function isSkip(answer: string): boolean {
-  return /^skip\W*$/i.test(answer) || /\bSKIP\b/.test(answer);
+  return /^[ \t]*skip[ \t.!?]*$/im.test(answer) || /\bSKIP\b/.test(answer);
 }
 
 // Both messaging desks use this guard before sending answer text.
 export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?: string; outcome: string } {
   const tapback = parseReact(drafted);
-  const internal = /\b(?:unsummarized|my move)\b|\b(?:firstmate|(?:front )?desk)\b[^.!?\n]*\b(?:thread|handoff|routing|decid(?:e|es|ing))\b/i.test(drafted);
+  const internal = /\b(?:unsummarized|my move)\b/i.test(drafted) ||
+    /\b(?:firstmate|(?:front )?desk)\b/i.test(drafted) &&
+    (/\b(?:i|we|the (?:front )?desk)\s+(?:should|must|needs? to|have to)\b/i.test(drafted) ||
+      /\bhandles?\b/i.test(drafted) &&
+      /\b(?:this|the latest)\b[^.!?\n]*\b(?:request|instruction|message)\b/i.test(drafted));
   const skip = !ok || !drafted.trim() || isSkip(drafted) || (!tapback && (/\b(?:REACT|TAPBACK)\s*:/i.test(drafted) || internal));
   return { skip, tapback: skip ? undefined : tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
 }

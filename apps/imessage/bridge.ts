@@ -588,11 +588,11 @@ async function runDesk(current: () => boolean) {
   if (stopping || !current()) return;
   if (answer === undefined) handoffPending();
   else {
-    recordRoute({ ids: pending.map((r) => r.requestId), route: "desk",
-      out: { ...at, requestId: pending.at(-1)!.requestId, requests: pending.map((r) => r.requestId), bubbles: [answer], kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+    recordRoute({ ids: pending.map((r) => r.requestId), route: typeof answer === "string" ? "desk" : "handoff",
+      out: { ...at, requestId: pending.at(-1)!.requestId, ...(typeof answer === "string" ? { requests: pending.map((r) => r.requestId), bubbles: [answer] } : answer), kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
     flushRoutes();
   }
-  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${answer === undefined ? "handoff" : "basic"}\n`, { mode: 0o600 });
+  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${answer === undefined ? "handoff" : typeof answer === "string" ? "basic" : `react ${answer.react}`}\n`, { mode: 0o600 });
 }
 
 async function draftBasic(pending: Routing[], current: () => boolean) {
@@ -663,8 +663,8 @@ function flushRoutes() {
     try {
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
-      } else if (item.route === "desk") outbox.add(item.out!);
-      else continue;
+      } else if (item.route !== "desk") continue;
+      if (item.out) outbox.add(item.out);
       recordRoute({ ids: [item.requestId], route: "done" });
     } catch (e) {
       log("route delivery")(e);

@@ -31,7 +31,7 @@ For each message from the owner, the service does these steps:
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
-   Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
+   Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
    It targets the last received request in the pending burst.
@@ -53,15 +53,16 @@ The BlueBubbles line does not report edits: an edit there files no note.
 The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
-A completed desk turn records the time, message id, and `basic` or `handoff` in the private `desk.log`.
+A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
 The shared desk parser gives `SKIP`, `REACT:`, and `TAPBACK:` directives precedence over surrounding prose.
-A single valid reaction produces only a tapback on the free-text desk path.
+A single valid reaction produces only a tapback, even after leaked prose or outside valid JSON.
 A skip, an invalid reaction, conflicting directives, or internal desk reasoning without a valid action produces no text.
-The iMessage bridge also checks structured answer text with this parser before evidence validation.
-Unstructured iMessage output still goes to Firstmate; it cannot bypass the structured routing contract.
-Photon and BlueBubbles share this check before transport selection.
-The Instagram desk uses the same parser.
+Standalone skip lines ignore letter case.
+The iMessage bridge checks raw output and structured answer text with this parser before evidence validation.
+It keeps the existing single request filing for a suppressed draft or reaction, with no separate handoff decision.
+Other unstructured iMessage output still goes to Firstmate.
+Photon, BlueBubbles, and the Instagram desk share the parser.
 
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
