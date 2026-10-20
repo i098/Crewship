@@ -13,13 +13,21 @@ ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.parametrize("existing_home", [False, True])
-def test_chart_creates_only_missing_directories(tmp_path, existing_home):
+@pytest.mark.parametrize("profiles", [
+    {},
+    {"fleet_guards": True},
+    {"fleet_browsers": True, "firstmate": True},
+])
+def test_chart_creates_only_missing_directories(tmp_path, existing_home, profiles):
     home = tmp_path / "home"
     home.mkdir()
     if existing_home:
         for path, mode in (
             (".local/bin", 0o750), (".acpx", 0o750), (".omp/agent/extensions", 0o700),
             (".config/systemd/user/no-mistakes-daemon-.service.d", 0o700),
+            ("oss-fleet/doctor", 0o700), ("oss-fleet/browsers", 0o750),
+            (".local/share/crewship/imessage", 0o700),
+            (".local/share/crewship/instagram-desk", 0o750),
         ):
             directory = home / path
             directory.mkdir(parents=True)
@@ -36,17 +44,40 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home):
     end = next(i for i, task in enumerate(tasks) if task["name"] == "Point daemon-spawned omp at the overlay")
     tasks = [task for task in tasks[:end + 1]
              if any(key in task for key in ("ansible.builtin.file", "ansible.builtin.copy", "ansible.builtin.stat"))]
+    site_tasks = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["tasks"]
+    for include in site_tasks:
+        task_file = include.get("ansible.builtin.import_tasks")
+        if task_file not in {
+            "tasks/fleet_guards.yml", "tasks/fleet-browsers.yml",
+            "tasks/imessage.yml", "tasks/instagram_dm.yml",
+        }:
+            continue
+        profile_tasks = yaml.safe_load((ROOT / "blueprint/ansible" / task_file).read_text())
+        tasks.append({
+            "block": [task for task in profile_tasks
+                      if task.get("ansible.builtin.copy", {}).get("remote_src")
+                      or task.get("ansible.builtin.file", {}).get("state") == "directory"],
+            **{key: include[key] for key in ("when", "become", "become_user", "environment")
+               if key in include},
+        })
     playbook = tmp_path / "chart.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars_files": [str(path) for path in sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))],
         "tasks": layout + tasks,
         "handlers": [{"name": name, "ansible.builtin.debug": {"msg": "deferred"}}
-                     for name in ("reload user systemd", "no-mistakes daemon restart required")],
+                     for name in ("reload user systemd", "no-mistakes daemon restart required",
+                                  "restart fm-imessage", "restart instagram-desk")],
     }]))
     variables = {
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
-        "crewship": {"home": str(home), "workspace": str(home / "Dev"), "user": getpass.getuser()},
+        "crewship": {
+            "home": str(home), "workspace": str(home / "Dev"), "user": getpass.getuser(),
+            "profiles": {"fleet_guards": False, "fleet_browsers": False, "firstmate": False,
+                         **profiles},
+            "imessage": {"owner": "+15551234567"},
+        },
+        "crewship_instagram_dm_operator": "operator",
         "ansible_become": False, "crewship_become_target": False, "crewship_account_ready": True,
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
     }
@@ -63,3 +94,11 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home):
     assert all((home / path).is_dir() for path in (
         ".local/bin", ".omp/agent/extensions", ".no-mistakes", ".acpx",
     ))
+    for path, enabled in (
+        ("oss-fleet/doctor", profiles.get("fleet_guards", False)),
+        ("oss-fleet/browsers",
+         profiles.get("fleet_guards", False) or profiles.get("fleet_browsers", False)),
+        (".local/share/crewship/imessage", profiles.get("firstmate", False)),
+        (".local/share/crewship/instagram-desk", profiles.get("firstmate", False)),
+    ):
+        assert (home / path).is_dir() == (existing_home or enabled)

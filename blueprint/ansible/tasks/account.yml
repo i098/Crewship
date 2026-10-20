@@ -153,16 +153,22 @@
     get_checksum: false
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
-  loop:
-    - "{{ crewship_cfg.home }}/.config"
-    - "{{ crewship_cfg.home }}/.config/environment.d"
-    - "{{ crewship_cfg.home }}/.local"
-    - "{{ crewship_cfg.home }}/.local/bin"
-    - "{{ crewship_cfg.home }}/.local/share"
-    - "{{ crewship_cfg.home }}/.local/state"
-    - "{{ crewship_share_dir }}"
-    - "{{ crewship_user_units }}"
-    - "{{ crewship_cfg.workspace }}"
+  loop: >-
+    {{ [crewship_cfg.home ~ '/.config',
+        crewship_cfg.home ~ '/.config/environment.d',
+        crewship_cfg.home ~ '/.local',
+        crewship_local_bin,
+        crewship_cfg.home ~ '/.local/share',
+        crewship_cfg.home ~ '/.local/state',
+        crewship_share_dir,
+        crewship_user_units,
+        crewship_cfg.workspace]
+       + ([crewship_fleet_doctor_dir] if crewship_cfg.profiles.fleet_guards | bool else [])
+       + ([crewship_fleet_browsers_dir] if crewship_fleet_browsers_enabled | bool else [])
+       + ([crewship_imessage_dir]
+          if crewship_cfg.profiles.firstmate | bool and crewship_cfg.imessage is defined else [])
+       + ([crewship_instagram_desk_dir]
+          if crewship_cfg.profiles.firstmate | bool and crewship_instagram_dm_operator | length > 0 else []) }}
   register: crewship_home_layout_stat
   when: crewship_account_ready | bool
 
