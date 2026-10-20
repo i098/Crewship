@@ -40,7 +40,8 @@ Pick the view from the question. Do not mix the two in one chart.
 The chart is an 840 px wide PNG (630 px minimum tall) for iMessage.
 It has a time axis in the operator's local time, with AM/PM ticks for short ranges and date ticks for long ranges.
 Each item has a bar from start to end, a duration, and a percent complete when known ("40% · 1 h 30 min").
-A darker fill shows the known completed part; an item without a percent shows only its duration, with no completion fill.
+For completion above 0% and below 100%, a darker fill shows the completed part.
+An item without a percent shows only its duration, with no completion fill.
 The chart has a red "now" line, a legend, and items grouped by project.
 A done item is a green dot.
 A moved item (the end slipped) is amber.

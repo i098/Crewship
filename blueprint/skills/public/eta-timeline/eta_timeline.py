@@ -164,7 +164,9 @@ def main():
         metavar="CAPTION",
         help="send the PNG with fm-imessage --image",
     )
-    p.add_argument("--card", action="store_true", help="with --send: send a timeline card, else the PNG")
+    p.add_argument(
+        "--card", action="store_true", help="with --send: send a timeline card, else the PNG"
+    )
     a = p.parse_args()
     tz = ZoneInfo(a.tz)
     now = parse(a.now, tz) if a.now else datetime.now(tz)
@@ -185,7 +187,13 @@ def main():
         )
     if not items:
         sys.exit("no items")
-    if a.card and a.send is not None and not a.out and len(items) <= 50 and shutil.which("fm-imessage"):
+    if (
+        a.card
+        and a.send is not None
+        and not a.out
+        and len(items) <= 50
+        and shutil.which("fm-imessage")
+    ):
         hm = "%-I:%M %p"
         card = {
             "kind": "timeline",
