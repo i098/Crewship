@@ -32,13 +32,35 @@ Use a Linux host for the native recipe. macOS and other client devices can reach
 
 The Dockerfile's `worker` target is an isolated, non-root, devcontainer-style image built by the same recipe. It runs `./ship.sh launch --config blueprint/containers/crewship.container.yml`, which sets `start_services: false` and `enable_linger: false` and turns off the `docker`, `tailscale`, `desktop`, `firstmate`, `chat`, and `gateway` profiles and the browser pruner. The image carries the agent and development toolchain and the rendered agent configs, with no systemd services, linger, or Docker-in-Docker. The devcontainer, Compose, and CI use the same image.
 
+This is a **worker-only** image, not a complete Crewship host.
+It does not run Firstmate or the host's Herdr and systemd services.
+Use the [native install](../../README.md#quick-start) for the complete host.
+
+With Docker installed and available to your account, run this from any directory; no checkout or Compose file is needed:
+
 ```bash
-docker pull ghcr.io/i098/crewship:latest                  # released image (or :X.Y.Z), published on each release
-docker tag ghcr.io/i098/crewship:latest crewship/worker:dev  # name Compose uses; skip to let Compose build it
-docker build --target worker --tag crewship/worker .  # or build it here
-docker compose --profile worker up -d                    # worker only
-docker compose --profile worker --profile data up -d     # + example Postgres and Redis
+docker pull ghcr.io/i098/crewship:latest
+docker run -d --name crewship-worker --init \
+  --cpus 4 --memory 6g --memory-swap 6g --pids-limit 4096 \
+  --shm-size 512m --cap-drop NET_RAW \
+  --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 \
+  --mount type=volume,source=crewship-workspace,target=/home/coder/Dev \
+  ghcr.io/i098/crewship:latest sleep infinity
+docker exec -it crewship-worker bash
 ```
+
+The shell opens as the non-root `coder` user in `/home/coder/Dev`.
+Run `omp` there and follow the [sign-in guide](../omp.md#sign-in).
+The named volume keeps project files when you replace the container.
+Credentials created inside the container remain in that container, not in the workspace volume.
+Do not mount your host's credentials, home directory, Docker socket, or Herdr state.
+
+Leave the shell with `exit`; enter it again with `docker exec -it crewship-worker bash`.
+Stop the worker with `docker stop crewship-worker`; resume it with `docker start crewship-worker`.
+
+For Compose or local image builds, clone this repository and use its root [`compose.yml`](../../compose.yml).
+The `worker` profile starts the worker; the optional `data` profile adds example PostgreSQL and Redis services.
+Set up the password file described in `compose.yml` before enabling `data`.
 
 ## Seeded Firstmate and OMP configuration
 
