@@ -2231,6 +2231,45 @@ console.log(JSON.stringify(cards.add({{ kind: "text", key: "startup", title: "Pe
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("startup_fails", [False, True])
+def test_photon_startup_deadline_does_not_affect_later_requests(tmp_path, startup_fails):
+    rig = FallbackRig(tmp_path, FM_IMESSAGE_TRANSPORTS="bluebubbles photon")
+    try:
+        (rig.fake / "edits").mkdir()
+        if startup_fails:
+            (rig.fake / "spectrum-down").touch()
+        source = FAKE_UPSTREAM.replace("export const Spectrum =", "const connect =")
+        source += """
+export const Spectrum = async () => {
+  const server = Bun.serve({ port: 0, async fetch() {
+    await Bun.sleep(3500);
+    return new Response("renewed");
+  } });
+  setTimeout(async () => {
+    const url = `http://127.0.0.1:${server.port}`;
+    try {
+      const results = await Promise.all([
+        fetch(url).then((r) => r.text()).catch((e) => e.name),
+        fetch(new Request(url, { signal: AbortSignal.timeout(6000) })).then((r) => r.text()).catch((e) => e.name),
+        fetch(url, { signal: AbortSignal.timeout(50) }).then((r) => r.text()).catch((e) => e.name),
+      ]);
+      writeFileSync(`${dir}/renewals`, JSON.stringify(results));
+    } finally {
+      server.stop(true);
+    }
+  }, 100);
+  return connect();
+};
+"""
+        (rig.app / "node_modules/spectrum-ts/index.js").write_text(source)
+        rig.start()
+        wait_for(lambda: (rig.fake / "renewals").exists(), "post-startup requests", timeout=10)
+        assert json.loads((rig.fake / "renewals").read_text()) == ["renewed", "renewed", "TimeoutError"]
+    finally:
+        rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_reply_keeps_an_uncertain_fallback_queued_after_a_permanent_read_error(tmp_path):
     rig = FallbackRig(tmp_path)
     try:

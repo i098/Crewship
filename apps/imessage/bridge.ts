@@ -69,10 +69,10 @@ function persistLatest(path: string, text: string) {
 const env = process.env;
 const need = (name: string) => env[name] || (() => { throw new Error(`fm-imessage: ${name} is not set`); })();
 // Spectrum has no request-timeout option. Bound its HTTP calls without changing other transports' deadlines.
-const photonRequests = new AsyncLocalStorage<true>();
+const photonRequests = new AsyncLocalStorage<{ active: boolean }>();
 const fetchRequest = globalThis.fetch;
 globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
-  if (!photonRequests.getStore()) return fetchRequest(input, init);
+  if (!photonRequests.getStore()?.active) return fetchRequest(input, init);
   const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
   const timeout = AbortSignal.timeout(3000);
   return fetchRequest(input, { ...init, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
@@ -202,11 +202,18 @@ async function startLine(name: string): Promise<Line> {
       home: `iMessage;-;${OWNER}`,
     };
   }
-  const app = await photonRequests.run(true, () => Spectrum({
-    projectId: need("PHOTON_PROJECT_ID"),
-    projectSecret: need("PHOTON_PROJECT_SECRET"),
-    providers: [imessage.config()],
-  }));
+  const startup = { active: true };
+  const app = await photonRequests.run(startup, async () => {
+    try {
+      return await Spectrum({
+        projectId: need("PHOTON_PROJECT_ID"),
+        projectSecret: need("PHOTON_PROJECT_SECRET"),
+        providers: [imessage.config()],
+      });
+    } finally {
+      startup.active = false;
+    }
+  });
   // Spectrum has no public accessor for the line's Advanced iMessage client, which owns Find My locations and the raw
   // message events with his edits; this reads its internal platform map (spectrum-ts 12.10). Recheck after a
   // spectrum-ts upgrade.
