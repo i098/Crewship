@@ -120,8 +120,8 @@ The installer already applied the default profiles. This run applies your change
 - Run it in an interactive terminal. With the `firstmate` profile on and omp signed in, the first launch then opens omp with the new-host questions ([New-host questions](docs/configuration.md#new-host-questions)). Relay each question to the user and pass on the answer.
 - If omp was not signed in at the first launch, the questions are skipped. Run `./ship.sh launch` again after step 2.
 - Check: the command ends with no failed task.
-  An unchanged `./ship.sh launch` reports `changed=0` when no tool has published a new release since the last apply.
-  A newer release shows as a change in the toolchain step; this is expected because Crewship installs the latest releases.
+  An unchanged `./ship.sh launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
+  A newer release or source update shows as an expected change in the toolchain step.
 
 ## 6. Verify and report
 
