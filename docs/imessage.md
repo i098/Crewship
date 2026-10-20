@@ -322,9 +322,9 @@ The bridge uses these routing rules with one or both transports:
 - **Inbound.** The bridge reads both transports and applies [the routing contract](#what-it-does) to each stable request id.
   It selects the latest text by message time, or receipt time when the transport gives none.
   A late text does not replace a newer latest text.
-- **Start.** The first transport starts before the others.
+- **Start.** The bridge starts all configured transports together, but waits only for the first transport before opening the local listener.
   Fallback transports and saved-message reads run in the background, so they cannot delay the local listener.
-  Photon startup HTTP requests and BlueBubbles health checks have a 3 second timeout.
+  Photon startup HTTP requests have a 3 second timeout.
   After Photon startup succeeds or fails, later requests keep their own deadlines, including token renewals.
   A transport that is still starting rejects sends without waiting.
   BlueBubbles retries through its existing health checks and per-minute catch-up.

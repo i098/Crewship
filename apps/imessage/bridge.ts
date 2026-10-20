@@ -68,7 +68,7 @@ function persistLatest(path: string, text: string) {
 }
 const env = process.env;
 const need = (name: string) => env[name] || (() => { throw new Error(`fm-imessage: ${name} is not set`); })();
-// Spectrum has no request-timeout option. Bound its HTTP calls without changing other transports' deadlines.
+// Spectrum has no request-timeout option. Scope this wrapper to startup so token renewals keep their own deadlines.
 const photonRequests = new AsyncLocalStorage<{ active: boolean }>();
 const fetchRequest = globalThis.fetch;
 globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
