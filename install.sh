@@ -40,7 +40,34 @@ check_args() {
 check_args "$@"
 
 work=
-trap 'rm -rf "$work"' EXIT
+log_dir=$HOME/.local/state/crewship
+mkdir -p -m 700 "$log_dir"
+export CREWSHIP_INSTALL_LOG
+CREWSHIP_INSTALL_LOG=$(mktemp "$log_dir/install-XXXXXX.log")
+exec 3>&1 4>&2
+exec > >(tee -a "$CREWSHIP_INSTALL_LOG" >&3) 2> >(tee -a "$CREWSHIP_INSTALL_LOG" >&4)
+finish() {
+  local status=$?
+  rm -rf "$work"
+  if ((status)); then
+    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" >&2
+  else
+    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG"
+  fi
+}
+trap finish EXIT
+
+run_step() {
+  local label=$1 started=$SECONDS status=0
+  shift
+  printf '%s...\n' "$label"
+  "$@" >>"$CREWSHIP_INSTALL_LOG" 2>&1 || status=$?
+  if ((status)); then
+    printf '%s: failed (exit %s)\n' "$label" "$status" >&2
+    return "$status"
+  fi
+  printf '%s: done (%ss)\n' "$label" "$((SECONDS - started))"
+}
 
 # Saves URL $1 to file $2. Returns 22 on HTTP 404 (the caller decides what that means).
 download() {
@@ -219,8 +246,8 @@ main() {
       missing+=("$package")
   done
   if ((${#missing[@]})); then
-    apt_get update -q
-    apt_get install -y -q "${missing[@]}"
+    run_step 'Updating OS packages' apt_get update -q
+    run_step 'Installing OS packages' apt_get install -y -q "${missing[@]}"
   fi
 
   if [ -e "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$dir/.git" ]; then
@@ -234,13 +261,14 @@ main() {
   else
     mkdir -p "$releases"
     work=$(mktemp -d "$releases/.tmp.XXXXXX")
+    echo 'Downloading and verifying the release...'
     fetch_release "$repo" "$ref" "$(asset_digest "$repo" "$ref" "crewship-$ref.tar.gz")"
     local old backup= prev=
     if [ -e "$dir" ]; then
       prev=$(readlink "$dir" || true)
       old=$(readlink -f "$dir")
       echo "Carrying the host files of $old:"
-      carry_host_files "$old"
+      carry_host_files "$old" >>"$CREWSHIP_INSTALL_LOG" 2>&1
       if [ -d "$dir/.git" ]; then
         git -C "$dir" diff --quiet HEAD 2>/dev/null || echo "install.sh: tracked files in $dir have local edits; they stay in the backup only" >&2
         backup=$dir.git-backup-$(date +%Y%m%d-%H%M%S)
@@ -261,8 +289,9 @@ main() {
   echo "Crewship $ref in $dir"
 
   cd "$dir"
-  migrate_v040
-  ./onboard.sh
+  echo 'Migrating host settings...'
+  migrate_v040 >>"$CREWSHIP_INSTALL_LOG" 2>&1
+  run_step 'Installing repository tools' ./onboard.sh
   if [ ! -f .local/host.yml ]; then
     ./ship.sh dock "$@"
   else
@@ -274,10 +303,11 @@ main() {
       esac
     done
   fi
-  ./ship.sh inspect
+  run_step 'Checking host settings' ./ship.sh inspect
   # Some tasks need installed tools that check mode cannot supply.
   # See docs/configuration.md#commands for preview behavior and side effects.
-  ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
+  run_step 'Previewing changes' ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
+  echo 'Applying host configuration...'
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
   local url home

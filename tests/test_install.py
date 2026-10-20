@@ -34,6 +34,13 @@ def install(env, *args):
     )
 
 
+def install_log(result):
+    for line in (result.stdout + result.stderr).splitlines():
+        if line.startswith("Full install log: "):
+            return Path(line.removeprefix("Full install log: "))
+    pytest.fail("The installer did not print its log path")
+
+
 @pytest.mark.parametrize("args", [["--help"], ["-h"], ["--container", "--help"], ["--user", "--help"]])
 def test_help_prints_usage_and_changes_nothing(tmp_path, args):
     result = install(sandbox(tmp_path), *args)
@@ -252,6 +259,22 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
     assert ("HTTPS_BOOTSTRAP" in result.stderr) is (missing is not None)
 
 
+@pytest.mark.parametrize("status", [0, 23])
+def test_install_logs_keep_details_private_on_success_and_failure(release, status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "onboard.sh").write_text(
+        f"#!/bin/sh\necho package-details\necho diagnostic-details >&2\nexit {status}\n"
+    )
+    result = release.install("v1.0.0")
+    assert result.returncode == status
+    assert "package-details" not in result.stdout + result.stderr
+    assert "diagnostic-details" not in result.stdout + result.stderr
+    log = install_log(result)
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert "package-details\n" in log.read_text()
+    assert "diagnostic-details\n" in log.read_text()
+
+
 
 @pytest.mark.parametrize("failure", ["lock", "timeout", "frontend-timeout", "package"])
 def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
@@ -296,9 +319,9 @@ def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
         assert result.returncode == 100
         assert not release.crewship.exists()
         if failure.endswith("timeout"):
-            assert "package locks did not clear within 600 seconds" in result.stderr
+            assert "package locks did not clear within 600 seconds" in install_log(result).read_text()
         else:
-            assert "Unable to locate package missing" in result.stderr
+            assert "Unable to locate package missing" in install_log(result).read_text()
             assert len(calls) == 1
 
 
@@ -401,9 +424,30 @@ def test_v040_host_is_migrated_before_the_reapply(release):
     assert (bin_dir / "mine").read_text() == "not ours"
     assert (old / "uv").read_text() == "x"
     assert "factory:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
-    for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
-        assert f"dropped fleet.{key}" in result.stdout
     assert "supabase_project_id" in (host.parent / "host.yml.v0.4.0").read_text()
+
+
+def test_failed_link_migration_stops_before_reapplying(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    links = release.home / ".local/bin"
+    links.mkdir(parents=True)
+    link = links / "uv"
+    link.symlink_to(old / "uv")
+    env = tmp_path / "bash-env"
+    env.write_text(
+        'rm() {\n'
+        '  if [[ $# == 2 && $1 == -f && $2 == "$FAILED_LINK" ]]; then return 73; fi\n'
+        '  command rm "$@"\n'
+        '}\n'
+    )
+    release.env.update(BASH_ENV=str(env), FAILED_LINK=str(link))
+    result = release.install("v1.1.0")
+    assert result.returncode == 73
+    assert link.is_symlink()
+    assert (release.home / "calls").read_text().split().count("launch") == 1
 
 
 def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
@@ -484,6 +528,5 @@ def test_migration_is_a_noop_on_a_current_host(release):
     host.write_text("crewship:\n  fleet:\n    keep: 1\n")
     result = release.install("v1.1.0")
     assert result.returncode == 0, result.stderr
-    assert "dropped" not in result.stdout and "relinking" not in result.stdout
     assert host.read_text() == "crewship:\n  fleet:\n    keep: 1\n"
     assert not (host.parent / "host.yml.v0.4.0").exists()

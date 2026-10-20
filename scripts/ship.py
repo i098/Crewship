@@ -303,6 +303,7 @@ def provision(document, check):
             "keep all Docker volumes. Use docs/project-databases.md for the replacement."
         )
     environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "blueprint/ansible/ansible.cfg")}
+    install_log = os.environ.get("CREWSHIP_INSTALL_LOG")
     argv = [
         "ansible-playbook",
         "-i",
@@ -324,6 +325,12 @@ def provision(document, check):
                 "sudo access required; run interactively to supply the become password"
             )
         argv.append("--ask-become-pass")
+        install_log = None
+    if install_log:
+        with open(install_log, "a") as output:
+            return subprocess.run(
+                argv, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT
+            ).returncode
     return subprocess.run(argv, cwd=ROOT, env=environment).returncode
 
 

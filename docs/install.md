@@ -48,6 +48,12 @@ The installer:
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
 
+The installer shows short progress lines and keeps the full output in `~/.local/state/crewship/install-*.log`.
+It prints the log path when it finishes or fails.
+Log files have mode `0600`; check them for private data before sharing them.
+Interactive setup questions stay visible.
+When Ansible needs a sudo password, its output stays visible so it can keep using that password.
+
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
 Let the other package manager finish, then run the installer again.
