@@ -5,8 +5,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: true
   enable_linger: true
-  # Absolute path on a data disk for Docker's data root and the npm and pip
-  # caches. Empty keeps both on the system disk (docs/configuration.md#data-disk).
+  # See docs/configuration.md#data-disk for path requirements and storage behavior.
   data_dir: ""
   # A new host gets the core only: agents and firstmate. Every other profile is
   # opt-in (docs/default-config.md).

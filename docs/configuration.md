@@ -41,7 +41,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: true
   enable_linger: true
-  data_dir: ""            # Data disk for Docker and the npm and pip caches; see Data disk below
+  data_dir: ""            # See Data disk below for path requirements and storage behavior
   profiles:
     agents: true          # Chrome autoprune, AXI tools, browser defaults
     development: false    # Rust, build tools
@@ -178,10 +178,64 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 | Docker images, containers and volumes | `<data_dir>/docker` | `data-root` in `/etc/docker/daemon.json` (`docker` profile) |
 | npm cache | `<data_dir>/cache/npm` | `npm_config_cache` |
 | pip cache | `<data_dir>/cache/pip` | `PIP_CACHE_DIR` |
+| General syslog | `<data_dir>/host-logs/rsyslog/syslog` | [Bounded general syslog](#bounded-general-syslog) |
 
 The variables go into the managed block of `~/.profile`, the Herdr unit and the no-mistakes daemon drop-in. A running Herdr server or no-mistakes daemon reads them only after its next restart. Apply creates `<data_dir>/cache` for the account; Docker creates its own data root. The cargo cache stays in `~/.cargo` on purpose: `CARGO_HOME` also holds `bin` and `config.toml`, so moving it would break `cargo install` on PATH and ignore the existing cargo config.
 
 The bun, pnpm and uv caches stay on the system disk on purpose. These tools hardlink packages from their cache into each worktree's `node_modules` or `.venv`, and a hardlink works only on one filesystem. With the cache on another disk, each install copies full packages into the worktree, so the worktree pools grow faster on the system disk. Move these caches only together with the pools (see below).
+
+### Bounded general syslog
+
+Apply changes only the general file action in the distribution `/etc/rsyslog.d/50-default.conf`.
+Native rsyslog rotates the file at 128 MiB plus one message batch.
+The native rotation helper accepts no argument or its exact configured file path.
+It retains eight archives and one active file, approximately 1.125 GiB plus message batches.
+Authentication, kernel, mail, journal, audit rules and other operator settings remain unchanged.
+Only `/var/log/syslog` leaves the distribution rsyslog logrotate list, after validated logger activation succeeds.
+Existing `/var/log/syslog` files, links and archives remain intact; apply neither copies nor truncates them.
+Archive old files manually only after you confirm that no writer holds them.
+
+The data directory must already exist at a canonical path on a separate mounted filesystem.
+Apply rejects the system filesystem, symlinks in the configured path and unsafe existing log paths.
+The logger receives stop requests from the identified mount without automatically mounting it again through socket activation.
+Its startup and rotation helper reject an absent mount before they can write.
+The log directory uses `syslog:adm` ownership and `2750` access.
+Files use `0640` when the distribution's global `$FileCreateMode 0640` setting remains in place.
+Native recreation on rsyslog 8.2312.0 uses that global setting, not the action's `fileCreateMode`.
+The setgid directory bit keeps group `adm` on files that native rotation recreates, even when the logger's primary group differs.
+The distribution `syslog` account needs search access through the data directory and its parents.
+Keep these parent directories under trusted ownership; apply does not change their access policy.
+
+The host must have distribution rsyslog and logrotate installed.
+The rsyslog build must accept `omfile` size-limit rotation; configuration validation fails for unsupported versions.
+Apply validates the complete configuration, including operator templates in other files.
+If validation fails, apply restores the original rules before it changes rotation ownership or restarts the logger.
+Apply activates the validated configuration inside the logging tasks, before unrelated provisioning tasks can fail.
+It records checksums for the helper, mount dependency, local AppArmor policy and general action only after a successful restart.
+An unchanged service-enabled apply retries deferred or failed activation.
+Every service-enabled apply also starts a stopped or failed logger before rotation cleanup, without restarting a healthy unchanged logger.
+Apply clears failed logger and socket activation limits before it starts or restarts rsyslog.
+Custom general actions without the Crewship marker require operator reconciliation before apply.
+An empty `data_dir` leaves logging unchanged, including an earlier data-drive configuration.
+Removing or changing that configuration requires a planned log migration, not a silent fallback.
+
+Where the distribution rsyslog AppArmor profile exists, apply adds only the required local paths and actual helper executables.
+The profile must include `local/usr.sbin.rsyslogd`; other profile forms require operator reconciliation.
+Apply keeps existing local rules; the distribution service hook reloads the profile at startup and safely handles disabled AppArmor.
+Custom service units must retain that distribution hook.
+With `start_services: false`, apply writes files and validates syntax but does not reload policy, reload systemd or start rsyslog.
+Old rotation ownership remains until a service-enabled apply completes activation.
+Check mode writes nothing.
+
+The focused tests run helper safety checks in the normal suite.
+Set `CREWSHIP_SYSLOG_CONTAINER=1` only inside a disposable root container to run the provisioning and native rotation checks.
+These checks need rsyslog, logrotate, systemd tools, a tmpfs mount at `/mnt/data`, and mount permission in the container namespace.
+They apply the logging task twice and require the second apply to report `changed=0`.
+The activation regression also requires systemd inside the container.
+It checks deferred starts, failed activation, recovery before an unrelated task failure, and unchanged recovery of stopped or rate-limited loggers.
+Native checks use a copied distribution binary to avoid the host's executable AppArmor attachment.
+The native rotation check verifies file ownership, modes and active/archive reads with only `adm` group access.
+The checks validate profile syntax, but a separate systemd VM must verify kernel policy enforcement and service mount-loss behavior.
 
 ### Moving an existing Docker data root
 

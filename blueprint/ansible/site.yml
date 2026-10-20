@@ -33,6 +33,12 @@
       ansible.builtin.import_tasks: tasks/packages.yml
       tags: [packages]
 
+    - name: Bounded native syslog on the configured data filesystem
+      ansible.builtin.import_tasks: tasks/syslog.yml
+      become: true
+      when: crewship_data_dir | length > 0
+      tags: [syslog]
+
     # Everything below writes files owned by the target account, so it needs a
     # resolvable uid. `crewship_account_ready` is false only in check mode on a
     # host where the account does not exist yet: `./ship.sh chart` then reports
