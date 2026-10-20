@@ -1,0 +1,154 @@
+---
+- name: Stop disabled usage export
+  when: not (crewship_usage_enabled | bool)
+  block:
+    - name: Read the loaded usage timer state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-usage.timer]
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_usage_timer
+      changed_when: false
+      failed_when: crewship_usage_timer.rc != 0 and (crewship_usage_timer.stdout | trim) != 'inactive'
+      check_mode: false
+      when: crewship_manage_services | bool
+
+    # Loaded units can stay active after an image-only apply removes their files.
+    - name: Stop the usage timer before inspecting the export
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, stop, crewship-usage.timer]
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_usage_timer.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
+
+    - name: Read the loaded usage exporter state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-usage.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_usage_service
+      changed_when: false
+      failed_when: crewship_usage_service.rc != 0 and (crewship_usage_service.stdout | trim) != 'inactive'
+      check_mode: false
+      when: crewship_manage_services | bool
+
+    - name: Stop any current usage export
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, stop, crewship-usage.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_usage_service.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
+
+    - name: Disable usage export at boot
+      ansible.builtin.file:
+        path: "{{ crewship_user_units }}/timers.target.wants/crewship-usage.timer"
+        state: absent
+      notify: reload user systemd
+
+- name: Install configured usage export
+  when: crewship_usage_enabled | bool
+  block:
+    - name: Require the usage data mount and state path
+      ansible.builtin.assert:
+        that:
+          - crewship_usage.mount | length > 0
+          - crewship_usage.state_dir | length > 0 or crewship_data_dir | length > 0
+        fail_msg: "Set usage.mount and usage.state_dir or data_dir before installing usage export."
+
+    - name: Check the usage data mount without creating storage
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ crewship_repo }}/scripts/usage.py"
+          - --data-dir
+          - "{{ crewship_usage_state }}"
+          - --mount
+          - "{{ crewship_usage.mount }}"
+          - check
+      changed_when: false
+      check_mode: false
+
+    - name: Ensure the usage asset and timer directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: "{{ crewship_usage_assets }}", mode: "0700"}
+        - {path: "{{ crewship_user_units }}/timers.target.wants", mode: "0755"}
+
+    - name: Copy the metadata client and native source assets
+      ansible.builtin.copy:
+        src: "{{ crewship_repo }}/{{ item.src }}"
+        dest: "{{ crewship_usage_assets }}/{{ item.dest }}"
+        mode: "0600"
+      loop:
+        - {src: scripts/usage.py, dest: usage.py}
+        - {src: blueprint/config/omp-usage.ts, dest: omp-usage.ts}
+        - {src: blueprint/usage/dashboard.json, dest: dashboard.json}
+        - {src: blueprint/patches/omp/usage.patch, dest: usage.patch}
+
+    - name: Write the explicit native process opt-in environment
+      ansible.builtin.copy:
+        dest: "{{ crewship_usage_assets }}/capture.env"
+        mode: "0600"
+        content: |
+          export CREWSHIP_USAGE_ADAPTER={{ (crewship_usage_assets ~ '/omp-usage.ts') | quote }}
+          export CREWSHIP_USAGE_COLLECTOR={{ (crewship_usage_assets ~ '/usage.py') | quote }}
+          export CREWSHIP_USAGE_DATA_DIR={{ crewship_usage_state | quote }}
+          export CREWSHIP_USAGE_MOUNT={{ crewship_usage.mount | quote }}
+          export CREWSHIP_USAGE_STORE=spool
+
+    - name: Render the usage exporter and timer
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ crewship_user_units }}/{{ item }}"
+        mode: "0644"
+      loop: [crewship-usage.service, crewship-usage.timer]
+      notify: reload user systemd
+
+    - name: Detect usage units changed while runtime management was off
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=NeedDaemonReload, --value, "{{ item }}"]
+      environment: "{{ crewship_user_systemd_env }}"
+      loop: [crewship-usage.service, crewship-usage.timer]
+      register: crewship_usage_reload
+      changed_when: crewship_usage_reload.stdout | trim == 'yes'
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+      notify: reload user systemd
+
+    - name: Load changed usage units before starting the timer
+      ansible.builtin.meta: flush_handlers
+
+    - name: Statically enable usage export
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/crewship-usage.timer"
+        dest: "{{ crewship_user_units }}/timers.target.wants/crewship-usage.timer"
+        state: link
+        force: true
+        follow: false
+
+    - name: Start the usage timer
+      ansible.builtin.systemd_service:
+        scope: user
+        name: crewship-usage.timer
+        state: started
+      environment: "{{ crewship_user_systemd_env }}"
+      when: crewship_manage_services | bool
+
+- name: Remove usage assets without deleting stored metadata
+  when: not (crewship_usage_enabled | bool)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ crewship_user_units }}/crewship-usage.timer"
+    - "{{ crewship_user_units }}/crewship-usage.service"
+    - "{{ crewship_usage_assets }}/usage.py"
+    - "{{ crewship_usage_assets }}/omp-usage.ts"
+    - "{{ crewship_usage_assets }}/dashboard.json"
+    - "{{ crewship_usage_assets }}/usage.patch"
+    - "{{ crewship_usage_assets }}/capture.env"
+  notify: reload user systemd

@@ -1,4 +1,3 @@
-import grp
 import importlib.util
 import json
 import os
@@ -486,38 +485,80 @@ if (terminal.stopReason !== "aborted" || calls !== 0)
     assert completion["input"] is None and completion["output"] is None
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_usage_asset_preview_creates_no_directories_on_a_new_host(enabled):
+@pytest.fixture
+def usage_installation():
     mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
     if mount is None or not shutil.which("ansible-playbook"):
         pytest.skip("needs Ansible and a separate mounted worktree")
-    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/agents.yml").read_text())
-    usage_task = next(task for task in tasks
-                      if "crewship_usage_install" in str(task.get("when", "")))
-    with tempfile.TemporaryDirectory(prefix=".usage-preview-", dir=ROOT) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".usage-install-", dir=ROOT) as temporary:
         scratch = Path(temporary)
-        (scratch / "home").mkdir()
+        (scratch / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
         config = scratch / "ansible.cfg"
         config.write_text("[defaults]\nretry_files_enabled = False\nlocal_tmp = "
                           + str(scratch / "local-tmp") + "\nremote_tmp = "
                           + str(scratch / "remote-tmp") + "\n")
-        variables = {
-            "crewship_repo": str(ROOT), "crewship_share_dir": str(scratch / "assets"),
-            "crewship_data_dir": str(scratch / "data"), "crewship_usage_mount": str(mount),
-            "crewship_cfg": {"user": pwd.getpwuid(os.getuid()).pw_name},
-            "crewship_group": grp.getgrgid(os.getgid()).gr_name,
-            "ansible_become": False, "ansible_python_interpreter": sys.executable,
-        }
-        if enabled:
-            variables["crewship_usage_install"] = True
         play = scratch / "play.yml"
-        play.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local",
-                                        "gather_facts": False, "vars": variables,
-                                        "tasks": [usage_task]}]))
-        environment = {"PATH": os.environ["PATH"], "HOME": str(scratch / "home"),
-                       "LANG": "C.UTF-8", "ANSIBLE_CONFIG": str(config)}
-        result = subprocess.run(["ansible-playbook", "-i", "localhost,", str(play), "--check"],
-                                env=environment, text=True, capture_output=True, timeout=45)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert not (scratch / "assets").exists()
-        assert not (scratch / "data").exists()
+        play.write_text(yaml.safe_dump([{
+            "hosts": "localhost", "connection": "local", "gather_facts": False,
+            "vars_files": [str(ROOT / "blueprint/ansible/group_vars/all" / (name + ".yml"))
+                           for name in ("base", "services", "usage")],
+            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/usage.yml")}],
+            "handlers": [{"name": "Reload preview", "ansible.builtin.debug": {"msg": "no runtime"},
+                          "listen": "reload user systemd"}],
+        }]))
+
+        def apply(settings, *options):
+            variables = {
+                "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
+                "crewship": {"user": pwd.getpwuid(os.getuid()).pw_name,
+                             "home": str(scratch / "home"), "start_services": False,
+                             "data_dir": str(scratch / "data"),
+                             "usage": {"mount": str(mount), **settings}},
+                "ansible_become": False, "ansible_python_interpreter": sys.executable,
+            }
+            environment = {**os.environ, "ANSIBLE_CONFIG": str(config)}
+            result = subprocess.run(
+                ["ansible-playbook", "-i", "localhost,", str(play), "-e", json.dumps(variables), *options],
+                env=environment, text=True, capture_output=True, timeout=60)
+            assert result.returncode == 0, result.stdout + result.stderr
+            return result.stdout
+
+        yield scratch, apply
+
+
+@pytest.mark.parametrize("endpoint", ["", "https://otlp.example.invalid/v1/logs"])
+def test_usage_preview_creates_no_directories_on_a_new_host(usage_installation, endpoint):
+    scratch, apply = usage_installation
+    apply({"endpoint": endpoint}, "--check")
+    assert not (scratch / "home").exists()
+    assert not (scratch / "data").exists()
+
+
+def test_usage_disable_and_removal_preserve_pending_and_old_data(usage_installation):
+    scratch, apply = usage_installation
+    configured = {"endpoint": "https://otlp.example.invalid/v1/logs"}
+    state = scratch / "data/usage"
+    state.mkdir(parents=True)
+    saved = {name: name.encode() for name in ("usage.sqlite", "spool.sqlite", "operator-notes")}
+    for name, content in saved.items():
+        (state / name).write_bytes(content)
+    assets = scratch / "home/.local/share/crewship/usage"
+    units = scratch / "home/.config/systemd/user"
+    enabled = units / "timers.target.wants/crewship-usage.timer"
+
+    apply(configured)
+    assert enabled.is_symlink()
+    assert "changed=0" in apply(configured)
+    apply({**configured, "enabled": False})
+    assert not enabled.exists()
+    assert not any(assets.iterdir())
+    assert "changed=0" in apply({**configured, "enabled": False})
+    apply(configured)
+    assert enabled.is_symlink()
+    apply({})
+    assert not any(assets.iterdir())
+    assert not (units / "crewship-usage.timer").exists()
+    assert not (units / "crewship-usage.service").exists()
+    assert not enabled.exists()
+    assert {name: (state / name).read_bytes() for name in saved} == saved
+    assert "changed=0" in apply({})

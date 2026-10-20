@@ -1,0 +1,5 @@
+---
+crewship_usage: "{{ {'endpoint': '', 'enabled': true, 'auth_file': '', 'mount': '', 'state_dir': ''} | combine(crewship_cfg.usage | default({})) }}"
+crewship_usage_enabled: "{{ (crewship_usage.endpoint | length > 0) and (crewship_usage.enabled | bool) }}"
+crewship_usage_assets: "{{ crewship_share_dir }}/usage"
+crewship_usage_state: "{{ crewship_usage.state_dir or (crewship_data_dir ~ '/usage') }}"

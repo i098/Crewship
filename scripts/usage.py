@@ -687,6 +687,8 @@ def configured_data_dir(data_dir, mount):
         existing = existing.parent
     if existing.stat().st_dev != mount.stat().st_dev:
         raise ValueError("data_dir is not on the configured data mount")
+    if not existing.is_dir() or not os.access(existing, os.W_OK | os.X_OK, effective_ids=True):
+        raise ValueError("data_dir or its nearest existing parent must be writable and searchable")
     return resolved
 
 
@@ -719,14 +721,9 @@ def sender(endpoint):
             return None
 
     opener = urllib.request.build_opener(NoRedirect)
-    requests = 0
 
     def send(payload):
-        nonlocal requests
-        if requests:
-            # Random gaps spread the requests of many hosts that reconnect at the same time.
-            time.sleep(random.uniform(0, JITTER))
-        requests += 1
+        time.sleep(random.uniform(0, JITTER))
         body = gzip.compress(json.dumps(payload).encode(), mtime=0)
         request = urllib.request.Request(endpoint, body, headers)
         with opener.open(request, timeout=15) as response:

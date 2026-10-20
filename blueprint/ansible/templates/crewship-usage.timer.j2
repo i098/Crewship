@@ -1,0 +1,14 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Schedule bounded SigNoz usage export (Crewship managed)
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=5min
+AccuracySec=1s
+Unit=crewship-usage.service
+
+[Install]
+WantedBy=timers.target

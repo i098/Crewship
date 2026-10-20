@@ -80,6 +80,14 @@
         - crewship_cfg.profiles.agents | bool
       tags: [agents]
 
+    - name: Optional SigNoz usage export and native source assets
+      ansible.builtin.import_tasks: tasks/usage.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when: crewship_account_ready | bool
+      tags: [usage]
+
     - name: Chrome AXI bridge pruning unit and timer
       ansible.builtin.import_tasks: tasks/browser_prune.yml
       become: "{{ crewship_become_target | bool }}"
