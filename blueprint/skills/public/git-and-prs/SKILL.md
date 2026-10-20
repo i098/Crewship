@@ -24,8 +24,6 @@ git diff main... | ponytail-review --stdin
 
 - It names what to cut: reinvented stdlib, unneeded dependencies, speculative abstractions, dead flexibility.
 - Apply findings from exactly one review round; read the installed wrapper's exit-code contract with `ponytail-review --help`.
-- A clean review has exactly one approved verdict and no line-leading finding locations or negative net summaries.
-  Descriptive prose may surround the verdict; prose-only cuts beside a Ship. verdict are trusted as clean.
 
 Use `ponytail-review`, not the `/ponytail-review` slash command: the slash command is a Claude plugin and is unavailable under other harnesses, so workers on pi could not run it. The wrapper builds its prompt from the plugin's own files, so it is the same review from anywhere.
 
