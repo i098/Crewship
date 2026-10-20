@@ -13,6 +13,11 @@ The installer:
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
 
+During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
+If a lock does not clear, the installer stops with an error.
+Let the other package manager finish, then run the installer again.
+Other package errors stop the installer without a retry.
+
 Download and checks happen in a temporary directory first; a failure leaves the current install untouched.
 
 ## Update
