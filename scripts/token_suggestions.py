@@ -232,13 +232,16 @@ def atomic_write(path, content):
         Path(temporary).unlink(missing_ok=True)
 
 
-def timeout(_signum, _frame):
-    raise TimeoutError("report deadline")
-
-
 def publish(config, cutoff, *, started=None):
     if started is None:
         started = time.monotonic()
+    interrupted = False
+
+    def timeout(_signum, _frame):
+        nonlocal interrupted
+        interrupted = True
+        raise TimeoutError("report deadline")
+
     directory = Path(config["fm_home"]) / "data/token-savings"
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     if directory.is_symlink() or directory.stat().st_uid != os.getuid():
@@ -262,6 +265,8 @@ def publish(config, cutoff, *, started=None):
             if not collected[-1]:
                 raise ValueError("no permitted source available")
             text = markdown(bounds, collected, previous.get("state") == "failed")
+            if interrupted or time.monotonic() - started >= 50:
+                raise TimeoutError("report deadline")
             day = bounds[1].astimezone(PACIFIC).date().isoformat()
             atomic_write(directory / f"{day}.md", text)
             for old in sorted(directory.glob("????-??-??.md"))[:-8]:

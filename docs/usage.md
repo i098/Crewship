@@ -488,6 +488,7 @@ The reader publishes each report atomically, prevents overlapping runs, and inte
 The reader does not write Python bytecode files beside its source assets.
 A failed cycle keeps the last successful report and records failure in `status.json`.
 SIGTERM also records failure and keeps the last successful report.
+Cancellation during a SQLite callback still fails the cycle before publication.
 The next successful report states that a prior cycle failed.
 No permitted source means failure, not a zero-saving report.
 This manual reader does not install or enable a timer.

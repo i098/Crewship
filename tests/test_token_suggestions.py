@@ -241,11 +241,15 @@ def test_alarm_preserves_report_and_releases_lock(tmp_path, report, monkeypatch)
     report.publish(config, CUTOFF)
 
 
-@pytest.mark.parametrize("failure", ["termination", "startup_deadline"])
+@pytest.mark.parametrize("failure", ["termination", "startup_deadline", "elapsed_deadline",
+                                     "sqlite_termination", "sqlite_deadline"])
 def test_interrupted_cli_records_failure_and_preserves_report(tmp_path, report, failure):
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(snapshot_fixture(report.windows(CUTOFF))))
     config = {"fm_home": str(tmp_path / "home"), "snapshots": [str(snapshot)]}
+    ledger = tmp_path / "usage.sqlite"
+    ledger_fixture(ledger, report.windows(CUTOFF))
+    config["ledger"] = str(ledger)
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))
     report.publish(config, CUTOFF)
@@ -261,6 +265,23 @@ def import_source(name, *args, **kwargs):
         if {failure!r} == "startup_deadline":
             clock = time.monotonic
             time.monotonic = lambda: clock() + 60
+        elif {failure!r} == "elapsed_deadline":
+            read_snapshot = module.read_snapshot
+            def expire(*args):
+                clock = time.monotonic
+                time.monotonic = lambda: clock() + 60
+                return read_snapshot(*args)
+            module.read_snapshot = expire
+        elif {failure!r}.startswith("sqlite_"):
+            normalize = module.normalized_input
+            def interrupt(*args):
+                if {failure!r} == "sqlite_termination":
+                    os.kill(os.getpid(), signal.SIGTERM)
+                else:
+                    signal.setitimer(signal.ITIMER_REAL, 0.001)
+                    time.sleep(0.05)
+                return normalize(*args)
+            module.normalized_input = interrupt
         else:
             def terminate(*args):
                 os.kill(os.getpid(), signal.SIGTERM)
