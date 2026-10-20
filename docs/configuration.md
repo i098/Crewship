@@ -41,7 +41,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: true
   enable_linger: true
-  data_dir: ""            # Data disk for Docker and the npm and pip caches; see Data disk below
+  data_dir: ""            # See Data disk below for path requirements and storage behavior
   profiles:
     agents: true          # Chrome autoprune, AXI tools, browser defaults
     development: false    # Rust, build tools
@@ -178,7 +178,7 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 | Docker images, containers and volumes | `<data_dir>/docker` | `data-root` in `/etc/docker/daemon.json` (`docker` profile) |
 | npm cache | `<data_dir>/cache/npm` | `npm_config_cache` |
 | pip cache | `<data_dir>/cache/pip` | `PIP_CACHE_DIR` |
-| General syslog | `<data_dir>/host-logs/rsyslog/syslog` | Native rsyslog rotation at 128 MiB plus one message batch, with eight archives |
+| General syslog | `<data_dir>/host-logs/rsyslog/syslog` | [Bounded general syslog](#bounded-general-syslog) |
 
 The variables go into the managed block of `~/.profile`, the Herdr unit and the no-mistakes daemon drop-in. A running Herdr server or no-mistakes daemon reads them only after its next restart. Apply creates `<data_dir>/cache` for the account; Docker creates its own data root. The cargo cache stays in `~/.cargo` on purpose: `CARGO_HOME` also holds `bin` and `config.toml`, so moving it would break `cargo install` on PATH and ignore the existing cargo config.
 
@@ -187,6 +187,7 @@ The bun, pnpm and uv caches stay on the system disk on purpose. These tools hard
 ### Bounded general syslog
 
 Apply changes only the general file action in the distribution `/etc/rsyslog.d/50-default.conf`.
+Native rsyslog rotates the file at 128 MiB plus one message batch.
 The native rotation helper accepts no argument or its exact configured file path.
 It retains eight archives and one active file, approximately 1.125 GiB plus message batches.
 Authentication, kernel, mail, journal, audit rules and other operator settings remain unchanged.

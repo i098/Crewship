@@ -180,7 +180,8 @@ Log flood cap: apply writes `/etc/systemd/journald.conf.d/50-fleet-ratelimit.con
 is host-wide, counts lines not bytes, and is the only limit on journald intake:
 a user unit's own `LogRateLimit*` is ignored, and the `page task error` warning
 Obscura logs for a page whose top-level await never resolves is not suppressed
-at its source. rsyslog still rotates `/var/log/syslog` weekly only.
+at its source.
+See [Bounded general syslog](configuration.md#bounded-general-syslog) for file storage and rotation.
 
 All three tiers share one session. `cookie-sync.ts` keeps a canonical jar at
 `~/.fleet-browser/cookies.json` and converges every live tier to it over CDP.
