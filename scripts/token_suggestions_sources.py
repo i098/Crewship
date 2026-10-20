@@ -110,7 +110,7 @@ producers AS (
            coalesce(max(CASE WHEN kind IN ('start','complete','checkpoint','shutdown')
                         THEN sequence END),0) AS through,
            max(retired_completions) AS retired,
-           count(DISTINCT CASE WHEN (kind='complete' AND at<upper)
+           count(DISTINCT CASE WHEN kind='complete'
                                 OR (kind='start' AND at>=upper)
                                THEN sequence END) AS accounted
     FROM records e CROSS JOIN periods GROUP BY periods.current,e.producer

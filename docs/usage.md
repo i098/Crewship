@@ -464,6 +464,7 @@ Cache shares require known normalized input and both cache buckets.
 The report excludes unknown rows and compares only matching models with complete coverage.
 Unobserved request sequences keep coverage partial, even when a later checkpoint reports them.
 Known request starts after a window do not count as missing requests in that window.
+Known completions account for their sequences across windows; their counts and tokens stay in the completion-time window.
 Duplicate gap and shutdown records count once per producer, event, and kind.
 Zero denominators remain unavailable.
 Cache reuse changes pricing, not total input tokens.

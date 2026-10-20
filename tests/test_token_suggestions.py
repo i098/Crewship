@@ -347,6 +347,34 @@ def test_later_native_activity_does_not_change_closed_windows(tmp_path, report):
     assert "Previous seven complete days" in report.cache_candidates(*after, bounds)[0]["signal"]
 
 
+@pytest.mark.parametrize("current", [False, True])
+def test_late_completion_accounts_for_coverage_without_moving_tokens(tmp_path, report, current):
+    path = tmp_path / "native.sqlite"
+    bounds = report.windows(CUTOFF)
+    boundary = bounds[2] if current else bounds[1]
+    seed_start = bounds[1] if current else bounds[0] + timedelta(days=1)
+    seed_bounds = (bounds[0], seed_start, boundary - timedelta(minutes=2))
+    ledger, accept = native_ledger(path, seed_bounds)
+    try:
+        accept("start", 3, boundary - timedelta(minutes=1), sequence=3,
+               provider="example", model="model")
+        accept("complete", 3, boundary + timedelta(minutes=1), sequence=3,
+               outcome="success", usage_present=True, input_basis="inclusive",
+               input=700, cache_read=350, cache_write=70, output=70, reasoning=5)
+        accept("checkpoint", 103, bounds[2] + timedelta(minutes=2), sequence=3)
+        rows, coverage = report.read_ledger(path, bounds)
+    finally:
+        ledger.db.close()
+    assert all(not row["partial"] and row["incomplete"] == 0 for row in coverage)
+    expected = {0: (1, 100), 1: (1, 100)} if current else {0: (2, 200), 1: (1, 700)}
+    assert {row["current"]: (row["requests"], row["input_total"]) for row in rows} == expected
+    candidates = report.cache_candidates(rows, coverage, bounds)
+    assert candidates and all("Previous seven complete days:" in row["signal"] for row in candidates)
+    text = report.markdown(bounds, report.collect({"ledger": str(path)}, bounds), False)
+    assert text.count("complete for registered sources") == 2
+    assert "Seven-day comparison unavailable" not in text
+
+
 def test_fractional_gap_overlap_is_partial_in_native_and_read_only_reports(tmp_path, report):
     path = tmp_path / "native.sqlite"
     bounds = report.windows(CUTOFF)
