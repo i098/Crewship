@@ -54,6 +54,15 @@ The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
 A completed desk turn records the time, message id, and `basic` or `handoff` in the private `desk.log`.
+
+The shared desk parser gives `SKIP`, `REACT:`, and `TAPBACK:` directives precedence over surrounding prose.
+A single valid reaction produces only a tapback on the free-text desk path.
+A skip, an invalid reaction, conflicting directives, or internal desk reasoning without a valid action produces no text.
+The iMessage bridge also checks structured answer text with this parser before evidence validation.
+Unstructured iMessage output still goes to Firstmate; it cannot bypass the structured routing contract.
+Photon and BlueBubbles share this check before transport selection.
+The Instagram desk uses the same parser.
+
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.

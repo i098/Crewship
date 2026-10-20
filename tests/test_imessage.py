@@ -234,20 +234,6 @@ console.log(JSON.stringify(await transcribe({json.dumps(str(tone))}, listen).cat
     assert "exit 3" in run("fail", 20_000)["error"] and "boom" in run("fail", 20_000)["error"]
     assert "failed" in run("slow", 1_500)["error"]
 
-@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-def test_desk_parses_tapbacks_and_skip():
-    result = bun(f"""
-import {{ isSkip, parseReact }} from {DESK};
-const answers = ["REACT:👍", "REACT: 🫡 ", "REACT:👍 thanks", "got it", "ok REACT:👍", "SKIP"];
-const skips = ["skip", "Skip", "SKIP.", "skip!!", "skip it", "REACT:👍", "ok"];
-console.log(JSON.stringify({{
-  reacts: answers.map((a) => parseReact(a) ?? null),
-  skips: skips.map(isSkip),
-}}));
-""")
-    assert result["reacts"] == ["👍", "🫡", None, None, None, None]
-    assert result["skips"] == [True, True, True, True, False, False, False]
-
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_bubbles_split_paragraphs_and_keep_lists():

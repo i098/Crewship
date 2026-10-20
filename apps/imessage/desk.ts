@@ -54,6 +54,8 @@ export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: 
   if (!ok) return;
   const value = parseBasic(drafted);
   if (!value || !Array.isArray(value.evidence)) return;
+  const action = verdict(true, value.answer);
+  if (action.skip || action.tapback) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
   if (/\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(value.answer)) return;
   if (/\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(value.answer)) return;
@@ -113,22 +115,24 @@ export function deskInput(system: string, view: string, status: string, latest: 
   return { prompt, spent: OVERHEAD + size(system + prompt) };
 }
 
-// The tapback emoji when the desk's whole answer is REACT:<emoji>, else undefined (send the answer as text).
+// A valid reaction directive wins over surrounding prose. Conflicting directives send nothing.
 export function parseReact(answer: string): string | undefined {
-  return answer.match(/^REACT:\s*(\S+)\s*$/u)?.[1];
+  const directives = [...answer.matchAll(/\b(?:REACT|TAPBACK)\s*:\s*(\S+)/giu)];
+  const emoji = directives.length === 1 ? directives[0][1] : "";
+  return /^(?:\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*)$/u.test(emoji) ? emoji : undefined;
 }
 
-// True when the desk's whole answer is SKIP (any case, trailing punctuation allowed): send nothing.
+// A skip directive takes precedence over text and reactions.
 export function isSkip(answer: string): boolean {
-  return /^skip\W*$/i.test(answer);
+  return /^skip\W*$/i.test(answer) || /\bSKIP\b/.test(answer);
 }
 
-// One Instagram desk turn's response: nothing (SKIP, or a failed call: Firstmate still has the note), a tapback,
-// or a text. `outcome` is the turn's line in the desk log.
+// Both messaging desks use this guard before sending answer text.
 export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?: string; outcome: string } {
-  const skip = !ok || isSkip(drafted);
-  const tapback = skip ? undefined : parseReact(drafted);
-  return { skip, tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
+  const tapback = parseReact(drafted);
+  const internal = /\b(?:unsummarized|my move)\b|\b(?:firstmate|(?:front )?desk)\b[^.!?\n]*\b(?:thread|handoff|routing|decid(?:e|es|ing))\b/i.test(drafted);
+  const skip = !ok || !drafted.trim() || isSkip(drafted) || (!tapback && (/\b(?:REACT|TAPBACK)\s*:/i.test(drafted) || internal));
+  return { skip, tapback: skip ? undefined : tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
 }
 
 // One desk turn's call (a process whose stdout is its answer), with zoom as its only tool; `memoryDir` and
