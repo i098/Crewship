@@ -170,17 +170,28 @@ def wait_for_start_process(service):
 def test_runtime_failure_status_and_disable_stop(installation):
     root, apply = installation
     home = Path.home()
+    cutoff = datetime.now(UTC)
     snapshot = root / "saved.json"
-    saved_report(snapshot, datetime.now(UTC))
+    saved_report(snapshot, cutoff)
     settings = {"fm_home": str(home), "snapshots": [str(snapshot)], "enabled": True}
     apply(settings, manage=True)
     assert "changed=0" in apply(settings, manage=True)
     units = home / ".config/systemd/user"
     service, timer = "crewship-token-suggestions.service", "crewship-token-suggestions.timer"
+    assets = home / ".local/share/crewship/token-suggestions"
+    unit = configparser.ConfigParser(interpolation=None)
+    unit.read(units / service)
+    command = shlex.split(unit["Service"]["ExecStart"])
+    dropin = units / f"{service}.d"
+    dropin.mkdir()
+    override = dropin / "proof.conf"
+    fixed_start = ("[Service]\nExecStart=\nExecStart="
+                   + shlex.join([*command, "--cutoff", cutoff.isoformat()]) + "\n")
+    override.write_text(fixed_start)
+    userctl("daemon-reload")
     userctl("start", service)
     latest = home / "data/token-savings/latest.md"
     before = latest.read_bytes()
-    assets = home / ".local/share/crewship/token-suggestions"
     delay = root / "delay.py"
     delay.write_text(
         "import sys, time\n"
@@ -188,18 +199,16 @@ def test_runtime_failure_status_and_disable_stop(installation):
         "import token_suggestions as report\n"
         "def delayed(*args): time.sleep(120)\n"
         "report.read_snapshot = delayed\n"
-        f"sys.exit(report.main(['--config', {str(assets / 'config.json')!r}]))\n"
+        f"sys.exit(report.main(['--config', {str(assets / 'config.json')!r}, "
+        f"'--cutoff', {cutoff.isoformat()!r}]))\n"
     )
-    dropin = units / f"{service}.d"
-    dropin.mkdir()
-    override = dropin / "proof.conf"
     override.write_text(f"[Service]\nExecStart=\nExecStart=/usr/bin/python3 -B {delay}\n")
     userctl("daemon-reload")
     result = userctl("start", service, check=False)
     assert result.returncode != 0
     assert json.loads(latest.with_name("status.json").read_text())["state"] == "failed"
     assert latest.read_bytes() == before
-    override.write_text("[Service]\nExecStartPre=/usr/bin/sleep 30\n")
+    override.write_text(fixed_start + "ExecStartPre=/usr/bin/sleep 30\n")
     (units / timer).write_text("[Timer]\nOnActiveSec=1h\n"
                               f"Unit={service}\n[Install]\nWantedBy=timers.target\n")
     userctl("daemon-reload")

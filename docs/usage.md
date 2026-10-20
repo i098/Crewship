@@ -509,7 +509,9 @@ The object is omitted by default.
 The reader requires an explicit `fm_home`; either metadata source can be omitted.
 The installer writes private assets and `config.json` under `~/.local/share/crewship/token-suggestions`.
 It does not open metadata sources or run the report during apply.
-This delivery installs no timer and starts no report, even when `enabled` is true.
+This PR installs no timer and starts no report during apply.
+Setting `enabled: true` does not schedule anything yet.
+The daily 09:00 America/Los_Angeles (Pacific) timer arrives in the next PR, after one complete report cycle is proven.
 The service has a 60-second limit, low CPU priority, and a private umask.
 The reader leaves time for failure status before the service limit.
 
