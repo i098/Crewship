@@ -158,6 +158,34 @@ if dropped:
 PY
 }
 
+# APT waits for dpkg locks itself; update also needs a retry for the lists lock.
+apt_get() {
+  local deadline=$((SECONDS + 600)) output status remaining
+  echo 'Waiting up to 600 seconds for package locks...'
+  while :; do
+    remaining=$((deadline - SECONDS))
+    ((remaining > 0)) || remaining=0
+    if output=$($sudo env LC_ALL=C DEBIAN_FRONTEND=noninteractive \
+      apt-get -o "DPkg::Lock::Timeout=$remaining" "$@" 2>&1); then
+      printf '%s\n' "$output"
+      return 0
+    else
+      status=$?
+    fi
+    case $output in
+      *'E: Could not get lock '*) ;;
+      *'E: Unable to acquire the dpkg frontend lock ('*'), is another process using it?'*) ;;
+      *) printf '%s\n' "$output" >&2; return "$status" ;;
+    esac
+    if ((SECONDS >= deadline)); then
+      printf '%s\n' "$output" >&2
+      echo 'install.sh: package locks did not clear within 600 seconds; retry after the other package manager finishes.' >&2
+      return "$status"
+    fi
+    sleep 1
+  done
+}
+
 main() {
   local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
@@ -173,8 +201,8 @@ main() {
       missing+=("$package")
   done
   if ((${#missing[@]})); then
-    $sudo apt-get update -q
-    $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
+    apt_get update -q
+    apt_get install -y -q "${missing[@]}"
   fi
 
   # The latest tag comes from the unmetered releases/latest redirect, not the API.

@@ -178,6 +178,54 @@ def test_fresh_install_unpacks_a_release_without_git(release):
     assert (release.home / "calls").read_text().split() == ["dock", "inspect", "chart", "launch"]
 
 
+@pytest.mark.parametrize("failure", ["lock", "timeout", "frontend-timeout", "package"])
+def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
+    bin_dir = tmp_path / "bin"
+    (bin_dir / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
+    (bin_dir / "sudo").chmod(0o755)
+    (bin_dir / "dpkg-query").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "apt-get").write_text(
+        "#!/usr/bin/python3\n"
+        "import os, pathlib, sys\n"
+        "failure = os.environ['FAILURE']\n"
+        "if failure == 'frontend-timeout' and 'install' not in sys.argv:\n"
+        "    sys.exit(0)\n"
+        "calls = pathlib.Path(os.environ['HOME']) / 'apt-calls'\n"
+        "previous = calls.read_text() if calls.exists() else ''\n"
+        "with calls.open('a') as log:\n"
+        "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "if not previous or failure in ('timeout', 'frontend-timeout'):\n"
+        "    message = 'Could not get lock /var/lib/apt/lists/lock'\n"
+        "    if os.environ['FAILURE'] == 'package':\n"
+        "        message = 'Unable to locate package missing'\n"
+        "    if failure == 'frontend-timeout':\n"
+        "        message = 'Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is another process using it?'\n"
+        "    print('E: ' + message, file=sys.stderr)\n"
+        "    sys.exit(100)\n"
+    )
+    release.env["FAILURE"] = failure
+    if failure.endswith("timeout"):
+        bash_env = tmp_path / "bash-env"
+        bash_env.write_text("sleep() { SECONDS=1000000; }\n")
+        release.env["BASH_ENV"] = str(bash_env)
+
+    result = release.install("v1.0.0")
+
+    calls = (release.home / "apt-calls").read_text().splitlines()
+    if failure == "lock":
+        assert result.returncode == 0, result.stderr
+        assert len(calls) == 3
+        assert (release.home / "calls").read_text().split()[-1] == "launch"
+    else:
+        assert result.returncode == 100
+        assert not release.crewship.exists()
+        if failure.endswith("timeout"):
+            assert "package locks did not clear within 600 seconds" in result.stderr
+        else:
+            assert "Unable to locate package missing" in result.stderr
+            assert len(calls) == 1
+
+
 def test_update_keeps_host_files_and_removes_the_replaced_release(release):
     assert release.install("v1.0.0").returncode == 0
     (release.crewship / ".local/host.yml").write_text("mine\n")
