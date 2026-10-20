@@ -70,6 +70,7 @@ def main(argv=None):
     payload = json.dumps({"title": title, "body": body, "labels": labels})
     result = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, text=True)
     if result.returncode:
+        sys.stderr.write(result.stdout)
         sys.exit(result.returncode)
     print(json.loads(result.stdout)["html_url"])
 

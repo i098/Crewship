@@ -56,14 +56,16 @@ def test_cli_refuses_missing_field():
     assert r.returncode != 0 and "proposal" in r.stderr
 
 
-def test_create_failure_reports_child_stderr(tmp_path, monkeypatch):
+@pytest.mark.parametrize("error_body", ["", '{"message":"Validation Failed","errors":[{"field":"title","code":"invalid"}]}\n'])
+def test_create_failure_reports_child_output(tmp_path, monkeypatch, error_body):
+    summary = "gh: Validation Failed (HTTP 422)\n"
     gh = tmp_path / "gh"
-    gh.write_text("#!/bin/sh\nprintf 'HTTP 403: Resource not accessible\\n' >&2\nexit 1\n")
+    gh.write_text(f"#!/bin/sh\nprintf '%s' '{error_body}'\nprintf '%s' '{summary}' >&2\nexit 1\n")
     gh.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
 
     result = run("feature", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
 
-    assert result.returncode != 0
+    assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == "HTTP 403: Resource not accessible\n"
+    assert result.stderr == summary + error_body
