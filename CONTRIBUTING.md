@@ -24,7 +24,7 @@ Follow [Dependencies](docs/dependencies.md) for tool release selection, download
 Only the repository's own development environments (`uv.lock`, `apps/crewboard/Cargo.lock`) stay locked.
 CI pins each GitHub Action to the commit SHA of its latest release, kept current by Dependabot.
 
-No unconditional restarts, daemon-reloads, or bare commands.
+Do not add unconditional restarts or bare commands.
 
 `start_services: false` suppresses every linger, daemon-reload, and systemd start action while still writing unit files and enabling them via static symlinks.
 
