@@ -860,23 +860,48 @@ check_agent_gate() {
     chmod +x "${stub}/bin/omp"
     for row in '0|0|Lean already. Ship.' '0|0|**Lean already. Ship.**' '0|0|`Lean already. Ship.`' \
         '0|0|Looks good. Ship.' '0|0|"Looks good. Ship."' '0|0|Nothing to cut. Ship.' \
-        $'2|0|Nothing to cut here.\nLooks good. Ship.' \
-        $'2|0|Nothing to cut here.\nLean already. Ship.' \
-        $'2|0|Nothing to cut here.\nNothing to cut. Ship.' \
+        $'0|0|Nothing to cut here.\nLooks good. Ship.' \
+        $'0|0|Nothing to cut here.\nLean already. Ship.' \
+        $'0|0|Nothing to cut here.\nNothing to cut. Ship.' \
         $'0|0|\n> _Looks good. Ship._\n\n' \
         $'0|0|**Working...**\nWhat this change does: Simplifies the wrapper.\nLooks **good**. Ship.\nChecked: Exit codes.\nNot checked: Live model.' \
         $'2|0|Looks good. Ship.\nLean already. Ship.' \
         $'2|0|Looks good. Ship.\nLooks good. Ship.' \
         $'2|0|Working...\nChecked: Exit codes.' \
-        $'2|0|Looks good. Ship.\nUnexpected output.' \
+        $'0|0|Looks good. Ship.\nThe wrapper keeps the existing interface.' \
         '2|0|Ship.' '2|0|Verdict: Ship.' '2|0|Verdict: Do not Ship.' \
         $'0|0|Working...\nWhat this change does: Installs Ondine for agents, adds a default diagram rule, and converts ten documentation diagrams to light/dark images while preserving their source. I assumed one fleet host with several agent processes, as the README and capacity guide describe.\n\nLooks good. Ship.\n\nChecked: real installation and repeat installation, rule opt-in behavior, all ten source/render/restore round trips, and light/dark rendering.\n\nNot checked: GitHub’s image proxy or execution on ARM hardware.' \
+        $'0|0|Working...\nWhat this change does: Adds ten shared UI decision rules and a changelog entry, drawing on [Laws of UX](https://lawsofux.com/). I assumed many coding agents read these rules when building apps and marketing pages; this change adds no running service or shared state.\n\nLooks good. Ship.\n\nChecked the supplied diff, both consuming skills, README, installer, and relevant tests. An install smoke check confirmed both skills resolve the same shared guide in both agent locations. No code changed.' \
+        $'0|0|Working...\nWhat this change does: Adds a production-readiness skill with 20 evidence-backed checks, plus its README entry and changelog. I assumed multiple agents using it to review services at each service’s expected peak load.\n\nLooks good. Ship.\n\nChecked linked guidance, all 20 check structures, and temporary installation into both agent directories. All 21 existing skill tests passed.' \
         '2|0|Cut the wrapper.' '2|0|Cut the wrapper. Ship.' '2|0|net: -4 lines possible. Ship.' \
-        $'2|0|Cut the wrapper.\nLooks good. Ship.' $'2|0|net: -4 lines possible.\nNothing to cut. Ship.' \
-        $'2|0|One change remains. Cut the wrapper.\nLooks good. Ship.' \
-        $'2|0|> **Cut the wrapper.**\nLooks good. Ship.' \
-        $'2|0|**Cut** the wrapper.\nLooks good. Ship.' \
-        $'2|0|1) Cut the wrapper.\nLooks good. Ship.' \
+        $'0|0|Cut the wrapper.\nLooks good. Ship.' $'2|0|net: -4 lines possible.\nNothing to cut. Ship.' \
+        $'0|0|You can cut the wrapper.\nLooks good. Ship.' \
+        $'0|0|Consider removing the flag.\nLooks good. Ship.' \
+        $'0|0|One change remains. Cut the wrapper.\nLooks good. Ship.' \
+        $'0|0|> **Cut the wrapper.**\nLooks good. Ship.' \
+        $'0|0|**Cut** the wrapper.\nLooks good. Ship.' \
+        $'0|0|1) Cut the wrapper.\nLooks good. Ship.' \
+        $'0|0|- **Remove** the wrapper.\nLooks good. Ship.' \
+        $'0|0|Delete the wrapper.\nLooks good. Ship.' $'0|0|Drop the wrapper.\nLooks good. Ship.' \
+        $'0|0|Inline the wrapper.\nLooks good. Ship.' $'0|0|Collapse the wrapper.\nLooks good. Ship.' \
+        $'0|0|Replace the wrapper.\nLooks good. Ship.' $'0|0|Merge the wrapper.\nLooks good. Ship.' \
+        $'0|0|Simplify the wrapper.\nLooks good. Ship.' \
+        $'0|0|Checked: wrapper.sh:L112-L130: no changes needed.\nLooks good. Ship.' \
+        $'0|0|Checked: src/my file.py:L12: no changes needed.\nLooks good. Ship.' \
+        $'0|0|Checked: net: -4 lines removed.\nLooks good. Ship.' \
+        $'2|0|Looks good. Ship.\n> **L12: delete: dead flag.**' \
+        $'2|0|1) `file.py:L12-L14:` delete: dead flag.\nLooks good. Ship.' \
+        $'2|0|src/my file.py:L12: delete dead flag.\nLooks good. Ship.' \
+        $'2|0|> 1) `src/my file.py:L12-L14:` delete dead flag.\nLooks good. Ship.' \
+        $'2|0|- **net: -4 lines possible.**\nLooks good. Ship.' \
+        $'2|0|### wrapper.sh:L12: drop the wrapper.\nLooks good. Ship.' \
+        $'2|0|### L12: drop the wrapper.\nLooks good. Ship.' \
+        $'2|0|| L12: drop the wrapper. |\nLooks good. Ship.' \
+        $'2|0|| wrapper.sh:L12: drop the wrapper. |\nLooks good. Ship.' \
+        $'2|0|> 1) ### wrapper.sh:L12: drop the wrapper.\nLooks good. Ship.' \
+        $'2|0|### net: -4 lines possible.\nLooks good. Ship.' \
+        $'2|0|| net: -4 lines possible. |\nLooks good. Ship.' \
+        $'0|0|### Looks good. Ship.\nChecked: wrapper.sh:L12: no changes needed.' \
         '1|1|Declined under the usage policy.' '1|1|Tool failed.' \
         $'2|0|L12: delete: dead flag. Nothing replaces it.\nLean already. Ship.' \
         $'2|0|file.py:L12-L14: delete: dead flag. Nothing replaces it.\nLooks good. Ship.' \
