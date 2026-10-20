@@ -156,11 +156,52 @@ the check failed. Check the digest first and stop on a mismatch.
 
 Branch names are `type/short-description`, with a type from the list above, for example `feat/one-command-install`.
 
+## Issues
+
+These issue and pull request rules apply to people and agents.
+Use a plain sentence-case issue title, such as `Explain the fresh-server install requirements`.
+Do not use a commit prefix such as `docs:` in an issue title.
+
+Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or [feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form:
+
+| Form | Label | Required fields | Optional fields |
+| --- | --- | --- | --- |
+| Bug report | `bug` | `what-happened`, `steps`, `version` | `host`, `logs` |
+| Feature request | `enhancement` | `problem`, `proposal` | None |
+
+For bugs, describe the actual and expected results, reproduction commands, and the release tag or commit.
+Include the operating system and logs when useful; remove secrets first.
+For features, describe the problem and the proposed change.
+Ask questions in [Discussions Q&A](https://github.com/i098/Crewship/discussions/categories/q-a), not an issue.
+
+Agents must use `scripts/new-issue`; people can use it or the web forms.
+Run these examples from the repository with the development dependencies installed:
+
+```bash
+uv run scripts/new-issue bug --title "The installer stops before setup" \
+  --field "what-happened=Setup stops; I expected it to finish." \
+  --field "steps=Run the README install command on a fresh server." \
+  --field "version=vX.Y.Z" --field "host=Ubuntu 24.04" --dry-run
+
+uv run scripts/new-issue feature --title "Explain the fresh-server install requirements" \
+  --field "problem=New users cannot find the server requirements." \
+  --field "proposal=List the requirements before the install command." --dry-run
+```
+
+Replace the example values with observed facts.
+Review the printed title, labels, and body, then remove `--dry-run` to create the issue.
+Use `--field logs=@/path/to/redacted-log.txt` to read a field from a file.
+The script applies the form's label and rejects missing required fields or commit-prefixed titles.
+
 ## Pull requests
 
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
+  Keep all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
+  Mark completed checklist items with `[x]`.
+  Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).
@@ -169,10 +210,6 @@ Branch names are `type/short-description`, with a type from the list above, for 
 - Describe what changed and why in the PR body.
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
-
-Open an issue with the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or the [feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form. Ask questions in the [Discussions Q&A category](https://github.com/i098/Crewship/discussions/categories/q-a) ([SUPPORT.md](.github/SUPPORT.md)).
-
-- Agents file issues with `scripts/new-issue`, which builds the body from these forms and refuses a missing required field.
 
 ## Branch rules
 
