@@ -277,6 +277,15 @@
       become: true
       when: (crewship_renamed_koncreet.stat.lnk_target | default('')).startswith('/usr/local/lib/' ~ crewship_renamed_word ~ '/')
 
+    - name: Check for the user unit directory
+      ansible.builtin.stat:
+        path: "{{ crewship_user_units }}"
+        get_checksum: false
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      register: crewship_renamed_unit_dir
+      check_mode: false
+
     # Rendered units are rewritten again by their own tasks; this also carries
     # unmanaged units, such as the proxy services, over to the moved paths.
     - name: Find user unit files that name the pre-rename paths
@@ -288,6 +297,7 @@
       become_user: "{{ crewship_cfg.user }}"
       register: crewship_renamed_unit_files
       check_mode: false
+      when: crewship_renamed_unit_dir.stat.isdir | default(false)
 
     - name: Rewrite the pre-rename paths in user unit files
       ansible.builtin.replace:
@@ -296,7 +306,7 @@
         replace: crewship
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
-      loop: "{{ crewship_renamed_unit_files.files }}"
+      loop: "{{ crewship_renamed_unit_files.files | default([]) }}"
       loop_control:
         label: "{{ item.path }}"
       register: crewship_renamed_unit_rewrites
@@ -331,10 +341,19 @@
              | map('split', '.d/') | map('first') | reject('search', '/')
              | select('search', '[^-][.]service$') | unique | list }}
 
+    - name: Check for the SSH directory
+      ansible.builtin.stat:
+        path: "{{ crewship_cfg.home }}/.ssh"
+        get_checksum: false
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      register: crewship_renamed_ssh_dir
+      check_mode: false
+
     # A new marker would add a second managed block beside the old one.
     - name: Find the pre-rename managed block markers
       ansible.builtin.find:
-        paths: ["{{ crewship_cfg.home }}", "{{ crewship_cfg.home }}/.ssh"]
+        paths: "{{ [crewship_cfg.home] + ([crewship_cfg.home ~ '/.ssh'] if (crewship_renamed_ssh_dir.stat.isdir | default(false)) else []) }}"
         patterns: [.profile, config]
         hidden: true
         contains: "# (BEGIN|END) {{ crewship_renamed_word }} "

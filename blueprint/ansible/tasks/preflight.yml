@@ -25,11 +25,11 @@
 - name: Assert the host is a supported Ubuntu release
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_version in crewship_supported_ubuntu_releases
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] in crewship_supported_ubuntu_releases
     fail_msg: >-
       Crewship targets Ubuntu {{ crewship_supported_ubuntu_releases | join(' / ') }};
-      this host reports {{ ansible_distribution }} {{ ansible_distribution_version }}.
+      this host reports {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
       Set crewship_allow_unsupported_os=true to override deliberately.
     quiet: true
   when: not (crewship_allow_unsupported_os | bool)
@@ -40,7 +40,7 @@
       - crewship_platform | length > 0
       - crewship_deb_arch | length > 0
     fail_msg: >-
-      Architecture {{ ansible_architecture }} is not supported. The toolchain
+      Architecture {{ ansible_facts['architecture'] }} is not supported. The toolchain
       ships linux-x86_64 and linux-aarch64 assets only.
     quiet: true
 
@@ -112,7 +112,7 @@
   ansible.builtin.debug:
     msg:
       - "account            : {{ crewship_cfg.user }} (home {{ crewship_cfg.home }}, workspace {{ crewship_cfg.workspace }})"
-      - "platform           : {{ ansible_distribution }} {{ ansible_distribution_version }} {{ ansible_architecture }} -> {{ crewship_platform }} / {{ crewship_deb_arch }}"
+      - "platform           : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} {{ ansible_facts['architecture'] }} -> {{ crewship_platform }} / {{ crewship_deb_arch }}"
       - "herdr              : {{ crewship_herdr_version }} (latest release) at {{ crewship_herdr_bin }}"
       - "omp                : {{ crewship_omp_version if (crewship_cfg.profiles.agents | bool) else 'not installed' }} (latest release)"
       - "profiles           : {{ crewship_cfg.profiles | dict2items | selectattr('value') | map(attribute='key') | list | join(', ') | default('none', true) }}"
