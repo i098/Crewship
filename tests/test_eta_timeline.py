@@ -116,12 +116,86 @@ def test_send_is_a_png_unless_card_is_asked_for(tmp_path, flags, card_exit):
 
 @pytest.mark.parametrize(
     ("percent", "label"),
-    [(None, "50% · 1 h"), (25, "25% · 1 h"), (250, "100% · 1 h"), (-5, "0% · 1 h")],
+    [(None, "1 h"), (25, "25% · 1 h"), (250, "100% · 1 h"), (-5, "0% · 1 h")],
 )
-def test_percent_is_given_derived_or_clamped(percent, label):
+def test_percent_is_given_or_clamped_not_derived(percent, label):
     tz = eta.ZoneInfo("America/Los_Angeles")
     item = {"label": "a", "group": "g", "state": "planned", "percent": percent}
     item |= {"start": eta.parse("2026-10-12T16:00", tz), "end": eta.parse("2026-10-12T17:00", tz)}
     page, _ = eta.build_page([item], tz, eta.parse("2026-10-12T16:30", tz))
-    assert label in page
-    assert ("rgba(0,0,0,.28)" in page.split("</style>")[1]) == (0 < int(label.split("%")[0]) < 100)
+    assert f">{label}</span>" in page
+    assert ("rgba(0,0,0,.28)" in page.split("</style>")[1]) == (
+        percent is not None and 0 < percent < 100
+    )
+
+
+def chart_geometry(tmp_path, end, start="2026-10-19T09:00"):
+    tz = eta.ZoneInfo("America/Los_Angeles")
+    now = eta.parse(start, tz) + eta.timedelta(hours=1)
+    item = {
+        "label": "Phase 1",
+        "group": "Landing",
+        "state": "planned",
+        "start": eta.parse(start, tz),
+        "end": eta.parse(end, tz),
+    }
+    page, _ = eta.build_page([item], tz, now)
+    script = """<script>
+    const box = e => {
+        const r = e.getBoundingClientRect();
+        return {left:r.left, right:r.right, top:r.top, bottom:r.bottom, text:e.textContent};
+    };
+    const result = {
+        ticks: [...document.querySelectorAll('.tick')].map(box),
+        heading: box(document.querySelector('h1')),
+        now: box(document.querySelector('.nowl'))
+    };
+    const output = document.createElement('pre');
+    output.id = 'geometry';
+    output.textContent = JSON.stringify(result);
+    document.body.append(output);
+    </script>"""
+    src = tmp_path / "chart.html"
+    src.write_text(page.replace("</body>", script + "</body>"))
+    result = subprocess.run(
+        [
+            eta.chrome(), "--headless=new", "--no-sandbox", "--window-size=840,630",
+            "--dump-dom", src.as_uri(),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout.split('<pre id="geometry">')[1].split("</pre>")[0])
+
+
+@pytest.mark.parametrize(
+    "end", ["2026-10-20T15:00", "2026-10-26T17:00", "2027-10-26T17:00", "2036-10-26T17:00"]
+)
+def test_long_range_tick_labels_do_not_overlap(tmp_path, end):
+    boxes = chart_geometry(tmp_path, end)["ticks"]
+    assert all(a["right"] + 8 <= b["left"] for a, b in zip(boxes, boxes[1:]))
+    assert all(0 <= box["left"] < box["right"] <= 840 for box in boxes)
+
+
+@pytest.mark.parametrize(
+    ("end", "second_tick"),
+    [("2026-04-23", "Jan 29"), ("2026-04-27", "Jan 30"), ("2026-05-01", "Jan 31")],
+)
+def test_fixed_day_ticks_in_one_month_keep_distinct_labels(tmp_path, end, second_tick):
+    boxes = chart_geometry(tmp_path, end, start="2026-01-01")["ticks"]
+    labels = [box["text"] for box in boxes]
+    assert labels[:2] == ["Jan 1", second_tick]
+    assert len(set(labels)) == len(labels)
+    assert all(a["right"] + 8 <= b["left"] for a, b in zip(boxes, boxes[1:]))
+    assert all(0 <= box["left"] < box["right"] <= 840 for box in boxes)
+
+
+def test_midnight_ticks_identify_each_day(tmp_path):
+    ticks = chart_geometry(tmp_path, "2026-10-20T15:00")["ticks"]
+    midnight_labels = [tick["text"] for tick in ticks if "12AM" in tick["text"]]
+    assert len(midnight_labels) == 3
+    assert len(set(midnight_labels)) == 3
+
+
+def test_now_label_is_below_heading(tmp_path):
+    boxes = chart_geometry(tmp_path, "2026-10-26T17:00")
+    assert boxes["heading"]["bottom"] < boxes["now"]["top"]

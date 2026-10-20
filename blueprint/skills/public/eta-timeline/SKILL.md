@@ -26,16 +26,27 @@ Pick the view from the question. Do not mix the two in one chart.
 - **Timeline**: the estimated path of a project from today to its full vision. It shows phases with estimated dates, so the operator can see how long each project needs.
 - **Estimate**: a date that is not confirmed. Label every estimated date as an estimate in the caption.
 
-## Do not invent dates or progress
+## Use evidence for dates and progress
 
-- Use only dates, percentages and task states that the repository, the tracker, or the operator gave you. Check them before you draw.
-- If a task has no known finish time, say so. Leave its end empty in the caption and do not guess.
-- If a phase has no known date, mark it `TBD` in the caption. Do not place a bar for it.
+- Check dates, percentages and task states against the repository, tracker, or operator before you draw.
+- If no finish date was supplied, estimate it from evidence such as remaining work, measured throughput, dependencies, or review time.
+- State that evidence in the caption and mark the finish date as an estimate.
+- If the evidence does not support a finish estimate, say so and mark the item `TBD` in the caption without a bar.
+- Never infer completion from elapsed time. Omit `percent` when completion is unknown.
 - Show every assumption in the caption, for example "assumes one reviewer per PR" or "assumes no slip from CI".
 
 ## Chart format
 
-The chart is an 840 px wide PNG (630 px minimum tall) for iMessage. It has a time axis in the operator's local time with AM/PM ticks, one bar per item from start to end with the percent complete and the duration inside ("40% · 1 h 30 min"; a darker fill shows the done part), a red "now" line, a legend, and items grouped by project. A done item is a green dot. A moved item (the end slipped) is amber. A planned item is blue. An item with start equal to end is a dot.
+The chart is an 840 px wide PNG (630 px minimum tall) for iMessage.
+It has a time axis in the operator's local time, with AM/PM ticks for short ranges and date ticks for long ranges.
+Each item has a bar from start to end, a duration, and a percent complete when known ("40% · 1 h 30 min").
+For completion above 0% and below 100%, a darker fill shows the completed part.
+An item without a percent shows only its duration, with no completion fill.
+The chart has a red "now" line, a legend, and items grouped by project.
+A done item is a green dot.
+A moved item (the end slipped) is amber.
+A planned item is blue.
+An item with start equal to end is a dot.
 
 For an ETA chart, group items by project and show only the current tasks. For a timeline chart, group items by project and use one group per phase row, with the estimated date as the end.
 
@@ -46,7 +57,7 @@ For an ETA chart, group items by project and show only the current tasks. For a 
      `[{"label": "0.4.3 release", "group": "Crewship", "start": "2026-10-12T16:30", "end": "2026-10-12T17:30", "state": "planned"}]`
    - Timeline example (phases of one project, each with an estimated end):
      `[{"label": "Phase 1: sign-in", "group": "Landing (estimate)", "start": "2026-10-12T16:30", "end": "2026-10-14T12:00", "state": "planned"}, {"label": "Phase 2: billing (estimate)", "group": "Landing (estimate)", "start": "2026-10-14T12:00", "end": "2026-10-20T17:00", "state": "planned"}]`
-   - `state` is `planned`, `done` or `moved`. `percent` (0-100) is optional: without it the chart uses the share of start..end that has passed at now. A given value is clamped to 0-100. Example: `{"label": "Mobile pass", "group": "Landing", "start": "2026-10-12T16:30", "end": "2026-10-12T18:00", "percent": 60}`. A time without an offset is read in the operator's timezone.
+   - `state` is `planned`, `done` or `moved`. `percent` (0-100) is optional: without it the chart shows only the duration, not a completion value. A given value is clamped to 0-100. Example: `{"label": "Mobile pass", "group": "Landing", "start": "2026-10-12T16:30", "end": "2026-10-12T18:00", "percent": 60}`. A time without an offset is read in the operator's timezone.
 2. Run the script that sits next to this file. It needs headless Chrome (`CHROME` overrides the path):
    `eta_timeline.py /tmp/eta.json --tz America/Los_Angeles`
    It prints the path of a temp PNG. Delete that file after you use it. Do not keep these images: pass `--out` only when a file must persist.
