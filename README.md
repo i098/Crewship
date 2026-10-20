@@ -2,15 +2,42 @@
 
 <div align="center">
 
-**This makes it super easy to start using agents in the cloud, enjoy!**
-
-[![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/i098/Crewship?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/i098/Crewship/releases/latest)
-[![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/FSL--1.1--Apache--2.0-0d9488?style=for-the-badge)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/i098/Crewship?style=for-the-badge&logo=github&color=d97706)](https://github.com/i098/Crewship/stargazers)
-[![Sponsor](https://img.shields.io/badge/Sponsor-db61a2?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/i098)
+Crewship sets up a cloud server for developers who want coding agents to work in parallel.
 
 [Docs](#more-docs) · [Install](#quick-start) · [Changelog](CHANGELOG.md) · [Discussions](https://github.com/i098/Crewship/discussions)
+
+</div>
+
+## Quick start
+
+Use a fresh Ubuntu 24.04 server with systemd, at least 4 vCPUs and 16 GB of RAM.
+Sign in over SSH with a non-root account that has sudo.
+See [Capacity](docs/capacity.md) for sizing.
+Ubuntu 26.04 is also supported.
+
+Run this command on the server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
+```
+
+The installer offers a feature checklist and installs omp agents and Firstmate.
+Then follow [SETUP.md](SETUP.md#1-sign-in-to-github) to sign in to GitHub and your model provider.
+
+For agent-assisted setup, give your coding agent this instruction on the server:
+
+```text
+Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
+```
+
+To update, run the same install command again.
+See [Install, update and migrate](docs/install.md) for other launchers and options.
+
+Crewship is **source-available under FSL-1.1**, not OSI open source.
+Each version becomes Apache-2.0 after two years.
+See [LICENSE](LICENSE).
+
+<div align="center">
 
 <img src="docs/images/crewship.png" alt="Herdr with a sidebar of workspaces and omp agents working on demo repositories in parallel">
 
@@ -31,20 +58,6 @@
 - **[Mac control](docs/security.md#ssh-to-a-mac):** JARVIS-style, agents run `ssh mac` to control apps on your Mac (opt-in).
 
 The other features, each with its docs link, are listed in [docs/features.md](docs/features.md).
-
-## Quick start
-
-1. **Machine:** Ubuntu 24.04 or 26.04 server from any VPS (e.g. Hetzner) or a spare box, 4 vCPU / 16 GB and up; see [Capacity](docs/capacity.md).
-
-2. **Paste:** this into your coding agent or `omp` on the machine. It installs Crewship and sets it up with you:
-
-   ```text
-   Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
-   ```
-
-3. **Update:** run `bunx crewship update` (`npx crewship update` and `pnpm dlx crewship update` work too), or the same install command again
-
-Prefer to do it by hand? `bunx crewship` installs the core (omp agents and Firstmate) and, in a terminal, shows one checklist of the opt-in features, including the public skills. Skip it with `--with docker,chat` (`--with none` for the core only). The installer commands are in [SETUP.md](SETUP.md); the [wiki](https://github.com/i098/Crewship/wiki) has the rest.
 
 ## How it works
 
