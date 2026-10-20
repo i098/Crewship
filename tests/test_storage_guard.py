@@ -67,7 +67,7 @@ class Guard:
         self.stub = tmp / "stub"
         (self.stub / "bin").mkdir(parents=True)
         self.doctor.mkdir()
-        for script in ("storage-guard.sh", "worktree-prune.sh"):
+        for script in ("storage-guard.sh", "worktree-prune.sh", "treehouse-roots.py"):
             shutil.copy(ROOT / "blueprint/fleet/doctor" / script, self.doctor)
         self._exe(self.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/broadcasts"')
         home = self.stub / "firstmate"
@@ -130,10 +130,10 @@ jq -nc --arg id "$3" --argjson announced "$announced" \
             timeout=60,
         )
 
-    def pool_with_stale_output(self) -> Path:
-        """A Treehouse pool worktree holding a tracked file and a month-old ignored node_modules."""
+    def pool_with_stale_output(self, pools: Path | None = None) -> Path:
+        """A Treehouse pool worktree holding a tracked file and month-old ignored output."""
         home = self.doctor.parent / "home"
-        repo = home / ".treehouse/proj-1/2/repo"
+        repo = (pools or home / ".treehouse") / "proj-1/2/repo"
         (repo / "node_modules/pkg").mkdir(parents=True)
         (repo / ".gitignore").write_text("node_modules/\n")
         (repo / "tracked.txt").write_text("keep")
@@ -394,6 +394,26 @@ def test_below_crit_and_in_dry_run_the_worktree_output_stays(guard):
     assert f"would remove {repo}/node_modules" in out
     assert "CRIT worktree step (would run now" in out
     assert (repo / "node_modules/pkg/index.js").is_file()
+
+
+@pytest.mark.parametrize("critical_root", ["native", "legacy"])
+def test_native_and_legacy_pools_are_pruned_only_on_the_critical_mount(guard, critical_root):
+    home_repo = guard.pool_with_stale_output()
+    native = guard.doctor.parent / "bulk"
+    native_repo = guard.pool_with_stale_output(native / ".treehouse")
+    config = Path(guard.env["HOME"]) / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f'root = "{native}"\n')
+    critical = native if critical_root == "native" else Path(guard.env["HOME"])
+    guard.fs({"/": 50, str(critical): 95})
+
+    guard.run()
+
+    removed, kept = ((native_repo, home_repo) if critical_root == "native" else (home_repo, native_repo))
+    assert not (removed / "node_modules").exists()
+    assert (kept / "node_modules/pkg/index.js").is_file()
+    assert (removed / "tracked.txt").is_file()
+    assert guard.prunes() == []
 
 
 @pytest.mark.parametrize(("pct", "alerted"), [(25, False), (75, True)])

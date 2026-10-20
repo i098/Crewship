@@ -89,16 +89,13 @@ Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs
 uv sync --group dev
 
 # Lint
-uv run ruff check scripts tests
+uv run ruff check .
 
 # Test, in parallel as CI runs it (the Koncreet apply tests need root or fakeroot; unprivileged without it they skip)
 uv run pytest -n auto --dist worksteal
 
 # Ansible syntax check
 uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/site.yml --syntax-check
-
-# Full CI (runs all of the above + Docker worker smoke)
-./scripts/ci-local.sh
 ```
 
 See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
