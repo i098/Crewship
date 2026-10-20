@@ -58,7 +58,7 @@ A completed desk turn records the time, message id, and `basic`, `handoff`, or `
 Both desks accept text only from one complete JSON object whose `kind` or `decision` is `reply`.
 The `answer` must be a non-empty string with no directive.
 iMessage also checks the existing source evidence before sending that answer.
-An action can occupy the whole trimmed output, a JSON decision field, or the final line after prose.
+An action can occupy the whole trimmed output, any JSON `kind` or `decision` field, or the final line after prose.
 Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, and `HANDOFF`.
 A JSON tapback uses `{"kind":"tapback","emoji":"👍"}`.
 An action sends only its reaction or silence, never the surrounding prose.
@@ -178,7 +178,7 @@ At start, the service skips a memory log line that does not parse.
 
 ## Instagram front desk
 
-The Instagram desk uses the shared structural reply contract.
+The Instagram desk uses the [shared reply contract](#what-it-does).
 `instagram-desk.service` runs `apps/imessage/instagram-desk.ts` and reuses the memory, runner, input budget, and timing helpers.
 Its channel-specific prompt does not use iMessage direct routing.
 It has no Instagram client.
@@ -188,7 +188,6 @@ It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-d
 - `state/.instagram-dms/sent.jsonl` (`INSTAGRAM_DM_SENT`): one row for each `fm-insta-reply` text, tapback, and typing indicator, with `by`, the value of `INSTAGRAM_DM_ACTOR` (`firstmate` by default). Any row that is not `by: desk` stops the desk for that burst of DMs, like a Firstmate send on iMessage.
 
 When the quiet period ends without a Firstmate action, the desk handles the whole burst in one turn.
-The model returns one reply, tapback, skip, or handoff object under the shared contract.
 The service sends only the selected action or `answer` with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`.
 A desk reply does not stop the next desk turn.
 A new DM or Firstmate action cancels a draft before delivery.
@@ -197,8 +196,9 @@ A burst with two or more different reel links gets no model call.
 After the long quiet, the service sends `got N reels` and one eyes tapback in one `fm-insta-reply` call.
 The log records `batch got N reels` for that batch.
 
-The Instagram thread keeps its own memory; see [Desk memory](#desk-memory).
-The private `desk.log` stores the time, message ID, and a short outcome without raw model text.
+The Instagram thread keeps its memory in `~/.local/state/instagram-desk/memory/`; see [Desk memory](#desk-memory).
+The private `~/.local/state/instagram-desk/desk.log` stores the time, message ID, and a short outcome without raw model text.
+Each model turn records `reply`, `skip`, `handoff`, `react <emoji>`, or `skip (desk failed)`.
 The service saves its position in each log.
 After a restart, only rows from the last 60 seconds can trigger a desk turn.
 Older rows fill the memory but do not trigger replies.

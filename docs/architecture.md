@@ -63,7 +63,7 @@ After a failed call the next calls wait 2, 4, 8 ... times the interval, up to 30
 
 A halt writes a flag file, `state/.instagram-dms/stop`, with its reason. `poll`, `listen`, `reply`, the reel curator, the front desk and `reel_watch.py` all check it and do nothing while it exists (the desk logs `skip (line stopped)`, drops the burst, and calls neither its model nor `fm-insta-reply`). `instagram_dm.py stop` is the kill switch: it writes the same flag by hand, with no Instagram call, and `instagram_dm.py resume` removes it. `reel_watch.py` finds the flag through `INSTAGRAM_DM_DIR` (default `~/.local/state/instagram-dm`): set that variable to the DM state directory in the environment of any agent that runs it.
 
-See [Instagram front desk](imessage.md#instagram-front-desk) for the `instagram-desk.service` acknowledgement contract.
+See [Instagram front desk](imessage.md#instagram-front-desk) for the `instagram-desk.service` reply contract.
 
 #### Official Instagram API
 
