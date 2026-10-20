@@ -280,6 +280,7 @@
     - name: Check for the user unit directory
       ansible.builtin.stat:
         path: "{{ crewship_user_units }}"
+        follow: true
         get_checksum: false
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
@@ -344,6 +345,7 @@
     - name: Check for the SSH directory
       ansible.builtin.stat:
         path: "{{ crewship_cfg.home }}/.ssh"
+        follow: true
         get_checksum: false
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"

@@ -1,3 +1,4 @@
+import configparser
 import getpass
 import json
 import os
@@ -49,17 +50,24 @@ def test_platform_and_account_use_namespaced_facts(tmp_path, injected_facts):
     }, injected_facts=injected_facts)
 
 
-@pytest.mark.parametrize("existing", [False, True])
-def test_legacy_scans_skip_missing_directories_and_preserve_migration(tmp_path, existing):
+@pytest.mark.parametrize("directory_type", ["missing", "directory", "symlink"])
+def test_legacy_scans_skip_missing_directories_and_preserve_migration(tmp_path, directory_type):
     home = tmp_path / "home"
     home.mkdir()
     units = home / ".config/systemd/user"
     ssh = home / ".ssh"
     profile = home / ".profile"
     profile.write_text("# BEGIN code-factory PATH\nkeep this\n# END code-factory PATH\n")
-    if existing:
-        units.mkdir(parents=True)
-        ssh.mkdir()
+    if directory_type != "missing":
+        if directory_type == "symlink":
+            units.parent.mkdir(parents=True)
+            for path in (units, ssh):
+                target = tmp_path / path.name
+                target.mkdir()
+                path.symlink_to(target, target_is_directory=True)
+        else:
+            units.mkdir(parents=True)
+            ssh.mkdir()
         (units / "custom.service").write_text("ExecStart=/opt/code-factory/tool\n")
         (ssh / "config").write_text("# BEGIN code-factory SSH\nHost example\n# END code-factory SSH\n")
     migration = yaml.safe_load((ANSIBLE / "tasks/rename.yml").read_text())[0]
@@ -80,10 +88,37 @@ def test_legacy_scans_skip_missing_directories_and_preserve_migration(tmp_path, 
     assert "code-factory" in profile.read_text()
     apply(tmp_path, tasks, variables)
     assert profile.read_text() == "# BEGIN crewship PATH\nkeep this\n# END crewship PATH\n"
-    if existing:
+    if directory_type != "missing":
         assert (units / "custom.service").read_text() == "ExecStart=/opt/crewship/tool\n"
         assert (ssh / "config").read_text() == "# BEGIN crewship SSH\nHost example\n# END crewship SSH\n"
     else:
         assert not units.exists()
         assert not ssh.exists()
     assert "changed=0" in apply(tmp_path, tasks, variables)
+
+
+@pytest.mark.parametrize("injected_facts", ["True", "False"])
+def test_koncreet_configuration_uses_namespaced_operator_facts(tmp_path, injected_facts):
+    tasks = []
+    for user in ("root", "crewship", "operator"):
+        tasks.append({
+            "ansible.builtin.template": {
+                "src": str(ANSIBLE / "templates/koncreet.conf.j2"),
+                "dest": str(tmp_path / f"{user}.conf"),
+                "force": False,
+            },
+            "vars": {"ansible_facts": {"user_id": user, "user_dir": f"/home/{user}"}},
+        })
+    variables = {"crewship": {"user": "crewship"}}
+    apply(tmp_path, tasks, variables, injected_facts=injected_facts)
+    for user in ("root", "crewship", "operator"):
+        config = configparser.ConfigParser()
+        config.read_string("[koncreet]\n" + (tmp_path / f"{user}.conf").read_text())
+        settings = config["koncreet"]
+        if user == "operator":
+            assert settings["user"] == "operator"
+            assert settings["pubkey_file"] == "/home/operator/.ssh/authorized_keys"
+        else:
+            assert "user" not in settings
+            assert "pubkey_file" not in settings
+    assert "changed=0" in apply(tmp_path, tasks, variables, injected_facts=injected_facts)
