@@ -100,6 +100,7 @@ When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest -n auto --dist worksteal` (pytest-xdist).
 - The [project database service verification](../project-databases.md#verification), run beside the tests.
+- [Token-suggestion installation and runtime checks](../../tests/test_token_suggestions_install.py) in a fresh non-root account on a disposable Ubuntu runner, except for `scope=imessage`.
 - `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../tools/herdr-patch/README.md) also runs on the operator's computer.
 - `bash blueprint/config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
 - `./ship.sh inspect` for `blueprint/config/default.yml` and `blueprint/containers/crewship.container.yml`.

@@ -527,4 +527,3 @@ With `start_services: false`, apply changes files only; it makes no runtime syst
 Removing `token_suggestions` removes the managed reader, configuration, and units.
 Existing metadata, authentication files, and private reports remain untouched.
 Deleting reports requires a separate explicit request.
-CI runs installation and runtime checks in a fresh non-root account on its disposable Ubuntu runner.
