@@ -59,7 +59,9 @@ Run `./ship.sh chart` before applying; every apply upgrades each tool to its lat
 
 See [Updating an existing host](omp.md#updating-an-existing-host) for omp preferences and [omp setup](omp.md#what-the-recipe-sets-up) for model override merging.
 
-A second unchanged provisioning pass should report `changed=0`. Runtime application activity, deliberate self-updates, and changed package indexes can create real drift; investigate it rather than weakening the check or forcing a reset.
+An unchanged provisioning pass reports `changed=0` when no tool has published a new release since the last apply.
+A newer release shows as a change in the toolchain step; this is expected because Crewship installs the latest releases.
+Runtime application activity, deliberate self-updates, and changed package indexes can create real drift; investigate it rather than weakening the check or forcing a reset.
 
 ### Upgrade from a pre-rename install
 

@@ -16,7 +16,9 @@ Crewship is an Ansible playbook with a Python CLI wrapper (`scripts/ship.py`). T
 
 ## Design rules
 
-Every task is idempotent; a second unchanged `launch` reports `changed=0`.
+Every task is idempotent.
+An unchanged `launch` reports `changed=0` when no tool has published a new release since the last apply.
+A newer release shows as a change in the toolchain step; this is expected because Crewship installs the latest releases.
 
 Keep every task check-mode safe; follow the [`chart` contract](docs/configuration.md#commands).
 Remote-source copies need existing parent directories even in check mode.
@@ -162,7 +164,8 @@ Branch names are `type/short-description`, with a type from the list above, for 
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).
-- Idempotent: `launch` → `launch` = `changed=0` on the second run.
+- Idempotent: an unchanged second `launch` reports `changed=0` when no tool has published a new release since the last apply.
+  A newer release shows as an expected change in the toolchain step.
 - Describe what changed and why in the PR body.
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
