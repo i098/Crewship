@@ -183,11 +183,11 @@ def test_a_patch_that_no_longer_applies_stops_and_leaves_the_checkout_as_it_was(
     before = git(host["checkout"], "rev-parse", "HEAD")
     lines = [f"line {n}" for n in range(1, 41)]
     lines[4] = "line 5 rewritten upstream"
-    push_upstream(host, "watch.sh", lines, "upstream: conflicting edit")
+    target = push_upstream(host, "watch.sh", lines, "upstream: conflicting edit")
 
     result, _ = apply(host)
     assert result.returncode != 0
-    assert f"{host['first'].name} no longer applies" in result.stdout
+    assert f"{host['first'].name} no longer applies to origin/main ({target})" in result.stdout
     assert git(host["checkout"], "rev-parse", "HEAD") == before
     assert git(host["checkout"], "status", "--porcelain") == ""
 
@@ -301,6 +301,48 @@ def crewboard_firstmate(tmp_path):
     for script in (*scripts, "fm-watch.sh", "fm-board-bridge.sh", "fm-task-inbox-lib.sh"):
         subprocess.run(["bash", "-n", checkout / "bin" / script], check=True)
     return checkout
+
+
+def test_herdr_patch_layer_is_unchanged_on_repeat_apply(crewboard_firstmate):
+    checkout = crewboard_firstmate
+    before = git(checkout, "rev-parse", "HEAD")
+    target = git(checkout, "rev-parse", "origin/main")
+    result = subprocess.run(
+        ["bash", SCRIPT, "apply", checkout, target, ROOT / "blueprint/patches/firstmate"],
+        check=True, capture_output=True, text=True,
+    )
+    assert result.stdout.splitlines()[-1] == "unchanged"
+    assert git(checkout, "rev-parse", "HEAD") == before
+
+
+@pytest.mark.parametrize("running, expected", [("true", "skipped"), ("false", "relaunchable")])
+def test_herdr_missing_pane_respects_server_state(crewboard_firstmate, tmp_path, running, expected):
+    state = tmp_path / "home/state"
+    state.mkdir(parents=True)
+    meta = state / "sm1.meta"
+    meta.write_text("window=sess:w1:p1\nbackend=herdr\nkind=secondmate\nharness=omp\n")
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    herdr = fakebin / "herdr"
+    herdr.write_text(
+        '#!/bin/sh\ncase "$1 $2" in\n'
+        '  "pane get") echo \'{"error":{"code":"pane_not_found"}}\'; exit 1 ;;\n'
+        '  "status --json") printf \'{"server":{"running":%s}}\\n\' "$FM_FAKE_HERDR_RUNNING" ;;\n'
+        '  *) exit 1 ;;\nesac\n'
+    )
+    herdr.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-c",
+         '. "$1/bin/fm-secondmate-liveness-lib.sh"; '
+         'fm_secondmate_liveness_probe "$2" sm1 poll; '
+         'printf "%s|%s\\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"',
+         "probe", str(crewboard_firstmate), str(meta)],
+        env={**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}",
+             "FM_HOME": str(state.parent), "STATE": str(state), "FM_FAKE_HERDR_RUNNING": running},
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    assert result.stdout.strip() == f"{expected}|missing"
+    assert (state / ".secondmate-closed-sm1").exists() == (running == "true")
 
 
 @pytest.mark.parametrize(

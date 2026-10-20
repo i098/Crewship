@@ -6,15 +6,17 @@ To add a patch, commit the fix on top of upstream `main` in a Firstmate clone, r
 
 [Firstmate patch layer](../../../docs/dependencies.md#firstmate-patch-layer) tells what each patch does, how apply handles upstream changes, and how to drop a patch once upstream has it.
 
-To test the board patches (0003 and 0004) against an upstream checkout, set `FIRSTMATE_TEST_SOURCE` to that checkout and run:
+To test the board and Herdr patches against an upstream checkout, set `FIRSTMATE_TEST_SOURCE` to that checkout and run:
 
 ```bash
-FIRSTMATE_TEST_SOURCE=/path/to/firstmate uv run pytest tests/test_firstmate_patches.py -k crewboard
+FIRSTMATE_TEST_SOURCE=/path/to/firstmate uv run pytest tests/test_firstmate_patches.py -k 'crewboard or herdr'
 ```
 
 The tests clone that checkout into temporary directories, put the whole patch layer on the clone with `scripts/firstmate-patch-layer.sh`, and never change the checkout.
 They check patch application, real brief generation, the supervisor output renderer that session start calls, and the patch's own shell suite `tests/fm-board-bridge.test.sh` (it needs `jq` and `python3`).
 They compare board-off output byte for byte and bind a real Unix socket for board-on output.
 Without `FIRSTMATE_TEST_SOURCE`, these integration tests skip rather than fetch upstream code during the test suite.
+The Herdr tests check that the complete patch layer stays unchanged on repeat apply.
+They also check that a missing pane under a running server is not relaunched, while a stopped server remains recoverable.
 
 Upstream Firstmate is under the [MIT License](https://github.com/kunchenguid/firstmate/blob/main/LICENSE). These patches change Firstmate code and stay under that license, not the license of this repository.

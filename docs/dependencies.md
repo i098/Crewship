@@ -167,7 +167,7 @@ How apply handles each case:
 
 - Upstream moved: apply builds the layer again on the new `origin/main`. It applies each patch three-way, so upstream edits near a patch do not break it.
 - Upstream already has a patch's change: apply prints `skipped, upstream already has it: <file>` and makes no commit for it.
-- A patch no longer applies: the play stops and names the patch. The checkout stays as it was. Update the patch for the new upstream code, or drop it.
+- A patch no longer applies: the play stops and names the patch and the upstream commit. The checkout stays as it was. Update the patch for the new upstream code, or drop it.
 - Local commits: every commit on `main` that is not upstream must carry the `Crewship-Patch` trailer. Apply replaces all of them with the rebuilt layer, so an edited, added, or dropped patch needs no manual step. Apply refuses any commit without the trailer, and a dirty tree or another branch, and never resets, stashes, or cleans.
 
 Verification requires `main` to be exactly `origin/main` plus the patch layer.
