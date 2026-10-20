@@ -178,8 +178,72 @@ def test_fresh_install_unpacks_a_release_without_git(release):
     assert (release.home / "calls").read_text().split() == ["dock", "inspect", "chart", "launch"]
 
 
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+@pytest.mark.parametrize("latest, warns", [("1.1.0", True), ("1.0.0", False), ("0.9.0", False), (None, False), ("offline", False)])
+def test_pnpm_release_policy_preserves_the_selected_release(release, tmp_path, latest, warns):
+    import json
+
+    launcher = tmp_path / "launcher"
+    launcher.mkdir()
+    shutil.copyfile(ROOT / "tools/npm/crewship.js", launcher / "crewship.js")
+    (launcher / "package.json").write_text('{"version":"1.0.0"}')
+    stub = tmp_path / "fetch.js"
+    stub.write_text(
+        "const fs = require('node:fs');\n"
+        "globalThis.fetch = async (url) => {\n"
+        "  if (url === 'https://registry.npmjs.org/crewship/latest') {\n"
+        + ("    throw new Error('registry unavailable');\n" if latest == "offline" else "")
+        + f"    return new Response(JSON.stringify({{version: {json.dumps(latest)}}}));\n"
+        "  }\n"
+        "  if (!url.endsWith('/v1.0.0/install.sh')) throw new Error(`unexpected URL: ${url}`);\n"
+        f"  return new Response(fs.readFileSync({json.dumps(str(ROOT / 'install.sh'))}, 'utf8'));\n"
+        "};\n"
+    )
+    result = subprocess.run(
+        [shutil.which("node"), "--require", str(stub), str(launcher / "crewship.js"), "--with", "none"],
+        capture_output=True, text=True, timeout=60,
+        env={**release.env, "npm_config_user_agent": "pnpm/12.14.0 npm/? node/v24.0.0 linux x64"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
+    assert ("minimumReleaseAge" in result.stdout) is warns
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("Crewship v1.0.0 in")
+
+
+
+@pytest.mark.parametrize("missing", ["curl", "ca-certificates"])
+def test_release_lookup_bootstraps_missing_https_prerequisites(release, tmp_path, missing):
+    bin_dir = tmp_path / "bin"
+    (bin_dir / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
+    (bin_dir / "sudo").chmod(0o755)
+    (bin_dir / "apt-get").write_text(
+        '#!/bin/sh\ncase "$*" in *install*) touch "$HOME/https-installed" ;; esac\n'
+    )
+    (bin_dir / "dpkg-query").write_text(
+        '#!/bin/sh\n[ -f "$HOME/https-installed" ] || exit 1\nprintf installed\n'
+    )
+    (bin_dir / "curl").write_text(
+        '#!/usr/bin/env bash\n[ -f "$HOME/https-installed" ] || exit 127\n' + CURL_SHIM.split("\n", 1)[1]
+    )
+    if missing == "curl":
+        env = tmp_path / "bash-env"
+        env.write_text(
+            'command() {\n'
+            '  if [[ $* == "-v curl" && ! -f "$HOME/https-installed" ]]; then return 1; fi\n'
+            '  builtin command "$@"\n'
+            '}\n'
+        )
+        release.env["BASH_ENV"] = str(env)
+    result = release.install("v1.0.0")
+    assert result.returncode == 0, result.stderr
+    assert (release.home / "https-installed").exists()
+    assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
+
+
+
 @pytest.mark.parametrize("failure", ["lock", "timeout", "frontend-timeout", "package"])
 def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
+    release.env["CREWSHIP_REF"] = "v1.0.0"
     bin_dir = tmp_path / "bin"
     (bin_dir / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
     (bin_dir / "sudo").chmod(0o755)

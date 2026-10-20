@@ -19,6 +19,24 @@ async function latestTag() {
   return tag;
 }
 
+async function explainPnpmRelease(ref) {
+  if (!process.env.npm_config_user_agent?.startsWith("pnpm/") || update) return;
+  try {
+    const response = await fetch("https://registry.npmjs.org/crewship/latest", { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return;
+    const latest = (await response.json()).version;
+    if (!/^\d+\.\d+\.\d+$/.test(latest) || !/^v\d+\.\d+\.\d+$/.test(ref)) return;
+    const selectedParts = ref.slice(1).split(".").map(Number);
+    const difference = latest.split(".").map(Number).map((part, index) => part - selectedParts[index]).find((part) => part !== 0);
+    if (!(difference > 0)) return;
+    console.log(`pnpm selected Crewship ${ref}; the registry latest is v${latest}.`);
+    console.log("pnpm's minimumReleaseAge policy can exclude recent releases (1,440 minutes by default in pnpm 12).");
+    console.log("Crewship keeps your pnpm policy unchanged.");
+  } catch {
+    // Registry availability must not block an already resolved release.
+  }
+}
+
 if (args.some((arg) => arg === "-h" || arg === "--help")) {
   console.log(`Usage: crewship [update] [--container] [--with NAMES] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
@@ -45,6 +63,7 @@ if (process.platform !== "linux") {
 
 (async () => {
   const ref = update ? await latestTag() : `v${version}`;
+  await explainPnpmRelease(ref);
   const url = `https://raw.githubusercontent.com/${repo}/${ref}/install.sh`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);

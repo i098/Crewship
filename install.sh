@@ -193,6 +193,18 @@ main() {
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
 
+  # Bootstrap HTTPS only when the release lookup needs it.
+  if [ -z "$ref" ]; then
+    if ! command -v curl >/dev/null || ! dpkg-query -W -f='${db:Status-Status}' ca-certificates 2>/dev/null | grep -qx installed; then
+      echo 'Installing HTTPS prerequisites to find the Crewship release...'
+      apt_get update -q
+      apt_get install -y -q curl ca-certificates
+    fi
+    ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}
+  fi
+  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
+  echo "Installing Crewship $ref"
+
   # The blueprint/cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
   local packages=(ca-certificates curl gnupg openssl git rsync tar unzip xz-utils zstd
     python3 python3-venv python3-apt python3-yaml jq procps acl sudo) missing=() package
@@ -205,9 +217,6 @@ main() {
     apt_get install -y -q "${missing[@]}"
   fi
 
-  # The latest tag comes from the unmetered releases/latest redirect, not the API.
-  [ -n "$ref" ] || { ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}; }
-  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
   if [ -e "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$dir/.git" ]; then
     echo "install.sh: $dir exists but is not a Crewship install; move it away and rerun" >&2
     return 1

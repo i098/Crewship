@@ -6,12 +6,20 @@
 
 The installer:
 
-1. Installs the OS packages it needs.
-2. Finds the latest release from the `https://github.com/<repo>/releases/latest` redirect, which has no rate limit (`bunx crewship` without `update` uses the release with its own version, so it needs no lookup; `bunx crewship update` does the same redirect lookup).
+1. Finds and prints the selected Crewship release before the main package setup.
+   `install.sh` follows the `https://github.com/<repo>/releases/latest` redirect.
+   If needed, it first installs curl and CA certificates for the release lookup.
+   The npm launchers use their package version unless you pass `update`, which follows the same redirect.
+2. Installs the OS packages it needs.
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
+
+With `pnpm dlx crewship`, pnpm can select an older release under its `minimumReleaseAge` policy.
+The default delay in pnpm 12 is 1,440 minutes.
+When the registry lists a newer release, the launcher explains this policy and keeps the selected release.
+It does not change your pnpm settings.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
