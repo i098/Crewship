@@ -28,7 +28,7 @@
   ansible.builtin.copy:
     dest: /etc/systemd/journald.conf.d/50-fleet-ratelimit.conf
     content: |
-      {{ ansible_managed | comment }}
+      # Managed by Crewship.
       [Journal]
       RateLimitIntervalSec=30s
       RateLimitBurst=1000

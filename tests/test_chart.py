@@ -14,6 +14,15 @@ import yaml
 ROOT = Path(__file__).parents[1]
 
 
+def redirect_system_paths(tasks, root):
+    for task in tasks:
+        for module, key in (("ansible.builtin.file", "path"), ("ansible.builtin.copy", "dest")):
+            options = task.get(module, {})
+            path = options.get(key, "")
+            if path.startswith("/etc/systemd/"):
+                options[key] = str(root / path.lstrip("/"))
+
+
 @pytest.mark.parametrize("existing_home", [False, True])
 @pytest.mark.parametrize("profiles", [
     {},
@@ -23,6 +32,9 @@ ROOT = Path(__file__).parents[1]
 def test_chart_creates_only_missing_directories(tmp_path, existing_home, profiles):
     home = tmp_path / "home"
     home.mkdir()
+    journald = tmp_path / "etc/systemd/journald.conf.d"
+    journald.mkdir(parents=True)
+    (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
     if existing_home:
         for path, mode in (
             (".local/bin", 0o750), (".acpx", 0o750), (".omp/agent/extensions", 0o700),
@@ -50,15 +62,19 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
     for include in site_tasks:
         task_file = include.get("ansible.builtin.import_tasks")
         if task_file not in {
-            "tasks/fleet_guards.yml", "tasks/fleet-browsers.yml",
+            "tasks/fleet_guards.yml", "tasks/fleet_units.yml", "tasks/fleet-browsers.yml",
             "tasks/imessage.yml", "tasks/instagram_dm.yml",
         }:
             continue
         profile_tasks = yaml.safe_load((ROOT / "blueprint/ansible" / task_file).read_text())
+        if task_file.startswith("tasks/fleet"):
+            redirect_system_paths(profile_tasks, tmp_path)
+        else:
+            profile_tasks = [task for task in profile_tasks
+                             if task.get("ansible.builtin.copy", {}).get("remote_src")
+                             or task.get("ansible.builtin.file", {}).get("state") == "directory"]
         tasks.append({
-            "block": [task for task in profile_tasks
-                      if task.get("ansible.builtin.copy", {}).get("remote_src")
-                      or task.get("ansible.builtin.file", {}).get("state") == "directory"],
+            "block": profile_tasks,
             **{key: include[key] for key in ("when", "become", "become_user", "environment")
                if key in include},
         })
@@ -69,7 +85,9 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         "tasks": layout + tasks,
         "handlers": [{"name": name, "ansible.builtin.debug": {"msg": "deferred"}}
                      for name in ("reload user systemd", "no-mistakes daemon restart required",
-                                  "restart fm-imessage", "restart instagram-desk")],
+                                  "restart fm-imessage", "restart instagram-desk",
+                                  "restart journald", "restart fleet timers",
+                                  "restart fleet browser obscura", "restart fleet browser timers")],
     }]))
     variables = {
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
@@ -77,9 +95,14 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
             "home": str(home), "workspace": str(home / "Dev"), "user": getpass.getuser(),
             "profiles": {"fleet_guards": False, "fleet_browsers": False, "firstmate": False,
                          **profiles},
+            "start_services": False,
             "imessage": {"owner": "+15551234567"},
         },
         "crewship_instagram_dm_operator": "operator",
+        "crewship_browser_obscura_dir": str(home / "oss-fleet/browsers/obscura-test"),
+        "crewship_browser_obscura": {
+            "url": (tmp_path / "absent.tar.gz").as_uri(), "sha256": "0" * 64,
+        },
         "ansible_become": False, "crewship_become_target": False, "crewship_account_ready": True,
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
     }
@@ -89,6 +112,9 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert list(journald.iterdir()) == []
+    if profiles.get("fleet_guards") or profiles.get("fleet_browsers"):
+        assert "would download and extract Obscura" in result.stdout
     assert {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
             for path in home.rglob("*") if path.is_file()} == before_files
     assert {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
