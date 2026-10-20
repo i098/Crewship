@@ -1,6 +1,6 @@
 # Model usage metadata
 
-This source provides a native metadata adapter, an upstream source patch, a durable ledger, an OTLP/HTTP exporter, and a SigNoz dashboard.
+This source provides a native metadata adapter, an upstream source patch, a durable ledger, a bounded retry spool, an OTLP/HTTP exporter, and a SigNoz dashboard.
 It does not install or activate a collector, a source adapter, or a SigNoz service.
 Jaeger and its 48-hour raw trace policy remain separate and unchanged.
 
@@ -54,7 +54,7 @@ The Ansible `crewship_usage_install` variable defaults to false.
 Setting it true copies the collector, adapter, dashboard, and source patch after a read-only data-mount check.
 It does not apply the upstream patch, rebuild OMP, set agent configuration, start a service, or activate capture.
 It preserves unknown settings and explicit user overrides.
-The future process opt-in requires four explicit variables:
+The future process opt-in requires four explicit variables and accepts one optional variable:
 
 | Variable | Value |
 | --- | --- |
@@ -62,6 +62,7 @@ The future process opt-in requires four explicit variables:
 | `CREWSHIP_USAGE_COLLECTOR` | The absolute installed `usage.py` path. |
 | `CREWSHIP_USAGE_DATA_DIR` | A dedicated directory below the verified large data mount. |
 | `CREWSHIP_USAGE_MOUNT` | The actual configured mount path. |
+| `CREWSHIP_USAGE_STORE` | Optional: `spool` (the default) or `ledger`, passed to the collector as `--store`. Another value fails every record. |
 
 The default asset directory is `~/.local/share/crewship/usage`.
 The source does not activate unless a patched runtime receives the adapter opt-in.
@@ -129,7 +130,7 @@ Pass a dedicated child directory and the actual mount path explicitly.
 For example, use `--mount /srv/agent-data --data-dir /srv/agent-data/usage` only after that mount exists.
 The collector refuses a missing mount, the root filesystem mount, path traversal, and paths outside the configured mount.
 It does not create a fallback root-backed directory.
-It creates private ledger files with mode `0600` under a private directory.
+It creates private ledger and spool files with mode `0600` under a private directory.
 The `check` command verifies these paths without creating a directory or database.
 It preserves existing host and agent configuration because it writes neither.
 
@@ -144,11 +145,81 @@ The collector rejects producer-supplied retirement records.
 Exported `sequence_through` and `retired_completions` values are immutable snapshots, not account totals or metric labels.
 The dashboard uses the retirement watermark without hiding missing records from a partial export.
 
-Every collector, report, and export invocation prunes expired records.
+Every ledger collector, report, and export invocation prunes expired records.
 A long-running collector also prunes hourly when it receives records.
 Run the `prune` command from an independently authorized scheduler to remove expired data when collection is idle.
 No scheduler or service is installed by this change.
 Offline storage cannot delete records without a running retention process.
+
+## Retry spool
+
+Add `--store spool` before the command to keep metadata only until the OTLP endpoint acknowledges it.
+The operator CLI default `--store ledger` keeps the 35-day ledger described above.
+The spool uses `spool.sqlite` in the same data directory and never opens `usage.sqlite`.
+An existing ledger stays unchanged; its unsent rows still export with `--store ledger export`.
+The native adapter uses the spool unless `CREWSHIP_USAGE_STORE=ledger` is set.
+A running process keeps the store that it started with, so restart producers to change the store.
+
+The spool applies the same allowlist, identity, and transition rules as the ledger.
+`collect` only validates and stores each record; it never compresses or sends.
+Each `export` run first moves the backlog of closed UTC hours into packs.
+A pack holds the rendered OTLP log records of up to 500 records from one closed hour, grouped by model and compressed with zlib.
+The current hour stays unpacked until the export sends it.
+The export sends the oldest packs first; then it packs and sends the current hour in batches of up to 100 records.
+A pack never changes after it is made, so a retry sends the same records in the same request.
+The exporter deletes a pack only after the OTLP acknowledgement.
+
+Moving records into a pack deletes their completions, checkpoints, and gaps from the record table.
+Registrations, shutdowns, and starts without a packed completion stay, because later records need their producer and model labels.
+These kept rows expire 35 days after their last use, as in the ledger; `prune` and `export` remove them.
+A kept row stays while a pending record of its producer or request still needs its labels, so a late pack keeps its producer and model labels.
+A new unpacked checkpoint replaces the older unpacked checkpoint of the same producer.
+The dashboard reads only the latest checkpoint of each producer, so this replacement removes no reported value.
+For the same records, the spool exports the same OTLP log records as the ledger.
+The spool keeps no totals, calendar periods, coverage, or reports, so `report` fails.
+It cannot recognize a replay of a record that it already packed.
+
+SigNoz drops a log record when its timestamp is older than the log retention.
+The exporter therefore holds a pack when its oldest record is less than one hour from the end of 35 days.
+A held pack stays in the spool, compressed and unchanged, and it is never sent.
+`export` reports held records as `held`.
+Held records do not count toward the byte, page, or age limits, so an outage longer than 35 days cannot keep collection refused.
+When every record in a held pack is past its 35-day local retention, `prune`, `collect`, and `export` delete the pack.
+SigNoz would drop these records at 35 days anyway, so this deletion is retention expiry, not a loss of exportable data.
+Each prune that deletes held packs writes one line, such as `{"expired_held_records": 3}`, to standard error.
+
+| Limit | Value |
+| --- | --- |
+| Stored bytes: unpacked records and compressed packs that are not held | 64 MiB |
+| Age of the oldest pending record that is not held | 7 days |
+| Database file | 128 MiB: 32,768 pages of 4,096 bytes |
+| Pages in use when `collect` refuses, less the pages of held packs | More than 32,512 |
+
+`collect` refuses a record that would go past the byte, age, or page limit.
+Without held packs, 256 pages stay free; held packs can use these pages until prune deletes them, about one to two hours later.
+In that window, SQLite's `SQLITE_FULL` limit at 32,768 pages stops any write that needs more pages.
+The 256 free pages let an export acknowledge and remove records from a full spool.
+With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
+SQLite refuses any page above the database limit with `SQLITE_FULL`.
+A refusal has the fixed error message and exit status 1, and it stores nothing.
+The adapter then records a delivery gap and fails the metered model call, as for any other collector failure.
+An export that packs or removes records lets collection continue.
+Records that are still below the limits wait through an endpoint outage and then export.
+
+The spool uses a write-ahead log with full synchronization; a one-record collector process makes two disk syncs, where a rollback journal makes five.
+A commit checkpoints the log into the database after 128 pages, and the log shrinks back to 1 MiB after a checkpoint, so it stays below 4 MiB.
+A closing process does not checkpoint, so a collector process that carries one record does not pay for a full checkpoint.
+The directory holds only `spool.sqlite`, `spool.sqlite-wal`, `spool.sqlite-shm`, and the empty `spool.lock`; a short-lived `spool.sqlite-journal` exists only while the first process creates the database.
+Each collector and export transaction takes an exclusive lock on `spool.lock`.
+The exporter does not keep the lock during the HTTP request.
+Each packing transaction handles at most 500 records.
+After each transaction, the process pauses for one millisecond, because `flock` wakes waiting processes in no fixed order.
+A collector waits for another transaction instead of failing with a busy database.
+
+The spool keeps no exported completions, so it cannot count completions that expire later in SigNoz.
+Its exported `retired_completions` value stays 0.
+A producer that runs longer than 35 days therefore shows its expired completions as missing sequences, and the dashboard marks its periods partial.
+A restarted producer registers a new identity without this effect.
 
 ## Reports and export
 
@@ -174,8 +245,12 @@ Run `export --endpoint https://AUTHORIZED-ENDPOINT/v1/logs` only after separate 
 `SIGNOZ_INGESTION_KEY`, when supplied by the operator, sets the ingestion header and never enters the ledger or exported metadata.
 The exporter refuses endpoint credentials, redirects, and remote plain HTTP.
 Loopback HTTP is supported for isolated protocol fixtures.
-It sends at most 100 metadata log records per invocation.
-Run again to drain more records.
+Each run takes a snapshot of the pending records and makes at most 50 requests.
+Records that arrive during the run wait for the next run.
+The sender compresses each request body with gzip and waits a random time of up to one second between requests.
+These waits spread the requests of many hosts that reconnect at the same time.
+The run stops at the first failed, throttled, or rejected request; the requests before it stay acknowledged.
+The next scheduled run continues, so a slow or busy endpoint receives fewer requests.
 
 The exporter acknowledges a batch only after a successful OTLP response with no rejected records.
 A transport error, rejected batch, or invalid acknowledgement keeps the complete batch pending.

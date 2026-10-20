@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Collect allowlisted model-request metadata in a separate 35-day SQLite ledger."""
+"""Collect allowlisted model-request metadata in a 35-day ledger or a bounded retry spool."""
 
 import argparse
+import fcntl
+import gzip
 import ipaddress
 import json
 import os
+import random
 import re
 import sqlite3
 import sys
 import time
 import urllib.request
+import zlib
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -17,6 +22,15 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 RETENTION = timedelta(days=35)
+BATCH, BATCHES = 100, 50
+SPOOL_BYTES, SPOOL_AGE = 64 * 1024 * 1024, timedelta(days=7)
+SPOOL_PAGES, SPOOL_SPARE = 32768, 256
+# A backlog pack holds up to 500 records of one closed hour, grouped by model.
+WINDOW, PACK = 3600, 500
+# SigNoz drops logs past its retention; a pack goes out only while all its records stay visible.
+VISIBLE = RETENTION - timedelta(hours=1)
+JITTER = 1.0
+TRANSIENT = ("complete", "checkpoint", "gap")
 PACIFIC = ZoneInfo("America/Los_Angeles")
 TOKENS = ("input", "cache_read", "cache_write", "output", "reasoning")
 COMMON = {"schema", "kind", "producer", "event", "at"}
@@ -30,11 +44,12 @@ FIELDS = {
     "retention": set(),
 }
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}\Z")
-SCHEMA = """
-PRAGMA journal_mode=WAL;
+DURABLE = """
 PRAGMA synchronous=FULL;
 PRAGMA secure_delete=ON;
 PRAGMA busy_timeout=10000;
+"""
+TABLES = """
 CREATE TABLE IF NOT EXISTS events (
     producer TEXT NOT NULL, event TEXT NOT NULL, kind TEXT NOT NULL,
     sequence INTEGER, at REAL NOT NULL, ingested REAL NOT NULL,
@@ -56,6 +71,35 @@ CREATE TABLE IF NOT EXISTS producer_state (
     missing_sequences TEXT NOT NULL, retired_completions INTEGER NOT NULL,
     expires REAL NOT NULL
 );
+"""
+SCHEMA = "PRAGMA journal_mode=WAL;" + DURABLE + TABLES
+# WAL commits sync once instead of five times; frequent checkpoints keep the log near 1 MiB.
+SPOOL_SCHEMA = f"""
+PRAGMA page_size=4096;
+PRAGMA journal_mode=WAL;
+PRAGMA wal_autocheckpoint=128;
+PRAGMA journal_size_limit=1048576;
+PRAGMA temp_store=MEMORY;
+PRAGMA max_page_count={SPOOL_PAGES};
+{DURABLE}{TABLES}
+CREATE TABLE IF NOT EXISTS budget (bytes INTEGER NOT NULL);
+INSERT INTO budget SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM budget);
+CREATE TRIGGER IF NOT EXISTS budget_insert AFTER INSERT ON events BEGIN
+    UPDATE budget SET bytes=bytes+length(new.payload);
+END;
+CREATE TRIGGER IF NOT EXISTS budget_delete AFTER DELETE ON events BEGIN
+    UPDATE budget SET bytes=bytes-length(old.payload);
+END;
+CREATE TABLE IF NOT EXISTS packs (
+    id INTEGER PRIMARY KEY, ingested REAL NOT NULL, logged REAL NOT NULL,
+    expires REAL NOT NULL, records INTEGER NOT NULL, body BLOB NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS pack_insert AFTER INSERT ON packs BEGIN
+    UPDATE budget SET bytes=bytes+length(new.body);
+END;
+CREATE TRIGGER IF NOT EXISTS pack_delete AFTER DELETE ON packs BEGIN
+    UPDATE budget SET bytes=bytes-length(old.body);
+END;
 """
 
 
@@ -179,10 +223,12 @@ def _acknowledge_sequence(ranges, sequence):
 
 
 class Ledger:
+    schema = SCHEMA
+
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
-        self.db.executescript(SCHEMA)
+        self.db.executescript(self.schema)
 
     def __enter__(self):
         return self
@@ -190,6 +236,11 @@ class Ledger:
     def __exit__(self, *_):
         self.db.close()
 
+    def locked(self):
+        return nullcontext()
+
+    def _admitted(self, event, now):
+        pass
 
     def accept(self, payload, now=None):
         now = now or datetime.now(UTC)
@@ -225,6 +276,7 @@ class Ledger:
                             "WHERE producer=? AND (kind='register' OR "
                             "(kind='start' AND event=?))",
                             (expiry, event["producer"], event["event"]))
+            self._admitted(event, now)
             self.db.commit()
         except sqlite3.IntegrityError as error:
             self.db.rollback()
@@ -394,32 +446,27 @@ class Ledger:
 
     def export(self, send, now=None):
         now = now or datetime.now(UTC)
-        pending = self.db.execute("SELECT rowid,* FROM events WHERE sent IS NULL AND expires>=? "
-                                  "ORDER BY ingested,rowid LIMIT 100", (now.timestamp(),)).fetchall()
-        if not pending:
-            return 0
-        logs = [self._log_record(row) for row in pending]
-        payload = {"resourceLogs": [{"resource": {"attributes": [
-            {"key": "service.name", "value": {"stringValue": "crewship-usage"}}]},
-            "scopeLogs": [{"scope": {"name": "crewship.usage", "version": "1"},
-                           "logRecords": logs}]}]}
-        reply = send(payload)
-        if not isinstance(reply, dict) or set(reply) - {"partialSuccess"}:
-            raise ValueError("invalid export acknowledgement")
-        partial = reply.get("partialSuccess", {})
-        if (not isinstance(partial, dict)
-                or set(partial) - {"rejectedLogRecords", "errorMessage"}):
-            raise ValueError("invalid export acknowledgement")
-        rejected = partial.get("rejectedLogRecords", 0)
-        if type(rejected) is bool or rejected not in (0, "0"):
-            raise ValueError("export rejected metadata records")
-        if partial.get("errorMessage"):
-            raise ValueError("export returned a partial acknowledgement")
-        with self.db:
-            self.db.executemany("UPDATE events SET sent=? WHERE producer=? AND event=? AND kind=?",
-                                [(now.timestamp(), row["producer"], row["event"], row["kind"])
-                                 for row in pending])
-        return len(pending)
+        exported = 0
+        with self.locked():
+            high = self.db.execute("SELECT coalesce(max(rowid),0) FROM events").fetchone()[0]
+        for _ in range(BATCHES):
+            with self.locked():
+                pending = self.db.execute("SELECT rowid,* FROM events WHERE sent IS NULL AND expires>=? "
+                                          "AND rowid<=? ORDER BY ingested,rowid LIMIT ?",
+                                          (now.timestamp(), high, BATCH)).fetchall()
+                logs = [self._log_record(row) for row in pending]
+            if not pending:
+                break
+            acknowledged(send(batch(logs)))
+            with self.locked(), self.db:
+                self._acknowledged(pending, now)
+            exported += len(pending)
+        return exported
+
+    def _acknowledged(self, rows, now):
+        self.db.executemany("UPDATE events SET sent=? WHERE producer=? AND event=? AND kind=?",
+                            [(now.timestamp(), row["producer"], row["event"], row["kind"])
+                             for row in rows])
 
     def _log_record(self, stored):
         event = validate(json.loads(stored["payload"]))
@@ -469,6 +516,161 @@ class Ledger:
                 "body": {"stringValue": "Model request metadata"}, "attributes": attributes}
 
 
+def batch(logs):
+    return {"resourceLogs": [{"resource": {"attributes": [
+        {"key": "service.name", "value": {"stringValue": "crewship-usage"}}]},
+        "scopeLogs": [{"scope": {"name": "crewship.usage", "version": "1"},
+                       "logRecords": logs}]}]}
+
+
+def acknowledged(reply):
+    if not isinstance(reply, dict) or set(reply) - {"partialSuccess"}:
+        raise ValueError("invalid export acknowledgement")
+    partial = reply.get("partialSuccess", {})
+    if (not isinstance(partial, dict)
+            or set(partial) - {"rejectedLogRecords", "errorMessage"}):
+        raise ValueError("invalid export acknowledgement")
+    rejected = partial.get("rejectedLogRecords", 0)
+    if type(rejected) is bool or rejected not in (0, "0"):
+        raise ValueError("export rejected metadata records")
+    if partial.get("errorMessage"):
+        raise ValueError("export returned a partial acknowledgement")
+
+
+class Spool(Ledger):
+    """Keep unexported metadata, in compressed packs, plus the context that later records need."""
+
+    schema = SPOOL_SCHEMA
+
+    def __init__(self, path):
+        self.lock = os.open(Path(path).with_suffix(".lock"),
+                            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with self.locked():
+            super().__init__(path)
+            # One process per record must not pay a full checkpoint each time it closes.
+            self.db.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+
+    def __exit__(self, *_):
+        super().__exit__()
+        os.close(self.lock)
+
+    @contextmanager
+    def locked(self):
+        # SQLite's busy handler polls and can starve a waiter; a blocking flock queues it.
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            # flock wakes waiters without order; a short pause stops a loop from taking it back.
+            time.sleep(0.001)
+
+    def accept(self, payload, now=None):
+        with self.locked():
+            return super().accept(payload, now)
+
+    def _admitted(self, event, now):
+        if event["kind"] == "checkpoint":
+            self.db.execute("DELETE FROM events WHERE producer=? AND kind='checkpoint' "
+                            "AND sent IS NULL AND event!=?", (event["producer"], event["event"]))
+        visible = (now - VISIBLE).timestamp()
+        oldest, size, used, held = self.db.execute(
+            "SELECT (SELECT min(ingested) FROM (SELECT min(ingested) AS ingested FROM events "
+            "WHERE sent IS NULL UNION ALL SELECT min(ingested) FROM packs WHERE logged>=?)),"
+            "(SELECT bytes FROM budget),(SELECT page_count FROM pragma_page_count())"
+            "-(SELECT freelist_count FROM pragma_freelist_count()),"
+            "(SELECT coalesce(sum(length(body)),0) FROM packs WHERE logged<?)",
+            (visible, visible)).fetchone()
+        # Held packs are past the SigNoz retention: they wait for prune and do not block admission.
+        if oldest < (now - SPOOL_AGE).timestamp():
+            raise ValueError("retry spool is too old")
+        # Collectors stop short of max_page_count: an acknowledgement also needs free pages.
+        if size - held > SPOOL_BYTES or used - held // 4096 > SPOOL_PAGES - SPOOL_SPARE:
+            raise ValueError("retry spool is full")
+
+    def export(self, send, now=None):
+        now = now or datetime.now(UTC)
+        with self.locked():
+            high = self.db.execute("SELECT coalesce(max(rowid),0) FROM events").fetchone()[0]
+        while self._pack(now, high, closed=True):
+            pass
+        exported = 0
+        for _ in range(BATCHES):
+            pack = self._next(now) or self._pack(now, high, closed=False) and self._next(now)
+            if not pack:
+                break
+            # A pack never changes, so a retry after an uncertain send repeats its exact body.
+            acknowledged(send(batch(json.loads(zlib.decompress(pack["body"])))))
+            with self.locked(), self.db:
+                self.db.execute("DELETE FROM packs WHERE id=?", (pack["id"],))
+            exported += pack["records"]
+        return exported
+
+    def _next(self, now):
+        with self.locked():
+            return self.db.execute("SELECT id,records,body FROM packs WHERE logged>=? "
+                                   "ORDER BY ingested,id LIMIT 1",
+                                   ((now - VISIBLE).timestamp(),)).fetchone()
+
+    def held(self, now=None):
+        now = now or datetime.now(UTC)
+        with self.locked():
+            return self.db.execute("SELECT coalesce(sum(records),0) FROM packs WHERE logged<?",
+                                   ((now - VISIBLE).timestamp(),)).fetchone()[0]
+
+    def _pack(self, now, high, closed):
+        """Move the oldest pending records of one hour into one compressed pack, grouped by model."""
+        with self.locked(), self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            first = self.db.execute("SELECT ingested FROM events WHERE sent IS NULL AND rowid<=? "
+                                    "ORDER BY ingested,rowid LIMIT 1", (high,)).fetchone()
+            if first is None or closed and first[0] >= now.timestamp() // WINDOW * WINDOW:
+                return False
+            rows = self.db.execute("SELECT rowid,* FROM events WHERE sent IS NULL AND rowid<=? "
+                                   "AND ingested<? ORDER BY ingested,rowid LIMIT ?",
+                                   (high, first[0] // WINDOW * WINDOW + WINDOW,
+                                    PACK if closed else BATCH)).fetchall()
+            logs = sorted((self._log_record(row) for row in rows), key=lambda log: next(
+                (item["value"]["stringValue"] for item in log["attributes"]
+                 if item["key"] == "usage.model"), ""))
+            self._acknowledged(rows, now)
+            self.db.execute("INSERT INTO packs(ingested,logged,expires,records,body) "
+                            "VALUES(?,?,?,?,?)",
+                            (min(row["ingested"] for row in rows),
+                             min(max(row["at"], row["ingested"]) for row in rows),
+                             max(row["expires"] for row in rows), len(rows),
+                             zlib.compress(json.dumps(logs, separators=(",", ":")).encode())))
+        return True
+
+    def _acknowledged(self, rows, now):
+        done = [(row["producer"], row["event"], row["kind"]) for row in rows
+                if row["kind"] in TRANSIENT]
+        self.db.executemany("DELETE FROM events WHERE producer=? AND event=? AND kind=?", done)
+        self.db.executemany("UPDATE events SET sent=? WHERE producer=? AND event=? AND kind=?",
+                            [(now.timestamp(), row["producer"], row["event"], row["kind"])
+                             for row in rows if row["kind"] not in TRANSIENT])
+        self.db.executemany("DELETE FROM events WHERE producer=? AND event=? AND kind='start' "
+                            "AND sent IS NOT NULL",
+                            [identity[:2] for identity in done if identity[2] == "complete"])
+
+    def prune(self, now=None):
+        now = (now or datetime.now(UTC)).timestamp()
+        with self.locked(), self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            removed = self.db.execute(
+                "DELETE FROM events WHERE sent IS NOT NULL AND expires<? AND NOT EXISTS ("
+                "SELECT 1 FROM events AS pending WHERE pending.sent IS NULL "
+                "AND pending.producer=events.producer "
+                "AND (events.kind='register' OR pending.event=events.event))", (now,)).rowcount
+            expired = self.db.execute("SELECT coalesce(sum(records),0) FROM packs WHERE expires<?",
+                                      (now,)).fetchone()[0]
+            self.db.execute("DELETE FROM packs WHERE expires<?", (now,))
+            self.db.execute("DELETE FROM producer_state WHERE expires<?", (now,))
+        if expired:
+            print(json.dumps({"expired_held_records": expired}), file=sys.stderr)
+        return removed
+
+
 def configured_data_dir(data_dir, mount):
     mount, data_dir = Path(mount), Path(data_dir)
     if not mount.is_absolute() or not data_dir.is_absolute() or ".." in data_dir.parts:
@@ -488,12 +690,12 @@ def configured_data_dir(data_dir, mount):
     return resolved
 
 
-def data_path(data_dir, mount):
+def data_path(data_dir, mount, name):
     directory = configured_data_dir(data_dir, mount)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = directory / "usage.sqlite"
+    path = directory / name
     if path.is_symlink():
-        raise ValueError("ledger must not be a symlink")
+        raise ValueError("metadata storage must not be a symlink")
     return path
 
 
@@ -508,7 +710,7 @@ def sender(endpoint):
             loopback = False
         if url.scheme != "http" or not loopback:
             raise ValueError("use HTTPS for a remote OTLP endpoint")
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
     if key := os.environ.get("SIGNOZ_INGESTION_KEY"):
         headers["signoz-ingestion-key"] = key
 
@@ -517,9 +719,16 @@ def sender(endpoint):
             return None
 
     opener = urllib.request.build_opener(NoRedirect)
+    requests = 0
 
     def send(payload):
-        request = urllib.request.Request(endpoint, json.dumps(payload).encode(), headers)
+        nonlocal requests
+        if requests:
+            # Random gaps spread the requests of many hosts that reconnect at the same time.
+            time.sleep(random.uniform(0, JITTER))
+        requests += 1
+        body = gzip.compress(json.dumps(payload).encode(), mtime=0)
+        request = urllib.request.Request(endpoint, body, headers)
         with opener.open(request, timeout=15) as response:
             if response.status != 200:
                 raise ValueError("export has no success acknowledgement")
@@ -545,6 +754,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--mount", required=True)
+    parser.add_argument("--store", choices=("ledger", "spool"), default="ledger",
+                        help="spool keeps only unexported metadata in a bounded retry buffer")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("collect")
     commands.add_parser("prune")
@@ -559,8 +770,12 @@ def main(argv=None):
         configured_data_dir(args.data_dir, args.mount)
         print(json.dumps({"mounted": True}))
         return
+    spool = args.store == "spool"
+    if spool and args.command == "report":
+        raise ValueError("the retry spool keeps no local history")
     os.umask(0o077)
-    with Ledger(data_path(args.data_dir, args.mount)) as ledger:
+    path = data_path(args.data_dir, args.mount, "spool.sqlite" if spool else "usage.sqlite")
+    with (Spool if spool else Ledger)(path) as ledger:
         if args.command not in {"prune", "collect"}:
             ledger.prune()
         if args.command == "collect":
@@ -571,7 +786,9 @@ def main(argv=None):
             bounds = calendar_bounds(args.period, args.at or datetime.now(UTC))
             print(json.dumps(ledger.summary(*bounds)))
         else:
-            print(json.dumps({"exported": ledger.export(sender(args.endpoint))}))
+            exported = ledger.export(sender(args.endpoint))
+            print(json.dumps({"exported": exported, "held": ledger.held()} if spool
+                             else {"exported": exported}))
 
 
 if __name__ == "__main__":
