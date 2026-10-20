@@ -1,7 +1,8 @@
 # Model usage metadata
 
-This source provides a native metadata adapter, an upstream source patch, a durable ledger, a bounded retry spool, an OTLP/HTTP exporter, and a SigNoz dashboard.
-It does not install or activate a collector, a source adapter, or a SigNoz service.
+Crewship provides a native metadata adapter, an upstream source patch, a durable ledger, a bounded retry spool, an OTLP/HTTP exporter, and a SigNoz dashboard.
+The optional installation configures the export timer and copies the native assets.
+It does not install SigNoz or rebuild the source runtime.
 Jaeger and its 48-hour raw trace policy remain separate and unchanged.
 
 ## Source compatibility
@@ -50,11 +51,54 @@ A source-package patch alone does not prove capture from that bundle.
 CLI activation requires an OMP artifact rebuilt from the patched source and a separate integration check.
 The copied native-source fixture exercises real provider parsers and collector delivery without changing the installed runtime.
 
-The Ansible `crewship_usage_install` variable defaults to false.
-Setting it true copies the collector, adapter, dashboard, and source patch after a read-only data-mount check.
-It does not apply the upstream patch, rebuild OMP, set agent configuration, start a service, or activate capture.
-It preserves unknown settings and explicit user overrides.
-The future process opt-in requires four explicit variables and accepts one optional variable:
+Configure `crewship.usage` in the host configuration:
+
+```yaml
+crewship:
+  usage:
+    endpoint: https://ingest.example.invalid/v1/logs
+    enabled: true
+    auth_file: /srv/secrets/signoz.env
+    mount: /srv/agent-data
+    state_dir: /srv/agent-data/usage
+```
+
+An empty endpoint is the default and installs nothing.
+Use the full OTLP/HTTP logs URL, including `/v1/logs`.
+Remote endpoints require HTTPS; loopback HTTP supports isolated fixtures.
+The configured mount must exist and differ from the root filesystem.
+An empty `state_dir` uses `crewship.data_dir/usage`.
+The installer checks the mount without creating state.
+
+The optional `auth_file` is a systemd environment file containing `SIGNOZ_INGESTION_KEY=...`.
+Create it separately with mode `0600`, readable by the target account.
+Crewship records only its path and never copies, reads, or deletes the authentication file.
+Leave the path empty when the endpoint needs no ingestion key.
+A missing configured file stops export instead of sending without its key.
+
+Run `./ship.sh chart` to preview and `./ship.sh launch` to install.
+The installation copies the client, adapter, dashboard, source patch, and `capture.env` into `~/.local/share/crewship/usage`.
+It installs `crewship-usage.service` and `crewship-usage.timer` as user units.
+The timer runs five minutes after boot and five minutes after each export finishes, plus up to five minutes of random delay.
+One service instance exports at a time, with a twenty-minute timeout.
+Each run uses the bounded spool, gzip requests, request limit, and per-request random delay described below.
+It does not open or drain an old `usage.sqlite` ledger.
+
+With `start_services: false`, installation writes units and the static timer link without starting, stopping, or reloading systemd.
+With service management enabled, set `usage.enabled: false` and apply to stop the timer and any current export.
+This removes the boot link and installed files.
+Clearing `usage.endpoint` and applying has the same effect.
+Both operations preserve state, old ledgers, and authentication files.
+When service management is off, apply again with service management enabled to stop an already running timer.
+Stop or restart opted-in source processes without `capture.env` before disabling or removing collection.
+Already running sources keep their environment.
+
+### Native process opt-in
+
+The installation does not apply the upstream patch, rebuild OMP, or activate capture in existing processes.
+For a separately verified patched runtime, source the installed `capture.env` before starting that process.
+Do not source it globally.
+The file selects the spool and supplies these variables:
 
 | Variable | Value |
 | --- | --- |
@@ -66,7 +110,7 @@ The future process opt-in requires four explicit variables and accepts one optio
 
 The default asset directory is `~/.local/share/crewship/usage`.
 The source does not activate unless a patched runtime receives the adapter opt-in.
-No installed source, binary, process, or host configuration changes here.
+Installation preserves unrelated host and agent settings.
 
 ## Durable protocol
 
@@ -147,8 +191,8 @@ The dashboard uses the retirement watermark without hiding missing records from 
 
 Every ledger collector, report, and export invocation prunes expired records.
 A long-running collector also prunes hourly when it receives records.
-Run the `prune` command from an independently authorized scheduler to remove expired data when collection is idle.
-No scheduler or service is installed by this change.
+The installed spool export timer prunes spool data, including while capture is idle.
+Run the ledger `prune` command from a separately authorized scheduler if an old ledger still needs retention cleanup.
 Offline storage cannot delete records without a running retention process.
 
 ## Retry spool

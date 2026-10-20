@@ -1,0 +1,15 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Export metadata-only model usage to SigNoz (Crewship managed)
+
+[Service]
+Type=oneshot
+{% if crewship_usage.auth_file %}
+EnvironmentFile={{ crewship_usage.auth_file }}
+{% endif %}
+ExecStart=/usr/bin/python3 -I "{{ crewship_usage_assets }}/usage.py" --mount "{{ crewship_usage.mount }}" --data-dir "{{ crewship_usage_state }}" --store spool export --endpoint "{{ crewship_usage.endpoint | replace('%', '%%') }}"
+TimeoutStartSec=20min
+Nice=10
+NoNewPrivileges=true
+UMask=0077
