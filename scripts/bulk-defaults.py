@@ -20,8 +20,11 @@ def check_config_links(path):
             raise FileNotFoundError(f"Unavailable configuration link: {component}")
 
 
-def native_text(path):
+def native_text(path, changes):
     check_config_links(path)
+    path = path.resolve()
+    if path in changes:
+        return changes[path]
     return path.read_text() if os.path.lexists(path) else ""
 
 
@@ -92,31 +95,26 @@ def native_changes(home, data):
         alternate = {".config/pip/pip.conf": home / ".pip/pip.conf",
                      ".config/pnpm/rc": home / ".npmrc"}.get(relative)
         if alternate:
-            legacy = native_text(alternate)
+            legacy = native_text(alternate, changes)
             if update(legacy, section, key, value) == legacy:
                 continue
         path = home / relative
-        text = native_text(path)
+        text = native_text(path, changes)
         desired = update(text, section, key, value)
         if desired != text:
-            changes[path] = desired
-    return changes
-
-
-def path_changes(home, data):
-    changes = {}
+            changes[path.resolve()] = desired
     go = home / ".config/go/env"
-    text = native_text(go)
+    text = native_text(go, changes)
     desired = text
     for key, value in {"GOCACHE": data / "cache/go-build", "GOMODCACHE": data / "cache/go-mod"}.items():
         if not re.search(r"(?m)^" + key + "=", text):
             desired = desired.rstrip() + f"\n{key}={value}\n"
     if desired != text:
-        changes[go] = desired
+        changes[go.resolve()] = desired
     downloads = home / ".config/user-dirs.dirs"
-    text = native_text(downloads)
+    text = native_text(downloads, changes)
     if not re.search(r"(?m)^\s*XDG_DOWNLOAD_DIR=", text):
-        changes[downloads] = text.rstrip() + f'\nXDG_DOWNLOAD_DIR="{data}/downloads"\n'
+        changes[downloads.resolve()] = text.rstrip() + f'\nXDG_DOWNLOAD_DIR="{data}/downloads"\n'
     return changes
 
 
@@ -150,7 +148,7 @@ def private_dirs(data, check):
 
 
 def configure(home, data, check=False):
-    changes = native_changes(home, data) | path_changes(home, data)
+    changes = native_changes(home, data)
     pnpm = shutil.which("pnpm")
     if pnpm:
         check_config_links(home / (os.environ.get("XDG_CONFIG_HOME") or ".config") / "pnpm/config.yaml")

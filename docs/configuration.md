@@ -193,6 +193,7 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 
 Native configuration works without shell initialization.
 Apply adds missing keys and preserves existing keys, comments, credentials, modes, and symbolic links.
+Updates through symbolic links to the same file accumulate before the write.
 An unavailable symbolic-link target causes apply to fail instead of creating a replacement.
 New per-account pool, cache, download, and temporary directories use mode `0700`.
 Apply preserves the modes of existing directories.

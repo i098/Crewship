@@ -1,5 +1,6 @@
 import grp
 import importlib.util
+import json
 import os
 import pwd
 import subprocess
@@ -144,6 +145,48 @@ def test_native_configuration_symlinks_keep_their_targets(home):
     assert credential in target.read_text()
     assert f"cache={home.parent}/data/cache/npm" in target.read_text().splitlines()
     assert target.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("layout", ["pnpm-to-npm", "npm-to-pnpm", "shared-target"])
+def test_linked_native_defaults_accumulate_in_one_idempotent_apply(home, layout):
+    npmrc = home / ".npmrc"
+    pnpmrc = home / ".config/pnpm/rc"
+    pnpmrc.parent.mkdir(parents=True)
+    target = {
+        "pnpm-to-npm": npmrc,
+        "npm-to-pnpm": pnpmrc,
+        "shared-target": home.parent / "shared-rc",
+    }[layout]
+    original = "# Operator settings.\n//registry.example.invalid/:_authToken=${TOKEN}\n"
+    target.write_text(original)
+    target.chmod(0o640)
+    links = [path for path in (npmrc, pnpmrc) if path != target]
+    for path in links:
+        path.symlink_to(target)
+    data = home.parent / "data"
+
+    def run(*options):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/bulk-defaults.py"),
+             "--home", str(home), "--data-dir", str(data), *options],
+            capture_output=True, text=True, check=True,
+        )
+        return json.loads(result.stdout)
+
+    assert run("--check") == {"changed": True}
+    assert target.read_text() == original
+    assert run() == {"changed": True}
+    parser = bulk.configparser.RawConfigParser(delimiters=("=",))
+    parser.read_string("[user]\n" + npmrc.read_text())
+    assert parser.get("user", "cache") == str(data / "cache/npm")
+    assert parser.get("user", "store-dir") == str(data / "cache/pnpm")
+    assert original in target.read_text()
+    applied = target.read_bytes()
+    assert run("--check") == {"changed": False}
+    assert run() == {"changed": False}
+    assert target.read_bytes() == applied
+    assert target.stat().st_mode & 0o777 == 0o640
+    assert all(path.is_symlink() and path.resolve() == target for path in links)
 
 
 def test_unavailable_native_symlink_does_not_create_a_replacement(home):
