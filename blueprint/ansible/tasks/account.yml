@@ -254,6 +254,7 @@
 - name: Remove the retired managed Bash environment block
   ansible.builtin.blockinfile:
     path: "{{ crewship_cfg.home }}/.bashrc"
+    create: true
     marker: "# {mark} crewship managed environment"
     state: absent
   become: "{{ crewship_become_target | bool }}"
@@ -296,23 +297,6 @@
   when:
     - crewship_manage_profile_path | bool
     - crewship_account_ready | bool
-
-# Every agent runs file watchers (LSP servers, bundlers, test runners), and all
-# of them run as this one account, so the stock 128 inotify instances per user
-# is the first limit a busy host hits. Kernel settings do not apply inside a
-# container, so only hosts that start services get it.
-- name: Raise the per-user inotify instance limit
-  ansible.builtin.copy:
-    dest: /etc/sysctl.d/60-agent-host.conf
-    content: |
-      # Managed by Crewship (docs/capacity.md).
-      fs.inotify.max_user_instances = 8192
-    owner: root
-    group: root
-    mode: "0644"
-  become: true
-  when: crewship_manage_services | bool
-  notify: load agent host sysctl
 
 # --- user manager -----------------------------------------------------------
 # Skipped entirely when start_services is false (image builds, containers).
@@ -361,3 +345,27 @@
     - crewship_manage_services | bool
     - crewship_account_ready | bool
     - not ansible_check_mode
+
+- name: Load pending user-manager defaults before starting services
+  ansible.builtin.meta: flush_handlers
+  when:
+    - crewship_manage_services | bool
+    - crewship_account_ready | bool
+
+# Every agent runs file watchers (LSP servers, bundlers, test runners), and all
+# of them run as this one account, so the stock 128 inotify instances per user
+# is the first limit a busy host hits. Kernel settings do not apply inside a
+# container, so only hosts that start services get it.
+- name: Raise the per-user inotify instance limit
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-agent-host.conf
+    content: |
+      # Managed by Crewship (docs/capacity.md).
+      fs.inotify.max_user_instances = 8192
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: crewship_manage_services | bool
+  notify: load agent host sysctl
+

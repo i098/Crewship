@@ -9,6 +9,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import tomllib
 from pathlib import Path
@@ -81,6 +82,35 @@ def ini_default(text, section, key, value):
     return text.rstrip() + f"\n[{section}]\n" + entry
 
 
+def pip_config_files(home):
+    dirs = os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg"
+    files = [Path(d) / "pip/pip.conf" for d in dirs.split(":") if d]
+    files += [Path("/etc/pip.conf"), home / ".pip/pip.conf", home / ".config/pip/pip.conf"]
+    if os.environ.get("XDG_CONFIG_HOME"):
+        files.append(Path(os.environ["XDG_CONFIG_HOME"]) / "pip/pip.conf")
+    files.append(Path(sys.prefix) / "pip.conf")
+    if os.environ.get("VIRTUAL_ENV"):
+        files.append(Path(os.environ["VIRTUAL_ENV"]) / "pip.conf")
+    if os.environ.get("PIP_CONFIG_FILE"):
+        files.append(Path(os.environ["PIP_CONFIG_FILE"]))
+    return files
+
+
+def pip_cache_configured(home, changes):
+    for path in pip_config_files(home):
+        parser = configparser.RawConfigParser()
+        target = path.resolve()
+        if target in changes:
+            parser.read_string(changes[target])
+        else:
+            parser.read(path)
+        for section in parser.sections():
+            if any(name.replace("_", "-").removeprefix("--") == "cache-dir"
+                   for name in parser.options(section)):
+                return True
+    return False
+
+
 def native_changes(home, data):
     changes = {}
     settings = [
@@ -92,10 +122,10 @@ def native_changes(home, data):
         (".config/pnpm/rc", ini_default, "", "store-dir", str(data / "cache/pnpm")),
     ]
     for relative, update, section, key, value in settings:
-        alternate = {".config/pip/pip.conf": home / ".pip/pip.conf",
-                     ".config/pnpm/rc": home / ".npmrc"}.get(relative)
-        if alternate:
-            legacy = native_text(alternate, changes)
+        if relative == ".config/pip/pip.conf" and pip_cache_configured(home, changes):
+            continue
+        if relative == ".config/pnpm/rc":
+            legacy = native_text(home / ".npmrc", changes)
             if update(legacy, section, key, value) == legacy:
                 continue
         path = home / relative

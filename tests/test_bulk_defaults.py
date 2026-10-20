@@ -19,6 +19,9 @@ SPEC.loader.exec_module(bulk)
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "xdg"))
+    for name in ("XDG_CONFIG_HOME", "VIRTUAL_ENV", "PIP_CONFIG_FILE"):
+        monkeypatch.delenv(name, raising=False)
     directory = tmp_path / "home"
     directory.mkdir()
     for root in ("cache", ".treehouse"):
@@ -101,7 +104,6 @@ def test_new_native_files_are_private_even_with_open_umask(home):
 
 
 @pytest.mark.parametrize("relative,content,shadow", [
-    (".pip/pip.conf", "[global]\ncache-dir=/custom/legacy-pip\n", ".config/pip/pip.conf"),
     (".npmrc", "store-dir=/custom/pnpm\n", ".config/pnpm/rc"),
 ])
 def test_alternate_native_paths_do_not_gain_a_higher_priority_default(home, relative, content, shadow):
@@ -113,6 +115,51 @@ def test_alternate_native_paths_do_not_gain_a_higher_priority_default(home, rela
 
     assert not (home / shadow).exists()
     assert content in legacy.read_text()
+
+
+@pytest.mark.parametrize("key", ["cache_dir", "cache-dir", "--cache-dir"])
+@pytest.mark.parametrize("location", ["legacy", "global", "xdg-home", "env-file"])
+def test_any_pip_cache_setting_blocks_the_user_default(home, monkeypatch, key, location):
+    unavailable = home.parent / "unavailable-global/pip/pip.conf"
+    unavailable.parent.mkdir(parents=True)
+    unavailable.symlink_to(home.parent / "missing-global.conf")
+    monkeypatch.setenv(
+        "XDG_CONFIG_DIRS",
+        f"{unavailable.parent.parent}:{os.environ['XDG_CONFIG_DIRS']}",
+    )
+    paths = {
+        "legacy": home / ".pip/pip.conf",
+        "global": home.parent / "xdg/pip/pip.conf",
+        "xdg-home": home.parent / "xdg-home/pip/pip.conf",
+        "env-file": home.parent / "operator.conf",
+    }
+    if location == "xdg-home":
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home.parent / "xdg-home"))
+    if location == "env-file":
+        monkeypatch.setenv("PIP_CONFIG_FILE", str(paths["env-file"]))
+    config = paths[location]
+    config.parent.mkdir(parents=True, exist_ok=True)
+    content = f"[global]\n{key}=/custom/pip\n"
+    config.write_text(content)
+    cli = [sys.executable, ROOT / "scripts/bulk-defaults.py", "--home", home, "--data-dir", home.parent / "data"]
+
+    subprocess.run([*cli, "--check"], check=True, capture_output=True)
+    assert not (home / ".config/pip/pip.conf").exists()
+    subprocess.run(cli, check=True, capture_output=True)
+    rerun = json.loads(subprocess.run(cli, check=True, capture_output=True).stdout)
+    assert rerun == {"changed": False}
+    assert not (home / ".config/pip/pip.conf").exists()
+    assert config.read_text() == content
+    if importlib.util.find_spec("pip") is None:
+        return
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("PIP_CACHE_DIR", None)
+    env.pop("PIP_NO_CACHE_DIR", None)
+    pip = subprocess.run(
+        [sys.executable, "-m", "pip", "cache", "dir"],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    assert pip.stdout.strip() == "/custom/pip"
 
 
 def test_failed_replace_does_not_truncate_credentials(home, monkeypatch):

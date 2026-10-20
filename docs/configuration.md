@@ -172,6 +172,7 @@ See [Project databases](project-databases.md) for existing-host management and s
 Set `data_dir` to an existing absolute path on a mounted data disk.
 On a fresh account, the default `""` keeps the legacy storage layout and writes no bulk defaults.
 Clearing `data_dir` removes the managed Bash block and user-manager file.
+Apply and preview tolerate a missing `.bashrc`.
 Native tool keys and existing data remain unchanged.
 Apply refuses a missing path or a path on the root mount before it creates bulk directories.
 Keep the underlying, unmounted mountpoint root-owned and non-writable by the account.
@@ -194,11 +195,14 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 Native configuration works without shell initialization.
 Apply adds missing keys and preserves existing keys, comments, credentials, modes, and symbolic links.
 Updates through symbolic links to the same file accumulate before the write.
-An unavailable symbolic-link target causes apply to fail instead of creating a replacement.
+An unavailable symbolic-link target blocks writes through that link.
 New per-account pool, cache, download, and temporary directories use mode `0700`.
 Apply preserves the modes of existing directories.
 Existing native paths remain explicit choices, including paths written by an earlier apply.
 Change those keys explicitly when changing disks.
+Pip cache settings in any supported configuration file prevent a new default.
+The spellings `cache_dir`, `cache-dir`, and `--cache-dir` identify the same pip option.
+Read-only pip probes skip files that pip cannot open.
 The pnpm 10 user rc receives a missing store default.
 When pnpm is available, its native configuration command also sets a missing global store default, including pnpm 11 YAML.
 Install an absent pnpm and apply again to configure its version-specific store.
@@ -208,7 +212,7 @@ Alternate configuration roots and explicit configuration files remain operator c
 
 The inherited defaults enter `~/.profile`, interactive `~/.bashrc`, and `~/.config/environment.d/60-crewship-bulk.conf`.
 An existing, non-empty environment variable wins in a new shell or installer process.
-A changed file notifies the existing user-manager reload, which runs only when `start_services` is true.
+A changed file notifies the existing user-manager reload, which runs before service starts when `start_services` is true.
 Apply does not import shell values or restart a service for this file.
 Herdr and no-mistakes inherit these defaults from the user manager on their next start.
 A bulk-only Herdr unit change does not restart the running service.

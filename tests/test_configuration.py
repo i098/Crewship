@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -1378,3 +1379,116 @@ def test_bulk_environment_defaults_preserve_explicit_values_across_consumers(
             for entry in shlex.split(line.partition("=")[2])
         )
         assert {key: (inherited | environment)[key] for key in defaults} == inherited
+
+
+def _account_play(tmp_path, names, variables, *options, tasks=(), handlers=()):
+    selected = [
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+        if task["name"] in names
+    ]
+    assert len(selected) == len(names)
+    playbook = tmp_path / "account.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": [*selected, *tasks], "handlers": list(handlers),
+    }]))
+    result = _ansible(
+        tmp_path, "ansible-playbook", "-i", "localhost,", str(playbook), *options,
+        *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_legacy_bash_block_removal_tolerates_a_missing_bashrc_and_keeps_other_lines(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    bashrc = home / ".bashrc"
+    names = {"Remove the retired managed Bash environment block"}
+    variables = {
+        "crewship_cfg": {"user": getpass.getuser(), "home": str(home), "data_dir": ""},
+        "crewship_account_ready": True, "crewship_become_target": False,
+    }
+    for options in (["--check"], []):
+        _account_play(tmp_path, names, variables, *options)
+        assert not bashrc.exists()
+    seeded = (
+        "alias ll='ls -l'\n# BEGIN crewship managed environment\nexport TMPDIR=/old/tmp\n"
+        "# END crewship managed environment\nexport EDITOR=vi\n"
+    )
+    bashrc.write_text(seeded)
+    for options, expected in ((["--check"], seeded), ([], "alias ll='ls -l'\nexport EDITOR=vi\n")):
+        _account_play(tmp_path, names, variables, *options)
+        assert bashrc.read_text() == expected
+
+
+@pytest.mark.parametrize("write", [True, False], ids=["write", "remove"])
+def test_changed_user_manager_defaults_reach_services_started_after_them_only(tmp_path, write):
+    home = tmp_path / "home"
+    conf = home / ".config/environment.d/60-crewship-bulk.conf"
+    conf.parent.mkdir(parents=True)
+    data = tmp_path / "data"
+    defaults = {
+        "DENO_DIR": f"{data}/cache/deno",
+        "BUN_RUNTIME_TRANSPILER_CACHE_PATH": f"{data}/cache/bun-transpiler",
+        "TMPDIR": f"{data}/tmp", "TMP": f"{data}/tmp", "TEMP": f"{data}/tmp",
+    }
+    stale = {key: f"/old/{key}" for key in defaults}
+    conf.write_text("".join(f"{key}={value}\n" for key, value in stale.items()))
+    manager = tmp_path / "manager.py"
+    manager.write_text(
+        "import json, pathlib, subprocess, sys\n"
+        "state, action, name = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]\n"
+        "if action == 'reload':\n"
+        "    (state / 'manager.json').write_text(subprocess.run(\n"
+        "        ['/bin/sh', '-c', 'set -a; [ ! -e \"$1\" ] || . \"$1\"; shift; exec \"$@\"', 'sh', name,\n"
+        "         sys.executable, '-c', 'import json, os; print(json.dumps(dict(os.environ)))'],\n"
+        "        env={}, capture_output=True, text=True, check=True,\n"
+        "    ).stdout)\n"
+        "elif not ((pid := state / f'{name}.pid').exists() and pathlib.Path('/proc', pid.read_text()).exists()):\n"
+        "    pid.write_text(str(subprocess.Popen(\n"
+        "        [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
+        "        env=json.loads((state / 'manager.json').read_text()), start_new_session=True,\n"
+        "        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+        "    ).pid))\n"
+    )
+    command = [sys.executable, str(manager), str(tmp_path)]
+
+    def service(name):
+        pid = (tmp_path / f"{name}.pid").read_text()
+        entries = (entry.partition("=") for entry in Path("/proc", pid, "environ").read_text().split("\0"))
+        return pid, {key: value for key, _, value in entries if key in defaults}
+
+    subprocess.run([*command, "reload", str(conf)], check=True)
+    subprocess.run([*command, "start", "active"], check=True)
+    try:
+        active = service("active")
+        assert active[1] == stale
+        _account_play(
+            tmp_path,
+            {
+                "Write bulk defaults for future user-manager processes",
+                "Remove retired managed user-manager bulk defaults",
+                "Load pending user-manager defaults before starting services",
+            },
+            {
+                "crewship_cfg": {
+                    "user": getpass.getuser(), "home": str(home),
+                    "data_dir": str(data) if write else "", "start_services": True,
+                },
+                "crewship_account_ready": True, "crewship_become_target": False,
+            },
+            tasks=[{
+                "name": "Start services that are not running",
+                "ansible.builtin.command": {"argv": [*command, "start", "{{ item }}"]},
+                "loop": ["active", "inactive"],
+            }],
+            handlers=[{
+                "name": "reload user systemd",
+                "ansible.builtin.command": {"argv": [*command, "reload", str(conf)]},
+            }],
+        )
+        assert service("active") == active
+        assert service("inactive")[1] == (defaults if write else {})
+    finally:
+        for pid in tmp_path.glob("*.pid"):
+            os.kill(int(pid.read_text()), signal.SIGKILL)
