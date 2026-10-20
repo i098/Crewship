@@ -1614,6 +1614,7 @@ const line = {
   } },
 };
 export const Spectrum = async () => {
+  if (process.env.FAKE_STARTUP_URL) await fetch(process.env.FAKE_STARTUP_URL);
   if (existsSync(`${dir}/spectrum-down`)) throw new Error("spectrum did not start");
   return { messages: messages(), __internal: { platforms: new Map([["imessage", { client: existsSync(`${dir}/raw-missing`) ? [] : [{ client: line }] }]]) } };
 };
@@ -2168,6 +2169,104 @@ class FallbackRig:
                 continue
             items.append(json.loads(text))
         return items
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("fallback", ["bluebubbles", "photon"])
+def test_hanging_fallback_does_not_delay_bridge_readiness(tmp_path, fallback):
+    rig = FallbackRig(tmp_path)
+    (rig.fake / "edits").mkdir()
+    with socket.socket() as hanging:
+        hanging.bind(("127.0.0.1", 0))
+        hanging.listen()
+        url = f"http://127.0.0.1:{hanging.getsockname()[1]}"
+        rig.env["FM_IMESSAGE_TRANSPORTS"] = (
+            "photon bluebubbles" if fallback == "bluebubbles" else "bluebubbles photon"
+        )
+        if fallback == "bluebubbles":
+            rig.env["FM_BLUEBUBBLES_RELAYS"] = f"{url},RELAY_PASSWORD"
+        else:
+            rig.env["FAKE_STARTUP_URL"] = url
+        rig.state.mkdir()
+        latest = rig.state / ("latest-bluebubbles" if fallback == "bluebubbles" else "latest")
+        latest.write_text("iMessage;-;+10000000000\nsaved\n1\n")
+        if fallback == "photon":
+            card_port = free_port()
+            rig.env |= {"FM_IMESSAGE_CARD_URL": f"http://127.0.0.1:{card_port}", "FM_IMESSAGE_CARD_PORT": str(card_port)}
+            card = bun(f"""
+import {{ Cards }} from {json.dumps(str(ROOT / "apps/imessage/cards.ts"))};
+const cards = new Cards({json.dumps(str(rig.state / "cards"))});
+console.log(JSON.stringify(cards.add({{ kind: "text", key: "startup", title: "Pending card", lines: ["Ready"], app: true }},
+  {{ space: "iMessage;-;+10000000000", id: "saved" }})));
+""")
+            (rig.state / "outbox").mkdir()
+            (rig.state / "outbox/1.json").write_text(json.dumps({**card["chat"], "card": card["token"]}))
+        try:
+            started = time.monotonic()
+            with rig.out.open("a") as out, rig.err.open("a") as err:
+                rig.bridge = subprocess.Popen(["bun", "bridge.ts"], cwd=rig.app, env=rig.env, stdout=out, stderr=err)
+            wait_for(lambda: "listening" in read_text(rig.out), "listener before fallback timeout", timeout=1)
+            connection = HTTPConnection("127.0.0.1", int(rig.env["FM_IMESSAGE_PORT"]), timeout=1)
+            try:
+                connection.request("GET", "/", headers={"X-Firstmate": "1"})
+                assert connection.getresponse().status == 404
+            finally:
+                connection.close()
+            assert time.monotonic() - started < 1
+            if fallback == "bluebubbles":
+                rig.photon_text("primary", "the primary works")
+            else:
+                rig.relay_text("primary", "the primary works", int(time.time() * 1000))
+            wait_for(lambda: "no answer in" in read_text(rig.err)
+                     or "photon did not start" in read_text(rig.err), "bounded fallback failure", timeout=6)
+            if fallback == "photon":
+                assert rig.outbox()[0]["card"] == card["token"]
+                rig.stop()
+                rig.env.pop("FAKE_STARTUP_URL")
+                rig.starts = 1
+                rig.start()
+                wait_for(lambda: "send card " in read_text(rig.fake / "sent"), "the retained card after restart")
+        finally:
+            rig.close()
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("startup_fails", [False, True])
+def test_photon_startup_deadline_does_not_affect_later_requests(tmp_path, startup_fails):
+    rig = FallbackRig(tmp_path, FM_IMESSAGE_TRANSPORTS="bluebubbles photon")
+    try:
+        (rig.fake / "edits").mkdir()
+        if startup_fails:
+            (rig.fake / "spectrum-down").touch()
+        source = FAKE_UPSTREAM.replace("export const Spectrum =", "const connect =")
+        source += """
+export const Spectrum = async () => {
+  const server = Bun.serve({ port: 0, async fetch() {
+    await Bun.sleep(3500);
+    return new Response("renewed");
+  } });
+  setTimeout(async () => {
+    const url = `http://127.0.0.1:${server.port}`;
+    try {
+      const results = await Promise.all([
+        fetch(url).then((r) => r.text()).catch((e) => e.name),
+        fetch(new Request(url, { signal: AbortSignal.timeout(6000) })).then((r) => r.text()).catch((e) => e.name),
+        fetch(url, { signal: AbortSignal.timeout(50) }).then((r) => r.text()).catch((e) => e.name),
+      ]);
+      writeFileSync(`${dir}/renewals`, JSON.stringify(results));
+    } finally {
+      server.stop(true);
+    }
+  }, 100);
+  return connect();
+};
+"""
+        (rig.app / "node_modules/spectrum-ts/index.js").write_text(source)
+        rig.start()
+        wait_for(lambda: (rig.fake / "renewals").exists(), "post-startup requests", timeout=10)
+        assert json.loads((rig.fake / "renewals").read_text()) == ["renewed", "renewed", "TimeoutError"]
+    finally:
+        rig.close()
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
