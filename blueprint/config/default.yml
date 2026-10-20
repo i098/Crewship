@@ -32,6 +32,7 @@ crewship:
   gateway:
     # Hours an address stays allowed after the right password; the cookie lasts as long.
     allow_hours: 24
+  # Optional board and GitHub sink configuration: see docs/board.md.
   herdr:
     theme: rose-pine
     # The outer terminal shows Herdr's notifications as desktop notifications.

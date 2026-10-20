@@ -12,7 +12,7 @@ The [Firstmate patch layer](dependencies.md#firstmate-patch-layer) adds the opti
 ## Turn it on
 
 1. Make sure that the `firstmate` and `development` profiles are on. Apply builds the board from `apps/crewboard/` with the cargo that the `development` profile installs.
-2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --with board`. All fields are optional:
+2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --with board`. The fields shown below are optional:
 
    ```yaml
    crewship:
@@ -27,6 +27,32 @@ The [Firstmate patch layer](dependencies.md#firstmate-patch-layer) adds the opti
 The new-host questions also ask, one time, whether to turn the board on, when `.local/host.yml` has no `board` block. See [New-host questions](configuration.md#new-host-questions).
 
 Apply copies `apps/crewboard/` to `~/.local/share/crewship/crewboard/source` and runs `cargo build --release --locked` there. It builds again only when the source changes, so a second apply changes nothing. It installs the binary as `~/.local/bin/crewboard` and runs `crewboard serve` as the user service `crewboard.service`, with `Restart=always` and a memory limit. With `start_services: false`, apply writes and enables the unit but does not start it.
+
+### Copy messages to GitHub
+
+Add `github_sink` inside `board` to copy messages to an existing GitHub issue:
+
+```yaml
+crewship:
+  board:
+    github_sink:
+      repo: owner/board
+      issue: 7
+      topics: [fleet, "task/*"]
+      interval: 300
+```
+
+`repo` and `issue` are required.
+`topics` defaults to `[fleet]`; a trailing `*` selects a topic prefix.
+`interval` defaults to 300 seconds and must be at least 60 seconds.
+Authenticate `gh` as the operator account before starting the service.
+Run `./ship.sh launch` to install, enable, and start `crewboard-github-sink.service` after the board.
+The unit uses `Restart=on-failure`.
+With `start_services: false`, apply writes and enables the unit without starting it.
+Remove `github_sink` and apply to stop and remove only the sink.
+Remove `board` and apply to stop and remove both services.
+Read its log with `journalctl --user -u crewboard-github-sink.service`.
+See [privacy guidance](github-board.md#privacy) and [authentication and delivery limits](../apps/crewboard/README.md#github-sink).
 
 ## Use it
 
@@ -83,7 +109,9 @@ With the board off, no process starts and no file is written.
 ## Turn it off
 
 Remove the `board` block from `.local/host.yml` and run `./ship.sh launch`. Apply stops `crewboard.service`, and removes the unit, `~/.local/bin/crewboard` and `~/.local/share/crewship/crewboard`. The socket goes away when the service stops.
+See [sink removal](#copy-messages-to-github) for the optional GitHub service.
 
 ## Troubleshooting
 
 Read the service log with `journalctl --user -u crewboard.service`, and its state with `systemctl --user status crewboard.service`.
+See [sink logs](#copy-messages-to-github) for the optional GitHub service.

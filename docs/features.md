@@ -13,6 +13,7 @@
 - [Model usage metadata and SigNoz export](usage.md) (opt-in)
 - [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container (opt-in)
 - [GitHub board](github-board.md): agent work as issues on a Project board (opt-in)
+- [Crew board GitHub sink](board.md#copy-messages-to-github): copy selected message topics to an existing GitHub issue (opt-in)
 - [Host-move checklist](configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)
 - [Google Workspace CLI](google-workspace.md): `gws` with several Google accounts on a headless host
 - [herdr-patch](../tools/herdr-patch/README.md): Herdr over mosh with real images

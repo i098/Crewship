@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+{% set sink = crewship_cfg.board.github_sink %}
+
+[Unit]
+Description=Copy crew board messages to a GitHub issue (Crewship managed)
+Wants=crewboard.service
+After=crewboard.service network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart={{ crewship_local_bin }}/crewboard github-sink --repo {{ sink.repo }} --issue {{ sink.issue | int }} --interval {{ sink.interval | default(300) | int }} -- {% for topic in sink.topics | default(['fleet']) %}{{ topic | to_json }}{{ ' ' if not loop.last else '' }}{% endfor %}
+
+Restart=on-failure
+RestartSec=2
+Nice=10
+UMask=0077
+
+[Install]
+WantedBy=default.target
