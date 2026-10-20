@@ -109,8 +109,8 @@ done
 
 printf '%s\n' "$out"
 
-# Accept a standalone verdict with up to 80 characters before the final "Ship.".
-if grep -qxE "[[:space:]*\`'\"]*([[:print:]]{1,80}[[:blank:]])?Ship\.[[:space:]*\`'\"]*" <<<"$out" \
+# Require "Ship." as its own sentence, not a command such as "Do not Ship.".
+if grep -qxE "[[:space:]*\`'\"]*([[:print:]]{1,80}\.[[:blank:]]+|Verdict:[[:blank:]]+)?Ship\.[[:space:]*\`'\"]*" <<<"$out" \
   && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out"; then
   exit 0
 fi
