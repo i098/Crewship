@@ -2,6 +2,7 @@
 
 Read by the `app-dashboard` and `landing-marketing` skills. Each rule here applies to both surfaces and lives only here.
 Same format and sources as those skills: `https://www.instagram.com/reel/<id>/` (ids in brackets).
+Additional decision rules draw on [Laws of UX](https://lawsofux.com/).
 
 ## Alignment
 
@@ -54,3 +55,53 @@ Check: raise the browser default font size; text and spacing grow, borders do no
 ## Accessibility
 - Keep every necessary label. A floating label is still a label [Db8J5z5Oy8-]. Removing icons or helper text never removes a label [Dej3pg9IYNv].
 - Respect `prefers-reduced-motion: reduce` (implementation clarification, not from a reel): replace looping or moving animation with a static frame.
+
+## Aesthetic-usability effect
+Why: visual polish can hide usability problems during review.
+Do: test task completion separately from appearance.
+Check: can a new user finish the primary task without help, even if they praise the design?
+
+## Doherty threshold
+Why: slow responses interrupt the user's flow.
+Do: acknowledge input within 400 ms with a visible control state or result; follow the app's loading policy for longer work.
+Check: under a slow connection, does the control respond within 400 ms without claiming the request has finished?
+
+## Similarity
+Why: similar-looking controls imply similar behavior.
+Do: give controls with the same role a consistent shape, color and label style.
+Check: do matching controls behave alike across the flow?
+
+## Common region
+Why: a shared boundary implies that its contents belong together.
+Do: add a shared surface only when spacing alone cannot separate related groups.
+Check: does each surface enclose one meaningful group without implying a relationship to unrelated content?
+
+## Progressive disclosure
+Why: secondary choices compete with the current decision.
+Do: reveal advanced options when needed; keep required choices, costs and errors visible.
+Check: can a user finish the common task without opening advanced options, while still seeing all required information?
+
+## Recognition over recall
+Why: remembering earlier choices adds work and errors.
+Do: show available choices and earlier selections beside the decision that needs them.
+Check: can the user decide without remembering another screen or copying information from it?
+
+## Peak-end rule
+Why: the most intense moment and the ending strongly affect how users remember a task.
+Do: provide recovery at the highest-risk step and end with a clear outcome and next action.
+Check: can the user recover from that step and tell what happened when the task ends?
+
+## Serial position effect
+Why: users tend to remember the first and last items in a sequence.
+Do: place important items first or last when no task order or familiar convention takes priority.
+Check: are key items buried in the middle of an otherwise unordered list?
+
+## Tesler's law
+Why: removing a control can leave its work for the user.
+Do: handle routine calculations and reuse known input; keep consequential choices explicit and defaults editable.
+Check: did simplification remove user work without hiding a required decision?
+
+## Postel's law
+Why: harmless formatting differences should not prevent valid input.
+Do: accept equivalent input formats and normalize them without changing meaning; reject ambiguous or unsafe input with a specific message.
+Check: do equivalent formats produce the same value while ambiguous input requires correction?
