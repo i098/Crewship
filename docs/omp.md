@@ -43,7 +43,14 @@ No credentials are installed. You sign in on each host.
    omp
    ```
 
-2. Sign in to each provider you use in `modelRoles` or the [crewmate and gate tiers](default-config.md).
+2. On first run, choose a theme or use the displayed skip option, then select a provider in the setup screen.
+   Complete these screens before entering slash commands at the normal prompt.
+   Open the printed login URL in your own browser.
+   If omp requests a returned code or redirect URL, enter it directly in the terminal.
+   Follow the provider's remote-login instructions; your browser's localhost is not the remote server.
+
+3. At the normal prompt, sign in to each other provider you use in `modelRoles` or the [crewmate and gate tiers](default-config.md).
+   If you skipped provider setup, sign in here too.
    For Anthropic:
 
    ```text
@@ -52,7 +59,7 @@ No credentials are installed. You sign in on each host.
 
    Run `/login` with no argument to pick from every provider. Logins are per provider: signing in to `anthropic` does not sign in to any other provider.
 
-3. Optional: run `/login anthropic` again with another account. omp pools several accounts of the same provider and rotates between them.
+4. Optional: run `/login anthropic` again with another account. omp pools several accounts of the same provider and rotates between them.
 
 Stored credentials live in `~/.omp/agent/agent.db`. An environment variable such as `ANTHROPIC_API_KEY` also works, but a stored login takes precedence over it. Never copy `agent.db` from another host; see [Security](security.md).
 
