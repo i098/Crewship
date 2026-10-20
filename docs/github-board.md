@@ -14,25 +14,7 @@ The board reads the Firstmate backlog (`data/backlog.md`, the default markdown b
 
 When the [crew board](board.md) is on, `crewboard github-sink` can copy its messages to one existing GitHub issue.
 It does not require the `github_board` timer, a Project, or the same repository.
-Add this block to the host config and run `./ship.sh launch`:
-
-```yaml
-crewship:
-  board:
-    github_sink:
-      repo: owner/board
-      issue: 7
-      topics: [fleet, fm]
-      interval: 600
-```
-
-Only `repo` and `issue` are required.
-The defaults are `topics: [fleet]` and `interval: 300`; the minimum interval is 60 seconds.
-Apply enables `crewboard-github-sink.service`, starts it after the board, and restarts it on failure.
-With `start_services: false`, apply writes and enables the unit but does not start it.
-Remove `board.github_sink` and apply to stop and remove the sink.
-Removing `board` also removes the sink.
-Read its log with `journalctl --user -u crewboard-github-sink.service`.
+See [managed sink configuration](board.md#copy-messages-to-github) for setup, service control, and logs.
 
 For a temporary sink, run it by hand instead:
 
@@ -41,13 +23,7 @@ crewboard github-sink --repo owner/board --issue 7            # topic fleet, one
 crewboard github-sink --repo owner/board --issue 7 fleet fm --interval 600
 ```
 
-The sink posts one REST comment for each interval that had messages, and nothing when no message arrived.
-It uses the operator account's existing `gh` login, without a token in the unit file or command arguments.
-Only an explicit `board.github_sink` block starts the managed service; a board without it makes no sink calls.
-Stop a manual sink with Ctrl-C or SIGTERM: it posts the waiting messages once, then exits.
-A failed post, SIGKILL, or a board restart can lose messages.
-The service restarts after a failure, but it does not recover lost messages.
-How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
+Read the [authentication and message-loss limits](../apps/crewboard/README.md#github-sink) before using either mode.
 
 ## Privacy
 
@@ -73,7 +49,7 @@ The new-host questions also ask, one time, whether to turn the board on, when `.
 
 ## Turn it off
 
-Remove the `github_board` block from `.local/host.yml` and run `./ship.sh launch`. Apply stops `github-board.timer` and removes the timer, `github-board.service` and `~/.local/bin/github-board.py`. After that, the host makes no GitHub calls for the board. The issues and the Project stay on GitHub. The board's own record, `~/.local/state/github-board/state.json`, also stays, so when you turn the board on again with the same `repo` and `project` it continues with the same issues. If you turn it on with a different `repo` or `project`, the board ignores the old record and files new issues. To start again with new issues in the same `repo` and `project`, remove that file before you turn the board on.
+Remove the `github_board` block from `.local/host.yml` and run `./ship.sh launch`. Apply stops `github-board.timer` and removes the timer, `github-board.service` and `~/.local/bin/github-board.py`. After that, the host makes no work-item sync calls. To stop message copies too, follow [sink removal](board.md#copy-messages-to-github). The issues and the Project stay on GitHub. The board's own record, `~/.local/state/github-board/state.json`, also stays, so when you turn the board on again with the same `repo` and `project` it continues with the same issues. If you turn it on with a different `repo` or `project`, the board ignores the old record and files new issues. To start again with new issues in the same `repo` and `project`, remove that file before you turn the board on.
 
 ## Rate limits
 

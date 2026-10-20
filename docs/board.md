@@ -12,7 +12,7 @@ The [Firstmate patch layer](dependencies.md#firstmate-patch-layer) adds the opti
 ## Turn it on
 
 1. Make sure that the `firstmate` and `development` profiles are on. Apply builds the board from `apps/crewboard/` with the cargo that the `development` profile installs.
-2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --with board`. All fields are optional:
+2. Add the block to `.local/host.yml`, or create the file with `./ship.sh dock --with board`. The fields shown below are optional:
 
    ```yaml
    crewship:
@@ -45,12 +45,14 @@ crewship:
 `repo` and `issue` are required.
 `topics` defaults to `[fleet]`; a trailing `*` selects a topic prefix.
 `interval` defaults to 300 seconds and must be at least 60 seconds.
-Run `./ship.sh launch` to install and enable `crewboard-github-sink.service`, with `Restart=on-failure`.
-The service uses the operator account's existing `gh` login; no token goes in the unit or command arguments.
+Authenticate `gh` as the operator account before starting the service.
+Run `./ship.sh launch` to install, enable, and start `crewboard-github-sink.service` after the board.
+The unit uses `Restart=on-failure`.
 With `start_services: false`, apply writes and enables the unit without starting it.
 Remove `github_sink` and apply to stop and remove only the sink.
 Remove `board` and apply to stop and remove both services.
-See [GitHub board messages](github-board.md#crew-board-messages) for privacy and delivery limits.
+Read its log with `journalctl --user -u crewboard-github-sink.service`.
+See [privacy guidance](github-board.md#privacy) and [authentication and delivery limits](../apps/crewboard/README.md#github-sink).
 
 ## Use it
 
@@ -107,7 +109,9 @@ With the board off, no process starts and no file is written.
 ## Turn it off
 
 Remove the `board` block from `.local/host.yml` and run `./ship.sh launch`. Apply stops `crewboard.service`, and removes the unit, `~/.local/bin/crewboard` and `~/.local/share/crewship/crewboard`. The socket goes away when the service stops.
+See [sink removal](#copy-messages-to-github) for the optional GitHub service.
 
 ## Troubleshooting
 
 Read the service log with `journalctl --user -u crewboard.service`, and its state with `systemctl --user status crewboard.service`.
+See [sink logs](#copy-messages-to-github) for the optional GitHub service.
