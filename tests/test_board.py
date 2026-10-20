@@ -1,4 +1,5 @@
 import argparse
+import configparser
 import importlib.util
 import json
 import shutil
@@ -145,6 +146,13 @@ def _apply(tmp_path, home, board, check=False, manage_services=False):
     return result.stdout
 
 
+def _service_settings(path):
+    unit = configparser.ConfigParser(strict=False, interpolation=None, delimiters=("=",))
+    unit.optionxform = str
+    unit.read_string(path.read_text())
+    return unit["Service"]
+
+
 def test_first_preview_does_not_contact_systemd(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
@@ -187,18 +195,19 @@ def test_apply_builds_once_and_removing_the_key_leaves_no_trace(tmp_path, sink):
     assert all(path.exists() for path in files)
     assert all(path.exists() == (sink is not None) for path in sink_files)
     if sink is not None:
-        sink_unit = sink_files[0].read_text()
+        sink_unit = _service_settings(sink_files[0])
         arguments = '--interval 60 -- "fleet" "task/*" "-ops"' if "topics" in sink else '--interval 300 -- "fleet"'
-        assert f"ExecStart={home}/.local/bin/crewboard github-sink --repo owner/board --issue 7 {arguments}\n" in sink_unit
-        assert "Restart=on-failure\n" in sink_unit
+        assert sink_unit["ExecStart"] == f"{home}/.local/bin/crewboard github-sink --repo owner/board --issue 7 {arguments}"
+        assert sink_unit["Restart"] == "on-failure"
         assert sink_files[1].resolve() == sink_files[0]
     assert (home / "cargo.log").read_text() == f"{build}/source build --release --locked --target-dir {build}/target\n"
-    unit = (units / "crewboard.service").read_text()
-    assert (
-        f"ExecStart={home}/.local/bin/crewboard serve --socket %t/crewboard.sock"
-        " --history 128 --cap-bytes 33554432 --max-msg 16384\n"
-    ) in unit
-    assert "Restart=always\n" in unit and "MemoryMax=96M\n" in unit
+    unit = _service_settings(units / "crewboard.service")
+    assert unit["ExecStart"] == (
+        f"{home}/.local/bin/crewboard serve --socket %t/crewboard.sock"
+        " --history 128 --cap-bytes 33554432 --max-msg 16384"
+    )
+    assert unit["Restart"] == "always"
+    assert unit["MemoryMax"] == "96M"
 
     assert "changed=0" in _apply(tmp_path, home, board)
     assert "changed=0" in _apply(tmp_path, home, board, check=True)
