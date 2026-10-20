@@ -10,6 +10,7 @@
 - [Configuration](configuration.md): `.local/host.yml`, the one file that describes a host
 - [Capacity and auto pruners](capacity.md): host sizing per lane count, and cleanup timers
 - [Data disk](configuration.md#data-disk) (opt-in)
+- [Model usage metadata and SigNoz export](usage.md) (opt-in)
 - [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container (opt-in)
 - [GitHub board](github-board.md): agent work as issues on a Project board (opt-in)
 - [Host-move checklist](configuration.md#new-host-questions): new-host questions that follow your own checklist (opt-in)

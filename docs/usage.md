@@ -51,6 +51,8 @@ A source-package patch alone does not prove capture from that bundle.
 CLI activation requires an OMP artifact rebuilt from the patched source and a separate integration check.
 The copied native-source fixture exercises real provider parsers and collector delivery without changing the installed runtime.
 
+## Installation
+
 Configure `crewship.usage` in the host configuration:
 
 ```yaml
@@ -75,7 +77,7 @@ If the directory does not exist, its nearest existing parent must permit the tar
 
 The optional `auth_file` is a systemd environment file containing `SIGNOZ_INGESTION_KEY=...`.
 Create it separately with mode `0600`, readable by the target account.
-Crewship records only its path and never copies, reads, or deletes the authentication file.
+The installer records only its path and never copies, reads, or deletes the authentication file.
 Leave the path empty when the endpoint needs no ingestion key.
 A missing configured file stops export instead of sending without its key.
 
@@ -84,9 +86,9 @@ The installation copies the client, adapter, dashboard, source patch, and `captu
 It installs `crewship-usage.service` and `crewship-usage.timer` as user units.
 The timer schedules export five minutes after boot and after each export finishes, plus up to five minutes of random delay.
 An expired timer deadline can start export immediately on activation or resume.
-The sender delays every request, including the first, by a random interval of up to one second.
+The sender also applies the [per-request random delay](#reports-and-export) before the first request.
 One service instance exports at a time, with a twenty-minute timeout.
-Each run uses the bounded spool, gzip requests, request limit, and per-request random delay described below.
+Each run uses the [bounded spool](#retry-spool) and the [export limits](#reports-and-export).
 It does not open or drain an old `usage.sqlite` ledger.
 
 With `start_services: false`, installation writes units and the static timer link without starting, stopping, or reloading systemd.
@@ -114,7 +116,6 @@ The file selects the spool and supplies these variables:
 | `CREWSHIP_USAGE_MOUNT` | The actual configured mount path. |
 | `CREWSHIP_USAGE_STORE` | Optional: `spool` (the default) or `ledger`, passed to the collector as `--store`. Another value fails every record. |
 
-The default asset directory is `~/.local/share/crewship/usage`.
 The source does not activate unless a patched runtime receives the adapter opt-in.
 Installation preserves unrelated host and agent settings.
 

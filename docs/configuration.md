@@ -33,6 +33,7 @@ Host paths, unit names, and the compose image name do not change in this step.
 ## The host config
 
 An excerpt with the defaults `./ship.sh dock` writes. The full document is [`blueprint/config/default.yml`](../blueprint/config/default.yml).
+See [Model usage metadata](usage.md#installation) for the optional `crewship.usage` configuration.
 
 ```yaml
 crewship:
