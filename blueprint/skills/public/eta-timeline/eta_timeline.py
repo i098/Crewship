@@ -38,7 +38,7 @@ def duration(m):
 
 
 def tick_label(t, step):
-    if step >= 28 * 1440:
+    if step >= 31 * 1440:
         return t.strftime("%b %Y")
     if step >= 1440:
         return t.strftime("%b %-d")

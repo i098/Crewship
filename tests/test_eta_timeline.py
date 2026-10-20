@@ -129,14 +129,14 @@ def test_percent_is_given_or_clamped_not_derived(percent, label):
     )
 
 
-def chart_geometry(tmp_path, end):
+def chart_geometry(tmp_path, end, start="2026-10-19T09:00"):
     tz = eta.ZoneInfo("America/Los_Angeles")
-    now = eta.parse("2026-10-19T10:00", tz)
+    now = eta.parse(start, tz) + eta.timedelta(hours=1)
     item = {
         "label": "Phase 1",
         "group": "Landing",
         "state": "planned",
-        "start": eta.parse("2026-10-19T09:00", tz),
+        "start": eta.parse(start, tz),
         "end": eta.parse(end, tz),
     }
     page, _ = eta.build_page([item], tz, now)
@@ -172,6 +172,19 @@ def chart_geometry(tmp_path, end):
 )
 def test_long_range_tick_labels_do_not_overlap(tmp_path, end):
     boxes = chart_geometry(tmp_path, end)["ticks"]
+    assert all(a["right"] + 8 <= b["left"] for a, b in zip(boxes, boxes[1:]))
+    assert all(0 <= box["left"] < box["right"] <= 840 for box in boxes)
+
+
+@pytest.mark.parametrize(
+    ("end", "second_tick"),
+    [("2026-04-23", "Jan 29"), ("2026-04-27", "Jan 30"), ("2026-05-01", "Jan 31")],
+)
+def test_fixed_day_ticks_in_one_month_keep_distinct_labels(tmp_path, end, second_tick):
+    boxes = chart_geometry(tmp_path, end, start="2026-01-01")["ticks"]
+    labels = [box["text"] for box in boxes]
+    assert labels[:2] == ["Jan 1", second_tick]
+    assert len(set(labels)) == len(labels)
     assert all(a["right"] + 8 <= b["left"] for a, b in zip(boxes, boxes[1:]))
     assert all(0 <= box["left"] < box["right"] <= 840 for box in boxes)
 
