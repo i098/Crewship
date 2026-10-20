@@ -36,6 +36,7 @@ FEATURES = {
     "crewship.imessage": "docs/imessage.md",
     "crewship.github_board": "docs/github-board.md",
     "crewship.board": "docs/board.md",
+    "crewship.board.github_sink": "docs/board.md#copy-messages-to-github",
     "crewship.ci_pool": "docs/ci-pool.md",
 }
 EXCLUDED = {
