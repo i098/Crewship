@@ -22,6 +22,7 @@
 // Instagram: with INSTAGRAM_DM_BACKEND=graph, that listener also takes Meta's DM webhook on /instagram/webhook
 //   (instagram-webhook.ts).
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
@@ -67,6 +68,15 @@ function persistLatest(path: string, text: string) {
 }
 const env = process.env;
 const need = (name: string) => env[name] || (() => { throw new Error(`fm-imessage: ${name} is not set`); })();
+// Spectrum has no request-timeout option. Bound its HTTP calls without changing other transports' deadlines.
+const photonRequests = new AsyncLocalStorage<true>();
+const fetchRequest = globalThis.fetch;
+globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
+  if (!photonRequests.getStore()) return fetchRequest(input, init);
+  const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+  const timeout = AbortSignal.timeout(3000);
+  return fetchRequest(input, { ...init, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+}, fetchRequest);
 const OWNER = need("FM_IMESSAGE_OWNER");
 const FM_HOME = need("FM_HOME");
 const INBOX = env.FM_INBOX_CMD || `${FM_HOME}/bin/fm-inbox.sh`;
@@ -165,7 +175,7 @@ type Line = {
 };
 let raw: AdvancedIMessage | undefined; // the Find My client (Photon only)
 const lines: Line[] = [];
-for (const name of TRANSPORTS) {
+async function startLine(name: string): Promise<Line> {
   if (name === "bluebubbles") {
     // FM_BLUEBUBBLES_RELAYS: "url,VARIABLE" items, space-separated, in failover order. VARIABLE names the environment
     // variable (from ~/super.env) that holds that relay's password.
@@ -179,7 +189,7 @@ for (const name of TRANSPORTS) {
     Bun.serve({ hostname: listen.hostname, port: Number(listen.port), fetch: (req) =>
       stopping ? new Response("stopping\n", { status: 503 }) : bb.webhook(req) });
     bb.start();
-    lines.push({
+    return {
       name,
       messages: bb,
       find: (ref) => bb.message(ref.id),
@@ -190,20 +200,13 @@ for (const name of TRANSPORTS) {
       release: (id) => bb.release(id),
       react: (ref, emoji) => bb.react(ref.space, ref.id, emoji),
       home: `iMessage;-;${OWNER}`,
-    });
-    continue;
+    };
   }
-  if (name !== "photon") throw new Error(`fm-imessage: unknown transport ${name}`);
-  // ponytail: a Photon line that cannot start is skipped when another transport is set, until the next restart.
-  const app = await Spectrum({
+  const app = await photonRequests.run(true, () => Spectrum({
     projectId: need("PHOTON_PROJECT_ID"),
     projectSecret: need("PHOTON_PROJECT_SECRET"),
     providers: [imessage.config()],
-  }).catch((e) => {
-    if (TRANSPORTS.length === 1) throw e;
-    console.error(`fm-imessage: photon did not start, using the other transports: ${brief(e)}`);
-  });
-  if (!app) continue;
+  }));
   // Spectrum has no public accessor for the line's Advanced iMessage client, which owns Find My locations and the raw
   // message events with his edits; this reads its internal platform map (spectrum-ts 12.10). Recheck after a
   // spectrum-ts upgrade.
@@ -221,9 +224,10 @@ for (const name of TRANSPORTS) {
     if (!permanent(e)) throw e;
     console.error(`fm-imessage: reply target ${reply} gone, sending unthreaded: ${brief(e)}`);
   }) : undefined;
-  lines.push({
+  return {
     name,
     messages: (async function* () {
+      if (photon) void watchEdits(photon);
       for await (const [, message] of app.messages) yield message;
     })(),
     find,
@@ -252,9 +256,33 @@ for (const name of TRANSPORTS) {
       return target.miniAppCardSession;
     },
     react: async (ref, emoji) => (await find(ref)).react(emoji),
-  });
+  };
 }
-// The active transport of a queued item or a kept text; undefined when absent or unable to start.
+const startups = TRANSPORTS.map((name) => {
+  if (!["photon", "bluebubbles"].includes(name)) throw new Error(`fm-imessage: unknown transport ${name}`);
+  const notReady = async (): Promise<never> => {
+    throw Object.assign(new Error(`${name} is not ready`), { status: 503, maybeSent: false });
+  };
+  const line: Line = {
+    name, find: notReady, separated: notReady, send: notReady, react: notReady,
+    ...(name === "photon" ? { sendCard: notReady, sendImage: notReady } : {}),
+    messages: (async function* () {
+      const ready = await started;
+      if (ready) yield* ready.messages;
+    })(),
+  };
+  lines.push(line);
+  const started = startLine(name).then((ready) => {
+    Object.assign(line, ready);
+    return ready;
+  }).catch((e) => {
+    if (TRANSPORTS.length === 1) throw e;
+    console.error(`fm-imessage: ${name} did not start, using the other transports: ${brief(e)}`);
+  });
+  return started;
+});
+await startups[0];
+// A configured transport, including one whose startup has not completed.
 const lineOf = (ref: Ref) => lines.find((line) => line.name === (ref.line ?? "photon"));
 // A Ref on a transport; a Photon one has no `line`, the same as the items queued before there were transports.
 const refOn = (name: string, space: string, id: string): Ref => (name === "photon" ? { space, id } : { line: name, space, id });
@@ -282,7 +310,6 @@ for (const name of TRANSPORTS) {
     if (directChat.test(space) && at > proactiveAt) [proactiveRef, proactiveAt] = [ref, at];
   }
 }
-if (latestRef) latest = await lineOf(latestRef)?.find(latestRef).catch((e) => void log("could not restore the latest text; sends still go to it")(e));
 const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
@@ -410,6 +437,12 @@ if (cards || igWebhook) {
   if (igWebhook) console.log(`fm-imessage: Instagram webhook on 127.0.0.1:${CARD_PORT}/instagram/webhook`);
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
+if (latestRef) {
+  const ref = latestRef;
+  void startups[TRANSPORTS.indexOf(ref.line ?? "photon")]?.then((line) => line?.find(ref)).then((message) => {
+    if (latestRef === ref) latest = message;
+  }).catch(log("could not restore the latest text; sends still go to it"));
+}
 
 // Puts one item in the outbox and answers once the item is on disk.
 function queue(item: Out, what: string) {
@@ -799,8 +832,6 @@ function edited(e: EventTypeMap["message.edited"]) {
   heard(e.messageGuid, text);
   handoffPending();
 }
-
-if (raw) void watchEdits(raw);
 
 // Every transport's messages, each message once even when two transports report it. A message that fails to be
 // handled is released, so a webhook or catch-up delivers it again.
