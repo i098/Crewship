@@ -54,3 +54,16 @@ def test_dry_run_prints_title_labels_body_from_file_field(tmp_path):
 def test_cli_refuses_missing_field():
     r = run("feature", "--title", "Do it", "--field", "problem=p", "--dry-run")
     assert r.returncode != 0 and "proposal" in r.stderr
+
+
+def test_create_failure_reports_child_stderr(tmp_path, monkeypatch):
+    gh = tmp_path / "gh"
+    gh.write_text("#!/bin/sh\nprintf 'HTTP 403: Resource not accessible\\n' >&2\nexit 1\n")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    result = run("feature", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "HTTP 403: Resource not accessible\n"
