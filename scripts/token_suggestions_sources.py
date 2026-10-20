@@ -143,7 +143,6 @@ def bounded_rows(cursor, remaining):
 
 
 def read_ledger(path, bounds):
-    history, start, end = bounds
     params = dict(zip(("history", "start", "end"), (t.timestamp() for t in bounds)))
     deadline = time.monotonic() + 20
     with sqlite3.connect(Path(path).absolute().as_uri() + "?mode=ro", uri=True,
@@ -162,7 +161,7 @@ def read_ledger(path, bounds):
         raise ValueError("unsupported or conflicting metadata")
     for row in coverage:
         row["partial"] = bool(not row["producers"] or row["incomplete"] or row["gaps"]
-                              or row["shutdowns"] or history < end - timedelta(days=35))
+                              or row["shutdowns"])
     return rows, coverage
 
 
