@@ -198,7 +198,10 @@ The data directory must already exist at a canonical path on a separate mounted 
 Apply rejects the system filesystem, symlinks in the configured path and unsafe existing log paths.
 The logger receives stop requests from the identified mount without automatically mounting it again through socket activation.
 Its startup and rotation helper reject an absent mount before they can write.
-The log directory uses `syslog:adm` ownership and `0750` access; files use `0640`.
+The log directory uses `syslog:adm` ownership and `2750` access.
+Files use `0640` when the distribution's global `$FileCreateMode 0640` setting remains in place.
+Native recreation on rsyslog 8.2312.0 uses that global setting, not the action's `fileCreateMode`.
+The setgid directory bit keeps group `adm` on files that native rotation recreates, even when the logger's primary group differs.
 The distribution `syslog` account needs search access through the data directory and its parents.
 Keep these parent directories under trusted ownership; apply does not change their access policy.
 
@@ -230,6 +233,7 @@ They apply the logging task twice and require the second apply to report `change
 The activation regression also requires systemd inside the container.
 It checks deferred starts, failed activation, recovery before an unrelated task failure, and unchanged recovery of stopped or rate-limited loggers.
 Native checks use a copied distribution binary to avoid the host's executable AppArmor attachment.
+The native rotation check verifies file ownership, modes and active/archive reads with only `adm` group access.
 The checks validate profile syntax, but a separate systemd VM must verify kernel policy enforcement and service mount-loss behavior.
 
 ### Moving an existing Docker data root

@@ -1,7 +1,10 @@
+import grp
 import os
+import pwd
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -324,15 +327,17 @@ def wait_until(predicate):
 def exercise_native_rotation(tmp_path):
     socket_path = tmp_path / "logger.sock"
     config = tmp_path / "runtime.conf"
-    config.write_text(f'module(load="imuxsock" SysSock.Name="{socket_path}")\n'
-                      '$PrivDropToUser syslog\n$PrivDropToGroup syslog\n'
-                      f'$IncludeConfig /etc/rsyslog.d/*.conf\n')
+    config.write_text(Path("/etc/rsyslog.conf").read_text().replace(
+        'module(load="imuxsock")', f'module(load="imuxsock" SysSock.Name="{socket_path}")',
+    ))
     for parent in (tmp_path, *tmp_path.parents):
         if parent == Path("/tmp"):
             break
         parent.chmod(0o755)
     active = Path("/mnt/data/host-logs/rsyslog/syslog")
+    archive = active.with_name("syslog.1")
     active.write_text("rotation history\n")
+    active.chmod(0o640)
     subprocess.run(["chown", "syslog:adm", active], check=True)
     with active.open("r+b") as stream:
         stream.truncate(134217728 + 1)
@@ -348,10 +353,25 @@ def exercise_native_rotation(tmp_path):
                 message = (f"<{number * 8 + 5}>{time.strftime('%b %d %H:%M:%S')} "
                            f"testhost crewship-check: crewship-check-{facility}")
                 client.sendto(message.encode(), str(socket_path))
-        archive = active.with_name("syslog.1")
-        wait_until(lambda: archive.exists() and active.exists()
-                   and "crewship-check-local6" in active.read_text())
+            wait_until(archive.exists)
+            message = (f"<13>{time.strftime('%b %d %H:%M:%S')} "
+                       "testhost crewship-check: crewship-check-after-rotation")
+            client.sendto(message.encode(), str(socket_path))
+        wait_until(lambda: active.exists() and "crewship-check-after-rotation" in active.read_text())
         assert 134217728 <= archive.stat().st_size < 134217728 + 65536
+        for log in (active, archive):
+            metadata = log.stat()
+            assert pwd.getpwuid(metadata.st_uid).pw_name == "syslog"
+            assert grp.getgrgid(metadata.st_gid).gr_name == "adm"
+            assert stat.S_IMODE(metadata.st_mode) == 0o640
+            with log.open("rb") as stream:
+                expected = stream.read(64)
+            reader = subprocess.run(
+                ["dd", f"if={log}", "bs=64", "count=1", "status=none"],
+                user="nobody", group="adm", extra_groups=[], capture_output=True,
+            )
+            assert reader.returncode == 0, reader.stderr
+            assert reader.stdout == expected
         with archive.open("rb") as stream:
             stream.seek(-65536, 2)
             tail = stream.read().decode()

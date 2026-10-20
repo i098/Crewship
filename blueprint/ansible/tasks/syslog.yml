@@ -117,7 +117,7 @@
     state: directory
     owner: syslog
     group: adm
-    mode: "0750"
+    mode: "2750"
 
 - name: Set narrow ownership on existing active and archived logs
   ansible.builtin.file:
