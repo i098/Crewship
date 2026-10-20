@@ -40,6 +40,7 @@ def cli(home, *args, check=True):
 
 def load(home, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("TREEHOUSE_ROOT", raising=False)
     loader = importlib.machinery.SourceFileLoader("crewship_db_test", str(HELPER))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -247,6 +248,282 @@ def test_compose_document_binds_loopback_and_keeps_the_password_in_a_file(databa
                for key, value in service["environment"].items())
 
 
+@pytest.mark.parametrize("prefix", ["", "$CREWSHIP_TREEHOUSE_TEST_UNSET", "${CREWSHIP_TREEHOUSE_TEST_UNSET}"])
+def test_seed_finds_native_root_without_a_shell_export(database, tmp_path, monkeypatch, prefix):
+    native = tmp_path / "data"
+    monkeypatch.delenv("CREWSHIP_TREEHOUSE_TEST_UNSET", raising=False)
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(prefix + str(native))}\n")
+    app = checkout(native, "app-abc", 1, "app", POSTGRES)
+
+    database.seed()
+
+    assert urlsplit(env_url(app)).scheme == "postgresql"
+
+
+@pytest.mark.parametrize("source", ["config", "override"])
+@pytest.mark.parametrize("operation", ["--seed", "app"])
+def test_native_root_cleans_parent_segments_before_resolving_symlinks(
+    database, tmp_path, monkeypatch, capsys, source, operation,
+):
+    archive = tmp_path / "archive/user"
+    archive.mkdir(parents=True)
+    link = tmp_path / "bulk/link"
+    link.parent.mkdir()
+    link.symlink_to(archive, target_is_directory=True)
+    app = checkout(tmp_path / "bulk/pools", "app-abc", 1, "app", POSTGRES)
+    wrong_root = tmp_path / "archive/pools"
+    wrong = checkout(wrong_root, "app-abc", 1, "app", LAB_REDIS)
+    root = "$HOME/bulk/link/../pools"
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(root if source == 'config' else str(wrong_root))}\n")
+    if source == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", root)
+
+    database.main([operation])
+
+    meta = json.loads((database.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == ("postgres", "postgres:16-alpine")
+    if operation == "--seed":
+        assert urlsplit(env_url(app)).scheme == "postgresql"
+        assert not (wrong / ".env.local").exists()
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / "app.env"
+        variable, url = path.read_text().strip().split("=", 1)
+        assert variable == "DATABASE_URL"
+        assert urlsplit(url).scheme == "postgresql"
+
+
+def test_explicit_root_overrides_native_config_and_keeps_legacy_projects(database, tmp_path, monkeypatch):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {json.dumps(str(tmp_path / 'ignored'))}\n")
+    ignored = checkout(tmp_path / "ignored", "ignored-abc", 1, "ignored", POSTGRES)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    native = checkout(tmp_path / "data", "app-abc", 1, "app", POSTGRES)
+    (native / ".git").rmdir()
+    (native / ".git").write_text("gitdir: unused-test-entry\n")
+    legacy = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    cache = tmp_path / "data/.treehouse/firstmate-abc/1/firstmate/projects/cache"
+    (cache / ".git").mkdir(parents=True)
+    (cache / "compose.yml").write_text(LAB_REDIS)
+    registered = tmp_path / "workspace/projects/app"
+    (registered / ".git").mkdir(parents=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+
+    database.seed()
+
+    assert env_url(native) == env_url(legacy) == env_url(registered)
+    assert urlsplit(env_url(cache, "REDIS_URL")).scheme == "redis"
+    assert not (ignored / ".env.local").exists()
+
+
+def test_discovery_deduplicates_root_and_registered_checkout_aliases(database, tmp_path, monkeypatch):
+    app = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    monkeypatch.setenv("TREEHOUSE_ROOT", str(alias))
+    database.apply()
+    database.PROJECTS.write_text(str(alias / ".treehouse/app-abc/1"))
+
+    assert {name: [path.resolve() for path in paths] for name, paths in database.checkouts().items()} == {"app": [app]}
+
+
+@pytest.mark.parametrize("operation", ["--seed", "app"])
+@pytest.mark.parametrize("source", ["default", "config", "override"])
+def test_linked_home_keeps_lexical_engine_detection_order(
+    database, tmp_path, monkeypatch, capsys, operation, source,
+):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    home = tmp_path / "home"
+    home.symlink_to(storage, target_is_directory=True)
+    linked = load(home, monkeypatch)
+    monkeypatch.setattr(linked, "docker", database.docker)
+    root = home if source == "default" else home / ".bulk"
+    first = checkout(root, "app-abc", 1, "app", POSTGRES)
+    second = checkout(root, "app-abc", 2, "app", LAB_REDIS)
+    registered = home / "Dev/firstmate/projects/app"
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(second, target_is_directory=True)
+    if source == "config":
+        config = home / ".config/treehouse/config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"root = {json.dumps(str(root))}\n")
+    elif source == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", str(root))
+    linked.apply()
+    capsys.readouterr()
+
+    linked.main([operation])
+
+    meta = json.loads((linked.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == ("postgres", "postgres:16-alpine")
+    if operation == "--seed":
+        assert env_url(first) == env_url(second) == env_url(registered)
+        assert urlsplit(env_url(first)).scheme == "postgresql"
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == linked.SECRETS / "app.env"
+        variable, url = path.read_text().strip().split("=", 1)
+        assert variable == "DATABASE_URL"
+        assert urlsplit(url).scheme == "postgresql"
+
+
+@pytest.mark.parametrize("operation", ["--seed", "app"])
+@pytest.mark.parametrize("source, relative, engine, image", [
+    ("registered", "Dev/firstmate/projects/app", "postgres", "postgres:16-alpine"),
+    ("registered", "!projects/app", "redis", "redis:alpine"),
+    ("pool", ".treehouse/firstmate-abc/1/firstmate/projects/app", "postgres", "postgres:16-alpine"),
+    ("pool", "data/.treehouse/app-abc/1/app", "postgres", "postgres:16-alpine"),
+])
+def test_checkout_aliases_keep_sorted_engine_detection_order(
+    database, tmp_path, monkeypatch, capsys, operation, source, relative, engine, image,
+):
+    first = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    second = checkout(tmp_path, "app-abc", 2, "app", LAB_REDIS)
+    alias = tmp_path / relative
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(first if engine == "postgres" else second, target_is_directory=True)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    if source == "registered":
+        database.apply()
+        database.PROJECTS.write_text(str(alias.parent))
+    capsys.readouterr()
+
+    database.main([operation])
+
+    meta = json.loads((database.STATE / "app/meta.json").read_text())
+    assert (meta["engine"], meta["image"]) == (engine, image)
+    variable = "DATABASE_URL" if engine == "postgres" else "REDIS_URL"
+    scheme = "postgresql" if engine == "postgres" else "redis"
+    if operation == "--seed":
+        assert env_url(first, variable) == env_url(second, variable) == env_url(alias, variable)
+        assert urlsplit(env_url(first, variable)).scheme == scheme
+    else:
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / "app.env"
+        key, url = path.read_text().strip().split("=", 1)
+        assert key == variable
+        assert urlsplit(url).scheme == scheme
+
+
+@pytest.mark.parametrize("target", ["123", "storage-app"])
+def test_registered_links_keep_their_project_name(database, tmp_path, target):
+    directory = tmp_path / "storage" / target
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    registered = tmp_path / "workspace/projects/app"
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(directory, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+
+    database.seed()
+
+    assert urlsplit(env_url(registered)).scheme == "postgresql"
+    assert (database.STATE / "app/meta.json").exists()
+    assert not (database.STATE / target).exists()
+
+
+@pytest.mark.parametrize("relative", [
+    ".treehouse/app-abc/1/app",
+    "data/.treehouse/app-abc/1/app",
+    "data/.treehouse/firstmate-abc/1/firstmate/projects/app",
+])
+def test_named_lookup_keeps_pool_and_registered_project_names(database, tmp_path, monkeypatch, capsys, relative):
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    directory = tmp_path / relative
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    projects = tmp_path / "workspace/projects"
+    projects.mkdir(parents=True)
+    for name in ("shop", "store"):
+        (projects / name).symlink_to(directory, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(projects))
+    capsys.readouterr()
+
+    urls = []
+    for name in ("app", "shop", "store"):
+        database.main([name])
+        path = Path(capsys.readouterr().out.strip())
+        assert path == database.SECRETS / (name + ".env")
+        urls.append(path.read_text().strip().split("=", 1)[1])
+
+    assert all(urlsplit(url).scheme == "postgresql" for url in urls)
+    assert len(set(urls)) == 3
+
+
+@pytest.mark.parametrize("name", ["123", "bad.name", "a" * 49])
+def test_invalid_registered_alias_does_not_hide_an_eligible_pool_project(database, tmp_path, name):
+    app = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    projects = tmp_path / "workspace/projects"
+    projects.mkdir(parents=True)
+    (projects / name).symlink_to(app, target_is_directory=True)
+    database.apply()
+    database.PROJECTS.write_text(str(projects))
+
+    database.seed()
+
+    assert urlsplit(env_url(app)).scheme == "postgresql"
+    assert (database.STATE / "app/meta.json").exists()
+    assert not (database.STATE / name).exists()
+
+
+def test_pool_links_keep_distinct_project_names(database, tmp_path, monkeypatch):
+    directory = tmp_path / "storage"
+    (directory / ".git").mkdir(parents=True)
+    (directory / "compose.yml").write_text(POSTGRES)
+    monkeypatch.setenv("TREEHOUSE_ROOT", "$HOME/data")
+    paths = {
+        "app": tmp_path / ".treehouse/app-abc/1/app",
+        "shop": tmp_path / "data/.treehouse/shop-abc/1/shop",
+        "store": tmp_path / "data/.treehouse/firstmate-abc/1/firstmate/projects/store",
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(directory, target_is_directory=True)
+
+    database.seed()
+
+    assert {path.parent.name for path in database.STATE.glob("*/meta.json")} == set(paths)
+    assert urlsplit(env_url(directory)).scheme == "postgresql"
+
+
+@pytest.mark.parametrize("root", ["42", "[]"])
+def test_native_root_rejects_non_path_values(database, tmp_path, root):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"root = {root}\n")
+
+    with pytest.raises(ValueError, match="Treehouse root"):
+        database.seed()
+
+
+def test_relative_native_root_does_not_hide_home_or_registered_projects(database, tmp_path, monkeypatch):
+    config = tmp_path / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('root = "."\n')
+    legacy = checkout(tmp_path, "app-abc", 1, "app", POSTGRES)
+    registered = tmp_path / "workspace/projects/app"
+    (registered / ".git").mkdir(parents=True)
+    database.apply()
+    database.PROJECTS.write_text(str(registered.parent))
+    elsewhere = tmp_path / "elsewhere"
+    ignored = checkout(elsewhere, "ignored-abc", 1, "ignored", POSTGRES)
+    monkeypatch.chdir(elsewhere)
+
+    database.seed()
+
+    assert env_url(legacy) == env_url(registered)
+    assert not (ignored / ".env.local").exists()
+
+
 def test_seed_gives_each_project_one_stable_container_and_url_for_all_worktrees(database, tmp_path):
     first = checkout(tmp_path, "shop-abc", 1, "shop", POSTGRES)
     second = checkout(tmp_path, "shop-abc", 2, "shop", name="docker-compose.yml", compose=POSTGRES)
@@ -361,9 +638,10 @@ def test_seed_skips_checkouts_removed_at_file_boundaries(database, tmp_path, mon
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
     if os.environ.get("CREWSHIP_POSTGRES_LAB") != "1":
         pytest.skip("disposable Docker lab only")
+    monkeypatch.delenv("TREEHOUSE_ROOT", raising=False)
     home = tmp_path / "home"
     home.mkdir()
     cli(home, "--apply")
@@ -414,6 +692,45 @@ def test_projects_get_their_own_containers_shared_by_their_worktrees(service):
     printed = cli(service, "shop").stdout.strip()
     assert Path(printed).read_text() == f"DATABASE_URL={url}\n"
     assert urlsplit(url).password not in printed
+
+
+@lab
+@pytest.mark.parametrize("selection", ["config", "override"])
+def test_native_legacy_and_registered_checkouts_receive_working_services(service, tmp_path, monkeypatch, selection):
+    native = tmp_path / "data"
+    config = service / ".config/treehouse/config.toml"
+    config.parent.mkdir(parents=True)
+    monkeypatch.delenv("CREWSHIP_TREEHOUSE_TEST_UNSET", raising=False)
+    configured = "${CREWSHIP_TREEHOUSE_TEST_UNSET}" + str(native if selection == "config" else tmp_path / "ignored")
+    config.write_text(f"root = {json.dumps(configured)}\n")
+    if selection == "override":
+        monkeypatch.setenv("TREEHOUSE_ROOT", str(native))
+    app = checkout(native, "app-abc", 1, "app", LAB_POSTGRES)
+    legacy = checkout(service, "app-abc", 1, "app", LAB_POSTGRES)
+    cache = checkout(native, "cache-abc", 1, "cache", LAB_REDIS)
+    registered = tmp_path / "workspace/projects/app"
+    storage = tmp_path / "storage/123"
+    (storage / ".git").mkdir(parents=True)
+    registered.parent.mkdir(parents=True)
+    registered.symlink_to(storage, target_is_directory=True)
+    (service / ".local/state/code-factory/project-db/projects-dir").write_text(str(registered.parent))
+
+    cli(service, "--seed")
+
+    assert env_url(app) == env_url(legacy) == env_url(registered)
+    assert query(env_url(app), "CREATE TABLE proof (n integer); INSERT INTO proof VALUES (42)").returncode == 0
+    assert query(env_url(legacy), "SELECT n FROM proof").stdout.strip() == "42"
+    assert query(env_url(registered), "SELECT n FROM proof").stdout.strip() == "42"
+    authenticated = subprocess.run(
+        ["docker", "exec", "-e", "REDISCLI_AUTH", "crewship-db-cache", "redis-cli", "--no-auth-warning", "ping"],
+        env={**os.environ, "REDISCLI_AUTH": urlsplit(env_url(cache, "REDIS_URL")).password},
+        capture_output=True, text=True, check=True,
+    )
+    assert authenticated.stdout.strip() == "PONG"
+    files = [path / ".env.local" for path in (app, legacy, cache, registered)]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+    cli(service, "--seed")
+    assert before == {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
 
 
 @lab
