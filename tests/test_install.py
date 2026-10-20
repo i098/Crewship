@@ -211,16 +211,26 @@ def test_pnpm_release_policy_preserves_the_selected_release(release, tmp_path, l
 
 
 
-@pytest.mark.parametrize("missing", ["curl", "ca-certificates"])
-def test_release_lookup_bootstraps_missing_https_prerequisites(release, tmp_path, missing):
+@pytest.mark.parametrize(
+    "ref, missing",
+    [("v1.0.0", None), (None, None), (None, "curl"), (None, "ca-certificates")],
+    ids=["pinned", "resolved", "missing-curl", "missing-ca-certificates"],
+)
+def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, missing):
+    if ref:
+        release.env["CREWSHIP_REF"] = ref
+    if missing is None:
+        (release.home / "https-installed").touch()
     bin_dir = tmp_path / "bin"
     (bin_dir / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
     (bin_dir / "sudo").chmod(0o755)
     (bin_dir / "apt-get").write_text(
-        '#!/bin/sh\ncase "$*" in *install*) touch "$HOME/https-installed" ;; esac\n'
+        '#!/bin/sh\n'
+        'if [ -f "$HOME/https-installed" ]; then echo MAIN_PACKAGE_SETUP; else echo HTTPS_BOOTSTRAP; fi\n'
+        'case "$*" in *install*) touch "$HOME/https-installed" ;; esac\n'
     )
     (bin_dir / "dpkg-query").write_text(
-        '#!/bin/sh\n[ -f "$HOME/https-installed" ] || exit 1\nprintf installed\n'
+        '#!/bin/sh\n[ "$3" != git ] && [ -f "$HOME/https-installed" ] || exit 1\nprintf installed\n'
     )
     (bin_dir / "curl").write_text(
         '#!/usr/bin/env bash\n[ -f "$HOME/https-installed" ] || exit 127\n' + CURL_SHIM.split("\n", 1)[1]
@@ -234,10 +244,12 @@ def test_release_lookup_bootstraps_missing_https_prerequisites(release, tmp_path
             '}\n'
         )
         release.env["BASH_ENV"] = str(env)
-    result = release.install("v1.0.0")
+    result = release.install("v1.1.0" if ref else "v1.0.0")
     assert result.returncode == 0, result.stderr
     assert (release.home / "https-installed").exists()
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("MAIN_PACKAGE_SETUP")
+    assert ("HTTPS_BOOTSTRAP" in result.stderr) is (missing is not None)
 
 
 
