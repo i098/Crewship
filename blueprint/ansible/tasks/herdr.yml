@@ -94,6 +94,7 @@
 - name: Enable and start the Herdr user service
   ansible.builtin.systemd_service:
     scope: user
+    daemon_reload: true
     name: herdr.service
     enabled: true
     state: started

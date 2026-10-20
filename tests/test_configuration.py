@@ -1421,11 +1421,29 @@ def test_legacy_bash_block_removal_tolerates_a_missing_bashrc_and_keeps_other_li
         assert bashrc.read_text() == expected
 
 
-@pytest.mark.parametrize("write", [True, False], ids=["write", "remove"])
-def test_changed_user_manager_defaults_reach_services_started_after_them_only(tmp_path, write):
+@pytest.mark.parametrize(
+    ("active", "manage", "check", "write", "fresh_unit", "ordinary"),
+    [
+        (False, True, False, True, False, False),
+        (True, True, False, True, False, False),
+        (False, False, False, True, False, False),
+        (False, True, True, True, False, False),
+        (False, True, False, True, True, False),
+        (False, True, False, False, False, False),
+        (True, True, False, False, False, False),
+        (True, True, False, True, False, True),
+    ],
+    ids=["stopped", "active", "disabled", "preview", "fresh-disk-stale-cache",
+         "remove-stopped", "remove-active", "ordinary-restart"],
+)
+def test_herdr_start_uses_reloaded_manager_and_unit_without_bulk_restart(
+    tmp_path, active, manage, check, write, fresh_unit, ordinary
+):
     home = tmp_path / "home"
     conf = home / ".config/environment.d/60-crewship-bulk.conf"
     conf.parent.mkdir(parents=True)
+    unit = home / ".config/systemd/user/herdr.service"
+    unit.parent.mkdir(parents=True)
     data = tmp_path / "data"
     defaults = {
         "DENO_DIR": f"{data}/cache/deno",
@@ -1433,36 +1451,139 @@ def test_changed_user_manager_defaults_reach_services_started_after_them_only(tm
         "TMPDIR": f"{data}/tmp", "TMP": f"{data}/tmp", "TEMP": f"{data}/tmp",
     }
     stale = {key: f"/old/{key}" for key in defaults}
+    retired = {"npm_config_cache": "/old/npm", "PIP_CACHE_DIR": "/old/pip"}
     conf.write_text("".join(f"{key}={value}\n" for key, value in stale.items()))
-    manager = tmp_path / "manager.py"
-    manager.write_text(
-        "import json, pathlib, subprocess, sys\n"
-        "state, action, name = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]\n"
-        "if action == 'reload':\n"
-        "    (state / 'manager.json').write_text(subprocess.run(\n"
-        "        ['/bin/sh', '-c', 'set -a; [ ! -e \"$1\" ] || . \"$1\"; shift; exec \"$@\"', 'sh', name,\n"
-        "         sys.executable, '-c', 'import json, os; print(json.dumps(dict(os.environ)))'],\n"
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    probe = binaries / "service-probe"
+    probe.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(600)\n")
+    probe.chmod(0o755)
+    systemctl = binaries / "systemctl"
+    systemctl.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, shlex, signal, subprocess, sys\n"
+        "root = pathlib.Path(os.environ['CREWSHIP_TEST_MANAGER'])\n"
+        "home = root / 'home'\n"
+        "config = home / '.config/environment.d/60-crewship-bulk.conf'\n"
+        "unit = home / '.config/systemd/user/herdr.service'\n"
+        "state = root / 'manager.json'\n"
+        "pid = root / 'service.pid'\n"
+        "assert sys.argv[1] == '--user'\n"
+        "action = sys.argv[2]\n"
+        "if action == 'daemon-reload':\n"
+        "    environment = json.loads(subprocess.run(\n"
+        "        ['/bin/sh', '-c', 'set -a; [ ! -e \"$1\" ] || . \"$1\"; shift; exec \"$@\"',\n"
+        "         'sh', str(config), sys.executable, '-c',\n"
+        "         'import json, os; print(json.dumps(dict(os.environ)))'],\n"
         "        env={}, capture_output=True, text=True, check=True,\n"
         "    ).stdout)\n"
-        "elif not ((pid := state / f'{name}.pid').exists() and pathlib.Path('/proc', pid.read_text()).exists()):\n"
-        "    pid.write_text(str(subprocess.Popen(\n"
-        "        [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
-        "        env=json.loads((state / 'manager.json').read_text()), start_new_session=True,\n"
-        "        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
-        "    ).pid))\n"
+        "    arguments = []\n"
+        "    for line in unit.read_text().splitlines():\n"
+        "        key, _, value = line.partition('=')\n"
+        "        if key == 'Environment':\n"
+        "            environment.update(item.split('=', 1) for item in shlex.split(value))\n"
+        "        elif key == 'ExecStart':\n"
+        "            arguments = shlex.split(value)\n"
+        "    state.write_text(json.dumps({'environment': environment, 'arguments': arguments}))\n"
+        "elif action == 'show':\n"
+        "    print('LoadState=loaded\\nActiveState=' + ('active' if pid.exists() else 'inactive'))\n"
+        "elif action == 'is-enabled':\n"
+        "    print('enabled')\n"
+        "elif action in ('start', 'restart'):\n"
+        "    if action == 'restart' and pid.exists():\n"
+        "        os.kill(int(pid.read_text()), signal.SIGKILL)\n"
+        "        pid.unlink()\n"
+        "    if not pid.exists():\n"
+        "        cached = json.loads(state.read_text())\n"
+        "        child = subprocess.Popen(cached['arguments'], env=cached['environment'],\n"
+        "            start_new_session=True, stdin=subprocess.DEVNULL,\n"
+        "            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "        pid.write_text(str(child.pid))\n"
+        "else:\n"
+        "    raise AssertionError(sys.argv)\n"
     )
-    command = [sys.executable, str(manager), str(tmp_path)]
+    systemctl.chmod(0o755)
+    manager_env = {
+        "PATH": f"{binaries}:{os.environ['PATH']}",
+        "CREWSHIP_TEST_MANAGER": str(tmp_path),
+    }
+    variables = {
+        "ansible_become": False,
+        "crewship_cfg": {
+            "user": getpass.getuser(), "home": str(home), "workspace": str(home),
+            "data_dir": str(data) if write else "", "start_services": manage,
+            "profiles": {"agents": True},
+        },
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_account_ready": True, "crewship_become_target": False,
+        "crewship_herdr_bin": str(probe),
+        "crewship_user_systemd_env": manager_env,
+        "crewship_platform": "linux-x86_64",
+        "crewship_latest": {"herdr": {"version": "1.0.0"}},
+        "crewship_fleet_browsers_enabled": False,
+        "ansible_managed": "Managed by Crewship",
+    }
+    (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
+    result = _ansible(
+        tmp_path, "ansible", "localhost", "-i", "localhost,", "-c", "local",
+        "-m", "ansible.builtin.template", "-a", json.dumps({
+            "src": str(ROOT / "blueprint/ansible/templates/herdr.service.j2"), "dest": str(unit),
+        }), *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    current_unit = unit.read_text()
+    old_unit = current_unit.replace(
+        "[Service]\n", "[Service]\n" + "".join(
+            f'Environment="{key}={value}"\n' for key, value in (stale | retired).items()
+        ),
+    )
+    if ordinary:
+        old_unit = old_unit.replace("Description=", "Description=Old ")
+    unit.write_text(old_unit)
+    command = [str(systemctl), "--user"]
+    subprocess.run([*command, "daemon-reload"], env={**os.environ, **manager_env}, check=True)
+    if active:
+        subprocess.run([*command, "start", "herdr.service"], env={**os.environ, **manager_env}, check=True)
+    if fresh_unit:
+        unit.write_text(current_unit)
+        copy = next(
+            task["ansible.builtin.copy"]
+            for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+            if task["name"] == "Write bulk defaults for future user-manager processes"
+        )
+        result = _ansible(
+            tmp_path, "ansible", "localhost", "-i", "localhost,", "-c", "local",
+            "-m", "ansible.builtin.copy", "-a", json.dumps(copy),
+            *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    pid_file = tmp_path / "service.pid"
 
-    def service(name):
-        pid = (tmp_path / f"{name}.pid").read_text()
-        entries = (entry.partition("=") for entry in Path("/proc", pid, "environ").read_text().split("\0"))
-        return pid, {key: value for key, _, value in entries if key in defaults}
+    def service():
+        pid = int(pid_file.read_text())
+        entries = (
+            entry.partition("=")
+            for entry in Path("/proc", str(pid), "environ").read_text().split("\0")
+        )
+        return pid, {key: value for key, _, value in entries if key in (defaults | retired)}
 
-    subprocess.run([*command, "reload", str(conf)], check=True)
-    subprocess.run([*command, "start", "active"], check=True)
+    before = service() if active else None
+    herdr_names = {
+        "Read the installed Herdr user unit", "Render the Herdr user unit",
+        "Restart Herdr for a unit change beyond the data-disk environment",
+        "Enable and start the Herdr user service",
+    }
+    herdr_tasks = [
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/herdr.yml").read_text())
+        if task["name"] in herdr_names
+    ]
+    handlers = [
+        handler
+        for play in yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())
+        for handler in play.get("handlers", [])
+        if handler.get("listen") in ("reload user systemd", "restart herdr")
+    ]
     try:
-        active = service("active")
-        assert active[1] == stale
         _account_play(
             tmp_path,
             {
@@ -1470,25 +1591,21 @@ def test_changed_user_manager_defaults_reach_services_started_after_them_only(tm
                 "Remove retired managed user-manager bulk defaults",
                 "Load pending user-manager defaults before starting services",
             },
-            {
-                "crewship_cfg": {
-                    "user": getpass.getuser(), "home": str(home),
-                    "data_dir": str(data) if write else "", "start_services": True,
-                },
-                "crewship_account_ready": True, "crewship_become_target": False,
-            },
-            tasks=[{
-                "name": "Start services that are not running",
-                "ansible.builtin.command": {"argv": [*command, "start", "{{ item }}"]},
-                "loop": ["active", "inactive"],
-            }],
-            handlers=[{
-                "name": "reload user systemd",
-                "ansible.builtin.command": {"argv": [*command, "reload", str(conf)]},
-            }],
+            variables, *(["--check"] if check else []), tasks=herdr_tasks, handlers=handlers,
         )
-        assert service("active") == active
-        assert service("inactive")[1] == (defaults if write else {})
+        if not manage or check:
+            assert not pid_file.exists()
+            cached = json.loads((tmp_path / "manager.json").read_text())["environment"]
+            assert {key: cached[key] for key in (stale | retired)} == (stale | retired)
+            if check:
+                assert conf.read_text() == "".join(f"{key}={value}\n" for key, value in stale.items())
+                assert unit.read_text() == old_unit
+        elif active and not ordinary:
+            assert service() == before
+        else:
+            assert service()[1] == (defaults if write else {})
+            if ordinary:
+                assert service()[0] != before[0]
     finally:
-        for pid in tmp_path.glob("*.pid"):
-            os.kill(int(pid.read_text()), signal.SIGKILL)
+        if pid_file.exists():
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)

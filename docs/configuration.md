@@ -215,6 +215,7 @@ An existing, non-empty environment variable wins in a new shell or installer pro
 A changed file notifies the existing user-manager reload, which runs before service starts when `start_services` is true.
 Apply does not import shell values or restart a service for this file.
 Herdr and no-mistakes inherit these defaults from the user manager on their next start.
+Herdr reloads its rendered unit before starting an inactive service.
 A bulk-only Herdr unit change does not restart the running service.
 Explicit service environment settings can override these defaults.
 Native package cache settings do not become service environment overrides.
