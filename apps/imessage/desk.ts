@@ -51,10 +51,10 @@ and zoom(id, 1) gives the message whole.`;
 
 export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }): string | { react: string } | undefined {
   if (!ok) return;
-  const value = parseBasic(drafted);
-  const action = verdict(true, value?.answer ?? drafted);
+  const action = verdict(true, drafted);
   if (action.skip) return;
   if (action.tapback) return { react: action.tapback };
+  const value = parseBasic(drafted);
   if (!value || !Array.isArray(value.evidence)) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
   if (/\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(value.answer)) return;
@@ -117,8 +117,9 @@ export function deskInput(system: string, view: string, status: string, latest: 
 
 // A valid reaction directive wins over surrounding prose. Conflicting directives send nothing.
 export function parseReact(answer: string): string | undefined {
-  const directives = [...answer.matchAll(/\b(?:REACT|TAPBACK)\s*:\s*(\S+)/giu)];
-  const emoji = directives.length === 1 ? directives[0][1] : "";
+  const directives = [...answer.matchAll(/\b(?:REACT|TAPBACK)\s*:\s*([^\s"{}\[\],]*)/giu)];
+  const emoji = directives[0]?.[1] ?? "";
+  if (directives.some((directive) => directive[1] !== emoji)) return;
   return /^(?:\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*)$/u.test(emoji) ? emoji : undefined;
 }
 
@@ -129,13 +130,22 @@ export function isSkip(answer: string): boolean {
 
 // Both messaging desks use this guard before sending answer text.
 export function verdict(ok: boolean, drafted: string): { skip: boolean; tapback?: string; outcome: string } {
-  const tapback = parseReact(drafted);
-  const internal = /\b(?:unsummarized|my move)\b/i.test(drafted) ||
-    /\b(?:firstmate|(?:front )?desk)\b/i.test(drafted) &&
-    (/\b(?:i|we|the (?:front )?desk)\s+(?:should|must|needs? to|have to)\b/i.test(drafted) ||
-      /\bhandles?\b/i.test(drafted) &&
-      /\b(?:this|the latest)\b[^.!?\n]*\b(?:request|instruction|message)\b/i.test(drafted));
-  const skip = !ok || !drafted.trim() || isSkip(drafted) || (!tapback && (/\b(?:REACT|TAPBACK)\s*:/i.test(drafted) || internal));
+  const jsonStart = drafted.search(/[{\[]/);
+  const text = drafted.replace(/("(?:\\.|[^"\\])*")(\s*:)?/g, (token, quoted, key, at) => {
+    if (key) return token;
+    try {
+      const value = JSON.parse(quoted);
+      return jsonStart >= 0 && at > jsonStart ? `\n${value}\n` : value;
+    } catch { return token; }
+  });
+  const tapback = parseReact(text);
+  const internal = /\b(?:unsummarized|my move)\b/i.test(text) ||
+    /\b(?:firstmate|(?:front )?desk)\b/i.test(text) &&
+    (/\b(?:i|we|the (?:front )?desk)\s+(?:should|must|needs? to|have to|(?:will|would)\s+defer)\b/i.test(text) ||
+      /\bhandles?\b/i.test(text) &&
+      (/\b(?:this|the latest)\b(?!\s+(?:kind|type|sort)\b)[^.!?\n]*\b(?:request|instruction|message)\b/i.test(text) ||
+        /\bhandles?\s+this(?:\s+(?:in|for)\b|\s*(?:[.!?,;:]|$))/i.test(text)));
+  const skip = !ok || !drafted.trim() || isSkip(text) || (!tapback && (/\b(?:REACT|TAPBACK)\s*:/i.test(text) || internal));
   return { skip, tapback: skip ? undefined : tapback, outcome: !ok ? "skip (desk failed)" : skip ? "skip" : tapback ? `react ${tapback}` : drafted.replace(/\s+/g, " ") };
 }
 

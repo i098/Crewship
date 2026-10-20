@@ -56,10 +56,14 @@ A failed direct attempt produces no desk answer; Firstmate receives the pending 
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
 The shared desk parser gives `SKIP`, `REACT:`, and `TAPBACK:` directives precedence over surrounding prose.
-A single valid reaction produces only a tapback, even after leaked prose or outside valid JSON.
+A single valid reaction produces only a tapback, even after leaked prose, before JSON, or inside any decoded JSON value.
+Repeated directives for the same emoji produce one tapback.
 A skip, an invalid reaction, conflicting directives, or internal desk reasoning without a valid action produces no text.
 Standalone skip lines ignore letter case.
-The iMessage bridge checks raw output and structured answer text with this parser before evidence validation.
+The shared parser checks raw text and all decoded JSON string values, including nested fields, before iMessage evidence validation.
+JSON quotes, braces, and escapes do not become part of the reaction.
+Decoding keeps quoted words inline in plain replies without JSON.
+It suppresses decisions about the current request while preserving generic role descriptions.
 It keeps the existing single request filing for a suppressed draft or reaction, with no separate handoff decision.
 Other unstructured iMessage output still goes to Firstmate.
 Photon, BlueBubbles, and the Instagram desk share the parser.
