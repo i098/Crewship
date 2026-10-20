@@ -30,15 +30,14 @@ See [Project databases](project-databases.md#worktree-environment) for the separ
 
 The storage guard, output pruner and dev-server reaper share `doctor/treehouse-roots.py`.
 They read the native global config at `~/.config/treehouse/config.toml`, without shell startup files.
-`TREEHOUSE_ROOT` takes precedence over the native `root` value.
-Treehouse expands environment variables in that value and appends `.treehouse`.
+A nonempty `TREEHOUSE_ROOT` takes precedence over the native `root` value.
+The resolver expands environment variables in that value and appends `.treehouse`.
 The scripts also scan `~/.treehouse` for legacy pools and remove duplicate resolved roots.
 They skip relative native roots because the timers have no repository context.
 Repository-local roots, custom worktree layouts and per-command `--root` values are not discovered.
 
 `WORKTREE_PRUNE_POOLS` still replaces pool discovery for the storage guard and output pruner.
 It names the pool directory itself, so the scripts do not append `.treehouse`.
-The guard prunes each root only when its filesystem reaches CRIT.
 The reaper searches lane metadata under both roots and retains the existing `~/.no-mistakes/worktrees/<repo>/<run>` match.
 Its process, lane-state and transcript-idle checks do not change.
 
@@ -94,7 +93,7 @@ Changing the state directory does not migrate earlier samples or pending records
 Earlier alerts without pending records cannot be reconstructed.
 Manual runs can set `STORAGE_DATA_DIR` to use the same placement.
 
-After notification, CRIT runs `worktree-prune.sh` on the filesystem that holds the Treehouse pools.
+After notification, CRIT runs `worktree-prune.sh` separately for each [cleanup pool root](#cleanup-pool-roots) on the affected filesystem.
 Only filesystems measured at CRIT during the notification pass can start reclaim.
 Later measurements can stop reclaim but cannot make another filesystem eligible.
 `WORKTREE_PRUNE_CMD` can replace this command.

@@ -198,4 +198,12 @@ For a cache, copy it with `rsync -aHAX`, apply, check the new path (for example 
 
 ### Later: pools and hardlinking caches together
 
-The worktree pools are the largest user of the system disk after Docker. Treehouse places new pools under `<root>/.treehouse`, where `<root>` comes from `--root`, the `TREEHOUSE_ROOT` variable, or `root` in a project's `treehouse.toml` (default `$HOME`). Treehouse looks up a pool under the same root, so a changed root does not find the pools that exist now. Change it only for a project whose pool has no live worktree. When the pools are on the data disk, point the bun (`BUN_INSTALL_CACHE_DIR`), pnpm (`store-dir`) and uv (`UV_CACHE_DIR`) caches to the same disk, so the hardlinks work again. The recipe does not do this step.
+The worktree pools are the largest user of the system disk after Docker.
+Treehouse places new pools under `<root>/.treehouse`.
+`--root`, `TREEHOUSE_ROOT`, project `treehouse.toml`, and `~/.config/treehouse/config.toml` can select the root; the default is `$HOME`.
+Treehouse looks up a pool under the same root, so a changed root does not find the pools that exist now.
+Change it only for a project whose pool has no live worktree.
+See [Cleanup pool roots](fleet-guards.md#cleanup-pool-roots) for the roots that fleet cleanup discovers and its limits.
+When the pools are on the data disk, point the bun (`BUN_INSTALL_CACHE_DIR`), pnpm (`store-dir`) and uv (`UV_CACHE_DIR`) caches to that disk.
+This lets hardlinks work again.
+The recipe does not do this step.
