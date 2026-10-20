@@ -887,9 +887,12 @@ check_agent_gate() {
         $'0|0|Replace the wrapper.\nLooks good. Ship.' $'0|0|Merge the wrapper.\nLooks good. Ship.' \
         $'0|0|Simplify the wrapper.\nLooks good. Ship.' \
         $'0|0|Checked: wrapper.sh:L112-L130: no changes needed.\nLooks good. Ship.' \
+        $'0|0|Checked: src/my file.py:L12: no changes needed.\nLooks good. Ship.' \
         $'0|0|Checked: net: -4 lines removed.\nLooks good. Ship.' \
         $'2|0|Looks good. Ship.\n> **L12: delete: dead flag.**' \
         $'2|0|1) `file.py:L12-L14:` delete: dead flag.\nLooks good. Ship.' \
+        $'2|0|src/my file.py:L12: delete dead flag.\nLooks good. Ship.' \
+        $'2|0|> 1) `src/my file.py:L12-L14:` delete dead flag.\nLooks good. Ship.' \
         $'2|0|- **net: -4 lines possible.**\nLooks good. Ship.' \
         $'2|0|### wrapper.sh:L12: drop the wrapper.\nLooks good. Ship.' \
         $'2|0|### L12: drop the wrapper.\nLooks good. Ship.' \

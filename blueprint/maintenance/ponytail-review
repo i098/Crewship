@@ -110,7 +110,7 @@ printf '%s\n' "$out"
 
 verdicts=0
 while IFS= read -r line; do
-  if [[ "${line,,}" =~ ^([^[:space:]]+:)?l[0-9]+(-l?[0-9]+)?: ||
+  if [[ "${line,,}" =~ ^([^:]+:)?l[0-9]+(-l?[0-9]+)?: ||
         "${line,,}" =~ ^net:[[:space:]]*-[0-9]+[[:space:]]+lines ]]; then
     verdicts=0
     break
