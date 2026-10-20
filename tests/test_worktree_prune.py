@@ -16,7 +16,10 @@ NEEDS_FDU = pytest.mark.skipif(shutil.which("fdu") is None, reason="fdu is not i
 
 def git(repo, *args):
     subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        [
+            "git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+            "-c", "maintenance.auto=false", *args,
+        ],
         check=True,
         capture_output=True,
     )
