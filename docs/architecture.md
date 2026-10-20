@@ -2,60 +2,34 @@
 
 ## Host layout
 
-```mermaid
-flowchart TB
-    client[SSH client] --> herdr
-    browser[Browser] -->|password| tunnel
-    subgraph host[Ubuntu host]
-        manager[User systemd] -->|linger| herdr[Herdr server]
-        herdr --> fleet[Agent fleet]
-        fleet --> browsers[Host browsers]
-        docker[Docker Compose] --> worker[Non-root worker]
-        docker --> data[Named data volumes]
-        tunnel[Cloudflare Quick Tunnel] --> gateway[Password gateway]
-        gateway --> pages[Loopback web pages]
-        fleet --> pages
-    end
-    worker --> toolchain[Agent and dev tools]
-```
+<!-- ondine:eNptUDtuwzAM3XsKXiBXKNAkg4ciaJFkEjLQFmMbkUWDlGIE8OGLUG5dFNUgku89fq-Bp6ZDSXDavgAANKGnmNzxWC3uBTabV-hIvJigFp6UxG2LNXoeUXVi8TOkHCMFU2quW8Gxg441uXOdY8rmX4x-vgEjtiTurCSgD000-FIx9LElmUtjVz1_UJI7yZptnI13DUTJvbUUU_FXkYUmWiZXV7Gmn2hVem5uJG5vBnY8jKxU1p9YntSB40aY0xL_TTWpx4TugAN5c-HOIQ_0q025kNsFzv4aUAg-c9_c4GR46ddiogkf7mO56zewVlkAU4_Ykrp35rHG5gYT1QX67whGGE7Rmy27GJmYQ9NhH5dTYvTg6W64Xr4ARhS0bw -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptUDtuwzAM3XsKXiBXKNAkg4ciaJFkEjLQFmMbkUWDlGIE8OGLUG5dFNUgku89fq-Bp6ZDSXDavgAANKGnmNzxWC3uBTabV-hIvJigFp6UxG2LNXoeUXVi8TOkHCMFU2quW8Gxg441uXOdY8rmX4x-vgEjtiTurCSgD000-FIx9LElmUtjVz1_UJI7yZptnI13DUTJvbUUU_FXkYUmWiZXV7Gmn2hVem5uJG5vBnY8jKxU1p9YntSB40aY0xL_TTWpx4TugAN5c-HOIQ_0q025kNsFzv4aUAg-c9_c4GR46ddiogkf7mO56zewVlkAU4_Ykrp35rHG5gYT1QX67whGGE7Rmy27GJmYQ9NhH5dTYvTg6W64Xr4ARhS0bw.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptUDtuwzAM3XsKXiBXKNAkg4ciaJFkEjLQFmMbkUWDlGIE8OGLUG5dFNUgku89fq-Bp6ZDSXDavgAANKGnmNzxWC3uBTabV-hIvJigFp6UxG2LNXoeUXVi8TOkHCMFU2quW8Gxg441uXOdY8rmX4x-vgEjtiTurCSgD000-FIx9LElmUtjVz1_UJI7yZptnI13DUTJvbUUU_FXkYUmWiZXV7Gmn2hVem5uJG5vBnY8jKxU1p9YntSB40aY0xL_TTWpx4TugAN5c-HOIQ_0q025kNsFzv4aUAg-c9_c4GR46ddiogkf7mO56zewVlkAU4_Ykrp35rHG5gYT1QX67whGGE7Rmy27GJmYQ9NhH5dTYvTg6W64Xr4ARhS0bw.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 Ansible manages the host; optional containers keep separate process and filesystem lifecycles. The [password gateway](gateway.md) is the default way to open the agents' web pages from a browser.
 
 ## Provisioning
 
-```mermaid
-flowchart TB
-    dock[./ship.sh dock] --> config[.local/host.yml]
-    config --> inspect[./ship.sh inspect]
-    inspect --> schema[Schema validation]
-    schema --> chart[./ship.sh chart]
-    chart --> preview[Check-mode preview]
-    preview --> launch[./ship.sh launch]
-    releases[Latest verified releases] --> launch
-    launch --> ansible[Ansible profiles]
-    ansible --> host[Configured host]
-    host --> survey[./ship.sh survey]
-```
+<!-- ondine:eNpNkEGOwyAMRfdzCl8g6Q0qzXQ7u-kOZcGAU6wSiDBJ1dtXsWnFyvzv54_lOeaHC7ZUuP58AQD47O5mPHGgdeQgcoJhOIPLaaabGWN2Np5C5jo-lzjJkPYEo8QrutpFNEfJJgRlF3Cx5k8K7DaSt5VyUlK7-vWxYJcouv0sux_QWnAnfJhLQHcfluzxbSnZhLDRbsmFLlENBQtGtIxsfm1FrrBjoZnQfxpTlyET-hTXJqb_iOZbK6wlzxSRNbp1hTwuaC5yuK2gF63U8dIDbWXHZ7emGtML8rGQ6A -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpNkEGOwyAMRfdzCl8g6Q0qzXQ7u-kOZcGAU6wSiDBJ1dtXsWnFyvzv54_lOeaHC7ZUuP58AQD47O5mPHGgdeQgcoJhOIPLaaabGWN2Np5C5jo-lzjJkPYEo8QrutpFNEfJJgRlF3Cx5k8K7DaSt5VyUlK7-vWxYJcouv0sux_QWnAnfJhLQHcfluzxbSnZhLDRbsmFLlENBQtGtIxsfm1FrrBjoZnQfxpTlyET-hTXJqb_iOZbK6wlzxSRNbp1hTwuaC5yuK2gF63U8dIDbWXHZ7emGtML8rGQ6A.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNpNkEGOwyAMRfdzCl8g6Q0qzXQ7u-kOZcGAU6wSiDBJ1dtXsWnFyvzv54_lOeaHC7ZUuP58AQD47O5mPHGgdeQgcoJhOIPLaaabGWN2Np5C5jo-lzjJkPYEo8QrutpFNEfJJgRlF3Cx5k8K7DaSt5VyUlK7-vWxYJcouv0sux_QWnAnfJhLQHcfluzxbSnZhLDRbsmFLlENBQtGtIxsfm1FrrBjoZnQfxpTlyET-hTXJqb_iOZbK6wlzxSRNbp1hTwuaC5yuK2gF63U8dIDbWXHZ7emGtML8rGQ6A.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 Validate the host file, preview the changes, then apply selected profiles; omp plugins have no publisher checksums.
 
 ## Agent fleet and supervision
 
-```mermaid
-flowchart TB
-    config[Seeded configuration] --> firstmate[Firstmate]
-    firstmate -->|secondmate harness| secondmate[Secondmates]
-    firstmate -->|dispatch policy| crews[Crews and scouts]
-    herdr[Herdr panes] --> crews
-    overlay[Crew omp overlay] --> crews
-    crews -->|async review| advisor[Advisor]
-    crews --> status[Durable status files]
-    status -->|supervision| firstmate
-    firstmate -->|instructions| inbox[Worker inbox]
-    inbox --> crews
-    crews --> provider[Model provider]
-    secondmate --> provider
-```
+<!-- ondine:eNp1UUFOxDAMvPMKf2C_gASsEBdOi8Qh6iGbuNQiG1d20lIpj0dN2y2g5eLMODOO7bSBR9dZSfD2eAcA4Di29GFOiB79yrLYRBwbOBzuoSXRdLEJzfOGmuq8Xsyyoug4-ko7KxFVC-w5c7pCveX2pL1NroOeA7mpgBMc1TzNEWz0oI5zWq0dihfzMkfobURdGq2WKuABJdip2oEv_Zb4q6uovm91ig4EB8KxgPUDKYt5WM7mtxg02ZTVHLPYc8CVQkthm23N1LXkHmUgJY5ln_nGBihqkuzmvWsBimf-Mu8snygLWSpX-N8U0AsP5FHMK3sMV7o2tX_QT-03o_G3gg -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNp1UUFOxDAMvPMKf2C_gASsEBdOi8Qh6iGbuNQiG1d20lIpj0dN2y2g5eLMODOO7bSBR9dZSfD2eAcA4Di29GFOiB79yrLYRBwbOBzuoSXRdLEJzfOGmuq8Xsyyoug4-ko7KxFVC-w5c7pCveX2pL1NroOeA7mpgBMc1TzNEWz0oI5zWq0dihfzMkfobURdGq2WKuABJdip2oEv_Zb4q6uovm91ig4EB8KxgPUDKYt5WM7mtxg02ZTVHLPYc8CVQkthm23N1LXkHmUgJY5ln_nGBihqkuzmvWsBimf-Mu8snygLWSpX-N8U0AsP5FHMK3sMV7o2tX_QT-03o_G3gg.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNp1UUFOxDAMvPMKf2C_gASsEBdOi8Qh6iGbuNQiG1d20lIpj0dN2y2g5eLMODOO7bSBR9dZSfD2eAcA4Di29GFOiB79yrLYRBwbOBzuoSXRdLEJzfOGmuq8Xsyyoug4-ko7KxFVC-w5c7pCveX2pL1NroOeA7mpgBMc1TzNEWz0oI5zWq0dihfzMkfobURdGq2WKuABJdip2oEv_Zb4q6uovm91ig4EB8KxgPUDKYt5WM7mtxg02ZTVHLPYc8CVQkthm23N1LXkHmUgJY5ln_nGBihqkuzmvWsBimf-Mu8snygLWSpX-N8U0AsP5FHMK3sMV7o2tX_QT-03o_G3gg.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 Firstmate supervises work through inboxes and status files; crews use the dispatch policy and call model providers directly.
 
@@ -119,33 +93,23 @@ See [iMessage bridge](imessage.md) for the optional bridge and its routing contr
 
 ## Boards
 
-```mermaid
-flowchart TB
-    agents[Agents] <-->|Unix socket| local[Crew board]
-    local --> memory[In-memory topics]
-    local -->|observe only| firstmate[Firstmate]
-    backlog[Backlog] --> mirror[GitHub board timer]
-    status[Status files] --> mirror
-    mirror --> issues[GitHub issues]
-    mirror --> project[Project status]
-    agents <-->|messages| issues
-```
+<!-- ondine:eNpdUEFqAzEMvPcV-oB_EAJNoU1uhbYn44PX0W7c2KsgaZsE_PiClUDIaUbDjEZoLHROh8gK35sXAIA44aziXzsEWDm3bj9zvoBQOqI2KJRi8W-MZxgo8j70WFfBuTVUrMRXv5udMVA65SRPtkaDIP8h0FyuDcbMojUq-vc7s8AQ07HQ5DeGwSoyM7H_yLpdBrsCNFdky4hGXcR_dYAxF5THXPcY7WoWWVDu22wKz6YT0y8m9Z-Gt47w8DJ7VUWROKG026J_pXJ4Lg -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpdUEFqAzEMvPcV-oB_EAJNoU1uhbYn44PX0W7c2KsgaZsE_PiClUDIaUbDjEZoLHROh8gK35sXAIA44aziXzsEWDm3bj9zvoBQOqI2KJRi8W-MZxgo8j70WFfBuTVUrMRXv5udMVA65SRPtkaDIP8h0FyuDcbMojUq-vc7s8AQ07HQ5DeGwSoyM7H_yLpdBrsCNFdky4hGXcR_dYAxF5THXPcY7WoWWVDu22wKz6YT0y8m9Z-Gt47w8DJ7VUWROKG026J_pXJ4Lg.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNpdUEFqAzEMvPcV-oB_EAJNoU1uhbYn44PX0W7c2KsgaZsE_PiClUDIaUbDjEZoLHROh8gK35sXAIA44aziXzsEWDm3bj9zvoBQOqI2KJRi8W-MZxgo8j70WFfBuTVUrMRXv5udMVA65SRPtkaDIP8h0FyuDcbMojUq-vc7s8AQ07HQ5DeGwSoyM7H_yLpdBrsCNFdky4hGXcR_dYAxF5THXPcY7WoWWVDu22wKz6YT0y8m9Z-Gt47w8DJ7VUWROKG026J_pXJ4Lg.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 The optional crew board keeps temporary host-local messages (see [how it is built](../apps/crewboard/README.md)); the GitHub board reads backlog and status without changing supervision.
 
 ## Data boundaries
 
-```mermaid
-flowchart TB
-    recipe[Provisioning recipe] --> config[Tool configuration]
-    recipe --> worker[Isolated worker]
-    worker --> volumes[Compose data volumes]
-    profile[Project databases profile] --> stack[Project database per project]
-    stack --> env[Worktree env seeder]
-    env --> apps[Worktree apps]
-    apps -->|application traffic| stack
-    auth[Authentication and state] -.->|outside recipe| host[Host account]
-```
+<!-- ondine:eNplkDFuwzAMRfeeghdwjxCg7dJuHQJ0EDIwMh2rVkSBpJzFhy8k2WiBbv9_PkofnCI__IxicH59AgAQ8iGT-xRegwZOId327ALDcALPaQo3d2aOuy6CFjhd_qw38sGykLgP5YhG4-471nXDVo7lTure-J5ZCUY0PMIOZ-EpxNbpm7w14opKekx6MzX0yz8IMknlatifa1zboLS6L5bFhKgaUKLxqFh9hTBn_aWq6_OqKrBhzjH4dgMwwWkKfuufdK7Y7F6KzZTswDCNlbDa_Hk4bVxMw0j79TaYWc29sxqg91ySXX4A4OWTnA -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNplkDFuwzAMRfeeghdwjxCg7dJuHQJ0EDIwMh2rVkSBpJzFhy8k2WiBbv9_PkofnCI__IxicH59AgAQ8iGT-xRegwZOId327ALDcALPaQo3d2aOuy6CFjhd_qw38sGykLgP5YhG4-471nXDVo7lTure-J5ZCUY0PMIOZ-EpxNbpm7w14opKekx6MzX0yz8IMknlatifa1zboLS6L5bFhKgaUKLxqFh9hTBn_aWq6_OqKrBhzjH4dgMwwWkKfuufdK7Y7F6KzZTswDCNlbDa_Hk4bVxMw0j79TaYWc29sxqg91ySXX4A4OWTnA.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNplkDFuwzAMRfeeghdwjxCg7dJuHQJ0EDIwMh2rVkSBpJzFhy8k2WiBbv9_PkofnCI__IxicH59AgAQ8iGT-xRegwZOId327ALDcALPaQo3d2aOuy6CFjhd_qw38sGykLgP5YhG4-471nXDVo7lTure-J5ZCUY0PMIOZ-EpxNbpm7w14opKekx6MzX0yz8IMknlatifa1zboLS6L5bFhKgaUKLxqFh9hTBn_aWq6_OqKrBhzjH4dgMwwWkKfuufdK7Y7F6KzZTswDCNlbDa_Hk4bVxMw0j79TaYWc29sxqg91ySXX4A4OWTnA.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 Authentication and mutable state stay outside the recipe.
 See [Project databases](project-databases.md) for the optional per-project worktree database.

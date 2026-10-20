@@ -86,14 +86,12 @@ This removes the fill and shows each image as half-block characters, but not as 
 
 ![The same two test images in WezTerm over mosh: as half-block characters with plain mosh (left), and at full resolution with herdr-patch on the computer (right)](images.png)
 
-```mermaid
-flowchart LR
-    app[App in a Herdr pane] --> herdr[Herdr]
-    herdr --> server["herdr-patch on the server"]
-    server -- "text and half-blocks" --> mosh[mosh] --> client["herdr-patch on your computer"]
-    server -- "images, on a socket" --> ssh["ssh: herdr-patch --read"] --> client
-    client --> term[WezTerm or kitty]
-```
+<!-- ondine:eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptjb1OBDEMhHueYpT68gIUSNddQYWQKKItTNZHVrv5ke3jOJ4ebUJxEjSWPTP-5rzVa0wkhueXBwCg1sKxNSwFhBPLLGhUeIL3T0j7Hbo69XQXuqUsnyzBdcU3sphQCyzxr-XGxzjgPZzxl4HKjETb2b9vNa7qOixXTWEfozZuCxf7w77ViyDW3C72H37J9MF62JMErXFlG3TVFJxqesQ90Hthmt19YyeOtavGksMbf7-yZFTBupjdph83Pmjq.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 On the server, `herdr-patch` takes the kitty graphics out of the output of Herdr. In their place, it paints half-block characters (2 pixels in each cell) into the cells of each image, and blanks these cells when Herdr deletes the image. Every mosh client can show these characters.
 

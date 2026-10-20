@@ -17,6 +17,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [chrome-devtools-axi](https://github.com/kunchenguid/chrome-devtools-axi) (`chrome-devtools-axi`): browser control for agents. License: MIT.
 - [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) (`chrome-devtools-mcp`): the DevTools server behind chrome-devtools-axi. License: Apache-2.0.
 - [lavish-axi](https://github.com/kunchenguid/lavish-axi) (`lavish-axi`): HTML plans, tables, and diagrams from agents. License: MIT.
+- [Ondine](https://github.com/wevm/ondine) (`ondine`): the default diagram compiler for agents and documentation. License: MIT.
 - [quota-axi](https://github.com/kunchenguid/quota-axi) (`quota-axi`): agent provider quota windows. License: MIT.
 - [tasks-axi](https://github.com/kunchenguid/tasks-axi) (`tasks-axi`): the task backlog of Firstmate. License: MIT.
 - [GitHub CLI](https://github.com/cli/cli) (`gh`): GitHub access. License: MIT.

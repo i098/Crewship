@@ -2,14 +2,12 @@
 
 The CI pool runs GitHub Actions jobs on this host with no runner to register or remove by hand. One list in `.local/host.yml` names each repository and its number of slots. Each slot is a systemd user unit that asks GitHub for a just-in-time (JIT) runner, runs one job in a fresh container, and exits. GitHub removes a JIT runner after its one job, and systemd starts the slot again for the next job.
 
-```mermaid
-flowchart LR
-    start["ci-runner@slot starts"] --> jit["POST generate-jitconfig (host gh login)"]
-    jit --> run["fresh runner container: one job"]
-    run --> gone["GitHub removes the runner"]
-    gone --> exit["slot exits"]
-    exit -->|systemd restarts it| start
-```
+<!-- ondine:eNotT7tOw0AQ7PmK0VVQ-AcoEF0okEBAZ6VwnPXdWs6utLsGIuXjozu7G81LM9Oif2MZLPD-9QAAHoNFn0bubBUhe_VFY2M9HdF1L5g5-vT58f2DTEI2BHUzx6gyccZjUQ_kgkUzy1M6ttaZo0VtlT5NRl6w1WNUiYGF7BkqhFlPe8RWaZGsQn06cLytJxhd9JccUWgv2N3V1ez0X9e10RX6rldc9ZtfPehyhtH2CRy37d4dalFY0Q -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNotT7tOw0AQ7PmK0VVQ-AcoEF0okEBAZ6VwnPXdWs6utLsGIuXjozu7G81LM9Oif2MZLPD-9QAAHoNFn0bubBUhe_VFY2M9HdF1L5g5-vT58f2DTEI2BHUzx6gyccZjUQ_kgkUzy1M6ttaZo0VtlT5NRl6w1WNUiYGF7BkqhFlPe8RWaZGsQn06cLytJxhd9JccUWgv2N3V1ez0X9e10RX6rldc9ZtfPehyhtH2CRy37d4dalFY0Q.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNotT7tOw0AQ7PmK0VVQ-AcoEF0okEBAZ6VwnPXdWs6utLsGIuXjozu7G81LM9Oif2MZLPD-9QAAHoNFn0bubBUhe_VFY2M9HdF1L5g5-vT58f2DTEI2BHUzx6gyccZjUQ_kgkUzy1M6ttaZo0VtlT5NRl6w1WNUiYGF7BkqhFlPe8RWaZGsQn06cLytJxhd9JccUWgv2N3V1ez0X9e10RX6rldc9ZtfPehyhtH2CRy37d4dalFY0Q.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 ## Opt a repository in
 

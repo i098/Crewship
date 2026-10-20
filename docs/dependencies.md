@@ -11,6 +11,23 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
 `./ship.sh chart` installs none of this.
 
+## Diagrams
+
+The `agents` profile installs the latest published [Ondine](https://github.com/wevm/ondine) release from the npm registry.
+It uses the existing bun installer with versioned prefixes, registry integrity checks, and command links.
+No new profile or schema setting is needed.
+The public [diagram rule](../blueprint/rules/public/ondine-diagrams.md) makes Ondine the default when `profiles.public_skills` is on.
+
+Run `ondine diagram.mmd` to render compatible Mermaid source as `diagram.svg`, then link the SVG from Markdown.
+The documentation uses Ondine's GitHub image blocks with light and dark variants.
+Each `<!-- ondine:... -->` marker preserves the original source without data loss.
+The public service at `ondine.sh` renders the source encoded in each image URL.
+Do not send private diagrams to this service.
+Use `ondine file.md --svg` to write local SVG files instead.
+
+To edit a documentation diagram, run `ondine file.md --restore`, edit the restored fence, then run `ondine file.md`.
+Run `ondine file.md --check` to check the result without writing files.
+
 ## Repository tooling
 
 `onboard.sh`, `pyproject.toml`, `uv.lock`

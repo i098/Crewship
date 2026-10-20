@@ -8,31 +8,12 @@ Report each result to the user in one line. If a command fails, show its last li
 
 ## Setup flow
 
-```mermaid
-flowchart TD
-    box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]
-    boot --> init["./ship.sh dock: writes .local/host.yml"]
-    init --> check["./ship.sh inspect, then chart"]
-    check --> apply["./ship.sh launch"]
-    lock["toolchain: latest releases, checksum-verified (omp plugins excepted)"] --> apply
-    apply --> profiles["Ansible profiles"]
-    subgraph host["Finished host"]
-        herdr["Herdr workspace"]
-        fm["Firstmate orchestrator"]
-        agents["omp agents"]
-        guards["Fleet guards"]
-        docker["Docker engine"]
-        chat["Concord and slk chat clients"]
-        gateway["Password gateway and Cloudflare tunnel"]
-    end
-    profiles --> herdr
-    profiles --> fm
-    profiles --> agents
-    profiles --> guards
-    profiles --> docker
-    profiles --> chat
-    profiles --> gateway
-```
+<!-- ondine:eNptksFu3CAQhu99ihGnVtp1omjVQw6VokSrHntoTygHDGODFjOIGeLs21fGTmR1y2XgZ76Bf2CINFtvisDvly8AAD29a3UuyB7-9DVJhYdTd38CKvDwvbs_qVc4Hn9ATyRadXeUejLFdewfIRpBFqhvB3hKHPqI6nWrSdKokEKj2IfcsQdH9vIIcwmCDF0ka-KdJ5buOsWNXZDGWo_2sodD4oxWDiAeEzQTG9NSG2Ryjtc9FE1N1m95kZaKQhStNyF9OigY0TDyYa3EdTq-YQlDQAdfacqQYx1DYsB3i1nQfdu60o5rpdusabnQECKyVltTPpXtFlz7sZjsYXGu1TmkwB5dW24py_BYXNHq5xJgpnLhbCzuEoZpgQvLZASBivXIUoxQ2SWZEZOwVouLdb7bHKspjrU6R0TZVrvt5bWwaPXSImAaQ9pfwHojWj1TslQcmOSA46WpYGP49ywjOJurVr8M87wAm9LA50jVDdEUBKkp4cdvwORa_Ghh63DrzK08TLfaavlWX73e6qvlW30x9Z8qq4O_fXwMGw -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptksFu3CAQhu99ihGnVtp1omjVQw6VokSrHntoTygHDGODFjOIGeLs21fGTmR1y2XgZ76Bf2CINFtvisDvly8AAD29a3UuyB7-9DVJhYdTd38CKvDwvbs_qVc4Hn9ATyRadXeUejLFdewfIRpBFqhvB3hKHPqI6nWrSdKokEKj2IfcsQdH9vIIcwmCDF0ka-KdJ5buOsWNXZDGWo_2sodD4oxWDiAeEzQTG9NSG2Ryjtc9FE1N1m95kZaKQhStNyF9OigY0TDyYa3EdTq-YQlDQAdfacqQYx1DYsB3i1nQfdu60o5rpdusabnQECKyVltTPpXtFlz7sZjsYXGu1TmkwB5dW24py_BYXNHq5xJgpnLhbCzuEoZpgQvLZASBivXIUoxQ2SWZEZOwVouLdb7bHKspjrU6R0TZVrvt5bWwaPXSImAaQ9pfwHojWj1TslQcmOSA46WpYGP49ywjOJurVr8M87wAm9LA50jVDdEUBKkp4cdvwORa_Ghh63DrzK08TLfaavlWX73e6qvlW30x9Z8qq4O_fXwMGw.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptksFu3CAQhu99ihGnVtp1omjVQw6VokSrHntoTygHDGODFjOIGeLs21fGTmR1y2XgZ76Bf2CINFtvisDvly8AAD29a3UuyB7-9DVJhYdTd38CKvDwvbs_qVc4Hn9ATyRadXeUejLFdewfIRpBFqhvB3hKHPqI6nWrSdKokEKj2IfcsQdH9vIIcwmCDF0ka-KdJ5buOsWNXZDGWo_2sodD4oxWDiAeEzQTG9NSG2Ryjtc9FE1N1m95kZaKQhStNyF9OigY0TDyYa3EdTq-YQlDQAdfacqQYx1DYsB3i1nQfdu60o5rpdusabnQECKyVltTPpXtFlz7sZjsYXGu1TmkwB5dW24py_BYXNHq5xJgpnLhbCzuEoZpgQvLZASBivXIUoxQ2SWZEZOwVouLdb7bHKspjrU6R0TZVrvt5bWwaPXSImAaQ9pfwHojWj1TslQcmOSA46WpYGP49ywjOJurVr8M87wAm9LA50jVDdEUBKkp4cdvwORa_Ghh63DrzK08TLfaavlWX73e6qvlW30x9Z8qq4O_fXwMGw.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 ## 0. Choose features and install Crewship
 

@@ -7,15 +7,12 @@ This file says how it is built and how it works.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    pub[crewboard pub] --> sock[Unix socket]
-    sub[crewboard sub / tail / topics / stat] <--> sock
-    sock --> daemon[crewboard serve]
-    daemon --> rings[Per-topic ring buffers]
-    rings --> subs[Topic subscribers]
-    rings --> fire[Firehose subscriber: sub '*']
-```
+<!-- ondine:eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNptj8EKwjAMhu8-RW4DYewuw6MnDyJ6Kj20XerK5jqS1vn4shRhgqfkJ18-Ej_GxfWGEpyvOwCAOVvlCBcbDXVr0lDXR-DoBnWfwls6TFpg_oE5W2ggmTCuJc7BMTTAySQN7VdS9qIbRNsZfMZp60B6YZGXmWAUpgerC1ItWslgs_dIXGAhyqXZsroJtraOgv1D-UCoToGwj4wb8CBfVPtKfwBf3F0c.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 The daemon is `crewboard serve`. Each client command is a short process. It sends one request to the socket and prints the reply.
 

@@ -77,13 +77,12 @@ Other addresses can still sign in.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  B[Browser] -->|HTTPS| CF[Cloudflare edge]
-  CF --> T[crewship-tunnel.service<br>cloudflared]
-  T -->|127.0.0.1:20240| G[crewship-gateway.service]
-  G -->|/PORT/path| P[127.0.0.1:PORT]
-```
+<!-- ondine:eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA.svg?scheme=dark">
+  <img alt="Mermaid flowchart diagram" src="https://ondine.sh/eNpFzEsKgzAUheG5q7gbMEYpFEpxoKAdFCo2s-AgjdcHBJUYGwpZfInQOj2c_-vUbOUgtIF7HQBkPNOzXVE3EIapuzFWPR3kBc_VvLWdEhoB2x6bACAv_AcYlxrtOoxLaLZpQkVW1O9R4vWlU_nPWp-wXY2TM6GEkviS0OREHZQH0QuDVnx-ho_KPYqqR82iRZjBQcUPws_NFx4NPsA.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 - `crewship-gateway.service` runs `~/.local/bin/crewship-gateway serve` on `127.0.0.1:20240`. It refuses a peer that is not on loopback. It opens no port to the network.
 - `crewship-tunnel.service` runs `cloudflared tunnel --url http://127.0.0.1:20240`, so the gateway is its only origin. It sends nothing to a local page directly. When the gateway is down, the tunnel answers 502 and shows no page.
