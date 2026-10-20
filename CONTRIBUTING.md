@@ -18,10 +18,8 @@ Crewship is an Ansible playbook with a Python CLI wrapper (`scripts/ship.py`). T
 
 Every task is idempotent; a second unchanged `launch` reports `changed=0`.
 
-Every task is check-mode safe: `chart` previews file changes without writing them.
-The account and agent tasks can create missing home-layout, preference, extension, and enabled-profile directories under `crewship.home`.
-These directories let remote-source copies run in check mode.
-Existing directory permissions and all managed files stay unchanged.
+Keep every task check-mode safe; follow the [`chart` contract](docs/configuration.md#commands).
+Remote-source copies need existing parent directories even in check mode.
 
 Follow [Dependencies](docs/dependencies.md) for tool release selection, download verification, and exceptions.
 Only the repository's own development environments (`uv.lock`, `apps/crewboard/Cargo.lock`) stay locked.
