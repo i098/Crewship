@@ -23,10 +23,7 @@ git diff main... | ponytail-review --stdin
 ```
 
 - It names what to cut: reinvented stdlib, unneeded dependencies, speculative abstractions, dead flexibility.
-- **Cut everything it names**, then run it again.
-- **Exit 0** = `Lean already. Ship.` The size is justified whatever the number says. Open the PR.
-- **Exit 2** = findings remain. Cut them.
-- **Exit 1** = the gate could not run (plugin missing, agent missing, empty diff). **Report that. It is never a pass.**
+- Apply findings from exactly one review round; read the installed wrapper's exit-code contract with `ponytail-review --help`.
 
 Use `ponytail-review`, not the `/ponytail-review` slash command: the slash command is a Claude plugin and is unavailable under other harnesses, so workers on pi could not run it. The wrapper builds its prompt from the plugin's own files, so it is the same review from anywhere.
 
