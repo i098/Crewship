@@ -2,28 +2,42 @@
 - name: Stop disabled usage export
   when: not (crewship_usage_enabled | bool)
   block:
-    - name: Read loaded usage unit states
+    - name: Read the loaded usage timer state
       ansible.builtin.command:
-        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, "{{ item }}"]
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-usage.timer]
       environment: "{{ crewship_user_systemd_env }}"
-      loop: [crewship-usage.timer, crewship-usage.service]
-      register: crewship_usage_units
+      register: crewship_usage_timer
       changed_when: false
-      failed_when: crewship_usage_units.rc != 0 and (crewship_usage_units.stdout | trim) != 'inactive'
+      failed_when: crewship_usage_timer.rc != 0 and (crewship_usage_timer.stdout | trim) != 'inactive'
       check_mode: false
       when: crewship_manage_services | bool
 
     # Loaded units can stay active after an image-only apply removes their files.
-    - name: Stop the usage timer and any current export
+    - name: Stop the usage timer before inspecting the export
       ansible.builtin.command:
-        argv: [/usr/bin/systemctl, --user, stop, "{{ item.item }}"]
+        argv: [/usr/bin/systemctl, --user, stop, crewship-usage.timer]
       environment: "{{ crewship_user_systemd_env }}"
       when:
         - crewship_manage_services | bool
-        - item.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
-      loop: "{{ crewship_usage_units.results }}"
-      loop_control:
-        label: "{{ item.item }}"
+        - crewship_usage_timer.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
+
+    - name: Read the loaded usage exporter state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-usage.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_usage_service
+      changed_when: false
+      failed_when: crewship_usage_service.rc != 0 and (crewship_usage_service.stdout | trim) != 'inactive'
+      check_mode: false
+      when: crewship_manage_services | bool
+
+    - name: Stop any current usage export
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, stop, crewship-usage.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_usage_service.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
 
     - name: Disable usage export at boot
       ansible.builtin.file:
@@ -91,6 +105,18 @@
         dest: "{{ crewship_user_units }}/{{ item }}"
         mode: "0644"
       loop: [crewship-usage.service, crewship-usage.timer]
+      notify: reload user systemd
+
+    - name: Detect usage units changed while runtime management was off
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=NeedDaemonReload, --value, "{{ item }}"]
+      environment: "{{ crewship_user_systemd_env }}"
+      loop: [crewship-usage.service, crewship-usage.timer]
+      register: crewship_usage_reload
+      changed_when: crewship_usage_reload.stdout | trim == 'yes'
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
       notify: reload user systemd
 
     - name: Load changed usage units before starting the timer

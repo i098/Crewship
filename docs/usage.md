@@ -68,7 +68,10 @@ Use the full OTLP/HTTP logs URL, including `/v1/logs`.
 Remote endpoints require HTTPS; loopback HTTP supports isolated fixtures.
 The configured mount must exist and differ from the root filesystem.
 An empty `state_dir` uses `crewship.data_dir/usage`.
-The installer checks the mount without creating state.
+The installer checks the mount and target-account write and search access without creating state, including in check mode.
+Prepare `state_dir` with mode `0700` and target-account ownership when the parent does not permit directory creation.
+Apply the same preparation to `crewship.data_dir/usage` when `state_dir` is empty.
+If the directory does not exist, its nearest existing parent must permit the target account to create it.
 
 The optional `auth_file` is a systemd environment file containing `SIGNOZ_INGESTION_KEY=...`.
 Create it separately with mode `0600`, readable by the target account.
@@ -85,6 +88,7 @@ Each run uses the bounded spool, gzip requests, request limit, and per-request r
 It does not open or drain an old `usage.sqlite` ledger.
 
 With `start_services: false`, installation writes units and the static timer link without starting, stopping, or reloading systemd.
+A later managed apply reloads stale exporter and timer units, including changes made while service management was off.
 With service management enabled, set `usage.enabled: false` and apply to stop the timer and any current export.
 This removes the boot link and installed files.
 Clearing `usage.endpoint` and applying has the same effect.

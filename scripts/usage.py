@@ -687,6 +687,8 @@ def configured_data_dir(data_dir, mount):
         existing = existing.parent
     if existing.stat().st_dev != mount.stat().st_dev:
         raise ValueError("data_dir is not on the configured data mount")
+    if not existing.is_dir() or not os.access(existing, os.W_OK | os.X_OK, effective_ids=True):
+        raise ValueError("data_dir or its nearest existing parent must be writable and searchable")
     return resolved
 
 

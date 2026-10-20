@@ -221,6 +221,39 @@ def test_missing_mount_fails_before_creating_a_directory(tmp_path):
     assert not missing.exists()
 
 
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("mode", [0o555, 0o666])
+def test_usage_check_requires_directory_write_and_search_access_without_creating_state(existing, mode):
+    if os.geteuid() == 0:
+        pytest.skip("directory permissions require an unprivileged account")
+    mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
+    if mount is None:
+        pytest.skip("needs a separate mounted worktree")
+    with tempfile.TemporaryDirectory(prefix=".usage-access-", dir=ROOT) as temporary:
+        scratch = Path(temporary)
+        scratch.chmod(0o755)
+        parent = scratch / "data"
+        parent.mkdir()
+        state = parent / "usage"
+        if existing:
+            state.mkdir()
+        restricted = state if existing else parent
+        restricted.chmod(mode)
+        command = [sys.executable, str(ROOT / "scripts/usage.py"), "--mount", str(mount),
+                   "--data-dir", str(state), "check"]
+        try:
+            denied = subprocess.run(command, capture_output=True, text=True)
+            assert denied.returncode == 1, denied.stdout + denied.stderr
+            restricted.chmod(0o777)
+            assert state.exists() == existing
+            allowed = subprocess.run(command, capture_output=True, text=True)
+            assert allowed.returncode == 0, allowed.stdout + allowed.stderr
+            assert json.loads(allowed.stdout) == {"mounted": True}
+            assert state.exists() == existing
+        finally:
+            restricted.chmod(0o700)
+
+
 def test_export_revalidates_corrupt_storage_before_sending(ledger):
     register(ledger)
     row = ledger.db.execute("SELECT payload FROM events").fetchone()
