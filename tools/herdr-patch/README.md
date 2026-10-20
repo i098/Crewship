@@ -86,14 +86,12 @@ This removes the fill and shows each image as half-block characters, but not as 
 
 ![The same two test images in WezTerm over mosh: as half-block characters with plain mosh (left), and at full resolution with herdr-patch on the computer (right)](images.png)
 
-```mermaid
-flowchart LR
-    app[App in a Herdr pane] --> herdr[Herdr]
-    herdr --> server["herdr-patch on the server"]
-    server -- "text and half-blocks" --> mosh[mosh] --> client["herdr-patch on your computer"]
-    server -- "images, on a socket" --> ssh["ssh: herdr-patch --read"] --> client
-    client --> term[WezTerm or kitty]
-```
+<!-- ondine:eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ.svg?scheme=dark">
+  <img alt="Herdr sends text and half-blocks over mosh and images over an SSH socket; the client combines them in WezTerm or kitty" src="https://ondine.sh/eNptULtuAyEQ7PMVI-rwA45kKZ2LVLGlFOgKzK0D8vEQu3bifH0EXGElbpB2ZpnZmdOSv5y3VfD2_gQA1rlDkIU22FGdK5jSzBD6Ftg0w9vlpI9LdmdGvlJFzOw7E6L9pBW0Cfv9DpzdmeQF4gluCZQELsdjSMQNiwgJH_RzoBqRK85B5DaOKMW8ltJ4u95RbKIJWm_h22w6OvXtDnSKqV6pGtURXaw4j5y6_6DU-DEGaA31KJnqYi2Zac-wHQH-ad_ypbZU5SKP5Ecrz23Trn0MdWZvFLPf4F5Q60p2VveOXXFtr6FCNZq_rU2_KImXmQ.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 On the server, `herdr-patch` takes the kitty graphics out of the output of Herdr. In their place, it paints half-block characters (2 pixels in each cell) into the cells of each image, and blanks these cells when Herdr deletes the image. Every mosh client can show these characters.
 

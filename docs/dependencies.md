@@ -11,6 +11,23 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
 `./ship.sh chart` installs none of this.
 
+## Diagrams
+
+The `agents` profile installs the latest published [Ondine](https://github.com/wevm/ondine) release from the npm registry.
+It uses the existing bun installer with versioned prefixes, registry integrity checks, and command links.
+No new profile or schema setting is needed.
+The public [diagram rule](../blueprint/rules/public/ondine-diagrams.md) makes Ondine the default when `profiles.public_skills` is on.
+
+Run `ondine diagram.mmd` to render compatible Mermaid source as `diagram.svg`, then link the SVG from Markdown.
+The documentation uses Ondine's GitHub image blocks with light and dark variants.
+Each `<!-- ondine:... -->` marker preserves the original source without data loss, with an added `accTitle` that describes the flow.
+The public service at `ondine.sh` renders the source encoded in each image URL.
+Do not send private diagrams to this service.
+Use `ondine file.md --svg` to write local SVG files instead.
+
+To edit a documentation diagram, run `ondine file.md --restore`, edit the restored fence, then run `ondine file.md`.
+Run `ondine file.md --check` to check the result without writing files.
+
 ## Repository tooling
 
 `onboard.sh`, `pyproject.toml`, `uv.lock`
@@ -32,6 +49,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 - `agents` profile, native: gws, the Google Workspace CLI ([googleworkspace/cli](https://github.com/googleworkspace/cli/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes. Signing in Google accounts is manual: see [Google Workspace CLI](google-workspace.md).
 - `agents` profile, no-mistakes ([kunchenguid/no-mistakes](https://github.com/kunchenguid/no-mistakes/releases)): the one tool that tracks the prerelease channel. Each apply resolves the newest non-draft release, betas included (not only the latest stable one), and verifies it against the GitHub release-asset digest.
 - `agents` profile, bun: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, forgejo-axi (the no-mistakes Forgejo provider; see [no-mistakes](forgejo.md#no-mistakes)), acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6. Shells and user units have `~/.bun/bin` on `PATH`, after `~/.local/bin`, for tools you add yourself with `bun add -g`.
+  See [Diagrams](#diagrams) for the Ondine entry.
 - `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `blueprint/config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.

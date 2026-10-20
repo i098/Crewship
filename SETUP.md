@@ -8,31 +8,12 @@ Report each result to the user in one line. If a command fails, show its last li
 
 ## Setup flow
 
-```mermaid
-flowchart TD
-    box["Fresh Ubuntu 24.04 or 26.04"] --> boot["./onboard.sh: latest uv, Ansible"]
-    boot --> init["./ship.sh dock: writes .local/host.yml"]
-    init --> check["./ship.sh inspect, then chart"]
-    check --> apply["./ship.sh launch"]
-    lock["toolchain: latest releases, checksum-verified (omp plugins excepted)"] --> apply
-    apply --> profiles["Ansible profiles"]
-    subgraph host["Finished host"]
-        herdr["Herdr workspace"]
-        fm["Firstmate orchestrator"]
-        agents["omp agents"]
-        guards["Fleet guards"]
-        docker["Docker engine"]
-        chat["Concord and slk chat clients"]
-        gateway["Password gateway and Cloudflare tunnel"]
-    end
-    profiles --> herdr
-    profiles --> fm
-    profiles --> agents
-    profiles --> guards
-    profiles --> docker
-    profiles --> chat
-    profiles --> gateway
-```
+<!-- ondine:eNptUsFu2zAMve8rCJ82IHWLItghhwFFimDHHbqT0YMs0ZYQWRJIKm7-fpDsBt4yXSg98VF8Txx8nLVVJPD2-gUAQGn95sTjAU6EbOF3n4NkYJScgHJg6GMUFlJpBxflnVGCXO7FhZF3oIIBlZJ3yJAoDs4jg0RwgUV5D0fCma1LIDF6rumMdHEauTbQx4-u-evt5337tIdI8Py9fdo37_Dw8KN20TXtYwx9VGRatgfwpRWBfNnBS2DXe2ze15pRKssFV1mlgZYtmKjPB5jJFQ2tj1r5RxtZ2uvkV26hVK62qM9bsgucUMsOxGKA6uLKqamVVJy4bkle5aDtmudjqViM0Fa5cFNA6FEx8m6pxHl6uCC5waGBr3FKkHweXWDAD41J0HxbXanPLf9YdhX7_ISuWU25IWsXnPuRVLJQlHfNyQXHFk09rillWSRDXfOzBJgjnTkpjZuEYSpkYpmUIETSFsucSKRNkhoxCHdNUbHsN5djVmS4a04eUdbT5rr8FlLXvNYIGEYXtg1oq6RrjjHoSGaZLH-uKGjv_n1LCc7q2jW_FPNcCCtSiUcfsxm8IgTJIeDnNGAwNd4muzhcnbmHh-keWyTf44vWe3yRfI8XUf-psij4AzscO0w -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNptUsFu2zAMve8rCJ82IHWLItghhwFFimDHHbqT0YMs0ZYQWRJIKm7-fpDsBt4yXSg98VF8Txx8nLVVJPD2-gUAQGn95sTjAU6EbOF3n4NkYJScgHJg6GMUFlJpBxflnVGCXO7FhZF3oIIBlZJ3yJAoDs4jg0RwgUV5D0fCma1LIDF6rumMdHEauTbQx4-u-evt5337tIdI8Py9fdo37_Dw8KN20TXtYwx9VGRatgfwpRWBfNnBS2DXe2ze15pRKssFV1mlgZYtmKjPB5jJFQ2tj1r5RxtZ2uvkV26hVK62qM9bsgucUMsOxGKA6uLKqamVVJy4bkle5aDtmudjqViM0Fa5cFNA6FEx8m6pxHl6uCC5waGBr3FKkHweXWDAD41J0HxbXanPLf9YdhX7_ISuWU25IWsXnPuRVLJQlHfNyQXHFk09rillWSRDXfOzBJgjnTkpjZuEYSpkYpmUIETSFsucSKRNkhoxCHdNUbHsN5djVmS4a04eUdbT5rr8FlLXvNYIGEYXtg1oq6RrjjHoSGaZLH-uKGjv_n1LCc7q2jW_FPNcCCtSiUcfsxm8IgTJIeDnNGAwNd4muzhcnbmHh-keWyTf44vWe3yRfI8XUf-psij4AzscO0w.svg?scheme=dark">
+  <img alt="Fresh Ubuntu setup runs bootstrap, validates settings, and applies profiles to install Crewship tools and services" src="https://ondine.sh/eNptUsFu2zAMve8rCJ82IHWLItghhwFFimDHHbqT0YMs0ZYQWRJIKm7-fpDsBt4yXSg98VF8Txx8nLVVJPD2-gUAQGn95sTjAU6EbOF3n4NkYJScgHJg6GMUFlJpBxflnVGCXO7FhZF3oIIBlZJ3yJAoDs4jg0RwgUV5D0fCma1LIDF6rumMdHEauTbQx4-u-evt5337tIdI8Py9fdo37_Dw8KN20TXtYwx9VGRatgfwpRWBfNnBS2DXe2ze15pRKssFV1mlgZYtmKjPB5jJFQ2tj1r5RxtZ2uvkV26hVK62qM9bsgucUMsOxGKA6uLKqamVVJy4bkle5aDtmudjqViM0Fa5cFNA6FEx8m6pxHl6uCC5waGBr3FKkHweXWDAD41J0HxbXanPLf9YdhX7_ISuWU25IWsXnPuRVLJQlHfNyQXHFk09rillWSRDXfOzBJgjnTkpjZuEYSpkYpmUIETSFsucSKRNkhoxCHdNUbHsN5djVmS4a04eUdbT5rr8FlLXvNYIGEYXtg1oq6RrjjHoSGaZLH-uKGjv_n1LCc7q2jW_FPNcCCtSiUcfsxm8IgTJIeDnNGAwNd4muzhcnbmHh-keWyTf44vWe3yRfI8XUf-psij4AzscO0w.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 ## 0. Choose features and install Crewship
 

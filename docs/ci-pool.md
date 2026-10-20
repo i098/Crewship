@@ -2,14 +2,12 @@
 
 The CI pool runs GitHub Actions jobs on this host with no runner to register or remove by hand. One list in `.local/host.yml` names each repository and its number of slots. Each slot is a systemd user unit that asks GitHub for a just-in-time (JIT) runner, runs one job in a fresh container, and exits. GitHub removes a JIT runner after its one job, and systemd starts the slot again for the next job.
 
-```mermaid
-flowchart LR
-    start["ci-runner@slot starts"] --> jit["POST generate-jitconfig (host gh login)"]
-    jit --> run["fresh runner container: one job"]
-    run --> gone["GitHub removes the runner"]
-    gone --> exit["slot exits"]
-    exit -->|systemd restarts it| start
-```
+<!-- ondine:eNp1kM1KBDEQhO8-RZGTwswL7EG8iD8Iis5t2EM225NkmO1Ap-MP7MNLMqOevDVUfU1VTUv6cMGK4un1AgCsc0PUhXa4tS5ACjMJ8pIUnjTD4vFhgEs8RV_EakzcVVdGYsKcDh3oM1bjpCS4i3pfDhA6pXfK0EDbyw6WjxDKakWrIKn4gPyVlU7HFqVJo3GxX5GblmIFzB59f4056mhent8GeGISq9TPUdd0uAwpK3zAknzkK7NvX-eoDZXCo5mE8m9Jl1htZJLdT5cNkcIN8YlpNP9W2tzV1ex1h9G00G2STa931c9b178Rop7Xet80qopa -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNp1kM1KBDEQhO8-RZGTwswL7EG8iD8Iis5t2EM225NkmO1Ap-MP7MNLMqOevDVUfU1VTUv6cMGK4un1AgCsc0PUhXa4tS5ACjMJ8pIUnjTD4vFhgEs8RV_EakzcVVdGYsKcDh3oM1bjpCS4i3pfDhA6pXfK0EDbyw6WjxDKakWrIKn4gPyVlU7HFqVJo3GxX5GblmIFzB59f4056mhent8GeGISq9TPUdd0uAwpK3zAknzkK7NvX-eoDZXCo5mE8m9Jl1htZJLdT5cNkcIN8YlpNP9W2tzV1ex1h9G00G2STa931c9b178Rop7Xet80qopa.svg?scheme=dark">
+  <img alt="Each runner slot gets a JIT configuration, runs one job, exits after GitHub removes the runner, and restarts through systemd" src="https://ondine.sh/eNp1kM1KBDEQhO8-RZGTwswL7EG8iD8Iis5t2EM225NkmO1Ap-MP7MNLMqOevDVUfU1VTUv6cMGK4un1AgCsc0PUhXa4tS5ACjMJ8pIUnjTD4vFhgEs8RV_EakzcVVdGYsKcDh3oM1bjpCS4i3pfDhA6pXfK0EDbyw6WjxDKakWrIKn4gPyVlU7HFqVJo3GxX5GblmIFzB59f4056mhent8GeGISq9TPUdd0uAwpK3zAknzkK7NvX-eoDZXCo5mE8m9Jl1htZJLdT5cNkcIN8YlpNP9W2tzV1ex1h9G00G2STa931c9b178Rop7Xet80qopa.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 ## Opt a repository in
 

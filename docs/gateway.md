@@ -77,13 +77,12 @@ Other addresses can still sign in.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  B[Browser] -->|HTTPS| CF[Cloudflare edge]
-  CF --> T[crewship-tunnel.service<br>cloudflared]
-  T -->|127.0.0.1:20240| G[crewship-gateway.service]
-  G -->|/PORT/path| P[127.0.0.1:PORT]
-```
+<!-- ondine:eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://ondine.sh/eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA.svg?scheme=dark">
+  <img alt="Browser requests pass through Cloudflare and the tunnel to the password gateway, which routes them to loopback web pages" src="https://ondine.sh/eNpNjsFqwzAQRO_-ivmA2nFMoRBKDjEkPRRqUt2MD7K8sUxVy13JFQV_fJGbNj3uMu_NXIwNSkv2eD4nACCVEoM3tMOBbXDEYPqYyXmHSToHr9nOvUZp7NxdjGSCHDt4TfDzOJKBt-sV08Fyh156CvLrDkEPSoPt7Cl66D1GjbVTK9UbArWYZE8uAQ71tbxBmu6XJyGq1wXlsf7XSl1PTQKUx5iBqBVTcHqY0p8dmSP-HBQ9trxXf1gXEbFat8VDlmd5tt0VeXGfLzjdFNfNv44InVZoU72cxWaSXi-o6psivptv3T9vxA.svg?scheme=light">
+</picture>
+<!-- /ondine -->
 
 - `crewship-gateway.service` runs `~/.local/bin/crewship-gateway serve` on `127.0.0.1:20240`. It refuses a peer that is not on loopback. It opens no port to the network.
 - `crewship-tunnel.service` runs `cloudflared tunnel --url http://127.0.0.1:20240`, so the gateway is its only origin. It sends nothing to a local page directly. When the gateway is down, the tunnel answers 502 and shows no page.
