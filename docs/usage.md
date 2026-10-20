@@ -202,8 +202,10 @@ The adapter then records a delivery gap and fails the metered model call, as for
 An export that packs or removes records lets collection continue.
 Records that are still below the limits wait through an endpoint outage and then export.
 
-The spool uses a rollback journal, so no write-ahead log grows beside the database.
-The directory holds only `spool.sqlite`, `spool.sqlite-journal`, and the empty `spool.lock`.
+The spool uses a write-ahead log with full synchronization; a one-record collector process makes two disk syncs, where a rollback journal makes five.
+A commit checkpoints the log into the database after 128 pages, and the log shrinks back to 1 MiB after a checkpoint, so it stays below 4 MiB.
+A closing process does not checkpoint, so a collector process that carries one record does not pay for a full checkpoint.
+The directory holds only `spool.sqlite`, `spool.sqlite-wal`, `spool.sqlite-shm`, and the empty `spool.lock`.
 Each collector and export transaction takes an exclusive lock on `spool.lock`.
 The exporter does not keep the lock during the HTTP request.
 Each packing transaction handles at most 500 records.

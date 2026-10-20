@@ -885,5 +885,5 @@ def test_spool_cli_keeps_no_history_and_never_opens_the_ledger():
         accepted = cli("collect", stdin=json.dumps(record) + "\n")
         assert json.loads(accepted.stdout) == {"accepted": True, "duplicate": False}
         assert sorted(path.name for path in data.iterdir()) == [
-            "spool.lock", "spool.sqlite", "spool.sqlite-journal"]
+            "spool.lock", "spool.sqlite", "spool.sqlite-shm", "spool.sqlite-wal"]
         assert {oct(path.stat().st_mode & 0o777) for path in data.iterdir()} == {"0o600"}

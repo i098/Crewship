@@ -73,10 +73,12 @@ CREATE TABLE IF NOT EXISTS producer_state (
 );
 """
 SCHEMA = "PRAGMA journal_mode=WAL;" + DURABLE + TABLES
-# A rollback journal holds one transaction, so no WAL grows beside the capped database.
+# WAL commits sync once instead of five times; frequent checkpoints keep the log near 1 MiB.
 SPOOL_SCHEMA = f"""
 PRAGMA page_size=4096;
-PRAGMA journal_mode=TRUNCATE;
+PRAGMA journal_mode=WAL;
+PRAGMA wal_autocheckpoint=128;
+PRAGMA journal_size_limit=1048576;
 PRAGMA temp_store=MEMORY;
 PRAGMA max_page_count={SPOOL_PAGES};
 {DURABLE}{TABLES}
@@ -545,6 +547,8 @@ class Spool(Ledger):
                             os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         with self.locked():
             super().__init__(path)
+            # One process per record must not pay a full checkpoint each time it closes.
+            self.db.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
 
     def __exit__(self, *_):
         super().__exit__()
