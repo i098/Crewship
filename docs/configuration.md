@@ -169,20 +169,57 @@ See [Project databases](project-databases.md) for existing-host management and s
 
 ## Data disk
 
-Set `data_dir` to an absolute path on a large data disk to keep fast-growing data off the system disk.
-The default is `""`.
+Set `data_dir` to an existing absolute path on a mounted data disk.
+On a fresh account, the default `""` keeps the legacy storage layout and writes no bulk defaults.
+Clearing `data_dir` removes the managed Bash block and user-manager file.
+Apply and preview tolerate a missing `.bashrc`.
+Native tool keys and existing data remain unchanged.
+Apply refuses a missing path or a path on the root mount before it creates bulk directories.
+Keep the underlying, unmounted mountpoint root-owned and non-writable by the account.
+This prevents native tools from creating replacement directories on the system disk after an unmount.
+Temporary build output requires execution permission on the data mount.
 See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and mount requirements.
 
-| Data | Location with `data_dir` set | How |
+| New bulk data | Location with `data_dir` set | Default setting |
 | --- | --- | --- |
 | Docker images, containers and volumes | `<data_dir>/docker` | `data-root` in `/etc/docker/daemon.json` (`docker` profile) |
-| npm cache | `<data_dir>/cache/npm` | `npm_config_cache` |
-| pip cache | `<data_dir>/cache/pip` | `PIP_CACHE_DIR` |
+| Treehouse pools | `<data_dir>/.treehouse` | User Treehouse TOML `root` |
+| npm, pip, Bun, uv, pnpm packages | `<data_dir>/cache/<tool>` | Native user configuration |
+| Go build cache and modules | `<data_dir>/cache/go-build`, `<data_dir>/cache/go-mod` | Native Go environment file |
+| Deno cache | `<data_dir>/cache/deno` | `DENO_DIR` |
+| Bun transpiler cache | `<data_dir>/cache/bun-transpiler` | `BUN_RUNTIME_TRANSPILER_CACHE_PATH` |
+| Temporary files, including new installer Cargo install builds | `<data_dir>/tmp` | `TMPDIR`, `TMP`, `TEMP` |
+| Downloads | `<data_dir>/downloads` | XDG `user-dirs.dirs` |
 | General syslog | `<data_dir>/host-logs/rsyslog/syslog` | [Bounded general syslog](#bounded-general-syslog) |
 
-The variables go into the managed block of `~/.profile`, the Herdr unit and the no-mistakes daemon drop-in. A running Herdr server or no-mistakes daemon reads them only after its next restart. Apply creates `<data_dir>/cache` for the account; Docker creates its own data root. The cargo cache stays in `~/.cargo` on purpose: `CARGO_HOME` also holds `bin` and `config.toml`, so moving it would break `cargo install` on PATH and ignore the existing cargo config.
+Native configuration works without shell initialization.
+Apply adds missing keys and preserves existing keys, comments, credentials, modes, and symbolic links.
+Updates through symbolic links to the same file accumulate before the write.
+An unavailable symbolic-link target blocks writes through that link.
+New per-account pool, cache, download, and temporary directories use mode `0700`.
+Apply preserves the modes of existing directories.
+Existing native paths remain explicit choices, including paths written by an earlier apply.
+Change those keys explicitly when changing disks.
+Pip cache settings in any supported configuration file prevent a new default.
+The spellings `cache_dir`, `cache-dir`, and `--cache-dir` identify the same pip option.
+Read-only pip probes skip files that pip cannot open.
+The pnpm 10 user rc receives a missing store default.
+When pnpm is available, its native configuration command also sets a missing global store default, including pnpm 11 YAML.
+Install an absent pnpm and apply again to configure its version-specific store.
+pnpm 11 ignores an old `.npmrc` store path; configure that version's native YAML setting instead.
+Unsupported TOML table layouts fail without replacing the file.
+Alternate configuration roots and explicit configuration files remain operator choices.
 
-The bun, pnpm and uv caches stay on the system disk on purpose. These tools hardlink packages from their cache into each worktree's `node_modules` or `.venv`, and a hardlink works only on one filesystem. With the cache on another disk, each install copies full packages into the worktree, so the worktree pools grow faster on the system disk. Move these caches only together with the pools (see below).
+The inherited defaults enter `~/.profile`, interactive `~/.bashrc`, and `~/.config/environment.d/60-crewship-bulk.conf`.
+An existing, non-empty environment variable wins in a new shell or installer process.
+A changed file notifies the existing user-manager reload, which runs before service starts when `start_services` is true.
+Apply does not import shell values or restart a service for this file.
+Herdr and no-mistakes inherit these defaults from the user manager on their next start.
+Herdr reloads its rendered unit before starting an inactive service.
+A bulk-only Herdr unit change does not restart the running service.
+Explicit service environment settings can override these defaults.
+Native package cache settings do not become service environment overrides.
+Global `XDG_CACHE_HOME`, `CARGO_HOME`, and `RUSTUP_HOME` do not change.
 
 ### Bounded general syslog
 
@@ -248,16 +285,30 @@ Apply sets the new `data-root` but copies nothing, so Docker starts with an empt
 5. `sudo systemctl start docker.service`, then make sure that `sudo docker info -f '{{.DockerRootDir}}'` and `sudo docker images` show the new root and the images.
 6. Remove `/var/lib/docker` only after that check.
 
-For a cache, copy it with `rsync -aHAX`, apply, check the new path (for example `npm config get cache`), then remove the old copy.
+### Compatibility limits
 
-### Later: pools and hardlinking caches together
+Apply moves or deletes no existing pools, caches, source trees, global installations, credentials, or Downloads files.
+Old Treehouse pools remain at their old root.
+Use an explicit old root or a worktree path when operating on an old pool.
+Native defaults select future pools; they do not update every repository.
+Daemon-owned worktrees for unmapped repositories can still use that daemon's existing fallback.
+Crewship does not change Firstmate's launcher or the shared daemon.
 
-The worktree pools are the largest user of the system disk after Docker.
 Treehouse places new pools under `<root>/.treehouse`.
-`--root`, `TREEHOUSE_ROOT`, project `treehouse.toml`, and `~/.config/treehouse/config.toml` can select the root; the default is `$HOME`.
+`--root`, `TREEHOUSE_ROOT`, project `treehouse.toml`, and `~/.config/treehouse/config.toml` can select the root.
 Treehouse looks up a pool under the same root, so a changed root does not find the pools that exist now.
 Change it only for a project whose pool has no live worktree.
 See [Cleanup pool roots](fleet-guards.md#cleanup-pool-roots) for the roots that fleet cleanup discovers and its limits.
-When the pools are on the data disk, point the bun (`BUN_INSTALL_CACHE_DIR`), pnpm (`store-dir`) and uv (`UV_CACHE_DIR`) caches to that disk.
-This lets hardlinks work again.
-The recipe does not do this step.
+
+Bun, pnpm, and uv caches share the configured disk with future default Treehouse pools.
+Hardlinks require the same filesystem; explicit pool or cache paths can break that alignment and cause copies.
+Previously installed packages and caches remain in place; a new store can start cold.
+Command flags, project settings, explicit environment variables, and browser download preferences can override defaults.
+Missing tools create no output until installed.
+Go uses its native default environment file unless `GOENV` or another configuration root selects a different file.
+
+New Cargo install scratch builds from the installer use the configured temporary directory.
+Crewship does not own an arbitrary project's Cargo output policy or an existing Cargo wrapper.
+Existing `target/` directories, explicit `CARGO_TARGET_DIR`, and the crew board's explicit build directory remain unchanged.
+This change does not provide a general per-project Rust output wrapper.
+Running processes keep their inherited paths until a new process receives new settings.

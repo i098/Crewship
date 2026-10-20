@@ -223,15 +223,12 @@
     mode: "0755"
   become: true
 
-- name: Point daemon-spawned omp at the overlay and pipelines at the data-disk caches
+- name: Point daemon-spawned omp at the overlay
   ansible.builtin.copy:
     content: |
       # Managed by Crewship (docs/omp.md#no-mistakes-pipeline-agent).
       [Service]
       Environment="PI_CONFIG_FILES={{ crewship_no_mistakes_omp_overlay }}"
-      {% for key, value in crewship_data_cache_env | dictsort %}
-      Environment="{{ key }}={{ value }}"
-      {% endfor %}
     dest: "{{ crewship_user_units }}/no-mistakes-daemon-.service.d/crewship.conf"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"

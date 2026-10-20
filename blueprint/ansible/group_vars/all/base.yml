@@ -68,16 +68,16 @@ crewship_managed_shell_env:
 crewship_board_env: >-
   {{ {'CREWBOARD_SOCKET': crewship_user_runtime_dir ~ '/crewboard.sock'}
      if crewship_cfg.board is defined else {} }}
-# crewship.data_dir: Docker's data root and the caches that never hardlink into
-# a worktree. Exported next to crewship_managed_shell_env on every profile.
-# bun, pnpm and uv stay on the system disk on purpose: they hardlink packages
-# into each worktree, which only works on one filesystem
-# (docs/configuration.md#data-disk).
+# Native tool files own package cache and pool defaults. Only tools without a
+# native path setting use inherited defaults (docs/configuration.md#data-disk).
 crewship_data_dir: "{{ crewship_cfg.data_dir | default('', true) }}"
 crewship_docker_data_root: "{{ (crewship_data_dir ~ '/docker') if crewship_data_dir else '' }}"
 crewship_data_cache_env: >-
-  {{ {'npm_config_cache': crewship_data_dir ~ '/cache/npm',
-      'PIP_CACHE_DIR': crewship_data_dir ~ '/cache/pip'} if crewship_data_dir else {} }}
+  {{ {'DENO_DIR': crewship_data_dir ~ '/cache/deno',
+      'BUN_RUNTIME_TRANSPILER_CACHE_PATH': crewship_data_dir ~ '/cache/bun-transpiler',
+      'TMPDIR': crewship_data_dir ~ '/tmp',
+      'TMP': crewship_data_dir ~ '/tmp',
+      'TEMP': crewship_data_dir ~ '/tmp'} if crewship_data_dir else {} }}
 # Contract: compute the unit ExecStart directly, never /usr/local/bin or $PATH.
 crewship_herdr_bin: "{{ crewship_tools_root }}/herdr/{{ crewship_herdr_version }}/{{ crewship_platform }}/herdr"
 crewship_herdr_config_dir: "{{ crewship_cfg.home }}/.config/herdr"

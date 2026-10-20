@@ -24,6 +24,13 @@
   become: true
   notify: restart herdr
 
+- name: Read the installed Herdr user unit
+  ansible.builtin.slurp:
+    src: "{{ crewship_user_units }}/herdr.service"
+  become: true
+  register: crewship_herdr_unit_before
+  failed_when: false
+
 - name: Render the Herdr user unit
   ansible.builtin.template:
     src: herdr.service.j2
@@ -32,9 +39,33 @@
     group: "{{ crewship_group }}"
     mode: "0644"
   become: true
-  notify:
-    - reload user systemd
-    - restart herdr
+  register: crewship_herdr_unit
+  notify: reload user systemd
+
+- name: Restart Herdr for a unit change beyond the data-disk environment
+  when: crewship_herdr_unit is changed
+  vars:
+    crewship_herdr_unit_deferred: '^(#|Environment="?(npm_config_cache|PIP_CACHE_DIR|DENO_DIR|BUN_RUNTIME_TRANSPILER_CACHE_PATH|TMPDIR|TMP|TEMP)=)'
+    crewship_herdr_unit_restart: >-
+      {{ (crewship_herdr_unit_before.content | default('') | b64decode).splitlines()
+         | reject('match', crewship_herdr_unit_deferred) | list
+         != lookup('template', 'herdr.service.j2').splitlines()
+         | reject('match', crewship_herdr_unit_deferred) | list }}
+  block:
+    - name: Request the Herdr restart for the unit change
+      ansible.builtin.debug:
+        msg: herdr.service changed beyond its data-disk environment; Herdr restarts.
+      changed_when: true
+      notify: restart herdr
+      when: crewship_herdr_unit_restart | bool
+
+    - name: Report the unit change deferred to the next Herdr start
+      ansible.builtin.debug:
+        msg: >-
+          herdr.service changed only in its data-disk environment, comments or
+          file attributes. The running Herdr and its agents keep going; Herdr
+          applies the change when it next starts.
+      when: not (crewship_herdr_unit_restart | bool)
 
 - name: Ensure the user default.target.wants directory
   ansible.builtin.file:
@@ -63,6 +94,7 @@
 - name: Enable and start the Herdr user service
   ansible.builtin.systemd_service:
     scope: user
+    daemon_reload: true
     name: herdr.service
     enabled: true
     state: started

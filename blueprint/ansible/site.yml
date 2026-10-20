@@ -4,7 +4,6 @@
 #
 # Design rules enforced throughout:
 #   * every task is idempotent; a second unchanged apply reports changed=0
-#   * no unconditional restarts, daemon-reloads or bare commands
 #   * `crewship.start_services: false` suppresses linger and every runtime
 #     systemd action, but still writes unit files and their static
 #     *.target.wants symlinks, so a container image can be built and the same
