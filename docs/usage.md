@@ -484,9 +484,10 @@ No-commit sessions and agent counts are not findings.
 
 Output is `FM_HOME/data/token-savings/latest.md`, with at most eight dated Markdown snapshots and `status.json`.
 The directory has mode `0700`; each output file has mode `0600`.
-The reader publishes each report atomically, prevents overlapping runs, and interrupts work after 50 seconds without retries.
+The reader publishes each report atomically, prevents overlapping runs, and interrupts work after 50 seconds, including startup, without retries.
 The reader does not write Python bytecode files beside its source assets.
 A failed cycle keeps the last successful report and records failure in `status.json`.
+SIGTERM also records failure and keeps the last successful report.
 The next successful report states that a prior cycle failed.
 No permitted source means failure, not a zero-saving report.
 This manual reader does not install or enable a timer.

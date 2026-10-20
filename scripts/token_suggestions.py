@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Write private token-saving suggestions from explicitly configured metadata."""
 
+# Start the deadline before loading the reader's dependencies.
+# ruff: noqa: E402
+
+import time
+
+STARTED = time.monotonic()
+
 import argparse
 import fcntl
 import json
@@ -229,20 +236,27 @@ def timeout(_signum, _frame):
     raise TimeoutError("report deadline")
 
 
-def publish(config, cutoff):
+def publish(config, cutoff, *, started=None):
+    if started is None:
+        started = time.monotonic()
     directory = Path(config["fm_home"]) / "data/token-savings"
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     if directory.is_symlink() or directory.stat().st_uid != os.getuid():
         raise ValueError("unsafe output directory")
     directory.chmod(0o700)
     fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    handlers = {}
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        signal.signal(signal.SIGALRM, timeout)
-        signal.alarm(50)
+        for signum in (signal.SIGALRM, signal.SIGTERM):
+            handlers[signum] = signal.signal(signum, timeout)
         status_path = directory / "status.json"
-        previous = read_json(status_path) if status_path.exists() else {}
         try:
+            remaining = 50 - (time.monotonic() - started)
+            if remaining <= 0:
+                raise TimeoutError("report deadline")
+            signal.setitimer(signal.ITIMER_REAL, remaining)
+            previous = read_json(status_path) if status_path.exists() else {}
             bounds = windows(cutoff)
             collected = collect(config, bounds)
             if not collected[-1]:
@@ -256,22 +270,28 @@ def publish(config, cutoff):
                                                   "window": [t.isoformat() for t in bounds[1:]]}) + "\n")
             atomic_write(directory / "latest.md", text)
         except (TimeoutError, *SOURCE_ERRORS):
+            signal.setitimer(signal.ITIMER_REAL, 0)
             atomic_write(status_path, json.dumps({"state": "failed", "cutoff": cutoff.isoformat(),
                                                   "reason": "source_unavailable or report failure",
                                                   "detectors": dict.fromkeys(DETECTORS, "unavailable")}) + "\n")
             raise
     finally:
-        signal.alarm(0)
+        if handlers:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
         os.close(fd)
 
 
-def main(argv=None):
+def main(argv=None, *, started=None):
+    if started is None:
+        started = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--cutoff", type=instant, help="fixed aware time for a manual fixture cycle")
     args = parser.parse_args(argv)
     try:
-        publish(settings(args.config), args.cutoff or datetime.now(UTC))
+        publish(settings(args.config), args.cutoff or datetime.now(UTC), started=started)
     except (TimeoutError, *SOURCE_ERRORS):
         print("Token suggestions failed; previous successful report retained.", file=sys.stderr)
         return 1
@@ -280,4 +300,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(started=STARTED))
