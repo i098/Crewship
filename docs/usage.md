@@ -65,7 +65,7 @@ crewship:
     state_dir: /srv/agent-data/usage
 ```
 
-An empty endpoint is the default and installs nothing.
+Omit `usage` or leave its endpoint empty to install nothing.
 Use the full OTLP/HTTP logs URL, including `/v1/logs`.
 Remote endpoints require HTTPS; loopback HTTP supports isolated fixtures.
 The configured mount must exist and differ from the root filesystem.

@@ -7,12 +7,6 @@ crewship:
   enable_linger: true
   # See docs/configuration.md#data-disk for path requirements and storage behavior.
   data_dir: ""
-  usage:
-    endpoint: ""
-    enabled: true
-    auth_file: ""
-    mount: ""
-    state_dir: ""
   # A new host gets the core only: agents and firstmate. Every other profile is
   # opt-in (docs/default-config.md).
   profiles:
