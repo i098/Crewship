@@ -47,7 +47,8 @@ Sequence checkpoints preserve skipped requests as unknown, never as zero-token c
 Collector children, their streams, and their timers never keep a source process alive.
 At exit, the adapter stops its collectors and attempts one synchronous transaction in the existing database.
 The transaction stores shutdown checkpoints and coverage gaps for pending records; it does not replay registrations.
-The process has a one-second deadline, including Python startup; the SQLite busy timeout stays at 200 ms, with no retry.
+The shutdown subprocess has a one-second deadline, including Python startup.
+It takes the spool lock without waiting and sets a 200 ms SQLite busy timeout, with no retry.
 If storage is missing, busy, full, or rejects a record, the adapter drops the batch and reports unknown coverage on standard error.
 The next source starts a new producer; a missing checkpoint or registration never establishes complete coverage or zero usage.
 Shutdown creates no retry files and starts no asynchronous delivery.
@@ -263,7 +264,7 @@ The 256 free pages let an export acknowledge and remove records from a full spoo
 With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
 SQLite refuses any page above the database limit with `SQLITE_FULL`.
 A refusal has the fixed error message and exit status 1, and it stores nothing.
-The adapter reports unknown coverage and stores a delivery gap when collection resumes; the metered model call continues.
+See [Source compatibility](#source-compatibility) for the adapter's response to collection failures.
 An export that packs or removes records lets collection continue.
 Records that are still below the limits wait through an endpoint outage and then export.
 
@@ -276,7 +277,7 @@ Each collector and export transaction takes an exclusive lock on `spool.lock`.
 The exporter does not keep the lock during the HTTP request.
 Each packing transaction handles at most 500 records.
 After each transaction, the process pauses for one millisecond, because `flock` wakes waiting processes in no fixed order.
-A collector waits for another transaction instead of failing with a busy database.
+The regular `collect` command waits for the lock; the [shutdown attempt](#source-compatibility) does not wait for it.
 
 The spool keeps no exported completions, so it cannot count completions that expire later in SigNoz.
 Its exported `retired_completions` value stays 0.
