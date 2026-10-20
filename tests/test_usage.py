@@ -1,5 +1,6 @@
 import gzip
 import importlib.util
+import io
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import zlib
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -947,6 +949,78 @@ def test_spool_writers_wait_for_a_long_transaction_instead_of_failing_busy(tmp_p
             holder.db.commit()
         thread.join()
     assert outcome == [{"accepted": True, "duplicate": False}]
+
+
+@pytest.mark.parametrize("failure", ["missing", "full", "expired", "unregistered", "locked"])
+def test_refused_shutdown_leaves_no_records_or_retry_files(failure, monkeypatch):
+    mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
+    if mount is None:
+        pytest.skip("needs a separate mounted worktree")
+    now = datetime.now(UTC)
+    with tempfile.TemporaryDirectory(prefix=".usage-shutdown-", dir=ROOT) as temporary:
+        data = Path(temporary) / "usage"
+        arguments = ["--data-dir", str(data), "--mount", str(mount), "--store", "spool",
+                     "shutdown"]
+        if failure == "missing":
+            with pytest.raises(OSError):
+                usage.main(arguments)
+            assert not data.exists()
+            return
+        data.mkdir()
+        with usage.Spool(data / "spool.sqlite") as spool:
+            register(spool, now=now, at=now.isoformat())
+            start(spool, now=now, at=now.isoformat())
+            complete(spool, now=now, at=now.isoformat())
+            before = list(spool.db.execute("SELECT payload FROM events ORDER BY rowid"))
+            if failure == "full":
+                monkeypatch.setattr(usage, "SPOOL_BYTES",
+                                    spool.db.execute("SELECT bytes FROM budget").fetchone()[0])
+            rows = [event("gap", 2, at=now.isoformat(), end=now.isoformat(), reason="shutdown")]
+            if failure == "expired":
+                rows.append(event("gap", 3, at=(now - timedelta(days=40)).isoformat(),
+                                  end=now.isoformat(), reason="shutdown"))
+            elif failure == "unregistered":
+                rows.append(event("shutdown", producer=str(UUID(int=2)), sequence=1,
+                                  at=now.isoformat()))
+            monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(
+                io.BytesIO(json.dumps(rows).encode())))
+            with spool.locked() if failure == "locked" else nullcontext():
+                with pytest.raises((ValueError, OSError, sqlite3.Error)):
+                    usage.main(arguments)
+            after = list(spool.db.execute("SELECT payload FROM events ORDER BY rowid"))
+            assert [tuple(row) for row in after] == [tuple(row) for row in before]
+        assert {path.name for path in data.iterdir()} <= {
+            "spool.sqlite", "spool.sqlite-wal", "spool.sqlite-shm", "spool.lock"}
+
+
+@pytest.mark.parametrize("store_type", [usage.Spool, usage.Ledger])
+def test_shutdown_marks_unknown_without_replaying_an_old_registration(store_type, monkeypatch):
+    mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
+    if mount is None:
+        pytest.skip("needs a separate mounted worktree")
+    now = datetime.now(UTC)
+    old = now - timedelta(days=40)
+    store = "spool" if store_type is usage.Spool else "ledger"
+    with tempfile.TemporaryDirectory(prefix=".usage-shutdown-", dir=ROOT) as temporary:
+        data = Path(temporary)
+        database = data / ("spool.sqlite" if store == "spool" else "usage.sqlite")
+        with store_type(database) as ledger:
+            register(ledger, now=old, at=old.isoformat())
+            ledger.db.execute("UPDATE events SET sent=?", (old.timestamp(),))
+            ledger.db.commit()
+            start(ledger, now=now, at=now.isoformat())
+            rows = [event("gap", at=now.isoformat(), end=now.isoformat(), reason="shutdown"),
+                    event("shutdown", at=now.isoformat(), sequence=1)]
+            monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(
+                io.BytesIO(json.dumps(rows).encode())))
+
+            usage.main(["--data-dir", str(data), "--mount", str(mount), "--store", store,
+                        "shutdown"])
+
+            assert json.loads(ledger.db.execute(
+                "SELECT missing_sequences FROM producer_state").fetchone()[0]) == [[1, 1]]
+            assert ledger.db.execute("SELECT count(*) FROM events WHERE kind='gap'").fetchone()[0] == 1
+            assert ledger.db.execute("SELECT count(*) FROM events WHERE kind='shutdown'").fetchone()[0] == 1
 
 
 def test_spool_cli_keeps_no_history_and_never_opens_the_ledger():

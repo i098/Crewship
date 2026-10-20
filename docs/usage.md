@@ -20,7 +20,7 @@ The message events carry content and are not an authorized substitute.
 `blueprint/patches/omp/usage.patch` adds the missing metadata contract to the OMP 18.12.1 source.
 It targets the upstream `packages/ai` directory.
 It observes public `stream` and `streamSimple` calls before dispatch and after provider settlement.
-It acknowledges metadata before it delivers a terminal result.
+It sends metadata in the background without delaying provider dispatch or terminal results.
 Nested calls count once.
 Separate public calls keep separate event identities.
 `complete` and `completeSimple` calls register as helpers.
@@ -38,10 +38,21 @@ Interrupted streams retain known input and cache fields without inventing a comp
 The shared Responses normalizer also serves Codex and Azure paths; those transports are not exercised here.
 Other normalizers keep usage presence unknown and export null token buckets.
 The adapter never treats their initialized zeroes as observed usage.
-It reads only selected terminal metadata and awaits durable acknowledgements.
-Delivery failure escapes instead of disappearing inside `onChatUsage`.
-After registration, every source record persists a pending gap first, including completion, checkpoint, and shutdown.
-Graceful exit records a shutdown checkpoint.
+It reads only selected terminal metadata.
+Registration and record batches each have a 15-second collector timeout.
+Each producer keeps at most 64 waiting records; overflow drops the waiting batch and marks a delivery gap.
+A collector failure drops the current and waiting batches, reports unknown coverage, and leaves the model call unchanged.
+The next successful delivery registers the producer if needed and stores the gap before later records.
+Sequence checkpoints preserve skipped requests as unknown, never as zero-token completions.
+Collector children, their streams, and their timers never keep a source process alive.
+At exit, the adapter stops its collectors and attempts one synchronous transaction in the existing database.
+The transaction stores shutdown checkpoints and coverage gaps for pending records; it does not replay registrations.
+The shutdown subprocess has a one-second deadline, including Python startup.
+It takes the spool lock without waiting and sets a 200 ms SQLite busy timeout, with no retry.
+If storage is missing, busy, full, or rejects a record, the adapter drops the batch and reports unknown coverage on standard error.
+The next source starts a new producer; a missing checkpoint or registration never establishes complete coverage or zero usage.
+Shutdown creates no retry files and starts no asynchronous delivery.
+A forced kill can lose metadata that has not reached the collector.
 An unreferenced one-minute timer records idle checkpoints without keeping a source process alive.
 Start a new source process after an outage exceeds the retained producer horizon.
 The collector cannot recover metadata that already expired.
@@ -137,7 +148,7 @@ Additional fields are rejected at capture and checked again before export.
 | Kind | Additional fields | Meaning |
 | --- | --- | --- |
 | `register` | `producer_kind` | Register a native `chat`, `judgment`, or `helper` producer. |
-| `start` | `sequence`, `provider`, `model` | Persist a positive sequence, bounded model labels, and a request start before dispatch. |
+| `start` | `sequence`, `provider`, `model` | Record a positive sequence, bounded model labels, and the request start time. |
 | `complete` | `sequence`, `outcome`, `usage_present`, `input_basis`, `input`, `cache_read`, `cache_write`, `output`, `reasoning` | Complete the matching start with the same private event identity. |
 | `checkpoint` | `sequence` | Declare the highest sequence produced through this UTC instant, including missing delivery. |
 | `shutdown` | `sequence` | End this producer's coverage through this instant. |
@@ -253,19 +264,20 @@ The 256 free pages let an export acknowledge and remove records from a full spoo
 With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
 SQLite refuses any page above the database limit with `SQLITE_FULL`.
 A refusal has the fixed error message and exit status 1, and it stores nothing.
-The adapter then records a delivery gap and fails the metered model call, as for any other collector failure.
+See [Source compatibility](#source-compatibility) for the adapter's response to collection failures.
 An export that packs or removes records lets collection continue.
 Records that are still below the limits wait through an endpoint outage and then export.
 
 The spool uses a write-ahead log with full synchronization; a one-record collector process makes two disk syncs, where a rollback journal makes five.
 A commit checkpoints the log into the database after 128 pages, and the log shrinks back to 1 MiB after a checkpoint, so it stays below 4 MiB.
 A closing process does not checkpoint, so a collector process that carries one record does not pay for a full checkpoint.
-The directory holds only `spool.sqlite`, `spool.sqlite-wal`, `spool.sqlite-shm`, and the empty `spool.lock`; a short-lived `spool.sqlite-journal` exists only while the first process creates the database.
+The directory holds only the SQLite files and the empty `spool.lock`.
+A short-lived `spool.sqlite-journal` exists only while the first process creates the database.
 Each collector and export transaction takes an exclusive lock on `spool.lock`.
 The exporter does not keep the lock during the HTTP request.
 Each packing transaction handles at most 500 records.
 After each transaction, the process pauses for one millisecond, because `flock` wakes waiting processes in no fixed order.
-A collector waits for another transaction instead of failing with a busy database.
+The regular `collect` command waits for the lock; the [shutdown attempt](#source-compatibility) does not wait for it.
 
 The spool keeps no exported completions, so it cannot count completions that expire later in SigNoz.
 Its exported `retired_completions` value stays 0.

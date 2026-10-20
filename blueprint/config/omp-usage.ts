@@ -1,56 +1,90 @@
-import { spawnSync } from "node:child_process";
+import { execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { writeSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { AssistantMessage, AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 
 type Kind = "chat" | "judgment" | "helper";
 type Metadata = { provider: string; model: string; producer_kind: Kind };
+type Row = Record<string, unknown> & { at: string };
 type Source = {
 	producer: string;
-	registration: Record<string, unknown>;
+	registration: Row;
 	registered: boolean;
 	sequence: number;
 	gap?: string;
+	pending: Row[];
+	inflight: Row[];
 };
 const sources = new Map<Kind, Source>();
+const collectors = new Set<ChildProcess>();
 
-function command() {
+function command(action = "collect") {
 	const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
 	const data = process.env.CREWSHIP_USAGE_DATA_DIR;
 	const mount = process.env.CREWSHIP_USAGE_MOUNT;
 	if (!collector || !isAbsolute(collector) || !data || !isAbsolute(data) || !mount || !isAbsolute(mount))
 		throw new Error("usage metadata configuration is incomplete");
 	return ["-I", collector, "--data-dir", data, "--mount", mount,
-		"--store", process.env.CREWSHIP_USAGE_STORE ?? "spool", "collect"];
+		"--store", process.env.CREWSHIP_USAGE_STORE ?? "spool", action];
 }
 
-function send(source: Source, row: Record<string, unknown>) {
-	// ponytail: one process per durable acknowledgement; use persistent IPC if measured throughput needs it.
-	const result = spawnSync("python3", command(), {
-		input: JSON.stringify(row) + "\n", encoding: "utf8", timeout: 15000, maxBuffer: 8192,
-		env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C.UTF-8" },
+function send(rows: Row[]) {
+	return new Promise<void>((resolve, reject) => {
+		const child = execFile("python3", command(), {
+			encoding: "utf8", maxBuffer: 16384,
+			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C.UTF-8" },
+		}, (error, stdout) => {
+			clearTimeout(timeout);
+			collectors.delete(child);
+			try {
+				if (error) throw error;
+				const replies = stdout.trim().split("\n").map(line => JSON.parse(line));
+				if (replies.length !== rows.length || replies.some(reply => reply?.accepted !== true))
+					throw new Error("usage metadata delivery failed");
+				resolve();
+			} catch (error) { reject(error); }
+		});
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 15000).unref();
+		collectors.add(child);
+		child.unref();
+		for (const stream of child.stdio) (stream as { unref?: () => void } | null)?.unref?.();
+		child.stdin!.on("error", reject);
+		child.stdin!.end(rows.map(row => JSON.stringify(row)).join("\n") + "\n");
 	});
-	let acknowledged = false;
-	if (result.status === 0) {
+}
+
+async function flush(source: Source) {
+	if (source.inflight.length) return;
+	while (source.pending.length) {
+		const rows = source.pending.splice(0);
+		const gap = source.gap;
+		source.gap = undefined;
+		source.inflight = gap ? [{ schema: 1, kind: "gap", producer: source.producer,
+			event: randomUUID(), at: gap, end: rows[0].at, reason: "delivery" }, ...rows] : rows;
 		try {
-			const reply: unknown = JSON.parse(result.stdout);
-			acknowledged = reply !== null && typeof reply === "object"
-				&& "accepted" in reply && reply.accepted === true;
-		} catch {}
-	}
-	if (!acknowledged) {
-		source.gap ??= new Date().toISOString();
-		throw new Error("usage metadata delivery failed");
+			if (!source.registered) {
+				await send([source.registration]);
+				source.registered = true;
+			}
+			await send(source.inflight);
+		} catch {
+			source.gap = gap ?? rows[0].at;
+			source.pending.length = 0;
+			process.stderr.write("usage metadata delivery failed; coverage is unknown\n");
+		}
+		source.inflight = [];
 	}
 }
 
 function record(source: Source, kind: string, event: string, at: string, fields = {}) {
-	if (source.gap) {
-		send(source, { schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
-			at: source.gap, end: at, reason: "delivery" });
-		source.gap = undefined;
+	// ponytail: keep at most 64 waiting records; use durable IPC if this limit drops useful coverage.
+	if (source.pending.length >= 64) {
+		source.gap ??= source.pending[0].at;
+		source.pending.length = 0;
 	}
-	send(source, { schema: 1, kind, producer: source.producer, event, at, ...fields });
+	source.pending.push({ schema: 1, kind, producer: source.producer, event, at, ...fields });
+	void flush(source);
 }
 
 function sourceFor(kind: Kind): Source {
@@ -59,15 +93,11 @@ function sourceFor(kind: Kind): Source {
 	let source = sources.get(kind);
 	if (!source) {
 		const producer = randomUUID();
-		source = { producer, sequence: 0, registered: false, registration: {
+		source = { producer, sequence: 0, registered: false, pending: [], inflight: [], registration: {
 			schema: 1, kind: "register", producer, event: randomUUID(), at: new Date().toISOString(),
 			producer_kind: kind,
 		} };
 		sources.set(kind, source);
-	}
-	if (!source.registered) {
-		send(source, source.registration);
-		source.registered = true;
 	}
 	return source;
 }
@@ -98,44 +128,38 @@ export function capture(metadata: Metadata, run: () => AssistantMessageEventStre
 	}
 	let stream: AssistantMessageEventStream;
 	try { stream = run(); } catch (error) { finish(undefined, "error"); throw error; }
-	const completed = stream.result().then(
-		(message: AssistantMessage) => { finish(message); return message; },
-		(error: unknown) => { finish(undefined, "error"); throw error; },
-	);
-	completed.catch(() => {});
-	stream.finalResultPromise = completed;
-	const iterator = stream[Symbol.asyncIterator].bind(stream);
-	stream[Symbol.asyncIterator] = async function* () {
-		try {
-			for await (const item of { [Symbol.asyncIterator]: iterator }) {
-				if (item.type === "done" || item.type === "error") await completed;
-				yield item;
-			}
-			await completed;
-		} catch (error) { await completed; throw error; }
-	};
+	void stream.result().then(
+		(message: AssistantMessage) => finish(message),
+		() => finish(undefined, "error"),
+	).catch(() => {});
 	return stream;
 }
 
 setInterval(() => {
-	for (const kind of sources.keys()) {
-		try {
-			const source = sourceFor(kind);
-			record(source, "checkpoint", randomUUID(), new Date().toISOString(), { sequence: source.sequence });
-		} catch {
-			process.stderr.write("usage metadata checkpoint acknowledgement failed\n");
-		}
-	}
+	for (const source of sources.values())
+		record(source, "checkpoint", randomUUID(), new Date().toISOString(), { sequence: source.sequence });
 }, 60_000).unref();
 
-process.on("exit", () => {
+process.once("exit", () => {
+	for (const child of collectors) child.kill("SIGKILL");
+	if (!sources.size) return;
+	const rows: Row[] = [];
+	const at = new Date().toISOString();
 	for (const source of sources.values()) {
-		if (!source.registered) continue;
-		try {
-			record(source, "shutdown", randomUUID(), new Date().toISOString(), { sequence: source.sequence });
-		} catch {
-			process.stderr.write("usage metadata shutdown acknowledgement failed\n");
-			process.exitCode = 1;
-		}
+		if (source.gap || source.inflight.length || source.pending.length)
+			rows.push({ schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
+				at: source.gap ?? source.inflight[0]?.at ?? source.pending[0]?.at ?? at,
+				end: at, reason: "shutdown" });
+		rows.push({ schema: 1, kind: "shutdown", producer: source.producer,
+			event: randomUUID(), at, sequence: source.sequence });
+	}
+	try {
+		execFileSync("python3", command("shutdown"), {
+			input: JSON.stringify(rows), timeout: 1000, killSignal: "SIGKILL",
+			stdio: ["pipe", "ignore", "ignore"],
+			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C.UTF-8" },
+		});
+	} catch {
+		try { writeSync(2, "usage metadata delivery failed at shutdown; coverage is unknown\n"); } catch {}
 	}
 });
