@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-10-20
+
+### Added
+
+- Optional `board.github_sink` settings manage a user service that copies crew board messages to a GitHub issue ([#429](https://github.com/i098/Crewship/issues/429)).
+
+### Fixed
+
+- Fix fresh-host `ship.sh chart` previews for missing directories and Obscura releases, and fix the fleet-browser journald task ([#441](https://github.com/i098/Crewship/issues/441)).
+- Restore fresh default installs by rebasing the Firstmate pane lifecycle patch onto current upstream code while preserving repeat-apply behavior ([#663](https://github.com/i098/Crewship/issues/663)).
+- The installer waits up to ten minutes for package locks instead of failing during first-boot updates ([#664](https://github.com/i098/Crewship/issues/664)).
+
 ## [0.4.5] - 2026-10-20
 
 ### Added
@@ -431,7 +443,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/i098/Crewship/releases/tag/v0.4.6
 [0.4.5]: https://github.com/i098/Crewship/releases/tag/v0.4.5
 [0.4.4]: https://github.com/i098/Crewship/releases/tag/v0.4.4
 [0.4.3]: https://github.com/i098/Crewship/releases/tag/v0.4.3
