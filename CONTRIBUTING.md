@@ -211,6 +211,12 @@ The script applies the form's label and rejects missing required fields or commi
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
 
+The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mistakes.yaml`.
+It omits generated intent and puts validation evidence in a collapsed section after the public body.
+These settings take effect after they merge into the default branch.
+Fill every section and keep each checklist item.
+For a check that does not apply, state `Not applicable` and give the reason.
+
 ## Branch rules
 
 GitHub rulesets enforce these rules, with no bypass:
