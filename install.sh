@@ -186,6 +186,21 @@ apt_get() {
   done
 }
 
+resolve_release() {
+  local repo=$1 ref=$2
+  if [ -z "$ref" ]; then
+    if ! command -v curl >/dev/null || ! dpkg-query -W -f='${db:Status-Status}' ca-certificates 2>/dev/null | grep -qx installed; then
+      echo 'Installing HTTPS prerequisites to find the Crewship release...' >&2
+      apt_get update -q >&2 || return
+      apt_get install -y -q curl ca-certificates >&2 || return
+    fi
+    ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") || return
+    ref=${ref##*/}
+  fi
+  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
+  printf '%s\n' "$ref"
+}
+
 main() {
   local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
@@ -193,16 +208,7 @@ main() {
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
 
-  # Bootstrap HTTPS only when the release lookup needs it.
-  if [ -z "$ref" ]; then
-    if ! command -v curl >/dev/null || ! dpkg-query -W -f='${db:Status-Status}' ca-certificates 2>/dev/null | grep -qx installed; then
-      echo 'Installing HTTPS prerequisites to find the Crewship release...'
-      apt_get update -q
-      apt_get install -y -q curl ca-certificates
-    fi
-    ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}
-  fi
-  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
+  ref=$(resolve_release "$repo" "$ref")
   echo "Installing Crewship $ref"
 
   # The blueprint/cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
