@@ -54,7 +54,7 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
     with tempfile.TemporaryDirectory(prefix="case-", dir=directory) as temporary:
         case = Path(temporary)
         script = case / "scenario.ts"
-        script.write_text(code.replace("NATIVE_SOURCE", native.as_posix())
+        script.write_text(OBSERVE_USAGE + code.replace("NATIVE_SOURCE", native.as_posix())
                           .replace("ADAPTER_SOURCE", ADAPTER.as_posix()))
         home, temporary_files = case / "home", case / "tmp"
         home.mkdir()
@@ -78,9 +78,45 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
             with sqlite3.connect(database) as connection:
                 records = [json.loads(row[0]) for row in connection.execute(
                     "SELECT payload FROM events ORDER BY ingested,rowid")]
-            if inspect:
-                inspect(case / "data")
+        if inspect:
+            inspect(case / "data")
         return result, records
+
+
+OBSERVE_USAGE = r'''
+import { Database as UsageDatabase } from "bun:sqlite";
+import { existsSync as usageExists } from "node:fs";
+async function waitForUsage(predicate) {
+    const path = process.env.CREWSHIP_USAGE_DATA_DIR + "/"
+        + (process.env.CREWSHIP_USAGE_STORE === "ledger" ? "usage.sqlite" : "spool.sqlite");
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+        if (usageExists(path)) {
+            const db = new UsageDatabase(path, { readonly: true });
+            try {
+                const rows = db.query("SELECT payload FROM events ORDER BY ingested,rowid").all()
+                    .map(row => JSON.parse(row.payload));
+                if (predicate(rows)) return rows;
+            } catch {} finally { db.close(); }
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw new Error("usage records did not arrive");
+}
+function deliveryFailure() {
+    return new Promise(resolve => {
+        const write = process.stderr.write.bind(process.stderr);
+        process.stderr.write = (chunk, ...args) => {
+            const result = write(chunk, ...args);
+            if (String(chunk).includes("usage metadata delivery failed")) {
+                process.stderr.write = write;
+                resolve();
+            }
+            return result;
+        };
+    });
+}
+'''
 
 
 TRANSPORT = r'''
@@ -137,6 +173,7 @@ await request();
 failed = true;
 await request();
 console.log(JSON.stringify({ calls }));
+await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 4);
 ''')
     assert result.returncode == 0, result.stderr
     completions = [row for row in records if row["kind"] == "complete"]
@@ -166,38 +203,125 @@ if (response.usageMetadata !== undefined || existsSync(process.env.CREWSHIP_USAG
     assert records == []
 
 
-def test_failed_durable_start_prevents_native_dispatch(native_source):
+def test_cold_registration_timeout_does_not_stall_calls_and_recovery_marks_unknown(native_source):
+    state = {}
+
+    def inspect(data):
+        with sqlite3.connect(data / "spool.sqlite") as db:
+            state["missing"] = json.loads(db.execute(
+                "SELECT missing_sequences FROM producer_state").fetchone()[0])
+
     result, records = execute(native_source, TRANSPORT + r'''
-let rejected = false;
-try { await request(); } catch { rejected = true; }
-if (!rejected || calls !== 0) throw new Error("the durable start must fail before provider dispatch");
+import { spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
+mkdirSync(process.env.CREWSHIP_USAGE_DATA_DIR!, { recursive: true });
+const holder = spawn("python3", ["-c", `
+import fcntl, sys
+with open(sys.argv[1], "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    print("locked", flush=True)
+    sys.stdin.read()
+`, process.env.CREWSHIP_USAGE_DATA_DIR + "/spool.lock"]);
+const released = new Promise(resolve => holder.once("exit", resolve));
+await new Promise(resolve => holder.stdout.once("data", resolve));
+try {
+    const timedOut = deliveryFailure();
+    const response = await request();
+    if (response.stopReason !== "stop" || calls !== 1)
+        throw new Error("the held registration lock changed the model result");
+    await timedOut;
+} finally {
+    holder.stdin.end();
+    await released;
+}
+await request();
+if (calls !== 2) throw new Error("the next model call must still run");
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 2));
+''', inspect=inspect)
+    assert result.returncode == 0, result.stderr
+    assert state["missing"] == [[1, 1]]
+    assert [row["sequence"] for row in records if row["kind"] == "complete"] == [2]
+    assert any(row["kind"] == "gap" and row["reason"] == "delivery" for row in records)
+    completion = next(row for row in records if row["kind"] == "complete")
+    assert completion["input"] == 35 and completion["output"] == 8
+
+
+def test_one_shot_exits_before_a_stuck_collector_and_reports_unknown_coverage(native_source):
+    directory = native_source[0]
+    collector = directory / "stuck-collector.py"
+    collector.write_text(
+        "import pathlib, sys, time\n"
+        "data = pathlib.Path(sys.argv[sys.argv.index('--data-dir') + 1])\n"
+        "data.mkdir(parents=True, exist_ok=True)\n"
+        "with (data / 'collector-starts').open('a') as log:\n"
+        "    log.write(sys.argv[-1] + '\\n')\n"
+        "time.sleep(60)\n")
+    observed = {}
+
+    def inspect(data):
+        observed["starts"] = (data / "collector-starts").read_text().splitlines()
+        observed["exit_ms"] = float((data / "exit-ms").read_text())
+        observed["files"] = {path.name for path in data.iterdir()}
+
+    result, records = execute(native_source, TRANSPORT + r'''
+import { existsSync, writeFileSync } from "node:fs";
+const response = await request();
+if (response.stopReason !== "stop" || calls !== 1)
+    throw new Error("the stuck collector must not change the provider result");
+while (!existsSync(process.env.CREWSHIP_USAGE_DATA_DIR + "/collector-starts"))
+    await new Promise(resolve => setTimeout(resolve, 10));
+const finishedAt = performance.now();
+process.once("exit", () => writeFileSync(process.env.CREWSHIP_USAGE_DATA_DIR + "/exit-ms",
+    String(performance.now() - finishedAt)));
+console.log("provider finished");
+''', collector=collector, inspect=inspect)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "provider finished"
+    assert observed["starts"].count("collect") == 1
+    assert observed["starts"].count("shutdown") <= 1
+    assert observed["exit_ms"] < 5000
+    assert records == []
+    assert "usage metadata delivery failed at shutdown; coverage is unknown" in result.stderr
+    assert observed["files"] == {"collector-starts", "exit-ms"}
+
+
+def test_failed_registration_does_not_prevent_native_dispatch(native_source):
+    result, records = execute(native_source, TRANSPORT + r'''
+const response = await request();
+if (response.stopReason !== "stop" || calls !== 1)
+    throw new Error("collector failure must not change the native result");
 ''', collector=ROOT / "missing-collector.py")
     assert result.returncode == 0, result.stderr
     assert records == []
+    assert "coverage is unknown" in result.stderr
 
 
-def test_stale_spool_refuses_the_native_call_before_dispatch_and_keeps_the_ledger_closed(native_source):
+def test_stale_spool_does_not_fail_native_calls_and_keeps_the_ledger_closed(native_source):
     stored = {}
     result, records = execute(native_source, TRANSPORT + r'''
 import { Database } from "bun:sqlite";
 await request();
+await waitForUsage(rows => rows.some(row => row.kind === "checkpoint"));
 const spool = new Database(process.env.CREWSHIP_USAGE_DATA_DIR + "/spool.sqlite");
 const stale = Date.now() / 1000 - 8 * 86400;
 spool.run("INSERT INTO events(producer,event,kind,at,ingested,expires,payload,sequence_through,"
     + "retired_completions) VALUES(?,?,'gap',?,?,?,'{}',0,0)",
     [crypto.randomUUID(), crypto.randomUUID(), stale, stale, stale + 35 * 86400]);
-let refused = false;
-try { await request(); } catch { refused = true; }
-if (!refused || calls !== 1) throw new Error("a stale spool must refuse the call before dispatch");
+const failedDelivery = deliveryFailure();
+const response = await request();
+if (response.stopReason !== "stop" || calls !== 2)
+    throw new Error("a stale spool must not fail the model call");
+await failedDelivery;
 spool.run("DELETE FROM events WHERE payload = '{}'");
 spool.close();
 await request();
-if (calls !== 2) throw new Error("the spool must accept calls after the stale record leaves");
+if (calls !== 3) throw new Error("the spool must accept records after the stale record leaves");
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 3));
 ''', inspect=lambda data: stored.update(ledger=(data / "usage.sqlite").exists()))
     assert result.returncode == 0, result.stderr
     assert stored == {"ledger": False}
-    assert [row["kind"] for row in records] == [
-        "register", "start", "complete", "gap", "start", "complete", "checkpoint", "shutdown"]
+    assert len([row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]) == 1
+    assert [row["sequence"] for row in records if row["kind"] == "complete"] == [1, 3]
     assert [row["sequence"] for row in records if row["kind"] == "start"] == [1, 3]
 
 
@@ -205,13 +329,14 @@ def test_native_helper_calls_register_separately_from_chat(native_source):
     result, records = execute(native_source, TRANSPORT + r'''
 await request();
 await completeSimple(model, context, options);
+await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2);
 ''')
     assert result.returncode == 0, result.stderr
     assert sorted(row["producer_kind"] for row in records if row["kind"] == "register") == ["chat", "helper"]
     assert len([row for row in records if row["kind"] == "complete"]) == 2
 
 
-def test_adapter_never_reads_content_and_surfaces_completion_delivery_failure(native_source):
+def test_adapter_never_reads_content_or_replaces_a_result_on_delivery_failure(native_source):
     result, records = execute(native_source, r'''
 import { capture } from "ADAPTER_SOURCE";
 import { AssistantMessageEventStream } from "NATIVE_SOURCE/utils/event-stream.ts";
@@ -224,6 +349,8 @@ const stream = capture({ provider: "example", model: "model-a", producer_kind: "
     return source;
 });
 await stream.result();
+await waitForUsage(rows => rows.some(row => row.kind === "checkpoint"));
+const failedDelivery = deliveryFailure();
 const broken = capture({ provider: "example", model: "model-a", producer_kind: "chat" }, () => {
     const source = new AssistantMessageEventStream();
     queueMicrotask(() => {
@@ -232,9 +359,9 @@ const broken = capture({ provider: "example", model: "model-a", producer_kind: "
     });
     return source;
 });
-let rejected = false;
-try { await broken.result(); } catch { rejected = true; }
-if (!rejected) throw new Error("completion delivery failure must escape");
+if ((await broken.result()).stopReason !== "stop")
+    throw new Error("completion delivery must not change the model result");
+await failedDelivery;
 process.env.CREWSHIP_USAGE_COLLECTOR = collector;
 const recovered = capture({ provider: "example", model: "model-a", producer_kind: "chat" }, () => {
     const source = new AssistantMessageEventStream();
@@ -243,11 +370,12 @@ const recovered = capture({ provider: "example", model: "model-a", producer_kind
     return source;
 });
 await recovered.result();
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 3));
 ''')
     assert result.returncode == 0, result.stderr
     assert len([row for row in records if row["kind"] == "complete"]) == 2
-    assert len([row for row in records if row["kind"] == "start"]) == 3
-    assert len([row for row in records if row["kind"] == "gap"]) == 1
+    assert [row["sequence"] for row in records if row["kind"] == "complete"] == [1, 3]
+    assert len([row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]) == 1
 
 
 def test_native_chat_backed_judgments_have_their_own_producer(native_source):
@@ -256,6 +384,7 @@ import { chatTextBackend } from "NATIVE_SOURCE/judgment/chat.ts";
 await chatTextBackend(model, { apiKey: "fixture-private-key" }).complete(
     { system: "", user: "", retry: false }, {});
 if (calls !== 1) throw new Error("expected one native judgment completion");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     assert [row["producer_kind"] for row in records if row["kind"] == "register"] == ["judgment"]
@@ -285,6 +414,7 @@ const response = stream(anthropic, context, { ...options, fetch: globalThis.fetc
 for await (const event of response) {}
 const terminal = await response.result();
 if (terminal.stopReason === "error") throw new Error("synthetic Anthropic transport failed");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     completion = next(row for row in records if row["kind"] == "complete")
@@ -328,6 +458,7 @@ for await (const event of response) {}
 const terminal = await response.result();
 if (calls !== 1 || (terminal.stopReason === "error") === scenario.final)
     throw new Error("the synthetic Anthropic stream ended unexpectedly");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 '''
 
 
@@ -387,6 +518,7 @@ const underlying = new AssistantMessageEventStream();
 const pending = capture({ provider: "example", model: "model-a", producer_kind: "chat" }, () => underlying);
 if (!pulse) throw new Error("the idle checkpoint is missing");
 pulse();
+await waitForUsage(rows => rows.some(row => row.kind === "checkpoint"));
 function report() {
     const result = spawnSync("python3", [process.env.CREWSHIP_USAGE_COLLECTOR!, "--data-dir",
         process.env.CREWSHIP_USAGE_DATA_DIR!, "--mount", process.env.CREWSHIP_USAGE_MOUNT!, "report"],
@@ -402,6 +534,7 @@ underlying.push({ type: "done", reason: "stop", message: {
     role: "assistant", stopReason: "stop", usageMetadata: null } });
 await pending.result();
 pulse();
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 const after = report();
 if (after.requests !== 1 || after.counted_tokens !== null
     || after.coverage[0].missing_sequences.length !== 0)
@@ -410,7 +543,7 @@ if (after.requests !== 1 || after.counted_tokens !== null
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("recovery", ["shutdown", "completion", "checkpoint"])
+@pytest.mark.parametrize("recovery", ["completion", "checkpoint"])
 def test_pending_outage_is_durable_before_recovered_source_records(native_source, recovery):
     view = {}
 
@@ -433,30 +566,31 @@ const { capture } = await import("ADAPTER_SOURCE");
 const underlying = new AssistantMessageEventStream();
 const pending = capture({ provider: "example", model: "model-a", producer_kind: "chat" }, () => underlying);
 const recovery = RECOVERY;
+await waitForUsage(rows => rows.some(row => row.kind === "start"));
 function finish() {
     underlying.push({ type: "done", reason: "stop", message: {
         role: "assistant", stopReason: "stop", usageMetadata: null } });
 }
-if (recovery === "shutdown") {
-    finish();
-    await pending.result();
-}
 if (!pulse) throw new Error("the checkpoint callback is missing");
 const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
+const failedDelivery = deliveryFailure();
 process.env.CREWSHIP_USAGE_COLLECTOR = "/missing-collector.py";
 pulse();
+await failedDelivery;
 process.env.CREWSHIP_USAGE_COLLECTOR = collector;
 if (recovery === "completion") {
     finish();
     await pending.result();
+    await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 } else if (recovery === "checkpoint") {
     pulse();
+    await waitForUsage(rows => rows.some(row => row.kind === "gap" && row.reason === "delivery"));
 }
 '''.replace("RECOVERY", json.dumps(recovery)),
         inspect=inspect, store="ledger")
     assert result.returncode == 0, result.stderr
-    assert "usage metadata checkpoint acknowledgement failed" in result.stderr
-    gaps = [row for row in records if row["kind"] == "gap"]
+    assert "usage metadata delivery failed; coverage is unknown" in result.stderr
+    gaps = [row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]
     assert len(gaps) == 1
     gap = gaps[0]
     recovered_kind = "complete" if recovery == "completion" else recovery
@@ -464,9 +598,8 @@ if (recovery === "completion") {
     assert records.index(gap) < records.index(recovered)
     assert gap["reason"] == "delivery" and gap["producer"] == recovered["producer"]
     coverage = view["coverage"][0]
-    assert coverage["gap_intervals"] == 1
+    assert coverage["gap_intervals"] >= 1
     assert coverage["missing_sequences"] == ([[1, 1]] if recovery == "checkpoint" else [])
-    assert coverage["shutdown"] is True
     assert view["requests"] == (0 if recovery == "checkpoint" else 1)
     assert view["counted_tokens"] is None
 
@@ -478,6 +611,7 @@ for await (const event of response) {}
 const terminal = await response.result();
 if (terminal.stopReason !== "aborted" || calls !== 0)
     throw new Error("the synthetic request must abort before transport");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     completion = next(row for row in records if row["kind"] == "complete")

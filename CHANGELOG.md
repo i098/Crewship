@@ -113,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `ponytail-review` wrapper now requires exactly one approved positive verdict and permits only approved progress and information lines after Markdown normalization.
   Unapproved output, including cuts, negative summaries, findings, and free prose, fails the review ([#652](https://github.com/i098/Crewship/issues/652)).
 - The iMessage bridge bounds startup requests, starts fallback transports in the background, and opens the listener without waiting for saved-message reads ([#654](https://github.com/i098/Crewship/issues/654)).
+- Keep metered model calls independent of slow or failed usage collection, including process exit, with a bounded shutdown write and explicit unknown coverage ([#655](https://github.com/i098/Crewship/issues/655)).
 
 ## [0.4.4] - 2026-10-14
 
