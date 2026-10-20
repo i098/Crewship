@@ -327,6 +327,29 @@ def provision(document, check):
     return subprocess.run(argv, cwd=ROOT, env=environment).returncode
 
 
+def firstmate_memory_ready(config):
+    if not config["profiles"]["firstmate"]:
+        return True
+    floor = int((ROOT / "blueprint/config/spawn-memory-floor-mb").read_text())
+    try:
+        available = next(
+            int(line.split()[1]) // 1024
+            for line in Path("/proc/meminfo").read_text().splitlines()
+            if line.startswith("MemAvailable:")
+        )
+    except (OSError, ValueError, IndexError, StopIteration):
+        print("Firstmate worker spawning: NOT READY; cannot read available RAM from /proc/meminfo.")
+        return False
+    ready = available >= floor
+    print(
+        f"Firstmate worker spawning: {'memory floor met' if ready else 'NOT READY'} "
+        f"({available:,} MB available; {floor:,} MB required)."
+    )
+    if not ready:
+        print("Free memory or add RAM before starting workers. Swap does not count toward this floor.")
+    return ready
+
+
 def host_environment(config):
     home = Path(config["home"])
     return {
@@ -416,6 +439,7 @@ def doctor(document):
         print(
             "Native services: verify systemctl --user status herdr chrome-autoprune.timer as the operator."
         )
+    memory_ready = firstmate_memory_ready(config)
     print(
         "Software checks: "
         + (
@@ -424,7 +448,7 @@ def doctor(document):
             else "passed; authentication/network prerequisites are separate"
         )
     )
-    return 1 if failed else 0
+    return 1 if failed or not memory_ready else 0
 
 
 def firstmate_checks(config, environment):
@@ -657,6 +681,9 @@ def main():
                 file=sys.stderr,
             )
         if result == 0:
+            if not firstmate_memory_ready(config):
+                print("Software is installed, but Firstmate cannot start workers until the memory check passes.")
+                return 1
             questions(document, path)
     return result
 

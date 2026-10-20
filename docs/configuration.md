@@ -42,6 +42,14 @@ If only Herdr is stopped, the recovery command starts its user service without a
 It requires an existing host config instead of using the default example.
 Like the other config readers, it performs the one-time rewrite below when needed.
 
+With the `firstmate` profile on, `launch` and `survey` also check available RAM against the worker spawn floor.
+The floor is 8,000 MB from `/proc/meminfo` `MemAvailable`, not total RAM.
+Swap does not count.
+Below the floor, both commands return a failure status, and `launch` does not open Firstmate's setup questions.
+The installed software stays in place.
+Free memory or add RAM, then run the command again.
+A passed memory check does not prove authentication or network access.
+
 The next config read rewrites an old root key to `crewship` and prints one notice.
 It keeps the original bytes in `<config>.bak` beside the config.
 The rewritten YAML does not keep comments; the backup keeps them.

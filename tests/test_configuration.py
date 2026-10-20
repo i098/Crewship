@@ -118,6 +118,7 @@ def test_legacy_obscura_keys_are_ignored_with_one_warning_and_apply_proceeds(
         ship, "provision", lambda document, check: provisioned.append(check) or 0
     )
     monkeypatch.setattr(ship, "questions", lambda document, config_path: 0)
+    monkeypatch.setattr(ship, "firstmate_memory_ready", lambda config: True)
     for host in (current, legacy):
         monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "launch", "--config", str(host)])
         assert ship.main() == 0
@@ -416,6 +417,7 @@ def test_second_apply_does_not_reopen_the_questions(
     if config_source == "relative":
         selected = selected.relative_to(tmp_path)
     monkeypatch.setattr(ship, "provision", lambda document, check: 0)
+    monkeypatch.setattr(ship, "firstmate_memory_ready", lambda config: True)
     monkeypatch.setattr(ship.sys.stdin, "isatty", lambda: obstacle != "terminal")
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.setattr(
@@ -584,11 +586,61 @@ def test_apply_warns_when_firstmate_still_tracks_the_stale_fork(
     host = tmp_path / "host.yml"
     host.write_text(yaml.safe_dump(configuration))
     monkeypatch.setattr(ship, "provision", lambda document, check: 0)
+    monkeypatch.setattr(ship, "firstmate_memory_ready", lambda config: True)
     monkeypatch.setattr(ship.sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "launch", "--config", str(host)])
     assert ship.main() == 0
     output = capsys.readouterr()
     assert output.err.startswith("WARNING: firstmate.url is the stale fork")
+
+
+@pytest.mark.parametrize(
+    "meminfo, enabled, expected",
+    [
+        ("MemAvailable: 8190976 kB\nSwapFree: 999999999 kB\n", True, 1),
+        ("MemAvailable: 8192000 kB\n", True, 0),
+        ("MemAvailable: 8193024 kB\n", True, 0),
+        ("MemTotal: 8192000 kB\n", True, 1),
+        ("MemAvailable: invalid kB\n", True, 1),
+        ("MemTotal: 0 kB\n", False, 0),
+    ],
+)
+def test_launch_checks_available_ram_before_firstmate_questions(
+    configuration, tmp_path, monkeypatch, capsys, meminfo, enabled, expected
+):
+    configuration["crewship"]["profiles"]["firstmate"] = enabled
+    original_read = Path.read_text
+    monkeypatch.setattr(
+        Path, "read_text",
+        lambda path, *a, **kw: meminfo if str(path) == "/proc/meminfo" else original_read(path, *a, **kw),
+    )
+    monkeypatch.setattr(ship, "load_config", lambda path: configuration)
+    monkeypatch.setattr(ship, "provision", lambda document, check: 0)
+    questions = []
+    monkeypatch.setattr(ship, "questions", lambda *a: questions.append(True))
+    monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "launch", "--config", str(tmp_path / "host.yml")])
+    assert ship.main() == expected
+    assert bool(questions) is (enabled and expected == 0)
+    output = capsys.readouterr().out
+    if expected:
+        assert "NOT READY" in output
+    elif enabled:
+        assert "8,000 MB required" in output
+
+
+@pytest.mark.parametrize("available, status", [(7999, 1), (8000, 0)])
+def test_survey_fails_below_memory_floor_even_when_software_passes(
+    configuration, monkeypatch, capsys, available, status
+):
+    original_read = Path.read_text
+    monkeypatch.setattr(
+        Path, "read_text",
+        lambda path, *a, **kw: f"MemAvailable: {available * 1024} kB\n"
+        if str(path) == "/proc/meminfo" else original_read(path, *a, **kw),
+    )
+    monkeypatch.setattr(ship.shutil, "which", lambda *a, **kw: "/bin/true")
+    assert ship.doctor(configuration) == status
+    assert "Software checks: passed" in capsys.readouterr().out
 
 
 def _verify_firstmate(tmp_path, origin, configured):
