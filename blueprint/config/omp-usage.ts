@@ -1,6 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, renameSync, statSync, writeSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AssistantMessage, AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 
 type Kind = "chat" | "judgment" | "helper";
@@ -13,9 +14,10 @@ type Source = {
 	sequence: number;
 	gap?: string;
 	pending: Row[];
-	sending: boolean;
+	inflight: Row[];
 };
 const sources = new Map<Kind, Source>();
+const collectors = new Set<ChildProcess>();
 
 function command() {
 	const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
@@ -30,9 +32,11 @@ function command() {
 function send(rows: Row[]) {
 	return new Promise<void>((resolve, reject) => {
 		const child = execFile("python3", command(), {
-			encoding: "utf8", timeout: 15000, killSignal: "SIGKILL", maxBuffer: 16384,
+			encoding: "utf8", maxBuffer: 16384,
 			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C.UTF-8" },
 		}, (error, stdout) => {
+			clearTimeout(timeout);
+			collectors.delete(child);
 			try {
 				if (error) throw error;
 				const replies = stdout.trim().split("\n").map(line => JSON.parse(line));
@@ -41,33 +45,36 @@ function send(rows: Row[]) {
 				resolve();
 			} catch (error) { reject(error); }
 		});
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 15000).unref();
+		collectors.add(child);
+		child.unref();
+		for (const stream of child.stdio) (stream as { unref?: () => void } | null)?.unref?.();
 		child.stdin!.on("error", reject);
 		child.stdin!.end(rows.map(row => JSON.stringify(row)).join("\n") + "\n");
 	});
 }
 
 async function flush(source: Source) {
-	if (source.sending) return;
-	source.sending = true;
+	if (source.inflight.length) return;
 	while (source.pending.length) {
 		const rows = source.pending.splice(0);
 		const gap = source.gap;
 		source.gap = undefined;
+		source.inflight = gap ? [{ schema: 1, kind: "gap", producer: source.producer,
+			event: randomUUID(), at: gap, end: rows[0].at, reason: "delivery" }, ...rows] : rows;
 		try {
 			if (!source.registered) {
 				await send([source.registration]);
 				source.registered = true;
 			}
-			if (gap) await send([{ schema: 1, kind: "gap", producer: source.producer,
-				event: randomUUID(), at: gap, end: rows[0].at, reason: "delivery" }]);
-			await send(rows);
+			await send(source.inflight);
 		} catch {
 			source.gap = gap ?? rows[0].at;
 			source.pending.length = 0;
 			process.stderr.write("usage metadata delivery failed; coverage is unknown\n");
 		}
+		source.inflight = [];
 	}
-	source.sending = false;
 }
 
 function record(source: Source, kind: string, event: string, at: string, fields = {}) {
@@ -86,7 +93,7 @@ function sourceFor(kind: Kind): Source {
 	let source = sources.get(kind);
 	if (!source) {
 		const producer = randomUUID();
-		source = { producer, sequence: 0, registered: false, pending: [], sending: false, registration: {
+		source = { producer, sequence: 0, registered: false, pending: [], inflight: [], registration: {
 			schema: 1, kind: "register", producer, event: randomUUID(), at: new Date().toISOString(),
 			producer_kind: kind,
 		} };
@@ -133,7 +140,44 @@ setInterval(() => {
 		record(source, "checkpoint", randomUUID(), new Date().toISOString(), { sequence: source.sequence });
 }, 60_000).unref();
 
-process.once("beforeExit", () => {
-	for (const source of sources.values())
-		record(source, "shutdown", randomUUID(), new Date().toISOString(), { sequence: source.sequence });
+process.once("exit", () => {
+	for (const child of collectors) child.kill("SIGKILL");
+	if (!sources.size) return;
+	const rows: Row[] = [];
+	const gaps: Row[] = [];
+	const at = new Date().toISOString();
+	for (const source of sources.values()) {
+		const shutdown = { schema: 1, kind: "shutdown", producer: source.producer,
+			event: randomUUID(), at, sequence: source.sequence };
+		const gap = { schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
+			at: source.gap ?? source.registration.at, end: at, reason: "delivery" };
+		const checkpoint = source.pending.findLast(row => row.kind === "checkpoint")
+			?? source.inflight.findLast(row => row.kind === "checkpoint");
+		rows.push(source.registration, ...source.inflight.filter(row => row.kind !== "checkpoint" || row === checkpoint));
+		if (source.gap) rows.push(gap);
+		rows.push(...source.pending.filter(row => row.kind !== "checkpoint" || row === checkpoint), shutdown);
+		gaps.push(source.registration, gap, shutdown);
+	}
+	try {
+		command();
+		const data = resolve(process.env.CREWSHIP_USAGE_DATA_DIR!);
+		const mount = realpathSync(process.env.CREWSHIP_USAGE_MOUNT!);
+		let ancestor = data;
+		while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+		const location = relative(mount, join(realpathSync(ancestor), relative(ancestor, data)));
+		if (statSync(mount).dev === statSync("/").dev || statSync(ancestor).dev !== statSync(mount).dev ||
+			!location || location === ".." || location.startsWith(`..${sep}`) || isAbsolute(location))
+			throw new Error("invalid usage data mount");
+		mkdirSync(data, { recursive: true, mode: 0o700 });
+		const store = process.env.CREWSHIP_USAGE_STORE ?? "spool";
+		if (store !== "spool" && store !== "ledger") throw new Error("invalid usage store");
+		const path = join(data, `shutdown-${store}-${randomUUID()}.jsonl`);
+		let payload = rows.map(row => JSON.stringify(row)).join("\n") + "\n";
+		if (Buffer.byteLength(payload) > 16384)
+			payload = gaps.map(row => JSON.stringify(row)).join("\n") + "\n";
+		appendFileSync(`${path}.tmp`, payload, { mode: 0o600, flag: "wx" });
+		renameSync(`${path}.tmp`, path);
+	} catch {
+		try { writeSync(2, "usage metadata delivery failed at shutdown; coverage is unknown\n"); } catch {}
+	}
 });

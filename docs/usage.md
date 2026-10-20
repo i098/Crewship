@@ -44,8 +44,14 @@ Each producer keeps at most 64 waiting records; overflow drops the waiting batch
 A collector failure drops the current and waiting batches, reports unknown coverage, and leaves the model call unchanged.
 The next successful delivery registers the producer if needed and stores the gap before later records.
 Sequence checkpoints preserve skipped requests as unknown, never as zero-token completions.
-Normal event-loop exit sends a shutdown checkpoint after pending delivery finishes.
-A forced exit can lose metadata that has not reached the collector.
+Collector children, their streams, and their timers never keep a source process alive.
+At exit, the adapter stops its collectors and writes one bounded batch with pending records, coverage gaps, and shutdown checkpoints.
+It does not start another delivery or retry.
+The next export or prune imports this private `shutdown-STORE-ID.jsonl` file and removes it after acceptance.
+An import failure leaves the batch for retry and reports unknown coverage without stopping export, prune, or report.
+The batch holds at most 16 KiB; larger batches store coverage gaps instead of pending records.
+A failed write reports unknown coverage on standard error.
+A forced kill can lose metadata that has not reached the collector.
 An unreferenced one-minute timer records idle checkpoints without keeping a source process alive.
 Start a new source process after an outage exceeds the retained producer horizon.
 The collector cannot recover metadata that already expired.
@@ -264,7 +270,8 @@ Records that are still below the limits wait through an endpoint outage and then
 The spool uses a write-ahead log with full synchronization; a one-record collector process makes two disk syncs, where a rollback journal makes five.
 A commit checkpoints the log into the database after 128 pages, and the log shrinks back to 1 MiB after a checkpoint, so it stays below 4 MiB.
 A closing process does not checkpoint, so a collector process that carries one record does not pay for a full checkpoint.
-The directory holds only `spool.sqlite`, `spool.sqlite-wal`, `spool.sqlite-shm`, and the empty `spool.lock`; a short-lived `spool.sqlite-journal` exists only while the first process creates the database.
+The directory holds the SQLite files, the empty `spool.lock`, and any shutdown batches waiting for import.
+A short-lived `spool.sqlite-journal` exists only while the first process creates the database.
 Each collector and export transaction takes an exclusive lock on `spool.lock`.
 The exporter does not keep the lock during the HTTP request.
 Each packing transaction handles at most 500 records.

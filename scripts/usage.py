@@ -747,6 +747,37 @@ def collect(ledger):
         print(json.dumps(ledger.accept(payload)), flush=True)
 
 
+def drain_shutdown(ledger, directory, store):
+    for path in directory.glob(f"shutdown-{store}-*.jsonl"):
+        try:
+            if path.is_symlink():
+                raise ValueError("metadata storage must not be a symlink")
+            with path.open("rb") as pending:
+                fcntl.flock(pending, fcntl.LOCK_EX)
+                if not path.exists():
+                    continue
+                payload = pending.read(16385)
+                if len(payload) > 16384:
+                    raise ValueError("usage shutdown batch is too large")
+                for line in payload.splitlines():
+                    event = validate(json.loads(line))
+                    if event["kind"] in {"start", "complete"}:
+                        state = ledger.db.execute(
+                            "SELECT sequence_through,missing_sequences FROM producer_state WHERE producer=?",
+                            (event["producer"],)).fetchone()
+                        if (state and event["sequence"] <= state["sequence_through"]
+                                and not any(lower <= event["sequence"] <= upper
+                                            for lower, upper in json.loads(state["missing_sequences"]))):
+                            continue
+                    ledger.accept(event)
+                path.unlink()
+        except FileNotFoundError:
+            continue
+        except (ValueError, OSError, sqlite3.Error):
+            print("usage: shutdown metadata import failed; retained for retry; coverage is unknown",
+                  file=sys.stderr)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", required=True)
@@ -775,6 +806,8 @@ def main(argv=None):
     with (Spool if spool else Ledger)(path) as ledger:
         if args.command not in {"prune", "collect"}:
             ledger.prune()
+        if args.command != "collect":
+            drain_shutdown(ledger, path.parent, args.store)
         if args.command == "collect":
             collect(ledger)
         elif args.command == "prune":

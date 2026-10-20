@@ -949,6 +949,55 @@ def test_spool_writers_wait_for_a_long_transaction_instead_of_failing_busy(tmp_p
     assert outcome == [{"accepted": True, "duplicate": False}]
 
 
+@pytest.mark.parametrize("command", ["export", "prune"])
+@pytest.mark.parametrize("failure", ["full", "expired", "checkpoint"])
+def test_rejected_shutdown_batch_does_not_block_spool_maintenance(command, failure,
+                                                                 monkeypatch, capsys):
+    mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
+    if mount is None:
+        pytest.skip("needs a separate mounted worktree")
+    now = datetime.now(UTC)
+    sent = []
+    monkeypatch.setattr(usage, "sender", lambda _: lambda batch: sent.append(batch) or {})
+    with tempfile.TemporaryDirectory(prefix=".usage-shutdown-", dir=ROOT) as temporary:
+        data = Path(temporary)
+        with usage.Spool(data / "spool.sqlite") as spool:
+            register(spool, now=now, at=now.isoformat())
+            start(spool, now=now, at=now.isoformat())
+            complete(spool, now=now, at=now.isoformat())
+            if failure == "full":
+                monkeypatch.setattr(usage, "SPOOL_BYTES",
+                                    spool.db.execute("SELECT bytes FROM budget").fetchone()[0])
+        rejected = event("start", 2, sequence=2, provider="example", model="model-a",
+                         at=now.isoformat())
+        if failure == "expired":
+            rejected["at"] = (now - timedelta(days=40)).isoformat()
+        elif failure == "checkpoint":
+            rejected = event("checkpoint", sequence=0, at=now.isoformat())
+        path = data / "shutdown-spool-rejected.jsonl"
+        path.write_text(json.dumps(rejected) + "\n")
+        arguments = ["--data-dir", str(data), "--mount", str(mount), "--store", "spool", command]
+        if command == "export":
+            arguments += ["--endpoint", "https://example.invalid/v1/logs"]
+
+        usage.main(arguments)
+
+        result = capsys.readouterr()
+        assert "shutdown metadata import failed; retained for retry" in result.err
+        assert path.exists()
+        if command == "export":
+            assert json.loads(result.out)["exported"] == 3
+            attributes = [{item["key"]: item["value"] for item in record["attributes"]}
+                          for batch in sent for record in logs(batch)]
+            assert any(record.get("usage.kind") == {"stringValue": "complete"}
+                       and record.get("usage.total") == {"intValue": "43"} for record in attributes)
+            if failure == "full":
+                usage.main(arguments)
+                assert not path.exists()
+        else:
+            assert json.loads(result.out) == {"removed": 0}
+
+
 def test_spool_cli_keeps_no_history_and_never_opens_the_ledger():
     mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
     if mount is None:

@@ -29,7 +29,7 @@ def native_source():
     mount = next((path for path in ROOT.parents if path.is_mount() and path != Path("/")), None)
     if mount is None:
         pytest.skip("the native collector fixture requires a separate mounted worktree")
-    with tempfile.TemporaryDirectory(prefix=".usage-native-", dir=ROOT.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".usage-native-", dir=ROOT) as temporary:
         directory = Path(temporary)
         packages = directory / "node_modules"
         packages.mkdir()
@@ -70,6 +70,11 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
             environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
                                 capture_output=True, text=True, timeout=60)
+        if enabled and result.returncode == 0:
+            subprocess.run(
+                [sys.executable, str(ROOT / "scripts/usage.py"), "--data-dir",
+                 str(case / "data"), "--mount", str(mount), "--store", store or "spool", "prune"],
+                capture_output=True, text=True, check=True, timeout=120)
         database = case / "data" / ("usage.sqlite" if store == "ledger" else "spool.sqlite")
         records = []
         if result.returncode != 0:
@@ -244,6 +249,44 @@ if (calls !== 2) throw new Error("the next model call must still run");
     assert completion["input"] == 35 and completion["output"] == 8
 
 
+def test_one_shot_exits_before_a_stuck_collector_and_spools_its_completion(native_source):
+    directory = native_source[0]
+    collector = directory / "stuck-collector.py"
+    collector.write_text(
+        "import pathlib, sys, time\n"
+        "data = pathlib.Path(sys.argv[sys.argv.index('--data-dir') + 1])\n"
+        "data.mkdir(parents=True, exist_ok=True)\n"
+        "with (data / 'collector-starts').open('a') as log:\n"
+        "    log.write('started\\n')\n"
+        "time.sleep(60)\n")
+    observed = {}
+
+    def inspect(data):
+        observed["starts"] = (data / "collector-starts").read_text().splitlines()
+        observed["exit_ms"] = float((data / "exit-ms").read_text())
+
+    result, records = execute(native_source, TRANSPORT + r'''
+import { existsSync, writeFileSync } from "node:fs";
+const response = await request();
+if (response.stopReason !== "stop" || calls !== 1)
+    throw new Error("the stuck collector must not change the provider result");
+while (!existsSync(process.env.CREWSHIP_USAGE_DATA_DIR + "/collector-starts"))
+    await new Promise(resolve => setTimeout(resolve, 10));
+const finishedAt = performance.now();
+process.once("exit", () => writeFileSync(process.env.CREWSHIP_USAGE_DATA_DIR + "/exit-ms",
+    String(performance.now() - finishedAt)));
+console.log("provider finished");
+''', collector=collector, inspect=inspect)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "provider finished"
+    assert observed["starts"] == ["started"]
+    assert observed["exit_ms"] < 5000
+    completion = next(row for row in records if row["kind"] == "complete")
+    assert completion["input"] == 35 and completion["output"] == 8
+    assert not any(row["kind"] == "gap" for row in records)
+    assert records[-1]["kind"] == "shutdown"
+
+
 def test_failed_registration_does_not_prevent_native_dispatch(native_source):
     result, records = execute(native_source, TRANSPORT + r'''
 const response = await request();
@@ -251,7 +294,7 @@ if (response.stopReason !== "stop" || calls !== 1)
     throw new Error("collector failure must not change the native result");
 ''', collector=ROOT / "missing-collector.py")
     assert result.returncode == 0, result.stderr
-    assert records == []
+    assert any(row["kind"] in {"complete", "gap"} for row in records)
 
 
 def test_stale_spool_does_not_fail_native_calls_and_keeps_the_ledger_closed(native_source):
