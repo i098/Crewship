@@ -4,6 +4,7 @@
 scripts/new-issue <feature|bug> --title "..." --field problem=@file|text --field proposal=...
 scripts/new-issue feature --json input.json    # {"title": "...", "fields": {"problem": "..."}}
 --dry-run prints the title, the labels and the body; without it the issue is created with gh api.
+On failure, child errors and any HTTP response body go to stderr; the child exit code is preserved.
 """
 
 import argparse
