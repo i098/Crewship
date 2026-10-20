@@ -147,15 +147,12 @@
   become: true
   when: crewship_account_ready | bool
 
-- name: Ensure the home layout
-  ansible.builtin.file:
+- name: Inspect the home layout
+  ansible.builtin.stat:
     path: "{{ item }}"
-    state: directory
-    owner: "{{ crewship_cfg.user }}"
-    group: "{{ crewship_group }}"
+    get_checksum: false
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
-  environment: "{{ crewship_user_env }}"
   loop:
     - "{{ crewship_cfg.home }}/.config"
     - "{{ crewship_cfg.home }}/.config/environment.d"
@@ -166,6 +163,22 @@
     - "{{ crewship_share_dir }}"
     - "{{ crewship_user_units }}"
     - "{{ crewship_cfg.workspace }}"
+  register: crewship_home_layout_stat
+  when: crewship_account_ready | bool
+
+- name: Ensure the home layout
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  check_mode: "{{ ansible_check_mode and item.stat.exists }}"
+  loop: "{{ crewship_home_layout_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
   when: crewship_account_ready | bool
 
 - name: Require a mounted data filesystem before creating bulk directories

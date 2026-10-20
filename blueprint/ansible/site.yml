@@ -8,8 +8,8 @@
 #     systemd action, but still writes unit files and their static
 #     *.target.wants symlinks, so a container image can be built and the same
 #     configuration boots correctly on a real host
-#   * check mode previews file changes; the agent tasks can create their parent
-#     directories under crewship.home so remote-source copies can be checked
+#   * check mode can create missing home-layout and agent directories;
+#     existing directory permissions and managed files remain unchanged
 - name: Crewship native provisioning
   hosts: crewship
   gather_facts: true
