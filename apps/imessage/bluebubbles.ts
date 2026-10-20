@@ -61,7 +61,6 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   private opts: typeof DEFAULTS;
   private health = new Map<Relay, { ok: boolean; at: number }>();
   private privateApi = new Map<Relay, { enabled: boolean; at: number }>();
-  private checking = new Map<Relay, Promise<boolean>>();
   private seen = new Set<string>(); // message GUIDs handled by the bridge, oldest first, kept on disk
   private pending = new Set<string>(); // message GUIDs queued for the bridge and not handled yet
   private suspects = new Set<Relay>(); // relays whose last send may have gone out without an answer, to ask first
@@ -208,7 +207,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     const started = Date.now();
     let maybeSent = false;
     let last: unknown = new RelayError("no relay is reachable", false, 503);
-    for (const r of await this.healthy(false)) {
+    for (const r of await this.healthy()) {
       try {
         if (!maybeSent || !(await this.sent(chat, text, started))) {
           await this.call(r, "POST", "message/text", undefined,
@@ -293,31 +292,23 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     throw last;
   }
 
-  private async healthy(waitForCheck = true): Promise<Relay[]> {
+  private async healthy(): Promise<Relay[]> {
     const ok = await Promise.all(this.relays.map(async (r) => {
       const h = this.health.get(r);
       const capability = this.privateApi.get(r);
       if (h && Date.now() - h.at < this.opts.healthMs && (!h.ok || (capability && Date.now() - capability.at < this.opts.healthMs))) return h.ok;
-      const pending = this.checking.get(r);
-      if (pending) return waitForCheck ? pending : false;
-      const check = (async () => {
-        try {
-          const info = await this.call(r, "GET", "server/info", undefined, undefined, this.opts.pingMs) as { private_api?: boolean } | undefined;
-          const enabled = info?.private_api === true;
-          const was = this.privateApi.get(r)?.enabled;
-          this.privateApi.set(r, { enabled, at: Date.now() });
-          if (was !== enabled && (was !== undefined || !enabled)) {
-            this.log(`${this.name(r)} Private API ${enabled ? "is on" : "is off; skipping typing and tapbacks, sending replies without a thread"}`);
-          }
-          return true;
-        } catch {
-          return false;
-        } finally {
-          this.checking.delete(r);
+      try {
+        const info = await this.call(r, "GET", "server/info", undefined, undefined, this.opts.pingMs) as { private_api?: boolean } | undefined;
+        const enabled = info?.private_api === true;
+        const was = this.privateApi.get(r)?.enabled;
+        this.privateApi.set(r, { enabled, at: Date.now() });
+        if (was !== enabled && (was !== undefined || !enabled)) {
+          this.log(`${this.name(r)} Private API ${enabled ? "is on" : "is off; skipping typing and tapbacks, sending replies without a thread"}`);
         }
-      })();
-      this.checking.set(r, check);
-      return check;
+        return true;
+      } catch {
+        return false;
+      }
     }));
     return this.relays.filter((_, i) => ok[i]);
   }
