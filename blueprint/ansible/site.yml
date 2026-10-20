@@ -8,8 +8,7 @@
 #     systemd action, but still writes unit files and their static
 #     *.target.wants symlinks, so a container image can be built and the same
 #     configuration boots correctly on a real host
-#   * check mode never mutates: commands are either read-only (check_mode:
-#     false) or skipped when ansible_check_mode is true
+#   * check mode follows the chart contract in docs/configuration.md#commands
 - name: Crewship native provisioning
   hosts: crewship
   gather_facts: true

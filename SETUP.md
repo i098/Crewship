@@ -101,7 +101,8 @@ It must print no error. If it names a key, fix that key and run it again.
 ./ship.sh chart
 ```
 
-This runs Ansible in check mode and changes nothing. Tell the user what it would change, in a few lines.
+Follow the [`chart` contract](docs/configuration.md#commands) for preview behavior and side effects.
+Tell the user what it would change, in a few lines.
 
 - STOP: ask the user to approve the launch.
 

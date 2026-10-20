@@ -232,8 +232,8 @@ main() {
     done
   fi
   ./ship.sh inspect
-  # Check mode cannot preview tasks that depend on an earlier install, so chart
-  # fails on a fresh host; it changes nothing, and launch reports real failures.
+  # Some tasks need installed tools that check mode cannot supply.
+  # See docs/configuration.md#commands for preview behavior and side effects.
   ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
