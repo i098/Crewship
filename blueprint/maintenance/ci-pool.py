@@ -308,6 +308,17 @@ def idle(name, repo, runners):
     return runner is not None and not runner["busy"] and not busy(name)
 
 
+def drifted(names, nice):
+    """The slots whose job container sits outside the slice that `nice` asks for, so a later
+    apply retries a slot that it could not show idle before. One bounded `docker inspect`; a
+    container that does not exist or does not answer counts as in place."""
+    shown = subprocess.run(bounded([*docker(), "inspect", "--format", "{{.Name}} {{.HostConfig.CgroupParent}}",
+                                    *(f"ci-runner-{name}" for name in names)]), capture_output=True, text=True)
+    parent = SLICE if nice else ""
+    return {line.partition(" ")[0].removeprefix("/ci-runner-") for line in shown.stdout.splitlines()
+            if line.partition(" ")[2] != parent}
+
+
 def set_slice_weight(weight):
     """Set SLICE's CPUWeight with `systemctl set-property` (a system unit, hence sudo), which
     applies it at once and keeps it below /etc/systemd/system.control. A refusal stops apply
@@ -411,15 +422,17 @@ def apply(check):
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         CONFIG.write_text(config)
     repos, runners = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}
+    outdated = drifted(want, nice)
     for name in want:
         unit = f"ci-runner@{name}.service"
         if name not in have:
             changes.append(f"start {unit}")
             if not check:
                 systemctl("enable", "--now", unit)
-        elif reconfigured and idle(name, repos[name.rpartition("-")[0]], runners):
+        elif (reconfigured or name in outdated) and idle(name, repos[name.rpartition("-")[0]], runners):
             # A busy slot, or one that a read could not show idle, reads the new config when
-            # its next job starts.
+            # its next job starts; a later apply restarts it once it is idle and its container
+            # is still outside the slice of `nice`.
             changes.append(f"restart {unit}")
             if not check:
                 systemctl("restart", unit)
