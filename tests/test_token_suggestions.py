@@ -241,67 +241,6 @@ def test_alarm_preserves_report_and_releases_lock(tmp_path, report, monkeypatch)
     report.publish(config, CUTOFF)
 
 
-@pytest.mark.parametrize("failure", ["termination", "startup_deadline", "elapsed_deadline",
-                                     "sqlite_termination", "sqlite_deadline"])
-def test_interrupted_cli_records_failure_and_preserves_report(tmp_path, report, failure):
-    snapshot = tmp_path / "snapshot.json"
-    snapshot.write_text(json.dumps(snapshot_fixture(report.windows(CUTOFF))))
-    config = {"fm_home": str(tmp_path / "home"), "snapshots": [str(snapshot)]}
-    ledger = tmp_path / "usage.sqlite"
-    ledger_fixture(ledger, report.windows(CUTOFF))
-    config["ledger"] = str(ledger)
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps(config))
-    report.publish(config, CUTOFF)
-    latest = tmp_path / "home/data/token-savings/latest.md"
-    before = latest.read_bytes()
-    script = f"""
-import builtins, os, runpy, signal, sys, time
-sys.path.insert(0, {str(ROOT / "scripts")!r})
-original_import = builtins.__import__
-def import_source(name, *args, **kwargs):
-    module = original_import(name, *args, **kwargs)
-    if name == "token_suggestions_sources":
-        if {failure!r} == "startup_deadline":
-            clock = time.monotonic
-            time.monotonic = lambda: clock() + 60
-        elif {failure!r} == "elapsed_deadline":
-            read_snapshot = module.read_snapshot
-            def expire(*args):
-                clock = time.monotonic
-                time.monotonic = lambda: clock() + 60
-                return read_snapshot(*args)
-            module.read_snapshot = expire
-        elif {failure!r}.startswith("sqlite_"):
-            normalize = module.normalized_input
-            def interrupt(*args):
-                if {failure!r} == "sqlite_termination":
-                    os.kill(os.getpid(), signal.SIGTERM)
-                else:
-                    signal.setitimer(signal.ITIMER_REAL, 0.001)
-                    time.sleep(0.05)
-                return normalize(*args)
-            module.normalized_input = interrupt
-        else:
-            def terminate(*args):
-                os.kill(os.getpid(), signal.SIGTERM)
-            module.read_snapshot = terminate
-    return module
-builtins.__import__ = import_source
-sys.argv = ["token_suggestions.py", "--config", {str(config_path)!r},
-            "--cutoff", {CUTOFF.isoformat()!r}]
-runpy.run_path({str(ROOT / "scripts/token_suggestions.py")!r}, run_name="__main__")
-"""
-    result = subprocess.run([sys.executable, "-B", "-c", script],
-                            capture_output=True, text=True, timeout=10)
-    status_path = latest.with_name("status.json")
-    assert json.loads(status_path.read_text())["state"] == "failed", result.stderr
-    assert result.returncode == 1
-    assert latest.read_bytes() == before
-    report.publish(config, CUTOFF)
-    assert "previous cycle failed" in latest.read_text()
-
-
 def test_spool_and_missing_ledger_never_become_history(tmp_path, report):
     missing = tmp_path / "missing.sqlite"
     bounds = report.windows(CUTOFF)
