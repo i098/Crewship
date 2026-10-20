@@ -111,7 +111,7 @@ printf '%s\n' "$out"
 
 if grep -qxE "[[:space:]*\`'\"]*(Lean already|Looks good|Nothing to cut)\.[[:blank:]]+Ship\.[[:space:]*\`'\"]*" <<<"$out" \
   && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out" \
-  && ! grep -qiE 'net:[[:blank:]]*-[0-9]+[[:blank:]]+lines[[:blank:]]+possible\.|(^|[^[:alnum:]])cut[[:blank:]]' <<<"$out"; then
+  && ! grep -qiE "net:[[:blank:]]*-[0-9]+[[:blank:]]+lines[[:blank:]]+possible\.|(^|[.!?][[:blank:]]+)[[:blank:]*\`'\">-]*([0-9]+[.)][[:blank:]]+)?cut[[:blank:]]" <<<"$out"; then
   exit 0
 fi
 echo >&2

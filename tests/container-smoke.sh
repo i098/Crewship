@@ -860,10 +860,16 @@ check_agent_gate() {
     chmod +x "${stub}/bin/omp"
     for row in '0|0|Lean already. Ship.' '0|0|**Lean already. Ship.**' '0|0|`Lean already. Ship.`' \
         '0|0|Looks good. Ship.' '0|0|"Looks good. Ship."' '0|0|Nothing to cut. Ship.' \
+        $'0|0|Nothing to cut here.\nLooks good. Ship.' \
+        $'0|0|Nothing to cut here.\nLean already. Ship.' \
+        $'0|0|Nothing to cut here.\nNothing to cut. Ship.' \
         '2|0|Ship.' '2|0|Verdict: Ship.' '2|0|Verdict: Do not Ship.' \
         $'0|0|Working...\nWhat this change does: Installs Ondine for agents, adds a default diagram rule, and converts ten documentation diagrams to light/dark images while preserving their source. I assumed one fleet host with several agent processes, as the README and capacity guide describe.\n\nLooks good. Ship.\n\nChecked: real installation and repeat installation, rule opt-in behavior, all ten source/render/restore round trips, and light/dark rendering.\n\nNot checked: GitHub’s image proxy or execution on ARM hardware.' \
         '2|0|Cut the wrapper.' '2|0|Cut the wrapper. Ship.' '2|0|net: -4 lines possible. Ship.' \
         $'2|0|Cut the wrapper.\nLooks good. Ship.' $'2|0|net: -4 lines possible.\nNothing to cut. Ship.' \
+        $'2|0|One change remains. Cut the wrapper.\nLooks good. Ship.' \
+        $'2|0|> **Cut the wrapper.**\nLooks good. Ship.' \
+        $'2|0|1) Cut the wrapper.\nLooks good. Ship.' \
         '1|1|Declined under the usage policy.' '1|1|Tool failed.' \
         $'2|0|L12: delete: dead flag. Nothing replaces it.\nLean already. Ship.' \
         $'2|0|file.py:L12-L14: delete: dead flag. Nothing replaces it.\nLooks good. Ship.' \
