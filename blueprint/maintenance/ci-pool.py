@@ -81,10 +81,12 @@ IMAGE_TIMER = UNITS / "ci-pool-image.timer"
 HOOK = HOME / ".config/ci-pool/job-started.sh"
 # The containerd image store keeps a container's own writes on the system disk, so these
 # paths take the heavy ones to the data disk. Scratch is wiped when a job starts; the apt
-# packages and lists stay (and are per slot, because apt locks its archive directory).
+# packages and lists and the caches stay. Each is per slot, as on a GitHub-hosted runner a job
+# owns them: apt locks its archive directory, rust-cache's post step deletes the registry
+# files that its own job does not use, and cargo's lock is outside the mounted directories.
 SCRATCH_DIRS = {"tmp": "/tmp", "postgresql": "/var/lib/postgresql", "bun": "/home/runner/.bun"}
 APT_DIRS = {"archives": "/var/cache/apt/archives", "lists": "/var/lib/apt/lists"}
-# Subdirectories of a repository's cache directory <data_dir>/ci-pool/cache/<owner>-<name>/.
+# Subdirectories of a slot's cache directory <data_dir>/ci-pool/cache/<slot>/.
 CACHE_DIRS = ("tool", "home", "cargo-registry", "cargo-git")
 # A repository entry with "docker": "dind" gets a Docker daemon of its own in each slot: a
 # rootless dockerd in a sidecar container on a network of the slot, never the host's socket.
@@ -351,7 +353,9 @@ def apply(check):
     if total == "auto":
         total = auto_slots(pool, *totals())
     want = wanted_slots(pool, total)
-    keep_caches = {slug(entry["repo"]) for entry in pool["repos"]}
+    # Also each repository's cache from before the caches were per slot (<data_dir>/ci-pool/cache/
+    # <owner>-<name>/): its slots that started then still mount it.
+    keep = {*want, *(slug(entry["repo"]) for entry in pool["repos"])}
     changes = []
 
     def write(path, text):
@@ -406,14 +410,15 @@ def apply(check):
                 systemctl("disable", "--now", unit)
     stale, held = [], set()
     for path in [*sorted((root / "work").glob("*")), *sorted((root / "scratch").glob("*")),
-                 *sorted((root / "apt").glob("*")), *sorted((root / "dind").glob("*"))]:
-        if path.name in want:
+                 *sorted((root / "apt").glob("*")), *sorted((root / "dind").glob("*")),
+                 *sorted((root / "cache").glob("*"))]:
+        if path.name in keep:
             continue
         if busy(path.name):
             held.add(path.name.rpartition("-")[0])
         else:
             stale.append(path)
-    stale += [p for p in sorted((root / "cache").glob("*")) if p.name not in keep_caches | held]
+    stale = [path for path in stale if path.name not in held]
     for path in stale:
         changes.append(f"remove {path}")
         if not check:
@@ -530,7 +535,7 @@ def run(instance):
         return 1
     repo = entry["repo"]
     root = Path(pool["data_dir"]) / "ci-pool"
-    work, cache = root / "work" / instance, root / "cache" / base
+    work, cache = root / "work" / instance, root / "cache" / instance
     scratch, apt = root / "scratch" / instance, root / "apt" / instance
     # The previous job's files belong to other uids inside the container, hence sudo.
     quiet(["sudo", "-n", "rm", "-rf", "--one-file-system", str(scratch)])
