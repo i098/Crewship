@@ -1,5 +1,6 @@
 """Read existing metadata without opening a writable usage client."""
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -97,17 +98,21 @@ SELECT at >= :start AS current, provider,model,count(*) AS requests,
 FROM comparable GROUP BY current,provider,model
 """
 COVERAGE_SQL = """
-WITH periods AS (SELECT 0 AS current,:history AS lower,:start AS upper
-                 UNION ALL SELECT 1,:start,:end),
+WITH records AS (
+    SELECT producer,event,kind,sequence,at,payload,retired_completions
+    FROM events GROUP BY producer,event,kind
+), periods AS (SELECT 0 AS current,:history AS lower,:start AS upper
+               UNION ALL SELECT 1,:start,:end),
 producers AS (
     SELECT periods.current, e.producer,
            min(CASE WHEN kind='register' THEN at END) AS registered,
            max(CASE WHEN kind IN ('checkpoint','shutdown') THEN at END) AS checkpoint,
-           coalesce(max(CASE WHEN kind IN ('start','complete') AND at<upper
+           coalesce(max(CASE WHEN (kind IN ('start','complete') AND at<upper)
+                              OR (kind IN ('checkpoint','shutdown') AND at<=upper)
                         THEN sequence END),0) AS through,
            max(retired_completions) AS retired,
            count(DISTINCT CASE WHEN kind='complete' AND at<upper THEN sequence END) AS completed
-    FROM events e CROSS JOIN periods GROUP BY periods.current,e.producer
+    FROM records e CROSS JOIN periods GROUP BY periods.current,e.producer
     HAVING registered IS NULL OR registered<upper
 )
 SELECT p.current,
@@ -115,10 +120,10 @@ SELECT p.current,
        (SELECT count(*) FROM producers WHERE current=p.current AND
         (registered IS NULL OR registered>p.lower OR checkpoint IS NULL
          OR checkpoint<p.upper OR through-retired-completed != 0)) AS incomplete,
-       (SELECT count(*) FROM events WHERE kind='gap' AND at<p.upper
+       (SELECT count(*) FROM records WHERE kind='gap' AND at<p.upper
         AND julianday(json_extract(payload,'$.end'))>julianday(p.lower,'unixepoch')) AS gaps,
-       (SELECT count(*) FROM events WHERE kind='shutdown' AND at>=p.lower AND at<p.upper) AS shutdowns,
-       (SELECT count(*) FROM events WHERE json_extract(payload,'$.schema') IS NOT 1) AS unsupported,
+       (SELECT count(*) FROM records WHERE kind='shutdown' AND at>=p.lower AND at<p.upper) AS shutdowns,
+       (SELECT count(*) FROM records WHERE json_extract(payload,'$.schema') IS NOT 1) AS unsupported,
        (SELECT count(*) FROM (SELECT 1 FROM events GROUP BY producer,event,kind
                               HAVING count(DISTINCT payload)>1)) AS conflicts
 FROM periods p
@@ -165,6 +170,20 @@ def candidate(detector, key, window, source, tokens, basis, signal, partial=True
             "tokens": tokens, "basis": basis, "signal": signal, "partial": partial}
 
 
+def tool_shape_counts(shape, tokens):
+    if not isinstance(shape, dict):
+        raise ValueError("invalid tool shape")
+    calls = number(shape["calls"])
+    size = number(shape["tokens"])
+    largest = number(shape["largest_call"])
+    errors = shape.get("error_calls")
+    if errors is not None:
+        errors = number(errors)
+    if (errors is not None and errors > calls) or largest > size or size > tokens:
+        raise ValueError("invalid output counters")
+    return {"calls": calls, "tokens": size, "largest_call": largest, "error_calls": errors}
+
+
 def tool_counts(evidence):
     tokens = number(evidence["tool_output_tokens"])
     if evidence["signature_token_basis"] != "estimated_local":
@@ -172,16 +191,7 @@ def tool_counts(evidence):
     shapes = evidence["top_signatures"]
     if not isinstance(shapes, list):
         raise ValueError("invalid output evidence")
-    for shape in shapes:
-        if not isinstance(shape, dict):
-            raise ValueError("invalid tool shape")
-        calls = number(shape["calls"])
-        size = number(shape["tokens"])
-        largest = number(shape["largest_call"])
-        errors = number(shape.get("error_calls", 0))
-        if errors > calls or largest > size or size > tokens:
-            raise ValueError("invalid output counters")
-    return tokens, len(shapes)
+    return tokens, [tool_shape_counts(shape, tokens) for shape in shapes]
 
 
 def read_sink(sink, window, source, partial):
@@ -205,18 +215,27 @@ def read_sink(sink, window, source, partial):
                          partial)
     if key == "tool_output_portfolio":
         tokens, shapes = tool_counts(evidence)
-        return candidate(1, key, window, source, tokens, "estimated_local",
-                         f"{shapes} measured tool shapes; raw signatures omitted.", partial)
+        row = candidate(1, key, window, source, tokens, "estimated_local",
+                        f"{len(shapes)} measured tool shapes; raw signatures omitted.", partial)
+        row["tool_shapes"] = shapes
+        return row
     if key.startswith("learning_loop:error_loop:"):
-        calls = number(evidence["calls"])
-        floor = number(evidence["observed_output_token_floor"])
-        tokens = number(sink.get("tokens_observed", 0))
-        if calls < 3 or tokens != floor or evidence["tokens_observed_basis"] != "bytes4_estimate":
-            raise ValueError("invalid retry evidence")
-        return candidate(2, key, window, source, tokens, "bytes4_estimate",
-                         f"{calls} normalized calls; at least half failed. Exact failure count unknown.",
-                         partial)
+        return retry_candidate(sink, evidence, window, source, partial)
     return None
+
+
+def retry_candidate(sink, evidence, window, source, partial):
+    calls = number(evidence["calls"])
+    floor = number(evidence["observed_output_token_floor"])
+    tokens = sink.get("tokens_observed")
+    if tokens is not None:
+        tokens = number(tokens)
+    if (calls < 3 or (tokens is not None and tokens != floor)
+            or evidence["tokens_observed_basis"] != "bytes4_estimate"):
+        raise ValueError("invalid retry evidence")
+    return candidate(2, sink["sink_id"], window, source, tokens, "bytes4_estimate",
+                     f"{calls} normalized calls; at least half failed. Exact failure count unknown.",
+                     partial)
 
 
 def confirmed_measurements(records):
@@ -240,6 +259,22 @@ def confirmed_measurements(records):
     return confirmed
 
 
+def snapshot_candidates(sinks, window, source, partial):
+    rows, seen = [], {}
+    for sink in sinks:
+        row = read_sink(sink, window, source, partial)
+        if row is None:
+            continue
+        key = row["detector"], row["key"]
+        if key in seen:
+            if seen[key] != sink:
+                raise ValueError("conflicting saved findings")
+            continue
+        seen[key] = sink
+        rows.append(row)
+    return rows
+
+
 def read_snapshot(path, bounds, index):
     data = read_json(path)
     if data["schema"] != "caveman.learn.v1" or data["basis"] != "inferred":
@@ -252,8 +287,7 @@ def read_snapshot(path, bounds, index):
         raise ValueError("invalid snapshot structure")
     partial = bool(data["caveats"] or start != bounds[1] or end != bounds[2])
     source = f"saved report {index} (configured local reference)"
-    rows = [row for sink in data["sinks"]
-            if (row := read_sink(sink, window, source, partial)) is not None]
+    rows = snapshot_candidates(data["sinks"], window, source, partial)
     retro = []
     block = data.get("retro")
     if block:
@@ -264,4 +298,5 @@ def read_snapshot(path, bounds, index):
                 retro.append((family["id"], number(family["tokens"])))
     confirmed = confirmed_measurements(data.get("confirmed", []))
     return rows, {"source": source, "window": window, "partial": partial,
-                  "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed}
+                  "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed,
+                  "identity": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).digest()}

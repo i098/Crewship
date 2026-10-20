@@ -108,23 +108,38 @@ def collect(config, bounds):
     seen = set()
     for index, path in enumerate(config.get("snapshots", []), 1):
         try:
-            if path in seen:
-                continue
-            seen.add(path)
             rows, source = read_snapshot(path, bounds, index)
+            identity = source.pop("identity")
+            if identity in seen:
+                continue
+            seen.add(identity)
             available = True
             sources.append(source)
+            candidates.extend(rows)
             for row in rows:
-                key = row["detector"], row["key"], row["window"]
-                if key not in seen:
-                    seen.add(key)
-                    candidates.append(row)
-                    statuses[row["detector"]] = "available: saved measurement"
+                statuses[row["detector"]] = "available: saved measurement"
         except TimeoutError:
             raise
         except SOURCE_ERRORS:
             notes.append(f"Saved report {index} source_unavailable: missing, stale, unsupported, or malformed.")
     return candidates, sources, notes, statuses, available
+
+
+def candidate_lines(row, count):
+    unranked = row["tokens"] is None
+    tokens = "unknown" if unranked else str(row["tokens"])
+    marker = "-" if unranked else f"{count}."
+    lines = [f"{marker} **{DETECTORS[row['detector']]}**", "",
+             f"   Source: {row['source']}. Observed tokens: {tokens}. "
+             f"Basis: {row['basis']}. Coverage: {'partial' if row['partial'] else 'complete for this source'}.",
+             f"   Signal: {row['signal']}",
+             "   Uncertainty: observed volume is not avoidable work or achieved savings.",
+             f"   Action: {ACTIONS[row['detector']]}", ""]
+    for index, shape in enumerate(row.get("tool_shapes", []), 1):
+        errors = "unknown" if shape["error_calls"] is None else str(shape["error_calls"])
+        lines.append(f"   Tool shape {index}: calls {shape['calls']}; tokens {shape['tokens']}; "
+                     f"largest_call {shape['largest_call']}; error_calls {errors}.")
+    return lines
 
 
 def markdown(bounds, collected, stale):
@@ -158,22 +173,18 @@ def markdown(bounds, collected, stale):
                   "Overlapping measurements are never added.", ""])
     groups = defaultdict(list)
     for row in candidates:
-        group = (row["window"], row["basis"], row["tokens"] is None)
+        group = (row["tokens"] is None, row["detector"] == 3, row["window"], row["basis"])
         groups[group].append(row)
     count = 0
-    for (window, basis, _), rows in sorted(groups.items()):
+    for (unranked, cache, window, basis), rows in sorted(groups.items()):
         if count == 5:
             break
-        lines.extend([f"### {basis}: {window[0]} to {window[1]}", ""])
-        for row in sorted(rows, key=lambda c: -(c["tokens"] or 0))[:5 - count]:
+        heading = "Cache shares" if cache else "Count-only retry observations" if unranked else basis
+        lines.extend([f"### {heading}: {window[0]} to {window[1]}", ""])
+        ordered = rows if unranked else sorted(rows, key=lambda c: -c["tokens"])
+        for row in ordered[:5 - count]:
             count += 1
-            tokens = "unknown" if row["tokens"] is None else str(row["tokens"])
-            lines.extend([f"{count}. **{DETECTORS[row['detector']]}**", "",
-                          f"   Source: {row['source']}. Observed tokens: {tokens}. "
-                          f"Basis: {basis}. Coverage: {'partial' if row['partial'] else 'complete for this source'}.",
-                          f"   Signal: {row['signal']}",
-                          "   Uncertainty: observed volume is not avoidable work or achieved savings.",
-                          f"   Action: {ACTIONS[row['detector']]}", ""])
+            lines.extend(candidate_lines(row, count))
     if not count:
         lines.extend(["No measured candidates in the permitted sources for this window.", ""])
     return "\n".join(lines)

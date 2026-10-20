@@ -337,6 +337,7 @@ def test_later_native_activity_does_not_change_closed_windows(tmp_path, report):
     try:
         before = report.read_ledger(path, bounds)
         accept("start", 3, CUTOFF, sequence=3, provider="example", model="model")
+        accept("checkpoint", 103, CUTOFF, sequence=3)
         accept("register", 200, CUTOFF, producer=2, producer_kind="helper")
         after = report.read_ledger(path, bounds)
     finally:
@@ -361,15 +362,153 @@ def test_fractional_gap_overlap_is_partial_in_native_and_read_only_reports(tmp_p
     assert current["gaps"] == 1 and current["partial"]
 
 
-def test_zero_output_retry_keeps_other_saved_findings(tmp_path, report):
+@pytest.mark.parametrize("tokens", ["missing", None])
+@pytest.mark.parametrize("floor", [0, 800])
+def test_unknown_output_retry_stays_unranked(tmp_path, report, tokens, floor):
     bounds = report.windows(CUTOFF)
     data = snapshot_fixture(bounds)
     retry = data["sinks"][2]
-    retry.pop("tokens_observed")
-    retry["evidence"]["observed_output_token_floor"] = 0
+    if tokens == "missing":
+        retry.pop("tokens_observed")
+    else:
+        retry["tokens_observed"] = tokens
+    retry["evidence"]["observed_output_token_floor"] = floor
     path = tmp_path / "saved.json"
     path.write_text(json.dumps(data))
-    rows, _, _, statuses, available = report.collect({"snapshots": [str(path)]}, bounds)
+    collected = report.collect({"snapshots": [str(path)]}, bounds)
+    rows, _, _, statuses, available = collected
     assert available and all(statuses[i].startswith("available") for i in range(3))
     assert {r["detector"] for r in rows} == {0, 1, 2}
-    assert next(r for r in rows if r["detector"] == 2)["tokens"] == 0
+    assert next(r for r in rows if r["detector"] == 2)["tokens"] is None
+    text = report.markdown(bounds, collected, False)
+    observations = text.split("### Count-only retry observations:", 1)[1]
+    assert "- **Retry loops**" in observations
+    assert "Observed tokens: unknown" in observations
+    assert "Observed tokens: 0" not in observations
+
+
+@pytest.mark.parametrize("current", [False, True])
+def test_checkpoint_missing_requests_block_cache_comparison(tmp_path, report, current):
+    path = tmp_path / "native.sqlite"
+    bounds = report.windows(CUTOFF)
+    native_bounds = bounds if current else (bounds[0], bounds[0] + timedelta(days=1), bounds[1])
+    ledger, accept = native_ledger(path, native_bounds)
+    try:
+        accept("checkpoint", 102, native_bounds[2], sequence=3)
+        if not current:
+            at = bounds[1] + timedelta(hours=1)
+            accept("start", 4, at, sequence=4, provider="example", model="model")
+            accept("complete", 4, at, sequence=4, outcome="success", usage_present=True,
+                   input_basis="inclusive", input=100, cache_read=60, cache_write=10,
+                   output=20, reasoning=5)
+            accept("checkpoint", 103, bounds[2], sequence=4)
+        assert ledger.summary(bounds[1], bounds[2], CUTOFF)["partial"]
+        rows, coverage = report.read_ledger(path, bounds)
+    finally:
+        ledger.db.close()
+    period = next(row for row in coverage if row["current"] == current)
+    assert period["incomplete"] == 1 and period["partial"]
+    assert all("Seven-day comparison unavailable" in row["signal"]
+               for row in report.cache_candidates(rows, coverage, bounds))
+
+
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("kind, counter", [("gap", "gaps"), ("shutdown", "shutdowns")])
+def test_duplicate_coverage_records_count_once(tmp_path, report, current, kind, counter):
+    path = tmp_path / "usage.sqlite"
+    bounds = report.windows(CUTOFF)
+    ledger_fixture(path, bounds, unknown=False, duplicate=True)
+    at = bounds[int(current)] + timedelta(hours=1)
+    payload = {"schema": 1, "kind": kind, "end": (at + timedelta(hours=1)).isoformat()}
+    record = (CANARY, "coverage-event", kind, None, at.timestamp(), json.dumps(payload), 4, 0)
+    with sqlite3.connect(path) as db:
+        db.executemany("INSERT INTO events VALUES (?,?,?,?,?,?,?,?)", [record, record])
+    _, coverage = report.read_ledger(path, bounds)
+    assert {row["current"]: row[counter] for row in coverage} == {
+        int(current): 1, int(not current): 0,
+    }
+
+
+def test_copied_exports_do_not_repeat_any_measurement(tmp_path, report):
+    bounds = report.windows(CUTOFF)
+    data = snapshot_fixture(bounds)
+    original, copy = tmp_path / "original.json", tmp_path / "copy.json"
+    original.write_text(json.dumps(data))
+    copy.write_text(json.dumps(data, sort_keys=True, indent=2))
+    collected = report.collect({"snapshots": [str(original), str(copy)]}, bounds)
+    rows, sources, _, _, _ = collected
+    assert len(rows) == 3 and len(sources) == 1
+    text = report.markdown(bounds, collected, False)
+    assert text.count("Estimated retrospective reduction (tool_outputs)") == 1
+    assert text.count("Estimated retrospective reduction (repeated_blocks)") == 1
+    assert text.count("Saved artifact measurement:") == 1
+    assert CANARY not in text
+
+
+def test_distinct_exports_keep_same_key_measurements(tmp_path, report):
+    bounds = report.windows(CUTOFF)
+    paths = []
+    for index, tokens in enumerate((3000, 4000)):
+        data = snapshot_fixture(bounds)
+        data["sinks"] = [data["sinks"][1]]
+        data["sinks"][0]["evidence"]["tool_output_tokens"] = tokens
+        path = tmp_path / f"saved-{index}.json"
+        path.write_text(json.dumps(data))
+        paths.append(str(path))
+    collected = report.collect({"snapshots": paths}, bounds)
+    assert [row["tokens"] for row in collected[0]] == [3000, 4000]
+    text = report.markdown(bounds, collected, False)
+    assert text.index("Observed tokens: 4000") < text.index("Observed tokens: 3000")
+    assert "Source: saved report 1" in text and "Source: saved report 2" in text
+
+
+@pytest.mark.parametrize("detector", [0, 1, 2])
+@pytest.mark.parametrize("conflict", [False, True])
+def test_duplicate_findings_are_collapsed_or_rejected(tmp_path, report, detector, conflict):
+    bounds = report.windows(CUTOFF)
+    data = snapshot_fixture(bounds)
+    sink = data["sinks"][detector]
+    duplicate = json.loads(json.dumps(sink))
+    if conflict:
+        field = ("occurrence_tokens_total", "tool_output_tokens", "calls")[detector]
+        duplicate["evidence"][field] += 1
+    data["sinks"] = [sink, duplicate]
+    path = tmp_path / "saved.json"
+    path.write_text(json.dumps(data))
+    rows, sources, notes, _, available = report.collect({"snapshots": [str(path)]}, bounds)
+    if conflict:
+        assert not rows and not sources and not available
+        assert any("Saved report 1 source_unavailable" in note for note in notes)
+    else:
+        assert len(rows) == 1 and len(sources) == 1 and available
+
+
+@pytest.mark.parametrize("errors", ["missing", None])
+def test_unknown_tool_error_counts_stay_null(tmp_path, report, errors):
+    bounds = report.windows(CUTOFF)
+    data = snapshot_fixture(bounds)
+    shape = data["sinks"][1]["evidence"]["top_signatures"][0]
+    if errors == "missing":
+        shape.pop("error_calls")
+    else:
+        shape["error_calls"] = errors
+    path = tmp_path / "saved.json"
+    path.write_text(json.dumps(data))
+    collected = report.collect({"snapshots": [str(path)]}, bounds)
+    tool = next(row for row in collected[0] if row["detector"] == 1)
+    assert tool["tool_shapes"][0]["error_calls"] is None
+    assert "error_calls unknown" in report.markdown(bounds, collected, False)
+
+
+def test_tool_shapes_keep_numeric_evidence_without_signatures(tmp_path, report):
+    bounds = report.windows(CUTOFF)
+    path = tmp_path / "saved.json"
+    path.write_text(json.dumps(snapshot_fixture(bounds)))
+    collected = report.collect({"snapshots": [str(path)]}, bounds)
+    tool = next(row for row in collected[0] if row["detector"] == 1)
+    assert tool["tool_shapes"] == [
+        {"calls": 5, "tokens": 3000, "largest_call": 1000, "error_calls": 2},
+    ]
+    text = report.markdown(bounds, collected, False)
+    assert "Tool shape 1: calls 5; tokens 3000; largest_call 1000; error_calls 2." in text
+    assert CANARY not in text

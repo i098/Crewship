@@ -448,15 +448,22 @@ Only cache comparison reads the preceding seven complete days.
 Saved reports must have a window inside the selected day.
 Older reports and reports that span a wider window are unavailable; their totals cannot be split safely.
 Source caveats or a shorter saved window make coverage partial.
+The reader collapses matching exports even when their configured paths differ.
+Distinct exports keep separate measurements.
+Conflicting copies of a finding within one export make that source unavailable.
 Unknown fields and source prose never enter the report.
 Source references use the configured snapshot index, not private paths or identifiers.
 
 The report shows all four detector statuses and at most five review candidates.
 Repeated context uses saved recurrence counts and local token estimates.
-Large tool outputs use saved output totals, not raw signatures.
+Large tool outputs retain numeric calls, tokens, largest-call size, and error counts for each shape, but omit raw signatures.
+Missing error counts remain unknown.
 Retry loops use saved normalized-call counts and measured output estimates, not request failures alone.
+Missing retry token estimates remain null and appear in a separate, unranked count-only list.
 Cache shares require known normalized input and both cache buckets.
 The report excludes unknown rows and compares only matching models with complete coverage.
+Coverage includes missing requests declared by checkpoints at or before each window end.
+Duplicate gap and shutdown records count once per producer, event, and kind.
 Zero denominators remain unavailable.
 Cache reuse changes pricing, not total input tokens.
 
