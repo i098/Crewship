@@ -3,8 +3,8 @@
 #
 # WHY THIS EXISTS
 #   The PR rule is: no line cap, instead run /ponytail-review on the diff,
-#   cut everything it names, and accept a short verdict ending with "Ship."
-#   only when no L<line>: findings remain.
+#   cut everything it names, and accept only approved positive verdicts
+#   when no cut instructions, negative summaries, or L<line>: findings remain.
 #
 #   But /ponytail-review is a Claude plugin slash command, and crewmates run on
 #   pi, where it is not registered. Abstract's worker hit this: it got a real
@@ -23,7 +23,7 @@
 #   git diff main... | ponytail-review --stdin
 #
 # EXIT CODES
-#   0  a short verdict ending with "Ship." and no L<line>: findings
+#   0  an approved positive verdict with no cuts or L<line>: findings
 #   1  usage, missing plugin or omp, empty diff, model refusal, or omp failure - NEVER a pass
 #   2  findings remain or no verdict: not a pass
 #
@@ -109,9 +109,9 @@ done
 
 printf '%s\n' "$out"
 
-# Require "Ship." as its own sentence, not a command such as "Do not Ship.".
-if grep -qxE "[[:space:]*\`'\"]*([[:print:]]{1,80}\.[[:blank:]]+|Verdict:[[:blank:]]+)?Ship\.[[:space:]*\`'\"]*" <<<"$out" \
-  && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out"; then
+if grep -qxE "[[:space:]*\`'\"]*(Lean already|Looks good|Nothing to cut)\.[[:blank:]]+Ship\.[[:space:]*\`'\"]*" <<<"$out" \
+  && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out" \
+  && ! grep -qiE 'net:[[:blank:]]*-[0-9]+[[:blank:]]+lines[[:blank:]]+possible\.|(^|[^[:alnum:]])cut[[:blank:]]' <<<"$out"; then
   exit 0
 fi
 echo >&2
