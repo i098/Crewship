@@ -1,7 +1,7 @@
-import { execFile, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, realpathSync, renameSync, statSync, writeSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { writeSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { AssistantMessage, AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 
 type Kind = "chat" | "judgment" | "helper";
@@ -19,14 +19,14 @@ type Source = {
 const sources = new Map<Kind, Source>();
 const collectors = new Set<ChildProcess>();
 
-function command() {
+function command(action = "collect") {
 	const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
 	const data = process.env.CREWSHIP_USAGE_DATA_DIR;
 	const mount = process.env.CREWSHIP_USAGE_MOUNT;
 	if (!collector || !isAbsolute(collector) || !data || !isAbsolute(data) || !mount || !isAbsolute(mount))
 		throw new Error("usage metadata configuration is incomplete");
 	return ["-I", collector, "--data-dir", data, "--mount", mount,
-		"--store", process.env.CREWSHIP_USAGE_STORE ?? "spool", "collect"];
+		"--store", process.env.CREWSHIP_USAGE_STORE ?? "spool", action];
 }
 
 function send(rows: Row[]) {
@@ -144,39 +144,21 @@ process.once("exit", () => {
 	for (const child of collectors) child.kill("SIGKILL");
 	if (!sources.size) return;
 	const rows: Row[] = [];
-	const gaps: Row[] = [];
 	const at = new Date().toISOString();
 	for (const source of sources.values()) {
-		const shutdown = { schema: 1, kind: "shutdown", producer: source.producer,
-			event: randomUUID(), at, sequence: source.sequence };
-		const gap = { schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
-			at: source.gap ?? source.registration.at, end: at, reason: "delivery" };
-		const checkpoint = source.pending.findLast(row => row.kind === "checkpoint")
-			?? source.inflight.findLast(row => row.kind === "checkpoint");
-		rows.push(source.registration, ...source.inflight.filter(row => row.kind !== "checkpoint" || row === checkpoint));
-		if (source.gap) rows.push(gap);
-		rows.push(...source.pending.filter(row => row.kind !== "checkpoint" || row === checkpoint), shutdown);
-		gaps.push(source.registration, gap, shutdown);
+		if (source.gap || source.inflight.length || source.pending.length)
+			rows.push({ schema: 1, kind: "gap", producer: source.producer, event: randomUUID(),
+				at: source.gap ?? source.inflight[0]?.at ?? source.pending[0]?.at ?? at,
+				end: at, reason: "shutdown" });
+		rows.push({ schema: 1, kind: "shutdown", producer: source.producer,
+			event: randomUUID(), at, sequence: source.sequence });
 	}
 	try {
-		command();
-		const data = resolve(process.env.CREWSHIP_USAGE_DATA_DIR!);
-		const mount = realpathSync(process.env.CREWSHIP_USAGE_MOUNT!);
-		let ancestor = data;
-		while (!existsSync(ancestor)) ancestor = dirname(ancestor);
-		const location = relative(mount, join(realpathSync(ancestor), relative(ancestor, data)));
-		if (statSync(mount).dev === statSync("/").dev || statSync(ancestor).dev !== statSync(mount).dev ||
-			!location || location === ".." || location.startsWith(`..${sep}`) || isAbsolute(location))
-			throw new Error("invalid usage data mount");
-		mkdirSync(data, { recursive: true, mode: 0o700 });
-		const store = process.env.CREWSHIP_USAGE_STORE ?? "spool";
-		if (store !== "spool" && store !== "ledger") throw new Error("invalid usage store");
-		const path = join(data, `shutdown-${store}-${randomUUID()}.jsonl`);
-		let payload = rows.map(row => JSON.stringify(row)).join("\n") + "\n";
-		if (Buffer.byteLength(payload) > 16384)
-			payload = gaps.map(row => JSON.stringify(row)).join("\n") + "\n";
-		appendFileSync(`${path}.tmp`, payload, { mode: 0o600, flag: "wx" });
-		renameSync(`${path}.tmp`, path);
+		execFileSync("python3", command("shutdown"), {
+			input: JSON.stringify(rows), timeout: 1000, killSignal: "SIGKILL",
+			stdio: ["pipe", "ignore", "ignore"],
+			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C.UTF-8" },
+		});
 	} catch {
 		try { writeSync(2, "usage metadata delivery failed at shutdown; coverage is unknown\n"); } catch {}
 	}

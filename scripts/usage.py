@@ -225,10 +225,12 @@ def _acknowledge_sequence(ranges, sequence):
 class Ledger:
     schema = SCHEMA
 
-    def __init__(self, path):
-        self.db = sqlite3.connect(path, timeout=10)
+    def __init__(self, path, *, existing=False):
+        self.db = sqlite3.connect(Path(path).as_uri() + "?mode=rw" if existing else path,
+                                  uri=existing, timeout=0.2 if existing else 10)
         self.db.row_factory = sqlite3.Row
-        self.db.executescript(self.schema)
+        if not existing:
+            self.db.executescript(self.schema)
 
     def __enter__(self):
         return self
@@ -236,14 +238,26 @@ class Ledger:
     def __exit__(self, *_):
         self.db.close()
 
-    def locked(self):
+    def locked(self, *, blocking=True):
         return nullcontext()
 
     def _admitted(self, event, now):
         pass
 
     def accept(self, payload, now=None):
-        now = now or datetime.now(UTC)
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            result = self._accept(payload, now or datetime.now(UTC))
+            self.db.commit()
+            return result
+        except sqlite3.IntegrityError as error:
+            self.db.rollback()
+            raise ValueError("identity conflict") from error
+        except BaseException:
+            self.db.rollback()
+            raise
+
+    def _accept(self, payload, now):
         event = validate(payload)
         if event["kind"] == "retention":
             raise ValueError("retirement metadata belongs to the ledger")
@@ -252,38 +266,28 @@ class Ledger:
             raise ValueError("event outside retention or clock bounds")
         encoded = json.dumps(event, sort_keys=True, separators=(",", ":"), allow_nan=False)
         identity = event["producer"], event["event"], event["kind"]
-        self.db.execute("BEGIN IMMEDIATE")
-        try:
-            previous = self.db.execute(
-                "SELECT payload FROM events WHERE producer=? AND event=? AND kind=?", identity
-            ).fetchone()
-            if previous:
-                if previous[0] != encoded:
-                    raise ValueError("identity conflict")
-                self.db.commit()
-                return {"accepted": True, "duplicate": True}
-            self._check_transition(event)
-            expiry = (max(at, now) + RETENTION).timestamp()
-            through, retired = self._track_sequences(event, expiry)
-            self.db.execute("INSERT INTO events(producer,event,kind,sequence,at,ingested,expires,"
-                            "payload,total,sequence_through,retired_completions) "
-                            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                            (*identity, event.get("sequence"), at.timestamp(), now.timestamp(),
-                             expiry, encoded,
-                             normalize(event)["total"] if event["kind"] == "complete" else None,
-                             through, retired))
-            self.db.execute("UPDATE events SET expires=max(expires,?) "
-                            "WHERE producer=? AND (kind='register' OR "
-                            "(kind='start' AND event=?))",
-                            (expiry, event["producer"], event["event"]))
-            self._admitted(event, now)
-            self.db.commit()
-        except sqlite3.IntegrityError as error:
-            self.db.rollback()
-            raise ValueError("identity conflict") from error
-        except BaseException:
-            self.db.rollback()
-            raise
+        previous = self.db.execute(
+            "SELECT payload FROM events WHERE producer=? AND event=? AND kind=?", identity
+        ).fetchone()
+        if previous:
+            if previous[0] != encoded:
+                raise ValueError("identity conflict")
+            return {"accepted": True, "duplicate": True}
+        self._check_transition(event)
+        expiry = (max(at, now) + RETENTION).timestamp()
+        through, retired = self._track_sequences(event, expiry)
+        self.db.execute("INSERT INTO events(producer,event,kind,sequence,at,ingested,expires,"
+                        "payload,total,sequence_through,retired_completions) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (*identity, event.get("sequence"), at.timestamp(), now.timestamp(),
+                         expiry, encoded,
+                         normalize(event)["total"] if event["kind"] == "complete" else None,
+                         through, retired))
+        self.db.execute("UPDATE events SET expires=max(expires,?) "
+                        "WHERE producer=? AND (kind='register' OR "
+                        "(kind='start' AND event=?))",
+                        (expiry, event["producer"], event["event"]))
+        self._admitted(event, now)
         return {"accepted": True, "duplicate": False}
 
     def _track_sequences(self, event, expiry):
@@ -542,22 +546,27 @@ class Spool(Ledger):
 
     schema = SPOOL_SCHEMA
 
-    def __init__(self, path):
+    def __init__(self, path, *, existing=False):
         self.lock = os.open(Path(path).with_suffix(".lock"),
-                            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        with self.locked():
-            super().__init__(path)
-            # One process per record must not pay a full checkpoint each time it closes.
-            self.db.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+                            os.O_RDWR | os.O_NOFOLLOW | (0 if existing else os.O_CREAT), 0o600)
+        try:
+            with self.locked(blocking=not existing):
+                super().__init__(path, existing=existing)
+                if existing:
+                    self.db.execute(f"PRAGMA max_page_count={SPOOL_PAGES}")
+                self.db.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+        except BaseException:
+            os.close(self.lock)
+            raise
 
     def __exit__(self, *_):
         super().__exit__()
         os.close(self.lock)
 
     @contextmanager
-    def locked(self):
+    def locked(self, *, blocking=True):
         # SQLite's busy handler polls and can starve a waiter; a blocking flock queues it.
-        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        fcntl.flock(self.lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         try:
             yield
         finally:
@@ -747,35 +756,20 @@ def collect(ledger):
         print(json.dumps(ledger.accept(payload)), flush=True)
 
 
-def drain_shutdown(ledger, directory, store):
-    for path in directory.glob(f"shutdown-{store}-*.jsonl"):
-        try:
-            if path.is_symlink():
-                raise ValueError("metadata storage must not be a symlink")
-            with path.open("rb") as pending:
-                fcntl.flock(pending, fcntl.LOCK_EX)
-                if not path.exists():
-                    continue
-                payload = pending.read(16385)
-                if len(payload) > 16384:
-                    raise ValueError("usage shutdown batch is too large")
-                for line in payload.splitlines():
-                    event = validate(json.loads(line))
-                    if event["kind"] in {"start", "complete"}:
-                        state = ledger.db.execute(
-                            "SELECT sequence_through,missing_sequences FROM producer_state WHERE producer=?",
-                            (event["producer"],)).fetchone()
-                        if (state and event["sequence"] <= state["sequence_through"]
-                                and not any(lower <= event["sequence"] <= upper
-                                            for lower, upper in json.loads(state["missing_sequences"]))):
-                            continue
-                    ledger.accept(event)
-                path.unlink()
-        except FileNotFoundError:
-            continue
-        except (ValueError, OSError, sqlite3.Error):
-            print("usage: shutdown metadata import failed; retained for retry; coverage is unknown",
-                  file=sys.stderr)
+def shutdown(ledger):
+    payload = sys.stdin.buffer.read(16385)
+    if len(payload) > 16384:
+        raise ValueError("usage shutdown batch is too large")
+    rows = json.loads(payload)
+    if not isinstance(rows, list) or len(rows) > 6:
+        raise ValueError("invalid usage shutdown batch")
+    now = datetime.now(UTC)
+    with ledger.locked(blocking=False), ledger.db:
+        ledger.db.execute("BEGIN IMMEDIATE")
+        for row in rows:
+            if not isinstance(row, dict) or row.get("kind") not in {"gap", "shutdown"}:
+                raise ValueError("invalid usage shutdown record")
+            ledger._accept(row, now)
 
 
 def main(argv=None):
@@ -787,6 +781,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("collect")
     commands.add_parser("prune")
+    commands.add_parser("shutdown")
     commands.add_parser("check")
     report = commands.add_parser("report")
     report.add_argument("--period", choices=("day", "week", "month"), default="day")
@@ -801,13 +796,19 @@ def main(argv=None):
     spool = args.store == "spool"
     if spool and args.command == "report":
         raise ValueError("the retry spool keeps no local history")
+    if args.command == "shutdown":
+        path = configured_data_dir(args.data_dir, args.mount) / (
+            "spool.sqlite" if spool else "usage.sqlite")
+        if path.is_symlink():
+            raise ValueError("metadata storage must not be a symlink")
+        with (Spool if spool else Ledger)(path, existing=True) as ledger:
+            shutdown(ledger)
+        return
     os.umask(0o077)
     path = data_path(args.data_dir, args.mount, "spool.sqlite" if spool else "usage.sqlite")
     with (Spool if spool else Ledger)(path) as ledger:
         if args.command not in {"prune", "collect"}:
             ledger.prune()
-        if args.command != "collect":
-            drain_shutdown(ledger, path.parent, args.store)
         if args.command == "collect":
             collect(ledger)
         elif args.command == "prune":

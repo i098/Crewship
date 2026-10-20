@@ -70,11 +70,6 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
             environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
                                 capture_output=True, text=True, timeout=60)
-        if enabled and result.returncode == 0:
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts/usage.py"), "--data-dir",
-                 str(case / "data"), "--mount", str(mount), "--store", store or "spool", "prune"],
-                capture_output=True, text=True, check=True, timeout=120)
         database = case / "data" / ("usage.sqlite" if store == "ledger" else "spool.sqlite")
         records = []
         if result.returncode != 0:
@@ -83,8 +78,8 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
             with sqlite3.connect(database) as connection:
                 records = [json.loads(row[0]) for row in connection.execute(
                     "SELECT payload FROM events ORDER BY ingested,rowid")]
-            if inspect:
-                inspect(case / "data")
+        if inspect:
+            inspect(case / "data")
         return result, records
 
 
@@ -178,6 +173,7 @@ await request();
 failed = true;
 await request();
 console.log(JSON.stringify({ calls }));
+await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 4);
 ''')
     assert result.returncode == 0, result.stderr
     completions = [row for row in records if row["kind"] == "complete"]
@@ -240,6 +236,7 @@ try {
 }
 await request();
 if (calls !== 2) throw new Error("the next model call must still run");
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 2));
 ''', inspect=inspect)
     assert result.returncode == 0, result.stderr
     assert state["missing"] == [[1, 1]]
@@ -249,7 +246,7 @@ if (calls !== 2) throw new Error("the next model call must still run");
     assert completion["input"] == 35 and completion["output"] == 8
 
 
-def test_one_shot_exits_before_a_stuck_collector_and_spools_its_completion(native_source):
+def test_one_shot_exits_before_a_stuck_collector_and_reports_unknown_coverage(native_source):
     directory = native_source[0]
     collector = directory / "stuck-collector.py"
     collector.write_text(
@@ -257,13 +254,14 @@ def test_one_shot_exits_before_a_stuck_collector_and_spools_its_completion(nativ
         "data = pathlib.Path(sys.argv[sys.argv.index('--data-dir') + 1])\n"
         "data.mkdir(parents=True, exist_ok=True)\n"
         "with (data / 'collector-starts').open('a') as log:\n"
-        "    log.write('started\\n')\n"
+        "    log.write(sys.argv[-1] + '\\n')\n"
         "time.sleep(60)\n")
     observed = {}
 
     def inspect(data):
         observed["starts"] = (data / "collector-starts").read_text().splitlines()
         observed["exit_ms"] = float((data / "exit-ms").read_text())
+        observed["files"] = {path.name for path in data.iterdir()}
 
     result, records = execute(native_source, TRANSPORT + r'''
 import { existsSync, writeFileSync } from "node:fs";
@@ -279,12 +277,12 @@ console.log("provider finished");
 ''', collector=collector, inspect=inspect)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "provider finished"
-    assert observed["starts"] == ["started"]
+    assert observed["starts"].count("collect") == 1
+    assert observed["starts"].count("shutdown") <= 1
     assert observed["exit_ms"] < 5000
-    completion = next(row for row in records if row["kind"] == "complete")
-    assert completion["input"] == 35 and completion["output"] == 8
-    assert not any(row["kind"] == "gap" for row in records)
-    assert records[-1]["kind"] == "shutdown"
+    assert records == []
+    assert "usage metadata delivery failed at shutdown; coverage is unknown" in result.stderr
+    assert observed["files"] == {"collector-starts", "exit-ms"}
 
 
 def test_failed_registration_does_not_prevent_native_dispatch(native_source):
@@ -294,7 +292,8 @@ if (response.stopReason !== "stop" || calls !== 1)
     throw new Error("collector failure must not change the native result");
 ''', collector=ROOT / "missing-collector.py")
     assert result.returncode == 0, result.stderr
-    assert any(row["kind"] in {"complete", "gap"} for row in records)
+    assert records == []
+    assert "coverage is unknown" in result.stderr
 
 
 def test_stale_spool_does_not_fail_native_calls_and_keeps_the_ledger_closed(native_source):
@@ -317,10 +316,11 @@ spool.run("DELETE FROM events WHERE payload = '{}'");
 spool.close();
 await request();
 if (calls !== 3) throw new Error("the spool must accept records after the stale record leaves");
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 3));
 ''', inspect=lambda data: stored.update(ledger=(data / "usage.sqlite").exists()))
     assert result.returncode == 0, result.stderr
     assert stored == {"ledger": False}
-    assert len([row for row in records if row["kind"] == "gap"]) == 1
+    assert len([row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]) == 1
     assert [row["sequence"] for row in records if row["kind"] == "complete"] == [1, 3]
     assert [row["sequence"] for row in records if row["kind"] == "start"] == [1, 3]
 
@@ -329,6 +329,7 @@ def test_native_helper_calls_register_separately_from_chat(native_source):
     result, records = execute(native_source, TRANSPORT + r'''
 await request();
 await completeSimple(model, context, options);
+await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2);
 ''')
     assert result.returncode == 0, result.stderr
     assert sorted(row["producer_kind"] for row in records if row["kind"] == "register") == ["chat", "helper"]
@@ -369,11 +370,12 @@ const recovered = capture({ provider: "example", model: "model-a", producer_kind
     return source;
 });
 await recovered.result();
+await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.sequence === 3));
 ''')
     assert result.returncode == 0, result.stderr
     assert len([row for row in records if row["kind"] == "complete"]) == 2
     assert [row["sequence"] for row in records if row["kind"] == "complete"] == [1, 3]
-    assert len([row for row in records if row["kind"] == "gap"]) == 1
+    assert len([row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]) == 1
 
 
 def test_native_chat_backed_judgments_have_their_own_producer(native_source):
@@ -382,6 +384,7 @@ import { chatTextBackend } from "NATIVE_SOURCE/judgment/chat.ts";
 await chatTextBackend(model, { apiKey: "fixture-private-key" }).complete(
     { system: "", user: "", retry: false }, {});
 if (calls !== 1) throw new Error("expected one native judgment completion");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     assert [row["producer_kind"] for row in records if row["kind"] == "register"] == ["judgment"]
@@ -411,6 +414,7 @@ const response = stream(anthropic, context, { ...options, fetch: globalThis.fetc
 for await (const event of response) {}
 const terminal = await response.result();
 if (terminal.stopReason === "error") throw new Error("synthetic Anthropic transport failed");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     completion = next(row for row in records if row["kind"] == "complete")
@@ -454,6 +458,7 @@ for await (const event of response) {}
 const terminal = await response.result();
 if (calls !== 1 || (terminal.stopReason === "error") === scenario.final)
     throw new Error("the synthetic Anthropic stream ended unexpectedly");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 '''
 
 
@@ -538,7 +543,7 @@ if (after.requests !== 1 || after.counted_tokens !== null
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("recovery", ["shutdown", "completion", "checkpoint"])
+@pytest.mark.parametrize("recovery", ["completion", "checkpoint"])
 def test_pending_outage_is_durable_before_recovered_source_records(native_source, recovery):
     view = {}
 
@@ -566,11 +571,6 @@ function finish() {
     underlying.push({ type: "done", reason: "stop", message: {
         role: "assistant", stopReason: "stop", usageMetadata: null } });
 }
-if (recovery === "shutdown") {
-    finish();
-    await pending.result();
-    await waitForUsage(rows => rows.some(row => row.kind === "complete"));
-}
 if (!pulse) throw new Error("the checkpoint callback is missing");
 const collector = process.env.CREWSHIP_USAGE_COLLECTOR;
 const failedDelivery = deliveryFailure();
@@ -581,14 +581,16 @@ process.env.CREWSHIP_USAGE_COLLECTOR = collector;
 if (recovery === "completion") {
     finish();
     await pending.result();
+    await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 } else if (recovery === "checkpoint") {
     pulse();
+    await waitForUsage(rows => rows.some(row => row.kind === "gap" && row.reason === "delivery"));
 }
 '''.replace("RECOVERY", json.dumps(recovery)),
         inspect=inspect, store="ledger")
     assert result.returncode == 0, result.stderr
     assert "usage metadata delivery failed; coverage is unknown" in result.stderr
-    gaps = [row for row in records if row["kind"] == "gap"]
+    gaps = [row for row in records if row["kind"] == "gap" and row["reason"] == "delivery"]
     assert len(gaps) == 1
     gap = gaps[0]
     recovered_kind = "complete" if recovery == "completion" else recovery
@@ -596,9 +598,8 @@ if (recovery === "completion") {
     assert records.index(gap) < records.index(recovered)
     assert gap["reason"] == "delivery" and gap["producer"] == recovered["producer"]
     coverage = view["coverage"][0]
-    assert coverage["gap_intervals"] == 1
+    assert coverage["gap_intervals"] >= 1
     assert coverage["missing_sequences"] == ([[1, 1]] if recovery == "checkpoint" else [])
-    assert coverage["shutdown"] is True
     assert view["requests"] == (0 if recovery == "checkpoint" else 1)
     assert view["counted_tokens"] is None
 
@@ -610,6 +611,7 @@ for await (const event of response) {}
 const terminal = await response.result();
 if (terminal.stopReason !== "aborted" || calls !== 0)
     throw new Error("the synthetic request must abort before transport");
+await waitForUsage(rows => rows.some(row => row.kind === "complete"));
 ''')
     assert result.returncode == 0, result.stderr
     completion = next(row for row in records if row["kind"] == "complete")
