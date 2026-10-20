@@ -310,7 +310,7 @@ def test_reports_keep_only_eight_dated_snapshots(tmp_path, report):
     ]
 
 
-def native_ledger(path, bounds):
+def native_ledger(path, bounds, *, checkpoint_sequence=2, checkpoint_delay=timedelta(0)):
     usage = importlib.import_module("usage")
     ledger = usage.Ledger(path)
 
@@ -326,7 +326,7 @@ def native_ledger(path, bounds):
         accept("complete", sequence, at, sequence=sequence, outcome="success",
                usage_present=True, input_basis="inclusive", input=100, cache_read=60,
                cache_write=10, output=20, reasoning=5)
-    accept("checkpoint", 101, bounds[2], sequence=2)
+    accept("checkpoint", 101, bounds[2] + checkpoint_delay, sequence=checkpoint_sequence)
     return ledger, accept
 
 
@@ -387,14 +387,15 @@ def test_unknown_output_retry_stays_unranked(tmp_path, report, tokens, floor):
     assert "Observed tokens: 0" not in observations
 
 
+@pytest.mark.parametrize("checkpoint_delay", [timedelta(0), timedelta(seconds=1)])
 @pytest.mark.parametrize("current", [False, True])
-def test_checkpoint_missing_requests_block_cache_comparison(tmp_path, report, current):
+def test_checkpoint_missing_requests_block_cache_comparison(tmp_path, report, current, checkpoint_delay):
     path = tmp_path / "native.sqlite"
     bounds = report.windows(CUTOFF)
     native_bounds = bounds if current else (bounds[0], bounds[0] + timedelta(days=1), bounds[1])
-    ledger, accept = native_ledger(path, native_bounds)
+    ledger, accept = native_ledger(path, native_bounds, checkpoint_sequence=3,
+                                   checkpoint_delay=checkpoint_delay)
     try:
-        accept("checkpoint", 102, native_bounds[2], sequence=3)
         if not current:
             at = bounds[1] + timedelta(hours=1)
             accept("start", 4, at, sequence=4, provider="example", model="model")
@@ -408,8 +409,12 @@ def test_checkpoint_missing_requests_block_cache_comparison(tmp_path, report, cu
         ledger.db.close()
     period = next(row for row in coverage if row["current"] == current)
     assert period["incomplete"] == 1 and period["partial"]
-    assert all("Seven-day comparison unavailable" in row["signal"]
-               for row in report.cache_candidates(rows, coverage, bounds))
+    candidates = report.cache_candidates(rows, coverage, bounds)
+    assert candidates and all(row["partial"] for row in candidates)
+    assert all("Seven-day comparison unavailable" in row["signal"] for row in candidates)
+    text = report.markdown(bounds, report.collect({"ledger": str(path)}, bounds), False)
+    assert "complete for registered sources" not in text
+    assert "Seven-day comparison unavailable" in text
 
 
 @pytest.mark.parametrize("current", [False, True])

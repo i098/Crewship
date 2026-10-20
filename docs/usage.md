@@ -462,7 +462,8 @@ Retry loops use saved normalized-call counts and measured output estimates, not 
 Missing retry token estimates remain null and appear in a separate, unranked count-only list.
 Cache shares require known normalized input and both cache buckets.
 The report excludes unknown rows and compares only matching models with complete coverage.
-Coverage includes missing requests declared by checkpoints at or before each window end.
+Unobserved request sequences keep coverage partial, even when a later checkpoint reports them.
+Known request starts after a window do not count as missing requests in that window.
 Duplicate gap and shutdown records count once per producer, event, and kind.
 Zero denominators remain unavailable.
 Cache reuse changes pricing, not total input tokens.

@@ -107,11 +107,12 @@ producers AS (
     SELECT periods.current, e.producer,
            min(CASE WHEN kind='register' THEN at END) AS registered,
            max(CASE WHEN kind IN ('checkpoint','shutdown') THEN at END) AS checkpoint,
-           coalesce(max(CASE WHEN (kind IN ('start','complete') AND at<upper)
-                              OR (kind IN ('checkpoint','shutdown') AND at<=upper)
+           coalesce(max(CASE WHEN kind IN ('start','complete','checkpoint','shutdown')
                         THEN sequence END),0) AS through,
            max(retired_completions) AS retired,
-           count(DISTINCT CASE WHEN kind='complete' AND at<upper THEN sequence END) AS completed
+           count(DISTINCT CASE WHEN (kind='complete' AND at<upper)
+                                OR (kind='start' AND at>=upper)
+                               THEN sequence END) AS accounted
     FROM records e CROSS JOIN periods GROUP BY periods.current,e.producer
     HAVING registered IS NULL OR registered<upper
 )
@@ -119,7 +120,7 @@ SELECT p.current,
        (SELECT count(*) FROM producers WHERE current=p.current) AS producers,
        (SELECT count(*) FROM producers WHERE current=p.current AND
         (registered IS NULL OR registered>p.lower OR checkpoint IS NULL
-         OR checkpoint<p.upper OR through-retired-completed != 0)) AS incomplete,
+         OR checkpoint<p.upper OR through-retired-accounted != 0)) AS incomplete,
        (SELECT count(*) FROM records WHERE kind='gap' AND at<p.upper
         AND julianday(json_extract(payload,'$.end'))>julianday(p.lower,'unixepoch')) AS gaps,
        (SELECT count(*) FROM records WHERE kind='shutdown' AND at>=p.lower AND at<p.upper) AS shutdowns,
