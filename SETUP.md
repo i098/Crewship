@@ -46,7 +46,11 @@ Run the installer with the chosen names, comma separated. Use `--with none` for 
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash -s -- --with public_skills,docker
 ```
 
-`bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
+Use curl on a fresh server; it does not need a JavaScript runtime.
+`bunx crewship` needs Bun and Node.js 18 or newer; Bun's Linux installer also needs `unzip`.
+`npx crewship` needs Node.js 18 or newer and npm.
+`pnpm dlx crewship` may select an older release because of pnpm's release-age policy.
+See [Launcher prerequisites](docs/install.md#install); do not clone the repository.
 
 The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock --with …`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). `--with` applies to a new host only. The later steps sign in, then apply again.
 

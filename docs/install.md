@@ -4,6 +4,34 @@
 
 ## Install
 
+Use the curl installer on a fresh server.
+It does not need Node.js, npm, pnpm, or Bun:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
+```
+
+If `curl` is missing, install it with `sudo apt-get update && sudo apt-get install -y curl`.
+
+Other launchers need an existing runtime:
+
+| Launcher | Prerequisite | Release selection |
+| --- | --- | --- |
+| `bunx crewship` | Bun and Node.js 18 or newer; Bun's Linux installer needs `unzip` | Installs the selected npm package's matching Crewship release |
+| `npx crewship` | Node.js 18 or newer and npm | Installs the selected npm package's matching Crewship release |
+| `pnpm dlx crewship` | pnpm and a compatible Node.js runtime | May select an older npm package under pnpm's release-age policy |
+
+Before installing Bun on Ubuntu, run `sudo apt-get update && sudo apt-get install -y unzip`.
+Follow [Bun's installation instructions](https://bun.sh/docs/installation), then use a new shell with `bunx` on `PATH`.
+The Crewship launcher uses a Node.js shebang, so plain `bunx crewship` also needs Node.js on `PATH`.
+Do not install a JavaScript runtime only to run Crewship; use curl instead.
+
+Recent pnpm versions can exclude newly published packages through [`minimumReleaseAge`](https://pnpm.io/settings/dependency-resolution#minimumreleaseage).
+Thus `pnpm dlx crewship` can install an older Crewship release even when a newer release is available.
+Check the release printed by the installer.
+Keep pnpm's safety policy; use the curl installer to select the latest Crewship release directly.
+See [Update](#update) for an existing installation.
+
 The installer:
 
 1. Installs the OS packages it needs.
