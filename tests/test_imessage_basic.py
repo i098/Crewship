@@ -19,7 +19,7 @@ PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode 
 def basic_rig(tmp_path, test_mode=True):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path, test_mode)
     (fake / "status").write_text("The build is paused.")
-    answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
+    answer = {"kind": "reply", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
     (fake / "answer").write_text(json.dumps(answer))
     (tmp_path / "bin/omp").write_text(
         "#!/usr/bin/env python3\n"
@@ -78,7 +78,7 @@ def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(t
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "status").write_text(fact)
     (fake / "answer").write_text(json.dumps({
-        "kind": "basic", "answer": fact, "evidence": [{"source": "status", "quote": fact}],
+        "kind": "reply", "answer": fact, "evidence": [{"source": "status", "quote": fact}],
     }))
     bridge = start(1)
     try:
@@ -163,10 +163,10 @@ def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, c
 @pytest.mark.parametrize("response,failed", [
     ("not JSON", False),
     ('{"kind":"handoff"}', False),
-    ('{"kind":"basic","answer":"Deployed.","evidence":[]}', False),
-    ('{"kind":"basic","answer":"The build passed.","evidence":[{"source":"status","quote":"The build passed."}]}', False),
-    ('{"kind":"basic","answer":"I deployed it.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
-    ('{"kind":"basic","answer":"The build is paused.","evidence":[{"source":"status","quote":"The build is paused."}]}', True),
+    ('{"kind":"reply","answer":"Deployed.","evidence":[]}', False),
+    ('{"kind":"reply","answer":"The build passed.","evidence":[{"source":"status","quote":"The build passed."}]}', False),
+    ('{"kind":"reply","answer":"I deployed it.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
+    ('{"kind":"reply","answer":"The build is paused.","evidence":[{"source":"status","quote":"The build is paused."}]}', True),
 ])
 def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(tmp_path, response, failed):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -214,7 +214,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
         (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": fact}
     (fake / "answer").write_text(json.dumps({
-        "kind": "basic", "answer": fact, "evidence": [evidence],
+        "kind": "reply", "answer": fact, "evidence": [evidence],
     }))
     bridge = start(1)
     try:
@@ -271,7 +271,7 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, sourc
         (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": claim}
     (fake / "answer").write_text(json.dumps({
-        "kind": "basic", "answer": claim, "evidence": [evidence],
+        "kind": "reply", "answer": claim, "evidence": [evidence],
     }))
     bridge = start(1)
     try:
@@ -304,7 +304,7 @@ def test_model_identity_is_bound_to_its_configured_subject(tmp_path, monkeypatch
     monkeypatch.setenv("FM_IMESSAGE_SUPERVISOR_MODEL", supervisor)
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text(json.dumps({
-        "kind": "basic", "answer": quote,
+        "kind": "reply", "answer": quote,
         "evidence": [{"source": "identity", "subject": subject, "quote": quote}],
     }))
     question = "Which model does Firstmate use?" if subject == "supervisor" else "Which model does the desk use?"
@@ -369,7 +369,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
                 call = {"id": "c1", "type": "function", "function": {"name": "zoom", "arguments": '{"id": 0, "n": 1}'}}
                 status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
             else:
-                answer = {"kind": "basic", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
+                answer = {"kind": "reply", "answer": "The build is paused.", "evidence": [{"source": "status", "quote": "The build is paused."}]}
                 status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": json.dumps(answer)}}]}
             data = json.dumps(reply).encode()
             self.send_response(status)
@@ -609,7 +609,7 @@ def test_only_trusted_chat_records_can_ground_a_basic_answer(tmp_path, source_ki
             wait_for(lambda: any(r["kind"] == "supervisor" for r in records()), "the supervisor record")
         source = next(r for r in records() if r["kind"] == source_kind)
         (fake / "answer").write_text(json.dumps({
-            "kind": "basic", "answer": "The queue is empty.",
+            "kind": "reply", "answer": "The queue is empty.",
             "evidence": [{"source": "chat", "id": source["i"], "quote": "The queue is empty."}],
         }))
         receive("question", "What is in the queue?")
@@ -764,7 +764,7 @@ def test_multiline_work_bypasses_a_ready_basic_answer(tmp_path):
 def test_partial_evidence_cannot_reverse_a_fact_or_shorten_model_identity(tmp_path, status, evidence, answer):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "status").write_text(status)
-    (fake / "answer").write_text(json.dumps({"kind": "basic", "answer": answer, "evidence": [evidence]}))
+    (fake / "answer").write_text(json.dumps({"kind": "reply", "answer": answer, "evidence": [evidence]}))
     bridge = start(1)
     try:
         receive("partial", "What is the build status?")

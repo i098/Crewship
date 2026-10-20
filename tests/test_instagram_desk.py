@@ -17,7 +17,7 @@ DESK = json.dumps(str(Path(__file__).parents[1] / "apps/imessage/instagram-desk.
 pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 
 
-def run(tmp_path, body, answer="hello there", omp_sleep=0, reply=None):
+def run(tmp_path, body, answer='{"kind":"reply","answer":"hello there"}', omp_sleep=0, reply=None):
     """Run `body` (TypeScript) against a desk built on the stand-ins; return what it printed as JSON.
 
     In `body`: `desk`, `feed(source, row)` (fresh now), `wait(ms)`, `omp()` (desk calls so far, their stdin) and
@@ -79,7 +79,6 @@ def test_one_desk_turn_per_burst_replies_through_fm_insta_reply(tmp_path):
     assert out["sends"] == ["desk|--thread T -- hello there"]  # one turn for the burst, as the desk
     assert len(out["prompts"]) == 1
     assert "owner: yo\nowner: you there?" in out["prompts"][0] and "fleet is quiet" in out["prompts"][0]
-    assert out["log"] == ["hello there"]
     assert out["second"] == 2  # the desk's own send does not stand it down for his next DM
     assert out["memory"] == ["owner: yo", "owner: you there?", "desk: hello there", "owner: ok"]
 
@@ -194,7 +193,7 @@ def test_react_skip_and_failed_desk_answers(tmp_path):
 
 def test_a_failed_send_logs_what_fm_insta_reply_said(tmp_path):
     out = run(tmp_path, "feed('messages', { id: 'a', text: 'hi' }); await wait(1200); out.log = log();", reply="echo 'poll halted (AccountSuspended at /api/v1/direct_v2/inbox/: challenge_required)' >&2\nexit 1\n")
-    assert out["log"] == ["hello there (send failed, exit 1: poll halted (AccountSuspended at /api/v1/direct_v2/inbox/: challenge_required))"]
+    assert out["log"][0].endswith("(send failed, exit 1: poll halted (AccountSuspended at /api/v1/direct_v2/inbox/: challenge_required))")
 
 
 def test_old_rows_fill_the_memory_and_never_start_a_turn(tmp_path):

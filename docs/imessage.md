@@ -31,7 +31,7 @@ For each message from the owner, the service does these steps:
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
-   Failed calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
+   Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
    It targets the last received request in the pending burst.
@@ -53,7 +53,22 @@ The BlueBubbles line does not report edits: an edit there files no note.
 The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
-A completed desk turn records the time, message id, and `basic` or `handoff` in the private `desk.log`.
+A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
+
+Both desks accept text only from one complete JSON object whose `kind` or `decision` is `reply`.
+The `answer` must be a non-empty string with no directive.
+iMessage also checks the existing source evidence before sending that answer.
+An action can occupy the whole trimmed output, any JSON `kind` or `decision` field, or the final line after prose.
+Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, and `HANDOFF`.
+A JSON tapback uses `{"kind":"tapback","emoji":"👍"}`.
+An action sends only its reaction or silence, never the surrounding prose.
+The parser validates the complete emoji; quotes, braces, and extra characters cannot become part of it.
+Repeated matching decision fields produce one action, while conflicts produce no visible response.
+All other output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
+Each rejected draft records one short outcome without raw model text.
+A suppressed draft or reaction retains the existing single request filing, without an extra operator request.
+Photon, BlueBubbles, and the Instagram desk share this parser.
+
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
@@ -163,7 +178,7 @@ At start, the service skips a memory log line that does not parse.
 
 ## Instagram front desk
 
-The Instagram desk keeps its existing acknowledgement contract.
+The Instagram desk uses the [shared reply contract](#what-it-does).
 `instagram-desk.service` runs `apps/imessage/instagram-desk.ts` and reuses the memory, runner, input budget, and timing helpers.
 Its channel-specific prompt does not use iMessage direct routing.
 It has no Instagram client.
@@ -172,9 +187,23 @@ It follows two logs of the [instagram-dm](../blueprint/skills/public/instagram-d
 - `state/instagram-dms.jsonl` (`INSTAGRAM_DM_LOG`): one row for each new DM from the operator. Each DM restarts the quiet period, 8 seconds (`crewship_instagram_desk_quiet_ms`), or 60 seconds (`crewship_instagram_desk_reel_quiet_ms`) once the burst holds a reel link.
 - `state/.instagram-dms/sent.jsonl` (`INSTAGRAM_DM_SENT`): one row for each `fm-insta-reply` text, tapback, and typing indicator, with `by`, the value of `INSTAGRAM_DM_ACTOR` (`firstmate` by default). Any row that is not `by: desk` stops the desk for that burst of DMs, like a Firstmate send on iMessage.
 
-When the quiet period ends and Firstmate stayed silent, the desk gets one turn for the whole burst. It answers `SKIP`, `REACT:` and one emoji, or a short text, and the service sends it with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`, so the desk's own send does not stop it for the next DM. If a DM or a Firstmate action arrives while the desk writes, the service kills the call and drops the draft. If the desk fails or times out after 45 seconds, it sends nothing: Firstmate has the note. A burst with two or more different reel links gets no model turn: after the long quiet the desk sends ONE text, `got N reels`, and ONE tapback (a 👀 on his last message) in one `fm-insta-reply` call, so ten links cost two writes. Its outcome in `desk.log` is `batch got N reels`.
+When the quiet period ends without a Firstmate action, the desk handles the whole burst in one turn.
+The service sends only the selected action or `answer` with `fm-insta-reply --thread ID` and `INSTAGRAM_DM_ACTOR=desk`.
+A desk reply does not stop the next desk turn.
+A new DM or Firstmate action cancels a draft before delivery.
+If the call fails or exceeds 45 seconds, the desk sends nothing; Firstmate already has the note.
+A burst with two or more different reel links gets no model call.
+After the long quiet, the service sends `got N reels` and one eyes tapback in one `fm-insta-reply` call.
+The log records `batch got N reels` for that batch.
 
-The Instagram thread has its own memory in `~/.local/state/instagram-desk/memory/`, with the design in [Desk memory](#desk-memory), and the outcome of each turn (time, message id, `skip`, `react <emoji>`, or the text) is in `~/.local/state/instagram-desk/desk.log`. The service saves how far it read each log. After a restart, rows from the last 60 seconds act on the desk, and older rows only fill the memory, so a DM from before the restart is never answered late. With no saved position, the service starts at the end of both logs. The desk shows no typing indicator.
+The Instagram thread keeps its memory in `~/.local/state/instagram-desk/memory/`; see [Desk memory](#desk-memory).
+The private `~/.local/state/instagram-desk/desk.log` stores the time, message ID, and a short outcome without raw model text.
+Each model turn records `reply`, `skip`, `handoff`, `react <emoji>`, or `skip (desk failed)`.
+The service saves its position in each log.
+After a restart, only rows from the last 60 seconds can trigger a desk turn.
+Older rows fill the memory but do not trigger replies.
+With no saved position, the service starts at the end of both logs.
+The desk does not show a typing indicator.
 
 Set `crewship_instagram_dm_operator`, and the playbook installs the unit with the listener. The settings are the `crewship_instagram_desk_*` variables in `blueprint/ansible/group_vars/all/instagram_dm.yml`: `model` (default `claude-haiku-5-5`), `owner_name`, `supervisor_model`, `quiet_ms`, and `reel_quiet_ms`.
 

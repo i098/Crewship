@@ -234,20 +234,6 @@ console.log(JSON.stringify(await transcribe({json.dumps(str(tone))}, listen).cat
     assert "exit 3" in run("fail", 20_000)["error"] and "boom" in run("fail", 20_000)["error"]
     assert "failed" in run("slow", 1_500)["error"]
 
-@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-def test_desk_parses_tapbacks_and_skip():
-    result = bun(f"""
-import {{ isSkip, parseReact }} from {DESK};
-const answers = ["REACT:👍", "REACT: 🫡 ", "REACT:👍 thanks", "got it", "ok REACT:👍", "SKIP"];
-const skips = ["skip", "Skip", "SKIP.", "skip!!", "skip it", "REACT:👍", "ok"];
-console.log(JSON.stringify({{
-  reacts: answers.map((a) => parseReact(a) ?? null),
-  skips: skips.map(isSkip),
-}}));
-""")
-    assert result["reacts"] == ["👍", "🫡", None, None, None, None]
-    assert result["skips"] == [True, True, True, True, False, False, False]
-
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_bubbles_split_paragraphs_and_keep_lists():
@@ -1686,7 +1672,7 @@ def fake_bridge(tmp_path, test_mode=True):
     (fake / "down").write_text("0")
     (fake / "typing-down").touch()
     notes = tmp_path / "notes"
-    identity = json.dumps({"kind": "basic", "answer": "claude-haiku-5-5", "evidence": [{"source": "identity", "subject": "desk", "quote": "claude-haiku-5-5"}]})
+    identity = json.dumps({"kind": "reply", "answer": "claude-haiku-5-5", "evidence": [{"source": "identity", "subject": "desk", "quote": "claude-haiku-5-5"}]})
     stubs = {
         "omp": f"cat >/dev/null; [ -e {fake / 'desk-on'} ] && echo '{identity}' || echo SKIP",
         "fm-inbox": f'printf "%s\\n" "$*" >> {notes}; [ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ]',
@@ -1755,7 +1741,7 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         "    print('owner: valid summary before teardown stalls', flush=True)\n"
         "    time.sleep(120)\n"
         "else:\n"
-        "    print('{\"kind\":\"basic\",\"answer\":\"claude-haiku-5-5\",\"evidence\":[{\"source\":\"identity\",\"subject\":\"desk\",\"quote\":\"claude-haiku-5-5\"}]}')\n"
+        "    print('{\"kind\":\"reply\",\"answer\":\"claude-haiku-5-5\",\"evidence\":[{\"source\":\"identity\",\"subject\":\"desk\",\"quote\":\"claude-haiku-5-5\"}]}')\n"
     )
     runner.chmod(0o755)
     bridge = start(1)
@@ -2173,7 +2159,15 @@ class FallbackRig:
         wait_for(lambda: f"bluebubbles-{guid} " in read_text(self.notes), f"the BlueBubbles note {guid}")
 
     def outbox(self):
-        return [json.loads(p.read_text()) for p in sorted((self.state / "outbox").glob("*.json"))]
+        items = []
+        for path in sorted((self.state / "outbox").glob("*.json")):
+            try:
+                text = path.read_text()
+            except FileNotFoundError:
+                # Delivery can remove a listed item before this read.
+                continue
+            items.append(json.loads(text))
+        return items
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
