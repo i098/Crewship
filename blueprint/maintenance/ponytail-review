@@ -25,7 +25,7 @@
 # EXIT CODES
 #   0  exactly one approved positive verdict and no unapproved output lines
 #   1  usage, missing plugin or omp, empty diff, model refusal, or omp failure - NEVER a pass
-#   2  findings remain or no verdict: not a pass
+#   2  unapproved output, missing verdict, or multiple verdicts: not a pass
 #
 # FAIL-CLOSED
 #   A missing plugin or agent exits 1 with a named reason. It never prints a
