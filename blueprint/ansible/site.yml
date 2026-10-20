@@ -365,8 +365,24 @@
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
       environment: "{{ crewship_user_systemd_env }}"
-      when: crewship_manage_services | bool
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
       listen: restart crewboard
+
+    - name: Restart the crew board GitHub sink
+      ansible.builtin.systemd_service:
+        scope: user
+        name: crewboard-github-sink.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_cfg.board.github_sink is defined
+        - not ansible_check_mode
+      listen: restart crewboard github sink
 
     - name: Restart the password gateway
       ansible.builtin.systemd_service:

@@ -12,14 +12,42 @@ The board reads the Firstmate backlog (`data/backlog.md`, the default markdown b
 
 ## Crew board messages
 
-When the [crew board](board.md) is on, `crewboard github-sink` can also copy its messages to one issue of the board repository. This is optional and separate from the timer. Create an issue for the messages, and run:
+When the [crew board](board.md) is on, `crewboard github-sink` can copy its messages to one existing GitHub issue.
+It does not require the `github_board` timer, a Project, or the same repository.
+Add this block to the host config and run `./ship.sh launch`:
+
+```yaml
+crewship:
+  board:
+    github_sink:
+      repo: owner/board
+      issue: 7
+      topics: [fleet, fm]
+      interval: 600
+```
+
+Only `repo` and `issue` are required.
+The defaults are `topics: [fleet]` and `interval: 300`; the minimum interval is 60 seconds.
+Apply enables `crewboard-github-sink.service`, starts it after the board, and restarts it on failure.
+With `start_services: false`, apply writes and enables the unit but does not start it.
+Remove `board.github_sink` and apply to stop and remove the sink.
+Removing `board` also removes the sink.
+Read its log with `journalctl --user -u crewboard-github-sink.service`.
+
+For a temporary sink, run it by hand instead:
 
 ```bash
 crewboard github-sink --repo owner/board --issue 7            # topic fleet, one comment every 5 minutes
 crewboard github-sink --repo owner/board --issue 7 fleet fm --interval 600
 ```
 
-The sink posts one REST comment for each interval that had messages, never more often than every 60 seconds, and nothing when no message arrived. It uses the host's gh login, the same as the timer. It does not start by itself: a host that does not run it makes no GitHub calls for it. Stop it with Ctrl-C or SIGTERM: it posts the waiting messages once, then exits. A failed post, a kill with SIGKILL, and a restart of the board daemon lose messages. How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
+The sink posts one REST comment for each interval that had messages, and nothing when no message arrived.
+It uses the operator account's existing `gh` login, without a token in the unit file or command arguments.
+Only an explicit `board.github_sink` block starts the managed service; a board without it makes no sink calls.
+Stop a manual sink with Ctrl-C or SIGTERM: it posts the waiting messages once, then exits.
+A failed post, SIGKILL, or a board restart can lose messages.
+The service restarts after a failure, but it does not recover lost messages.
+How the sink works: [apps/crewboard/README.md](../apps/crewboard/README.md#github-sink).
 
 ## Privacy
 

@@ -32,6 +32,9 @@ crewship:
   gateway:
     # Hours an address stays allowed after the right password; the cookie lasts as long.
     allow_hours: 24
+  # Optional: board.github_sink copies messages to a GitHub issue.
+  # Set repo and issue; topics defaults to [fleet], interval to 300 seconds.
+  # Leave board absent to keep both services off. See docs/board.md.
   herdr:
     theme: rose-pine
     # The outer terminal shows Herdr's notifications as desktop notifications.

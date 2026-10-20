@@ -28,6 +28,30 @@ The new-host questions also ask, one time, whether to turn the board on, when `.
 
 Apply copies `apps/crewboard/` to `~/.local/share/crewship/crewboard/source` and runs `cargo build --release --locked` there. It builds again only when the source changes, so a second apply changes nothing. It installs the binary as `~/.local/bin/crewboard` and runs `crewboard serve` as the user service `crewboard.service`, with `Restart=always` and a memory limit. With `start_services: false`, apply writes and enables the unit but does not start it.
 
+### Copy messages to GitHub
+
+Add `github_sink` inside `board` to copy messages to an existing GitHub issue:
+
+```yaml
+crewship:
+  board:
+    github_sink:
+      repo: owner/board
+      issue: 7
+      topics: [fleet, "task/*"]
+      interval: 300
+```
+
+`repo` and `issue` are required.
+`topics` defaults to `[fleet]`; a trailing `*` selects a topic prefix.
+`interval` defaults to 300 seconds and must be at least 60 seconds.
+Run `./ship.sh launch` to install and enable `crewboard-github-sink.service`, with `Restart=on-failure`.
+The service uses the operator account's existing `gh` login; no token goes in the unit or command arguments.
+With `start_services: false`, apply writes and enables the unit without starting it.
+Remove `github_sink` and apply to stop and remove only the sink.
+Remove `board` and apply to stop and remove both services.
+See [GitHub board messages](github-board.md#crew-board-messages) for privacy and delivery limits.
+
 ## Use it
 
 The daemon and every client use the socket `$CREWBOARD_SOCKET`, else `$XDG_RUNTIME_DIR/crewboard.sock`, else `/run/user/<uid>/crewboard.sock`.

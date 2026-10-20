@@ -93,7 +93,9 @@
         mode: "0755"
         remote_src: true
       when: not (ansible_check_mode and crewship_board_stale | bool)
-      notify: restart crewboard
+      notify:
+        - restart crewboard
+        - restart crewboard github sink
 
     - name: Render the crew board unit
       ansible.builtin.template:
@@ -119,7 +121,68 @@
         enabled: true
         state: started
       environment: "{{ crewship_user_systemd_env }}"
-      when: crewship_manage_services | bool
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+
+    - name: Install the crew board GitHub sink
+      when: crewship_cfg.board.github_sink is defined
+      block:
+        - name: Render the crew board GitHub sink unit
+          ansible.builtin.template:
+            src: crewboard-github-sink.service.j2
+            dest: "{{ crewship_user_units }}/crewboard-github-sink.service"
+            mode: "0644"
+          notify:
+            - reload user systemd
+            - restart crewboard github sink
+
+        - name: Statically enable the crew board GitHub sink
+          ansible.builtin.file:
+            src: "{{ crewship_user_units }}/crewboard-github-sink.service"
+            dest: "{{ crewship_user_units }}/default.target.wants/crewboard-github-sink.service"
+            state: link
+            force: true
+            follow: false
+
+        - name: Enable and start the crew board GitHub sink
+          ansible.builtin.systemd_service:
+            scope: user
+            name: crewboard-github-sink.service
+            enabled: true
+            state: started
+          environment: "{{ crewship_user_systemd_env }}"
+          when:
+            - crewship_manage_services | bool
+            - not ansible_check_mode
+
+- name: Remove the crew board GitHub sink
+  when: crewship_cfg.board.github_sink is not defined
+  block:
+    - name: Look for an installed crew board GitHub sink unit
+      ansible.builtin.stat:
+        path: "{{ crewship_user_units }}/crewboard-github-sink.service"
+        get_checksum: false
+      register: crewship_board_github_sink_unit
+
+    - name: Stop the crew board GitHub sink
+      ansible.builtin.systemd_service:
+        scope: user
+        name: crewboard-github-sink.service
+        state: stopped
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_board_github_sink_unit.stat.exists
+
+    - name: Remove the crew board GitHub sink unit
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ crewship_user_units }}/default.target.wants/crewboard-github-sink.service"
+        - "{{ crewship_user_units }}/crewboard-github-sink.service"
+      notify: reload user systemd
 
 - name: Remove the crew board
   when: crewship_cfg.board is not defined
