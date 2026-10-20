@@ -2159,7 +2159,15 @@ class FallbackRig:
         wait_for(lambda: f"bluebubbles-{guid} " in read_text(self.notes), f"the BlueBubbles note {guid}")
 
     def outbox(self):
-        return [json.loads(p.read_text()) for p in sorted((self.state / "outbox").glob("*.json"))]
+        items = []
+        for path in sorted((self.state / "outbox").glob("*.json")):
+            try:
+                text = path.read_text()
+            except FileNotFoundError:
+                # Delivery can remove a listed item before this read.
+                continue
+            items.append(json.loads(text))
+        return items
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
