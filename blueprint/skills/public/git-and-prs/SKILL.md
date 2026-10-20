@@ -48,3 +48,10 @@ State these in the PR body, because they change how the diff should be read:
 - A ponytail finding deliberately NOT cut - name it and say why it earns its place.
 
 Never ship a diff you have not put through ponytail, and never pad the "skip this" list to make a diff look leaner than it is.
+
+# Evidence and intent
+
+Runtime tokens, socket paths and paths outside the home folder never go into `--intent`, a verification plan, or gate evidence.
+Examples are a channel token, a `/run/user/<uid>/...` socket, and a worktree, data-disk or scratch path.
+The no-mistakes PR step removes only home-folder paths, so it publishes the rest in the PR body.
+Write placeholders such as `<token>` and `<worktree>`, and filter process lists and socket tables before you quote them.

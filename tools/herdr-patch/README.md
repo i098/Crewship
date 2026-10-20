@@ -97,7 +97,7 @@ flowchart LR
 
 On the server, `herdr-patch` takes the kitty graphics out of the output of Herdr. In their place, it paints half-block characters (2 pixels in each cell) into the cells of each image, and blanks these cells when Herdr deletes the image. Every mosh client can show these characters.
 
-On your computer, each `herdr-patch <host>` makes a random token and starts `mosh <host> -- herdr-patch --channel <token>`. That server process serves its images on the Unix socket `/tmp/herdr-patch-<uid>/<token>`. The directory has mode 700 and the socket has mode 600, so only your user can open it. Your computer reads the socket of its own server process through `ssh <host> herdr-patch --read <token>`, and writes the images over the half-block characters.
+On your computer, each `herdr-patch <host>` makes a random token and starts `mosh <host> -- herdr-patch --channel <token>`. That server process serves its images on the Unix socket `/run/user/<uid>/herdr-patch-<uid>/<token>`, or `/tmp/herdr-patch-<uid>/<token>` if the server has no `/run/user/<uid>`. Cleaners of idle `/tmp` folders do not move `/run/user`, so a connection that stays open for days keeps its images. The directory has mode 700 and the socket has mode 600, so only your user can open it. Your computer reads the socket of its own server process through `ssh <host> herdr-patch --read <token>`, and writes the images over the half-block characters.
 
 The images go into your terminal only between escape sequences. After mosh erases or scrolls cells, and after a resize, `herdr-patch` writes the image placements again. If the SSH connection stops, mosh continues without images, and `herdr-patch` connects again.
 
