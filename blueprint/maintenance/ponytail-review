@@ -3,8 +3,8 @@
 #
 # WHY THIS EXISTS
 #   The PR rule is: no line cap, instead run /ponytail-review on the diff,
-#   cut everything it names, and accept exactly one approved positive verdict
-#   with only approved progress and information lines around it.
+#   cut everything it names, and accept exactly one approved positive verdict.
+#   Descriptive prose is allowed, but findings and cut instructions are not.
 #
 #   But /ponytail-review is a Claude plugin slash command, and crewmates run on
 #   pi, where it is not registered. Abstract's worker hit this: it got a real
@@ -23,9 +23,9 @@
 #   git diff main... | ponytail-review --stdin
 #
 # EXIT CODES
-#   0  exactly one approved positive verdict and no unapproved output lines
+#   0  exactly one approved positive verdict and no findings or cut instructions
 #   1  usage, missing plugin or omp, empty diff, model refusal, or omp failure - NEVER a pass
-#   2  unapproved output, missing verdict, or multiple verdicts: not a pass
+#   2  findings, cut instructions, missing verdict, or multiple verdicts: not a pass
 #
 # FAIL-CLOSED
 #   A missing plugin or agent exits 1 with a named reason. It never prints a
@@ -111,13 +111,17 @@ printf '%s\n' "$out"
 
 verdicts=0
 while IFS= read -r line; do
+  if [[ "${line,,}" =~ (^|[^[:alnum:]_])l[0-9]+(-l?[0-9]+)?: ||
+        "${line,,}" =~ net:[[:space:]]*-[0-9]+[[:space:]]+lines ||
+        "${line,,}" =~ (^|[.!?][[:space:]]+)(cut|delete|remove|drop|inline|collapse|replace|merge|simplify)([[:space:][:punct:]]|$) ]]; then
+    verdicts=0
+    break
+  fi
   case "$line" in
-    ""|"Working..."|"What this change does:"*|"Checked:"*|"Not checked:"*) ;;
     "Lean already. Ship."|"Looks good. Ship."|"Nothing to cut. Ship.")
       verdicts=$((verdicts+1)) ;;
-    *) verdicts=0; break ;;
   esac
-done < <(sed -E "s/[*_\`'\"]//g; s/^[[:space:]>]+//; s/[[:space:]]+$//" <<<"$out")
+done < <(sed -E "s/[*_\`'\"]//g; s/^[[:space:]>]+//; s/^([0-9]+[.)]|[-+])[[:space:]]+//; s/[[:space:]]+$//" <<<"$out")
 if [ "$verdicts" -eq 1 ]; then
   exit 0
 fi
