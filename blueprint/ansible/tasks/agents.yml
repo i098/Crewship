@@ -6,6 +6,8 @@
 # user providers or unshipped model keys. Harness binaries come from --npm,
 # together with the gh / no-mistakes / treehouse / gws support binaries.
 
+# Remote-source copies need real parent directories even in check mode.
+# Only these account-owned directories are created; file writes stay previews.
 - name: Ensure the harness preference directories
   ansible.builtin.file:
     path: "{{ item.dest | dirname }}"
@@ -14,6 +16,7 @@
     group: "{{ crewship_group }}"
     mode: "{{ item.dir_mode }}"
   become: true
+  check_mode: false
   loop: "{{ crewship_agent_config_files }}"
   loop_control:
     label: "{{ item.dest | dirname }}"
@@ -140,6 +143,7 @@
     group: "{{ crewship_group }}"
     mode: "0755"
   become: true
+  check_mode: false
 
 - name: Install the Herdr sidebar omp extension
   ansible.builtin.copy:
@@ -222,6 +226,7 @@
     group: "{{ crewship_group }}"
     mode: "0755"
   become: true
+  check_mode: false
 
 - name: Point daemon-spawned omp at the overlay
   ansible.builtin.copy:
