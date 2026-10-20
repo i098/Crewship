@@ -94,8 +94,12 @@ Do, by expected wait:
 - Past about 10 s, or an unknown wait: a progress bar when progress is measured, else a step indicator or an indeterminate bar, not a loop.
 - On failure: show the error as soon as it is known. Never hold a spinner and fail later.
 Implementation clarification (not from the reels): the reel says changing text works "even if it is fake"; do not do that. Status text, step counts and percentages must reflect observed work; show a percentage only when progress is measured. With reduced motion (shared basics), show a static skeleton or spinner frame.
+Do for skeletons: render the loaded UI at each target viewport and measure each element's box with Playwright `locator.boundingBox()`.
+Match the skeleton blocks to those sizes and positions.
+Source: Aiden Bai, https://x.com/aidenybai/status/2111991261540528454.
 Don't: a skeleton for a wait you cannot bound, a pulsing fade, a spinner for a sub-second action, invented status text, a fake percentage or step.
-Check: name the expected wait for each loading state. Does the indicator match the row above? Does the skeleton outline match the loaded layout pixel for pixel?
+Check: name the expected wait for each loading state. Does the indicator match the row above?
+Verify zero layout shift when content loads by comparing boxes before and after, or observing CLS with a `PerformanceObserver`.
 
 ## 10. Reachable, few, familiar [Ddz0B_LCnR-]
 Source: a reel by @peterstewiestartup on seven UX laws; this rule keeps the ideas not already covered above.
