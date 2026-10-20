@@ -122,5 +122,5 @@ if [ "$verdicts" -eq 1 ]; then
   exit 0
 fi
 echo >&2
-echo "ponytail-review: findings remain - cut them and run again. Not a pass." >&2
+echo "ponytail-review: findings remain - cut them; do not run another round. Not a pass." >&2
 exit 2
