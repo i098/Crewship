@@ -172,6 +172,7 @@ The exporter deletes a pack only after the OTLP acknowledgement.
 Moving records into a pack deletes their completions, checkpoints, and gaps from the record table.
 Registrations, shutdowns, and starts without a packed completion stay, because later records need their producer and model labels.
 These kept rows expire 35 days after their last use, as in the ledger; `prune` and `export` remove them.
+A kept row stays while a pending record of its producer or request still needs its labels, so a late pack keeps its producer and model labels.
 A new unpacked checkpoint replaces the older unpacked checkpoint of the same producer.
 The dashboard reads only the latest checkpoint of each producer, so this replacement removes no reported value.
 For the same records, the spool exports the same OTLP log records as the ledger.
@@ -180,20 +181,23 @@ It cannot recognize a replay of a record that it already packed.
 
 SigNoz drops a log record when its timestamp is older than the log retention.
 The exporter therefore holds a pack when its oldest record is less than one hour from the end of 35 days.
-A held pack stays in the spool, compressed and unchanged, and it is never sent or deleted.
+A held pack stays in the spool, compressed and unchanged, and it is never sent.
 `export` reports held records as `held`.
-Held records count toward the byte and page limits, but not toward the age limit.
-So collection can continue after an outage longer than 35 days.
-Removing held packs needs a separate operator decision; this source does not delete them.
+Held records do not count toward the byte, page, or age limits, so an outage longer than 35 days cannot keep collection refused.
+When every record in a held pack is past its 35-day local retention, `prune`, `collect`, and `export` delete the pack.
+SigNoz would drop these records at 35 days anyway, so this deletion is retention expiry, not a loss of exportable data.
+Each prune that deletes held packs writes one line, such as `{"expired_held_records": 3}`, to standard error.
 
 | Limit | Value |
 | --- | --- |
-| Stored bytes: unpacked records and compressed packs | 64 MiB |
+| Stored bytes: unpacked records and compressed packs that are not held | 64 MiB |
 | Age of the oldest pending record that is not held | 7 days |
 | Database file | 128 MiB: 32,768 pages of 4,096 bytes |
-| Pages in use when `collect` refuses | More than 32,512, so 256 pages stay free |
+| Pages in use when `collect` refuses, less the pages of held packs | More than 32,512 |
 
 `collect` refuses a record that would go past the byte, age, or page limit.
+Without held packs, 256 pages stay free; held packs can use these pages until prune deletes them, about one to two hours later.
+In that window, SQLite's `SQLITE_FULL` limit at 32,768 pages stops any write that needs more pages.
 The 256 free pages let an export acknowledge and remove records from a full spool.
 With adapter records, the page limit stops collection at about 42 MiB of record bytes, about 83,000 pending requests, before the byte limit.
 SQLite refuses any page above the database limit with `SQLITE_FULL`.

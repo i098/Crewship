@@ -729,33 +729,41 @@ def test_backlog_packs_by_window_and_model_and_sends_the_ledger_records(tmp_path
         assert pending(spool) == 0
 
 
-def test_spool_holds_records_past_signoz_retention_and_admits_new_ones(tmp_path):
+def test_a_35_day_outage_keeps_labels_expires_held_packs_and_admits_again(tmp_path, monkeypatch,
+                                                                          capsys):
     with usage.Spool(tmp_path / "spool.sqlite") as spool:
         register(spool)
         start(spool)
+        assert spool.export(lambda _: {}, NOW) == 2
         complete(spool)
-        with pytest.raises(OSError):
-            spool.export(lambda _: (_ for _ in ()).throw(OSError("offline")), NOW)
 
         def other(moment):
             return {**event("register", producer_kind="helper"), "producer": str(UUID(int=2)),
                     "at": moment.isoformat()}
 
+        monkeypatch.setattr(usage, "SPOOL_BYTES", spool.db.execute("SELECT bytes FROM budget").fetchone()[0])
+        with pytest.raises(ValueError, match="full"):
+            spool.accept(other(NOW), NOW)
         week = NOW + timedelta(days=8)
         with pytest.raises(ValueError, match="too old"):
             spool.accept(other(week), week)
-        late = NOW + timedelta(days=36)
-        assert spool.export(lambda _: pytest.fail("a held record must not be sent"), late) == 0
-        assert spool.held(late) == 3
+        late = NOW + timedelta(days=35, seconds=1)
         spool.prune(late)
-        spool.accept(other(late), late)
-        assert spool.export(lambda _: {}, late) == 1
+        assert stored(spool) == [("register", 0), ("start", 0), ("complete", 1)]
+        assert spool.export(lambda _: pytest.fail("a held record must not be sent"), late) == 0
+        assert spool.held(late) == 1
         body = spool.db.execute("SELECT body FROM packs").fetchone()[0]
-        kept = [{item["key"]: item["value"] for item in log["attributes"]}
-                for log in json.loads(zlib.decompress(body))]
-        assert [(log["usage.kind"]["stringValue"], log["usage.event"]["stringValue"]) for log in kept] \
-            == [(kind, event(kind)["event"]) for kind in ("register", "start", "complete")]
-        assert spool.held(late) == 3
+        [kept] = [{item["key"]: item["value"] for item in log["attributes"]}
+                  for log in json.loads(zlib.decompress(body))]
+        assert kept["usage.model"] == {"stringValue": "model-a"}
+        assert kept["usage.producer_kind"] == {"stringValue": "chat"}
+        monkeypatch.setattr(usage, "SPOOL_BYTES", spool.db.execute("SELECT bytes FROM budget").fetchone()[0])
+        spool.accept(other(late), late)
+        capsys.readouterr()
+        spool.prune(late)
+        assert json.loads(capsys.readouterr().err) == {"expired_held_records": 1}
+        assert spool.held(late) == 0 and stored(spool) == [("register", 1)]
+        assert spool.export(lambda _: {}, late) == 1
 
 
 def test_sender_compresses_and_spaces_requests(monkeypatch):

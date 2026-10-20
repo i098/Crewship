@@ -92,7 +92,7 @@ CREATE TRIGGER IF NOT EXISTS budget_delete AFTER DELETE ON events BEGIN
 END;
 CREATE TABLE IF NOT EXISTS packs (
     id INTEGER PRIMARY KEY, ingested REAL NOT NULL, logged REAL NOT NULL,
-    records INTEGER NOT NULL, body BLOB NOT NULL
+    expires REAL NOT NULL, records INTEGER NOT NULL, body BLOB NOT NULL
 );
 CREATE TRIGGER IF NOT EXISTS pack_insert AFTER INSERT ON packs BEGIN
     UPDATE budget SET bytes=bytes+length(new.body);
@@ -574,16 +574,18 @@ class Spool(Ledger):
             self.db.execute("DELETE FROM events WHERE producer=? AND kind='checkpoint' "
                             "AND sent IS NULL AND event!=?", (event["producer"], event["event"]))
         visible = (now - VISIBLE).timestamp()
-        oldest, size, used = self.db.execute(
+        oldest, size, used, held = self.db.execute(
             "SELECT (SELECT min(ingested) FROM (SELECT min(ingested) AS ingested FROM events "
             "WHERE sent IS NULL UNION ALL SELECT min(ingested) FROM packs WHERE logged>=?)),"
             "(SELECT bytes FROM budget),(SELECT page_count FROM pragma_page_count())"
-            "-(SELECT freelist_count FROM pragma_freelist_count())", (visible,)).fetchone()
-        # Held packs are past the SigNoz retention: they wait locally and do not block admission.
+            "-(SELECT freelist_count FROM pragma_freelist_count()),"
+            "(SELECT coalesce(sum(length(body)),0) FROM packs WHERE logged<?)",
+            (visible, visible)).fetchone()
+        # Held packs are past the SigNoz retention: they wait for prune and do not block admission.
         if oldest < (now - SPOOL_AGE).timestamp():
             raise ValueError("retry spool is too old")
         # Collectors stop short of max_page_count: an acknowledgement also needs free pages.
-        if size > SPOOL_BYTES or used > SPOOL_PAGES - SPOOL_SPARE:
+        if size - held > SPOOL_BYTES or used - held // 4096 > SPOOL_PAGES - SPOOL_SPARE:
             raise ValueError("retry spool is full")
 
     def export(self, send, now=None):
@@ -632,9 +634,11 @@ class Spool(Ledger):
                 (item["value"]["stringValue"] for item in log["attributes"]
                  if item["key"] == "usage.model"), ""))
             self._acknowledged(rows, now)
-            self.db.execute("INSERT INTO packs(ingested,logged,records,body) VALUES(?,?,?,?)",
+            self.db.execute("INSERT INTO packs(ingested,logged,expires,records,body) "
+                            "VALUES(?,?,?,?,?)",
                             (min(row["ingested"] for row in rows),
-                             min(max(row["at"], row["ingested"]) for row in rows), len(rows),
+                             min(max(row["at"], row["ingested"]) for row in rows),
+                             max(row["expires"] for row in rows), len(rows),
                              zlib.compress(json.dumps(logs, separators=(",", ":")).encode())))
         return True
 
@@ -653,9 +657,17 @@ class Spool(Ledger):
         now = (now or datetime.now(UTC)).timestamp()
         with self.locked(), self.db:
             self.db.execute("BEGIN IMMEDIATE")
-            removed = self.db.execute("DELETE FROM events WHERE sent IS NOT NULL AND expires<?",
-                                      (now,)).rowcount
+            removed = self.db.execute(
+                "DELETE FROM events WHERE sent IS NOT NULL AND expires<? AND NOT EXISTS ("
+                "SELECT 1 FROM events AS pending WHERE pending.sent IS NULL "
+                "AND pending.producer=events.producer "
+                "AND (events.kind='register' OR pending.event=events.event))", (now,)).rowcount
+            expired = self.db.execute("SELECT coalesce(sum(records),0) FROM packs WHERE expires<?",
+                                      (now,)).fetchone()[0]
+            self.db.execute("DELETE FROM packs WHERE expires<?", (now,))
             self.db.execute("DELETE FROM producer_state WHERE expires<?", (now,))
+        if expired:
+            print(json.dumps({"expired_held_records": expired}), file=sys.stderr)
         return removed
 
 
