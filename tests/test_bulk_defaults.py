@@ -1,8 +1,13 @@
+import grp
 import importlib.util
 import os
+import pwd
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("bulk_defaults", ROOT / "scripts/bulk-defaults.py")
@@ -15,6 +20,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "")
     directory = tmp_path / "home"
     directory.mkdir()
+    for root in ("cache", ".treehouse"):
+        (tmp_path / "data" / root).mkdir(parents=True)
     return directory
 
 
@@ -218,3 +225,79 @@ def test_native_writer_rejects_an_unavailable_linked_parent(home):
         bulk.write_native_file(link / "pip/pip.conf", "[global]\n")
 
     assert link.is_symlink() and not target.exists()
+
+
+def test_new_bulk_directories_are_private_and_existing_modes_stay(home):
+    data = home.parent / "data"
+    (data / ".treehouse").rmdir()
+    (data / "cache").chmod(0o755)
+    tasks = [task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+             if "account's bulk directories" in task["name"]]
+    play = home.parent / "play.yml"
+    play.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {"crewship_data_dir": str(data), "crewship_account_ready": True,
+                 "crewship_cfg": {"user": pwd.getpwuid(os.getuid()).pw_name},
+                 "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+                 "ansible_become": False, "ansible_python_interpreter": sys.executable},
+        "tasks": tasks,
+    }]))
+    environment = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(home.parent),
+                   "LANG": "C.UTF-8", "ANSIBLE_LOCAL_TEMP": str(home.parent / "ansible-tmp")}
+    previous = os.umask(0)
+    try:
+        for check in (True, False):
+            result = subprocess.run(
+                [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(play),
+                 *(["--check"] if check else [])],
+                env=environment, capture_output=True, text=True,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert bulk.configure(home, data, check=check)["changed"]
+            if check:
+                assert sorted(path.name for path in data.iterdir()) == ["cache"]
+                assert list((data / "cache").iterdir()) == []
+                (data / "cache/uv").mkdir(mode=0o750)
+        assert not bulk.configure(home, data)["changed"]
+    finally:
+        os.umask(previous)
+    assert (data / "cache").stat().st_mode & 0o777 == 0o755
+    assert (data / "cache/uv").stat().st_mode & 0o777 == 0o750
+    for relative in (
+        ".treehouse", "tmp", "downloads", "cache/npm", "cache/pip", "cache/bun",
+        "cache/pnpm", "cache/go-build", "cache/go-mod", "cache/deno", "cache/bun-transpiler",
+    ):
+        assert (data / relative).stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("check", [True, False])
+@pytest.mark.parametrize("link", ["pnpm", "pnpm/config.yaml"])
+@pytest.mark.parametrize("config_root", ["default", "absolute", "relative"])
+def test_unavailable_pnpm_yaml_config_stops_before_any_change(
+    home, monkeypatch, check, link, config_root
+):
+    bin_dir = home.parent / "bin"
+    bin_dir.mkdir()
+    log = home.parent / "pnpm.log"
+    pnpm = bin_dir / "pnpm"
+    pnpm.write_text(f'#!/bin/sh\necho "$@" >> {log}\n')
+    pnpm.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    config_home = {
+        "default": home / ".config", "absolute": home.parent / "xdg", "relative": home / "xdg",
+    }[config_root]
+    (config_home / link).parent.mkdir(parents=True)
+    target = home.parent / "unavailable"
+    (config_home / link).symlink_to(target)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    if config_root != "default":
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home) if config_root == "absolute" else "xdg")
+    before = list(home.iterdir())
+
+    with pytest.raises(FileNotFoundError):
+        bulk.configure(home, home.parent / "data", check=check)
+
+    assert list(home.iterdir()) == before
+    assert all(not list(path.iterdir()) for path in (home.parent / "data").iterdir())
+    assert (config_home / link).is_symlink() and not target.exists()
+    assert not log.exists()

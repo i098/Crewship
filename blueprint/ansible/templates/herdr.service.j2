@@ -24,7 +24,7 @@ Environment=FLEET_BROWSER_TIER=obscura
 Environment="{{ key }}={{ value }}"
 {% endfor %}
 {% endif %}
-{% for key, value in crewship_data_cache_env | combine(crewship_board_env) | dictsort %}
+{% for key, value in crewship_board_env | dictsort %}
 Environment="{{ key }}={{ value }}"
 {% endfor %}
 Restart=on-failure

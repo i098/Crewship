@@ -194,6 +194,8 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 Native configuration works without shell initialization.
 Apply adds missing keys and preserves existing keys, comments, credentials, modes, and symbolic links.
 An unavailable symbolic-link target causes apply to fail instead of creating a replacement.
+New per-account pool, cache, download, and temporary directories use mode `0700`.
+Apply preserves the modes of existing directories.
 Existing native paths remain explicit choices, including paths written by an earlier apply.
 Change those keys explicitly when changing disks.
 The pnpm 10 user rc receives a missing store default.
@@ -204,10 +206,11 @@ Unsupported TOML table layouts fail without replacing the file.
 Alternate configuration roots and explicit configuration files remain operator choices.
 
 The inherited defaults enter `~/.profile`, interactive `~/.bashrc`, and `~/.config/environment.d/60-crewship-bulk.conf`.
-An existing, non-empty environment variable wins in a new shell.
+An existing, non-empty environment variable wins in a new shell or installer process.
 A changed file notifies the existing user-manager reload, which runs only when `start_services` is true.
 Apply does not import shell values or restart a service for this file.
-Herdr and no-mistakes unit defaults affect their next start, not running processes.
+Herdr and no-mistakes inherit these defaults from the user manager on their next start.
+A bulk-only Herdr unit change does not restart the running service.
 Explicit service environment settings can override these defaults.
 Native package cache settings do not become service environment overrides.
 Global `XDG_CACHE_HOME`, `CARGO_HOME`, and `RUSTUP_HOME` do not change.

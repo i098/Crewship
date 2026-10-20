@@ -139,14 +139,28 @@ def write_native_file(path, content):
         Path(temporary).unlink(missing_ok=True)
 
 
+def private_dirs(data, check):
+    caches = ("npm", "pip", "bun", "uv", "pnpm", "go-build", "go-mod", "deno", "bun-transpiler")
+    paths = [data / "cache" / name for name in caches]
+    missing = [path for path in paths if not os.path.lexists(path)]
+    if not check:
+        for path in missing:
+            path.mkdir(mode=0o700)
+    return bool(missing)
+
+
 def configure(home, data, check=False):
     changes = native_changes(home, data) | path_changes(home, data)
+    pnpm = shutil.which("pnpm")
+    if pnpm:
+        check_config_links(home / (os.environ.get("XDG_CONFIG_HOME") or ".config") / "pnpm/config.yaml")
+    dirs_change = private_dirs(data, check)
     if not check:
         for path, content in changes.items():
             write_native_file(path, content)
     # pnpm 11 owns its YAML format. Query after the pnpm 10 rc update.
     pnpm_change = False
-    if shutil.which("pnpm"):
+    if pnpm:
         result = subprocess.run(
             ["pnpm", "config", "get", "--json", "store-dir"],
             cwd=home, check=True, capture_output=True, text=True,
@@ -157,7 +171,7 @@ def configure(home, data, check=False):
                 ["pnpm", "config", "set", "store-dir", str(data / "cache/pnpm")],
                 cwd=home, check=True, stdout=subprocess.DEVNULL,
             )
-    return {"changed": bool(changes) or pnpm_change}
+    return {"changed": bool(changes) or dirs_change or pnpm_change}
 
 
 def main():

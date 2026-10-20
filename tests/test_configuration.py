@@ -1,7 +1,10 @@
 import argparse
+import getpass
+import grp
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -910,6 +913,91 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
         ]
 
 
+BULK_UNIT_LINES = (
+    'Environment="npm_config_cache=/data/cache/npm"\n'
+    'Environment="PIP_CACHE_DIR=/data/cache/pip"\n'
+    'Environment="TMPDIR=/data/tmp"\n'
+    'Environment="DENO_DIR=/data/cache/deno"\n'
+    'Environment="BUN_RUNTIME_TRANSPILER_CACHE_PATH=/data/cache/bun-transpiler"\n'
+    'Environment="TMP=/data/tmp"\n'
+    'Environment="TEMP=/data/tmp"\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("seed", "check", "restart"),
+    [
+        (None, False, True),
+        ("", False, False),
+        (BULK_UNIT_LINES, False, False),
+        (BULK_UNIT_LINES, True, False),
+        ("ExecStart=/old/herdr server\n", False, True),
+        (BULK_UNIT_LINES + "ExecStart=/old/herdr server\n", True, True),
+    ],
+    ids=["first-install", "unchanged", "bulk-only", "bulk-only-check", "ordinary", "combined-check"],
+)
+def test_herdr_restarts_only_for_a_unit_change_beyond_the_data_disk_environment(
+    tmp_path, seed, check, restart
+):
+    names = {
+        "Read the installed Herdr user unit",
+        "Render the Herdr user unit",
+        "Restart Herdr for a unit change beyond the data-disk environment",
+    }
+    tasks = [
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/herdr.yml").read_text())
+        if task.get("name") in names
+    ]
+    assert len(tasks) == len(names)
+    playbook = tmp_path / "herdr.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "tasks": tasks,
+        "handlers": [
+            {"name": name, "ansible.builtin.debug": {"msg": name}}
+            for name in ("reload user systemd", "restart herdr")
+        ],
+    }]))
+    (tmp_path / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
+    unit = tmp_path / ".config/systemd/user/herdr.service"
+    unit.parent.mkdir(parents=True)
+    variables = {
+        "ansible_become": False,
+        "crewship_cfg": {
+            "user": getpass.getuser(),
+            "home": str(tmp_path),
+            "workspace": str(tmp_path),
+            "profiles": {"agents": True},
+        },
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_user_uid": 12345,
+        "crewship_platform": "linux-x86_64",
+        "crewship_latest": {"herdr": {"version": "1.0.0"}},
+        "crewship_fleet_browsers_enabled": False,
+        "ansible_managed": "Managed by Crewship",
+    }
+
+    def apply(*options):
+        result = _ansible(
+            tmp_path, "ansible-playbook", "-i", "localhost,", str(playbook), *options,
+            *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout
+
+    if seed is not None:
+        apply()
+        unit.write_text(unit.read_text().replace("[Service]\n", "[Service]\n" + seed))
+    seeded = unit.read_text() if unit.exists() else None
+    output = apply(*(["--check"] if check else []))
+    assert ("RUNNING HANDLER [restart herdr]" in output) is restart, output
+    assert ("RUNNING HANDLER [reload user systemd]" in output) is (seed != ""), output
+    if check:
+        assert unit.read_text() == seeded
+    else:
+        assert "=/data/" not in unit.read_text()
+        assert "RUNNING HANDLER" not in apply()
+
+
 def _ansible(tmp_path, *argv, wrapper=()):
     return subprocess.run(
         [*wrapper, Path(sys.executable).parent / argv[0], *argv[1:]],
@@ -1179,3 +1267,114 @@ def test_herdr_config_does_not_resume_agents_on_restore():
 
     config = tomllib.loads(env.from_string(source).render(crewship_cfg=Anything()))
     assert config["session"] == {"resume_agents_on_restore": False}
+
+
+@pytest.mark.parametrize("state", ["unset", "empty", "inherited", "task"])
+def test_bulk_environment_defaults_preserve_explicit_values_across_consumers(
+    tmp_path, monkeypatch, state
+):
+    home = tmp_path / "home"
+    units = home / ".config/systemd/user"
+    (units / "no-mistakes-daemon-.service.d").mkdir(parents=True)
+    (home / ".config/environment.d").mkdir()
+    data = tmp_path / "data"
+    defaults = {
+        "DENO_DIR": str(data / "cache/deno"),
+        "BUN_RUNTIME_TRANSPILER_CACHE_PATH": str(data / "cache/bun-transpiler"),
+        "TMPDIR": str(data / "tmp"), "TMP": str(data / "tmp"), "TEMP": str(data / "tmp"),
+    }
+    for key in defaults:
+        monkeypatch.delenv(key, raising=False)
+        if state != "unset":
+            monkeypatch.setenv(key, "/operator/scratch" if state == "inherited" else "")
+    observed = tmp_path / "installer.json"
+    observer = tmp_path / "installer probe.py"
+    observer.write_text(
+        "import json, os, pathlib, sys\n"
+        "pathlib.Path(sys.argv[1]).write_text(json.dumps("
+        "{key: os.environ.get(key) for key in sys.argv[2:]}))\n"
+        "print(json.dumps({'changed': False}))\n"
+    )
+    account = yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+    tasks = [
+        task for task in account
+        if task["name"] in {
+            "Write bulk defaults for future user-manager processes",
+            "Keep the managed bin directory and environment on the interactive shell",
+        }
+    ]
+    tasks.append(next(
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/tools.yml").read_text())
+        if task["name"] == "Install the toolchain as the target user"
+    ))
+    tasks.append({
+        "ansible.builtin.template": {
+            "src": str(ROOT / "blueprint/ansible/templates/herdr.service.j2"),
+            "dest": str(units / "herdr.service"),
+        },
+    })
+    tasks.append(next(
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/agents.yml").read_text())
+        if task.get("ansible.builtin.copy", {}).get("dest", "").endswith(
+            "/no-mistakes-daemon-.service.d/crewship.conf"
+        )
+    ))
+    playbook = tmp_path / "environment.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": tasks,
+        "handlers": [
+            {"name": name, "ansible.builtin.debug": {"msg": name}}
+            for name in ("reload user systemd", "no-mistakes daemon restart required")
+        ],
+    }]))
+    variables = {
+        "ansible_become": False,
+        "crewship_repo": str(ROOT),
+        "crewship_cfg": {
+            "user": getpass.getuser(), "home": str(home), "workspace": str(home),
+            "data_dir": str(data), "profiles": {"agents": True},
+        },
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_account_ready": True, "crewship_become_target": False,
+        "crewship_platform": "linux-x86_64",
+        "crewship_latest": {"herdr": {"version": "1.0.0"}},
+        "crewship_fleet_browsers_enabled": False,
+        "crewship_installer_argv": [sys.executable, str(observer), str(observed), *defaults],
+        "crewship_user_env": {
+            "HOME": str(home), "PATH": os.environ["PATH"],
+            **({key: "/task/scratch" for key in defaults} if state == "task" else {}),
+        },
+    }
+    result = _ansible(
+        tmp_path, "ansible-playbook", "-i", "localhost,", str(playbook),
+        *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    inherited = (
+        {key: "/operator/scratch" for key in defaults} if state == "inherited" else defaults
+    )
+    assert json.loads(observed.read_text()) == (
+        {key: "/task/scratch" for key in defaults} if state == "task" else inherited
+    )
+    reader = [
+        sys.executable, "-c",
+        "import json, os, sys; print(json.dumps({key: os.environ.get(key) for key in sys.argv[1:]}))",
+        *defaults,
+    ]
+    for path in (
+        home / ".profile", home / ".bashrc",
+        home / ".config/environment.d/60-crewship-bulk.conf",
+    ):
+        shell = subprocess.run(
+            ["/bin/sh", "-c", 'set -a; . "$1"; shift; exec "$@"', "sh", str(path), *reader],
+            capture_output=True, text=True, check=True,
+        )
+        assert json.loads(shell.stdout) == inherited
+    for path in (units / "herdr.service", units / "no-mistakes-daemon-.service.d/crewship.conf"):
+        environment = dict(
+            entry.split("=", 1)
+            for line in path.read_text().splitlines() if line.startswith("Environment=")
+            for entry in shlex.split(line.partition("=")[2])
+        )
+        assert {key: (inherited | environment)[key] for key in defaults} == inherited

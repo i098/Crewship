@@ -183,14 +183,27 @@
   check_mode: false
   when: crewship_data_dir | length > 0
 
+- name: Inspect the account's bulk directories on the data disk
+  ansible.builtin.stat:
+    path: "{{ crewship_data_dir }}/{{ item }}"
+  become: true
+  loop: [cache, .treehouse, tmp, downloads]
+  register: crewship_bulk_dirs
+  when:
+    - crewship_data_dir | length > 0
+    - crewship_account_ready | bool
+
 - name: Ensure the account's bulk directories on the data disk
   ansible.builtin.file:
-    path: "{{ crewship_data_dir }}/{{ item }}"
+    path: "{{ crewship_data_dir }}/{{ item.item }}"
     state: directory
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
+    mode: "{{ omit if item.stat.exists else '0700' }}"
   become: true
-  loop: [cache, .treehouse, tmp, downloads]
+  loop: "{{ crewship_bulk_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
   when:
     - crewship_data_dir | length > 0
     - crewship_account_ready | bool

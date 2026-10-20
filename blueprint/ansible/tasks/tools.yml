@@ -34,12 +34,16 @@
   when: ansible_check_mode
 
 - name: Install the toolchain as the target user
-  ansible.builtin.command:
-    argv: "{{ crewship_installer_argv }}"
+  ansible.builtin.shell:
+    cmd: |
+      {% for key, value in crewship_data_cache_env | dictsort %}
+      export {{ key }}="${{ '{' }}{{ key }}:-{{ value }}{{ '}' }}"
+      {% endfor %}
+      exec {{ crewship_installer_argv | map('quote') | join(' ') }}
     chdir: "{{ crewship_repo }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
-  environment: "{{ crewship_data_cache_env | combine(crewship_user_env) }}"
+  environment: "{{ crewship_user_env }}"
   register: crewship_installer_run
   failed_when: >-
     crewship_installer_run.rc != 0
