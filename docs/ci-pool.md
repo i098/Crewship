@@ -101,7 +101,7 @@ sudo docker inspect ci-runner-<slot> --format '{{.HostConfig.CgroupParent}}'   #
 - The CPU and memory caps above, and at most 8192 processes.
 - No Docker daemon by default: the host's Docker socket is never mounted. A repository with `docker: dind` gets a daemon of its own (see [Docker in a job](#docker-in-a-job)). Other jobs that build or run containers stay on GitHub-hosted runners. Without a daemon, `docker info` fails, so a tool that builds an image, for example `wrangler deploy` for a Worker with containers, stops with "The Docker CLI is needed to build the configured image".
 - An empty `_work` directory for each job, emptied when the container starts.
-- Caches that stay between the jobs of one repository: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), and the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`). The downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`) stay for each slot, not for the repository, because apt locks that directory.
+- Caches that stay between the jobs of one slot: the tool cache (`RUNNER_TOOL_CACHE`, which the `actions/setup-*` actions use), `~/.cache` (uv, pip, and other tools), the bun, npm, and pnpm stores (`BUN_INSTALL_CACHE_DIR`, `npm_config_cache`, `npm_config_store_dir`, set below `~/.cache`), the cargo registry and git directories (`~/.cargo/registry`, `~/.cargo/git`), and the downloaded apt packages and lists (`/var/cache/apt/archives`, `/var/lib/apt/lists`). Each slot has its own, because a job's tools expect to own them, as on a GitHub-hosted runner: apt locks its archive directory, and `Swatinem/rust-cache` deletes the registry files that its own job does not use.
 - Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, fresh Postgres 17 and 18 clusters. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
 - A check before the first step: the runner's job-started hook ends the job container when its code comes from outside the repository, which is a pull request from a fork or a `workflow_run` that a fork's pull request started. The hook kills every process in the container, so no later step runs, not even an `if: always()` step. The slot then deletes the runner. Only the repositories in the pool's list, and only their own branches, run on the host.
 
@@ -141,7 +141,7 @@ On a host with `kernel.apparmor_restrict_unprivileged_userns=1` (Ubuntu's defaul
 | `~/.config/ci-pool/pool.json` | The `ci_pool` section as apply last wrote it. Each slot reads it when it starts. |
 | `~/.config/ci-pool/job-started.sh` | The job-started hook. Apply writes it; each job container mounts it read-only. A slot whose hook file is missing does not start a job. |
 | `<data_dir>/ci-pool/work/<slot>/` | The slot's job work directory. |
-| `<data_dir>/ci-pool/cache/<owner>-<name>/tool/`, `home/`, `cargo-registry/`, `cargo-git/` | The repository's tool cache, `~/.cache`, and cargo directories. |
+| `<data_dir>/ci-pool/cache/<slot>/tool/`, `home/`, `cargo-registry/`, `cargo-git/` | The slot's tool cache, `~/.cache`, and cargo directories. A `cache/<owner>-<name>/` directory from an older pool, which all slots of a repository shared, stays while the repository is in the pool; delete it once no container that started before the upgrade runs. |
 | `<data_dir>/ci-pool/scratch/<slot>/` | The slot's `/tmp`, Postgres cluster directory, and `~/.bun`, deleted at each job start. |
 | `<data_dir>/ci-pool/apt/<slot>/` | The slot's downloaded apt packages and lists. |
 | `<data_dir>/ci-pool/dind/<slot>/` | With `docker: dind`: the slot's Docker daemon data and TLS certificates, deleted at each job start. |
@@ -191,12 +191,12 @@ echo '{"data_dir": "/mnt/data/ci", "repos": [{"repo": "owner/name", "slots": 2, 
 
 ## Public repositories
 
-A self-hosted runner runs the code of the workflow that selects it. On a public repository, a pull request from a fork can change the workflow. The job-started hook ends such a job's container before any of its steps run. That is the first barrier; the trigger rule below is the second. The job container limits CPU, memory, and processes, and has no Docker socket, but it shares the host's network, and its caches stay for the next job of the same repository.
+A self-hosted runner runs the code of the workflow that selects it. On a public repository, a pull request from a fork can change the workflow. The job-started hook ends such a job's container before any of its steps run. That is the first barrier; the trigger rule below is the second. The job container limits CPU, memory, and processes, and has no Docker socket, but it shares the host's network, and its caches stay for the next job in the same slot.
 
 - Opt in private repositories freely. For a public repository, select the pool only in workflows that outside contributors cannot start: `workflow_dispatch` and `push` to protected branches. Never use `pull_request` from forks.
 - This repository's `ci.yml` stays on GitHub-hosted runners. `ci-pool-smoke.yml` runs the same checks on the pool, and only `workflow_dispatch` starts it. It stays queued until `.local/host.yml` has the entry `{ repo: i098/Crewship, slots: N, labels: [crewship] }` in `crewship.ci_pool.repos`.
 - Do not opt in a repository whose jobs need secrets that a fork pull request could reach.
-- A job can change the repository's caches (`<data_dir>/ci-pool/cache/<owner>-<name>/`), which later jobs of that repository read, including jobs on the default branch. Each JIT runner is registered to one repository only, so other repositories' jobs never run in its slots or read its caches.
+- A job can change its slot's caches (`<data_dir>/ci-pool/cache/<slot>/`), which later jobs in that slot read, including jobs on the default branch. Each JIT runner is registered to one repository only, so other repositories' jobs never run in its slots or read its caches.
 
 ## macOS runner
 
