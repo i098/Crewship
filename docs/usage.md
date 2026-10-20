@@ -433,6 +433,7 @@ Omit `ledger` or `snapshots` when that source is not available.
 Never point `ledger` at the retry spool.
 The reader rejects spool databases and opens a history ledger with SQLite `mode=ro` and `query_only`.
 It never creates, migrates, prunes, drains, or exports that database.
+SQLite may create or update `usage.sqlite-wal` and `usage.sqlite-shm` coordination files during read-only access.
 The two aggregate queries each have a 20-second deadline and share a 2 MiB result limit.
 At most eight explicitly named snapshots are read, with a 1 MiB limit each.
 The reader does not search other homes or session roots.

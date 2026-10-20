@@ -5,6 +5,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -24,7 +25,8 @@ def report(monkeypatch):
 
 def ledger_fixture(path, bounds, *, unknown=True, duplicate=False):
     history, start, end = bounds
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
         db.execute("CREATE TABLE events (producer TEXT,event TEXT,kind TEXT,sequence INTEGER,"
                    "at REAL,payload TEXT,sequence_through INTEGER,retired_completions INTEGER)")
 
@@ -98,7 +100,8 @@ def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report):
     config.write_text(json.dumps({"fm_home": str(home), "ledger": str(ledger),
                                  "snapshots": [str(snapshot), str(snapshot),
                                                str(tmp_path / "missing.json")]}))
-    before = ledger.read_bytes(), snapshot.read_bytes()
+    with closing(sqlite3.connect(ledger.as_uri() + "?mode=ro", uri=True)) as db:
+        before = tuple(db.iterdump()), snapshot.read_bytes()
     result = subprocess.run([sys.executable, str(ROOT / "scripts/token_suggestions.py"),
                              "--config", str(config), "--cutoff", CUTOFF.isoformat()],
                             env={**os.environ, "HOME": str(home)}, text=True,
@@ -121,9 +124,8 @@ def test_full_cli_cycle_is_private_read_only_and_deduplicated(tmp_path, report):
     assert "Saved report 3 source_unavailable" in content
     assert directory.stat().st_mode & 0o777 == 0o700
     assert all(p.stat().st_mode & 0o777 == 0o600 for p in directory.iterdir())
-    assert before == (ledger.read_bytes(), snapshot.read_bytes())
-    assert not ledger.with_name("usage.sqlite-wal").exists()
-    assert not ledger.with_name("usage.sqlite-shm").exists()
+    with closing(sqlite3.connect(ledger.as_uri() + "?mode=ro", uri=True)) as db:
+        assert before == (tuple(db.iterdump()), snapshot.read_bytes())
 
 
 def test_complete_cache_windows_compare_only_matching_models(tmp_path, report):
