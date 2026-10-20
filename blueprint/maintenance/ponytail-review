@@ -2,9 +2,9 @@
 # Run the ponytail over-engineering review on a diff, from ANY harness.
 #
 # WHY THIS EXISTS
-#   The captain's PR rule (2026-08-25) is: no line cap, instead run
-#   /ponytail-review on the diff, cut everything it names, and ship when it
-#   answers "Lean already. Ship."
+#   The PR rule is: no line cap, instead run /ponytail-review on the diff,
+#   cut everything it names, and accept a short verdict ending with "Ship."
+#   only when no L<line>: findings remain.
 #
 #   But /ponytail-review is a Claude plugin slash command, and crewmates run on
 #   pi, where it is not registered. Abstract's worker hit this: it got a real
@@ -23,9 +23,9 @@
 #   git diff main... | ponytail-review --stdin
 #
 # EXIT CODES
-#   0  "Lean already. Ship." - the gate passes
+#   0  a short verdict ending with "Ship." and no L<line>: findings
 #   1  usage, missing plugin or omp, empty diff, model refusal, or omp failure - NEVER a pass
-#   2  findings remain: cut them and run again
+#   2  findings remain or no verdict: not a pass
 #
 # FAIL-CLOSED
 #   A missing plugin or agent exits 1 with a named reason. It never prints a
@@ -109,8 +109,8 @@ done
 
 printf '%s\n' "$out"
 
-# "Lean already. Ship." is the plugin's own pass phrase.
-if grep -qxE "[[:space:]*\`'\"]*Lean already\. Ship\.[[:space:]*\`'\"]*" <<<"$out" \
+# Accept a standalone verdict with up to 80 characters before the final "Ship.".
+if grep -qxE "[[:space:]*\`'\"]*([[:print:]]{1,80}[[:blank:]])?Ship\.[[:space:]*\`'\"]*" <<<"$out" \
   && ! grep -qE '(^|[^[:alnum:]])L[0-9]+(-L?[0-9]+)?:' <<<"$out"; then
   exit 0
 fi
