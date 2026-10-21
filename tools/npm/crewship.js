@@ -19,11 +19,14 @@ const presets = [
   { cpu: 8, ram: 32, disk: 200, swap: 16 },
   { cpu: 16, ram: 64, disk: 300, swap: 32 },
 ];
+const capacityTolerance = 0.9;
 
-function recommend(light, ui) {
-  const ram = 11 + 2 * light + 8 * ui;
+function recommend(light, ui, extraDisk = 0, extraBrowsers = 0) {
+  const ram = 11 + 2 * light + 8 * ui + 2 * extraBrowsers;
   const cpu = light + 2 * ui;
-  return { ram, cpu, preset: presets.find((size) => size.ram >= ram && size.cpu >= cpu) };
+  const workload = presets.find((size) => size.ram >= ram && size.cpu >= cpu);
+  const disk = (workload || presets[presets.length - 1]).disk + extraDisk;
+  return { ram, cpu, disk, preset: presets.find((size) => size.ram >= ram && size.cpu >= cpu && size.disk >= disk) };
 }
 
 function features(answer) {
@@ -43,21 +46,24 @@ function validateSshTarget({ alias, host, user }) {
 function sshArgs(target) {
   validateSshTarget(target);
   const { alias, host, user, port } = target;
-  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error("Use a port from 1 to 65535.");
+  if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) throw new Error("Use a port from 1 to 65535.");
   return [
     "-a", "-o", "ForwardAgent=no", "-o", "BatchMode=yes",
     "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
     "-o", "StrictHostKeyChecking=ask", "-o", "ControlPath=none",
-    "-o", "ConnectTimeout=10", "-p", port, ...(alias ? [] : ["-l", user]),
+    "-o", "ConnectTimeout=10", ...(port ? ["-p", port] : []), ...(alias ? [] : ["-l", user]),
     "--", alias || host,
   ];
 }
 
 function installCommand(selected) {
-  return `if [ -f "$HOME/Crewship/.local/host.yml" ]; then
-  curl -fsSL https://raw.githubusercontent.com/${repo}/main/install.sh | bash
+  return `if ! command -v curl >/dev/null; then
+  sudo apt-get update && sudo apt-get install -y curl || exit 1
+fi
+if [ -f "$HOME/Crewship/.local/host.yml" ]; then
+  curl -fsSL https://raw.githubusercontent.com/${repo}/main/install.sh | env -u CREWSHIP_REF bash
 else
-  curl -fsSL https://raw.githubusercontent.com/${repo}/v${version}/install.sh | bash -s -- --with ${selected}
+  curl -fsSL https://raw.githubusercontent.com/${repo}/v${version}/install.sh | CREWSHIP_REF=v${version} bash -s -- --with ${selected}
 fi`;
 }
 
@@ -69,8 +75,8 @@ function serverScript(size, selected) {
 [ "$(id -u)" -ne 0 ] || { echo "Use a non-root account."; exit 1; }
 command -v sudo >/dev/null || { echo "The account needs sudo."; exit 1; }
 [ "$(nproc)" -ge ${size.cpu} ] || { echo "The server needs ${size.cpu} vCPU."; exit 1; }
-awk '/^MemTotal:/ { exit (int($2 / 1048576 + 0.5) < ${size.ram}) }' /proc/meminfo || { echo "The server needs ${size.ram} GB RAM."; exit 1; }
-df -Pk "$HOME" | awk 'NR == 2 { exit ($4 < ${size.disk} * 1000000) }' || { echo "The server needs ${size.disk} GB free disk."; exit 1; }
+awk '/^MemTotal:/ { exit ($2 * 1024 < ${size.ram * capacityTolerance * 1e9}) }' /proc/meminfo || { echo "The server needs nominal ${size.ram} GB RAM."; exit 1; }
+df -Pk "$HOME" | awk 'NR == 2 { exit ($2 * 1024 < ${size.disk * capacityTolerance * 1e9}) }' || { echo "The server needs nominal ${size.disk} GB total disk."; exit 1; }
 sudo -v
 ${installCommand(selected)}`;
 }
@@ -89,9 +95,9 @@ async function setup(ask, { size, selected }, terminal) {
   const alias = await ask("Existing SSH alias? [Enter to use host/user/port]");
   const host = alias ? "" : await ask("Server hostname or IP address?");
   const user = alias ? "" : await ask("Non-root server username?");
-  const port = (await ask("SSH port? [Enter for 22]")) || "22";
+  const port = await ask("SSH port? [Enter to use SSH configuration]");
   const connection = sshArgs({ alias, host, user, port });
-  console.log(`Target: ${alias || `${user}@${host}`}:${port}. New-host features: ${selected}. Existing config: update only.`);
+  console.log(`Target: ${alias || `${user}@${host}`}${port ? `:${port}` : ""}. New-host features: ${selected}. Existing config: update only.`);
   console.log("Verify the SSH host fingerprint against the provider console. Unknown or changed keys stop setup.");
   console.log("SSH will check the server, then run the installer. Enter sudo answers only in the native terminal.");
   if ((await ask("Start setup on this server? [yes/no]")).toLowerCase() !== "yes") return;
@@ -119,6 +125,15 @@ async function askNumber(ask, question, minimum) {
   return Number(answer);
 }
 
+async function askCapacity(ask, question) {
+  const answer = await ask(question);
+  const value = Number(answer);
+  if (!/^\d+(?:\.\d+)?$/.test(answer) || !Number.isFinite(value) || value <= 0) {
+    throw new Error("Enter a positive capacity in GB.");
+  }
+  return value;
+}
+
 async function askFeatures(ask) {
   for (const [name, needs] of Object.entries(optIn)) {
     console.log(`  ${name}${needs.length ? ` (needs ${needs.join(", ")})` : ""}`);
@@ -128,28 +143,33 @@ async function askFeatures(ask) {
 
 async function existingServer(ask) {
   const cpu = await askNumber(ask, "How many vCPU does it have?", 1);
-  const ram = await askNumber(ask, "How much RAM does it have, in GB?", 1);
-  const disk = await askNumber(ask, "How much free disk does it have, in GB?", 1);
-  const size = presets.filter((preset) => cpu >= preset.cpu && ram >= preset.ram && disk >= preset.disk).pop();
-  if (!size) throw new Error("Use at least 4 vCPU, 16 GB RAM, and 100 GB free disk.");
+  const ram = await askCapacity(ask, "How much RAM does it have, in GB?");
+  const disk = await askCapacity(ask, "How much total disk does it have, in GB?");
+  const size = presets.filter((preset) => cpu >= preset.cpu && ram >= preset.ram * capacityTolerance && disk >= preset.disk * capacityTolerance).pop();
+  if (!size) throw new Error("Use at least nominal 4 vCPU, 16 GB RAM, and 100 GB total disk.");
   console.log(`The server meets the ${size.cpu} vCPU / ${size.ram} GB RAM / ${size.disk} GB disk preset.`);
   return { size, selected: await askFeatures(ask) };
 }
 
 async function newServer(ask) {
   console.log("Count active lanes, not queued jobs. Count each UI lane separately from light lanes.");
-  const light = await askNumber(ask, "How many simultaneous light lanes?", 0);
-  const ui = await askNumber(ask, "How many simultaneous UI lanes?", 0);
+  const starter = (await ask("Cannot estimate? Use the starter with two light lanes and no UI lanes? [yes/no]")).toLowerCase();
+  if (starter !== "yes" && starter !== "no") throw new Error("Choose yes for the starter, or no to enter lane counts.");
+  const light = starter === "yes" ? 2 : await askNumber(ask, "How many simultaneous light lanes?", 0);
+  const ui = starter === "yes" ? 0 : await askNumber(ask, "How many simultaneous UI lanes?", 0);
   const selected = await askFeatures(ask);
-  const estimate = recommend(light, ui);
-  console.log(`Estimate: ${estimate.ram} GB RAM and ${estimate.cpu} vCPU. These are estimates, not guarantees.`);
+  const extraBrowsers = await askNumber(ask, "How many extra idle browser bridges, outside the UI lanes? [0 for none]", 0);
+  const extraDisk = await askNumber(ask, "Extra storage beyond the workload preset, in GB? [0 for none]", 0);
+  const estimate = recommend(light, ui, extraDisk, extraBrowsers);
+  console.log(`Estimate: ${estimate.ram} GB RAM and ${estimate.cpu} vCPU; ${estimate.disk} GB disk. These are estimates, not guarantees.`);
   if (!estimate.preset) {
     console.log("The load exceeds the documented presets. Obtain a larger server quote before setup.");
     return;
   }
   const size = estimate.preset;
   console.log(`Buy or provision: ${size.cpu} vCPU, ${size.ram} GB RAM, ${size.disk} GB disk, ${size.swap} GB swap.`);
-  console.log("Swap is not capacity. Allow extra space for data and extra RAM for other services.");
+  console.log("Use SSD or NVMe storage. Start with a VPS; compare dedicated hardware for sustained 16 vCPU / 64 GB load.");
+  console.log("Swap is not capacity. Allow extra RAM for other large services.");
   if ((await ask("Have you purchased or provisioned a server that meets this recommendation? [yes/no]")).toLowerCase() !== "yes") return;
   return { size, selected };
 }
