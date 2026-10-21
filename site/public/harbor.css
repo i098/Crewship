@@ -142,6 +142,6 @@ kbd {
 
 .about { font-size: 16px; }
 .about .top { padding-top: 12px; }
-.about .top h1 { font-size: clamp(26px, 5vw, 38px); }
-.about .top nav a { display: inline-flex; align-items: center; min-height: 44px; }
+.about h1 { font-size: clamp(26px, 5vw, 38px); }
+.about nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .about .post { padding: 20px; }
