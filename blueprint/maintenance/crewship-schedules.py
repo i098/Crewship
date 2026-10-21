@@ -97,6 +97,7 @@ def row_order(item):
     return (result_kind(item["result"]) != "failed",
             next_run[0] if next_run else "9999", item["name"], item["source"])
 
+
 def owner_for(evidence, owners):
     matches = [(root, name) for root, name in owners.items()
                if re.search(r"(?<![\w./-])" + re.escape(root.rstrip("/")) +
