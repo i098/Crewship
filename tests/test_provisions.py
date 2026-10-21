@@ -12,7 +12,9 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 import yaml
@@ -755,6 +757,153 @@ def test_omp_plugins_are_managed_from_the_target_home_whatever_the_installer_cwd
     monkeypatch.chdir(elsewhere)
     installer.omp_plugins(home, {})
     assert set((tmp_path / "cwds").read_text().split()) == {str(home)}
+
+
+def test_plugin_catalogs_are_fetched_once_per_apply_and_existing_plugins_upgrade(tmp_path):
+    omp = tmp_path / ".local/bin/omp"
+    omp.parent.mkdir(parents=True)
+    state_file = tmp_path / "marketplace-state.json"
+    state_file.write_text(json.dumps({"remote": 1, "catalogs": {}, "plugins": {}, "downloads": {}}))
+    omp.write_text(
+        f"#!{sys.executable}\n"
+        """import json
+import sys
+from pathlib import Path
+
+home = Path.home()
+state_file = home / "marketplace-state.json"
+state = json.loads(state_file.read_text())
+args = sys.argv[2:]
+
+def fetch(name):
+    state["catalogs"][name] = state["remote"]
+    state["downloads"][name] = state["downloads"].get(name, 0) + 1
+
+if args == ["list", "--json"]:
+    print(json.dumps({"marketplace": [{"id": name} for name in state["plugins"]]}))
+elif args[:2] == ["marketplace", "add"]:
+    name = args[2].split("/")[-1]
+    fetch(name)
+    registry = home / ".omp/marketplaces.json"
+    registry.parent.mkdir(exist_ok=True)
+    known = json.loads(registry.read_text()) if registry.exists() else []
+    registry.write_text(json.dumps([*known, args[2]]))
+elif args == ["marketplace", "update"]:
+    for name in state["catalogs"]:
+        fetch(name)
+elif args[0] == "install":
+    state["plugins"][args[1]] = state["catalogs"][args[1].split("@")[1]]
+elif args == ["upgrade"]:
+    updated = {name: state["catalogs"][name.split("@")[1]] for name in state["plugins"]}
+    print("up to date" if updated == state["plugins"] else "upgraded")
+    state["plugins"] = updated
+else:
+    raise SystemExit(1)
+state_file.write_text(json.dumps(state))
+"""
+    )
+    omp.chmod(0o755)
+    environment = {"HOME": str(tmp_path)}
+    assert installer.omp_plugins(tmp_path, environment)
+    state = json.loads(state_file.read_text())
+    assert state["plugins"] == {f"{name}@{name}": 1 for name in installer.OMP_PLUGINS}
+    assert state["downloads"] == {name: 1 for name in installer.OMP_PLUGINS}
+
+    state["remote"] = 2
+    state_file.write_text(json.dumps(state))
+    assert installer.omp_plugins(tmp_path, environment)
+    state = json.loads(state_file.read_text())
+    assert state["plugins"] == {f"{name}@{name}": 2 for name in installer.OMP_PLUGINS}
+    assert state["downloads"] == {name: 2 for name in installer.OMP_PLUGINS}
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_concurrent_bun_logs_stay_together_and_failed_output_is_kept(
+    monkeypatch, tmp_path, capfd, failed
+):
+    bun = tmp_path / ".local/bin/bun"
+    bun.parent.mkdir(parents=True)
+    bun.write_text(
+        f"#!{sys.executable}\n"
+        """import json
+import os
+from pathlib import Path
+import sys
+import time
+
+name, version = sys.argv[-1].rsplit("@", 1)
+home = Path.home()
+print(f"{name}:start", flush=True)
+(home / name).touch()
+deadline = time.monotonic() + 5
+while not all((home / tool).exists() for tool in ("first", "second")):
+    if time.monotonic() > deadline:
+        raise SystemExit("the other install did not start")
+    time.sleep(0.01)
+print(f"{name}:end", flush=True)
+if name == "second" and os.environ.get("FAIL"):
+    raise SystemExit(3)
+package = Path(os.environ["BUN_INSTALL_GLOBAL_DIR"]) / "node_modules" / name
+package.mkdir(parents=True)
+(package / "package.json").write_text(json.dumps({"version": version}))
+"""
+    )
+    bun.chmod(0o755)
+    monkeypatch.setattr(installer, "NPM_LATEST", {"first": "first", "second": "second"})
+    environment = {"HOME": str(tmp_path), "FAIL": "yes" if failed else ""}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(installer.bun_latest_install, tmp_path, "first", "1.0.0", environment)
+        second = pool.submit(installer.bun_latest_install, tmp_path, "second", "1.0.0", environment)
+        assert first.result()
+        if failed:
+            with pytest.raises(subprocess.CalledProcessError) as error:
+                second.result()
+            assert "second:end" in error.value.output
+            assert not (tmp_path / ".local/share/crewship/second/1.0.0").exists()
+        else:
+            assert second.result()
+    lines = capfd.readouterr().err.splitlines()
+    for tool in ("first", "second"):
+        assert lines.index(f"{tool}:end") == lines.index(f"{tool}:start") + 1
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_package_installs_overlap_and_failures_prevent_success(
+    monkeypatch, tmp_path, capsys, failed
+):
+    packages = {"first": "first", "second": "second"}
+    ready = Barrier(2, timeout=5)
+
+    def install(home, tool, version, environment):
+        ready.wait()
+        if failed and tool == "second":
+            raise ValueError("package download failed")
+        (home / tool).write_text(version)
+        return True
+
+    monkeypatch.setattr(installer, "NPM_LATEST", packages)
+    monkeypatch.setattr(installer, "AGENT_TOOLS", [])
+    monkeypatch.setattr(installer, "install_asset", lambda *args: False)
+    monkeypatch.setattr(installer, "bun_latest_install", install)
+    monkeypatch.setattr(installer, "omp_plugins", lambda *args: False)
+    resolved = {"uv": {}, "first": "1.0.0", "second": "1.0.0"}
+    monkeypatch.setattr(
+        installer.sys, "argv",
+        ["provisions.py", "--home", str(tmp_path), "--tools", "uv", "--npm",
+         "--resolved", json.dumps(resolved)],
+    )
+    if failed:
+        with pytest.raises(ValueError, match="package download failed"):
+            installer.main()
+        assert not (tmp_path / ".local/share/crewship/resolved.json").exists()
+        assert capsys.readouterr().out == ""
+    else:
+        installer.main()
+        assert json.loads(capsys.readouterr().out)["changed"]
+        assert {tool: (tmp_path / tool).read_text() for tool in packages} == {
+            "first": "1.0.0", "second": "1.0.0"
+        }
+
 
 
 def test_current_follows_the_newest_release_and_a_repeat_changes_nothing(tmp_path):

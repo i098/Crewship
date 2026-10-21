@@ -104,6 +104,9 @@
             "development": {
               "type": "boolean"
             },
+            "sgrep": {
+              "type": "boolean"
+            },
             "firstmate": {
               "type": "boolean"
             },
