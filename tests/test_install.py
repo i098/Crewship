@@ -463,7 +463,6 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
     }]))
     (release.crewship / "ship.sh").write_text(
         SHIP + '\ncase $1 in\n'
-        '  chart) set -- --check ;;\n'
         '  launch) set -- ;;\n'
         '  *) exit 0 ;;\n'
         'esac\n'
@@ -473,7 +472,6 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
     release.env["ANSIBLE_PIPELINING"] = "1"
     result = release.install("v1.0.0")
     assert result.returncode == 0, install_log(result).read_text()
-    assert "chart could not preview every change" not in result.stderr
     for directory in (".local/state", ".cache"):
         assert not (release.home / directory / "code-factory").exists()
         assert (release.home / directory / "crewship/data").read_text() == directory
@@ -481,20 +479,19 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
 
 
 @pytest.mark.parametrize("password_required", [False, True])
-@pytest.mark.parametrize("chart_status", [0, 23])
-def test_install_routes_preview_and_apply_output(release, tmp_path, password_required, chart_status):
+def test_install_routes_apply_output(release, tmp_path, password_required):
     assert release.install("v1.0.0").returncode == 0
     (release.crewship / "ship.sh").write_text(
         f"#!{sys.executable}\n"
         "import importlib.util, os, sys\n"
-        "if sys.argv[1] not in ('chart', 'launch'):\n"
+        "if sys.argv[1] != 'launch':\n"
         "    sys.exit(0)\n"
         f"spec = importlib.util.spec_from_file_location('ship', {str(ROOT / 'scripts/ship.py')!r})\n"
         "ship = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(ship)\n"
         "ship.os.geteuid = lambda: 1000\n"
         "ship.sys.stdin.isatty = lambda: True\n"
-        "sys.exit(ship.provision({'crewship': {'home': os.environ['HOME']}}, sys.argv[1] == 'chart'))\n"
+        "sys.exit(ship.provision({'crewship': {'home': os.environ['HOME']}}, False))\n"
     )
     bin_dir = tmp_path / "bin"
     (bin_dir / "sudo").write_text(f"#!/bin/sh\nexit {int(password_required)}\n")
@@ -504,23 +501,18 @@ def test_install_routes_preview_and_apply_output(release, tmp_path, password_req
         f"#!{sys.executable}\n"
         "import os, sys\n"
         "assert ('--ask-become-pass' in sys.argv) == (os.environ['PASSWORD_REQUIRED'] == '1')\n"
-        "check = '--check' in sys.argv\n"
-        "phase = 'preview' if check else 'apply'\n"
-        "print(phase + '-details')\n"
-        "print(phase + '-diagnostic', file=sys.stderr)\n"
-        "sys.exit(int(os.environ['CHART_STATUS']) if check else 0)\n"
+        "print('apply-details')\n"
+        "print('apply-diagnostic', file=sys.stderr)\n"
     )
     ansible.chmod(0o755)
-    release.env.update(PASSWORD_REQUIRED=str(int(password_required)), CHART_STATUS=str(chart_status))
+    release.env["PASSWORD_REQUIRED"] = str(int(password_required))
     result = release.install("v1.0.0")
     log = install_log(result).read_text()
     assert result.returncode == 0, log
-    for phase in ("preview", "apply"):
-        for stream in ("details", "diagnostic"):
-            message = f"{phase}-{stream}"
-            assert log.count(message) == 1
-            assert (message in result.stdout + result.stderr) == password_required
-    assert ("chart could not preview every change" in result.stderr) == bool(chart_status)
+    for stream in ("details", "diagnostic"):
+        message = f"apply-{stream}"
+        assert log.count(message) == 1
+        assert (message in result.stdout + result.stderr) == password_required
 
 
 
