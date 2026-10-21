@@ -167,7 +167,6 @@ NPM_LATEST = {
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
 PRERELEASE_CHANNEL = {"no-mistakes"}
-# Native tools the agents profile adds; bun installs the registry tools, so it comes first.
 AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws"]
 # Attempts per download; transient 5xx and connection errors back off 1 s, then 2 s.
 DOWNLOAD_ATTEMPTS = 3
