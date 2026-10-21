@@ -52,7 +52,9 @@ Use curl on a fresh server; it does not need a JavaScript runtime.
 `pnpm dlx crewship` may select an older release because of pnpm's release-age policy.
 See [Launcher prerequisites](docs/install.md#install); do not clone the repository.
 
-The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock --with …`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). `--with` applies to a new host only. The later steps sign in, then apply again.
+See [Install, update and migrate](docs/install.md) for release selection and installation steps.
+`--with` applies to a new host only.
+Sign in and apply again in the later steps.
 
 If the installer reports a package-lock error, follow the [recovery instructions](docs/install.md#install).
 
