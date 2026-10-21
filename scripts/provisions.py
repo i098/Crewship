@@ -740,7 +740,7 @@ def fdu_install(home, environment):
     return version() != before
 
 
-# omp marketplace plugins, upgraded on every apply to the default branch: name -> repository.
+# omp marketplace plugins: name -> repository.
 OMP_PLUGINS = {
     "ponytail": "DietrichGebert/ponytail",
     "i-have-adhd": "ayghri/i-have-adhd",
