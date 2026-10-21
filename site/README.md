@@ -174,10 +174,11 @@ Pass a port to `site/serve.py` to use a port other than 8000.
 ## Link preview
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
+Each page defines its own title, description, and absolute canonical URL in `public/index.html` or `public/how.html`.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
 `og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
-After a scene, preview layout, metadata tagline, or favicon change, regenerate both PNGs in the Playwright container and commit them:
+After a scene, preview layout, or favicon change, regenerate both PNGs in the Playwright container and commit them:
 
 ```bash
 python3 site/build.py
@@ -193,6 +194,7 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 ## Browser checks
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
+It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
