@@ -5,7 +5,7 @@ Each `./ship.sh launch` resolves the newest tool releases once, then installs th
 Re-running apply upgrades an existing host.
 The installer verifies downloads against publisher checksums and refuses releases without them.
 Optional Koncreet failures produce a warning instead.
-The omp marketplace plugins and Neovim plugins use upstream Git repositories without publisher checksums.
+See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums.
 Neovim downloads its plugins on first start, not during apply.
 The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
@@ -47,10 +47,9 @@ Bun output stays in one labeled block per package, including command failures.
   See the [`sgrep` profile](configuration.md#profiles) to enable it.
   Apply builds the latest default branch with `cargo install --git https://github.com/context-dot-dev/sgrep --locked`.
   Cargo verifies crates against the upstream `Cargo.lock`; upstream publishes no checksum for the source build.
-  This profile also installs Rust and uses the base ripgrep package.
+  It uses the base ripgrep package and requires the [upstream Rust version](https://github.com/context-dot-dev/sgrep/blob/HEAD/Cargo.toml).
   Apply warms the code and text models; a failed warmup warns without failing the apply.
   Without this profile, apply skips the sgrep build and model downloads.
-  Rust installs only when this profile or `development` is selected.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
 - Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
@@ -130,7 +129,7 @@ See [Project databases](project-databases.md) for setup, backups and removal.
 
 ## Koncreet
 
-Every host that starts services (`start_services: true`); the container worker image skips it.
+See the [`koncreet` profile](configuration.md#profiles) for selection and existing-host defaults; installation also requires `start_services: true`.
 
 - [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `blueprint/patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
 
