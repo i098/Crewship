@@ -46,14 +46,22 @@ The installer:
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
-6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
+6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, and `launch`.
+   In a terminal, `dock` shows a checklist of opt-in features.
+   `--with NAMES` answers it; `--with none` installs only the core.
+   On an existing host, set profiles in `.local/host.yml`; a rerun refuses `--with`.
    If the [Firstmate memory check](configuration.md#commands) fails, the installer stops before its final completion message.
+
+The one-command installer does not run a separate full preview before applying.
+Run `./ship.sh chart` from `~/Crewship` when you want to inspect a preview yourself.
+Follow the [`chart` contract](configuration.md#commands) for preview behavior and side effects.
+The apply still validates the configuration, verifies downloads, and checks its outputs.
 
 The installer shows short progress lines and keeps the full output in `~/.local/state/crewship-install/install-*.log`.
 It prints the log path when it finishes or fails.
 Log files have mode `0600`; check them for private data before sharing them.
 Interactive setup questions stay visible.
-Ansible preview and apply output stays visible when sudo needs a password.
+Ansible apply output stays visible when sudo needs a password.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
