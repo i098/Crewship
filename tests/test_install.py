@@ -1,10 +1,16 @@
 """install.sh and the npm launcher print the usage before any install step."""
 
+import errno
 import getpass
 import importlib.util
+import os
+import pty
+import select
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -263,11 +269,18 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
 
 
 @pytest.mark.parametrize("status", [0, 23])
-def test_install_logs_keep_details_private_on_success_and_failure(release, status):
+def test_install_logs_keep_details_private_on_success_and_failure(release, tmp_path, status):
     assert release.install("v1.0.0").returncode == 0
     (release.crewship / "onboard.sh").write_text(
         f"#!/bin/sh\necho package-details\necho diagnostic-details >&2\nexit {status}\n"
     )
+    tee = tmp_path / "bin/tee"
+    tee.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys\n"
+        f"subprocess.run([{shutil.which('tee')!r}, *sys.argv[1:]], input=sys.stdin.buffer.read(), check=True)\n"
+    )
+    tee.chmod(0o755)
     result = release.install("v1.0.0")
     assert result.returncode == status
     assert "package-details" not in result.stdout + result.stderr
@@ -277,6 +290,58 @@ def test_install_logs_keep_details_private_on_success_and_failure(release, statu
     assert log.parent == release.home / ".local/state/crewship-install"
     assert "package-details\n" in log.read_text()
     assert "diagnostic-details\n" in log.read_text()
+    report = f"Full install log: {log}\n"
+    assert (result.stderr if status else result.stdout).endswith(report)
+    assert log.read_text().endswith(report)
+
+
+def test_interrupt_reports_retained_install_log(release):
+    assert release.install("v1.0.0").returncode == 0
+    (release.home / "calls").unlink()
+    (release.crewship / "onboard.sh").write_text(
+        "#!/bin/sh\n"
+        "echo before-interrupt\n"
+        "echo diagnostic-before-interrupt >&2\n"
+        "echo ready-to-interrupt >/dev/tty\n"
+        "exec sleep 60\n"
+    )
+    pid, terminal = pty.fork()
+    if pid == 0:
+        os.execve(BASH, [BASH, str(ROOT / "install.sh")], release.env)
+    output = b""
+    interrupted = False
+    deadline = time.monotonic() + 20
+    try:
+        while True:
+            ready, _, _ = select.select([terminal], [], [], max(0, deadline - time.monotonic()))
+            assert ready, f"The installer did not exit:\n{output.decode()}"
+            try:
+                chunk = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not chunk:
+                break
+            output += chunk
+            if b"ready-to-interrupt" in output and not interrupted:
+                os.write(terminal, b"\x03")
+                interrupted = True
+    finally:
+        os.close(terminal)
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _, status = os.waitpid(pid, 0)
+    result = subprocess.CompletedProcess([], os.waitstatus_to_exitcode(status), output.decode(), "")
+    assert interrupted, result.stdout
+    log = install_log(result)
+    assert result.returncode == 130, result.stdout
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert "before-interrupt\n" in log.read_text()
+    assert "diagnostic-before-interrupt\n" in log.read_text()
+    assert not (release.home / "calls").exists()
 
 
 def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path):

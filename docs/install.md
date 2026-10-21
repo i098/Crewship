@@ -49,7 +49,7 @@ The installer:
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
 
 The installer shows short progress lines and keeps the full output in `~/.local/state/crewship-install/install-*.log`.
-It prints the log path when it finishes or fails.
+It prints the log path after the other output when it finishes, fails, or you press Ctrl-C.
 Log files have mode `0600`; check them for private data before sharing them.
 Interactive setup questions stay visible.
 When Ansible needs a sudo password, its output stays visible so it can keep using that password.
