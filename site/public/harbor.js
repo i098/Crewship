@@ -4289,10 +4289,7 @@ function startSound() {
       gain.connect(panner).connect(ctx.destination);
       // AAC plays in every major browser; Chromium builds without AAC take the Opus copy. A loop that fails stays silent.
       const load = (type) => fetch(`audio/${name}.${type}`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b));
-      load("m4a").catch((error) => {
-        if (error.name !== "EncodingError") throw error;
-        return load("webm");
-      }).then((buffer) => {
+      load("m4a").catch(() => load("webm")).then((buffer) => {
         const source = new AudioBufferSourceNode(ctx, { buffer, loop: true, loopStart: 0.25, loopEnd: 0.25 + loop });
         source.connect(gain);
         source.start(0, 0.25 + Math.random() * loop);

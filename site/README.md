@@ -125,7 +125,6 @@ Sound starts with the first click or tap, as browsers require, and the speaker b
 The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
 Sound stops while the tab is hidden; reduced motion does not change it.
 The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
-Only an AAC decode error selects the Opus copy; cancelled or failed network requests do not start another request.
 See [how.html](public/how.html) for the audio graph.
 
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
@@ -251,6 +250,6 @@ The site serves on https://crewship.si, a custom domain attached to the Worker o
 
 The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
 The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
-The sitemap lists the canonical home and How URLs without modification dates.
+The sitemap lists the canonical home, How, and About URLs without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.

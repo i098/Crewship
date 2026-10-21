@@ -203,7 +203,11 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                     assert [
                         url.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
                         for url in sitemap
-                    ] == ["https://crewship.si/", "https://crewship.si/how"]
+                    ] == [
+                        "https://crewship.si/",
+                        "https://crewship.si/how",
+                        "https://crewship.si/about",
+                    ]
                 if filename == "robots.txt":
                     robots = RobotFileParser()
                     robots.parse(body.decode().splitlines())

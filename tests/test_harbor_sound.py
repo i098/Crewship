@@ -43,8 +43,7 @@ class PannerNode {
   constructor() { this.positionX = param(); this.positionY = param(); this.positionZ = param(); }
   connect(n) { return n; }
 }
-const requests = [];
-const fetch = (url) => { requests.push(url); return Promise.reject(new TypeError('offline')); };
+const fetch = () => Promise.reject(new Error('offline'));
 """
     check = r"""
 const at = (i) => { const p = audio.nodes[i].panner; return [p.positionX.value, p.positionY.value, -p.positionZ.value]; };
@@ -55,9 +54,6 @@ let clock = 0;
 const tick = () => { clock += 100; soundTick(clock); };
 assert.equal(audio, null, 'no audio before a click or tap');
 setSound(true);
-await new Promise(setImmediate);
-assert.deepEqual(requests, LOOPS.map(([name]) => `audio/${name}.m4a`),
-  'network failures must not start codec fallback requests');
 
 // Outdoors by the fountain: the outdoor loops play, the fire is silent, the fountain stays at the basin.
 Object.assign(me, {x: 5, z: 21, yaw: 0, eye: 3});
