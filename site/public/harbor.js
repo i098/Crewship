@@ -3114,6 +3114,7 @@ function mapMarks() {
   if (mapInside(f)) mapPut(f[0] + 1, f[1] + 1, "O", "w");
   ORDER.forEach(mapPoint);
   if (mapMode === 2) mapLabels();
+  if (mapMode) mapPoint(ORDER[pick], pick);
   const p = toMap(me.x, me.z);
   if (mapInside(p)) mapPut(p[0] + 1, p[1] + 1, "^>v<"[Math.round(((me.yaw % 6.283) + 6.283) / 1.5708) % 4], "k");
 }

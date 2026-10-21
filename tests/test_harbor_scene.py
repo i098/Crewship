@@ -93,14 +93,18 @@ function fountainMapCell() {
   return MAPCELLS.get((mapBox.oj + j + 1) * cols + mapBox.oi + i + 1);
 }
 assert.deepEqual(fountainMapCell(), ['O', 'w'], 'full map label overwrites the fountain');
-cols = 17; rows = 20; setMap(1);
-minimap();
-assert.deepEqual(toMap(anchors.antenna.x, anchors.antenna.z), toMap(5, 24.6),
-  'coarse map must exercise a point and scenery overlap');
-assert.deepEqual(fountainMapCell(), ['@', 'h'], 'fountain overwrites the selected point');
-me.x = 2.9; me.z = 24.6;
-minimap();
-assert.deepEqual(fountainMapCell(), ['^', 'k'], 'scenery or selected point overwrites the player');
+cols = 17; rows = 20;
+for (const mode of [1, 2]) {
+  setMap(mode);
+  me.x = 0; me.z = -7.4;
+  minimap();
+  assert.deepEqual(toMap(anchors.antenna.x, anchors.antenna.z), toMap(5, 24.6),
+    'coarse map must exercise a point and scenery overlap');
+  assert.deepEqual(fountainMapCell(), ['@', 'h'], 'landmarks overwrite the selected point');
+  me.x = 2.9; me.z = 24.6;
+  minimap();
+  assert.deepEqual(fountainMapCell(), ['^', 'k'], 'scenery or selected point overwrites the player');
+}
 setMap(0); cols = rows = 0;
 for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
   me.x = 5 - Math.sin(yaw) * 2.1;
