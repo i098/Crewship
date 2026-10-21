@@ -115,7 +115,7 @@ Documentation-only PRs change only root-level `README*` files, files under `docs
 Files under `blueprint/skills/`, `blueprint/rules/`, and `blueprint/config/` count as code, including Markdown files.
 Renames check both the old and new paths.
 CI skips heavy jobs on documentation-only PRs when classification succeeds.
-PRs limited to `site/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
+PRs limited to `site/**` and documentation also skip heavy jobs.
 Job-level conditions let skipped required checks report instead of remaining pending.
 The `changelog fragment` job lives in `changelog.yml`, so label changes re-run only that workflow; `ci.yml` ignores `labeled`/`unlabeled`. It runs on PRs unless they have the `no changelog` label.
 The required `pull request body` job lives in `pr-body.yml` and runs on opened, edited, synchronized, and reopened PRs.
@@ -133,9 +133,19 @@ Pushes to `main` and manual runs execute heavy jobs except the PR-only quality g
 
 Every action is pinned to the commit SHA of its latest release (Dependabot moves the pins weekly), and the CI token is read-only. uv and Bun are their latest releases, the same as `./onboard.sh` and `./ship.sh launch` install.
 
-`.github/workflows/npm-publish.yml` runs when a `vX.Y.Z` GitHub release is published. It sets the version of the `crewship` npm package (`tools/npm/`) to the tag and publishes it with npm trusted publishing: the job's OIDC token (`id-token: write`, its only other permission is `contents: read`) replaces a stored npm token, and npm adds a provenance attestation. The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment. Each publish shows under Deployments with the package page as its URL. The package holds only `tools/npm/crewship.js`, which fetches and runs `install.sh` from the release with the same version; `tests/test_npm_package.py` fails if anything else enters the tarball.
+`.github/workflows/npm-publish.yml` runs when a `v*` GitHub release is published.
+See [Release channels and steps](../../CONTRIBUTING.md#changelog-and-releases) for version checks and publication rules.
+The workflow uses npm trusted publishing: the job's OIDC token (`id-token: write`, with `contents: read`) replaces a stored npm token.
+npm adds a provenance attestation.
+The npm trusted publisher accepts only this workflow in the `npm` environment, and only `v*` tags can deploy to that environment.
+Each publish shows under Deployments with the package page as its URL.
+The package holds only `tools/npm/crewship.js`, which fetches and runs `install.sh` from the matching release.
+`tests/test_npm_package.py` fails if anything else enters the tarball.
 
-`.github/workflows/release-artifact.yml` is started by hand with a tag. It attaches `crewship-<tag>.tar.gz` (a `git archive` of the tag, built by `scripts/build-release-artifact.sh`) and its `.sha256` to the draft release of that tag, with `contents: write` as its only permission. It has no `published` trigger: releases are immutable, so assets can only be added to a draft, before it is published (see [Changelog and releases](../../CONTRIBUTING.md#changelog-and-releases)). `install.sh` installs that artifact, or the verified source archive of the tag when a release has none, instead of cloning ([Install, update and migrate](../install.md)).
+`.github/workflows/release-artifact.yml` attaches assets to a draft release with `contents: write` as its only permission.
+It has no `published` trigger because immutable releases accept assets only before publication.
+See [Release steps](../../CONTRIBUTING.md#release-steps) for channel selection and artifact preparation.
+See [Install, update and migrate](../install.md) for installer selection, verification, and legacy archive support.
 
 ## Primary sources
 
