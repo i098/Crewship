@@ -289,7 +289,7 @@ def test_sgrep_can_be_selected_without_development(tmp_path, monkeypatch):
 def test_survey_requires_sgrep_only_when_selected(configuration, monkeypatch, capsys, enabled):
     configuration["crewship"]["profiles"].update(agents=False, firstmate=False, sgrep=enabled)
     configuration["crewship"]["start_services"] = False
-    monkeypatch.setattr(ship.shutil, "which", lambda name, **kwargs: None if name == "sgrep" else "/usr/bin/true")
+    monkeypatch.setattr(ship.shutil, "which", lambda name, **kwargs: None if name == "sgrep" else sys.executable)
     assert ship.doctor(configuration) == int(enabled)
     assert ("MISSING sgrep" in capsys.readouterr().out) is enabled
 
