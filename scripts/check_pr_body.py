@@ -2,6 +2,7 @@
 import argparse
 import re
 import sys
+from html import unescape
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.md"
@@ -11,6 +12,12 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
 MARKUP = re.compile(CODE_SPAN + r"|</?[A-Za-z][\w-]*(?:\s+[^<>]*)?\s*/?>")
+LINK_DEFINITION = re.compile(
+    r"^ {0,3}\[(?:\\.|[^\[\]\\\n])+\]:[ \t]*(?:\n[ \t]*)?"
+    r"(?:<[^<>\n]*>|[^\s<>]+)"
+    r"""(?:[ \t]*(?:\n[ \t]*)?(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*(?=\n|$)""",
+    re.M,
+)
 
 
 def strip_comments(line, comment):
@@ -58,10 +65,23 @@ def sections(markdown):
     return result
 
 
+def has_content(lines):
+    if any(code and re.search(r"\w", line) for line, code in lines):
+        return True
+    text = LINK_DEFINITION.sub("", "\n".join(line if not code else "" for line, code in lines))
+    if any(
+        line.startswith(("    ", "\t")) and re.search(r"\w", line) for line in text.splitlines()
+    ):
+        return True
+    if any(match[1] and re.search(r"\w", match[2]) for match in MARKUP.finditer(text)):
+        return True
+    return bool(re.search(r"\w", unescape(MARKUP.sub("", text))))
+
+
 def check_body(body, template):
     errors = []
-    first = body.lstrip().splitlines()[0] if body.strip() else ""
-    if not re.fullmatch(r"Closes #[1-9][0-9]*[ \t]*", first):
+    first = next((line for line in body.splitlines() if line.strip()), "")
+    if not re.fullmatch(r" {0,3}Closes #[1-9][0-9]*[ \t]*", first):
         errors.append("Start the body with Closes # followed by a positive issue number.")
 
     actual = sections(body)
@@ -73,11 +93,7 @@ def check_body(body, template):
             errors.append(f"Include exactly one ## {heading} section.")
             continue
         lines = matches[0]
-        text = (
-            line if code else MARKUP.sub(lambda match: match[0] if match[1] else "", line)
-            for line, code in lines
-        )
-        if not any(re.search(r"\w", line) for line in text):
+        if not has_content(lines):
             errors.append(f"Fill the ## {heading} section.")
         items = [CHECKBOX.fullmatch(line) for line, code in lines if not code]
         items = [item for item in items if item]

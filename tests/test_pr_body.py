@@ -57,6 +57,11 @@ class PRBodyTests(unittest.TestCase):
     def check(self, body):
         return checker.check_body(body, TEMPLATE)
 
+    def body_with_section(self, heading, content):
+        before, marker, after = VALID_BODY.partition(f"## {heading}\n")
+        _, next_heading, rest = after.partition("\n## ")
+        return before + marker + "\n" + content + "\n" + next_heading + rest
+
     def test_pipeline_style_body_with_collapsed_evidence_passes(self):
         self.assertEqual(self.check(VALID_BODY), [])
 
@@ -68,6 +73,19 @@ class PRBodyTests(unittest.TestCase):
             with self.subTest(first=first):
                 self.assertTrue(self.check(VALID_BODY.replace("Closes #695", first, 1)))
 
+    def test_indented_code_cannot_supply_the_opening_reference(self):
+        for prefix in ("    ", "\t", " \t", "\n    ", "\n\t"):
+            with self.subTest(prefix=prefix):
+                errors = self.check(prefix + VALID_BODY)
+                self.assertIn(
+                    "Start the body with Closes # followed by a positive issue number.", errors
+                )
+
+    def test_opening_reference_allows_blank_lines_and_prose_indentation(self):
+        for prefix in ("", " ", "  ", "   ", "\n \t\n   "):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.check(prefix + VALID_BODY), [])
+
     def test_each_required_heading_must_appear_once(self):
         for heading in ("Summary", "What changed and why", "Test evidence", "Checklist"):
             with self.subTest(heading=heading):
@@ -75,12 +93,33 @@ class PRBodyTests(unittest.TestCase):
                 self.assertTrue(self.check(VALID_BODY + f"\n## {heading}\nDuplicate.\n"))
 
     def test_required_sections_cannot_be_empty_or_comment_only(self):
-        for content in ("", "-", "<!-- Fill this in. -->", "```text\n```", "<br>", "<div></div>"):
-            with self.subTest(content=content):
-                body = VALID_BODY.replace(
-                    "Check every pull request body against the repository template.", content
-                )
-                self.assertTrue(self.check(body))
+        for heading in ("Summary", "What changed and why", "Test evidence"):
+            for content in (
+                "", "-", "<!-- Fill this in. -->", "```text\n```", "<br>", "<div></div>",
+                "<div>&nbsp;</div>", "&#160;", "&#xA0;", "&Tab;&NewLine;", "&ensp;",
+                "[ref]: https://example.com",
+                "   [ref]: <https://example.com> 'A title'",
+                '[ref]: https://example.com\n  "A title"',
+                "[ref]:\n    https://example.com\n    (A title)",
+                "[one]: https://example.com\n[two]: https://example.org",
+            ):
+                with self.subTest(heading=heading, content=content):
+                    errors = self.check(self.body_with_section(heading, content))
+                    self.assertIn(f"Fill the ## {heading} section.", errors)
+
+    def test_visible_section_content_survives_markup_filtering(self):
+        for heading in ("Summary", "What changed and why", "Test evidence"):
+            for content in (
+                "`<br>`", "`&nbsp;`", "`[ref]: https://example.com`",
+                "```html\n<div>&nbsp;</div>\n```",
+                "~~~markdown\n[ref]: https://example.com\n~~~",
+                "    <div>&nbsp;</div>", "\t[ref]: https://example.com",
+                "&lt;br&gt;", "<div>A change.</div>",
+                "[ref]: https://example.com\n\nRead [ref].",
+                '[ref]: https://example.com\n  "A title"\n\nVisible text.',
+            ):
+                with self.subTest(heading=heading, content=content):
+                    self.assertEqual(self.check(self.body_with_section(heading, content)), [])
 
     def test_comment_and_fenced_headings_do_not_supply_required_sections(self):
         for wrapped in (f"<!--\n{VALID_BODY}\n-->", f"```markdown\n{VALID_BODY}\n```"):
@@ -158,6 +197,22 @@ class PRBodyTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 1)
         self.assertIn("## Summary", result.stderr)
+
+    def test_cli_rejects_indented_reference_and_rendered_empty_section(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            path = Path(directory) / "body.md"
+            path.write_text(self.body_with_section("Summary", "<div>&nbsp;</div>"))
+            for args, stdin, error in (
+                ([], "    " + VALID_BODY, "Start the body with Closes #"),
+                ([str(path)], None, "Fill the ## Summary section."),
+            ):
+                with self.subTest(args=args):
+                    result = subprocess.run(
+                        [sys.executable, str(SCRIPT), *args],
+                        input=stdin, text=True, capture_output=True, timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(error, result.stderr)
 
 
 if __name__ == "__main__":
