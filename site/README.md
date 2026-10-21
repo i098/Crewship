@@ -6,7 +6,7 @@ The home page keeps its product summary and About link in the HTML and the initi
 The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
 It uses the main README as its factual source and needs no JavaScript.
 
-It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
+The harbor is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
@@ -172,13 +172,13 @@ python3 site/serve.py
 ```
 
 Then open <http://localhost:8000>.
-The preview serves `/how` without a redirect and returns 404 for unknown routes.
+The preview serves `/how` and `/about` without redirects and returns 404 for unknown routes.
 Pass a port to `site/serve.py` to use a port other than 8000.
 
 ## Link preview
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
-Each page defines its own title, description, and absolute canonical URL in `public/index.html` or `public/how.html`.
+Each page defines its own title, description, and absolute canonical URL in `public/index.html`, `public/how.html`, or `public/about.html`.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
 `og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
