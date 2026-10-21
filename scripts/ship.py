@@ -6,6 +6,7 @@ import json
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -326,14 +327,16 @@ def provision(document, check):
     return subprocess.run(argv, cwd=ROOT, env=environment).returncode
 
 
-def doctor(document):
-    config = document["crewship"]
+def host_environment(config):
     home = Path(config["home"])
-    environment = {
+    return {
         **os.environ,
         "HOME": str(home),
         "PATH": str(home / ".local/bin") + ":/usr/local/bin:/usr/bin:/bin",
     }
+
+
+def tool_checks(config, environment):
     tools = ["herdr", "node", "bun", "uv", "git", "rg", "sgrep"]
     if config["profiles"]["agents"]:
         tools += [
@@ -353,39 +356,55 @@ def doctor(document):
         tools += ["rustc", "cargo"]
     if config["profiles"].get("gateway"):  # off unless the host config turns it on
         tools.append("cloudflared")
-    failed = []
     for name in tools:
         path = shutil.which(name, path=environment["PATH"])
         if not path:
-            failed.append(name)
-            print(f"MISSING {name}")
+            yield name, False, f"MISSING {name}"
             continue
         try:
             result = subprocess.run(
                 [path, "--version"], env=environment, capture_output=True, text=True, timeout=20
             )
             if result.returncode:
-                failed.append(name)
-                print(f"FAILED {name}: exit {result.returncode}")
+                yield name, False, f"FAILED {name}: exit {result.returncode}"
             else:
                 text = (result.stdout or result.stderr).splitlines()
-                print(f"OK {name}: {text[0] if text else path}")
-        except subprocess.TimeoutExpired:
-            failed.append(name)
-            print(f"FAILED {name}: version command timed out")
-    if config["profiles"]["agents"]:
-        gh = shutil.which("gh", path=environment["PATH"])
-        authenticated = (
-            gh is not None
-            and subprocess.run(
-                [gh, "auth", "status"],
-                env=environment,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=20,
-            ).returncode
-            == 0
+                yield name, True, f"OK {name}: {text[0] if text else path}"
+        except (OSError, subprocess.TimeoutExpired):
+            yield name, False, f"FAILED {name}: version command unavailable or timed out"
+
+
+def github_signed_in(environment):
+    try:
+        return subprocess.run(
+            ["gh", "auth", "status", "--hostname", "github.com"],
+            env=environment, cwd=environment["HOME"], capture_output=True, timeout=20,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def omp_signed_in(environment):
+    try:
+        probe = subprocess.run(
+            ["omp", "models", "--json"], env=environment,
+            cwd=environment["HOME"], capture_output=True, text=True, timeout=30,
         )
+        models = json.loads(probe.stdout)["models"]
+        return probe.returncode == 0 and isinstance(models, list) and bool(models)
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        return False
+
+
+def doctor(document):
+    config = document["crewship"]
+    environment = host_environment(config)
+    checks = list(tool_checks(config, environment))
+    failed = [name for name, ok, _ in checks if not ok]
+    for _, _, message in checks:
+        print(message)
+    if config["profiles"]["agents"]:
+        authenticated = github_signed_in(environment)
         print(
             "GitHub authentication: "
             + ("present" if authenticated else "manual gh auth login required")
@@ -408,11 +427,80 @@ def doctor(document):
     return 1 if failed else 0
 
 
+def firstmate_checks(config, environment):
+    pending = []
+    if not config["profiles"]["firstmate"]:
+        return pending
+    home = Path(config["home"])
+    if not (Path(config["workspace"]) / "firstmate/bin/fm-home-seed.sh").is_file():
+        pending.append("Firstmate installation")
+    if not (home / ".local/share/crewship/new-host-questions-done").is_file():
+        pending.append("new-host questions")
+    if config["start_services"]:
+        runtime = f"/run/user/{os.getuid()}"
+        environment = {
+            **environment,
+            "XDG_RUNTIME_DIR": runtime,
+            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
+        }
+        try:
+            service = subprocess.run(
+                ["systemctl", "--user", "is-active", "--quiet", "herdr.service"],
+                env=environment, capture_output=True, timeout=20,
+            )
+            if service.returncode:
+                pending.append("Herdr service")
+        except (OSError, subprocess.TimeoutExpired):
+            pending.append("Herdr service")
+    return pending
+
+
+def setup_status(document, config_path):
+    config = document["crewship"]
+    command = shlex.join([str(ROOT / "ship.sh"), "launch", "--config", str(config_path)])
+    resume = shlex.join([str(ROOT / "ship.sh"), "setup", "--config", str(config_path)])
+    if pwd.getpwuid(os.getuid()).pw_name != config["user"]:
+        resume = shlex.join([
+            "sudo", "-iu", config["user"], str(ROOT / "ship.sh"),
+            "setup", "--config", str(config_path),
+        ])
+        for section in ("Software", "Sign-ins", "Fleet ready"):
+            print(f"{section}: unchecked; run: {resume}")
+        return 1
+    environment = host_environment(config)
+    failed = [name for name, ok, _ in tool_checks(config, environment) if not ok]
+    print(f"Software: missing or failed {', '.join(failed)}; run: {command}"
+          if failed else "Software: ready")
+    missing = []
+    if config["profiles"]["agents"]:
+        if not github_signed_in(environment):
+            gh = shlex.quote(shutil.which("gh", path=environment["PATH"]) or "gh")
+            missing.append(f"{gh} auth login --hostname github.com --git-protocol https --web")
+        if not omp_signed_in(environment):
+            missing.append(shlex.quote(str(Path(config["home"]) / ".local/bin/omp")))
+    print(f"Sign-ins: pending; run: {' && '.join(missing)}"
+          if missing else "Sign-ins: ready")
+    pending = firstmate_checks(config, environment)
+    if failed or missing:
+        print(f"Fleet ready: no; finish the commands above, then run: {resume}")
+    elif pending:
+        print(f"Fleet ready: no ({', '.join(pending)}); run: {command}")
+    elif not config["profiles"]["firstmate"]:
+        print("Fleet ready: not enabled (worker-only profile)")
+    elif not config["start_services"]:
+        edit_config = f"${{EDITOR:-nano}} {shlex.quote(str(config_path))}"
+        print(f"Fleet ready: no (start_services is false); enable services with: {edit_config}")
+        return 1
+    else:
+        print("Fleet ready: setup checks passed; a live agent task is not verified")
+    return int(bool(failed or missing or pending))
+
+
 def questions(document, config_path):
     """Open Firstmate on omp to ask the operator the new-host move questions."""
     config = document["crewship"]
     home = Path(config["home"])
-    environment = {**os.environ, "PATH": f"{home / '.local/bin'}:{os.environ.get('PATH', '')}"}
+    environment = host_environment(config)
     marker = home / ".local/share/crewship/new-host-questions-done"
     if (
         not sys.stdin.isatty()
@@ -433,19 +521,7 @@ def questions(document, config_path):
         return 0
     omp = home / ".local/bin/omp"
     firstmate = Path(config["workspace"]) / "firstmate"
-    try:
-        probe = subprocess.run(
-            [omp, "models", "--json"],
-            cwd=firstmate,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        signed_in = probe.returncode == 0 and bool(json.loads(probe.stdout)["models"])
-    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
-        signed_in = False
-    if not signed_in:
+    if not omp_signed_in(environment):
         print(
             f"New-host questions not started: sign in to omp with /login (run omp as "
             f"{config['user']}), then rerun ./ship.sh launch interactively"
@@ -475,7 +551,7 @@ def questions(document, config_path):
                 f"Checklist {checklist['repo']}:{checklist['path']} is not readable; using {source}"
             )
     prompt = (
-        "Crewship setup on this host is complete. Walk me through the new-host move "
+        "Crewship software is installed on this host. Walk me through the new-host move "
         "decisions one question at a time, waiting for my answer before the next: which "
         "secondmate homes, services, tools and unpushed work to bring over from the old "
         f"host. Use {source} as the checklist."
@@ -531,6 +607,7 @@ def main():
         ("chart", "preview provisioning changes; old config keys are rewritten once"),
         ("launch", "provision this host from the host config; old config keys are rewritten once"),
         ("survey", "check expected tools; old config keys are rewritten once"),
+        ("setup", "report software, sign-ins and Firstmate readiness; rerun after each missing step"),
     ):
         command = commands.add_parser(name, help=text)
         command.add_argument("--config", type=Path, default=None)
@@ -540,11 +617,22 @@ def main():
         return 0
     path = args.config or (
         ROOT / ".local/host.yml"
-        if (ROOT / ".local/host.yml").exists()
+        if args.command == "setup" or (ROOT / ".local/host.yml").exists()
         else ROOT / "blueprint/config/default.yml"
     )
     path = path.resolve()
+    if args.command == "setup" and not path.is_file():
+        if args.config:
+            recovery = f"restore the selected config with: ${{EDITOR:-nano}} {shlex.quote(str(path))}"
+        else:
+            recovery = f"run: {shlex.join([str(ROOT / 'ship.sh'), 'dock'])}"
+        print(f"Software: unchecked (missing config {path}); {recovery}")
+        print(f"Sign-ins: unchecked; {recovery}")
+        print(f"Fleet ready: no; {recovery}")
+        return 1
     document = load_config(path)
+    if args.command == "setup":
+        return setup_status(document, path)
     if args.command == "inspect":
         print(f"Valid host configuration: {path}")
         return 0

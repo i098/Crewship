@@ -12,6 +12,7 @@
 | `./ship.sh chart` | | Runs the Ansible playbook in check mode and reports what would change. Creates missing home-layout, agent preference, extension, and enabled-profile directories under the configured user's home. Leaves existing directory permissions, ownership, and managed files unchanged. Reports missing Obscura releases without downloading or extracting binaries. Also performs the one-time config rewrite below. |
 | `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. With the `firstmate` profile on, the first successful interactive apply with omp signed in then opens the new-host questions (below). |
 | `./ship.sh survey` | | Checks that each expected tool runs and reports `gh` authentication. Changes nothing except for the one-time config rewrite below. |
+| `./ship.sh setup` | | Reports software, sign-ins, and Firstmate setup readiness on three lines, with the next commands for missing steps. Exits 1 until required checks pass. Does not install or sign in. |
 | `scripts/ship.py` | | The Python program behind `ship.sh`. |
 | `scripts/provisions.py` | `scripts/install_tools.py` | Installs the public tools into the user-owned Crewship prefix. |
 | `scripts/stow-secrets.sh` | `scripts/push-super-env.sh` | Pushes `~/super.env` to Cloudflare Secrets Store and redeploys the fleet-secrets Worker. |
@@ -23,6 +24,13 @@ Errors from installed units remain visible.
 `launch` keeps its existing service enablement and start behavior.
 
 `inspect`, `chart`, `launch`, and `survey` read `--config <path>` if you pass one, otherwise `.local/host.yml`. If `.local/host.yml` does not exist, `inspect`, `chart`, and `survey` fall back to `blueprint/config/default.yml` (user `coder`); `launch` refuses to run.
+
+Run `"$HOME/Crewship/ship.sh" setup` from any directory after installation.
+It uses the same tool checks as `survey`, then checks GitHub authentication and `omp models --json`.
+For Firstmate, it checks the installed entry point, the new-host question marker, and the Herdr user service when enabled.
+It does not start Firstmate, prove worker capacity, or send a model request.
+Repeat it after each printed command; it reads current state and does not repeat an apply.
+`setup` accepts `--config <path>` and requires an existing host config instead of using the default example.
 
 The next config read rewrites an old root key to `crewship` and prints one notice.
 It keeps the original bytes in `<config>.bak` beside the config.

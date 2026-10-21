@@ -59,7 +59,24 @@ If the installer reports a package-lock error, follow the [recovery instructions
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
 - STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
-- Then run `cd ~/Crewship` for every later step.
+- Check or resume setup from any directory with `"$HOME/Crewship/ship.sh" setup`.
+
+### Resume setup
+
+```bash
+"$HOME/Crewship/ship.sh" setup
+```
+
+The command prints three lines: software, sign-ins, and fleet readiness.
+Run each printed command, then repeat `setup`.
+It checks existing state instead of installing again.
+It exits with status 1 while a required step is missing.
+GitHub and provider sign-ins still need the user's consent.
+The fleet check covers the Firstmate installation, new-host questions, and the Herdr service when enabled.
+It does not prove capacity or a successful agent task.
+Use [`Capacity`](docs/capacity.md) before starting workers.
+
+The manual steps below use `./ship.sh` from `~/Crewship`; the absolute path above needs no directory change.
 
 ## 1. Sign in to GitHub
 
@@ -144,13 +161,14 @@ The installer already applied the default profiles. This run applies your change
 ## 6. Verify and report
 
 ```bash
-./ship.sh survey
+"$HOME/Crewship/ship.sh" setup
 ```
 
-- Check: each expected tool runs, and `gh` shows as authenticated.
+- Check: software and sign-ins report ready, and the enabled Firstmate checks pass.
 - Check: with the gateway on, `crewship-gateway url` prints an `https://….trycloudflare.com` address.
-- Tell the user what passed and what failed, and which step to repeat for each failure.
-- Do not mark the setup as done while a check fails.
+- Report each missing step and its printed command.
+- Do not mark setup as done while a check fails or a sign-in is missing.
+- Check host capacity and run a real agent task before reporting a working fleet.
 
 ## Where to look when stuck
 

@@ -9,7 +9,7 @@ Crewship is an Ansible playbook with a Python CLI wrapper (`scripts/ship.py`). T
 - `blueprint/ansible/group_vars/all/*.yml` — Jinja vars consumed by tasks, one file per topic
 - `blueprint/ansible/tasks/*.yml` — the tasks themselves (one file per concern)
 - `blueprint/ansible/templates/*.j2` — systemd unit templates
-- `scripts/ship.py` — CLI (`dock`, `inspect`, `chart`, `launch`, `survey`)
+- `scripts/ship.py` — CLI (`dock`, `inspect`, `chart`, `launch`, `survey`, `setup`)
 - `scripts/provisions.py` — latest-release tool installer (idempotent)
 - `blueprint/fleet/` — runtime scripts deployed to `~/oss-fleet/` on the target host
 - `blueprint/config/` — per-tool config templates deployed to Firstmate homes

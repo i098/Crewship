@@ -472,6 +472,78 @@ def test_another_accounts_apply_skips_questions_without_reading_the_unreadable_h
     assert "rerun ./ship.sh launch interactively as another-account" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "github,models,questions_done,service,expected",
+    [
+        (1, '{"models":[]}', True, 0, "Sign-ins: pending"),
+        (0, '{"models":[]}', True, 0, "Sign-ins: pending"),
+        (1, '{"models":[{}]}', True, 0, "Sign-ins: pending"),
+        (0, 'not json', True, 0, "Sign-ins: pending"),
+        (0, '{"models":"invalid"}', True, 0, "Sign-ins: pending"),
+        (0, '{"models":[{}]}', False, 0, "new-host questions"),
+        (0, '{"models":[{}]}', True, 1, "Herdr service"),
+        (0, '{"models":[{}]}', True, 0, "Fleet ready: setup checks passed"),
+    ],
+)
+def test_setup_resumes_without_claiming_readiness_before_sign_in(
+    configuration, tmp_path, monkeypatch, capsys, github, models, questions_done, service, expected
+):
+    configuration["crewship"].update(
+        user=ship.pwd.getpwuid(ship.os.getuid()).pw_name,
+        home=str(tmp_path), workspace=str(tmp_path / "Dev"),
+    )
+    firstmate = tmp_path / "Dev/firstmate/bin"
+    firstmate.mkdir(parents=True)
+    (firstmate / "fm-home-seed.sh").touch()
+    if questions_done:
+        marker = tmp_path / ".local/share/crewship/new-host-questions-done"
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+    host = tmp_path / "host config.yml"
+    host.write_text(yaml.safe_dump(configuration))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ship, "tool_checks", lambda *_: [("omp", True, "OK omp")])
+    monkeypatch.setattr(ship, "load_config", lambda path: yaml.safe_load(path.read_text()))
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+
+    def run(command, **kwargs):
+        if command[0] == "gh":
+            return subprocess.CompletedProcess(command, github)
+        if command[0] == "omp":
+            return subprocess.CompletedProcess(command, 0, models)
+        if command[0] == "systemctl":
+            runtime = f"/run/user/{os.getuid()}"
+            connected = (
+                kwargs["env"].get("XDG_RUNTIME_DIR") == runtime
+                and kwargs["env"].get("DBUS_SESSION_BUS_ADDRESS") == f"unix:path={runtime}/bus"
+            )
+            return subprocess.CompletedProcess(command, service if connected else 1)
+        pytest.fail(f"unexpected provisioning or interactive command: {command}")
+
+    monkeypatch.setattr(ship.subprocess, "run", run)
+    monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "setup", "--config", str(host)])
+    ready = github == 0 and models == '{"models":[{}]}' and questions_done and service == 0
+    assert ship.main() == (0 if ready else 1)
+    output = capsys.readouterr().out
+    assert output.startswith("Software: ready\n")
+    assert len(output.splitlines()) == 3
+    assert expected in output
+    if not ready:
+        assert "Fleet ready: no" in output
+        assert "setup checks passed" not in output
+        assert shlex.quote(str(host)) in output
+
+
+def test_setup_preserves_a_missing_explicit_config_path(tmp_path, monkeypatch, capsys):
+    selected = tmp_path / "selected host.yml"
+    monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "setup", "--config", str(selected)])
+    assert ship.main() == 1
+    output = capsys.readouterr().out
+    assert f"${{EDITOR:-nano}} {shlex.quote(str(selected))}" in output
+    assert "dock" not in output
+
+
 def test_apply_warns_when_firstmate_still_tracks_the_stale_fork(
     configuration, tmp_path, monkeypatch, capsys
 ):
