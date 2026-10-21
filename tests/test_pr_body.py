@@ -183,6 +183,49 @@ class PRBodyTests(unittest.TestCase):
         body = VALID_BODY.replace(item, item.replace("[x]", "[ ]") + " Not applicable: no Python changes.")
         self.assertEqual(self.check(body), [])
 
+    def test_each_unchecked_item_rejects_invisible_reasons(self):
+        items = [line for line in VALID_BODY.splitlines() if line.startswith("- [")]
+        for item in items:
+            label = item[6:].partition(" Not applicable:")[0]
+            for reason in (
+                "<reason>", "<div></div>", "<br>", "<div>&nbsp;</div>",
+                "&nbsp;", "&#160;", "&#xA0;", "&Tab;&NewLine;",
+                "    <reason>", "\t<div>&nbsp;</div>", "<!-- no changes -->",
+            ):
+                with self.subTest(label=label, reason=reason):
+                    replacement = f"- [ ] {label} Not applicable: {reason}"
+                    errors = self.check(VALID_BODY.replace(item, replacement, 1))
+                    self.assertIn(
+                        f"Check the completed item or add Not applicable: <reason>: {label}",
+                        errors,
+                    )
+
+    def test_each_unchecked_item_accepts_visible_reasons(self):
+        items = [line for line in VALID_BODY.splitlines() if line.startswith("- [")]
+        for item in items:
+            label = item[6:].partition(" Not applicable:")[0]
+            for reason in (
+                "No relevant files changed.", "`docs-only`", "`<reason>`", "`&nbsp;`",
+                "<span>No Python changes.</span>", "&#78;o changes.",
+            ):
+                with self.subTest(label=label, reason=reason):
+                    replacement = f"- [ ] {label} not applicable: {reason}"
+                    self.assertEqual(self.check(VALID_BODY.replace(item, replacement, 1)), [])
+
+    def test_cli_rejects_placeholder_reason(self):
+        body = VALID_BODY.replace(
+            "- [x] One concern in this PR.",
+            "- [ ] One concern in this PR. Not applicable: <reason>",
+        )
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT)], input=body, text=True, capture_output=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "Check the completed item or add Not applicable: <reason>: One concern in this PR.",
+            result.stderr,
+        )
+
     def test_cli_reads_stdin_and_reports_failure_for_an_incomplete_file(self):
         result = subprocess.run(
             [sys.executable, str(SCRIPT)], input=VALID_BODY, text=True, capture_output=True, timeout=10

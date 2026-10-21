@@ -106,8 +106,10 @@ def check_body(body, template):
             if len(found) != 1:
                 errors.append(f"Keep exactly one checklist item: {label}")
             elif found[0][1] == " ":
-                reason = found[0][2][len(label):].strip()
-                if not re.fullmatch(r"Not applicable:\s*.*\w.*", reason, flags=re.I):
+                reason = re.fullmatch(
+                    r"Not applicable:(.*)", found[0][2][len(label):].strip(), flags=re.I
+                )
+                if not reason or not has_content([(reason[1].strip(), False)]):
                     errors.append(f"Check the completed item or add Not applicable: <reason>: {label}")
     return errors
 
