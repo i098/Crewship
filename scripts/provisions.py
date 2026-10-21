@@ -287,6 +287,18 @@ def verified(tool, version, key, name, url, checksum, binaries):
 
 def resolve_latest(key, names):
     """Specs for the newest releases of exactly these tools, and nothing else."""
+    groups = {}
+    for name in sorted(set(names)):
+        source = GITHUB_LATEST[name][0] if name in GITHUB_LATEST else name
+        groups.setdefault(source, set()).add(name)
+    latest = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for resolved in pool.map(lambda group: resolve_release_group(key, group), groups.values()):
+            latest.update(resolved)
+    return latest
+
+
+def resolve_release_group(key, names):
     latest = {}
     stable = {}  # repository -> its latest release, so tools from one release share it
     skipped = set()
