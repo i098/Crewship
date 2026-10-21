@@ -477,6 +477,9 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
         assert not (release.home / directory / "code-factory").exists()
         assert (release.home / directory / "crewship/data").read_text() == directory
     assert install_log(result).stat().st_mode & 0o777 == 0o600
+    repeated = release.install("v1.0.0")
+    assert repeated.returncode == 0, install_log(repeated).read_text()
+    assert "changed=0" in install_log(repeated).read_text()
 
 
 @pytest.mark.parametrize("password_required", [False, True])

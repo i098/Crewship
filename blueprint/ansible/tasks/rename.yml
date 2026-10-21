@@ -159,7 +159,9 @@
         removes: "{{ item[0] }}"
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
-      loop: "{{ crewship_renamed_paths | selectattr('0', 'match', crewship_renamed_home_re) | list }}"
+      loop: >-
+        {{ crewship_renamed_paths | selectattr('0', 'in', crewship_renamed_existing)
+           | selectattr('0', 'match', crewship_renamed_home_re) | list }}
 
     - name: Move the pre-rename system paths to their new names
       ansible.builtin.command:
@@ -167,7 +169,9 @@
         creates: "{{ item[1] }}"
         removes: "{{ item[0] }}"
       become: true
-      loop: "{{ crewship_renamed_paths | rejectattr('0', 'match', crewship_renamed_home_re) | list }}"
+      loop: >-
+        {{ crewship_renamed_paths | selectattr('0', 'in', crewship_renamed_existing)
+           | rejectattr('0', 'match', crewship_renamed_home_re) | list }}
 
     # The home paths above moved unless the installer's releases, tools and lock file already
     # hold the new share directory; the old directory's contents then move into it, entry by
