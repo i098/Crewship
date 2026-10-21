@@ -14,7 +14,7 @@ import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, BrokenBarrierError
 
 import pytest
 import yaml
@@ -96,6 +96,42 @@ def test_native_installs_overlap_and_keep_checksum_failures_fatal(tmp_path, monk
         installer.main()
         assert not json.loads(capsys.readouterr().out)["changed"]
     assert subprocess.check_output([tmp_path / ".local/bin/first"], text=True).strip() == "first 1.0.0"
+
+
+def test_parallel_download_progress_keeps_separate_lines(tmp_path, monkeypatch):
+    barrier = Barrier(2, timeout=1)
+
+    class SlowStderr(io.StringIO):
+        def write(self, text):
+            written = super().write(text)
+            if text.startswith("Downloading "):
+                try:
+                    barrier.wait()
+                except BrokenBarrierError:
+                    pass
+            return written
+
+    progress = SlowStderr()
+    payload = b"verified download"
+    checksum = hashlib.sha256(payload).hexdigest()
+    urls = [f"https://downloads.example.test/{name}" for name in ("first", "second")]
+    monkeypatch.setattr(sys, "stderr", progress)
+    monkeypatch.setattr(
+        installer.urllib.request, "urlopen",
+        lambda url, **kwargs: Download(payload, url),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            pool.submit(installer.download, url, checksum, tmp_path / str(index))
+            for index, url in enumerate(urls)
+        ]
+        for result in results:
+            result.result()
+
+    assert sorted(progress.getvalue().splitlines()) == sorted(
+        f"Downloading {url}" for url in urls
+    )
 
 
 @pytest.mark.parametrize(

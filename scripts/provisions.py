@@ -393,7 +393,8 @@ def download(url, checksum, destination):
         or not re.fullmatch(r"[0-9a-f]{64}", checksum)
     ):
         raise ValueError("downloads require HTTPS and an explicit SHA-256")
-    print(f"Downloading {url}", file=sys.stderr)
+    with INSTALL_OUTPUT_LOCK:
+        print(f"Downloading {url}", file=sys.stderr)
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         try:
             with (
