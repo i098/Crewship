@@ -2,6 +2,10 @@
 # Fail fast, before anything is touched: configuration shape, supported
 # platform, and the presence of every Main-owned input this run consumes.
 
+- name: Resolve the host configuration once
+  ansible.builtin.set_fact:
+    crewship_cfg: "{{ crewship_cfg }}"
+
 - name: Assert the configuration document matches the contract
   ansible.builtin.assert:
     that:

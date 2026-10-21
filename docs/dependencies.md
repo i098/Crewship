@@ -11,6 +11,10 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
 `./ship.sh chart` installs none of this.
 
+Ansible pipelining is enabled for the local connection used by the supplied inventory.
+Modules run through standard input instead of a separate temporary-file transfer; task checks and privilege changes remain the same.
+The playbook also resolves the merged host configuration once, before validation, instead of reading and parsing the defaults for each reference.
+
 ## Diagrams
 
 The `agents` profile installs the latest published [Ondine](https://github.com/wevm/ondine) release from the npm registry.
