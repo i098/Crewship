@@ -130,6 +130,8 @@ omp config get statusLine.showHookStatus
 
 Crewship installs managed `gh` and `gh-axi` wrappers at `~/.local/bin/`.
 Both wrappers use the policy in [`blueprint/maintenance/gh`](../blueprint/maintenance/gh).
+Firstmate explicitly approved this execution-time wrapper architecture in R23 as the replacement for shell-text checks.
+That approval covers both CLIs and installation through existing Crewship provisioning.
 Each wrapper checks its own actual arguments before starting the real executable.
 The `gh-axi` check therefore runs before its preliminary issue lookups or API calls.
 Shell quoting, here-documents, here-strings, and working-directory changes cannot borrow a target from another invocation.

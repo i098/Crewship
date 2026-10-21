@@ -589,3 +589,16 @@ def test_gh_axi_api_reads_and_matching_writes_reach_real_gh_axi(run, command, ca
 ])
 def test_gh_axi_reads_and_bare_help_reach_real_gh_axi(run, command, calls, env):
     axi(run, command, calls, **env)
+
+
+@pytest.mark.parametrize("command", ["issue create --title incident", "issue edit 1 --title incident"])
+@pytest.mark.parametrize("flags", [
+    "--type Bug --type ''",
+    "--type=Bug --type=",
+    "--type Bug --type=",
+    "--type '' --type Bug",
+    "--type=",
+])
+@pytest.mark.parametrize("approved", [None, UPSTREAM])
+def test_every_type_flag_requires_approval_before_gh_axi_starts(run, command, flags, approved):
+    axi(run, f"{command} -R i098/sanctum {flags}", None, approved=approved)

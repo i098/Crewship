@@ -228,7 +228,7 @@ def issue_targets(positionals, flags, cli):
         targets.append(repository(destination))
     if operation == "develop" and last(flags, "--branch-repo"):
         targets.append(repository(last(flags, "--branch-repo")))
-    if cli == "gh-axi" and (subissue or last(flags, "--type") or enabled(flags, "--no-type")):
+    if cli == "gh-axi" and (subissue or "--type" in flags or enabled(flags, "--no-type")):
         approved = approval()
         targets.append(approved if approved == targets[0] else "")
     return targets
