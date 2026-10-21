@@ -14,7 +14,7 @@ import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, BrokenBarrierError
 
 import pytest
 import yaml
@@ -57,6 +57,81 @@ def test_verified_install_runs_and_second_install_changes_nothing(tmp_path, monk
     command = tmp_path / ".local/bin/tool"
     assert subprocess.check_output([command], text=True).strip() == "tool 1.0.0"
     assert not installer.install_asset(tmp_path, "tool", spec, "linux-x86_64")
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_native_installs_overlap_and_keep_checksum_failures_fatal(tmp_path, monkeypatch, capsys, corrupt):
+    key = "linux-x86_64"
+    payloads = {
+        name: f"#!/bin/sh\nprintf '{name} 1.0.0\\n'\n".encode()
+        for name in ("first", "second")
+    }
+    latest = {name: asset(payload) for name, payload in payloads.items()}
+    for name, spec in latest.items():
+        spec["assets"][key]["url"] = f"https://downloads.example.test/{name}"
+        spec["assets"][key]["binaries"] = {name: name}
+    barrier = Barrier(2, timeout=5)
+
+    def source(url, **kwargs):
+        name = url.rsplit("/", 1)[1]
+        barrier.wait()
+        payload = b"corrupt" if corrupt and name == "second" else payloads[name]
+        return Download(payload, url)
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", source)
+    monkeypatch.setattr(installer, "platform_key", lambda: key)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["provisions.py", "--home", str(tmp_path), "--tools", "first,second,first",
+         "--resolved", json.dumps(latest)],
+    )
+    if corrupt:
+        with pytest.raises(ValueError, match="checksum mismatch"):
+            installer.main()
+        assert not os.path.lexists(tmp_path / ".local/bin/second")
+    else:
+        installer.main()
+        assert json.loads(capsys.readouterr().out)["changed"]
+        assert subprocess.check_output([tmp_path / ".local/bin/second"], text=True).strip() == "second 1.0.0"
+        installer.main()
+        assert not json.loads(capsys.readouterr().out)["changed"]
+    assert subprocess.check_output([tmp_path / ".local/bin/first"], text=True).strip() == "first 1.0.0"
+
+
+def test_parallel_download_progress_keeps_separate_lines(tmp_path, monkeypatch):
+    barrier = Barrier(2, timeout=1)
+
+    class SlowStderr(io.StringIO):
+        def write(self, text):
+            written = super().write(text)
+            if text.startswith("Downloading "):
+                try:
+                    barrier.wait()
+                except BrokenBarrierError:
+                    pass
+            return written
+
+    progress = SlowStderr()
+    payload = b"verified download"
+    checksum = hashlib.sha256(payload).hexdigest()
+    urls = [f"https://downloads.example.test/{name}" for name in ("first", "second")]
+    monkeypatch.setattr(sys, "stderr", progress)
+    monkeypatch.setattr(
+        installer.urllib.request, "urlopen",
+        lambda url, **kwargs: Download(payload, url),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            pool.submit(installer.download, url, checksum, tmp_path / str(index))
+            for index, url in enumerate(urls)
+        ]
+        for result in results:
+            result.result()
+
+    assert sorted(progress.getvalue().splitlines()) == sorted(
+        f"Downloading {url}" for url in urls
+    )
 
 
 @pytest.mark.parametrize(

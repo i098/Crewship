@@ -413,8 +413,8 @@ The isolated HTTP receiver proves the exporter protocol, not a SigNoz deployment
 
 ## Private token-saving suggestions
 
-`scripts/token_suggestions.py` reads an explicitly configured existing ledger and saved `caveman.learn.v1` reports.
-It does not scan sessions, run Caveman, query raw traces, change agents, or run experiments.
+`scripts/token_suggestions.py` reads an explicitly configured existing ledger, saved `caveman.learn.v1` reports, and local omp session JSONL files.
+It does not run Caveman, query raw traces, change agents, or run experiments.
 It makes no paid report calls.
 SigNoz is shown as `source_unavailable` because no authorized query path is integrated.
 The ingestion key is not a query credential.
@@ -425,18 +425,41 @@ Create a private JSON configuration with absolute paths:
 {
   "fm_home": "/path/to/owning-home",
   "ledger": "/path/to/existing/usage.sqlite",
-  "snapshots": ["/path/to/existing/learn.json"]
+  "snapshots": ["/path/to/existing/learn.json"],
+  "omp_sessions": "/home/your-user/.omp/agent/sessions"
 }
 ```
 
-Omit `ledger` or `snapshots` when that source is not available.
+Omit `ledger`, `snapshots`, or `omp_sessions` when that source is not available.
 Never point `ledger` at the retry spool.
 The reader rejects spool databases and opens a history ledger with SQLite `mode=ro` and `query_only`.
 It never creates, migrates, prunes, drains, or exports that database.
 SQLite may create or update `usage.sqlite-wal` and `usage.sqlite-shm` coordination files during read-only access.
 The two aggregate queries each have a 20-second deadline and share a 2 MiB result limit.
 At most eight explicitly named snapshots are read, with a 1 MiB limit each.
-The reader does not search other homes or session roots.
+The reader does not search other homes or unconfigured session roots.
+
+Set `omp_sessions` explicitly to the root used by omp, normally `~/.omp/agent/sessions`, expanded to an absolute path.
+The source reads JSONL files throughout that root, including nested subagent and advisor sessions, without following symbolic links.
+It considers at most 8,192 directory entries and reads at most 256 files, newest modified first.
+Only files modified since the selected day began are eligible.
+Each scan has a 15-second deadline, a 128 MiB total limit, and a 100,000-record limit.
+Each file has a 16 MiB limit; each JSONL record has a 2 MiB limit.
+The report shows file, message, and malformed-record counts, plus a scan-limit flag, without private excerpts.
+A scan that exceeds its deadline makes the omp source unavailable.
+An incomplete final record stays unread.
+No observed messages for the selected day means the omp source cannot establish a successful report cycle.
+
+The omp source measures text sizes locally and uses temporary hashes to match repeated text and tool calls.
+It never exports those hashes, message text, tool output, arguments, paths, identifiers, model names, or provider names.
+Image data, thinking blocks, and unknown fields do not contribute to token estimates.
+Identical original records count once across copied session files, even when unrelated records share a short entry ID.
+The reader follows parent links to preserve each real retry sequence.
+Copied prefixes and suffixes are omitted when a longer observed sequence contains them; forked branches never merge.
+Distinct branch candidates can share earlier calls; do not add their estimates.
+Malformed text encoding increases the malformed-record count without discarding other valid sessions.
+The reader retains earlier call metadata in eligible files to match tool results from the selected day.
+All omp coverage stays partial because session files do not establish a complete request history.
 
 Run one manual cycle:
 
@@ -445,7 +468,7 @@ python3 scripts/token_suggestions.py --config /path/to/private-config.json
 ```
 
 The cutoff selects the previous complete Pacific day, including daylight-saving changes.
-Only cache comparison reads the preceding seven complete days.
+Only the ledger provides a comparison with the preceding seven complete days.
 Saved reports must have a window inside the selected day.
 Older reports and reports that span a wider window are unavailable; their totals cannot be split safely.
 Source caveats or a shorter saved window make coverage partial.
@@ -458,10 +481,13 @@ Unknown fields and source prose never enter the report.
 Source references use the configured snapshot index, not private paths or identifiers.
 
 The report shows all four detector statuses and at most five review candidates.
-Repeated context uses saved recurrence counts and local token estimates.
+Repeated context uses saved recurrence counts or identical omp user/developer text blocks across at least three sessions.
+OMP blocks must reach a local estimate of 180 tokens; all local text estimates use UTF-8 bytes divided by four, rounded up.
 Large tool outputs retain numeric calls, tokens, largest-call size, and error counts for each shape, but omit raw signatures.
 Missing error counts remain unknown.
-Retry loops use saved normalized-call counts and measured output estimates, not request failures alone.
+Retry loops use saved normalized-call counts or consecutive omp calls with matching names and arguments, with at least half reporting errors.
+OMP retry groups need at least three calls; missing error flags never count as confirmed failures.
+Their token estimates measure observed text output, not request failures alone.
 Missing retry token estimates remain null and appear in a separate, unranked count-only list.
 Cache shares require known normalized input and both cache buckets.
 The report excludes unknown rows and compares only matching models with complete coverage.
@@ -471,6 +497,9 @@ Known completions account for their sequences across windows; their counts and t
 Duplicate gap and shutdown records count once per producer, event, and kind.
 Zero denominators remain unavailable.
 Cache reuse changes pricing, not total input tokens.
+OMP input tokens exclude cache buckets; the reader adds both cache buckets through the existing normalizer.
+OMP cache aggregation covers only the selected day.
+Missing omp usage fields stay unknown, and omp cache shares never claim a complete seven-day comparison.
 
 Token ranks apply only within one window and measurement basis.
 The report never adds overlapping detector estimates.
@@ -503,12 +532,13 @@ crewship:
     enabled: false
     fm_home: /path/to/owning-home
     ledger: /path/to/existing/usage.sqlite
+    omp_sessions: /home/your-user/.omp/agent/sessions
     snapshots:
       - /path/to/existing/learn.json
 ```
 
 The object is omitted by default.
-The reader requires an explicit `fm_home`; either metadata source can be omitted.
+The reader requires an explicit `fm_home`; each source can be omitted.
 The installer writes private assets and `config.json` under `~/.local/share/crewship/token-suggestions`.
 It does not open metadata sources or run the report during apply.
 Apply enables the timer only when configuration opts in, service management is on, and the latest cycle receipt matches the configured inputs.
@@ -533,7 +563,7 @@ It follows Pacific daylight-saving changes and does not catch up missed runs.
 The service keeps its existing runtime limit and cannot overlap another report.
 
 Each successful cycle publishes the report before writing a private receipt for its configured source paths.
-A changed `fm_home`, `ledger`, or `snapshots` value requires a successful cycle for those inputs before activation.
+A changed `fm_home`, `ledger`, `snapshots`, or `omp_sessions` value requires a successful cycle for those inputs before activation.
 A failed latest cycle also blocks activation until a successful cycle completes.
 Reports from older reader versions lack this receipt and also need one new manual cycle.
 The activation check reads the receipt without opening metadata sources or writing files.

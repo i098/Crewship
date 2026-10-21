@@ -148,26 +148,23 @@
                 if (crewship_cfg.board is defined) else []) }}
 
     - name: Stat every expected output
-      ansible.builtin.stat:
-        path: "{{ item }}"
-        follow: false
-        get_checksum: false
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ crewship_path_checker }}"
+          - "{{ crewship_expected_outputs | to_json }}"
       become: true
-      loop: "{{ crewship_expected_outputs }}"
-      loop_control:
-        label: "{{ item | relpath(crewship_cfg.home) }}"
-      register: crewship_output_stat
+      register: crewship_output_paths
       changed_when: false
       check_mode: false
 
     - name: Assert every expected output exists
       ansible.builtin.assert:
         that:
-          - crewship_output_stat.results | rejectattr('stat.exists') | list | length == 0
+          - (crewship_output_paths.stdout | from_json).missing | length == 0
         fail_msg: >-
           Provisioning finished but these outputs are missing:
-          {{ crewship_output_stat.results | rejectattr('stat.exists')
-             | map(attribute='item') | list | join(', ') }}.
+          {{ (crewship_output_paths.stdout | from_json).missing | join(', ') }}.
         quiet: true
 
     # --- desktop units are enabled through the managed symlinks -------------

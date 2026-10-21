@@ -193,11 +193,14 @@
       check_mode: false
 
     - name: Stat the Firstmate config destinations
-      ansible.builtin.stat:
-        path: "{{ crewship_firstmate_dir }}/config/{{ item }}"
-        get_checksum: false
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ crewship_path_checker }}"
+          - >-
+            {{ [crewship_firstmate_dir ~ '/config'] | product(crewship_firstmate_config_names)
+               | map('path_join') | list | to_json }}
       become: true
-      loop: "{{ crewship_firstmate_config_names }}"
       register: crewship_fm_dest_stat
       changed_when: false
       check_mode: false
@@ -205,17 +208,18 @@
     - name: Write the Firstmate dispatch settings
       ansible.builtin.copy:
         # A trailing slash copies directory contents; plain files copy as-is.
-        src: "{{ crewship_blueprint }}/config/{{ item.0.item }}{{ '/' if item.0.stat.isdir else '' }}"
-        dest: "{{ crewship_firstmate_dir }}/config/{{ item.0.item }}"
+        src: "{{ crewship_blueprint }}/config/{{ item.item }}{{ '/' if item.stat.isdir else '' }}"
+        dest: "{{ crewship_firstmate_dir }}/config/{{ item.item }}"
         owner: "{{ crewship_cfg.user }}"
         group: "{{ crewship_group }}"
-        mode: "{{ '0600' if not item.0.stat.isdir else omit }}"
-        directory_mode: "{{ '0700' if item.0.stat.isdir else omit }}"
+        mode: "{{ '0600' if not item.stat.isdir else omit }}"
+        directory_mode: "{{ '0700' if item.stat.isdir else omit }}"
         remote_src: true
       become: true
-      loop: "{{ crewship_fm_src_stat.results | zip(crewship_fm_dest_stat.results) | list }}"
+      loop: "{{ crewship_fm_src_stat.results }}"
       loop_control:
-        label: "{{ item.0.item }}"
+        label: "{{ item.item }}"
       when: >-
         not (crewship_firstmate_config_first_write | bool)
-        or not (item.1.stat.exists | default(false))
+        or (crewship_firstmate_dir ~ '/config/' ~ item.item)
+           not in (crewship_fm_dest_stat.stdout | from_json).existing

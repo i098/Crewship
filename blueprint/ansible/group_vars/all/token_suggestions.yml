@@ -1,8 +1,10 @@
 ---
 crewship_token_suggestions_configured: "{{ crewship_cfg.token_suggestions is defined }}"
-crewship_token_suggestions: "{{ {'enabled': false, 'ledger': '', 'snapshots': []} | combine(crewship_cfg.token_suggestions | default({})) }}"
+crewship_token_suggestions: "{{ {'enabled': false, 'ledger': '', 'snapshots': [], 'omp_sessions': ''} | combine(crewship_cfg.token_suggestions | default({})) }}"
 crewship_token_suggestions_assets: "{{ crewship_share_dir }}/token-suggestions"
 crewship_token_suggestions_inputs: >-
   {{ {'fm_home': crewship_token_suggestions.fm_home, 'snapshots': crewship_token_suggestions.snapshots}
      | combine({'ledger': crewship_token_suggestions.ledger}
-               if crewship_token_suggestions.ledger else {}) }}
+               if crewship_token_suggestions.ledger else {})
+     | combine({'omp_sessions': crewship_token_suggestions.omp_sessions}
+               if crewship_token_suggestions.omp_sessions else {}) }}
