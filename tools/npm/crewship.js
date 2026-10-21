@@ -33,11 +33,16 @@ function features(answer) {
   return [...new Set(selected.flatMap((name) => [name, ...optIn[name]]))].join(",");
 }
 
-function sshArgs({ alias, host, user, port }) {
+function validateSshTarget({ alias, host, user }) {
   const name = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
   if (alias ? !name.test(alias) : (
     !(name.test(host) || isIP(host)) || !/^[a-z_][a-z0-9_-]*$/i.test(user) || user === "root"
   )) throw new Error("Use an SSH alias, or a hostname and a non-root username. Shell syntax is not allowed.");
+}
+
+function sshArgs(target) {
+  validateSshTarget(target);
+  const { alias, host, user, port } = target;
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error("Use a port from 1 to 65535.");
   return [
     "-a", "-o", "ForwardAgent=no", "-o", "BatchMode=yes",
@@ -106,6 +111,49 @@ async function setup(ask, { size, selected }, terminal) {
   console.log('Run "$HOME/Crewship/ship.sh" setup on the server and complete the manual sign-in steps.');
 }
 
+async function askNumber(ask, question, minimum) {
+  const answer = await ask(question);
+  if (!/^\d+$/.test(answer) || !Number.isSafeInteger(Number(answer)) || Number(answer) < minimum) {
+    throw new Error(`Enter a whole number of at least ${minimum}.`);
+  }
+  return Number(answer);
+}
+
+async function askFeatures(ask) {
+  for (const [name, needs] of Object.entries(optIn)) {
+    console.log(`  ${name}${needs.length ? ` (needs ${needs.join(", ")})` : ""}`);
+  }
+  return features(await ask("Which features do you need? [names, or Enter for none]"));
+}
+
+async function existingServer(ask) {
+  const cpu = await askNumber(ask, "How many vCPU does it have?", 1);
+  const ram = await askNumber(ask, "How much RAM does it have, in GB?", 1);
+  const disk = await askNumber(ask, "How much free disk does it have, in GB?", 1);
+  const size = presets.filter((preset) => cpu >= preset.cpu && ram >= preset.ram && disk >= preset.disk).pop();
+  if (!size) throw new Error("Use at least 4 vCPU, 16 GB RAM, and 100 GB free disk.");
+  console.log(`The server meets the ${size.cpu} vCPU / ${size.ram} GB RAM / ${size.disk} GB disk preset.`);
+  return { size, selected: await askFeatures(ask) };
+}
+
+async function newServer(ask) {
+  console.log("Count active lanes, not queued jobs. Count each UI lane separately from light lanes.");
+  const light = await askNumber(ask, "How many simultaneous light lanes?", 0);
+  const ui = await askNumber(ask, "How many simultaneous UI lanes?", 0);
+  const selected = await askFeatures(ask);
+  const estimate = recommend(light, ui);
+  console.log(`Estimate: ${estimate.ram} GB RAM and ${estimate.cpu} vCPU. These are estimates, not guarantees.`);
+  if (!estimate.preset) {
+    console.log("The load exceeds the documented presets. Obtain a larger server quote before setup.");
+    return;
+  }
+  const size = estimate.preset;
+  console.log(`Buy or provision: ${size.cpu} vCPU, ${size.ram} GB RAM, ${size.disk} GB disk, ${size.swap} GB swap.`);
+  console.log("Swap is not capacity. Allow extra space for data and extra RAM for other services.");
+  if ((await ask("Have you purchased or provisioned a server that meets this recommendation? [yes/no]")).toLowerCase() !== "yes") return;
+  return { size, selected };
+}
+
 async function init() {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   const lines = terminal[Symbol.asyncIterator]();
@@ -115,50 +163,12 @@ async function init() {
     if (line.done) throw new Error("Cancelled. No setup started.");
     return line.value.trim();
   };
-  const number = async (question, minimum) => {
-    const answer = await ask(question);
-    if (!/^\d+$/.test(answer) || !Number.isSafeInteger(Number(answer)) || Number(answer) < minimum) {
-      throw new Error(`Enter a whole number of at least ${minimum}.`);
-    }
-    return Number(answer);
-  };
-  const askFeatures = async () => {
-    for (const [name, needs] of Object.entries(optIn)) {
-      console.log(`  ${name}${needs.length ? ` (needs ${needs.join(", ")})` : ""}`);
-    }
-    return features(await ask("Which features do you need? [names, or Enter for none]"));
-  };
-  let selected = "none";
   try {
     const existing = (await ask("Do you already have a server for Crewship? [yes/no]")).toLowerCase();
-    let size;
-    if (existing === "yes") {
-      const cpu = await number("How many vCPU does it have?", 1);
-      const ram = await number("How much RAM does it have, in GB?", 1);
-      const disk = await number("How much free disk does it have, in GB?", 1);
-      if (cpu < 4 || ram < 16 || disk < 100) throw new Error("Use at least 4 vCPU, 16 GB RAM, and 100 GB free disk.");
-      size = presets.filter((preset) => cpu >= preset.cpu && ram >= preset.ram && disk >= preset.disk).pop();
-      console.log(`The server meets the ${size.cpu} vCPU / ${size.ram} GB RAM / ${size.disk} GB disk preset.`);
-    } else if (existing === "no") {
-      console.log("Count active lanes, not queued jobs. Count each UI lane separately from light lanes.");
-      const light = await number("How many simultaneous light lanes?", 0);
-      const ui = await number("How many simultaneous UI lanes?", 0);
-      selected = await askFeatures();
-      const estimate = recommend(light, ui);
-      console.log(`Estimate: ${estimate.ram} GB RAM and ${estimate.cpu} vCPU. These are estimates, not guarantees.`);
-      if (!estimate.preset) {
-        console.log("The load exceeds the documented presets. Obtain a larger server quote before setup.");
-        return;
-      }
-      size = estimate.preset;
-      console.log(`Buy or provision: ${size.cpu} vCPU, ${size.ram} GB RAM, ${size.disk} GB disk, ${size.swap} GB swap.`);
-      console.log("Swap is not capacity. Allow extra space for data and extra RAM for other services.");
-      if ((await ask("Have you purchased or provisioned a server that meets this recommendation? [yes/no]")).toLowerCase() !== "yes") return;
-    } else {
-      return;
-    }
-    if (existing === "yes") selected = await askFeatures();
-    await setup(ask, { size, selected }, terminal);
+    let server;
+    if (existing === "yes") server = await existingServer(ask);
+    if (existing === "no") server = await newServer(ask);
+    if (server) await setup(ask, server, terminal);
   } finally {
     terminal.close();
   }

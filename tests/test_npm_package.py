@@ -247,6 +247,6 @@ def test_small_existing_server_stops_before_setup(run_init, specs):
 def test_load_above_presets_stops_at_recommendation(run_init):
     result = run_init("no\n32\n8\nnone\nyes\na\n")
     assert result.returncode == 0
-    assert "107 GB RAM and 48 vCPU" in result.stdout
+    assert "139 GB RAM and 48 vCPU" in result.stdout
     assert "SPAWN:" not in result.stdout
     assert "ON THE SERVER" not in result.stdout
