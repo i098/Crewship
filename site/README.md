@@ -2,6 +2,10 @@
 
 `site/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
 
+The home page has a visible product summary and an About link.
+The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
+It uses the main README as its factual source and needs no JavaScript.
+
 It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.

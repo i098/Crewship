@@ -56,6 +56,11 @@ addEventListener("unhandledrejection", (e) => String(e.reason?.stack).includes("
   <p>Crewship is built in the open at <a target="_blank" rel="noopener" href="https://github.com/i098/Crewship">github.com/i098/Crewship</a>. Read the <a href="https://github.com/i098/Crewship/blob/main/docs/architecture.md/">Architecture</a>. This page draws the scene as text, in your browser.</p>
 </footer>
 </div>
+<aside id="product-summary" aria-label="About Crewship">
+  <p>Crewship sets up your cloud server to run coding agents in parallel.</p>
+  <p>Firstmate supervises the agents, and Herdr shows their workspaces and state.</p>
+  <a href="/about">About Crewship</a>
+</aside>
 <section id="stage" class="stage" hidden tabindex="0" role="application" aria-roledescription="3D harbor" aria-label="The ship at the dock, a walkable 3D scene. The feature list before it has the same content.">
   <canvas id="scene" aria-hidden="true"></canvas>
   <div id="card" class="sr-only" aria-live="polite"></div>
