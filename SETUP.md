@@ -59,7 +59,6 @@ If the installer reports a package-lock error, follow the [recovery instructions
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
 - STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
-- Check or resume setup from any directory with `"$HOME/Crewship/ship.sh" setup`.
 
 ### Resume setup
 
@@ -67,14 +66,10 @@ If the installer reports a package-lock error, follow the [recovery instructions
 "$HOME/Crewship/ship.sh" setup
 ```
 
-The command prints three lines: software, sign-ins, and fleet readiness.
 Run each printed command, then repeat `setup`.
-It checks existing state instead of installing again.
-It exits with status 1 while a required step is missing.
+Follow the remaining steps below for manual approvals and sign-ins.
 GitHub and provider sign-ins still need the user's consent.
-The fleet check covers the Firstmate installation, new-host questions, and the running Herdr service when the Firstmate profile is enabled.
-It does not prove capacity or a successful agent task.
-Use [`Capacity`](docs/capacity.md) before starting workers.
+See [Setup checks](docs/configuration.md#commands) for the reported states and limits.
 
 The commands below also work from any directory.
 

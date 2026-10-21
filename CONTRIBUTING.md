@@ -9,7 +9,7 @@ Crewship is an Ansible playbook with a Python CLI wrapper (`scripts/ship.py`). T
 - `blueprint/ansible/group_vars/all/*.yml` — Jinja vars consumed by tasks, one file per topic
 - `blueprint/ansible/tasks/*.yml` — the tasks themselves (one file per concern)
 - `blueprint/ansible/templates/*.j2` — systemd unit templates
-- `scripts/ship.py` — CLI (`dock`, `inspect`, `chart`, `launch`, `survey`, `setup`)
+- `scripts/ship.py` - CLI; see [Commands](docs/configuration.md#commands)
 - `scripts/provisions.py` — latest-release tool installer (idempotent)
 - `blueprint/fleet/` — runtime scripts deployed to `~/oss-fleet/` on the target host
 - `blueprint/config/` — per-tool config templates deployed to Firstmate homes
@@ -77,13 +77,14 @@ You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root acc
    ./ship.sh launch
    ```
 
-7. Check the result:
+7. Check [setup readiness](docs/configuration.md#commands):
 
    ```bash
-   ./ship.sh survey
+   ./ship.sh setup
    ```
 
-Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs/omp.md#sign-in). Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
+Follow the printed commands and the [manual sign-in steps](SETUP.md#1-sign-in-to-github), then repeat `setup`.
+Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
 
 ## Development
 
