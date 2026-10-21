@@ -5,7 +5,7 @@ Each `./ship.sh launch` resolves the newest tool releases once, then installs th
 Re-running apply upgrades an existing host.
 The installer verifies downloads against publisher checksums and refuses releases without them.
 Optional Koncreet failures produce a warning instead.
-The omp marketplace plugins and Neovim plugins use upstream Git repositories without publisher checksums.
+See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums.
 Neovim downloads its plugins on first start, not during apply.
 The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
@@ -38,9 +38,18 @@ Run `ondine file.md --check` to check the result without writing files.
 ## Latest releases
 
 `scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. bun is installed first, from the release below. Superseded versions stay on disk.
+The installer runs at most four independent registry installations at once.
+Plugin setup starts only after those installations succeed.
+Bun output stays in one labeled block per package, including command failures.
 
 - Always: herdr ([herdrdev/herdr](https://github.com/herdrdev/herdr/releases/latest)), bun ([oven-sh/bun](https://github.com/oven-sh/bun/releases/latest), the x64 `baseline` build), uv ([astral-sh/uv](https://github.com/astral-sh/uv/releases/latest)), btop ([aristocratos/btop](https://github.com/aristocratos/btop/releases/latest), the static musl build, linked as `btop-bin`; `btop` is the launcher in [btop](herdr.md#btop)), sentrux ([sentrux/sentrux](https://github.com/sentrux/sentrux/releases/latest), the binary plus the same release's `grammars-<platform>.tar.gz`, whose grammars are linked into `~/.sentrux/plugins/<language>/grammars/` so sentrux never downloads them itself, unverified, on first run), fallow ([fallow-rs/fallow](https://github.com/fallow-rs/fallow/releases/latest), the static musl binary `fallow-linux-<arch>-musl`, for the [quality gate](omp.md#quality-gate)), verified against the GitHub release-asset digest. A herdr upgrade rewrites and restarts `herdr.service`.
-- Always: sgrep ([context-dot-dev/sgrep](https://github.com/context-dot-dev/sgrep)), a local search by meaning for code and documents. Apply runs `cargo install --git https://github.com/context-dot-dev/sgrep --locked`, so it builds the default branch, never a pinned release, and cargo checks the crates against the repository's `Cargo.lock`. The repository publishes no checksums for that build, like the omp plugins below. It needs Rust 1.90 or later: the Rust toolchain below installs on every host, not only with the `development` profile, and sgrep needs ripgrep from the base packages. Linux only, like every native tool here, so the macOS release binary is not used. After each build, apply runs one tiny search per model (code and text) so the models are downloaded once and a search needs no network. A failed warm-up prints a warning and does not stop the apply.
+- [sgrep](https://github.com/context-dot-dev/sgrep) provides local search by meaning for code and documents.
+  See the [`sgrep` profile](configuration.md#profiles) to enable it.
+  Apply builds the latest default branch with `cargo install --git https://github.com/context-dot-dev/sgrep --locked`.
+  Cargo verifies crates against the upstream `Cargo.lock`; upstream publishes no checksum for the source build.
+  It uses the base ripgrep package and requires the [upstream Rust version](https://github.com/context-dot-dev/sgrep/blob/HEAD/Cargo.toml).
+  Apply warms the code and text models; a failed warmup warns without failing the apply.
+  Without this profile, apply skips the sgrep build and model downloads.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
 - Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
@@ -53,11 +62,14 @@ Run `ondine file.md --check` to check the result without writing files.
 - `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `blueprint/config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
-  Apply installs them once and runs `omp plugin upgrade` on later applies.
+  Apply fetches each new marketplace once.
+  Later applies refresh existing marketplaces before installing plugins and running `omp plugin upgrade`.
   These plugins have no publisher checksums and track each author's default branch.
   They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
-- Always (sgrep builds with it), and the `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the `.sha256` published beside it, installing the Rust `stable` toolchain (minimal profile + rustfmt + clippy). Every apply moves the toolchain to the newest stable.
+- `sgrep` or `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the published `.sha256`.
+  It installs the Rust `stable` toolchain with rustfmt and clippy.
+  Each selected apply updates the toolchain to the newest stable release.
 - `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
 - `gateway` profile: cloudflared ([cloudflare/cloudflared](https://github.com/cloudflare/cloudflared/releases/latest), `cloudflared-linux-<arch>`), verified against the GitHub release-asset digest. See [Web pages from anywhere](gateway.md).
 
@@ -117,7 +129,7 @@ See [Project databases](project-databases.md) for setup, backups and removal.
 
 ## Koncreet
 
-Every host that starts services (`start_services: true`); the container worker image skips it.
+See the [`koncreet` profile](configuration.md#profiles) for selection and existing-host defaults; installation also requires `start_services: true`.
 
 - [Koncreet](https://github.com/jimididit/koncreet), the latest release's `koncreet.tar.gz`, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/koncreet.yml`). It installs as root into `/usr/local/lib/crewship/koncreet/<version>-<patch hash>/` with `/usr/local/bin/koncreet` linked to it, and `blueprint/patches/koncreet/ubuntu-26.04.patch` is layered on top. It is optional: when its lookup, checksum, or download fails, apply warns and skips it. Apply never runs it; [Host hardening](security.md#host-hardening) has the manual run.
 
