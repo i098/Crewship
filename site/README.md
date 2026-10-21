@@ -125,6 +125,7 @@ Sound starts with the first click or tap, as browsers require, and the speaker b
 The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
 Sound stops while the tab is hidden; reduced motion does not change it.
 The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
+Only an AAC decode error selects the Opus copy; cancelled or failed network requests do not start another request.
 See [how.html](public/how.html) for the audio graph.
 
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.

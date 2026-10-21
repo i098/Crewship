@@ -40,7 +40,7 @@ await page.context().route("**/*", async (route) => {
     return;
   }
   let path = url.pathname.slice(1) || "index.html";
-  if (!path.split("/").pop().includes(".")) path += ".html";
+  if (path === "how" || path === "about") path += ".html";
   const type = { html: "text/html", js: "text/javascript", css: "text/css" }[path.split(".").pop()];
   if (path === "harbor.js") {
     const source = await readFile(new URL(path, dist), "utf8");
