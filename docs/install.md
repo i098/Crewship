@@ -1,9 +1,31 @@
 # Install, update and migrate
 
-`install.sh` (also `bunx crewship`, `npx crewship`, `pnpm dlx crewship`) installs a release of Crewship. It never clones the repository.
+`install.sh` and the bare npm launchers install a Crewship release on the machine where you run them.
+They never clone the repository.
+
+## Start on your laptop
+
+Do you already have a server for Crewship?
+If yes, check its [capacity](capacity.md) and run the [server install](#install).
+If no, run the guided setup on your laptop with Node.js 18 or newer and npm:
+
+```bash
+npx crewship init
+```
+
+Or use `bunx crewship init` with Bun and Node.js installed.
+The guide recommends a size from your expected load and waits for explicit purchase confirmation.
+It then offers SSH setup or a command to run manually on the server.
+It does not install Crewship on the laptop.
+SSH setup uses existing keys only and requires permission for the named target.
+Verify new host fingerprints through the provider console; never bypass a changed host key.
+If no usable key exists, use the manual server route.
+See [Agent setup](../SETUP.md#before-installation-choose-the-server) for the full sequence.
 
 ## Install
 
+Run all commands in this section on the server, as a non-root user with sudo.
+Use Ubuntu 24.04 or 26.04 with systemd and check the [capacity requirements](capacity.md).
 Use the curl installer on a fresh server.
 It does not need Node.js, npm, pnpm, or Bun:
 
@@ -23,7 +45,7 @@ The small download script itself still comes from `main`.
 
 If `curl` is missing, install it with `sudo apt-get update && sudo apt-get install -y curl`.
 
-Other launchers need an existing runtime:
+Other server launchers need an existing runtime:
 
 | Launcher | Prerequisite | Release selection |
 | --- | --- | --- |
@@ -87,6 +109,8 @@ A failure at that stage leaves the current Crewship installation unchanged.
 
 ## Update
 
+Run update commands on the server that already has Crewship installed.
+
 Run `bunx crewship update` or `npx crewship update` to select the latest stable release, regardless of the npm package version.
 Alternatively, run `bunx crewship@latest` or the curl command under [Install](#install).
 The installer fetches and verifies the selected release, then:
@@ -117,7 +141,7 @@ See [Release channels](../CONTRIBUTING.md#release-channels) for publication rule
 
 ## Migrate a git install
 
-If `~/Crewship` is a git clone from an older installer, the next run:
+Run the installer on the server that holds the existing `~/Crewship` clone:
 
 1. downloads and verifies the selected release;
 2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and records each copied file in the install log;
@@ -131,4 +155,5 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 
 ## Attach the artifact to a draft release
 
+Run release commands from a maintainer's repository checkout, not from the laptop setup guide.
 Follow the [release steps](../CONTRIBUTING.md#release-steps) for draft creation, channel selection, artifact attachment, and publication.
