@@ -3,7 +3,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 # Arguments go to `./ship.sh dock` (for example `bash -s -- --container`);
 # `--help` prints the usage and changes nothing.
-# Installs the OS prerequisites, downloads and verifies the latest release
+# Installs the OS prerequisites, downloads and verifies the selected release
 # artifact (no git clone) into ~/.local/share/crewship/releases/TAG, points
 # ~/Crewship at it, then runs onboard, dock, inspect, chart and launch. Run it
 # again to update: the host's own files (.local/) move to the new release and the
@@ -186,12 +186,30 @@ apt_get() {
   done
 }
 
+resolve_release() {
+  local repo=$1 ref=$2
+  if [ -z "$ref" ]; then
+    if ! command -v curl >/dev/null || ! dpkg-query -W -f='${db:Status-Status}' ca-certificates 2>/dev/null | grep -qx installed; then
+      echo 'Installing HTTPS prerequisites to find the Crewship release...' >&2
+      apt_get update -q >&2 || return
+      apt_get install -y -q curl ca-certificates >&2 || return
+    fi
+    ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") || return
+    ref=${ref##*/}
+  fi
+  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
+  printf '%s\n' "$ref"
+}
+
 main() {
   local repo=${CREWSHIP_REPO:-i098/Crewship} ref=${CREWSHIP_REF:-}
   local dir=$HOME/Crewship releases=$HOME/.local/share/crewship/releases
   local sudo=sudo
   [ "$(id -u)" -ne 0 ] || sudo=
   command -v apt-get >/dev/null || { echo 'install.sh: needs Ubuntu 24.04 or 26.04 (apt-get)' >&2; return 1; }
+
+  ref=$(resolve_release "$repo" "$ref")
+  echo "Installing Crewship $ref"
 
   # The blueprint/cloud-init/user-data.yaml packages, plus python3-apt for chart's check mode and python3-yaml for migrate_v040.
   local packages=(ca-certificates curl gnupg openssl git rsync tar unzip xz-utils zstd
@@ -205,9 +223,6 @@ main() {
     apt_get install -y -q "${missing[@]}"
   fi
 
-  # The latest tag comes from the unmetered releases/latest redirect, not the API.
-  [ -n "$ref" ] || { ref=$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/$repo/releases/latest") && ref=${ref##*/}; }
-  [[ $ref =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "install.sh: no release found in $repo (got '$ref')" >&2; return 1; }
   if [ -e "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$dir/.git" ]; then
     echo "install.sh: $dir exists but is not a Crewship install; move it away and rerun" >&2
     return 1

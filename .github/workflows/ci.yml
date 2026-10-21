@@ -80,6 +80,28 @@ jobs:
 
   config-and-python:
     name: configuration and python checks
+    needs: [changes, python_checks, runtime_smoke]
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.code != 'false')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require both validation jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          PYTHON_RESULT: ${{ needs.python_checks.result }}
+          RUNTIME_RESULT: ${{ needs.runtime_smoke.result }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]] &&
+          [[ "$CODE" == true ]] &&
+          [[ "$PYTHON_RESULT" == success ]] &&
+          [[ "$RUNTIME_RESULT" == success ]]
+
+  python_checks:
+    name: python and configuration tests
     needs: changes
     if: >-
       always() &&
@@ -129,10 +151,9 @@ jobs:
 
       # pytest-xdist: -n auto is one worker per CPU of the runner, and worksteal lets an idle
       # worker take the tail of a busy one's queue, so the long node tests do not set the finish.
-      # The project database smoke waits on Docker and the network, so it runs beside the tests.
       # A pull request that changes only apps/imessage/ runs the iMessage tests and the core
       # (changelog, instructions, README, skills); every other change and every push runs all.
-      - name: Python tests and project database disposable service smoke
+      - name: Python tests
         env:
           SCOPE: ${{ needs.changes.outputs.scope }}
         run: |
@@ -141,15 +162,7 @@ jobs:
             tests=(tests/test_imessage.py tests/test_bluebubbles_relay.py tests/test_changelog.py
               tests/test_instructions.py tests/test_readme.py tests/test_skills.py)
           fi
-          bash tests/project-databases-smoke.sh > "$RUNNER_TEMP/project-databases-smoke.log" 2>&1 &
-          smoke=$!
-          tests_status=0 smoke_status=0
-          uv run pytest -n auto --dist worksteal "${tests[@]}" || tests_status=$?
-          wait "$smoke" || smoke_status=$?
-          echo "::group::Project database disposable service smoke (exit $smoke_status)"
-          cat "$RUNNER_TEMP/project-databases-smoke.log"
-          echo "::endgroup::"
-          [[ "$tests_status" == 0 && "$smoke_status" == 0 ]]
+          uv run pytest -n auto --dist worksteal "${tests[@]}"
 
       - name: Token suggestion installation and runtime smoke
         if: needs.changes.outputs.scope != 'imessage'
@@ -188,6 +201,23 @@ jobs:
 
       - name: Validate container configuration
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
+
+  runtime_smoke:
+    name: project database runtime smoke
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Project database disposable service smoke
+        run: bash tests/project-databases-smoke.sh
 
   # apps/crewboard/ is a Rust crate; its Cargo.lock stays locked like uv.lock.
   # Rust tracks its latest stable release through the runner's rustup.
