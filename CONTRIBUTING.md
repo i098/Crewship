@@ -198,9 +198,9 @@ The script applies the form's label and rejects missing required fields or commi
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
-  Keep all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
-  Mark completed checklist items with `[x]`.
+  Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
@@ -214,8 +214,6 @@ The script applies the form's label and rejects missing required fields or commi
 The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mistakes.yaml`.
 It omits generated intent and puts validation evidence in a collapsed section after the public body.
 These settings take effect after they merge into the default branch.
-Fill every section and keep each checklist item.
-For a check that does not apply, state `Not applicable` and give the reason.
 
 ## Branch rules
 
