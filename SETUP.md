@@ -149,9 +149,10 @@ The installer already applied the default profiles. This run applies your change
 ```
 
 - It may ask for the sudo password. STOP and let the user type it. Never store or echo it.
-- Run it in an interactive terminal. With the `firstmate` profile on and omp signed in, the first launch then opens omp with the new-host questions ([New-host questions](docs/configuration.md#new-host-questions)). Relay each question to the user and pass on the answer.
-- If omp was not signed in at the first launch, the questions are skipped. Run `"$HOME/Crewship/ship.sh" launch` again after step 2.
-- Check: the command ends with no failed task.
+- Run `"$HOME/Crewship/ship.sh" launch` in an interactive terminal and follow [New-host questions](docs/configuration.md#new-host-questions).
+  Relay each question to the user and pass on the answer.
+- Follow the [command checks](docs/configuration.md#commands) if `launch` reports a failure.
+- Check: the command exits successfully, with no failed task.
   An unchanged `"$HOME/Crewship/ship.sh" launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
   A newer release or source update shows as an expected change in the toolchain step.
 
@@ -161,7 +162,7 @@ The installer already applied the default profiles. This run applies your change
 "$HOME/Crewship/ship.sh" setup
 ```
 
-- Check: software and sign-ins report ready, and the enabled Firstmate checks pass.
+- Check: `setup` exits successfully, software and sign-ins report ready, and the enabled Firstmate checks pass.
 - Check: with the gateway on, `crewship-gateway url` prints an `https://….trycloudflare.com` address.
 - Report each missing step and its printed command.
 - Do not mark setup as done while a check fails or a sign-in is missing.

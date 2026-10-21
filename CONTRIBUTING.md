@@ -71,7 +71,8 @@ You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root acc
    ./ship.sh chart
    ```
 
-6. Launch to provision the host; this step may ask for your sudo password. With the `firstmate` profile on, the first successful interactive apply after you sign in to omp opens the [new-host questions](docs/configuration.md#new-host-questions); a fresh host's first apply installs omp, so sign in to omp after it and rerun apply:
+6. Run `launch` to provision the host; it may ask for your sudo password.
+   Follow [New-host questions](docs/configuration.md#new-host-questions) for the setup requirements:
 
    ```bash
    ./ship.sh launch
