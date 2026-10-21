@@ -72,7 +72,6 @@ html:not(.js) #menu { position: static; margin: 24px auto; }
 .top nav { display: flex; flex-wrap: wrap; gap: 8px 10px; }
 .top nav a {
   font-family: var(--mono); font-size: 14px; text-decoration: none;
-  display: inline-flex; align-items: center; min-height: 44px;
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; background: var(--panel);
 }
 .top nav a:hover { border-color: var(--accent); }
