@@ -313,15 +313,24 @@ function hasRawApiWrite(command: string): boolean {
 
 function rawTargetReason(command: string): string {
 	if (!RAW_ISSUE_WRITE.test(command) && !hasRawApiWrite(command)) return "";
-	let targets = Array.from(command.matchAll(
+	const contract = process.env.CREWSHIP_GITHUB_REPO;
+	const targets = Array.from(command.matchAll(
 		/(?:^|[^\w-])(?:-R(?:=|\s*)|--repo(?:=|\s+))["']?([\w.-]+\/[\w.-]+)(?=$|[\s"'`;&|()<>])/gm,
 	), (match) => match[1].toLowerCase());
-	if (!targets.length) targets = Array.from(command.matchAll(
-		/https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/\d+/g,
-	), (match) => match[1].toLowerCase());
-	if (!targets.length) targets = Array.from(command.matchAll(
-		/\brepos\/([\w.-]+\/[\w.-]+)\//g,
-	), (match) => match[1].toLowerCase());
+	if (contract) targets.push(...Array.from(command.matchAll(
+		/(?:^|[^\w-])--(?:to-repo|branch-repo)(?:=|\s+)["']?([\w.-]+\/[\w.-]+)(?=$|[\s"'`;&|()<>])/gm,
+	), (match) => match[1].toLowerCase()));
+	if (contract || !targets.length) {
+		const urls = contract ?
+			/https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)(?=$|[/?#\s"'`;&|()<>])/gi :
+			/https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/\d+/g;
+		targets.push(...Array.from(command.matchAll(urls), (match) => match[1].toLowerCase().replace(/\.git$/, "")));
+	}
+	if (contract || !targets.length) {
+		targets.push(...Array.from(command.matchAll(
+			/\brepos\/([\w.-]+\/[\w.-]+)\//g,
+		), (match) => match[1].toLowerCase()));
+	}
 	return targetReason(targets.length ? targets : [""]);
 }
 

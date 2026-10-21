@@ -314,7 +314,7 @@ def test_approved_opaque_graphql_payload_runs(guarded, payload):
 @pytest.mark.parametrize("operation", ["close", "reopen"])
 @pytest.mark.parametrize("flag", [
     "-c done", "-cdone", "-c=done", "--comment done",
-    "-c https://github.com/upstream/firstmate/issues/2",
+    "-c https://github.com/i098/sanctum/issues/2",
 ])
 def test_issue_comment_flags_preserve_authorized_target(guarded, operation, flag):
     guarded(f"gh issue {operation} 5 {flag} -R i098/sanctum")
@@ -453,9 +453,9 @@ def test_develop_false_listing_still_requires_target(guarded, flag):
 @pytest.mark.parametrize("first,last,approved,allowed", [
     ("upstream/firstmate", "i098/sanctum", None, False),
     ("upstream/firstmate", "i098/sanctum", "upstream/firstmate", True),
-    ("i098/sanctum", "upstream/firstmate", None, True),
+    ("i098/sanctum", "upstream/firstmate", None, False),
 ])
-def test_axi_transfer_checks_first_destination(guarded, separator, first, last, approved, allowed):
+def test_contract_checks_all_transfer_destinations(guarded, separator, first, last, approved, allowed):
     guarded(
         f"gh-axi issue transfer 1 -R i098/sanctum "
         f"--to-repo{separator}{first} --to-repo{separator}{last}",
@@ -480,10 +480,10 @@ def test_develop_checks_branch_repository(guarded, separator, branch_repo, appro
 
 @pytest.mark.parametrize("separator", [" ", "="])
 @pytest.mark.parametrize("first,last,allowed", [
-    ("upstream/firstmate", "i098/sanctum", True),
+    ("upstream/firstmate", "i098/sanctum", False),
     ("i098/sanctum", "upstream/firstmate", False),
 ])
-def test_develop_checks_last_branch_repository(guarded, separator, first, last, allowed):
+def test_contract_checks_all_branch_repositories(guarded, separator, first, last, allowed):
     guarded(
         f"gh issue develop 1 -R i098/sanctum "
         f"--branch-repo{separator}{first} --branch-repo{separator}{last} --name incident",
@@ -675,3 +675,83 @@ def test_api_read_does_not_hide_a_later_write(guarded):
         "gh api -X POST repos/upstream/firstmate/issues --field title=incident",
         allowed=False,
     )
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("wrapper", [
+    "bash <<< {quoted}; gh issue list -R i098/sanctum",
+    "bash <<'EOF'\n{command}\nEOF\ngh issue list -R i098/sanctum",
+    "cat <<'EOF' | bash\n{command}\nEOF\ngh issue list -R i098/sanctum",
+])
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("upstream/firstmate", True)])
+def test_unrelated_read_target_cannot_hide_write_repository(guarded, cli, wrapper, approved, allowed):
+    field = "-f" if cli == "gh" else "--field"
+    command = f"{cli} api -X POST repos/upstream/firstmate/issues {field} title=incident"
+    guarded(
+        wrapper.format(command=command, quoted=shlex.quote(command)),
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("reference", [
+    "--to-repo i098/other", "--branch-repo=i098/other",
+    "-R i098/other", "--repo=i098/other", "https://github.com/i098/other",
+    "http://github.com/i098/other/issues/2", "https://github.com/i098/other/pull/2",
+    "repos/i098/other/issues/2",
+])
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("i098/other", True)])
+def test_contract_checks_every_body_repository(guarded, reference, approved, allowed):
+    guarded(
+        f"gh issue create -R i098/sanctum --title fix --body {shlex.quote('repro: ' + reference)}",
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("reference,allowed", [
+    ("-R i098/other", False),
+    ("-R upstream/firstmate", True),
+    ("--repo=i098/sanctum", True),
+    ("https://github.com/upstream/firstmate", True),
+    ("https://GitHub.com/upstream/firstmate.git", True),
+    ("repos/upstream/firstmate/issues/2", True),
+])
+def test_approved_upstream_write_allows_only_contract_or_approved_body_repos(guarded, reference, allowed):
+    guarded(
+        f"gh issue create -R upstream/firstmate --title fix --body {shlex.quote('repro: ' + reference)}",
+        approved="upstream/firstmate", allowed=allowed,
+    )
+
+
+def test_without_contract_another_command_can_supply_target_text(guarded, tmp_path):
+    guarded(
+        "bash <<< 'gh-axi issue create --title incident'; gh issue list -R i098/sanctum",
+        contract=None,
+    )
+    assert (tmp_path / "calls").read_text().splitlines() == [
+        "issue create --title incident", "issue list -R i098/sanctum",
+    ]
+
+
+@pytest.mark.parametrize("prefix,flag", [
+    ("gh-axi issue transfer 1", "--to-repo"),
+    ("gh issue develop 1", "--branch-repo"),
+])
+@pytest.mark.parametrize("separator", [" ", "="])
+@pytest.mark.parametrize("wrapper", [
+    "bash <<< {quoted}", "bash <<'EOF'\n{command}\nEOF",
+])
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("upstream/firstmate", True)])
+def test_raw_destination_flags_need_contract_approval(guarded, prefix, flag, separator, wrapper, approved, allowed):
+    command = f"{prefix} -R i098/sanctum {flag}{separator}upstream/firstmate"
+    guarded(
+        wrapper.format(command=command, quoted=shlex.quote(command)),
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("command", [
+    "gh-axi issue transfer 1 --to-repo i098/sanctum",
+    "gh issue develop 1 --branch-repo i098/sanctum",
+])
+def test_destination_alone_does_not_supply_uncontracted_source(guarded, command):
+    guarded(f"bash <<< {shlex.quote(command)}", contract=None, allowed=False)

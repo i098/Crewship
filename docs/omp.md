@@ -135,7 +135,7 @@ Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional
 `gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
 The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
 Linked-branch creation also checks `--branch-repo`, including repository URLs.
-For repeated `gh-axi --to-repo` flags, the first destination controls the transfer and the guard.
+`gh-axi` uses the first transfer destination; a task contract checks every raw destination value.
 Raw issue-write patterns require readable repository text, even in help requests or commands that only print examples.
 `gh` accepts `-h` and boolean help values; `gh-axi` recognizes only bare `--help`.
 `gh issue develop --list` and `-l` remain read-only, but their raw text still needs a repository target.
@@ -161,9 +161,11 @@ Repository mismatch checks apply only when `CREWSHIP_GITHUB_REPO=owner/repo` is 
 Crewship has no repository-aware task launcher here; Firstmate owns that launch path and must supply this variable separately.
 Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact repository.
 Both values compare without letter case.
-The raw check accepts repository flags, full issue URLs, and literal `repos/owner/repo/` paths anywhere in the same text.
-Repository flags take precedence over raw URL and path matches.
-Raw targets also receive contract checks when `CREWSHIP_GITHUB_REPO` is set.
+With a contract, the raw check collects `-R`/`--repo`, `--to-repo`, `--branch-repo`, `github.com` repository URLs, and literal `repos/owner/repo/` paths.
+Each collected repository must match the contract or the explicitly approved repository.
+This includes references in comments, bodies, here-documents, and here-strings; unrelated references can therefore block an otherwise authorized write.
+Without a contract, the existing presence check accepts repository flags, full issue URLs, or literal repository API paths anywhere in the text.
+Without a contract, a target from another command in the same line can satisfy that presence check.
 
 The normal agent apply installs the guard for host and worker omp sessions.
 To update only this guard from a verified checkout, run `install -m 0644 blueprint/config/omp-no-pattern-kill.ts ~/.omp/agent/extensions/fm-no-pattern-kill.ts`.
