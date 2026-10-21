@@ -54,6 +54,7 @@ The installer:
 
 The one-command installer does not run a separate full preview before applying.
 Run `./ship.sh chart` from `~/Crewship` when you want to inspect a preview yourself.
+Follow the [`chart` contract](configuration.md#commands) for preview behavior and side effects.
 The apply still validates the configuration, verifies downloads, and checks its outputs.
 
 The installer shows short progress lines and keeps the full output in `~/.local/state/crewship-install/install-*.log`.

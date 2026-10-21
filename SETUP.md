@@ -52,7 +52,7 @@ Use curl on a fresh server; it does not need a JavaScript runtime.
 `pnpm dlx crewship` may select an older release because of pnpm's release-age policy.
 See [Launcher prerequisites](docs/install.md#install); do not clone the repository.
 
-See [Install, update and migrate](docs/install.md) for release selection and installation steps.
+See [Install, update and migrate](docs/install.md#install) for release selection, installation steps, and optional preview.
 `--with` applies to a new host only.
 Sign in and apply again in the later steps.
 
