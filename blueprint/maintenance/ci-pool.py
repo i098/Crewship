@@ -11,7 +11,7 @@
                                image (see DOCKERFILE) from the latest official one.
   ci-pool.py run <instance>    ExecStart of ci-runner@<instance>.service: asks
                                GitHub for a JIT runner, runs one job in a fresh
-                               container from the official runner image, exits.
+                               container from the configured pool image, exits.
 
 GitHub removes a JIT runner after its one job, so nothing is registered or
 deregistered by hand. docs/ci-pool.md has the operator guide.
@@ -197,7 +197,7 @@ RUN apt-get update -qq \\
  && apt-get install -y -qq --no-install-recommends \\
       build-essential pkg-config libgtk-3-0 unzip git curl ca-certificates gnupg lsb-release postgresql-common \\
       clang cmake libssl-dev libzstd-dev libfontconfig-dev libfreetype-dev libasound2-dev \\
-      libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libvulkan-dev \\
+      libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libvulkan-dev mesa-vulkan-drivers \\
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \\
  && apt-get install -y -qq --no-install-recommends postgresql-17 postgresql-client-17 postgresql-18 postgresql-client-18 postgresql-18-pgvector \\
  && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
