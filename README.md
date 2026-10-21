@@ -4,6 +4,8 @@
 
 Crewship sets up a cloud server for developers who want coding agents to work in parallel.
 
+**This makes it super easy to start using agents in the cloud, enjoy!**
+
 [Docs](#more-docs) · [Install](#quick-start) · [Changelog](CHANGELOG.md) · [Discussions](https://github.com/i098/Crewship/discussions)
 
 </div>
