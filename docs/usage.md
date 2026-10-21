@@ -525,17 +525,19 @@ systemctl --user start crewship-token-suggestions.service
 
 1. Keep `enabled: false` and apply the configuration.
 2. Run the installed service manually and read `FM_HOME/data/token-savings/latest.md`.
-3. Set `enabled: true` and apply with `start_services: true` only after that complete cycle succeeds.
+3. Obtain activation approval after that cycle succeeds.
+4. Set `enabled: true` and apply with `start_services: true`.
 
 The timer runs daily at 09:00 `America/Los_Angeles`, with up to 15 minutes of random delay.
 It follows Pacific daylight-saving changes and does not catch up missed runs.
 The service keeps its existing runtime limit and cannot overlap another report.
 
 Each successful cycle publishes the report before writing a private receipt for its configured source paths.
-A changed configuration or a failed latest cycle requires another successful manual cycle before activation.
+A changed `fm_home`, `ledger`, or `snapshots` value requires a successful cycle for those inputs before activation.
+A failed latest cycle also blocks activation until a successful cycle completes.
 Reports from older reader versions lack this receipt and also need one new manual cycle.
 The activation check reads the receipt without opening metadata sources or writing files.
-Apply stops and disables an existing timer before replacing changed report inputs.
+Apply stops the timer and any active report, and removes the timer activation link, before replacing changed report inputs.
 With service management off, it rejects changed inputs while a timer activation link exists.
 
 Setting `enabled: false` stops the timer before checking and stopping an active report when service management is on.
