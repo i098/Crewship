@@ -99,7 +99,7 @@ GitHub Actions (`.github/workflows/ci.yml`) starts on pushes to `main`, on pull 
 When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest -n auto --dist worksteal` (pytest-xdist).
-- The [project database service verification](../project-databases.md#verification), run beside the tests.
+- The [project database service verification](../project-databases.md#verification), run in a separate parallel job with its own 20-minute limit.
 - `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../tools/herdr-patch/README.md) also runs on the operator's computer.
 - `bash blueprint/config/omp-as-pi/test.sh`, the offline tests of the omp-as-pi wrapper ([no-mistakes pipeline agent](../omp.md#no-mistakes-pipeline-agent)).
 - `./ship.sh inspect` for `blueprint/config/default.yml` and `blueprint/containers/crewship.container.yml`.
@@ -121,7 +121,10 @@ The required `pull request body` job lives in `pr-body.yml` and runs on opened, 
 It uses Python's standard library, runs its focused checker tests, and validates the body against the repository template.
 It has no path, label, author, or release exemption.
 Body edits do not restart the main build workflow.
-The required `configuration and python checks` job rejects classification failure before it starts heavy work.
+The required `configuration and python checks` name stays unchanged.
+It succeeds only when classification, Python checks, and runtime smoke all pass.
+Python checks run on their own runner and keep their 20-minute limit.
+Failed, cancelled, and skipped validation jobs cannot produce a successful required check.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
 A PR that changes only `apps/imessage/` plus documentation (`scope=imessage`) runs only the iMessage tests and the core tests (changelog, instructions, README, skills) in the Python step; every other change and every push runs the whole suite.

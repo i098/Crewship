@@ -119,11 +119,13 @@ def test_missing_base_fails_without_skip_output(tmp_path):
     assert output == ""
 
 
-def workflow_context(event, changes, code):
+def workflow_context(event, changes, code, *, python="success", runtime="success"):
     return {
         "github": SimpleNamespace(event_name=event),
         "needs": SimpleNamespace(
             changes=SimpleNamespace(result=changes, outputs=SimpleNamespace(code=code)),
+            python_checks=SimpleNamespace(result=python),
+            runtime_smoke=SimpleNamespace(result=runtime),
         ),
         "always": lambda: True,
     }
@@ -147,6 +149,16 @@ def job_runs(job, context):
     return expression_value(condition, context)
 
 
+def run_gate(job, context):
+    step = job["steps"][0]
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        env={key: expression_value(value, context) for key, value in step["env"].items()},
+        capture_output=True,
+        text=True,
+    ).returncode
+
+
 @pytest.mark.parametrize("changes", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("code", ["true", "false", "", "invalid"])
 def test_required_check_rejects_prerequisite_failure(changes, code):
@@ -154,17 +166,9 @@ def test_required_check_rejects_prerequisite_failure(changes, code):
     job = jobs["config-and-python"]
     context = workflow_context("pull_request", changes, code)
     valid = changes == "success" and code in {"true", "false"}
-    assert job["needs"] == "changes"
     assert job_runs(job, context) == (not valid or code == "true")
     if job_runs(job, context):
-        step = job["steps"][0]
-        result = subprocess.run(
-            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
-            env={key: expression_value(value, context) for key, value in step["env"].items()},
-            capture_output=True,
-            text=True,
-        )
-        assert (result.returncode == 0) == valid
+        assert (run_gate(job, context) == 0) == valid
 
 
 @pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch"])
@@ -172,8 +176,19 @@ def test_required_check_rejects_prerequisite_failure(changes, code):
 def test_heavy_job_event_policy(event, code):
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
     context = workflow_context(event, "success", code)
-    for name in ["config-and-python", "crewboard", "harbor-webkit", "container-smoke"]:
+    for name in ["config-and-python", "python_checks", "runtime_smoke",
+                 "crewboard", "harbor-webkit", "container-smoke"]:
         assert job_runs(jobs[name], context) == (code == "true")
     assert job_runs(jobs["quality-gate"], context) == (
         event == "pull_request" and code == "true"
     )
+
+
+@pytest.mark.parametrize("python", ["success", "failure", "cancelled", "skipped"])
+@pytest.mark.parametrize("runtime", ["success", "failure", "cancelled", "skipped"])
+def test_required_gate_preserves_both_workload_results(python, runtime):
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+    context = workflow_context("pull_request", "success", "true", python=python, runtime=runtime)
+    gate = jobs["config-and-python"]
+    assert job_runs(gate, context)
+    assert (run_gate(gate, context) == 0) == (python == runtime == "success")
