@@ -451,7 +451,7 @@ No observed messages for the selected day means the omp source cannot establish 
 
 The omp source measures text sizes locally and uses temporary hashes to match repeated text and tool calls.
 It never exports those hashes, message text, tool output, arguments, paths, identifiers, model names, or provider names.
-It ignores unknown fields, image data, and thinking blocks.
+Image data, thinking blocks, and unknown fields do not contribute to token estimates.
 Identical original records count once across copied session files, even when unrelated records share a short entry ID.
 The reader follows parent links to preserve each real retry sequence.
 Copied prefixes and suffixes are omitted when a longer observed sequence contains them; forked branches never merge.
@@ -467,7 +467,7 @@ python3 scripts/token_suggestions.py --config /path/to/private-config.json
 ```
 
 The cutoff selects the previous complete Pacific day, including daylight-saving changes.
-Only ledger cache comparison reads the preceding seven complete days.
+Only the ledger provides a comparison with the preceding seven complete days.
 Saved reports must have a window inside the selected day.
 Older reports and reports that span a wider window are unavailable; their totals cannot be split safely.
 Source caveats or a shorter saved window make coverage partial.
