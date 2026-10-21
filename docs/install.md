@@ -40,6 +40,7 @@ The installer:
 4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
+   If the [Firstmate memory check](configuration.md#commands) fails, the installer stops before its final completion message.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.

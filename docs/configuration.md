@@ -10,8 +10,8 @@
 | `./ship.sh dock` | | Copies `blueprint/config/default.yml` to `.local/host.yml` with your user, home, and `~/Dev` workspace filled in. Never overwrites an existing file. On a terminal it shows one checklist of the opt-in features. Options: `--user`, `--home`, `--container`, and `--with NAMES`, which turns on the named opt-ins instead of asking (`--with none` for none). The names: `public_skills`, `development`, `docker`, `chat`, `gateway`, `jj`, `fdu`, `fleet_guards`, `project_databases`, `fleet_browsers`, `tailscale`, `koncreet`, `desktop`, and `board` (the [crew board](board.md)). A choice brings what it needs: `docker` for `fleet_guards` and `project_databases`, `development` for `board`. |
 | `./ship.sh inspect` | | Does the one-time config rewrite below if needed, then checks the config against `blueprint/schemas/crewship.schema.json` and the cross-field rules below. |
 | `./ship.sh chart` | | Runs the Ansible playbook in check mode and reports what would change. Creates missing home-layout, agent preference, extension, and enabled-profile directories under the configured user's home. Leaves existing directory permissions, ownership, and managed files unchanged. Reports missing Obscura releases without downloading or extracting binaries. Also performs the one-time config rewrite below. |
-| `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. With the `firstmate` profile on, the first successful interactive apply with omp signed in then opens the new-host questions (below). |
-| `./ship.sh survey` | | Checks that each expected tool runs and reports `gh` authentication. Changes nothing except for the one-time config rewrite below. |
+| `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. Then follows the [new-host question rules](#new-host-questions). |
+| `./ship.sh survey` | | Checks expected tools and `gh` authentication, plus Firstmate memory as described below. Changes nothing except for the one-time config rewrite below. |
 | `./ship.sh setup` | | Checks setup readiness; see the details below. Does not install or sign in. |
 | `scripts/ship.py` | | The Python program behind `ship.sh`. |
 | `scripts/provisions.py` | `scripts/install_tools.py` | Installs the public tools into the user-owned Crewship prefix. |
@@ -43,9 +43,11 @@ It requires an existing host config instead of using the default example.
 Like the other config readers, it performs the one-time rewrite below when needed.
 
 With the `firstmate` profile on, `launch` and `survey` also check available RAM against the worker spawn floor.
-The floor is 8,000 MB from `/proc/meminfo` `MemAvailable`, not total RAM.
-Swap does not count.
-Below the floor, both commands return a failure status, and `launch` does not open Firstmate's setup questions.
+Both commands read `MemAvailable` from `/proc/meminfo`, not total RAM or swap.
+They use [`blueprint/config/spawn-memory-floor-mb`](../blueprint/config/spawn-memory-floor-mb); see [Capacity](capacity.md#load-estimate) for sizing.
+`launch` checks after provisioning succeeds and before the [new-host questions](#new-host-questions).
+Below the floor, or when available RAM cannot be read, both commands return a failure status.
+`launch` does not open the questions when this check fails.
 The installed software stays in place.
 Free memory or add RAM, then run the command again.
 A passed memory check does not prove authentication or network access.
@@ -161,6 +163,7 @@ The Firstmate checkout tracks the default branch of upstream Firstmate, not a sh
 
 After a successful `./ship.sh launch` with the `firstmate` profile on, once omp has a provider login, Crewship starts omp in the Firstmate checkout with an opening prompt. Firstmate then asks the move decisions for this host one question at a time: which secondmate homes, services, tools, and unpushed work to bring over.
 
+- The [memory check](#commands) must pass before the questions start.
 - The questions follow `firstmate.checklist` when it is set and `gh` can read it: `repo` is a GitHub repository (it can be private) and `path` is the checklist file in it. Set it only in `.local/host.yml`, never in `blueprint/config/default.yml`. Otherwise they follow [Agent host move](agent-host-move.md).
 - When `.local/host.yml` has no `github_board` block, a question asks whether to turn on the [GitHub board](github-board.md). The answer is off unless you choose it.
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.

@@ -20,7 +20,9 @@ Do not point two machines at the same live session, task registry, browser profi
 ```
 
 - **`fleet guards require the docker and firstmate profiles`**: enable both profiles in `.local/host.yml`.
-- **Spawn refused by the memory floor**: wait for a lane to finish, or lower the floor in this repository's `blueprint/config/spawn-memory-floor-mb` and rerun `./ship.sh launch`. Every apply rewrites the Firstmate checkout's copy, so an edit made only there is reverted.
+- **Spawn refused by the memory floor**: follow the [memory check guidance](configuration.md#commands).
+  To change the floor, edit this repository's `blueprint/config/spawn-memory-floor-mb` and rerun `./ship.sh launch`.
+  Every apply rewrites the Firstmate checkout's copy, so an edit made only there is reverted.
 
 ## Desktop access
 
