@@ -22,6 +22,7 @@ crewship_cfg: "{{ crewship_defaults | combine(crewship | default({}, true), recu
 crewship_repo: "{{ playbook_dir | dirname | dirname }}"
 crewship_blueprint: "{{ crewship_repo }}/blueprint"
 crewship_installer: "{{ crewship_repo }}/scripts/provisions.py"
+crewship_path_checker: "{{ crewship_repo }}/scripts/check_paths.py"
 crewship_pruner_source: "{{ crewship_blueprint }}/maintenance/chrome-autoprune.py"
 
 # Nothing is pinned: tasks/preflight.yml resolves every tool's latest release

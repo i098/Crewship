@@ -458,6 +458,7 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
             "crewship_become_target": False,
             "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
             "crewship_share_dir": str(release.home / ".local/share/crewship"),
+            "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
         },
         "tasks": [migration],
     }]))
