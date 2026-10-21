@@ -164,10 +164,12 @@ See [how.html](public/how.html) for the movement and Enter controls.
 
 ```bash
 python3 site/build.py
-python3 -m http.server --directory site/dist 8000
+python3 site/serve.py
 ```
 
 Then open <http://localhost:8000>.
+The preview serves `/how` without a redirect and returns 404 for unknown routes.
+Pass a port to `site/serve.py` to use a port other than 8000.
 
 ## Link preview
 
@@ -241,6 +243,6 @@ The site serves on https://crewship.si, a custom domain attached to the Worker o
 
 The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
 The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
-The sitemap lists the canonical home, About, and How URLs without modification dates.
+The sitemap lists the canonical home and How URLs without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.
