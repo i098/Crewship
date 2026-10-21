@@ -52,7 +52,7 @@ The installer shows short progress lines and keeps the full output in `~/.local/
 It prints the log path when it finishes or fails.
 Log files have mode `0600`; check them for private data before sharing them.
 Interactive setup questions stay visible.
-When Ansible needs a sudo password, its output stays visible so it can keep using that password.
+Ansible preview and apply output stays visible when sudo needs a password.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
