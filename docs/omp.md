@@ -229,7 +229,11 @@ Otherwise, apply removes the manifest-owned installed rule.
 
 ## Global instructions
 
-[`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) holds generic working rules and nothing personal: it points each agent at the skills, sets one round of `ponytail-review` per PR, and tells it to search by meaning with [sgrep](dependencies.md#latest-releases) and by exact text with ripgrep. The feature is opt-in. `profiles.agent_instructions: true` turns it on, `false` turns it off, and with no key an apply installs it only on a host that already has it (the manifest below exists, or a file holds a Crewship block). Turning it off deletes nothing.
+[`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) holds the generic working rules; see that file for skill, review, and search guidance.
+The global instructions are opt-in.
+`profiles.agent_instructions: true` turns them on; `false` turns them off.
+With no key, apply installs them only on a host with the manifest below or a file containing a Crewship block.
+Turning them off deletes nothing.
 
 [`scripts/instructions.py`](../scripts/instructions.py) writes the text to `~/.claude/CLAUDE.md` (Claude Code) and `~/.codex/AGENTS.md` (Codex, which has no import). When `~/.claude/RTK.md` exists, the Claude Code file also gets the `@RTK.md` import. omp's own `~/.omp/agent/AGENTS.md` shadows `~/.claude/CLAUDE.md`, so that file is the single line `@~/.claude/CLAUDE.md`.
 

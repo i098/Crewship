@@ -40,14 +40,14 @@ Run `ondine file.md --check` to check the result without writing files.
 `scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. bun is installed first, from the release below. Superseded versions stay on disk.
 
 - Always: herdr ([herdrdev/herdr](https://github.com/herdrdev/herdr/releases/latest)), bun ([oven-sh/bun](https://github.com/oven-sh/bun/releases/latest), the x64 `baseline` build), uv ([astral-sh/uv](https://github.com/astral-sh/uv/releases/latest)), btop ([aristocratos/btop](https://github.com/aristocratos/btop/releases/latest), the static musl build, linked as `btop-bin`; `btop` is the launcher in [btop](herdr.md#btop)), sentrux ([sentrux/sentrux](https://github.com/sentrux/sentrux/releases/latest), the binary plus the same release's `grammars-<platform>.tar.gz`, whose grammars are linked into `~/.sentrux/plugins/<language>/grammars/` so sentrux never downloads them itself, unverified, on first run), fallow ([fallow-rs/fallow](https://github.com/fallow-rs/fallow/releases/latest), the static musl binary `fallow-linux-<arch>-musl`, for the [quality gate](omp.md#quality-gate)), verified against the GitHub release-asset digest. A herdr upgrade rewrites and restarts `herdr.service`.
-- `sgrep` profile, off by default: [sgrep](https://github.com/context-dot-dev/sgrep) provides local search by meaning for code and documents.
-  Select `--with sgrep` for a new host, or set `profiles.sgrep: true` in `.local/host.yml` and apply.
+- [sgrep](https://github.com/context-dot-dev/sgrep) provides local search by meaning for code and documents.
+  See the [`sgrep` profile](configuration.md#profiles) to enable it.
   Apply builds the latest default branch with `cargo install --git https://github.com/context-dot-dev/sgrep --locked`.
   Cargo verifies crates against the upstream `Cargo.lock`; upstream publishes no checksum for the source build.
   This profile also installs Rust and uses the base ripgrep package.
   Apply warms the code and text models; a failed warmup warns without failing the apply.
-  A core installation skips this build, Rust, and model downloads unless another selected profile needs Rust.
-  Disabling the profile leaves existing files untouched; enable it to resume updates.
+  Without this profile, apply skips the sgrep build and model downloads.
+  Rust installs only when this profile or `development` is selected.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
 - Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
