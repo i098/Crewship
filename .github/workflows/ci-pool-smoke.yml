@@ -1,8 +1,7 @@
 # Real-job proof for the self-hosted CI pool (docs/ci-pool.md).
 #
-# Runs the configuration and python job of ci.yml on a pool slot. It starts only
-# by hand: this repository is public, so a pull request from a fork must never
-# reach the host. Action pins and the read-only token match ci.yml.
+# Only manual runs are allowed: this public repository must never let a pull
+# request from a fork reach the host. Action pins and the read-only token match ci.yml.
 name: ci-pool-smoke
 
 on:

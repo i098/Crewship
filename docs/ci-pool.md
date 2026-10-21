@@ -192,7 +192,9 @@ echo '{"data_dir": "/mnt/data/ci", "repos": [{"repo": "owner/name", "slots": 2, 
 A self-hosted runner runs the code of the workflow that selects it. On a public repository, a pull request from a fork can change the workflow. The job-started hook ends such a job's container before any of its steps run. That is the first barrier; the trigger rule below is the second. The job container limits CPU, memory, and processes, and has no Docker socket, but it shares the host's network, and its caches stay for the next job in the same slot.
 
 - Opt in private repositories freely. For a public repository, select the pool only in workflows that outside contributors cannot start: `workflow_dispatch` and `push` to protected branches. Never use `pull_request` from forks.
-- This repository's `ci.yml` stays on GitHub-hosted runners. `ci-pool-smoke.yml` runs the same checks on the pool, and only `workflow_dispatch` starts it. It stays queued until `.local/host.yml` has the entry `{ repo: i098/Crewship, slots: N, labels: [crewship] }` in `crewship.ci_pool.repos`.
+- This repository's `ci.yml` stays on GitHub-hosted runners; see the [CI reference](agents/architecture.md#ci) for its checks.
+  [`ci-pool-smoke.yml`](../.github/workflows/ci-pool-smoke.yml) runs only by `workflow_dispatch`.
+  It stays queued until `.local/host.yml` has the entry `{ repo: i098/Crewship, slots: N, labels: [crewship] }` in `crewship.ci_pool.repos`.
 - Do not opt in a repository whose jobs need secrets that a fork pull request could reach.
 - A job can change its slot's caches (`<data_dir>/ci-pool/cache/<slot>/`), which later jobs in that slot read, including jobs on the default branch. Each JIT runner is registered to one repository only, so other repositories' jobs never run in its slots or read its caches.
 
