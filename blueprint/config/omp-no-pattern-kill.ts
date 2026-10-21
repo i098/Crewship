@@ -1,5 +1,5 @@
 /**
- * Refuses pattern-based process kills.
+ * Refuses process kills that select targets by name or command-line pattern.
  *
  * Every omp worker on this host runs as the same uid, and a worker's full brief
  * sits in its own argv. So `pkill -f '<anything in a brief>'` matches sibling
@@ -39,12 +39,10 @@ export default function (pi: GuardExtensionApi) {
 		if (tool !== "bash" && tool !== "eval") return {};
 		let text = "";
 		try {
-			text = typeof event.input?.command === "string" ? event.input.command :
-				typeof event.input?.code === "string" ? event.input.code : JSON.stringify(event.input ?? {});
+			text = typeof event.input?.command === "string" ? event.input.command : JSON.stringify(event.input ?? {});
 		} catch {
 			return {};
 		}
-		if (isPatternKill(text)) return { block: true, reason: REASON };
-		return {};
+		return isPatternKill(text) ? { block: true, reason: REASON } : {};
 	});
 }

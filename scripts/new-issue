@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """File a Crewship issue that follows the issue forms in .github/ISSUE_TEMPLATE.
 
-scripts/new-issue <feature|bug> --title "..." --field problem=@file|text --field proposal=...
-scripts/new-issue feature --json input.json    # {"title": "...", "fields": {"problem": "..."}}
---dry-run prints the title, the labels and the body; without it the issue is created with gh api.
+scripts/new-issue <feature|bug> -R owner/repo --title "..." --field problem=@file|text --field proposal=...
+scripts/new-issue feature -R owner/repo --json input.json    # {"title": "...", "fields": {"problem": "..."}}
+--dry-run prints the title, the labels and the body; without it the issue is created in --repo with gh api.
 On failure, child errors and any HTTP response body go to stderr; the child exit code is preserved.
 """
 
@@ -19,6 +19,7 @@ import yaml
 TEMPLATES = Path(__file__).parents[1] / ".github/ISSUE_TEMPLATE"
 KINDS = {"feature": "feature_request.yml", "bug": "bug_report.yml"}
 PREFIX = re.compile(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]*\))?!?:", re.I)
+REPO = re.compile(r"^(?!\.{1,2}/)[A-Za-z0-9_.-]+/(?!\.{1,2}$)[A-Za-z0-9_.-]+$")
 
 
 def build(kind, title, values):
@@ -52,9 +53,14 @@ def main(argv=None):
     p.add_argument("kind", choices=KINDS)
     p.add_argument("--title")
     p.add_argument("--field", action="append", default=[], metavar="ID=@file|text")
+    p.add_argument("-R", "--repo", metavar="OWNER/REPO", help="literal target repository; required to create")
     p.add_argument("--json", metavar="FILE", help="input as JSON; --title and --field override it")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv)
+    if a.repo is not None and not REPO.fullmatch(a.repo):
+        sys.exit(f"new-issue: --repo must be a literal owner/repo: {a.repo!r}")
+    if a.repo is None and not a.dry_run:
+        sys.exit("new-issue: --repo owner/repo is required to create an issue")
     data = json.loads(Path(a.json).read_text()) if a.json else {}
     title, values = a.title or data.get("title", ""), dict(data.get("fields", {}))
     for item in a.field:
@@ -67,7 +73,7 @@ def main(argv=None):
     if a.dry_run:
         print(f"title: {title}\nlabels: {', '.join(labels)}\n\n{body}", end="")
         return
-    cmd = ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/issues", "--input", "-"]
+    cmd = ["gh", "api", "-X", "POST", f"repos/{a.repo}/issues", "--input", "-"]
     payload = json.dumps({"title": title, "body": body, "labels": labels})
     result = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, text=True)
     if result.returncode:

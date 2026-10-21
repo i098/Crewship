@@ -130,8 +130,6 @@ omp config get statusLine.showHookStatus
 
 Crewship installs managed `gh` and `gh-axi` wrappers at `~/.local/bin/`.
 Both wrappers use the policy in [`blueprint/maintenance/gh`](../blueprint/maintenance/gh).
-Firstmate explicitly approved this execution-time wrapper architecture in R23 as the replacement for shell-text checks.
-That approval covers both CLIs and installation through existing Crewship provisioning.
 Each wrapper checks its own actual arguments before starting the real executable.
 The `gh-axi` check therefore runs before its preliminary issue lookups or API calls.
 Shell quoting, here-documents, here-strings, and working-directory changes cannot borrow a target from another invocation.
@@ -150,6 +148,7 @@ Both CLIs use the last repository flag; `gh-axi --to-repo` uses the first destin
 GraphQL issue mutations and opaque GraphQL payloads require `CREWSHIP_GITHUB_APPROVED_REPO`, because node IDs do not identify a readable repository.
 Implicit parent changes and REST relationship writes also require this approval.
 `gh-axi` sub-issue writes and type edits require matching approval before the CLI starts, because they use internal GraphQL mutations.
+A literal `--no-type` still requires approval when a later occurrence has a false value.
 
 Missing-target blocking is always active.
 Set `CREWSHIP_GITHUB_REPO=owner/repo` in the task environment to enforce a repository contract.
@@ -157,6 +156,7 @@ Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` only after approval for that exac
 Targets compare without letter case.
 `GH_REPO` and git-inferred context do not substitute for explicit issue-write arguments on either CLI.
 Crewship has no repository-aware task launcher here; Firstmate must supply the contract separately.
+An enabled GitHub board service uses its configured repository as both contract and approval for its Project updates.
 
 The existing tool installer owns both wrappers under `~/.local/share/crewship/gh-guard/`.
 Adjacent `gh-real` and `gh-axi-real` links name the verified native release and installed npm entrypoint directly.

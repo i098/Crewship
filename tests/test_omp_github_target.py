@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -602,3 +603,107 @@ def test_gh_axi_reads_and_bare_help_reach_real_gh_axi(run, command, calls, env):
 @pytest.mark.parametrize("approved", [None, UPSTREAM])
 def test_every_type_flag_requires_approval_before_gh_axi_starts(run, command, flags, approved):
     axi(run, f"{command} -R i098/sanctum {flags}", None, approved=approved)
+
+
+BOARD_STUB = f"""#!{sys.executable}
+import json, os, sys
+from pathlib import Path
+calls = Path(os.environ["BOARD_STUB_CALLS"])
+argv = sys.argv[1:]
+with calls.open("a") as log:
+    log.write(json.dumps(argv) + "\\n")
+args = argv[1:]
+if args[0] == "graphql" and "repositoryOwner" in args[2]:
+    options = [{{"id": f"option-{{name}}", "name": name}} for name in ("Queued", "In progress", "In review", "Done")]
+    answer = {{"data": {{"repositoryOwner": {{"projectV2": {{"id": "project", "field": {{"id": "status", "options": options}}}}}}}}}}
+elif args[0] == "graphql":
+    answer = {{"data": {{f"a{{i}}": {{"item": {{"id": f"item-{{i}}"}}}} for i in range(args[2].count("addProjectV2ItemById"))}}}}
+elif args[0].endswith("/issues"):
+    answer = {{"number": 1, "node_id": "issue-1"}}
+else:
+    answer = {{}}
+print(json.dumps(answer))
+"""
+
+
+def rendered_board_service(tmp_path, home, repo):
+    spec = importlib.util.spec_from_file_location("github_board_apply", ROOT / "tests/test_github_board.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module._apply(tmp_path, home, {"repo": repo, "project": 3})
+    env, command = {}, None
+    for line in (home / ".config/systemd/user/github-board.service").read_text().splitlines():
+        key, _, value = line.replace("%h", str(home)).partition("=")
+        if key == "Environment":
+            env.update(word.split("=", 1) for word in shlex.split(value))
+        elif key == "ExecStart":
+            command = shlex.split(value)
+    return env, command
+
+
+def test_the_rendered_board_service_syncs_its_repo_through_the_guard(tmp_path):
+    home = tmp_path / "home"
+    real = home / ".local/share/crewship/tools/gh/2.0.0/bin/gh"
+    real.parent.mkdir(parents=True)
+    real.write_text(BOARD_STUB)
+    real.chmod(0o755)
+    env, command = rendered_board_service(tmp_path, home, CONTRACT)
+    assert env["PATH"].split(":")[0] == str(home / ".local/bin")
+    provisions.install_gh_guard(home, real)
+    calls = tmp_path / "board-calls.jsonl"
+    env.update(HOME=str(home), BOARD_STUB_CALLS=str(calls))
+    firstmate = Path(command[2])
+    (firstmate / "data").mkdir(parents=True)
+    (firstmate / "state").mkdir()
+    state = home / ".local/state/github-board/state.json"
+
+    def sync(section):
+        (firstmate / "data/backlog.md").write_text(f"## {section}\n- [ ] a - work a (repo: r)\n")
+        calls.unlink(missing_ok=True)
+        result = subprocess.run([sys.executable, *command[1:]], env=env, capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        made = [json.loads(line) for line in calls.read_text().splitlines()]
+        mutations = [call[3] for call in made if call[1] == "graphql" and call[3].startswith("query=mutation")]
+        assert ["addProjectV2ItemById" in mutations[0], "updateProjectV2ItemFieldValue" in mutations[1]] == [True, True]
+        return made, json.loads(state.read_text())
+
+    made, saved = sync("In flight")
+    assert made[0][:2] == ["api", f"repos/{CONTRACT}/issues"]
+    assert saved["items"]["a"] == {"issue": 1, "node": "issue-1", "status": "In progress", "posted": 0}
+
+    made, saved = sync("Done")
+    assert ["api", "-X", "PATCH", f"repos/{CONTRACT}/issues/1", "-f", "state=closed"] in made
+    assert saved == {"repo": CONTRACT, "project": 3,
+                     "items": {"a": {"issue": 1, "node": "issue-1", "status": "Done", "posted": 0}}}
+
+    calls.unlink()
+    blocked = subprocess.run(["gh", "api", f"repos/{UPSTREAM}/issues", "-f", "title=x"],
+                             env=env, capture_output=True, text=True, timeout=30)
+    assert blocked.returncode == 2 and "Blocked:" in blocked.stderr
+    assert not calls.exists()
+
+
+@pytest.mark.parametrize("flags", [
+    "--no-type --no-type=false",
+    "--no-type=false --no-type",
+    "--no-type --no-type=0",
+    "--no-type --no-type=f",
+])
+@pytest.mark.parametrize("approved", [None, UPSTREAM])
+def test_literal_no_type_cannot_be_cancelled_before_gh_axi_starts(run, flags, approved):
+    axi(run, f"issue edit 1 -R i098/sanctum --title renamed {flags}", None, approved=approved)
+
+
+@pytest.mark.skipif(shutil.which("bun") is None, reason="needs bun")
+def test_process_guard_keeps_original_eval_json_matching():
+    code = f"""
+import extension from {json.dumps(str(ROOT / "blueprint/config/omp-no-pattern-kill.ts"))};
+let handler;
+extension({{ on: (_event, callback) => {{ handler = callback; }} }});
+const result = await handler({{
+    toolName: "eval", input: {{ code: 'import os\\nkillall = "example"' }}
+}});
+console.log(JSON.stringify(result));
+"""
+    result = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == {}

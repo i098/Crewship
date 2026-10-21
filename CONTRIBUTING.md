@@ -180,18 +180,20 @@ Agents must use `scripts/new-issue`; people can use it or the web forms.
 Run these examples from the repository with the development dependencies installed:
 
 ```bash
-uv run scripts/new-issue bug --title "The installer stops before setup" \
+uv run scripts/new-issue bug --repo i098/Crewship --title "The installer stops before setup" \
   --field "what-happened=Setup stops; I expected it to finish." \
   --field "steps=Run the README install command on a fresh server." \
   --field "version=vX.Y.Z" --field "host=Ubuntu 24.04" --dry-run
 
-uv run scripts/new-issue feature --title "Explain the fresh-server install requirements" \
+uv run scripts/new-issue feature --repo i098/Crewship --title "Explain the fresh-server install requirements" \
   --field "problem=New users cannot find the server requirements." \
   --field "proposal=List the requirements before the install command." --dry-run
 ```
 
 Replace the example values with observed facts.
 Review the printed title, labels, and body, then remove `--dry-run` to create the issue.
+Creating an issue requires `--repo owner/repo` with the literal target repository, for example `--repo i098/Crewship`.
+The script does not guess the repository from the working directory or the environment.
 Use `--field logs=@/path/to/redacted-log.txt` to read a field from a file.
 The script applies the form's label and rejects missing required fields or commit-prefixed titles.
 

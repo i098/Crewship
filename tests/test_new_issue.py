@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -64,8 +65,63 @@ def test_create_failure_reports_child_output(tmp_path, monkeypatch, error_body):
     gh.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
 
-    result = run("feature", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
+    result = run("feature", "-R", "i098/Crewship", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
 
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == summary + error_body
+
+
+def recording_gh(tmp_path, monkeypatch):
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\nfrom pathlib import Path\n"
+        f"Path({str(tmp_path / 'argv')!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        f"Path({str(tmp_path / 'stdin')!r}).write_text(sys.stdin.read())\n"
+        "print(json.dumps({'html_url': 'https://example.test/1'}))\n"
+    )
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    return tmp_path / "argv", tmp_path / "stdin"
+
+
+FIELDS = ("--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
+
+
+@pytest.mark.parametrize("flag", ["-R", "--repo"])
+def test_create_posts_to_supplied_repository(tmp_path, monkeypatch, flag):
+    argv, stdin = recording_gh(tmp_path, monkeypatch)
+
+    result = run("feature", flag, "i098/Crewship", *FIELDS)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "https://example.test/1\n"
+    assert json.loads(argv.read_text()) == ["api", "-X", "POST", "repos/i098/Crewship/issues", "--input", "-"]
+    payload = json.loads(stdin.read_text())
+    assert payload["title"] == "Do it" and payload["labels"] == ["enhancement"]
+
+
+@pytest.mark.parametrize(
+    "repo", [None, "", "i098", "{owner}/{repo}", ":owner/:repo", "i098/Crewship/x", "../x", "i098/..", "a b/c", "i098/Crewship\n"]
+)
+def test_missing_or_invalid_repository_never_starts_gh(tmp_path, monkeypatch, repo):
+    argv, _ = recording_gh(tmp_path, monkeypatch)
+    target = () if repo is None else ("--repo", repo)
+
+    result = run("feature", *target, *FIELDS)
+
+    assert result.returncode != 0
+    assert "--repo" in result.stderr
+    assert not argv.exists()
+
+
+@pytest.mark.parametrize("target", [(), ("--repo", "i098/Crewship")])
+def test_dry_run_never_starts_gh(tmp_path, monkeypatch, target):
+    argv, _ = recording_gh(tmp_path, monkeypatch)
+
+    result = run("feature", *target, *FIELDS, "--dry-run")
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("title: Do it\nlabels: enhancement\n")
+    assert not argv.exists()
