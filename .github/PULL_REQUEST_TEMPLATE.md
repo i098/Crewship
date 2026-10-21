@@ -16,7 +16,7 @@ Closes #
 
 ## Checklist
 
-<!-- Keep every item. Check completed items. For an inapplicable item, leave its box unchecked and add "Not applicable: <reason>" on the same line. -->
+<!-- Keep every item. Check completed items. See CONTRIBUTING.md#pull-requests for unchecked items and required explanations. -->
 
 - [ ] One concern in this PR.
 - [ ] The title uses the commit format, for example `fix(provisions): check the digest before install`.
