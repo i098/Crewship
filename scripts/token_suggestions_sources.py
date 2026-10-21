@@ -6,6 +6,7 @@ import os
 import sqlite3
 import stat
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -323,32 +324,37 @@ def omp_deadline(deadline):
         raise ValueError("omp source deadline")
 
 
-def omp_paths(root_fd, lower, deadline, counts):
-    paths = []
+@contextmanager
+def omp_directory(root_fd, parts, deadline):
+    fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            omp_deadline(deadline)
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
 
-    def scan(directory_fd, parent=""):
-        with os.scandir(directory_fd) as entries:
+
+def omp_paths(root_fd, lower, deadline, counts):
+    paths, directories = [], [()]
+    while directories and not counts["limited"]:
+        parent = directories.pop()
+        with omp_directory(root_fd, parent, deadline) as fd, os.scandir(fd) as entries:
             for entry in entries:
                 omp_deadline(deadline)
                 counts["entries"] += 1
                 if counts["entries"] > OMP_MAX_ENTRIES:
                     counts["limited"] = 1
                     break
-                if not parent and entry.is_dir(follow_symlinks=False):
-                    fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                                 dir_fd=root_fd)
-                    try:
-                        scan(fd, entry.name)
-                    finally:
-                        os.close(fd)
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append((*parent, entry.name))
                 elif entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
                     modified = entry.stat(follow_symlinks=False).st_mtime
                     if modified >= lower.timestamp():
                         paths.append((modified, parent, entry.name))
-                if counts["limited"]:
-                    break
-
-    scan(root_fd)
     paths.sort(reverse=True)
     if len(paths) > OMP_MAX_FILES:
         counts["limited"] = 1
@@ -357,11 +363,8 @@ def omp_paths(root_fd, lower, deadline, counts):
 
 def omp_records(root_fd, path, deadline, counts):
     _, parent, name = path
-    fd = os.open(parent or ".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
-    try:
+    with omp_directory(root_fd, parent, deadline) as fd:
         source_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
-    finally:
-        os.close(fd)
     with os.fdopen(source_fd, "rb") as source:
         if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
             raise ValueError("omp source is not a regular file")
@@ -383,7 +386,7 @@ def omp_records(root_fd, path, deadline, counts):
             counts["records"] += 1
             try:
                 record = json.loads(raw)
-                if isinstance(record, dict) and record.get("type") == "message":
+                if isinstance(record, dict) and record.get("type") not in ("session", "title"):
                     yield record
             except (ValueError, UnicodeError, RecursionError):
                 counts["malformed"] += 1
@@ -428,18 +431,33 @@ def omp_cache(message, groups):
 
 
 def omp_retry(run, retries):
-    events = run["events"]
-    overlaps = {id(retries[event]): retries[event] for event in events if event in retries}
-    for group in overlaps.values():
-        events.update(group)
-    for event in events:
-        retries[event] = events
+    if run is not None and run["calls"] >= 3 and run["errors"] * 2 >= run["calls"]:
+        retries[id(run)] = run
+
+
+def omp_retry_groups(retries, deadline):
+    covered = {}
+    for run in sorted(retries.values(), key=lambda run: -run["calls"]):
+        events, link = set(), run["events"]
+        while link is not None:
+            omp_deadline(deadline)
+            event, link = link
+            events.add(event)
+        if any(events <= group for group in covered.get(run["events"][0], ())):
+            continue
+        for event in events:
+            covered.setdefault(event, []).append(events)
+        yield run
 
 
 def omp_message(record):
     at = instant(record["timestamp"])
-    message = record["message"]
-    identity = omp_digest(record["id"])
+    if (not isinstance(record["id"], str)
+            or record.get("parentId") is not None and not isinstance(record["parentId"], str)):
+        raise ValueError("invalid omp entry identity")
+    message = (record["message"] if record.get("type") == "message"
+               else {"role": record.get("type")})
+    identity = omp_digest(record)
     if not isinstance(message, dict):
         raise ValueError("invalid omp message")
     if message.get("role") == "assistant" and "completedAt" in message:
@@ -461,16 +479,27 @@ def omp_tool_measure(message, shape, size, tools):
         tool["error_calls"] += int(error)
 
 
-def omp_tool_result(message, pending, run, size, retries, identity):
-    shape, batch = pending.pop(omp_digest(message.get("toolCallId")), (None, None))
+def omp_pending_call(pending, key, deadline):
+    while pending is not None:
+        omp_deadline(deadline)
+        calls, pending = pending
+        if key in calls:
+            return calls[key]
+    return None, None
+
+
+def omp_tool_result(message, call, run, size, retries, identity):
+    shape, batch = call
     error = message.get("isError")
-    if (shape != run["shape"] or shape is None or batch == run["batch"]
+    if (run is None or shape != run["shape"] or shape is None or batch == run["batch"]
             or type(error) is not bool):
         omp_retry(run, retries)
-        run = {"shape": shape, "batch": batch, "events": {}}
+        run = {"shape": shape, "batch": batch, "calls": 0, "errors": 0, "tokens": 0,
+               "events": None}
     if shape is not None and type(error) is bool:
-        run["batch"] = batch
-        run["events"][identity] = (size, int(error))
+        return {"shape": shape, "batch": batch, "calls": run["calls"] + 1,
+                "errors": run["errors"] + int(error), "tokens": run["tokens"] + size,
+                "events": (identity, run["events"])}
     return run
 
 
@@ -492,16 +521,13 @@ def omp_calls(content, identity):
         for block in content if isinstance(block, dict) and block.get("type") == "toolCall"}
 
 
-def omp_candidates(contexts, tools, retries, window):
+def omp_candidates(contexts, tools, retries, window, deadline):
     sinks = []
-    for events in {id(events): events for events in retries.values()}.values():
-        calls = len(events)
-        if calls >= 3 and sum(error for _, error in events.values()) * 2 >= calls:
-            tokens = sum(size for size, _ in events.values())
-            sinks.append({"sink_id": f"learning_loop:error_loop:omp-{len(sinks)}",
-                          "tokens_observed": tokens, "evidence": {
-                              "calls": calls, "observed_output_token_floor": tokens,
-                              "tokens_observed_basis": "bytes4_estimate"}})
+    for run in omp_retry_groups(retries, deadline):
+        sinks.append({"sink_id": f"learning_loop:error_loop:omp-{len(sinks)}",
+                      "tokens_observed": run["tokens"], "evidence": {
+                          "calls": run["calls"], "observed_output_token_floor": run["tokens"],
+                          "tokens_observed_basis": "bytes4_estimate"}})
     for context in contexts.values():
         if len(context["sessions"]) >= 3:
             sinks.append({"sink_id": f"recurring_context:repaste:omp-{len(sinks)}", "evidence": {
@@ -524,7 +550,38 @@ def omp_messages(root_fd, path, deadline, counts, end):
             counts["malformed"] += 1
             continue
         if at < end:
-            yield at, message, identity, texts
+            yield record, at, message, identity, texts
+
+
+def omp_apply(entry, state, session, start, counts, observations):
+    contexts, tools, cache, seen, retries, deadline = observations
+    record, at, message, identity, texts = entry
+    pending, run = state
+    current = at >= start
+    observed = current and record["type"] == "message" and identity not in seen
+    if observed:
+        seen.add(identity)
+        counts["messages"] += 1
+    role = message.get("role")
+    if role in ("user", "developer", "reset_boundary", "compaction", "branch_summary"):
+        omp_retry(run, retries)
+        pending, run = None, None
+        if observed:
+            omp_context(texts, session, contexts)
+    elif role == "assistant":
+        pending = (omp_calls(message.get("content"), identity), pending)
+        if observed:
+            omp_cache(message, cache)
+    elif role == "toolResult":
+        key = omp_digest(message.get("toolCallId"))
+        call = omp_pending_call(pending, key, deadline)
+        pending = ({key: (None, None)}, pending)
+        if current:
+            size = sum((len(text) + 3) // 4 for text in texts)
+            run = omp_tool_result(message, call, run, size, retries, identity)
+            if observed:
+                omp_tool_measure(message, run["shape"], size, tools)
+    return pending, run
 
 
 def read_omp(root, bounds):
@@ -533,6 +590,8 @@ def read_omp(root, bounds):
                            "malformed", "limited"), 0)
     window = tuple(t.isoformat() for t in bounds[1:])
     contexts, tools, cache, seen, retries = {}, {}, {}, set(), {}
+    observations = contexts, tools, cache, seen, retries, deadline
+
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         paths = omp_paths(root_fd, bounds[1], deadline, counts)
@@ -541,37 +600,17 @@ def read_omp(root, bounds):
                 counts["limited"] = 1
                 break
             counts["files"] += 1
-            pending = {}
-            run = {"shape": None, "batch": None, "events": {}}
-            for at, message, identity, texts in omp_messages(
-                    root_fd, path, deadline, counts, bounds[2]):
-                current = at >= bounds[1]
-                duplicate = identity in seen
-                if current:
-                    seen.add(identity)
-                    counts["messages"] += int(not duplicate)
-                role = message.get("role")
-                content = message.get("content")
-                if role in ("user", "developer"):
-                    omp_retry(run, retries)
-                    run = {"shape": None, "batch": None, "events": {}}
-                    pending.clear()
-                    if current and not duplicate:
-                        omp_context(texts, session, contexts)
-                elif role == "assistant":
-                    pending.update(omp_calls(content, identity))
-                    if current and not duplicate:
-                        omp_cache(message, cache)
-                elif role == "toolResult":
-                    if not current:
-                        pending.pop(omp_digest(message.get("toolCallId")), None)
-                        continue
-                    size = sum((len(text) + 3) // 4 for text in texts)
-                    run = omp_tool_result(message, pending, run, size, retries, identity)
-                    if not duplicate:
-                        omp_tool_measure(message, run["shape"], size, tools)
-            omp_retry(run, retries)
+            states, leaves = {}, set()
+            for entry in omp_messages(root_fd, path, deadline, counts, bounds[2]):
+                record = entry[0]
+                key, parent = record["id"], record.get("parentId")
+                states[key] = omp_apply(
+                    entry, states.get(parent, (None, None)), session, bounds[1], counts, observations)
+                leaves.discard(parent)
+                leaves.add(key)
+            for leaf in leaves:
+                omp_retry(states[leaf][1], retries)
     finally:
         os.close(root_fd)
-    rows = omp_candidates(contexts, tools, retries, window)
+    rows = omp_candidates(contexts, tools, retries, window, deadline)
     return rows, list(cache.values()), counts

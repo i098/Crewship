@@ -440,7 +440,7 @@ At most eight explicitly named snapshots are read, with a 1 MiB limit each.
 The reader does not search other homes or unconfigured session roots.
 
 Set `omp_sessions` explicitly to the root used by omp, normally `~/.omp/agent/sessions`, expanded to an absolute path.
-The source reads JSONL files in that root and its direct project directories without following symbolic links.
+The source reads JSONL files throughout that root, including nested subagent and advisor sessions, without following symbolic links.
 It considers at most 8,192 directory entries and reads at most 256 files, newest modified first.
 Only files modified since the selected day began are eligible.
 Each scan has a 15-second deadline, a 128 MiB total limit, and a 100,000-record limit.
@@ -452,8 +452,10 @@ No observed messages for the selected day means the omp source cannot establish 
 The omp source measures text sizes locally and uses temporary hashes to match repeated text and tool calls.
 It never exports those hashes, message text, tool output, arguments, paths, identifiers, model names, or provider names.
 It ignores unknown fields, image data, and thinking blocks.
-Identical entry IDs count once across copied session files.
-The reader reconstructs retry sequences from copied entries, then merges overlapping sequences and counts each result once.
+Identical original records count once across copied session files, even when unrelated records share a short entry ID.
+The reader follows parent links to preserve each real retry sequence.
+Copied prefixes and suffixes are omitted when a longer observed sequence contains them; forked branches never merge.
+Distinct branch candidates can share earlier calls; do not add their estimates.
 Malformed text encoding increases the malformed-record count without discarding other valid sessions.
 The reader retains earlier call metadata in eligible files to match tool results from the selected day.
 All omp coverage stays partial because session files do not establish a complete request history.
