@@ -77,8 +77,12 @@ Use arrows or `j`/`k` to select a row, and Enter to open or close its details.
 Press `/` to search, `s` to cycle sources, `o` to cycle owners, and Escape to clear the filters.
 Use Page Up and Page Down to scroll details.
 Press `J` to read the selected service's last 40 journal lines, and `q` to quit.
+Press `p` to show or hide raw systemd properties.
 Each subprocess has an eight-second timeout.
 Narrow terminals show the job name and result first.
+Failed jobs appear first; other jobs follow their next run time.
+Results use red for failure, yellow for running, green for success, and dim text for unknown values.
+The time and result columns show unknown values as `-`; owner labels keep `Unknown`.
 
 The installation records its Firstmate home in `~/.config/crewship/schedules.json`.
 `FM_HOME` or `--home DIR` overrides that home.

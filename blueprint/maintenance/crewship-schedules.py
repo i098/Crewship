@@ -85,6 +85,20 @@ def compact_schedule(value):
     return interval.removeprefix("*-*-* ") + (" repeat" if kind != "Calendar" else "")
 
 
+def result_kind(value):
+    if value.startswith("OK "):
+        return "ok"
+    if value == "Running":
+        return "running"
+    return "unknown" if value in (UNKNOWN, "No record") else "failed"
+
+
+def row_order(item):
+    next_run = re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", item["next"])
+    return (result_kind(item["result"]) != "failed",
+            next_run[0] if next_run else "9999", item["name"], item["source"])
+
+
 def owner_for(evidence, owners):
     matches = [(root, name) for root, name in owners.items()
                if re.search(r"(?<![\w./-])" + re.escape(root.rstrip("/")) +
@@ -309,28 +323,40 @@ class Inventory:
                 for source, items in self.saved.items() for item in items]
         rows.extend(row("Read error", source, UNKNOWN, "", message, {}, path=source, stale=False)
                     | {"result": "Read error"} for source, message in self.errors.items())
-        return rows
+        return sorted(rows, key=row_order)
 
 
 def details(item):
-    lines = [f"{item['name']} | {item['result']}" + (" | STALE" if item["stale"] else ""),
-             f"Purpose: {item['purpose']}", f"Source: {item['source']} | {item['path']}",
-             f"Owner: {item['owner']} | {item['evidence']}", f"Schedule: {item['schedule']}",
-             f"Command: {item['command']}", f"Next: {item['next']} | Last trigger: {item['last']}"]
-    if item.get("registration"):
-        lines.append(f"Registration: {item['registration']}")
-    for kind in ("service", "timer"):
-        for key, value in item.get(kind, {}).items():
-            if key not in ("Id", "Description", "ExecStart", "TimersCalendar", "TimersMonotonic"):
-                lines.append(f"{kind}.{key}: {value or UNKNOWN}")
+    service = item.get("service", {})
+    command = re.findall(r"argv\[\]=(.*?) ; ignore_errors=", item["command"])
+    lines = [item["name"] + (" | STALE" if item["stale"] else ""),
+             f"Purpose: {item['purpose']}", f"Owner: {item['owner']} | {item['evidence']}",
+             f"Schedule: {item['schedule']}",
+             f"Next: {item['next']} | Last trigger: {item['last']}",
+             f"Result: {item['result']}"]
+    if service:
+        lines.append(f"Service: {service.get('ActiveState', UNKNOWN)}/{service.get('SubState', UNKNOWN)}"
+                     f" | Exit status: {service.get('ExecMainStatus', UNKNOWN)}")
+        lines.append(f"Started: {timestamp(service.get('ExecMainStartTimestamp'))}"
+                     f" | Exited: {timestamp(service.get('ExecMainExitTimestamp'))}")
+    lines.extend([f"Command: {'; '.join(command) if command else item['command']}",
+                  f"Source: {item['source'] if service else item['path']}"])
     return lines
 
 
-def put(screen, y, value, attr=0):
+def raw_details(item):
+    lines = [f"{kind}.{key}: {value or UNKNOWN}"
+             for kind in ("service", "timer") for key, value in item.get(kind, {}).items()]
+    if item.get("registration"):
+        lines.append(f"Registration: {item['registration']}")
+    return lines or ["No systemd properties for this source."]
+
+
+def put(screen, y, value, attr=0, x=0):
     height, width = screen.getmaxyx()
-    if 0 <= y < height and width > 1:
+    if 0 <= y < height and width - x > 1:
         try:
-            screen.addnstr(y, 0, text(value), width - 1, attr)
+            screen.addnstr(y, x, text(value), width - x - 1, attr)
         except curses.error:
             pass  # A resize or a wide glyph can reach the last terminal cell.
 
@@ -358,24 +384,52 @@ def draw_header(screen, caption, search_line, errors):
     return 2 + min(len(messages), max(1, height // 5))
 
 
+def cell_value(item, key):
+    value = item[key]
+    if key in ("next", "last"):
+        value = compact_time(value)
+    elif key == "schedule":
+        value = compact_schedule(value)
+    if key in ("next", "last", "result") and value in (UNKNOWN, "No record"):
+        value = "-"
+    return "STALE " + value if key == "result" and item["stale"] else value
+
+
+def cell_style(item, key):
+    if key == "result":
+        kind = result_kind(item[key])
+        if kind == "unknown":
+            return curses.A_DIM
+        return curses.color_pair({"ok": 1, "failed": 2, "running": 3}[kind]) if curses.has_colors() else curses.A_BOLD
+    return curses.A_DIM if key in ("next", "last") and item[key] == UNKNOWN else 0
+
+
+def draw_row(screen, y, item, layout, selected):
+    base, x = (curses.A_REVERSE if selected else 0), 0
+    _, width = screen.getmaxyx()
+    put(screen, y, " " * (width - 1), base)
+    for index, (key, size) in enumerate(layout):
+        value = text(cell_value(item, key))[:size].ljust(size)
+        put(screen, y, value, base | cell_style(item, key), x)
+        x += size
+        if index < len(layout) - 1:
+            put(screen, y, " │ ", base | curses.A_DIM, x)
+            x += 3
+
+
 def draw_table(screen, visible, selected, header, expanded):
     height, width = screen.getmaxyx()
     if width >= 120:
-        layout = [("name", 22), ("schedule", 16), ("next", 11), ("last", 11), ("result", 13), ("owner", 18), ("purpose", width - 98)]
+        layout = [("name", 22), ("schedule", 16), ("next", 11), ("last", 11), ("result", 13), ("owner", 18), ("purpose", width - 110)]
     elif width >= 75:
-        layout = [("name", 25), ("result", 18), ("owner", 20), ("purpose", max(10, width - 66))]
+        layout = [("name", 23), ("result", 14), ("owner", 17), ("purpose", width - 64)]
     else:
-        layout = [("name", max(8, width - 21)), ("result", 19)]
-    put(screen, header, " ".join(key.title().ljust(size) for key, size in layout), curses.A_BOLD)
+        layout = [("name", max(8, width - 22)), ("result", 18)]
+    put(screen, header, " │ ".join(key.title().ljust(size) for key, size in layout), curses.A_BOLD)
     count = min(max(1, len(visible)), max(1, (height - header - 4) // (2 if expanded else 1)))
     start = max(0, selected - count + 1)
     for y, item in enumerate(visible[start:start + count], header + 1):
-        values = dict(item, next=compact_time(item["next"]), last=compact_time(item["last"]),
-                      schedule=compact_schedule(item["schedule"]))
-        if item["stale"]:
-            values["result"] = "STALE " + values["result"]
-        attr = curses.A_REVERSE if y - header - 1 + start == selected else 0
-        put(screen, y, " ".join(text(values[key])[:size].ljust(size) for key, size in layout), attr)
+        draw_row(screen, y, item, layout, y - header - 1 + start == selected)
     return header + count + 2
 
 
@@ -412,6 +466,7 @@ class View:
         self.selected, self.expanded, self.offset = 0, True, 0
         self.search, self.source, self.owner = "", "All", "All"
         self.editing, self.journal = False, []
+        self.raw_properties = False
 
     def draw(self, visible):
         height, width = self.screen.getmaxyx()
@@ -422,12 +477,15 @@ class View:
             self.inventory.errors)
         top = draw_table(self.screen, visible, self.selected, header, self.expanded)
         if self.expanded and visible:
-            lines = [details(visible[self.selected])[0], *self.journal] if self.journal else details(visible[self.selected])
+            item = visible[self.selected]
+            lines = [item["name"], *self.journal] if self.journal else details(item)
+            if self.raw_properties:
+                lines.extend(["Properties:", *raw_details(item)])
             self.offset = draw_details(self.screen, lines, top, self.offset)
         put(self.screen, height - 2, "Local login + system only; no other accounts, containers, remote hosts, or cron child scripts.", curses.A_DIM)
-        help_line = "q quit  j/k select  Enter details  / search  s source  o owner  r refresh  J journal  PgUp/Dn scroll"
+        help_line = "q quit  j/k select  Enter details  / search  s source  o owner  r refresh  p properties  J journal  PgUp/Dn scroll"
         accent = curses.color_pair(1) if curses.has_colors() else curses.A_BOLD
-        put(self.screen, height - 1, help_line if width >= 100 else "q quit | j/k Enter / s o r J PgUp/Dn", accent)
+        put(self.screen, height - 1, help_line if width >= 115 else "q quit | j/k Enter / s o r p J PgUp/Dn", accent)
         self.screen.refresh()
 
     def filter_key(self, key):
@@ -438,6 +496,7 @@ class View:
         else:
             self.search, self.source, self.owner = "", "All", "All"
         self.selected, self.offset, self.journal = 0, 0, []
+        self.raw_properties = False
 
     def handle_key(self, key, visible):
         if self.editing:
@@ -456,13 +515,17 @@ class View:
         elif key == "r":
             self.rows = self.inventory.refresh()
             self.journal = []
+        elif key == "p":
+            self.raw_properties = not self.raw_properties
+            self.offset, self.journal = 0, []
+            self.expanded = True
         elif key in (curses.KEY_NPAGE, curses.KEY_PPAGE):
             self.offset = max(0, self.offset + (5 if key == curses.KEY_NPAGE else -5))
         elif key == "J" and visible:
             item = visible[self.selected]
             if item.get("unit"):
                 self.journal = read_journal(item)
-                self.expanded, self.offset = True, 0
+                self.expanded, self.offset, self.raw_properties = True, 0, False
 
     def run(self):
         while True:
@@ -482,6 +545,7 @@ def view(screen, inventory):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_GREEN, -1)
         curses.init_pair(2, curses.COLOR_RED, -1)
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)
     View(screen, inventory).run()
 
 

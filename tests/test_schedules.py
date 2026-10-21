@@ -53,6 +53,10 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
     assert completed["result"] == "OK 2"
     assert completed["owner"] == "orbit-mate-a1"
     assert completed["last"] != completed["service"]["ExecMainExitTimestamp"]
+    failed = dict(completed, name="broken", result="exit-code (1)", next="2026-10-23 09:00:00 UTC")
+    earlier = dict(completed, name="earlier", next="2026-10-22 07:00:00 UTC")
+    ordered = sorted([completed, earlier, failed], key=schedules.row_order)
+    assert [item["name"] for item in ordered] == ["broken", "earlier", "report"]
     assert schedules.text("report\x1b[31m\n\u202e") == r"report\x1b[31m\n\u202e"
     (tmp_path / "state").mkdir()
     check = tmp_path / "state/report.check.sh"
