@@ -124,7 +124,9 @@ The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for br
 See [how.html](public/how.html) for the audio graph.
 
 Settings provides Auto, Low, and High graphics, plus System, Reduce, and Full motion.
-Auto keeps adaptive phone detail; Low uses larger glyphs without shadows; High keeps full detail.
+Auto keeps adaptive phone detail, and High keeps full detail.
+Low multiplies the complete base glyph size by 1.5 and disables shadows.
+Low stays active through house doors, cabin doors, and the ship's hatch.
 The small `harbor-settings` record stores only graphics and motion values.
 If storage fails, changes apply for the visit and Settings shows a notice.
 The notice clears after a successful save.

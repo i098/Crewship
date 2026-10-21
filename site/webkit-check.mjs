@@ -134,6 +134,10 @@ window.harborCheck = {
     document.querySelectorAll(selector)[n].focus();
     return this.focusState();
   },
+  mapBounds() {
+    return mapBox ? { x: padX + mapBox.oi * cellW, y: padY + mapBox.oj * cellH,
+      width: mapBox.w * cellW, height: mapBox.h * cellH, cellW, cellH } : null;
+  },
   bounds() {
     return {
       box: signBox,
@@ -143,8 +147,7 @@ window.harborCheck = {
       cellH, dpr: canvas.width / stage.clientWidth, ratio: devicePixelRatio,
       safe: [safe.top, safe.right, safe.bottom, safe.left], screenWidth: stage.clientWidth, screenHeight: stage.clientHeight,
       pad: pad.offsetParent ? pad.getBoundingClientRect().toJSON() : null,
-      map: mapBox ? { x: padX + mapBox.oi * cellW, y: padY + mapBox.oj * cellH,
-        width: mapBox.w * cellW, height: mapBox.h * cellH, cellW, cellH } : null,
+      map: this.mapBounds(),
       links: signLinks.map(({start, height, left = 1, width = signBox.w - 2, a}) => ({
         x: padX + (signBox.i + left + width / 2) * cellW,
         y: padY + (signBox.j + 1 + start + height / 2) * cellH,
@@ -198,7 +201,7 @@ if (!page.isClosed() && !errors.length) {
 }
 if (!page.isClosed() && !errors.length) {
   for (const full of [false, true]) {
-    const { map } = await page.evaluate(() => window.harborCheck.bounds());
+    const map = await page.evaluate(() => window.harborCheck.mapBounds());
     const button = await page.locator("#menu-open").boundingBox();
     assert(button && (button.x >= map.x + map.width || button.x + button.width <= map.x ||
       button.y >= map.y + map.height || button.y + button.height <= map.y), `${name}: Menu covers the map`);

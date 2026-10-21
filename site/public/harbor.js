@@ -1779,7 +1779,7 @@ function crossInto(next, place) {
   interior = next;
   Object.assign(me, place, { pitch: 0 });
   probeMs = -1;
-  slow = fast = 0; scale = preferences.graphics === "low" ? COARSEST : 1;
+  slow = fast = 0; scale = 1;
   layoutDirty = true;
   doorInputHeld = true;
 
@@ -2694,7 +2694,7 @@ function measure() {
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
   // The 0.9 zoom holds up to FULL_AREA; a bigger stage gets bigger glyphs so the cell cap falls with the square root of its
   // area (about 51000 cells at 3840 by 2160). A cell is about twice as tall as wide.
-  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale);
+  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale) * (preferences.graphics === "low" ? COARSEST : 1);
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4340,7 +4340,7 @@ function savePreferences() {
 }
 function applyPreferences() {
   reduced.matches = preferences.motion === "reduce" || (preferences.motion === "system" && systemMotion.matches);
-  scale = preferences.graphics === "low" ? COARSEST : 1;
+  scale = 1;
   shadows = preferences.graphics === "high" || (preferences.graphics === "auto" && !touchFirst.matches);
   slow = fast = 0;
   layoutDirty = dirty = true;
