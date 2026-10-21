@@ -445,7 +445,8 @@ It considers at most 8,192 directory entries and reads at most 256 files, newest
 Only files modified since the selected day began are eligible.
 Each scan has a 15-second deadline, a 128 MiB total limit, and a 100,000-record limit.
 Each file has a 16 MiB limit; each JSONL record has a 2 MiB limit.
-Limit hits and malformed records appear as counts, not private excerpts.
+The report shows file, message, and malformed-record counts, plus a scan-limit flag, without private excerpts.
+A scan that exceeds its deadline makes the omp source unavailable.
 An incomplete final record stays unread.
 No observed messages for the selected day means the omp source cannot establish a successful report cycle.
 
