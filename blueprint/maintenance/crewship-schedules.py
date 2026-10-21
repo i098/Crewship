@@ -98,10 +98,9 @@ def row_order(item):
 
 
 def owner_for(paths, owners):
-    paths = [os.path.normpath(path) for path in paths if Path(path).is_absolute()]
+    paths = [os.path.realpath(path) for path in paths if Path(path).is_absolute()]
     matches = [(root, name) for root, name in owners.items()
-               if any(path == os.path.normpath(root) or
-                      path.startswith(os.path.normpath(root).rstrip("/") + "/") for path in paths)]
+               if any(path == root or path.startswith(root.rstrip("/") + "/") for path in paths)]
     if not matches:
         return UNKNOWN, "No registered home path matches. Worker: Unknown."
     names = {name for _, name in matches}
@@ -284,7 +283,10 @@ def read_registry(registry):
         if match:
             root = match[1].strip()
             identity = re.match(r"- ([A-Za-z0-9._-]+) - ", line)
-            if not identity or not Path(root).is_absolute() or root in owners:
+            if not identity or not Path(root).is_absolute():
+                raise ValueError("Invalid second-mate registry entry")
+            root = os.path.realpath(root)
+            if root in owners:
                 raise ValueError("Invalid second-mate registry entry")
             try:
                 if (Path(root) / ".fm-secondmate-home").read_text().strip() != identity[1]:
@@ -316,6 +318,7 @@ def check_rows(home, owners):
 
 class Inventory:
     def __init__(self, home, registry=None):
+        home = Path(os.path.realpath(home)) if home else None
         self.home, self.saved, self.errors, self.owners = home, {}, {}, {}
         self.registry = registry or (home / "data/secondmates.md" if home else None)
 

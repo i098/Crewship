@@ -16,13 +16,16 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     other = tmp_path / "nova"
     other.mkdir()
     (other / ".fm-secondmate-home").write_text("nova-mate-b2\n")
+    home_alias = tmp_path / "orbit-alias"
+    home_alias.symlink_to(home, target_is_directory=True)
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(
-        f"- orbit-mate-a1 - Report owner (home: {home}; scope: Reports; projects: orbit; added 2026-10-21)\n"
-        f"- nova-mate-b2 - Other owner (home: {other}; scope: Reports; projects: nova; added 2026-10-21)\n"
+        f"- orbit-mate-a1 - Report owner (home: {home_alias}/../orbit; scope: Reports; projects: orbit; added 2026-10-21)\n"
+        f"- nova-mate-b2 - Other owner (home: {other}/.; scope: Reports; projects: nova; added 2026-10-21)\n"
     )
     owners, errors = schedules.read_registry(tmp_path / "data/secondmates.md")
     assert not errors
+    assert owners == {str(home): "orbit-mate-a1", str(other): "nova-mate-b2"}
     cron = schedules.cron_rows(
         "CRON_TZ=UTC\n# Purpose: Publish the report\n0 9 * * * /srv/orbit/bin/report\n"
         "@reboot /srv/orbital/bin/report\n"
@@ -54,6 +57,7 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         (f"cd {home} || ./bin/report.sh", "cd", "Unknown"),
         (f"cd {home}/$SUBDIR && ./bin/report.sh", "cd", "Unknown"),
         (f"/usr/bin/env HOME={home} /usr/bin/cat {home}/data.py", "env", "Unknown"),
+        (f"{home_alias}/bin/report", "report", "orbit-mate-a1"),
     ]
     for source, system in (("user cron", False), ("/etc/crontab", True), ("/etc/cron.d/report", True)):
         for command, name, owner in commands:
@@ -163,11 +167,12 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     assert all(item["result"] == "Unknown" and not item["stale"] for item in checks)
     assert all(item["schedule"] == "Watcher sweep (default 5m)" for item in checks)
     assert scanned == {root / "state" for root in (tmp_path, home, other)}
-    for selected in (None, home):
+    monkeypatch.chdir(home)
+    for selected in (None, home, Path("."), Path("../orbit"), home_alias):
         registered = schedules.collect_snapshot(selected, registry, {})
         assert not registered["errors"]
-        assert {item["path"] for item in registered["rows"]} == {
-            str(root / "state/report.check.sh") for root in (home, other)
+        assert {item["path"]: item["owner"] for item in registered["rows"]} == {
+            str(root / "state/report.check.sh"): owners[str(root)] for root in (home, other)
         }
     unavailable.add(home / "state")
     stale = schedules.collect_snapshot(tmp_path, registry, snapshot)

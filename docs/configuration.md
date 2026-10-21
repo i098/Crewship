@@ -88,6 +88,7 @@ The installation records its Firstmate home in `~/.config/crewship/schedules.jso
 `FM_HOME` or `--home DIR` overrides that home.
 The viewer reads that home's `data/secondmates.md`; `--registry FILE` selects another registry.
 Only registered home paths with matching `.fm-secondmate-home` metadata establish second-mate ownership.
+The viewer resolves relative components and symbolic links before it compares home paths or matches ownership evidence.
 Worker ownership stays Unknown without proof.
 Checks come from `state/*.check.sh` in the selected home and every validated registry home.
 The viewer reads only check names, paths, and file modes; it never reads script contents or trust files.
@@ -101,7 +102,7 @@ The Last column means the timer's last trigger, not service completion.
 Details keep service start, exit, result, exit code, and success policy separate.
 A nonzero exit can be successful under systemd's policy.
 Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
-Control characters appear as text.
+Control and format characters appear as visible code-point escapes in terminal filters and errors.
 Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
 Other commands use their executable name as a label.
 For a leading `cd DIR && command`, the viewer uses DIR as working-directory evidence and resolves relative executable or script paths.

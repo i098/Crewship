@@ -28,7 +28,7 @@ const collector = existsSync(join(import.meta.dir, "collector.py"))
   ? join(import.meta.dir, "collector.py")
   : resolve(import.meta.dir, "../../blueprint/maintenance/crewship-schedules.py");
 const safe = (value: string) => value.replace(/[\p{Cc}\p{Cf}]/gu,
-  (char) => JSON.stringify(char).slice(1, -1));
+  (char) => `\\u{${char.codePointAt(0)!.toString(16)}}`);
 const chunk = (text: string, fg = colors.text, bg = colors.background, attributes = 0): TextChunk =>
   ({ __isChunk: true, text, fg, bg, attributes });
 
