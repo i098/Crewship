@@ -12,6 +12,7 @@
 | `./ship.sh chart` | | Runs the Ansible playbook in check mode and reports what would change. Creates missing home-layout, agent preference, extension, and enabled-profile directories under the configured user's home. Leaves existing directory permissions, ownership, and managed files unchanged. Reports missing Obscura releases without downloading or extracting binaries. Also performs the one-time config rewrite below. |
 | `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. With the `firstmate` profile on, the first successful interactive apply with omp signed in then opens the new-host questions (below). |
 | `./ship.sh survey` | | Checks that each expected tool runs and reports `gh` authentication. Changes nothing except for the one-time config rewrite below. |
+| `./ship.sh setup` | | Checks setup readiness; see the details below. Does not install or sign in. |
 | `scripts/ship.py` | | The Python program behind `ship.sh`. |
 | `scripts/provisions.py` | `scripts/install_tools.py` | Installs the public tools into the user-owned Crewship prefix. |
 | `scripts/stow-secrets.sh` | `scripts/push-super-env.sh` | Pushes `~/super.env` to Cloudflare Secrets Store and redeploys the fleet-secrets Worker. |
@@ -23,6 +24,23 @@ Errors from installed units remain visible.
 `launch` keeps its existing service enablement and start behavior.
 
 `inspect`, `chart`, `launch`, and `survey` read `--config <path>` if you pass one, otherwise `.local/host.yml`. If `.local/host.yml` does not exist, `inspect`, `chart`, and `survey` fall back to `blueprint/config/default.yml` (user `coder`); `launch` refuses to run.
+
+Run `"$HOME/Crewship/ship.sh" setup` from any directory after installation.
+It reports three status lines: software, sign-ins, and fleet readiness.
+It uses the same tool checks as `survey`.
+With the `agents` profile enabled, it also checks GitHub authentication and requires a non-empty model list from `omp models --json`.
+With the `firstmate` profile enabled, it checks the installed entry point, the new-host question marker, and the running Herdr user service.
+The service check does not depend on `start_services`, which controls provisioning actions only.
+Without the `firstmate` profile, the fleet line reports that Firstmate is not enabled.
+Run it as `crewship.user`; another account gets unchecked states and a command to switch accounts.
+It exits with status 1 while a required check is missing or fails, and status 0 when all required checks pass.
+It does not start Firstmate, prove [worker capacity](capacity.md), or send a model request.
+Run each printed recovery command, then repeat `setup`.
+Recovery commands for `ship.sh` use absolute paths and preserve the selected config.
+If only Herdr is stopped, the recovery command starts its user service without another apply.
+`setup` accepts `--config <path>`; otherwise it reads `.local/host.yml` under the Crewship installation.
+It requires an existing host config instead of using the default example.
+Like the other config readers, it performs the one-time rewrite below when needed.
 
 The next config read rewrites an old root key to `crewship` and prints one notice.
 It keeps the original bytes in `<config>.bak` beside the config.
@@ -140,9 +158,18 @@ After a successful `./ship.sh launch` with the `firstmate` profile on, once omp 
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.
 - When `project_databases` is off or omitted, a question offers the [per-project dev databases](project-databases.md).
   The prompt names the resolved config path and does not enable the profile without your choice.
-- They are asked once per host. When the omp session exits successfully, apply writes the marker `~/.local/share/crewship/new-host-questions-done`; while it exists, later applies skip the questions and print one line naming it. If omp exits non-zero, apply writes no marker and prints one line saying the questions did not complete. To ask again, delete the marker and rerun `./ship.sh launch` interactively.
-- The launch needs an interactive terminal, run as `crewship.user`. When stdin is not a TTY, when `CI` is set, or when another account runs apply, apply skips them without writing the marker and prints one line saying to rerun `./ship.sh launch` interactively.
-- They need an omp provider login. Apply checks with `omp models --json`; when it lists no models or fails, apply skips the questions without writing the marker and prints one line saying to sign in to omp with `/login` ([Sign in](omp.md#sign-in)) and rerun `./ship.sh launch` interactively. On a new host the first apply installs omp, so sign in after it and then rerun apply.
+- They are asked once per host.
+  When the omp session exits successfully, apply writes the marker `~/.local/share/crewship/new-host-questions-done`.
+  While the marker exists, later applies skip the questions and print its path.
+  If omp exits non-zero, apply writes no marker and prints a recovery command.
+  To ask again, delete the marker and run the printed recovery command interactively.
+- The launch needs an interactive terminal, run as `crewship.user`.
+  When stdin is not a TTY, `CI` is set, or another account runs apply, apply skips the questions without writing the marker.
+  It prints an absolute recovery command that preserves the selected config.
+- They need an omp provider login.
+  Apply checks with `omp models --json`; when it lists no models or fails, apply skips the questions without writing the marker.
+  It prints instructions to [sign in with `/login`](omp.md#sign-in), then run the recovery command interactively.
+  On a new host the first apply installs omp, so sign in after it and then rerun apply.
 
 The recipe refuses to overwrite a conflicting unmanaged command or an independently advanced Firstmate checkout. See [Drift and upgrades](recovery.md#drift-and-upgrades).
 

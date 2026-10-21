@@ -61,7 +61,19 @@ If the installer reports a package-lock error, follow the [recovery instructions
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
 - STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
-- Then run `cd ~/Crewship` for every later step.
+
+### Resume setup
+
+```bash
+"$HOME/Crewship/ship.sh" setup
+```
+
+Run each printed command, then repeat `setup`.
+Follow the remaining steps below for manual approvals and sign-ins.
+GitHub and provider sign-ins still need the user's consent.
+See [Setup checks](docs/configuration.md#commands) for the reported states and limits.
+
+The commands below also work from any directory.
 
 ## 1. Sign in to GitHub
 
@@ -103,16 +115,16 @@ omp models --json
 
 ## 3. Review the profiles
 
-`.local/host.yml` holds the host config. Open it and show the user the `profiles` block. Step 0 already set the user's choices. To change one later, set its key to `true` or `false`.
+`~/Crewship/.local/host.yml` holds the host config. Open it and show the user the `profiles` block. Step 0 already set the user's choices. To change one later, set its key to `true` or `false`.
 
 The full list and the rules between profiles are in [Profiles](docs/configuration.md#profiles).
 
 - STOP: ask the user which profiles to change, if any. Change only the keys the user chose.
-- Never put secrets, host names, or personal details in `.local/host.yml` that the user did not give you.
+- Never put secrets, host names, or personal details in `~/Crewship/.local/host.yml` that the user did not give you.
 - Check:
 
 ```bash
-./ship.sh inspect
+"$HOME/Crewship/ship.sh" inspect
 ```
 
 It must print no error. If it names a key, fix that key and run it again.
@@ -120,7 +132,7 @@ It must print no error. If it names a key, fix that key and run it again.
 ## 4. Preview the change
 
 ```bash
-./ship.sh chart
+"$HOME/Crewship/ship.sh" chart
 ```
 
 Follow the [`chart` contract](docs/configuration.md#commands) for preview behavior and side effects.
@@ -133,26 +145,27 @@ Tell the user what it would change, in a few lines.
 The installer already applied the default profiles. This run applies your changes and the new sign-ins.
 
 ```bash
-./ship.sh launch
+"$HOME/Crewship/ship.sh" launch
 ```
 
 - It may ask for the sudo password. STOP and let the user type it. Never store or echo it.
 - Run it in an interactive terminal. With the `firstmate` profile on and omp signed in, the first launch then opens omp with the new-host questions ([New-host questions](docs/configuration.md#new-host-questions)). Relay each question to the user and pass on the answer.
-- If omp was not signed in at the first launch, the questions are skipped. Run `./ship.sh launch` again after step 2.
+- If omp was not signed in at the first launch, the questions are skipped. Run `"$HOME/Crewship/ship.sh" launch` again after step 2.
 - Check: the command ends with no failed task.
-  An unchanged `./ship.sh launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
+  An unchanged `"$HOME/Crewship/ship.sh" launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
   A newer release or source update shows as an expected change in the toolchain step.
 
 ## 6. Verify and report
 
 ```bash
-./ship.sh survey
+"$HOME/Crewship/ship.sh" setup
 ```
 
-- Check: each expected tool runs, and `gh` shows as authenticated.
+- Check: software and sign-ins report ready, and the enabled Firstmate checks pass.
 - Check: with the gateway on, `crewship-gateway url` prints an `https://….trycloudflare.com` address.
-- Tell the user what passed and what failed, and which step to repeat for each failure.
-- Do not mark the setup as done while a check fails.
+- Report each missing step and its printed command.
+- Do not mark setup as done while a check fails or a sign-in is missing.
+- Check host capacity and run a real agent task before reporting a working fleet.
 
 ## Where to look when stuck
 

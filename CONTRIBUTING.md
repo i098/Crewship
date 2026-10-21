@@ -9,7 +9,7 @@ Crewship is an Ansible playbook with a Python CLI wrapper (`scripts/ship.py`). T
 - `blueprint/ansible/group_vars/all/*.yml` — Jinja vars consumed by tasks, one file per topic
 - `blueprint/ansible/tasks/*.yml` — the tasks themselves (one file per concern)
 - `blueprint/ansible/templates/*.j2` — systemd unit templates
-- `scripts/ship.py` — CLI (`dock`, `inspect`, `chart`, `launch`, `survey`)
+- `scripts/ship.py` - CLI; see [Commands](docs/configuration.md#commands)
 - `scripts/provisions.py` — latest-release tool installer (idempotent)
 - `blueprint/fleet/` — runtime scripts deployed to `~/oss-fleet/` on the target host
 - `blueprint/config/` — per-tool config templates deployed to Firstmate homes
@@ -77,13 +77,14 @@ You need Ubuntu 24.04 or 26.04 on x86_64 or aarch64 with systemd, a non-root acc
    ./ship.sh launch
    ```
 
-7. Check the result:
+7. Check [setup readiness](docs/configuration.md#commands):
 
    ```bash
-   ./ship.sh survey
+   ./ship.sh setup
    ```
 
-Then authenticate the agent CLIs on this account; for omp, follow [Sign in](docs/omp.md#sign-in). Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
+Follow the printed commands and the [manual sign-in steps](SETUP.md#1-sign-in-to-github), then repeat `setup`.
+Credentials are never copied from another host; see [Migration and recovery](docs/recovery.md).
 
 ## Development
 
@@ -198,10 +199,13 @@ The script applies the form's label and rejects missing required fields or commi
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
-  Keep all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Put the opening reference on its own line, outside a code block.
+  Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
-  Mark completed checklist items with `[x]`.
+  Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
+  Use visible text in sections and reasons; comments, empty markup, link definitions, and whitespace entities alone do not count.
+  Inline and fenced code can supply content.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).
@@ -211,12 +215,25 @@ The script applies the form's label and rejects missing required fields or commi
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
 
+The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mistakes.yaml`.
+It omits generated intent and puts validation evidence in a collapsed section after the public body.
+The pipeline reads these settings from the default branch.
+
+The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It runs for every PR, including Dependabot and release PRs.
+Body edits rerun this small check without restarting the full build.
+Check a body file before publication:
+
+```bash
+python3 scripts/check_pr_body.py /tmp/pr-body.md
+```
+
 ## Branch rules
 
 GitHub rulesets enforce these rules, with no bypass:
 
 - `main` changes only through a pull request.
-  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  Before a merge, `pull request body`, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
   See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
   No approval is necessary.
 - `main` cannot be force-pushed or deleted.

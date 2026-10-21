@@ -1,7 +1,7 @@
 ---
 # --- Tailscale (install only; login, ACLs, SSH and UFW stay manual) ---------
 crewship_tailscale_track: stable
-crewship_tailscale_suite: "{{ ansible_distribution_release }}"
+crewship_tailscale_suite: "{{ ansible_facts['distribution_release'] }}"
 crewship_tailscale_keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg
 # Optional exact apt version pin, e.g. "1.102.3". Empty installs the current
 # package from the stable track.
