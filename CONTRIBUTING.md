@@ -244,7 +244,21 @@ GitHub rulesets enforce these rules, with no bypass:
 
 ## Changelog and releases
 
-[CHANGELOG.md](CHANGELOG.md) follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). Releases are [GitHub releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository) on `vX.Y.Z` tags.
+[CHANGELOG.md](CHANGELOG.md) follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+Releases use `vX.Y.Z` tags; prereleases add a suffix such as `v0.4.8-rc.1`.
+
+### Release channels
+
+Stable releases and promotion from prerelease to stable require the owner's explicit word.
+Routine fixes can use prereleases without that approval.
+Prereleases use npm `next`, an exact GHCR version tag, and a GitHub prerelease with `make_latest=false`.
+They never move npm `latest`, GHCR `latest`, or GitHub's latest release.
+The default installer and `update` select GitHub's latest stable release.
+Users must [opt in explicitly](docs/install.md#prerelease-opt-in) to install a prerelease.
+Keep patch-only numbering; use the next patch version and increase `rc.N` for successive candidates.
+Do not change published releases, including `0.4.7`.
+
+### Release steps
 
 1. Every PR adds one fragment file, `changelog.d/<issue>.<type>.md`, where `<issue>` is the number of the issue it resolves and `<type>` is the section that fits: `added`, `changed`, `deprecated`, `removed`, `fixed`, or `security`. The file holds one sentence, without the issue link; the release step adds the link. For example, `changelog.d/58.fixed.md`:
 
@@ -253,12 +267,32 @@ GitHub rulesets enforce these rules, with no bypass:
    ```
 
    A PR with nothing to note, for example a test-only change, gets the `no changelog` label instead.
-2. To cut a release, run `uv run towncrier build --version X.Y.Z` on a new branch and open a PR with the result. The command writes a new `## [X.Y.Z] - YYYY-MM-DD` section (today's ISO 8601 date) under `## [Unreleased]` in Keep a Changelog order and deletes the fragments it used; `uv run towncrier build --draft --version X.Y.Z` shows the section first and changes nothing. In the same PR, update the link references at the bottom of the file and set `version` in `tools/npm/package.json` to `X.Y.Z`. Bump the patch number for every release, and batch changes; release at most once per day.
+2. Prepare a release on a new branch with `uv run towncrier build --version X.Y.Z`, then open a PR.
+   The command writes a dated version section below `Unreleased` and deletes the fragments it uses.
+   Preview it first with `uv run towncrier build --draft --version X.Y.Z`.
+   Update the changelog's link references and set `tools/npm/package.json` to the same version.
+   For a prerelease, include the suffix in both versions, for example `0.4.8-rc.1`.
+   Use the next patch number for a new release series; keep that number for its prerelease candidates.
+   Batch changes and publish at most once per day.
 
    Bump the minor or major number only with the owner's approval.
 3. After that PR merges, tag its merge commit on `main` as `vX.Y.Z`. Never move or reuse a published tag.
-4. Create a **draft** GitHub release for the tag, named `vX.Y.Z`, with that version's changelog section as the notes, for example `gh release create vX.Y.Z --draft --verify-tag --title vX.Y.Z --notes-file <section.md>`. Releases are immutable, so the install artifact must be on the draft before it is published: run `gh workflow run release-artifact.yml -f tag=vX.Y.Z` (or `scripts/build-release-artifact.sh vX.Y.Z dist` and `gh release upload vX.Y.Z dist/*`), then check the draft lists `crewship-vX.Y.Z.tar.gz` and its `.sha256`. `install.sh` installs the source archive of the tag when a release has no artifact, but the artifact adds the checksum check.
-5. Publish the draft (`gh release edit vX.Y.Z --draft=false`). Publishing the release runs `.github/workflows/npm-publish.yml`, which publishes the `crewship` npm package as version `X.Y.Z`. The workflow fails before the publish when `tools/npm/package.json` does not have that version.
-6. The release starts the `release-image` workflow. It builds the `worker` image and pushes it to the GitHub Container Registry as `ghcr.io/i098/crewship:X.Y.Z` and `ghcr.io/i098/crewship:latest`. When the package is public, anyone can pull it without a login: `docker pull ghcr.io/i098/crewship:X.Y.Z`.
+4. Create a **draft** GitHub release with the version's changelog section as its notes.
+   For a prerelease, use `gh release create v0.4.8-rc.1 --draft --prerelease --latest=false --verify-tag --title v0.4.8-rc.1 --notes-file <section.md>`.
+   For an approved stable release, use `gh release create vX.Y.Z --draft --verify-tag --title vX.Y.Z --notes-file <section.md>`.
+5. Attach the install artifact before publication; published releases are immutable.
+   Run `gh workflow run release-artifact.yml -f tag=v0.4.8-rc.1` for a prerelease.
+   For an approved stable release, run `gh workflow run release-artifact.yml -f tag=vX.Y.Z -f stable=true`.
+   The workflow rejects a tag that does not match the selected channel and rejects releases that are already published.
+   It sets the draft's prerelease and latest flags from the selected channel.
+   Check that the draft lists `crewship-<tag>.tar.gz`, `install.sh`, and both `.sha256` files before publication.
+   The installer asset comes from `scripts/install.sh` at the tag, not from the workflow's branch.
+6. Publish a prerelease with `gh release edit v0.4.8-rc.1 --draft=false --prerelease --latest=false`.
+   Only with the owner's word, publish a stable release with `gh release edit vX.Y.Z --draft=false --prerelease=false --latest`.
+   Publication starts `npm-publish.yml`; the package version must match the tag and the GitHub prerelease flag.
+   The npm tag is `next` for prereleases and `latest` for stable releases.
+7. Publication also starts `release-image`.
+   It pushes `ghcr.io/i098/crewship:<version>` for either channel and `ghcr.io/i098/crewship:latest` only for stable releases.
+   When the package is public, anyone can pull an exact version without a login: `docker pull ghcr.io/i098/crewship:0.4.8-rc.1`.
 
    The first push creates the package as private, and the REST API cannot change package visibility. Do this one time: on the [crewship package](https://github.com/users/i098/packages/container/package/crewship), click **Package settings**, then under **Danger Zone** click **Change visibility**, select **Public**, and confirm with the package name.

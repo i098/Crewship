@@ -164,7 +164,7 @@ class Release:
         (self.mirror / "latest").write_text(latest)
         return subprocess.run(
             [BASH, "-s", "--", *args],
-            input=(ROOT / "install.sh").read_text(),
+            input=(ROOT / "scripts/install.sh").read_text(),
             capture_output=True,
             text=True,
             env=self.env,
@@ -212,7 +212,7 @@ def test_pnpm_release_policy_preserves_the_selected_release(release, tmp_path, l
         + f"    return new Response(JSON.stringify({{version: {json.dumps(latest)}}}));\n"
         "  }\n"
         "  if (!url.endsWith('/v1.0.0/install.sh')) throw new Error(`unexpected URL: ${url}`);\n"
-        f"  return new Response(fs.readFileSync({json.dumps(str(ROOT / 'install.sh'))}, 'utf8'));\n"
+        f"  return new Response(fs.readFileSync({json.dumps(str(ROOT / 'scripts/install.sh'))}, 'utf8'));\n"
         "};\n"
     )
     result = subprocess.run(
@@ -291,7 +291,7 @@ def terminal_install(release, responses):
     pid, terminal = pty.fork()
     if pid == 0:
         termios.tcsetwinsize(0, (40, 120))
-        os.execve(BASH, [BASH, str(ROOT / "install.sh")], release.env)
+        os.execve(BASH, [BASH, str(ROOT / "scripts/install.sh")], release.env)
     output = b""
     deadline = time.monotonic() + 20
     status = None

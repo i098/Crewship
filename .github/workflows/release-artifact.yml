@@ -20,9 +20,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag (vX.Y.Z) of the draft release to attach the artifact to
+        description: Tag (vX.Y.Z or vX.Y.Z-rc.N) of the draft release
         required: true
         type: string
+      stable:
+        description: Prepare a stable release only with the owner's explicit approval
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -42,21 +47,36 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Check the release is a draft
+      - name: Check the release channel and draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          STABLE: ${{ inputs.stable }}
         run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error title=release tag::$TAG is not vX.Y.Z or vX.Y.Z-rc.N"
+            exit 1
+          fi
+          prerelease=false
+          [[ "$TAG" != *-* ]] || prerelease=true
+          if [[ "$prerelease" == "$STABLE" ]]; then
+            echo "::error title=release channel::Stable tags require stable=true and owner approval; prerelease tags require stable=false"
+            exit 1
+          fi
           draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
           if [ "$draft" != true ]; then
             echo "::error title=release not a draft::$TAG is already published and releases are immutable; create the release as a draft, run this workflow, then publish it"
             exit 1
           fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease="$prerelease" --latest="$STABLE"
 
       - name: Build the artifact and its checksum
         env:
           TAG: ${{ inputs.tag }}
-        run: scripts/build-release-artifact.sh "$TAG" dist
+        run: |
+          scripts/build-release-artifact.sh "$TAG" dist
+          git show "$TAG:scripts/install.sh" > dist/install.sh
+          (cd dist && sha256sum install.sh > install.sh.sha256)
 
       - name: Attach to the draft release
         env:

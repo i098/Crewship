@@ -11,6 +11,13 @@ It does not need Node.js, npm, pnpm, or Bun:
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
+The script on `main` only selects and downloads a released installer.
+It follows GitHub's latest stable release, verifies `install.sh` against its `.sha256`, and runs that copy.
+It also compares the digest from GitHub's release API when the API is available.
+For older releases without an installer asset, including `v0.4.7`, it extracts the installer from the checked release archive.
+Changes to the full installer in `scripts/install.sh` do not reach stable users until an approved stable release includes them.
+The small download script itself still comes from `main`.
+
 If `curl` is missing, install it with `sudo apt-get update && sudo apt-get install -y curl`.
 
 Other launchers need an existing runtime:
@@ -40,7 +47,7 @@ The installer:
 
 1. Finds and prints the selected Crewship release before the main package setup.
    `install.sh` follows the `https://github.com/<repo>/releases/latest` redirect unless [`CREWSHIP_REF`](#settings) selects a tag.
-   If needed, it first installs curl and CA certificates for the release lookup.
+   If needed, the download script first installs curl, CA certificates, and jq for the release checks.
    The npm launchers use their package version unless you pass `update`, which follows the same redirect.
 2. Installs the OS packages it needs.
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
@@ -83,6 +90,20 @@ A host still on v0.4.0 gets a one-time migration before the re-apply: links in `
 
 If the selected release is already installed, the download is skipped. Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
 
+## Prerelease opt-in
+
+The default installer and `update` follow GitHub's latest stable release, never a prerelease.
+To install the npm `next` channel, run `npx crewship@next` without `update`.
+To select an exact prerelease, run `npx crewship@0.4.8-rc.1`, or select the tag with the existing `CREWSHIP_REF` setting:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/v0.4.8-rc.1/install.sh | CREWSHIP_REF=v0.4.8-rc.1 bash
+```
+
+These are version examples; select an available prerelease tag.
+`npx crewship@next update` returns to the latest stable release.
+See [Release channels](../CONTRIBUTING.md#release-channels) for publication rules.
+
 ## Migrate a git install
 
 If `~/Crewship` is a git clone from an older installer, the next run:
@@ -99,4 +120,11 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 
 ## Attach the artifact to a draft release
 
-Part of the release steps in [CONTRIBUTING.md](../CONTRIBUTING.md#changelog-and-releases). Create the release as a draft, then run the `release-artifact` workflow by hand (Actions, `release-artifact`, Run workflow, with the tag, for example `v1.2.3`, as input) or `gh workflow run release-artifact.yml -f tag=v1.2.3`. It builds the artifact from the tag and uploads it with `--clobber`; it refuses a release that is already published, because immutable releases accept no new assets. It creates no release, tag or version. Publish the draft afterwards.
+Follow the [release steps](../CONTRIBUTING.md#release-steps) to create a draft first.
+Run `gh workflow run release-artifact.yml -f tag=v0.4.8-rc.1` to attach a prerelease artifact.
+Stable tags require `-f stable=true` and the owner's explicit word.
+The workflow sets the draft's channel flags, builds the artifact from the tag, and uploads it with `--clobber`.
+It also attaches `scripts/install.sh` from the tag as `install.sh`, with `install.sh.sha256`.
+It rejects a channel mismatch or a release that is already published.
+It creates no release, tag, or version.
+Check the assets, then publish the draft in the same channel.
