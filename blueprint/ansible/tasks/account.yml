@@ -148,43 +148,29 @@
   when: crewship_account_ready | bool
 
 - name: Inspect the home layout
-  ansible.builtin.stat:
-    path: "{{ item }}"
-    get_checksum: false
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_path_checker }}"
+      - "{{ crewship_home_layout_paths | to_json }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
-  loop: >-
-    {{ [crewship_cfg.home ~ '/.config',
-        crewship_cfg.home ~ '/.config/environment.d',
-        crewship_cfg.home ~ '/.local',
-        crewship_local_bin,
-        crewship_cfg.home ~ '/.local/share',
-        crewship_cfg.home ~ '/.local/state',
-        crewship_share_dir,
-        crewship_user_units,
-        crewship_cfg.workspace]
-       + ([crewship_fleet_doctor_dir] if crewship_cfg.profiles.fleet_guards | bool else [])
-       + ([crewship_fleet_browsers_dir] if crewship_fleet_browsers_enabled | bool else [])
-       + ([crewship_imessage_dir]
-          if crewship_cfg.profiles.firstmate | bool and crewship_cfg.imessage is defined else [])
-       + ([crewship_instagram_desk_dir]
-          if crewship_cfg.profiles.firstmate | bool and crewship_instagram_dm_operator | length > 0 else []) }}
   register: crewship_home_layout_stat
+  changed_when: false
+  check_mode: false
   when: crewship_account_ready | bool
 
 - name: Ensure the home layout
   ansible.builtin.file:
-    path: "{{ item.item }}"
+    path: "{{ item }}"
     state: directory
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_env }}"
-  check_mode: "{{ ansible_check_mode and item.stat.exists }}"
-  loop: "{{ crewship_home_layout_stat.results }}"
-  loop_control:
-    label: "{{ item.item }}"
+  check_mode: "{{ ansible_check_mode and item in (crewship_home_layout_stat.stdout | from_json).existing }}"
+  loop: "{{ crewship_home_layout_paths }}"
   when: crewship_account_ready | bool
 
 - name: Require a mounted data filesystem before creating bulk directories

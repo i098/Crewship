@@ -84,6 +84,7 @@ def apply(host):
         # The dispatch-settings tasks ask for root; nothing here needs it.
         "ansible_become": False,
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
+        "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
         "crewship_become_target": False,
         "crewship_user_env": {},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,

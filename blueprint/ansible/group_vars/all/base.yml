@@ -84,6 +84,22 @@ crewship_herdr_bin: "{{ crewship_tools_root }}/herdr/{{ crewship_herdr_version }
 crewship_herdr_config_dir: "{{ crewship_cfg.home }}/.config/herdr"
 crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
 crewship_user_units: "{{ crewship_cfg.home }}/.config/systemd/user"
+crewship_home_layout_paths: >-
+  {{ [crewship_cfg.home ~ '/.config',
+      crewship_cfg.home ~ '/.config/environment.d',
+      crewship_cfg.home ~ '/.local',
+      crewship_local_bin,
+      crewship_cfg.home ~ '/.local/share',
+      crewship_cfg.home ~ '/.local/state',
+      crewship_share_dir,
+      crewship_user_units,
+      crewship_cfg.workspace]
+     + ([crewship_fleet_doctor_dir] if crewship_cfg.profiles.fleet_guards | bool else [])
+     + ([crewship_fleet_browsers_dir] if crewship_fleet_browsers_enabled | bool else [])
+     + ([crewship_imessage_dir]
+        if crewship_cfg.profiles.firstmate | bool and crewship_cfg.imessage is defined else [])
+     + ([crewship_instagram_desk_dir]
+        if crewship_cfg.profiles.firstmate | bool and crewship_instagram_dm_operator | length > 0 else []) }}
 crewship_firstmate_dir: "{{ crewship_cfg.workspace }}/firstmate"
 # One local commit per patch on top of origin/main (tasks/firstmate.yml).
 crewship_firstmate_patch_dir: "{{ crewship_blueprint }}/patches/firstmate"

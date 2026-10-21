@@ -9,64 +9,65 @@
 # Remote-source copies need real parent directories even in check mode.
 # Existing directories stay in check mode so preview cannot change their access.
 - name: Inspect the harness preference directories
-  ansible.builtin.stat:
-    path: "{{ item.dest | dirname }}"
-    get_checksum: false
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_path_checker }}"
+      - "{{ crewship_agent_config_files | map(attribute='dest') | map('dirname') | list | to_json }}"
   become: true
-  loop: "{{ crewship_agent_config_files }}"
-  loop_control:
-    label: "{{ item.dest | dirname }}"
   register: crewship_agent_directory_stat
+  changed_when: false
+  check_mode: false
 
 - name: Ensure the harness preference directories
   ansible.builtin.file:
-    path: "{{ item.item.dest | dirname }}"
+    path: "{{ item.dest | dirname }}"
     state: directory
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
-    mode: "{{ item.item.dir_mode }}"
+    mode: "{{ item.dir_mode }}"
   become: true
-  check_mode: "{{ ansible_check_mode and item.stat.exists }}"
-  loop: "{{ crewship_agent_directory_stat.results }}"
-  loop_control:
-    label: "{{ item.item.dest | dirname }}"
-
-- name: Check for existing harness preference files
-  ansible.builtin.stat:
-    path: "{{ item.dest }}"
-    get_checksum: false
-  become: true
+  check_mode: >-
+    {{ ansible_check_mode
+       and (item.dest | dirname) in (crewship_agent_directory_stat.stdout | from_json).existing }}
   loop: "{{ crewship_agent_config_files }}"
   loop_control:
-    label: "{{ item.dest }}"
+    label: "{{ item.dest | dirname }}"
+
+- name: Check for existing harness preference files
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_path_checker }}"
+      - "{{ crewship_agent_config_files | map(attribute='dest') | list | to_json }}"
+  become: true
   register: crewship_agent_config_stat
   changed_when: false
   check_mode: false
 
 - name: Write harness preferences that are absent
   ansible.builtin.copy:
-    src: "{{ crewship_repo }}/{{ item.item.src }}"
-    dest: "{{ item.item.dest }}"
+    src: "{{ crewship_repo }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
-    mode: "{{ item.item.mode }}"
+    mode: "{{ item.mode }}"
     remote_src: true
   become: true
-  loop: "{{ crewship_agent_config_stat.results }}"
+  loop: "{{ crewship_agent_config_files }}"
   loop_control:
-    label: "{{ item.item.dest }}"
+    label: "{{ item.dest }}"
   when:
-    - item.item.first_write | bool
-    - not (item.stat.exists | default(false))
+    - item.first_write | bool
+    - item.dest not in (crewship_agent_config_stat.stdout | from_json).existing
 
 - name: Report harness preferences left untouched
   ansible.builtin.debug:
     msg: >-
-      {{ crewship_agent_config_stat.results
-         | selectattr('stat.exists', 'defined')
-         | selectattr('stat.exists')
-         | selectattr('item.first_write')
-         | map(attribute='item.dest') | list | join(', ') | default('none', true) }}
+      {{ crewship_agent_config_files
+         | selectattr('dest', 'in', (crewship_agent_config_stat.stdout | from_json).existing)
+         | selectattr('first_write')
+         | map(attribute='dest') | list | join(', ') | default('none', true) }}
       already exist and were not rewritten (first-write-only inputs).
 
 - name: Merge the omp model overrides
