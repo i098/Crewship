@@ -22,6 +22,7 @@ With the `agents` profile on, `./ship.sh launch`:
 3. Installs the extension `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`, which feeds the Herdr Agent sidebar the session topic, the pane's short name, and the pull request line (pull request, issue and diff size). Every apply rewrites it. See [Herdr sidebar](herdr.md).
 4. Installs the extension `~/.omp/agent/extensions/aa-mode-icons.ts` from [`blueprint/config/omp-status-icons.ts`](../blueprint/config/omp-status-icons.ts). Every apply rewrites it. See [Status line icons](#status-line-icons).
 5. Installs the extension `~/.omp/agent/extensions/fm-no-pattern-kill.ts` from [`blueprint/config/omp-no-pattern-kill.ts`](../blueprint/config/omp-no-pattern-kill.ts). It blocks `pkill`, `killall` and kill-by-`pgrep` commands in every omp session: all agents on the host run as one user and each worker's brief sits in its command line, so a name or pattern can match other workers. Kill a process by the PID you started instead. Every apply rewrites it. It is a best-effort seatbelt, not a barrier: it matches the command text, so it lets through an absolute path (`/usr/bin/pkill`), a kill whose targets come from `pidof`, `ps | grep` or a `pgrep` loop, and the list form in an eval cell (`subprocess.run(["pkill", ...])`), and it blocks read-only mentions such as `grep -rn pkill docs/`. Removing worker briefs from the command line is the real fix and is out of scope for this recipe.
+   The same extension checks GitHub write targets; see [GitHub write guard](#github-write-guard).
 6. Installs the extension `~/.omp/agent/extensions/crewship-quality-gate.ts` from [`blueprint/config/omp-quality-gate.ts`](../blueprint/config/omp-quality-gate.ts), the sentrux and fallow check at the end of every agent turn. Every apply rewrites it. See [Quality gate](#quality-gate).
 7. Sets up omp as the no-mistakes pipeline agent. See [no-mistakes pipeline agent](#no-mistakes-pipeline-agent).
 8. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
@@ -124,6 +125,35 @@ The row needs two keys in `statusLine`: `status` in `leftSegments`, which shows 
 omp config get statusLine.leftSegments
 omp config get statusLine.showHookStatus
 ```
+
+## GitHub write guard
+
+The existing `fm-no-pattern-kill.ts` extension checks literal `gh` and `gh-axi` commands before omp runs a bash or eval tool.
+It covers issue and pull-request mutations, including issue transfers and both repositories in a transfer.
+It also checks `gh-axi issue subissue add|remove`; `subissue list` remains read-only.
+Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional GitHub URL.
+`gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
+Reads and help commands pass unchanged.
+
+The guard also checks API writes to `repos/owner/repo/issues`, `pulls`, and `comments`, including their child paths.
+It recognizes `-X`, `--method`, and the positional HTTP method in `gh-axi api`.
+For `gh api`, fields and input imply POST unless an explicit method overrides it.
+`gh-axi api` defaults to GET even with fields or input.
+API targets must use literal repository names, not `{owner}` or `{repo}` placeholders.
+
+Set `CREWSHIP_GITHUB_REPO=owner/repo` in the environment that starts the task's omp session to enforce its repository contract.
+Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact additional repository.
+Both values compare without letter case.
+`GH_REPO`, the working directory, and URLs in titles or bodies do not satisfy an explicit target.
+
+The normal agent apply installs the guard for host and worker omp sessions.
+To update only this guard from a verified checkout, run `install -m 0644 blueprint/config/omp-no-pattern-kill.ts ~/.omp/agent/extensions/fm-no-pattern-kill.ts`.
+Start a new omp session to load the update; existing sessions retain their loaded extension.
+Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kill.py` for offline checks with recording stubs.
+
+This command-text guard is not an operating-system security boundary.
+It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
+Literal shell commands and nested `sh -c` forms are covered; arbitrary eval-language programs and argv arrays are not.
 
 ## Quality gate
 
