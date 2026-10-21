@@ -39,6 +39,8 @@ Run `ondine file.md --check` to check the result without writing files.
 
 `scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. Superseded versions stay on disk.
 For `gh` and `gh-axi`, these links select [managed wrappers](omp.md#github-write-guard) instead of the upstream executables.
+The installer resolves at most four independent release sources at once.
+Tools from the same GitHub repository share one release lookup per apply.
 The installer downloads and extracts at most four native assets at once.
 Every native installation must pass verification before registry setup starts.
 The installer runs at most four independent registry installations at once.
@@ -81,7 +83,6 @@ The GitHub API allows 60 unauthenticated requests per hour per IP.
 Shared IPs, such as CI runners, can reach this limit.
 When the API answers HTTP 403 or 429, the lookup prints a message and reads the same release from github.com's public pages instead.
 Those pages have no request budget: the `releases/latest` redirect gives the tag (the release Atom feed, for no-mistakes), and the release's asset list shows each asset's SHA-256 digest.
-A resolution makes one request per GitHub repository, at most seventeen.
 Only the tools a run installs are resolved, so an unused source cannot fail the run.
 The lookups use `GITHUB_TOKEN` from the environment that runs `./ship.sh launch` or `./onboard.sh`, if set.
 The token goes to the GitHub API only.

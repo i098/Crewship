@@ -411,6 +411,29 @@ EVERYTHING = {
     "psutil",
 }
 
+def test_release_lookups_overlap_and_share_one_result_per_repository_per_apply(monkeypatch):
+    seen = []
+    upstream(monkeypatch, seen=seen)
+    source = installer.urllib.request.urlopen
+    barrier = Barrier(2, timeout=5)
+
+    def urlopen(request, **kwargs):
+        barrier.wait()
+        return source(request, **kwargs)
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    for _ in range(2):
+        latest = installer.resolve_latest("linux-x86_64", {"sentrux", "sentrux-grammars", "uv"})
+        assert latest["sentrux"]["version"] == latest["sentrux-grammars"]["version"] == "9.9.9"
+        assert latest["uv"]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
+    assert [url for url, _ in seen].count(
+        "https://api.github.com/repos/sentrux/sentrux/releases/latest"
+    ) == 2
+    assert [url for url, _ in seen].count(
+        "https://api.github.com/repos/astral-sh/uv/releases/latest"
+    ) == 2
+
+
 
 def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeypatch):
     upstream(monkeypatch)
