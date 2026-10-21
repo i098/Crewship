@@ -932,3 +932,41 @@ def test_graphql_issue_mutations_are_blocked_even_with_approval(run, cli, operat
     result = run(f"{cli} api graphql {flag} {field}", approved=CONTRACT)
     assert_blocked(result)
     assert "Approval cannot replace an unresolved target" in result.stderr
+
+
+@pytest.mark.parametrize("backend_version", ["1.0.0", "0.9.0"])
+def test_image_release_check_follows_guard_to_the_recorded_release(tmp_path, backend_version):
+    home = tmp_path / "home"
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    versions = {}
+    for name in ("herdr", "gh", "no-mistakes", "treehouse", "gws", "nvim"):
+        versions[name] = {"version": "1.0.0"}
+        tool = bin_dir / name
+        tool.write_text("#!/bin/sh\necho 'tool 1.0.0'\n")
+        tool.chmod(0o755)
+    packages = {"omp": "@oh-my-pi/pi-coding-agent"}
+    for name in ("omp", "chrome-devtools-axi", "gh-axi", "lavish-axi", "quota-axi",
+                 "tasks-axi", "acpx", "chrome-devtools-mcp"):
+        versions[name] = "1.0.0"
+        version = backend_version if name == "gh-axi" else "1.0.0"
+        prefix = home / ".local/share/crewship" / name / version
+        package = prefix / "node_modules" / packages.get(name, name)
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(json.dumps({"version": version}))
+        tool = package / name
+        tool.write_text("#!/bin/sh\necho 'tool 1.0.0'\n")
+        tool.chmod(0o755)
+        if name == "gh-axi":
+            provisions.install_gh_guard(home, tool, name)
+        else:
+            (bin_dir / name).symlink_to(tool)
+    (home / ".local/share/crewship/resolved.json").write_text(json.dumps(versions))
+    result = subprocess.run(
+        ["bash", str(ROOT / "tests/container-smoke.sh"), "--in-container", "--only", "resolved-releases"],
+        env={**os.environ, "HOME": str(home), "CREWSHIP_IMAGE": "test", "CREWSHIP_ROOT": str(ROOT)},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == (0 if backend_version == "1.0.0" else 1), result.stdout + result.stderr
+    if backend_version != "1.0.0":
+        assert "expected the resolved release" in result.stdout
