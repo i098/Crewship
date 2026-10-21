@@ -15,19 +15,19 @@ modules=baseline,firewall,fail2ban,updates
 
 # The account that ran ./ship.sh launch is the operator: it keeps the SSH keys
 # it logs in with and is made a sudo user.
-{% if ansible_user_id == 'root' %}
+{% if ansible_facts['user_id'] == 'root' %}
 # Apply ran as root, so the operator account is unknown. Set both before use:
 # user=<operator login>
 # pubkey_file=/home/<operator login>/.ssh/authorized_keys
-{% elif ansible_user_id == crewship_cfg.user %}
+{% elif ansible_facts['user_id'] == crewship_cfg.user %}
 # Apply ran as {{ crewship_cfg.user }}, the Crewship account that runs the agents and
 # must not gain sudo through this file, so no sudo user is set. Set both to the
 # operator's login before use:
 # user=<operator login>
 # pubkey_file=/home/<operator login>/.ssh/authorized_keys
 {% else %}
-user={{ ansible_user_id }}
-pubkey_file={{ ansible_user_dir }}/.ssh/authorized_keys
+user={{ ansible_facts['user_id'] }}
+pubkey_file={{ ansible_facts['user_dir'] }}/.ssh/authorized_keys
 {% endif %}
 
 # SSH stays open: koncreet always allows the ports sshd listens on.
