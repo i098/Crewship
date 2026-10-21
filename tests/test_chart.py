@@ -56,8 +56,13 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
               if task["name"] in ("Inspect the home layout", "Ensure the home layout")]
     tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/agents.yml").read_text())
     end = next(i for i, task in enumerate(tasks) if task["name"] == "Point daemon-spawned omp at the overlay")
-    tasks = [task for task in tasks[:end + 1]
-             if any(key in task for key in ("ansible.builtin.file", "ansible.builtin.copy", "ansible.builtin.stat"))]
+    tasks = [
+        task for task in tasks[:end + 1]
+        if any(key in task for key in ("ansible.builtin.file", "ansible.builtin.copy", "ansible.builtin.stat"))
+        or task["name"] in (
+            "Inspect the harness preference directories", "Check for existing harness preference files",
+        )
+    ]
     site_tasks = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["tasks"]
     for include in site_tasks:
         task_file = include.get("ansible.builtin.import_tasks")
@@ -130,6 +135,69 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         (".local/share/crewship/instagram-desk", profiles.get("firstmate", False)),
     ):
         assert (home / path).is_dir() == (existing_home or enabled)
+
+
+@pytest.mark.parametrize("first_write", [False, True])
+def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode(tmp_path, first_write):
+    sources = tmp_path / "sources"
+    (sources / "config/nested").mkdir(parents=True)
+    (sources / "agent.conf").write_text("managed agent settings\n")
+    (sources / "config/settings.conf").write_text("managed Firstmate settings\n")
+    (sources / "config/nested/managed.conf").write_text("managed nested settings\n")
+    home = tmp_path / "home"
+    existing = home / "preferences/existing.conf"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("private provider settings\n")
+    existing.chmod(0o640)
+    missing = home / "new-preferences/new.conf"
+    destination = home / "firstmate/config"
+    (destination / "nested").mkdir(parents=True)
+    (destination / "settings.conf").write_text("operator Firstmate settings\n")
+    (destination / "nested/operator.conf").write_text("operator nested settings\n")
+    agents = yaml.safe_load((ROOT / "blueprint/ansible/tasks/agents.yml").read_text())
+    names = {
+        "Inspect the harness preference directories", "Ensure the harness preference directories",
+        "Check for existing harness preference files", "Write harness preferences that are absent",
+        "Report harness preferences left untouched",
+    }
+    tasks = [task for task in agents if task["name"] in names]
+    tasks.append(next(
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/firstmate.yml").read_text())
+        if task["name"] == "Deploy Firstmate dispatch settings"
+    ))
+    variables = {
+        "crewship_repo": str(tmp_path), "crewship_blueprint": str(sources),
+        "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
+        "crewship_cfg": {"user": getpass.getuser()},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_agent_config_files": [
+            {"src": "sources/agent.conf", "dest": str(path), "dir_mode": "0700",
+             "mode": "0600", "first_write": True}
+            for path in (existing, missing)
+        ],
+        "crewship_firstmate_dir": str(home / "firstmate"),
+        "crewship_firstmate_config_names": ["settings.conf", "nested"],
+        "crewship_firstmate_config_first_write": first_write,
+        "crewship_fm_git": {"stat": {"exists": True}},
+        "ansible_become": False,
+    }
+    playbook = tmp_path / "preferences.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": variables, "tasks": tasks,
+    }]))
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert existing.read_text() == "private provider settings\n"
+    assert existing.stat().st_mode & 0o777 == 0o640
+    assert missing.stat().st_mode & 0o777 == 0o600
+    expected = "operator Firstmate settings\n" if first_write else "managed Firstmate settings\n"
+    assert (destination / "settings.conf").read_text() == expected
+    assert (destination / "nested/operator.conf").read_text() == "operator nested settings\n"
+    assert (destination / "nested/managed.conf").exists() is not first_write
 
 
 @pytest.mark.parametrize("task_file,unit,handler", [
