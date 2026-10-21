@@ -583,7 +583,10 @@ def questions(document, config_path):
             "If yes, set crewship.profiles.project_databases to true in "
             f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
-    returncode = subprocess.run([omp, prompt], cwd=firstmate, env=environment).returncode
+    argv = [omp, prompt]
+    if os.environ.get("CREWSHIP_INSTALL_LOG"):
+        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
+    returncode = subprocess.run(argv, cwd=firstmate, env=environment).returncode
     if returncode:
         print(
             f"New-host questions did not complete (omp exited {returncode}); rerun "

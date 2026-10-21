@@ -45,27 +45,17 @@ mkdir -p -m 700 "$log_dir"
 export CREWSHIP_INSTALL_LOG
 CREWSHIP_INSTALL_LOG=$(mktemp "$log_dir/install-XXXXXX.log")
 exec 3>&1 4>&2
-exec > >(trap '' INT; exec tee -a "$CREWSHIP_INSTALL_LOG" >&3)
-stdout_tee=$!
-exec 2> >(trap '' INT; exec tee -a "$CREWSHIP_INSTALL_LOG" >&4)
-stderr_tee=$!
+exec > >(tee -a "$CREWSHIP_INSTALL_LOG" >&3) 2> >(tee -a "$CREWSHIP_INSTALL_LOG" >&4)
 finish() {
-  local status=$? report
-  trap '' INT
-  exec >&3 2>&4
-  wait "$stdout_tee" "$stderr_tee" || true
+  local status=$?
   rm -rf "$work"
   if ((status)); then
-    printf -v report 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG"
-    printf '%s' "$report" >&4
+    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" >&2
   else
-    printf -v report 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG"
-    printf '%s' "$report" >&3
+    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG"
   fi
-  printf '%s' "$report" >>"$CREWSHIP_INSTALL_LOG"
 }
 trap finish EXIT
-trap 'exit 130' INT
 
 run_step() {
   local label=$1 started=$SECONDS status=0

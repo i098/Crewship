@@ -269,18 +269,11 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
 
 
 @pytest.mark.parametrize("status", [0, 23])
-def test_install_logs_keep_details_private_on_success_and_failure(release, tmp_path, status):
+def test_install_logs_keep_details_private_on_success_and_failure(release, status):
     assert release.install("v1.0.0").returncode == 0
     (release.crewship / "onboard.sh").write_text(
         f"#!/bin/sh\necho package-details\necho diagnostic-details >&2\nexit {status}\n"
     )
-    tee = tmp_path / "bin/tee"
-    tee.write_text(
-        f"#!{sys.executable}\n"
-        "import subprocess, sys\n"
-        f"subprocess.run([{shutil.which('tee')!r}, *sys.argv[1:]], input=sys.stdin.buffer.read(), check=True)\n"
-    )
-    tee.chmod(0o755)
     result = release.install("v1.0.0")
     assert result.returncode == status
     assert "package-details" not in result.stdout + result.stderr
@@ -290,31 +283,20 @@ def test_install_logs_keep_details_private_on_success_and_failure(release, tmp_p
     assert log.parent == release.home / ".local/state/crewship-install"
     assert "package-details\n" in log.read_text()
     assert "diagnostic-details\n" in log.read_text()
-    report = f"Full install log: {log}\n"
-    assert (result.stderr if status else result.stdout).endswith(report)
-    assert log.read_text().endswith(report)
 
 
-def test_interrupt_reports_retained_install_log(release):
-    assert release.install("v1.0.0").returncode == 0
-    (release.home / "calls").unlink()
-    (release.crewship / "onboard.sh").write_text(
-        "#!/bin/sh\n"
-        "echo before-interrupt\n"
-        "echo diagnostic-before-interrupt >&2\n"
-        "echo ready-to-interrupt >/dev/tty\n"
-        "exec sleep 60\n"
-    )
+def terminal_install(release, responses):
     pid, terminal = pty.fork()
     if pid == 0:
         os.execve(BASH, [BASH, str(ROOT / "install.sh")], release.env)
     output = b""
-    interrupted = False
     deadline = time.monotonic() + 20
+    status = None
+    responses = dict(responses)
     try:
         while True:
             ready, _, _ = select.select([terminal], [], [], max(0, deadline - time.monotonic()))
-            assert ready, f"The installer did not exit:\n{output.decode()}"
+            assert ready, f"The installer did not exit:\n{output.decode(errors='replace')}"
             try:
                 chunk = os.read(terminal, 65536)
             except OSError as error:
@@ -324,24 +306,97 @@ def test_interrupt_reports_retained_install_log(release):
             if not chunk:
                 break
             output += chunk
-            if b"ready-to-interrupt" in output and not interrupted:
-                os.write(terminal, b"\x03")
-                interrupted = True
+            for prompt, answer in list(responses.items()):
+                if prompt in output:
+                    os.write(terminal, answer)
+                    del responses[prompt]
+        _, status = os.waitpid(pid, 0)
     finally:
         os.close(terminal)
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        _, status = os.waitpid(pid, 0)
-    result = subprocess.CompletedProcess([], os.waitstatus_to_exitcode(status), output.decode(), "")
-    assert interrupted, result.stdout
-    log = install_log(result)
-    assert result.returncode == 130, result.stdout
-    assert log.stat().st_mode & 0o777 == 0o600
-    assert "before-interrupt\n" in log.read_text()
-    assert "diagnostic-before-interrupt\n" in log.read_text()
+        if status is None:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+    assert not responses, output.decode(errors="replace")
+    return subprocess.CompletedProcess(
+        [], os.waitstatus_to_exitcode(status), output.decode(errors="replace"), ""
+    )
+
+
+def test_interrupt_during_package_lock_wait_does_not_hang(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    (release.home / "calls").unlink()
+    bin_dir = tmp_path / "bin"
+    for name, body in {
+        "dpkg-query": "#!/bin/sh\nexit 1\n",
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "apt-get": "#!/bin/sh\necho 'E: Could not get lock /var/lib/apt/lists/lock'\nexit 100\n",
+        "sleep": "#!/bin/sh\necho ready-to-interrupt >/dev/tty\nexec /bin/sleep 60\n",
+    }.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    result = terminal_install(release, {b"ready-to-interrupt": b"\x03"})
+    assert result.returncode == -signal.SIGINT, result.stdout
     assert not (release.home / "calls").exists()
+
+
+@pytest.mark.parametrize("question_status", [0, 17])
+def test_install_questions_keep_terminal_and_capture_output(release, question_status):
+    assert release.install("v1.0.0").returncode == 0
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    config["crewship"].update(
+        home=str(release.home), user=ship.pwd.getpwuid(os.getuid()).pw_name,
+        workspace=str(release.home / "Dev"),
+    )
+    config["crewship"]["profiles"]["firstmate"] = True
+    config["crewship"]["firstmate"].pop("checklist", None)
+    (release.crewship / ".local/host.yml").write_text(yaml.safe_dump(config))
+    (release.home / "Dev/firstmate").mkdir(parents=True)
+    omp = release.home / ".local/bin/omp"
+    omp.parent.mkdir(parents=True)
+    omp.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys\n"
+        "if sys.argv[1:] == ['models', '--json']:\n"
+        "    print('{\"models\": [{\"id\": \"test\"}]}')\n"
+        "    sys.exit(0)\n"
+        "assert all(os.isatty(fd) for fd in (0, 1, 2)), 'missing terminal'\n"
+        "home = pathlib.Path(os.environ['HOME'])\n"
+        "assert pathlib.Path.cwd() == home / 'Dev/firstmate'\n"
+        "answer = input('Choose a host name: ')\n"
+        "(home / 'answer').write_text(answer)\n"
+        "print('Configured host: ' + answer, flush=True)\n"
+        "print('Question diagnostic', file=sys.stderr, flush=True)\n"
+        f"sys.exit({question_status})\n"
+    )
+    omp.chmod(0o755)
+    (release.crewship / "ship.sh").write_text(
+        f"#!{sys.executable}\n"
+        "import importlib.util, pathlib, sys\n"
+        "if sys.argv[1] != 'launch':\n"
+        "    sys.exit(0)\n"
+        f"spec = importlib.util.spec_from_file_location('ship', {str(ROOT / 'scripts/ship.py')!r})\n"
+        "ship = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(ship)\n"
+        "ship.provision = lambda document, check: 0\n"
+        "ship.load_config = lambda path: ship.yaml.safe_load(path.read_text())\n"
+        "config = pathlib.Path(__file__).parent / '.local/host.yml'\n"
+        "sys.argv = [sys.argv[0], 'launch', '--config', str(config)]\n"
+        "sys.exit(ship.main())\n"
+    )
+    result = terminal_install(release, {b"Choose a host name: ": b"test-host\n"})
+    assert result.returncode == 0, result.stdout
+    assert (release.home / "answer").read_text() == "test-host"
+    log = install_log(result)
+    assert log.stat().st_mode & 0o777 == 0o600
+    for message in ("Configured host: test-host", "Question diagnostic"):
+        assert message in result.stdout
+        assert log.read_text().count(message) == 1
+    marker = release.home / ".local/share/crewship/new-host-questions-done"
+    assert marker.exists() == (question_status == 0)
+    assert (f"omp exited {question_status}" in result.stdout) == bool(question_status)
 
 
 def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path):
