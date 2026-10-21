@@ -199,10 +199,13 @@ The script applies the form's label and rejects missing required fields or commi
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
+  Put the opening reference on its own line, outside a code block.
   Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
   Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
+  Use visible text in sections and reasons; comments, empty markup, link definitions, and whitespace entities alone do not count.
+  Inline and fenced code can supply content.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).
@@ -216,12 +219,21 @@ The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mi
 It omits generated intent and puts validation evidence in a collapsed section after the public body.
 The pipeline reads these settings from the default branch.
 
+The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It runs for every PR, including Dependabot and release PRs.
+Body edits rerun this small check without restarting the full build.
+Check a body file before publication:
+
+```bash
+python3 scripts/check_pr_body.py /tmp/pr-body.md
+```
+
 ## Branch rules
 
 GitHub rulesets enforce these rules, with no bypass:
 
 - `main` changes only through a pull request.
-  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  Before a merge, `pull request body`, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
   See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
   No approval is necessary.
 - `main` cannot be force-pushed or deleted.

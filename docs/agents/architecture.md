@@ -117,6 +117,10 @@ CI skips heavy jobs on documentation-only PRs when classification succeeds.
 PRs limited to `site/**` and documentation also skip heavy jobs; the separate harbor deployment workflow stays unchanged.
 Job-level conditions let skipped required checks report instead of remaining pending.
 The `changelog fragment` job lives in `changelog.yml`, so label changes re-run only that workflow; `ci.yml` ignores `labeled`/`unlabeled`. It runs on PRs unless they have the `no changelog` label.
+The required `pull request body` job lives in `pr-body.yml` and runs on opened, edited, synchronized, and reopened PRs.
+It uses Python's standard library, runs its focused checker tests, and validates the body against the repository template.
+It has no path, label, author, or release exemption.
+Body edits do not restart the main build workflow.
 The required `configuration and python checks` job rejects classification failure before it starts heavy work.
 CodeQL keeps running through GitHub's default setup.
 Code PRs run all heavy jobs.
