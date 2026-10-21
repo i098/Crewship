@@ -73,6 +73,57 @@ const TARGET_REQUIRED =
 
 type GithubArgs = { positionals: string[]; flags: Record<string, string[]>; uncertain: boolean };
 type ShellWord = { value: string; operator: boolean };
+type ShellScan = { end: number; expansions: string[] };
+const SHELL_PAIRS: Record<string, string> = { "'": "'", '"': '"', "`": "`", "(": ")" };
+
+function shellQuoteEnd(source: string, start: number, closing: string): number {
+	for (let i = start; i < source.length; i++) {
+		if (source[i] === closing) return i;
+		if (source[i] === "\\" && closing !== "'") i++;
+	}
+	return source.length;
+}
+
+function shellOpening(source: string, index: number, closing: string): string {
+	if (source.startsWith("$(", index)) return "$(";
+	if (closing === '"') return source[index] === "`" ? "`" : "";
+	return SHELL_PAIRS[source[index]] ? source[index] : "";
+}
+
+function scanShell(source: string, start: number, closing: string): ShellScan {
+	const expansions: string[] = [];
+	if (closing === "'" || closing === "`") return { end: shellQuoteEnd(source, start, closing), expansions };
+	let wordStart = closing !== '"';
+	let i = start;
+	for (; i < source.length; i++) {
+		const char = source[i];
+		if (char === "\\") {
+			i++;
+			wordStart = false;
+			continue;
+		}
+		if (char === closing) break;
+		if (char === "#" && wordStart) {
+			i = source.indexOf("\n", i);
+			if (i < 0) return { end: source.length, expansions };
+			continue;
+		}
+		const opening = shellOpening(source, i, closing);
+		if (opening) {
+			const bodyStart = i + opening.length;
+			const nested = scanShell(source, bodyStart, opening === "$(" ? ")" : SHELL_PAIRS[opening]);
+			if (opening === "$(" || opening === "`") {
+				const body = source.slice(bodyStart, nested.end);
+				expansions.push(opening === "`" ? body.replace(/\\([$`\\])/g, "$1") : body);
+			} else {
+				expansions.push(...nested.expansions);
+			}
+			i = nested.end;
+		}
+		wordStart = closing !== '"' && /[\s;&|()]/.test(char);
+	}
+	return { end: i, expansions };
+}
 
 function shellWords(command: string): ShellWord[] {
 	const words = command.replace(/\\\r?\n/g, "").match(/#[^\n]*|[0-9]*(?:>&|<&|<>|>>?|<<<?)|&>>?|(?:[^\s'"\\;&|()<>`]+|\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*')+|[;&|()\n`]/g) ?? [];
@@ -202,6 +253,18 @@ function relationshipTargets({ flags, positionals }: GithubArgs, cli: string): s
 	return targets;
 }
 
+function destinationTargets({ flags, positionals }: GithubArgs, cli: string): string[] {
+	if (positionals[1] === "transfer") {
+		const destination = cli === "gh-axi" ? flags["--to-repo"]?.[0] : positionals[3];
+		return [literalRepo(destination ?? "")];
+	}
+	const branchRepo = flags["--branch-repo"]?.at(-1);
+	if (cli === "gh" && positionals[1] === "develop" && branchRepo) {
+		return [literalRepo(branchRepo.replace(/^(?:https?:\/\/)?github\.com\//i, "").replace(/\.git\/?$/, "").replace(/\/$/, ""))];
+	}
+	return [];
+}
+
 function mutationTargets(args: GithubArgs, cli: string): string[] {
 	const { positionals, flags } = args;
 	const [kind, operation, selector] = positionals;
@@ -218,10 +281,7 @@ function mutationTargets(args: GithubArgs, cli: string): string[] {
 	}
 	if (targets.length === 0) targets.push("");
 	targets.push(...relationshipTargets(args, cli));
-	if (operation === "transfer") {
-		const destination = cli === "gh-axi" ? flags["--to-repo"]?.at(-1) : positionals[3];
-		targets.push(literalRepo(destination ?? ""));
-	}
+	targets.push(...destinationTargets(args, cli));
 	return targets;
 }
 
@@ -239,8 +299,15 @@ function checkGithubWrite(words: string[], cli: string): string {
 	return "";
 }
 
-function githubWriteReason(command: string): string {
-	const words = shellWords(command);
+function isShellCommand(words: ShellWord[], index: number): boolean {
+	for (let i = index - 1; i >= 0 && !words[i].operator; i--) {
+		if (!/^[A-Za-z_]\w*=/.test(words[i].value) &&
+			!/^(?:command|builtin|--|if|then|else|elif|do|while|until|!|time)$/.test(words[i].value)) return false;
+	}
+	return true;
+}
+
+function literalGithubWriteReason(words: ShellWord[]): string {
 	for (let i = 0; i < words.length; i++) {
 		const cli = words[i].value.split("/").pop() ?? "";
 		if (/^(?:bash|sh|zsh)$/.test(cli)) {
@@ -265,6 +332,22 @@ function githubWriteReason(command: string): string {
 		if (reason) return reason;
 	}
 	return "";
+}
+
+function githubWriteReason(command: string): string {
+	command = command.replace(/\\\r?\n/g, "");
+	for (const expansion of scanShell(command, 0, "").expansions) {
+		const reason = githubWriteReason(expansion);
+		if (reason) return reason;
+	}
+	const words = shellWords(command);
+	for (let i = 0; i < words.length; i++) {
+		if (words[i].value === "eval" && isShellCommand(words, i)) {
+			const reason = githubWriteReason(commandArgs(words, i + 1).join(" "));
+			if (reason) return reason;
+		}
+	}
+	return literalGithubWriteReason(words);
 }
 
 export default function (pi: GuardExtensionApi) {

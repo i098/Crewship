@@ -134,6 +134,8 @@ It also checks `gh-axi issue subissue add|remove`; `subissue list` remains read-
 Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional GitHub URL.
 `gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
 The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
+Linked-branch creation also checks `--branch-repo`, including repository URLs.
+For repeated `gh-axi --to-repo` flags, the first destination controls the transfer and the guard.
 Recognized reads and help commands pass unchanged.
 `gh` accepts `-h` and boolean help values; `gh-axi` recognizes only bare `--help`.
 `gh issue develop --list` and `-l` remain read-only; false values still require a write target.
@@ -167,6 +169,8 @@ Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kil
 This command-text guard is not an operating-system security boundary.
 It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
 Literal shell commands and nested `sh -c` forms are covered, including preceding shell options and their operands.
+The guard also checks executable `$()` substitutions, backticks, and literal shell `eval` operands.
+Single-quoted and escaped substitution text remains data.
 Arbitrary eval-language programs and argv arrays are not covered.
 
 ## Quality gate

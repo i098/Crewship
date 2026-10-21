@@ -451,3 +451,84 @@ def test_develop_false_listing_still_requires_target(guarded, flag):
 
 def test_develop_last_list_value_wins(guarded):
     guarded("gh issue develop 1 -l=false --list")
+
+
+@pytest.mark.parametrize("separator", [" ", "="])
+@pytest.mark.parametrize("first,last,approved,allowed", [
+    ("upstream/firstmate", "i098/sanctum", None, False),
+    ("upstream/firstmate", "i098/sanctum", "upstream/firstmate", True),
+    ("i098/sanctum", "upstream/firstmate", None, True),
+])
+def test_axi_transfer_checks_first_destination(guarded, separator, first, last, approved, allowed):
+    guarded(
+        f"gh-axi issue transfer 1 -R i098/sanctum "
+        f"--to-repo{separator}{first} --to-repo{separator}{last}",
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("separator", [" ", "="])
+@pytest.mark.parametrize("branch_repo,approved,allowed", [
+    ("upstream/firstmate", None, False),
+    ("upstream/firstmate", "upstream/firstmate", True),
+    ("i098/sanctum", None, True),
+    ("https://github.com/upstream/firstmate", None, False),
+    ("https://github.com/i098/sanctum", None, True),
+])
+def test_develop_checks_branch_repository(guarded, separator, branch_repo, approved, allowed):
+    guarded(
+        f"gh issue develop 1 -R i098/sanctum --branch-repo{separator}{branch_repo} --name incident",
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("separator", [" ", "="])
+@pytest.mark.parametrize("first,last,allowed", [
+    ("upstream/firstmate", "i098/sanctum", True),
+    ("i098/sanctum", "upstream/firstmate", False),
+])
+def test_develop_checks_last_branch_repository(guarded, separator, first, last, allowed):
+    guarded(
+        f"gh issue develop 1 -R i098/sanctum "
+        f"--branch-repo{separator}{first} --branch-repo{separator}{last} --name incident",
+        allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("script", [
+    'value="$({command})"',
+    'value="`{command}`"',
+    "value=$({command})",
+    "value=`{command}`",
+    'value="$(printf \'%s\' "$({command})")"',
+    'value="\'$({command})\'"',
+    'value="${{missing:-$({command})}}"',
+    'value="$\\\n({command})"',
+    "eval '{command}'",
+    "builtin eval '{command}'",
+    "command eval '{command}'",
+    "eval '{cli}' 'issue create --title incident {target}'",
+    "bash -c 'value=\"$({command})\"'",
+])
+@pytest.mark.parametrize("target,allowed", [
+    ("", False), ("-R i098/sanctum", True), ("-R upstream/firstmate", False),
+])
+def test_executable_shell_regions_check_issue_targets(guarded, cli, script, target, allowed):
+    command = f"{cli} issue create --title incident {target}"
+    guarded(script.format(command=command, cli=cli, target=target), allowed=allowed)
+
+
+@pytest.mark.parametrize("script", [
+    "printf '%s' '$(gh-axi issue create --title incident)'",
+    "printf '%s' '`gh-axi issue create --title incident`'",
+    'printf "%s" "\\$(gh-axi issue create --title incident)"',
+    'printf "%s" "\\`gh-axi issue create --title incident\\`"',
+    "printf '%s' eval 'gh-axi issue create --title incident'",
+    "printf '%s' 'eval gh-axi issue create --title incident'",
+    "# $(gh-axi issue create --title incident)\nprintf '%s' safe",
+    'eval "printf \'%s\' \'\\$(gh-axi issue create --title incident)\'"',
+])
+def test_non_executable_shell_text_stays_inert(guarded, tmp_path, script):
+    guarded(f"{script}; gh issue list")
+    assert (tmp_path / "calls").read_text() == "issue list\n"
