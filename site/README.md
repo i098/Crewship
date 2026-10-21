@@ -131,7 +131,7 @@ Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `
 
 `build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row and from `docs/features.md`.
 Every object in the scene needs a `SCENE` entry whose docs link appears in one of them; a test checks this.
-It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and how.html.
+It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and `/how`.
 A link with an object in the scene (mapped in `build.py`'s `SCENE`) opens on that object.
 A link with no mapping prints a warning but never blocks the build.
 The docs board shows on the mini map like the other points.
@@ -238,3 +238,9 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 ```
 
 The site serves on https://crewship.si, a custom domain attached to the Worker outside `wrangler.jsonc`, and each deploy records that URL under Deployments.
+
+The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
+The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
+The sitemap lists the canonical home, About, and How URLs without modification dates.
+Origin redirects and Cloudflare-managed crawler settings live outside this repository.
+Check that the deployed `/robots.txt` matches the file before changing those settings.
