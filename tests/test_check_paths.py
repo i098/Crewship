@@ -38,6 +38,31 @@ def test_paths_are_classified_without_following_or_changing_links(tmp_path):
     assert dangling.readlink() == tmp_path / "absent-target"
 
 
+def test_directory_details_do_not_follow_links(tmp_path):
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    linked_directory = tmp_path / "linked-directory"
+    linked_directory.symlink_to(directory, target_is_directory=True)
+    file = tmp_path / "file"
+    file.write_text("keep")
+    dangling = tmp_path / "dangling"
+    dangling.symlink_to(tmp_path / "absent-target")
+    missing = tmp_path / "missing"
+    paths = [linked_directory, file, directory, dangling, missing]
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--directories", json.dumps([str(path) for path in paths])],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(result.stdout) == {
+        "existing": [str(path) for path in paths[:-1]],
+        "missing": [str(missing)],
+        "directories": [str(directory)],
+    }
+    assert linked_directory.readlink() == directory
+    assert dangling.readlink() == tmp_path / "absent-target"
+    assert file.read_text() == "keep"
+
+
 @pytest.mark.parametrize("error_type", [PermissionError, NotADirectoryError])
 def test_inspection_errors_are_not_reported_as_missing(monkeypatch, error_type):
     def fail(path):

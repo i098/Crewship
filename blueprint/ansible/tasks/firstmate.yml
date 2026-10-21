@@ -184,10 +184,14 @@
       become: true
 
     - name: Stat the Firstmate config sources
-      ansible.builtin.stat:
-        path: "{{ crewship_blueprint }}/config/{{ item }}"
-        get_checksum: false
-      loop: "{{ crewship_firstmate_config_names }}"
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ crewship_path_checker }}"
+          - --directories
+          - >-
+            {{ [crewship_blueprint ~ '/config'] | product(crewship_firstmate_config_names)
+               | map('path_join') | list | to_json }}
       register: crewship_fm_src_stat
       changed_when: false
       check_mode: false
@@ -206,20 +210,22 @@
       check_mode: false
 
     - name: Write the Firstmate dispatch settings
+      vars:
+        crewship_fm_source_is_directory: >-
+          {{ (crewship_blueprint ~ '/config/' ~ item)
+             in (crewship_fm_src_stat.stdout | from_json).directories }}
       ansible.builtin.copy:
         # A trailing slash copies directory contents; plain files copy as-is.
-        src: "{{ crewship_blueprint }}/config/{{ item.item }}{{ '/' if item.stat.isdir else '' }}"
-        dest: "{{ crewship_firstmate_dir }}/config/{{ item.item }}"
+        src: "{{ crewship_blueprint }}/config/{{ item }}{{ '/' if crewship_fm_source_is_directory | bool else '' }}"
+        dest: "{{ crewship_firstmate_dir }}/config/{{ item }}"
         owner: "{{ crewship_cfg.user }}"
         group: "{{ crewship_group }}"
-        mode: "{{ '0600' if not item.stat.isdir else omit }}"
-        directory_mode: "{{ '0700' if item.stat.isdir else omit }}"
+        mode: "{{ omit if crewship_fm_source_is_directory | bool else '0600' }}"
+        directory_mode: "{{ '0700' if crewship_fm_source_is_directory | bool else omit }}"
         remote_src: true
       become: true
-      loop: "{{ crewship_fm_src_stat.results }}"
-      loop_control:
-        label: "{{ item.item }}"
+      loop: "{{ crewship_firstmate_config_names }}"
       when: >-
         not (crewship_firstmate_config_first_write | bool)
-        or (crewship_firstmate_dir ~ '/config/' ~ item.item)
+        or (crewship_firstmate_dir ~ '/config/' ~ item)
            not in (crewship_fm_dest_stat.stdout | from_json).existing
