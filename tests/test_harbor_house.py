@@ -120,12 +120,16 @@ function removeEventListener() {}
 const window = {};
 """
     check = r"""
+preferences.graphics = "low";
+applyPreferences();
+measure();
 Object.assign(me, {x: -5, z: 20.6, yaw: 0});
 keys.add('f');
 for (let i = 0; i < 4; i++) step(0.02);
 keys.clear();
 step(0);
 assert.equal(interior, HOUSE, 'walking into the door must enter the room');
+assert.equal(scale, COARSEST, 'Low detail must survive entry through a door');
 assert.equal(floorAt(me.x, me.z), 0);
 assert(!blocked(me.x, me.z, 0), 'entry must leave the player in a clear aisle');
 assert.equal(walkPath.length, 0);
@@ -166,6 +170,9 @@ assert.equal(interior, null, 'the touch stick must exit through the door');
 assert.equal(me.yaw, Math.PI);
 assert(me.z < 20.75 && me.z > 19.8, 'exit must land just outside the door');
 assert(!blocked(me.x, me.z, floorAt(me.x, me.z)));
+assert.equal(scale, COARSEST, 'Low detail must survive exit through a door');
+preferences.graphics = "auto";
+applyPreferences();
 Object.assign(me, {x: -5, z: 20.6, yaw: 0});
 stick.y = 1;
 for (let i = 0; i < 4; i++) step(0.02);

@@ -33,7 +33,7 @@ const fs = require('node:fs'), vm = require('node:vm');
 const assert = require('node:assert/strict');
 const element = {
   hidden: false, classList: { add() {}, toggle() {} }, focus() {}, addEventListener() {},
-  firstElementChild: {}, clientWidth: 600, clientHeight: 400,
+  firstElementChild: {style: {}}, clientWidth: 600, clientHeight: 400,
   style: {setProperty() {}},
   getContext: () => ({setTransform() {}, fillRect() {}, measureText: () => ({width: 6})})
 };

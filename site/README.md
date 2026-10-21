@@ -15,10 +15,10 @@ See [how.html](public/how.html) for the renderer and controls.
 The off-screen HTML list and current sign keep links available to screen readers and keyboard users.
 An uncaught error or rejected promise in `harbor.js`, or a failure to load it, hides the scene and shows the plain page.
 Errors and rejected promises from other scripts or resources, such as browser add-ons, do not.
-JavaScript hides the plain page before the first paint; visitors without JavaScript still see it.
-The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera.
-Any key, click, touch, or mouse wheel input skips the animation.
-Reduced-motion visitors get the scene immediately.
+The start menu shows a still Harbor view with Explore, GitHub, About, and Settings.
+Explore starts the existing scene and moves keyboard focus to the stage.
+The scene starts with a 1.2-second glyph-noise sweep.
+Reduced motion skips the sweep.
 Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
@@ -117,11 +117,27 @@ Without reduced motion, a missing clear route also stops the map walk without mo
 
 The harbor plays ambient sound that fades with distance: sea and surf at the nearest waterline or ship side, water at the fountain, wind in the nearest tree, creaking timbers along the ship, and gulls circling far over the bay.
 Inside the house and the ship's rooms, a fire or lantern crackles nearby and the outdoor sounds are muffled; the ship's rooms keep the creaking.
-Sound starts with the first click or tap, as browsers require, and the speaker button in the bottom-left corner turns it off or on.
-The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
-Sound stops while the tab is hidden; reduced motion does not change it.
+Sound starts only after Explore, and the speaker button turns it off or on.
+The page stores the sound choice under `harbor-sound`.
+Sound stops while the tab is hidden or the menu is open; reduced motion does not change it.
 The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
 See [how.html](public/how.html) for the audio graph.
+
+Settings provides Auto, Low, and High graphics, plus System, Reduce, and Full motion.
+Auto keeps adaptive phone detail; Low uses larger glyphs without shadows; High keeps full detail.
+The small `harbor-settings` record stores only graphics and motion values.
+If storage fails, changes apply for the visit and Settings shows a notice.
+Reset restores Auto graphics, System motion, and sound on without clearing other storage.
+The Controls section lists the existing keyboard and touch controls.
+The scene Menu button pauses the view and releases movement input.
+Escape first releases pointer lock or closes the map; a later press opens the menu.
+
+Run the menu check through `chrome-devtools-axi run` with the preview server URL:
+
+```js
+const { checkMenu } = await import(process.cwd() + "/site/menu-check.mjs");
+console.log(await checkMenu(page, "http://127.0.0.1:8000/"));
+```
 
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
 Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `site/`, and the playbook never copies it.
@@ -197,7 +213,7 @@ The check loads the built page in Playwright WebKit at desktop and iPhone portra
 It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
-It also checks that the first intro frame is black and that the scene keeps moving during the intro.
+The check enters through Explore before it exercises the scene.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
 It checks the how, docsboard, and mailbox signs against the placement rules above.

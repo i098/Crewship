@@ -34,6 +34,7 @@ await page.goto("http://harbor.test/");
 await page.waitForFunction(() => window.ogReady?.());
 await page.addStyleTag({ content: "#pad, #zoomhint { display: none !important; }" });
 await page.evaluate((pose) => window.ogPose(...pose), POSE);
+await page.click("#explore");
 await page.waitForFunction(() => window.ogDrawn);
 const scene = (await page.locator("#scene").screenshot()).toString("base64");
 
