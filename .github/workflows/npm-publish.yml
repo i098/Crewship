@@ -1,4 +1,4 @@
-# Publishes the crewship npm package (tools/npm/) for each published vX.Y.Z release.
+# Publishes the crewship npm package (tools/npm/) for each published v* release.
 #
 # npm trusted publishing: the job's GitHub OIDC token authenticates the
 # publish, so no npm token is stored, and npm adds a provenance attestation.

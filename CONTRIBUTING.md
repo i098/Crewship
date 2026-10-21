@@ -253,8 +253,7 @@ Stable releases and promotion from prerelease to stable require the owner's expl
 Routine fixes can use prereleases without that approval.
 Prereleases use npm `next`, an exact GHCR version tag, and a GitHub prerelease with `make_latest=false`.
 They never move npm `latest`, GHCR `latest`, or GitHub's latest release.
-The default installer and `update` select GitHub's latest stable release.
-Users must [opt in explicitly](docs/install.md#prerelease-opt-in) to install a prerelease.
+See [Prerelease opt-in](docs/install.md#prerelease-opt-in) for installer selection and explicit opt-in.
 Keep patch-only numbering; use the next patch version and increase `rc.N` for successive candidates.
 Do not change published releases, including `0.4.7`.
 

@@ -11,7 +11,7 @@ It does not need Node.js, npm, pnpm, or Bun:
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
-The script on `main` only selects and downloads a released installer.
+The script on `main` selects and downloads a released installer.
 It follows GitHub's latest stable release, verifies `install.sh` against its `.sha256`, and runs that copy.
 It also compares the digest from GitHub's release API when the API is available.
 If the selected release has no installer asset, the bootstrap uses the installer from the verified, approved `i098/Crewship` release `v0.4.7`.
@@ -43,7 +43,7 @@ For stable releases, the pnpm launcher checks the registry and explains this pol
 It keeps the selected release and does not change your pnpm settings.
 The check does not run for `update`; a failed check does not stop installation.
 Check the release printed by the installer.
-Keep pnpm's safety policy; use the curl installer to select the latest Crewship release directly.
+Keep pnpm's safety policy; use the curl installer to select the latest stable Crewship release directly.
 See [Update](#update) for an existing installation.
 
 The installer:
@@ -83,7 +83,9 @@ A failure at that stage leaves the current Crewship installation unchanged.
 
 ## Update
 
-Run `bunx crewship update` (or `npx crewship update`; it takes the newest release, whatever the version of the npm package), or run the installer again: `bunx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
+Run `bunx crewship update` or `npx crewship update` to select the latest stable release, regardless of the npm package version.
+Alternatively, run `bunx crewship@latest` or the curl command under [Install](#install).
+The installer fetches and verifies the selected release, then:
 
 - copies the host's own files into it: `.local/` (including `host.yml`), `blueprint/skills/private/` and `blueprint/rules/private/`; a release from before the `blueprint/` folder kept the private files in `skills/private/` and `rules/private/`, and the installer moves them to the new place;
 - switches `~/Crewship` to the new release in one step (`mv -T` of a new symlink);
@@ -91,7 +93,9 @@ Run `bunx crewship update` (or `npx crewship update`; it takes the newest releas
 
 A host still on v0.4.0 gets a one-time migration before the re-apply: links in `~/.local/bin` into the old `~/.local/share/code-factory` tree are removed and the installer links the tools again under `crewship`; the old tree itself is left in place for the rename step of the re-apply, and the `fleet` keys v0.4.1 removed (`supabase_project_id`, `fixture_archive`, `worktree_pools`) are dropped from `.local/host.yml`, one line each, with the original kept as `host.yml.v0.4.0`. Comments in `host.yml` are not preserved in the rewritten file.
 
-If the selected release is already installed, the download is skipped. Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
+If the selected release is already installed, the full installer skips the release download.
+The bootstrap still downloads and verifies its installer.
+Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
 
 ## Prerelease opt-in
 
@@ -123,11 +127,4 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 
 ## Attach the artifact to a draft release
 
-Follow the [release steps](../CONTRIBUTING.md#release-steps) to create a draft first.
-Run `gh workflow run release-artifact.yml -f tag=v0.4.8-rc.1` to attach a prerelease artifact.
-Stable tags require `-f stable=true` and the owner's explicit word.
-The workflow sets the draft's channel flags, builds the artifact from the tag, and uploads it with `--clobber`.
-It also attaches `scripts/install.sh` from the tag as `install.sh`, with `install.sh.sha256`.
-It rejects a channel mismatch or a release that is already published.
-It creates no release, tag, or version.
-Check the assets, then publish the draft in the same channel.
+Follow the [release steps](../CONTRIBUTING.md#release-steps) for draft creation, channel selection, artifact attachment, and publication.

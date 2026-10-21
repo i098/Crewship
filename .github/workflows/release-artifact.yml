@@ -8,12 +8,8 @@
 # The job checks out the workflow's own ref (it has the build script, which an old tag
 # lacks) with all tags; the script archives the tag.
 #
-# crewship-<tag>.tar.gz is a `git archive` of the tag (no .git) and
-# crewship-<tag>.tar.gz.sha256 its checksum, both built by
-# scripts/build-release-artifact.sh. install.sh downloads and verifies them
-# instead of cloning the repository, and installs the source archive of the tag
-# when a release has no artifact. Actions are pinned to the commit SHA of
-# their latest release (the same pin as npm-publish.yml).
+# See docs/install.md for archive verification and installation behavior.
+# Action pins match npm-publish.yml.
 name: release-artifact
 
 on:
