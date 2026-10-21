@@ -32,6 +32,12 @@ await page.addInitScript(() => {
     window.longest = Math.max(window.longest, text.length);
     return fillText.call(this, text, ...rest);
   };
+  const start = AudioBufferSourceNode.prototype.start;
+  window.startedLoops = 0;
+  AudioBufferSourceNode.prototype.start = function (...args) {
+    start.apply(this, args);
+    window.startedLoops++;
+  };
 });
 await page.context().route("**/*", async (route) => {
   const url = new URL(route.request().url());
@@ -87,6 +93,7 @@ let signCheckWidth = Infinity;
 const fitSign = signFit;
 signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
 window.harborCheck = {
+  soundReady() { return window.startedLoops === LOOPS.length; },
   place(x, z, yaw) { Object.assign(me, {x, z, yaw, pitch: 0}); moved = dirty = true; },
   state() { return {inside: interior === HOUSE, below: interior === GUN_DECK, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
   ids: ORDER,
@@ -180,6 +187,10 @@ if (name === "desktop") {
   await probe.close();
 }
 async function clickLink(link, offset = 0) {
+  if (await page.locator("#sound").getAttribute("aria-pressed") !== "true") {
+    await page.locator("#sound").click();
+  }
+  await page.waitForFunction(() => window.harborCheck.soundReady());
   const popup = link.target === "_blank";
   const navigation = popup ? page.waitForEvent("popup") : page.waitForNavigation();
   if (touch) await page.touchscreen.tap(link.x, link.y + offset);
