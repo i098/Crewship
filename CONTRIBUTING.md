@@ -213,7 +213,7 @@ The script applies the form's label and rejects missing required fields or commi
 
 The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mistakes.yaml`.
 It omits generated intent and puts validation evidence in a collapsed section after the public body.
-These settings take effect after they merge into the default branch.
+The pipeline reads these settings from the default branch.
 
 ## Branch rules
 
