@@ -37,6 +37,11 @@ const ISSUE_WRITES: Record<string, true> = {
 	create: true, new: true, edit: true, comment: true, close: true, reopen: true, delete: true,
 	transfer: true, lock: true, unlock: true, pin: true, unpin: true, develop: true,
 };
+const RAW_ISSUE_WRITE = new RegExp(
+	`\\bgh(?:-axi)?\\b[^;\\n|&]*?\\bissue\\s+(?:${Object.keys(ISSUE_WRITES).join("|")}|subissue\\s+(?:add|remove))\\b`,
+);
+const RAW_API_CALL = /\b(gh(?:-axi)?)\b[^;\n|&]*?\bapi\b/g;
+const ISSUE_GRAPHQL_FIELD = /\b(?:\w*Issue\w*|(?:create|delete)LinkedBranch|addComment|(?:un)?minimizeComment|clearLabelsFromLabelable|replaceActorsForAssignable|(?:add|remove)(?:BlockedBy|Blocking|RelatesTo|Reaction|LabelsToLabelable|LabelsFromLabelable|AssigneesToAssignable|AssigneesFromAssignable)|(?:un)?lockLockable|(?:add|delete|update)ProjectV2Item\w*)\s*[\({]/;
 const BOOL_FLAGS: Record<string, true> = {
 	"--help": true, "--web": true, "-w": true, "--editor": true, "-e": true,
 	"--yes": true, "-y": true, "--verify": true, "--undo": true, "--remove": true,
@@ -73,26 +78,6 @@ const TARGET_REQUIRED =
 
 type GithubArgs = { positionals: string[]; flags: Record<string, string[]>; uncertain: boolean };
 type ShellWord = { value: string; operator: boolean };
-type ShellMask = { start: number; end: number; replacement: string };
-type ShellScan = { end: number; expansions: string[]; masks: ShellMask[] };
-type ShellHereDoc = { end: number; delimiter: string; quoted: boolean; stripTabs: boolean };
-type ShellCase = { stage: "subject" | "in" | "pattern" | "body"; depth: number; start: boolean };
-type ShellControl = { wordStart: boolean; cases: ShellCase[]; hereDocs: ShellHereDoc[] };
-const SHELL_PAIRS: Record<string, string> = { "'": "'", '"': '"', "`": "`", "(": ")" };
-
-function shellQuoteEnd(source: string, start: number, closing: string): number {
-	for (let i = start; i < source.length; i++) {
-		if (source[i] === closing) return i;
-		if (source[i] === "\\" && closing !== "'") i++;
-	}
-	return source.length;
-}
-
-function shellOpening(source: string, index: number, closing: string): string {
-	if (source.startsWith("$(", index)) return "$(";
-	if (closing === '"' || closing === "heredoc") return source[index] === "`" ? "`" : "";
-	return SHELL_PAIRS[source[index]] ? source[index] : "";
-}
 
 function shellWordValue(word: string): string {
 	return word.replace(
@@ -101,169 +86,6 @@ function shellWordValue(word: string): string {
 	);
 }
 
-function shellCaseKeyword(source: string, index: number, cases: ShellCase[]): number {
-	if (/\s/.test(source[index])) return 0;
-	const current = cases.at(-1);
-	if (current?.stage === "subject") {
-		current.stage = "in";
-		return 0;
-	}
-	const keyword = source.slice(index).match(/^(case|in|esac)(?=[\s;&|()]|$)/)?.[1];
-	const commandStart = (current?.stage ?? "body") === "body" &&
-		/(?:^|[;&|()\n{}]|\b(?:then|do|else|elif|if|while|until))\s*$/.test(source.slice(0, index));
-	if (keyword === "case" && commandStart) {
-		cases.push({ stage: "subject", depth: 0, start: true });
-	} else if (keyword === "in" && current?.stage === "in") {
-		current.stage = "pattern";
-		current.start = true;
-	} else if (keyword === "esac" && current && (current.stage === "pattern" || commandStart)) {
-		cases.pop();
-	} else {
-		return 0;
-	}
-	return keyword.length;
-}
-
-function shellCasePunctuation(source: string, index: number, cases: ShellCase[]): number {
-	const current = cases.at(-1);
-	if (!current) return 0;
-	const terminator = source.slice(index).match(/^;(?:;&?|&)/)?.[0];
-	if (current.stage === "body" && terminator) {
-		current.stage = "pattern";
-		current.start = true;
-		return terminator.length;
-	}
-	if (current.stage !== "pattern") return 0;
-	const char = source[index];
-	if (char === "(") {
-		if (!current.start) current.depth++;
-		current.start = false;
-		return 1;
-	}
-	if (char === ")") {
-		if (current.depth) current.depth--;
-		else current.stage = "body";
-		return 1;
-	}
-	if (/\S/.test(char)) current.start = false;
-	return 0;
-}
-
-function shellHereDoc(source: string, index: number): ShellHereDoc | undefined {
-	if (!source.startsWith("<<", index)) return;
-	const match = source.slice(index).match(/^<<(-?)(?!<)[ \t]*((?:[^\s'"\\;&|()<>`]+|\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*')+)/);
-	if (!match) return;
-	return {
-		end: index + match[0].length,
-		delimiter: shellWordValue(match[2]),
-		quoted: /['"\\]/.test(match[2]),
-		stripTabs: match[1] === "-",
-	};
-}
-
-function readShellHereDocs(source: string, start: number, documents: ShellHereDoc[]): ShellScan {
-	const expansions: string[] = [];
-	const masks: ShellMask[] = [];
-	let end = start;
-	for (const document of documents) {
-		const bodyStart = end;
-		let bodyEnd = source.length;
-		while (end < source.length) {
-			const lineEnd = source.indexOf("\n", end);
-			const next = lineEnd < 0 ? source.length : lineEnd;
-			const line = source.slice(end, next);
-			const matches = (document.stripTabs ? line.replace(/^\t+/, "") : line) === document.delimiter;
-			const lineStart = end;
-			end = Math.min(next + 1, source.length);
-			if (matches) {
-				bodyEnd = lineStart;
-				break;
-			}
-		}
-		if (!document.quoted) expansions.push(...scanShell(source.slice(bodyStart, bodyEnd), 0, "heredoc").expansions);
-		masks.push({ start: bodyStart, end, replacement: "\n" });
-	}
-	return { end, expansions, masks };
-}
-
-function shellControl(source: string, index: number, state: ShellControl): ShellScan | undefined {
-	if (source[index] === "\n" && state.hereDocs.length) {
-		state.wordStart = true;
-		return readShellHereDocs(source, index + 1, state.hereDocs.splice(0));
-	}
-	const document = shellHereDoc(source, index);
-	if (document) {
-		state.hereDocs.push(document);
-		state.wordStart = false;
-		return { end: document.end, expansions: [], masks: [] };
-	}
-	const skipped = (state.wordStart ? shellCaseKeyword(source, index, state.cases) : 0) ||
-		shellCasePunctuation(source, index, state.cases);
-	if (skipped) {
-		state.wordStart = true;
-		return { end: index + skipped, expansions: [], masks: [] };
-	}
-}
-
-function scanShellOpening(source: string, index: number, opening: string): ShellScan {
-	const bodyStart = index + opening.length;
-	const nested = scanShell(source, bodyStart, opening === "$(" ? ")" : SHELL_PAIRS[opening]);
-	if (opening !== "$(" && opening !== "`") return nested;
-	const body = source.slice(bodyStart, nested.end);
-	return {
-		end: nested.end,
-		expansions: [opening === "`" ? body.replace(/\\([$`\\])/g, "$1") : body],
-		masks: [{ start: index, end: nested.end + 1, replacement: "$__shell_substitution__" }],
-	};
-}
-
-function scanShell(source: string, start: number, closing: string): ShellScan {
-	const expansions: string[] = [];
-	const masks: ShellMask[] = [];
-	if (closing === "'" || closing === "`") return { end: shellQuoteEnd(source, start, closing), expansions, masks };
-	const quoted = closing === '"' || closing === "heredoc";
-	const state: ShellControl = { wordStart: !quoted, cases: [], hereDocs: [] };
-	let i = start;
-	for (; i < source.length; i++) {
-		let char = source[i];
-		if (char === "#" && state.wordStart) {
-			i = source.indexOf("\n", i);
-			if (i < 0) return { end: source.length, expansions, masks };
-			char = source[i];
-			state.wordStart = true;
-		}
-		const control = quoted ? undefined : shellControl(source, i, state);
-		if (control) {
-			expansions.push(...control.expansions);
-			masks.push(...control.masks);
-			i = control.end - 1;
-			continue;
-		}
-		if (char === "\\") {
-			i++;
-			state.wordStart = false;
-			continue;
-		}
-		if (source[i] === closing) break;
-		const opening = shellOpening(source, i, closing);
-		if (opening) {
-			const nested = scanShellOpening(source, i, opening);
-			expansions.push(...nested.expansions);
-			masks.push(...nested.masks);
-			i = nested.end;
-		}
-		state.wordStart = !quoted && /[\s;&|()]/.test(char);
-	}
-	return { end: i, expansions, masks };
-}
-
-function maskShell(source: string, masks: ShellMask[]): string {
-	for (let i = masks.length - 1; i >= 0; i--) {
-		const mask = masks[i];
-		source = source.slice(0, mask.start) + mask.replacement + source.slice(mask.end);
-	}
-	return source;
-}
 
 function shellWords(command: string): ShellWord[] {
 	const words = command.replace(/\\\r?\n/g, "").match(/#[^\n]*|[0-9]*(?:>&|<&|<>|>>?|<<<?)|&>>?|(?:[^\s'"\\;&|()<>`]+|\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*')+|[;&|()\n`]/g) ?? [];
@@ -343,9 +165,8 @@ function graphqlTargets(flags: GithubArgs["flags"]): string[] {
 	const opaque = flags["--input"] || queries.length !== 1 || /^\s*[@$`]/.test(queries[0]);
 	if (!opaque) {
 		const query = queries[0].replace(/"""[\s\S]*?"""|"(?:\\[\s\S]|[^"\\])*"|#[^\n]*/g, "");
-		const issueField = /\b(?:\w*Issue\w*|(?:create|delete)LinkedBranch|addComment|(?:un)?minimizeComment|clearLabelsFromLabelable|replaceActorsForAssignable|(?:add|remove)(?:BlockedBy|Blocking|RelatesTo|Reaction|LabelsToLabelable|LabelsFromLabelable|AssigneesToAssignable|AssigneesFromAssignable)|(?:un)?lockLockable|(?:add|delete|update)ProjectV2Item\w*)\s*[\({]/;
 		if (/^\s*(?:query\b|\{)/.test(query) && !/\bmutation\b/.test(query)) return [];
-		if (/\bmutation\b/.test(query) && !issueField.test(query)) return [];
+		if (/\bmutation\b/.test(query) && !ISSUE_GRAPHQL_FIELD.test(query)) return [];
 	}
 	return [literalRepo(process.env.CREWSHIP_GITHUB_APPROVED_REPO ?? "")];
 }
@@ -426,6 +247,10 @@ function checkGithubWrite(words: string[], cli: string): string {
 	const args = githubArgs(words, cli);
 	if (!args.uncertain && /^(true|1|t)$/i.test(args.flags["--help"]?.at(-1) ?? "")) return "";
 	const targets = args.positionals[0] === "api" ? apiTargets(args, cli) : mutationTargets(args, cli);
+	return targetReason(targets);
+}
+
+function targetReason(targets: string[]): string {
 	if (targets.some((target) => !target)) return TARGET_REQUIRED;
 	const contract = process.env.CREWSHIP_GITHUB_REPO;
 	const approval = process.env.CREWSHIP_GITHUB_APPROVED_REPO;
@@ -475,14 +300,36 @@ function literalGithubWriteReason(words: ShellWord[]): string {
 	return "";
 }
 
+function hasRawApiWrite(command: string): boolean {
+	for (const match of command.matchAll(RAW_API_CALL)) {
+		const tail = command.slice(match.index + match[0].length);
+		if (!/(?:^|\/)issues(?:[/?#]|\b)/m.test(tail) &&
+			!(/\bmutation\b/.test(tail) && ISSUE_GRAPHQL_FIELD.test(tail))) continue;
+		const words = ["api", ...commandArgs(shellWords(tail), 0)];
+		if (apiTargets(githubArgs(words, match[1]), match[1]).length) return true;
+	}
+	return false;
+}
+
+function rawTargetReason(command: string): string {
+	if (!RAW_ISSUE_WRITE.test(command) && !hasRawApiWrite(command)) return "";
+	let targets = Array.from(command.matchAll(
+		/(?:^|[^\w-])(?:-R(?:=|\s*)|--repo(?:=|\s+))["']?([\w.-]+\/[\w.-]+)(?=$|[\s"'`;&|()<>])/gm,
+	), (match) => match[1].toLowerCase());
+	if (!targets.length) targets = Array.from(command.matchAll(
+		/https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/\d+/g,
+	), (match) => match[1].toLowerCase());
+	if (!targets.length) targets = Array.from(command.matchAll(
+		/\brepos\/([\w.-]+\/[\w.-]+)\//g,
+	), (match) => match[1].toLowerCase());
+	return targetReason(targets.length ? targets : [""]);
+}
+
 function githubWriteReason(command: string): string {
 	command = command.replace(/\\\r?\n/g, "");
-	const scan = scanShell(command, 0, "");
-	for (const expansion of scan.expansions) {
-		const reason = githubWriteReason(expansion);
-		if (reason) return reason;
-	}
-	const words = shellWords(maskShell(command, scan.masks));
+	const rawReason = rawTargetReason(command);
+	if (rawReason) return rawReason;
+	const words = shellWords(command);
 	for (let i = 0; i < words.length; i++) {
 		if (words[i].value === "eval" && isShellCommand(words, i)) {
 			const reason = githubWriteReason(commandArgs(words, i + 1).join(" "));

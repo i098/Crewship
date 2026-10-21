@@ -93,7 +93,7 @@ def test_unrelated_approval_does_not_authorize_upstream(guarded):
 
 
 @pytest.mark.parametrize("command", [
-    "gh issue list", "gh-axi pr view 42", "gh issue create --help",
+    "gh issue list", "gh-axi pr view 42", "gh issue create -R i098/sanctum --help",
     "gh api repos/upstream/firstmate/issues",
     "gh api -X GET repos/upstream/firstmate/issues -f page=1",
     "gh-axi api repos/upstream/firstmate/issues --field page=1",
@@ -176,7 +176,7 @@ def test_shell_comments_cannot_authorize_writes(guarded, command):
     guarded(command, allowed=False)
 
 
-@pytest.mark.parametrize("body", ["'# -R upstream/firstmate'", '"# text"', r"\#text", "text#suffix"])
+@pytest.mark.parametrize("body", ["'# text'", '"# text"', r"\#text", "text#suffix"])
 def test_quoted_escaped_and_embedded_hashes_remain_arguments(guarded, body):
     guarded(f"gh issue create -R i098/sanctum --body {body}")
 
@@ -278,7 +278,7 @@ def test_authorized_relationships_run(guarded):
 def test_graphql_issue_writes_require_explicit_approval(guarded, cli, field, operation):
     query = f"mutation {{ {operation}(input: {{id: \"node\"}}) {{ clientMutationId }} }}"
     guarded(
-        f"{cli} api graphql {field} {shlex.quote('query=' + query)}",
+        f"{cli} api graphql {field} {shlex.quote('query=' + query)} # repos/i098/sanctum/",
         allowed=False,
     )
 
@@ -294,7 +294,7 @@ def test_opaque_graphql_payloads_require_explicit_approval(guarded, cli, payload
 
 @pytest.mark.parametrize("cli", ["gh", "gh-axi"])
 def test_approved_graphql_issue_mutation_runs(guarded, cli):
-    query = 'mutation { createIssue(input: {repositoryId: "node", title: "incident"}) { clientMutationId } }'
+    query = 'mutation { createIssue(input: {repositoryId: "node", title: "https://github.com/upstream/firstmate/issues/1"}) { clientMutationId } }'
     guarded(
         f"{cli} api graphql --field {shlex.quote('query=' + query)}",
         approved="upstream/firstmate",
@@ -355,7 +355,7 @@ def test_axi_help_lookalikes_do_not_bypass_guard(guarded, flag, command):
     ("gh", "--help=t"), ("gh", "--help"), ("gh-axi", "--help"),
 ])
 def test_each_cli_recognized_help_remains_available(guarded, cli, flag):
-    guarded(f"{cli} issue create {flag}")
+    guarded(f"{cli} issue create -R i098/sanctum {flag}")
 
 
 @pytest.mark.parametrize("flag", [
@@ -438,8 +438,8 @@ def test_unresolved_api_targets_still_block(guarded, endpoint):
 
 
 @pytest.mark.parametrize("flag", ["--list", "-l", "--list=true", "-l=true", "--list=1", "-l=t"])
-def test_develop_listing_needs_no_target(guarded, flag):
-    guarded(f"gh issue develop 1 {flag}")
+def test_develop_listing_with_explicit_target_runs(guarded, flag):
+    guarded(f"gh issue develop 1 -R i098/sanctum {flag}")
 
 
 @pytest.mark.parametrize("flag", [
@@ -447,10 +447,6 @@ def test_develop_listing_needs_no_target(guarded, flag):
 ])
 def test_develop_false_listing_still_requires_target(guarded, flag):
     guarded(f"gh issue develop 1 {flag}", allowed=False)
-
-
-def test_develop_last_list_value_wins(guarded):
-    guarded("gh issue develop 1 -l=false --list")
 
 
 @pytest.mark.parametrize("separator", [" ", "="])
@@ -529,9 +525,8 @@ def test_executable_shell_regions_check_issue_targets(guarded, cli, script, targ
     "# $(gh-axi issue create --title incident)\nprintf '%s' safe",
     'eval "printf \'%s\' \'\\$(gh-axi issue create --title incident)\'"',
 ])
-def test_non_executable_shell_text_stays_inert(guarded, tmp_path, script):
-    guarded(f"{script}; gh issue list")
-    assert (tmp_path / "calls").read_text() == "issue list\n"
+def test_raw_issue_write_examples_require_targets(guarded, script):
+    guarded(script, allowed=False)
 
 
 @pytest.mark.parametrize("cli", ["gh", "gh-axi"])
@@ -557,13 +552,11 @@ def test_case_and_prefixed_eval_keep_write_checks(guarded, cli, script, target, 
 @pytest.mark.parametrize("cli", ["gh", "gh-axi"])
 @pytest.mark.parametrize("operator", ["<<", "<<-"])
 @pytest.mark.parametrize("delimiter", ["'EOF'", '"EOF"', r"\EOF", "E'OF'"])
-def test_quoted_heredoc_bodies_stay_inert(guarded, tmp_path, cli, operator, delimiter):
+def test_quoted_heredoc_examples_require_targets(guarded, cli, operator, delimiter):
     indent = "\t" if operator == "<<-" else ""
     body = f'value="$({cli} issue create --title example)"\neval \'{cli} issue create\'\n'
     indented = "".join(indent + line for line in body.splitlines(keepends=True))
-    result = guarded(f"cat {operator}{delimiter}\n{indented}{indent}EOF\ngh issue list")
-    assert result.stdout == body
-    assert (tmp_path / "calls").read_text() == "issue list\n"
+    guarded(f"cat {operator}{delimiter}\n{indented}{indent}EOF", allowed=False)
 
 
 @pytest.mark.parametrize("cli", ["gh", "gh-axi"])
@@ -575,7 +568,7 @@ def test_unquoted_heredoc_expansions_are_checked(guarded, cli, target, allowed):
     )
 
 
-def test_multiple_and_nested_quoted_heredocs_stay_inert(guarded, tmp_path):
+def test_multiple_and_nested_quoted_heredocs_require_targets(guarded):
     command = (
         "value=\"$(cat <<'INNER'\n$(gh-axi issue create --title example)\nINNER\n)\"\n"
         "cat <<'FIRST' <<\\SECOND\n"
@@ -583,31 +576,102 @@ def test_multiple_and_nested_quoted_heredocs_stay_inert(guarded, tmp_path):
         "eval 'gh-axi issue create --title example'\nSECOND\n"
         "gh issue list"
     )
-    guarded(command)
+    guarded(command, allowed=False)
+
+
+def test_printed_eval_issue_write_requires_target(guarded):
+    guarded("printf '%s' 2>/dev/null eval 'gh-axi issue create'; gh issue list", allowed=False)
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("arguments", [
+    "issue create --title incident",
+    "api -X POST repos/{owner}/{repo}/issues --field title=incident",
+    'api graphql --field \'query=mutation { createIssue(input: {repositoryId: "node", title: "incident"}) { clientMutationId } }\'',
+])
+@pytest.mark.parametrize("wrapper", [
+    "here_string_then_command", "ansi_delimiter_then_command", "quoted_bash_input",
+    "unquoted_sh_input", "piped_input", "here_string", "nested_here_string",
+])
+def test_raw_guard_covers_all_shell_input_forms(guarded, cli, arguments, wrapper):
+    command = f"{cli} {arguments}"
+    scripts = {
+        "here_string_then_command": f"cat <<< note\n{command}",
+        "ansi_delimiter_then_command": f"cat <<$'EOF'\ntext\nEOF\n{command}",
+        "quoted_bash_input": f"bash <<'EOF'\n{command}\nEOF",
+        "unquoted_sh_input": f"sh -s <<EOF\n{command}\nEOF",
+        "piped_input": f"cat <<'EOF' | bash\n{command}\nEOF",
+        "here_string": f"bash <<< {shlex.quote(command)}",
+        "nested_here_string": f"bash -c {shlex.quote('bash <<< ' + shlex.quote(command))}",
+    }
+    guarded(scripts[wrapper], allowed=False)
+
+
+@pytest.mark.parametrize("script", [
+    "bash <<'EOF'\ngh-axi issue create -R i098/sanctum --title incident\nEOF",
+    "sh -s <<EOF\ngh issue create --repo=i098/sanctum --title incident\nEOF",
+    "cat <<'EOF' | bash\ngh-axi issue create -Ri098/sanctum --title incident\nEOF",
+    "bash <<< 'gh issue create -R i098/sanctum --title incident'",
+    "bash <<< 'gh api -X POST repos/i098/sanctum/issues --field title=incident'",
+])
+def test_explicit_shell_input_targets_run_locally(guarded, script):
+    guarded(script)
+
+
+def test_targeted_printed_example_runs_without_a_write(guarded, tmp_path):
+    result = guarded(
+        "cat <<'EOF'\ngh-axi issue create -R i098/sanctum --title example\nEOF\ngh issue list"
+    )
+    assert result.stdout == "gh-axi issue create -R i098/sanctum --title example\n"
     assert (tmp_path / "calls").read_text() == "issue list\n"
 
 
 @pytest.mark.parametrize("cli", ["gh", "gh-axi"])
-@pytest.mark.parametrize("flag_text", [
-    "-R i098/sanctum", "--repo=i098/sanctum", "-Ri098/sanctum", "--help",
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("upstream/firstmate", True)])
+def test_raw_shell_input_retains_contract_checks(guarded, cli, approved, allowed):
+    guarded(
+        f"bash <<< '{cli} issue create -R upstream/firstmate --title incident'",
+        approved=approved, allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+def test_raw_issue_mutation_still_needs_target_text_with_approval(guarded, cli):
+    query = 'mutation { createIssue(input: {repositoryId: "node", title: "incident"}) { clientMutationId } }'
+    guarded(
+        f"{cli} api graphql --field {shlex.quote('query=' + query)}",
+        approved="upstream/firstmate", allowed=False,
+    )
+
+
+@pytest.mark.parametrize("arguments", [
+    "gh api repos/upstream/firstmate/issues",
+    "gh api --method=GET repos/upstream/firstmate/issues -F page=1",
+    "gh api -XHEAD repos/upstream/firstmate/issues",
+    "gh-axi api repos/upstream/firstmate/issues --field page=1",
+    "gh-axi api GET repos/upstream/firstmate/issues --field page=1",
+    "gh-axi api -X HEAD repos/upstream/firstmate/issues",
 ])
-@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
-def test_nested_body_quotes_cannot_supply_flags(guarded, cli, flag_text, target, allowed):
+@pytest.mark.parametrize("wrapper", ["{command}", "bash <<< {quoted}", "cat <<'EOF'\n{command}\nEOF\ngh issue list"])
+def test_raw_api_reads_do_not_require_contract_approval(guarded, arguments, wrapper):
+    guarded(wrapper.format(command=arguments, quoted=shlex.quote(arguments)))
+
+
+@pytest.mark.parametrize("arguments", [
+    "gh api repos/upstream/firstmate/issues -f title=incident",
+    "gh api -X POST repos/upstream/firstmate/issues",
+    "gh api --method=PATCH repos/upstream/firstmate/issues/1",
+    "gh-axi api POST repos/upstream/firstmate/issues --field title=incident",
+    "gh-axi api -XDELETE repos/upstream/firstmate/issues/1",
+])
+@pytest.mark.parametrize("wrapper", ["{command}", "bash <<< {quoted}", "cat <<'EOF'\n{command}\nEOF\ngh issue list"])
+def test_raw_api_writes_still_require_contract_approval(guarded, arguments, wrapper):
+    guarded(wrapper.format(command=arguments, quoted=shlex.quote(arguments)), allowed=False)
+
+
+def test_api_read_does_not_hide_a_later_write(guarded):
     guarded(
-        f'{cli} issue create --title incident --body "$(printf \'%s\' "use {flag_text} here")" {target}',
-        allowed=allowed,
+        "gh api -X GET repos/upstream/firstmate/issues; "
+        "gh api -X POST repos/upstream/firstmate/issues --field title=incident",
+        allowed=False,
     )
-
-
-@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
-def test_heredoc_body_cannot_supply_target(guarded, target, allowed):
-    guarded(
-        'gh-axi issue create --title incident --body "$(cat <<\'EOF\'\n'
-        f'use -R i098/sanctum here\nEOF\n)" {target}',
-        allowed=allowed,
-    )
-
-
-def test_eval_word_after_echo_and_redirection_stays_data(guarded, tmp_path):
-    guarded("printf '%s' 2>/dev/null eval 'gh-axi issue create'; gh issue list")
-    assert (tmp_path / "calls").read_text() == "issue list\n"

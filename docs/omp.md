@@ -128,7 +128,7 @@ omp config get statusLine.showHookStatus
 
 ## GitHub write guard
 
-The existing `fm-no-pattern-kill.ts` extension checks literal `gh` and `gh-axi` commands before omp runs a bash or eval tool.
+The existing `fm-no-pattern-kill.ts` extension checks raw `gh` and `gh-axi` text before omp runs a bash or eval tool.
 It covers issue mutations, including issue transfers and both repositories in a transfer.
 It also checks `gh-axi issue subissue add|remove`; `subissue list` remains read-only.
 Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional GitHub URL.
@@ -136,17 +136,19 @@ Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional
 The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
 Linked-branch creation also checks `--branch-repo`, including repository URLs.
 For repeated `gh-axi --to-repo` flags, the first destination controls the transfer and the guard.
-Recognized reads and help commands pass unchanged.
+Raw issue-write patterns require readable repository text, even in help requests or commands that only print examples.
 `gh` accepts `-h` and boolean help values; `gh-axi` recognizes only bare `--help`.
-`gh issue develop --list` and `-l` remain read-only; false values still require a write target.
+`gh issue develop --list` and `-l` remain read-only, but their raw text still needs a repository target.
 Unknown flags or invalid boolean values block API commands because the guard cannot safely determine whether they write.
 
 The guard also checks API writes to `repos/owner/repo/issues`, including issue comments and other child paths.
 It recognizes `-X`, `--method`, and the positional HTTP method in `gh-axi api`.
 For `gh api`, fields and input imply POST unless an explicit method overrides it.
 `gh-axi api` defaults to GET even with fields or input.
+The raw API check uses these same method and payload rules, so read-only API requests do not require repository approval.
 API targets must use literal repository names, not `{owner}` or `{repo}` placeholders.
 GraphQL issue mutations and shared mutations that can change issues require `CREWSHIP_GITHUB_APPROVED_REPO`, even when the task contract is set.
+Inline GraphQL issue mutations also need readable repository text in the command.
 The value names the explicitly approved target repository because the guard cannot resolve GraphQL node IDs.
 File and stdin GraphQL payloads also require this approval because the command-text guard cannot inspect their contents.
 `gh issue edit --parent`, `--add-sub-issue`, and active `--remove-parent` also require approval because an existing parent can be outside the target repository.
@@ -159,7 +161,9 @@ Repository mismatch checks apply only when `CREWSHIP_GITHUB_REPO=owner/repo` is 
 Crewship has no repository-aware task launcher here; Firstmate owns that launch path and must supply this variable separately.
 Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact repository.
 Both values compare without letter case.
-`GH_REPO`, the working directory, shell comments, and URLs in titles or bodies do not satisfy an explicit target.
+The raw check accepts repository flags, full issue URLs, and literal `repos/owner/repo/` paths anywhere in the same text.
+Repository flags take precedence over raw URL and path matches.
+Raw targets also receive contract checks when `CREWSHIP_GITHUB_REPO` is set.
 
 The normal agent apply installs the guard for host and worker omp sessions.
 To update only this guard from a verified checkout, run `install -m 0644 blueprint/config/omp-no-pattern-kill.ts ~/.omp/agent/extensions/fm-no-pattern-kill.ts`.
@@ -168,12 +172,12 @@ Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kil
 
 This command-text guard is not an operating-system security boundary.
 It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
-Literal shell commands and nested `sh -c` forms are covered, including preceding shell options and their operands.
-The guard also checks executable `$()` substitutions, case arms, backticks, and literal shell `eval` operands, including groups and leading redirections.
-Nested substitutions remain inside their outer arguments and cannot supply repository or help flags.
-Single-quoted text, escaped substitutions, and quoted here-document bodies remain data.
-Unquoted here-document bodies receive expansion checks only.
-Arbitrary eval-language programs and argv arrays are not covered.
+The raw check scans quoted text, comments, here-documents, and here-strings without masking them.
+An example that only prints an issue-write command can therefore block.
+Include an explicit repository target in the example.
+This conservative check does not prove which text the shell will execute or bind each target to each command.
+Existing direct-command checks still validate parsed targets and approvals.
+Computed strings passed to `eval`, commands loaded from script files, and direct `curl` requests remain outside coverage.
 
 ## Quality gate
 
