@@ -32,6 +32,7 @@ try:
         metadata_identity,
         read_json,
         read_ledger,
+        read_omp,
         read_snapshot,
         windows,
     )
@@ -44,22 +45,22 @@ SOURCE_ERRORS = (OSError, ValueError, KeyError, TypeError, RecursionError, sqlit
 
 def settings(path):
     config = read_json(path)
-    if not isinstance(config, dict) or set(config) - {"fm_home", "ledger", "snapshots"}:
+    if not isinstance(config, dict) or set(config) - {"fm_home", "ledger", "snapshots", "omp_sessions"}:
         raise ValueError("invalid report config")
     paths = config.get("snapshots", [])
     if not isinstance(paths, list) or len(paths) > 8:
         raise ValueError("invalid snapshot list")
-    for value in [config["fm_home"], *paths, *([config["ledger"]] if config.get("ledger") else [])]:
+    sources = [*paths, *(config[key] for key in ("ledger", "omp_sessions") if key in config)]
+    for value in [config["fm_home"], *sources]:
         if not isinstance(value, str) or not Path(value).is_absolute():
             raise ValueError("explicit absolute paths required")
     output = Path(config["fm_home"]) / "data/token-savings"
-    if any(Path(source).resolve().is_relative_to(output.resolve())
-           for source in [*paths, *([config["ledger"]] if config.get("ledger") else [])]):
+    if any(Path(source).resolve().is_relative_to(output.resolve()) for source in sources):
         raise ValueError("source overlaps report directory")
     return config
 
 
-def cache_candidates(rows, coverage, bounds):
+def cache_candidates(rows, coverage, bounds, source="existing local ledger"):
     by_group = defaultdict(dict)
     for row in rows:
         by_group[row["provider"], row["model"]][row["current"]] = row
@@ -88,7 +89,7 @@ def cache_candidates(rows, coverage, bounds):
         else:
             signal += " Seven-day comparison unavailable: incomplete coverage or unknown usage."
         result.append(candidate(3, index, tuple(t.isoformat() for t in bounds[1:]),
-                                "existing local ledger", None, "normalized cache shares", signal,
+                                source, None, "normalized cache shares", signal,
                                 periods[1]["partial"] or bool(row["excluded"])))
     return result
 
@@ -104,25 +105,46 @@ def deduplicate_source_measurements(source, seen):
         source[kind] = unique
 
 
+def collect_ledger(path, bounds):
+    rows, coverage = read_ledger(path, bounds)
+    notes = [
+        "Current ledger completions: "
+        f"{sum(r['requests'] for r in rows if r['current'])}; excluded rows: "
+        f"{sum(r['excluded'] for r in rows if r['current'])}.",
+        "Ledger coverage: " + "; ".join(
+            f"{'day' if c['current'] else 'prior seven days'}: "
+            f"{c['producers']} registered sources, {c['incomplete']} incomplete, "
+            f"{c['gaps']} retained gaps, {c['shutdowns']} shutdowns; "
+            f"{'partial' if c['partial'] else 'complete for registered sources'}"
+            for c in coverage) + ".",
+    ]
+    return cache_candidates(rows, coverage, bounds), notes
+
+
+def collect_omp(path, bounds):
+    rows, cache, counts = read_omp(path, bounds)
+    cache_rows = cache_candidates(cache, [{"current": 1, "partial": True}], bounds, "omp sessions")
+    detectors = list(range(3)) if counts["messages"] else []
+    if cache_rows:
+        detectors.append(3)
+    note = (
+        f"OMP bounded local scan: {counts['files']} files; {counts['messages']} day messages; "
+        f"{counts['malformed']} malformed records; limit reached: {bool(counts['limited'])}. "
+        "Coverage is partial; session history has no request completeness guarantee.")
+    return [*rows, *cache_rows], note, detectors
+
+
 def collect(config, bounds):
     candidates, sources, notes = [], [], []
     available = False
     statuses = ["unavailable: no matching saved measurement" for _ in DETECTORS]
     if config.get("ledger"):
         try:
-            rows, coverage = read_ledger(config["ledger"], bounds)
-            candidates.extend(cache_candidates(rows, coverage, bounds))
+            rows, ledger_notes = collect_ledger(config["ledger"], bounds)
+            candidates.extend(rows)
             available = True
-            statuses[3] = "available" if candidates else "unavailable: no known nonzero input denominator"
-            notes.append("Current ledger completions: "
-                         f"{sum(r['requests'] for r in rows if r['current'])}; excluded rows: "
-                         f"{sum(r['excluded'] for r in rows if r['current'])}.")
-            notes.append("Ledger coverage: " + "; ".join(
-                f"{'day' if c['current'] else 'prior seven days'}: "
-                f"{c['producers']} registered sources, {c['incomplete']} incomplete, "
-                f"{c['gaps']} retained gaps, {c['shutdowns']} shutdowns; "
-                f"{'partial' if c['partial'] else 'complete for registered sources'}"
-                for c in coverage) + ".")
+            statuses[3] = "available" if rows else "unavailable: no known nonzero input denominator"
+            notes.extend(ledger_notes)
         except TimeoutError:
             raise
         except SOURCE_ERRORS:
@@ -130,6 +152,20 @@ def collect(config, bounds):
     else:
         notes.append("Local ledger source_unavailable: not configured.")
     notes.append("SigNoz source_unavailable: no authorized read-only query path is integrated.")
+    if config.get("omp_sessions"):
+        try:
+            rows, note, detectors = collect_omp(config["omp_sessions"], bounds)
+            candidates.extend(rows)
+            notes.append(note)
+            available = available or bool(detectors)
+            for detector in detectors:
+                statuses[detector] = "available: bounded omp observations (partial)"
+        except TimeoutError:
+            raise
+        except SOURCE_ERRORS:
+            notes.append("OMP source_unavailable: missing, unsupported, malformed, or timed out.")
+    else:
+        notes.append("OMP source_unavailable: not configured.")
     seen_snapshots, seen_findings, seen_measurements = set(), set(), set()
     for index, path in enumerate(config.get("snapshots", []), 1):
         try:

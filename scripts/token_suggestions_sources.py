@@ -6,6 +6,7 @@ import os
 import sqlite3
 import stat
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,6 +15,13 @@ from usage import normalize
 
 MIB = 1024 * 1024
 PACIFIC = ZoneInfo("America/Los_Angeles")
+OMP_MAX_ENTRIES = 8192
+OMP_MAX_FILES = 256
+OMP_MAX_BYTES = 128 * MIB
+OMP_MAX_FILE_BYTES = 16 * MIB
+OMP_MAX_LINE_BYTES = 2 * MIB
+OMP_MAX_RECORDS = 100_000
+OMP_SECONDS = 15
 DETECTORS = ("Repeated context", "Large tool outputs", "Retry loops", "Cache inefficiency")
 ACTIONS = (
     "Review whether a short reference can replace the repeated context.",
@@ -309,3 +317,300 @@ def read_snapshot(path, bounds, index):
                "caveats": len(data["caveats"]), "retro": retro, "confirmed": confirmed}
     summary["identity"] = metadata_identity([*rows, summary])
     return rows, summary
+
+
+def omp_deadline(deadline):
+    if time.monotonic() >= deadline:
+        raise ValueError("omp source deadline")
+
+
+@contextmanager
+def omp_directory(root_fd, parts, deadline):
+    fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            omp_deadline(deadline)
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def omp_paths(root_fd, lower, deadline, counts):
+    paths, directories = [], [()]
+    while directories and not counts["limited"]:
+        parent = directories.pop()
+        with omp_directory(root_fd, parent, deadline) as fd, os.scandir(fd) as entries:
+            for entry in entries:
+                omp_deadline(deadline)
+                counts["entries"] += 1
+                if counts["entries"] > OMP_MAX_ENTRIES:
+                    counts["limited"] = 1
+                    break
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append((*parent, entry.name))
+                elif entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
+                    modified = entry.stat(follow_symlinks=False).st_mtime
+                    if modified >= lower.timestamp():
+                        paths.append((modified, parent, entry.name))
+    paths.sort(reverse=True)
+    if len(paths) > OMP_MAX_FILES:
+        counts["limited"] = 1
+    return paths[:OMP_MAX_FILES]
+
+
+def omp_records(root_fd, path, deadline, counts):
+    _, parent, name = path
+    with omp_directory(root_fd, parent, deadline) as fd:
+        source_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    with os.fdopen(source_fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError("omp source is not a regular file")
+        size = 0
+        while counts["records"] < OMP_MAX_RECORDS:
+            omp_deadline(deadline)
+            remaining = min(OMP_MAX_FILE_BYTES - size, OMP_MAX_BYTES - counts["bytes"])
+            if remaining <= 0:
+                counts["limited"] = 1
+                break
+            raw = source.readline(min(OMP_MAX_LINE_BYTES, remaining) + 1)
+            if not raw:
+                break
+            counts["bytes"] += len(raw)
+            size += len(raw)
+            if len(raw) > min(OMP_MAX_LINE_BYTES, remaining) or not raw.endswith(b"\n"):
+                counts["limited"] = 1
+                break
+            counts["records"] += 1
+            try:
+                record = json.loads(raw)
+                if isinstance(record, dict) and record.get("type") not in ("session", "title"):
+                    yield record
+            except (ValueError, UnicodeError, RecursionError):
+                counts["malformed"] += 1
+        else:
+            counts["limited"] = 1
+
+
+def omp_text(content):
+    if isinstance(content, str):
+        yield content
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if isinstance(text, str):
+                    yield text
+
+
+def omp_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).digest()
+
+
+def omp_cache(message, groups):
+    provider, model = message.get("provider"), message.get("model")
+    key = omp_digest([provider, model])
+    row = groups.setdefault(key, {"current": 1, "provider": key, "model": key,
+                                 "requests": 0, "excluded": 0, "input_total": 0,
+                                 "cache_read": 0, "cache_write": 0})
+    row["requests"] += 1
+    usage = message.get("usage")
+    try:
+        if not isinstance(usage, dict) or not provider or not model:
+            raise ValueError("unknown omp usage")
+        read, write = number(usage["cacheRead"]), number(usage["cacheWrite"])
+        total = normalized_input(1, "exclusive", number(usage["input"]), read, write)
+    except (ValueError, KeyError, TypeError):
+        row["excluded"] += 1
+        return
+    row["input_total"] += total
+    row["cache_read"] += read
+    row["cache_write"] += write
+
+
+def omp_retry(run, retries):
+    if run is not None and run["calls"] >= 3 and run["errors"] * 2 >= run["calls"]:
+        retries[id(run)] = run
+
+
+def omp_retry_groups(retries, deadline):
+    covered = {}
+    for run in sorted(retries.values(), key=lambda run: -run["calls"]):
+        events, link = set(), run["events"]
+        while link is not None:
+            omp_deadline(deadline)
+            event, link = link
+            events.add(event)
+        if any(events <= group for group in covered.get(run["events"][0], ())):
+            continue
+        for event in events:
+            covered.setdefault(event, []).append(events)
+        yield run
+
+
+def omp_message(record):
+    at = instant(record["timestamp"])
+    if (not isinstance(record["id"], str)
+            or record.get("parentId") is not None and not isinstance(record["parentId"], str)):
+        raise ValueError("invalid omp entry identity")
+    message = (record["message"] if record.get("type") == "message"
+               else {"role": record.get("type")})
+    identity = omp_digest(record)
+    if not isinstance(message, dict):
+        raise ValueError("invalid omp message")
+    if message.get("role") == "assistant" and "completedAt" in message:
+        at = datetime.fromtimestamp(number(message["completedAt"]) / 1000, UTC)
+    texts = tuple(text.encode() for text in omp_text(message.get("content")))
+    return at, message, identity, texts
+
+
+def omp_tool_measure(message, shape, size, tools):
+    key = shape or omp_digest(message.get("toolName"))
+    tool = tools.setdefault(key, {"calls": 0, "tokens": 0, "largest_call": 0, "error_calls": 0})
+    error = message.get("isError")
+    tool["calls"] += 1
+    tool["tokens"] += size
+    tool["largest_call"] = max(tool["largest_call"], size)
+    if type(error) is not bool:
+        tool["error_calls"] = None
+    elif tool["error_calls"] is not None:
+        tool["error_calls"] += int(error)
+
+
+def omp_pending_call(pending, key, deadline):
+    while pending is not None:
+        omp_deadline(deadline)
+        calls, pending = pending
+        if key in calls:
+            return calls[key]
+    return None, None
+
+
+def omp_tool_result(message, call, run, size, retries, identity):
+    shape, batch = call
+    error = message.get("isError")
+    if (run is None or shape != run["shape"] or shape is None or batch == run["batch"]
+            or type(error) is not bool):
+        omp_retry(run, retries)
+        run = {"shape": shape, "batch": batch, "calls": 0, "errors": 0, "tokens": 0,
+               "events": None}
+    if shape is not None and type(error) is bool:
+        return {"shape": shape, "batch": batch, "calls": run["calls"] + 1,
+                "errors": run["errors"] + int(error), "tokens": run["tokens"] + size,
+                "events": (identity, run["events"])}
+    return run
+
+
+def omp_context(texts, session, contexts):
+    for text in texts:
+        size = (len(text) + 3) // 4
+        if size >= 180:
+            context = contexts.setdefault(hashlib.sha256(text).digest(), {
+                "sessions": set(), "calls": 0, "block": size})
+            context["sessions"].add(session)
+            context["calls"] += 1
+
+
+def omp_calls(content, identity):
+    if not isinstance(content, list):
+        return {}
+    return {omp_digest(block.get("id")): (
+        omp_digest([block.get("name"), block.get("arguments")]), identity)
+        for block in content if isinstance(block, dict) and block.get("type") == "toolCall"}
+
+
+def omp_candidates(contexts, tools, retries, window, deadline):
+    sinks = []
+    for run in omp_retry_groups(retries, deadline):
+        sinks.append({"sink_id": f"learning_loop:error_loop:omp-{len(sinks)}",
+                      "tokens_observed": run["tokens"], "evidence": {
+                          "calls": run["calls"], "observed_output_token_floor": run["tokens"],
+                          "tokens_observed_basis": "bytes4_estimate"}})
+    for context in contexts.values():
+        if len(context["sessions"]) >= 3:
+            sinks.append({"sink_id": f"recurring_context:repaste:omp-{len(sinks)}", "evidence": {
+                "recurrence_sessions": len(context["sessions"]),
+                "occurrences_total": context["calls"], "block_tokens": context["block"],
+                "occurrence_tokens_total": context["calls"] * context["block"]}})
+    if tools:
+        sinks.append({"sink_id": "tool_output_portfolio", "evidence": {
+            "tool_output_tokens": sum(tool["tokens"] for tool in tools.values()),
+            "signature_token_basis": "estimated_local",
+            "top_signatures": sorted(tools.values(), key=lambda tool: -tool["tokens"])[:32]}})
+    return snapshot_candidates(sinks, window, "omp sessions", True)
+
+
+def omp_messages(root_fd, path, deadline, counts, end):
+    for record in omp_records(root_fd, path, deadline, counts):
+        try:
+            at, message, identity, texts = omp_message(record)
+        except (ValueError, KeyError, TypeError, OverflowError):
+            counts["malformed"] += 1
+            continue
+        if at < end:
+            yield record, at, message, identity, texts
+
+
+def omp_apply(entry, state, session, start, counts, observations):
+    contexts, tools, cache, seen, retries, deadline = observations
+    record, at, message, identity, texts = entry
+    pending, run = state
+    current = at >= start
+    observed = current and record["type"] == "message" and identity not in seen
+    if observed:
+        seen.add(identity)
+        counts["messages"] += 1
+    role = message.get("role")
+    if role in ("user", "developer", "reset_boundary", "compaction", "branch_summary"):
+        omp_retry(run, retries)
+        pending, run = None, None
+        if observed:
+            omp_context(texts, session, contexts)
+    elif role == "assistant":
+        pending = (omp_calls(message.get("content"), identity), pending)
+        if observed:
+            omp_cache(message, cache)
+    elif role == "toolResult":
+        key = omp_digest(message.get("toolCallId"))
+        call = omp_pending_call(pending, key, deadline)
+        pending = ({key: (None, None)}, pending)
+        if current:
+            size = sum((len(text) + 3) // 4 for text in texts)
+            run = omp_tool_result(message, call, run, size, retries, identity)
+            if observed:
+                omp_tool_measure(message, run["shape"], size, tools)
+    return pending, run
+
+
+def read_omp(root, bounds):
+    deadline = time.monotonic() + OMP_SECONDS
+    counts = dict.fromkeys(("entries", "files", "bytes", "records", "messages",
+                           "malformed", "limited"), 0)
+    window = tuple(t.isoformat() for t in bounds[1:])
+    contexts, tools, cache, seen, retries = {}, {}, {}, set(), {}
+    observations = contexts, tools, cache, seen, retries, deadline
+
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        paths = omp_paths(root_fd, bounds[1], deadline, counts)
+        for session, path in enumerate(paths):
+            if counts["bytes"] >= OMP_MAX_BYTES or counts["records"] >= OMP_MAX_RECORDS:
+                counts["limited"] = 1
+                break
+            counts["files"] += 1
+            states, leaves = {}, set()
+            for entry in omp_messages(root_fd, path, deadline, counts, bounds[2]):
+                record = entry[0]
+                key, parent = record["id"], record.get("parentId")
+                states[key] = omp_apply(
+                    entry, states.get(parent, (None, None)), session, bounds[1], counts, observations)
+                leaves.discard(parent)
+                leaves.add(key)
+            for leaf in leaves:
+                omp_retry(states[leaf][1], retries)
+    finally:
+        os.close(root_fd)
+    rows = omp_candidates(contexts, tools, retries, window, deadline)
+    return rows, list(cache.values()), counts
