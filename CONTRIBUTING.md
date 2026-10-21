@@ -216,12 +216,21 @@ The no-mistakes pipeline uses `.github/PULL_REQUEST_TEMPLATE.md` through `.no-mi
 It omits generated intent and puts validation evidence in a collapsed section after the public body.
 The pipeline reads these settings from the default branch.
 
+The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It runs for every PR, including Dependabot and release PRs.
+Body edits rerun this small check without restarting the full build.
+Check a body file before publication:
+
+```bash
+python3 scripts/check_pr_body.py /tmp/pr-body.md
+```
+
 ## Branch rules
 
 GitHub rulesets enforce these rules, with no bypass:
 
 - `main` changes only through a pull request.
-  Before a merge, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
+  Before a merge, `pull request body`, `configuration and python checks`, `quality gate`, and `worker image behavior smoke` must pass or report an allowed skip.
   See the [CI reference](docs/agents/architecture.md#ci) for skip conditions.
   No approval is necessary.
 - `main` cannot be force-pushed or deleted.
