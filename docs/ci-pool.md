@@ -105,10 +105,10 @@ sudo docker inspect ci-runner-<slot> --format '{{.HostConfig.CgroupParent}}'   #
 
 ### Headless GPU rendering
 
-The pool image includes `mesa-vulkan-drivers` for headless rendering through Mesa's software Vulkan adapter.
+The built pool image includes `mesa-vulkan-drivers` for headless rendering through Mesa's software Vulkan adapter.
 It needs no display server or `/dev/dri` device.
 `libvulkan-dev` supplies headers and the loader, but it does not supply a Vulkan driver.
-Keep both packages in custom images that run headless GPU tests.
+Custom images need a Vulkan loader and a software Vulkan driver for these tests.
 
 ### Postgres in the pool's image
 

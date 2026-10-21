@@ -11,7 +11,7 @@
                                image (see DOCKERFILE) from the latest official one.
   ci-pool.py run <instance>    ExecStart of ci-runner@<instance>.service: asks
                                GitHub for a JIT runner, runs one job in a fresh
-                               container from the official runner image, exits.
+                               container from the configured pool image, exits.
 
 GitHub removes a JIT runner after its one job, so nothing is registered or
 deregistered by hand. docs/ci-pool.md has the operator guide.
