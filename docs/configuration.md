@@ -50,7 +50,9 @@ They use [`blueprint/config/spawn-memory-floor-mb`](../blueprint/config/spawn-me
 Below the floor, or when available RAM cannot be read, all three commands return a failure status.
 `launch` does not open the questions when this check fails.
 The installed software stays in place.
-Free memory or add RAM, then run the command again.
+When RAM is below the floor, free memory or add RAM, then run the command again.
+If the read fails, check that `/proc/meminfo` is readable and contains a valid `MemAvailable` value.
+Correct that problem, then run the command again.
 A passed memory check does not prove authentication or network access.
 
 The next config read rewrites an old root key to `crewship` and prints one notice.

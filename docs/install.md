@@ -47,7 +47,8 @@ If a lock does not clear, the installer stops with an error.
 Let the other package manager finish, then run the installer again.
 Other package errors stop the installer without a retry.
 
-Download and checks happen in a temporary directory first; a failure leaves the current install untouched.
+Downloads and archive checks happen in a temporary directory before the release switch.
+A failure at that stage leaves the current Crewship installation unchanged.
 
 ## Update
 
