@@ -5,8 +5,8 @@
 # releases"). There is no `published` trigger for that reason. --clobber lets a failed
 # run be re-driven.
 #
-# The job checks out the workflow's own ref (it has the build script, which an old tag
-# lacks) with all tags; the script archives the tag.
+# Use the workflow's build script so archive creation does not depend on the
+# selected tag's build tooling. The tag must contain scripts/install.sh.
 #
 # See docs/install.md for archive verification and installation behavior.
 # Action pins match npm-publish.yml.
