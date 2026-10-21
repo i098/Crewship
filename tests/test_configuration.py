@@ -1173,8 +1173,10 @@ def test_each_fleet_profile_resolves_only_its_own_release(
 def _koncreet_settings(tmp_path, tailscale, apply_user):
     destination = tmp_path / "koncreet.conf"
     variables = {
-        "ansible_user_id": apply_user,
-        "ansible_user_dir": "/root" if apply_user == "root" else f"/home/{apply_user}",
+        "ansible_facts": {
+            "user_id": apply_user,
+            "user_dir": "/root" if apply_user == "root" else f"/home/{apply_user}",
+        },
         "crewship_cfg": {"user": "coder", "profiles": {"tailscale": tailscale}},
         "crewship_koncreet_config": "/etc/koncreet.conf",
     }
@@ -1253,8 +1255,7 @@ def _run_koncreet_tasks(tmp_path, digest, *flags):
     )
     variables = {
         "ansible_become": False,
-        "ansible_user_id": "operator",
-        "ansible_user_dir": "/home/operator",
+        "ansible_facts": {"user_id": "operator", "user_dir": "/home/operator"},
         "crewship_cfg": {"user": "coder", "profiles": {"tailscale": False}},
         "crewship_latest": {"koncreet": {"version": "9.9.9"}},
         "crewship_koncreet": {"url": source.as_uri(), "sha256": digest},
