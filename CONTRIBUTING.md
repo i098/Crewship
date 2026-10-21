@@ -119,7 +119,7 @@ A test or smoke must never send a call to that session.
 
 ## Adding a new tool
 
-1. Add it to `GITHUB_LATEST` (a GitHub release whose assets carry a SHA-256 digest; when the release publishes its own `<asset>.sha256` files, also list it in `SHA256_FILE` to verify against those) or `NPM_LATEST` in `scripts/provisions.py`. A tool from elsewhere needs its own resolver in `resolve_latest` that reads the checksum its publisher posts for the release.
+1. Add it to `GITHUB_LATEST` (a GitHub release whose assets carry a SHA-256 digest; when the release publishes its own `<asset>.sha256` files, also list it in `SHA256_FILE` to verify against those) or `NPM_LATEST` in `scripts/provisions.py`. A tool from elsewhere needs its own resolver in `resolve_release_group` that reads the checksum its publisher posts for the release.
 2. Register where it installs: `crewship_core_tools` in `blueprint/ansible/group_vars/all/tools.yml` for every host, `AGENT_TOOLS` in `scripts/provisions.py` for the `agents` profile's native tools (npm tools in `NPM_LATEST` need no step), or `crewship_installer_also` in `blueprint/ansible/group_vars/all/` for a source Ansible installs itself.
 3. If it needs a systemd unit, add a `.j2` template in `blueprint/ansible/templates/` and wire it in the relevant task file.
 4. If it needs environment variables, add them to `blueprint/ansible/group_vars/all/` (not to shell rc files).

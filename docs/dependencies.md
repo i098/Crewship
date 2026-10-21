@@ -83,7 +83,6 @@ The GitHub API allows 60 unauthenticated requests per hour per IP.
 Shared IPs, such as CI runners, can reach this limit.
 When the API answers HTTP 403 or 429, the lookup prints a message and reads the same release from github.com's public pages instead.
 Those pages have no request budget: the `releases/latest` redirect gives the tag (the release Atom feed, for no-mistakes), and the release's asset list shows each asset's SHA-256 digest.
-A resolution makes one request per GitHub repository, at most seventeen.
 Only the tools a run installs are resolved, so an unused source cannot fail the run.
 The lookups use `GITHUB_TOKEN` from the environment that runs `./ship.sh launch` or `./onboard.sh`, if set.
 The token goes to the GitHub API only.
