@@ -2,8 +2,6 @@
 
 <div align="center">
 
-Crewship sets up a cloud server for developers who want coding agents to work in parallel.
-
 **This makes it super easy to start using agents in the cloud, enjoy!**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/i098/Crewship/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/i098/Crewship/actions/workflows/ci.yml)
