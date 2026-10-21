@@ -6,11 +6,15 @@ Turn a fresh Ubuntu 24.04 or 26.04 machine into an AI-agent coding host with [Cr
 bunx crewship
 ```
 
-`npx crewship` and `pnpm dlx crewship` work too. The package fetches `install.sh` from the Crewship release with the same version and runs it; it bundles nothing else. Arguments go to `./ship.sh dock`. `bunx crewship update` takes the newest release instead and updates an installed host ([Update](https://github.com/i098/Crewship/blob/main/docs/install.md#update)).
+`npx crewship` and `pnpm dlx crewship` work too.
+These bare commands run the installer on the current Ubuntu server.
+The package bundles only the launcher.
+Installation arguments go to `./ship.sh dock`.
+See [Install, update and migrate](https://github.com/i098/Crewship/blob/main/docs/install.md) for release selection and updates.
 
 ## Guided setup
 
-Run the guide on your laptop with Node.js 18 or later:
+Run the guide on your laptop with Node.js 18 or later and npm:
 
 ```sh
 npx crewship init
@@ -47,5 +51,4 @@ Feature choices apply only to a new config.
 Both routes install curl when it is absent.
 New installations use the release matching this package version; updates use the latest release.
 After installation, run `"$HOME/Crewship/ship.sh" setup` on the server and complete the manual sign-in steps.
-Bare `npx crewship` still installs on the current Ubuntu server.
-`npx crewship update` still updates that server.
+Run `npx crewship update` on the Crewship server for later updates.

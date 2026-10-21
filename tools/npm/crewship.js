@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// Fetch install.sh from the Crewship release that matches this package version and
-// run it (`update`: from the newest release); it downloads the release artifact of the same version. Arguments go to `./ship.sh dock`.
-// --help prints the usage of install.sh here, without a fetch; install.sh rejects bad options.
 const { spawnSync } = require("node:child_process");
 const { version } = require("./package.json");
 const { createInterface } = require("node:readline");
