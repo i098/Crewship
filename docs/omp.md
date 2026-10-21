@@ -129,22 +129,29 @@ omp config get statusLine.showHookStatus
 ## GitHub write guard
 
 The existing `fm-no-pattern-kill.ts` extension checks literal `gh` and `gh-axi` commands before omp runs a bash or eval tool.
-It covers issue and pull-request mutations, including issue transfers and both repositories in a transfer.
+It covers issue mutations, including issue transfers and both repositories in a transfer.
 It also checks `gh-axi issue subissue add|remove`; `subissue list` remains read-only.
 Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional GitHub URL.
 `gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
-Reads and help commands pass unchanged.
+The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
+Recognized reads and help commands pass unchanged.
+Unknown flags or invalid boolean values block API commands because the guard cannot safely determine whether they write.
 
-The guard also checks API writes to `repos/owner/repo/issues`, `pulls`, and `comments`, including their child paths.
+The guard also checks API writes to `repos/owner/repo/issues`, including issue comments and other child paths.
 It recognizes `-X`, `--method`, and the positional HTTP method in `gh-axi api`.
 For `gh api`, fields and input imply POST unless an explicit method overrides it.
 `gh-axi api` defaults to GET even with fields or input.
 API targets must use literal repository names, not `{owner}` or `{repo}` placeholders.
+GraphQL issue mutations and shared mutations that can change issues require `CREWSHIP_GITHUB_APPROVED_REPO`, even when the task contract is set.
+The value names the explicitly approved target repository because the guard cannot resolve GraphQL node IDs.
+File and stdin GraphQL payloads also require this approval because the command-text guard cannot inspect their contents.
 
-Set `CREWSHIP_GITHUB_REPO=owner/repo` in the environment that starts the task's omp session to enforce its repository contract.
+Missing-target blocking is always active.
+Repository mismatch checks apply only when `CREWSHIP_GITHUB_REPO=owner/repo` is set in the environment that starts the task's omp session.
+Crewship has no repository-aware task launcher here; Firstmate owns that launch path and must supply this variable separately.
 Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact additional repository.
 Both values compare without letter case.
-`GH_REPO`, the working directory, and URLs in titles or bodies do not satisfy an explicit target.
+`GH_REPO`, the working directory, shell comments, and URLs in titles or bodies do not satisfy an explicit target.
 
 The normal agent apply installs the guard for host and worker omp sessions.
 To update only this guard from a verified checkout, run `install -m 0644 blueprint/config/omp-no-pattern-kill.ts ~/.omp/agent/extensions/fm-no-pattern-kill.ts`.
