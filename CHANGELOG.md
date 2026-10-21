@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-10-21
+
+### Added
+
+- Add a private, read-only token-suggestions report for existing usage metadata and saved Caveman measurements ([#668](https://github.com/i098/Crewship/issues/668)).
+- Shared UI skills now cover ten missing UX decision rules, including response timing, progressive disclosure, input tolerance, and task completion ([#672](https://github.com/i098/Crewship/issues/672)).
+- Add the public `prod-readiness` skill with 20 ordered checks, evidence-based verdicts, and links to existing guidance before production releases ([#673](https://github.com/i098/Crewship/issues/673)).
+- Add optional private token-suggestions reader installation, a bounded manual service, and state-preserving disable and removal ([#677](https://github.com/i098/Crewship/issues/677)).
+- Add `ship.sh setup` to report software, sign-ins and Firstmate readiness separately, with commands for missing steps from any directory.
+  Check the running Herdr service regardless of `start_services`, and preserve the selected config in setup recovery commands.
+  Recover a stopped Herdr service without another apply when other checks pass ([#692](https://github.com/i098/Crewship/issues/692)).
+- The required pull request body check reruns after body edits and rejects invalid opening references, empty sections, missing checklist items, and unexplained unchecked items ([#695](https://github.com/i098/Crewship/issues/695)).
+- Add opt-in daily private token-suggestion delivery, gated by a completed cycle for the configured inputs ([#722](https://github.com/i098/Crewship/issues/722)).
+- Add bounded, metadata-only omp session support to private token-saving reports, including nested subagent and advisor sessions ([#729](https://github.com/i098/Crewship/issues/729)).
+
+### Changed
+
+- Pipeline pull requests use the repository template, omit generated intent, and keep validation evidence in a collapsed section ([#685](https://github.com/i098/Crewship/issues/685)).
+- Lead the README with server requirements, the curl installer, and source-available license terms ([#691](https://github.com/i098/Crewship/issues/691)).
+- Document issue form fields, dry-run commands, and pull request formatting for people and agents ([#694](https://github.com/i098/Crewship/issues/694)).
+- Explain omp's first-run screens and remote GitHub device login without a server browser or clipboard ([#696](https://github.com/i098/Crewship/issues/696)).
+- Provide a standalone Docker worker launch command, shell access, and the worker-only boundary ([#697](https://github.com/i098/Crewship/issues/697)).
+- Recommend curl for fresh servers and explain Bun, Node.js, and pnpm launcher prerequisites and release selection ([#698](https://github.com/i098/Crewship/issues/698)).
+- The one-command installer no longer repeats the full Ansible preview before applying; run `./ship.sh chart` for a separate preview ([#711](https://github.com/i098/Crewship/issues/711)).
+- Semantic search is now opt-in with `--with sgrep` or `profiles.sgrep: true`; core installs skip its Rust build and model downloads ([#712](https://github.com/i098/Crewship/issues/712)).
+- Run project-database smoke and Python checks on separate CI runners while preserving the combined required check ([#718](https://github.com/i098/Crewship/issues/718)).
+- Link the private token-suggestions installation guide and its real-user CI checks from the configuration and architecture references ([#720](https://github.com/i098/Crewship/issues/720)).
+- Complete the semantic-search opt-in documentation, migration guidance, credits, and optional-tool instructions ([#724](https://github.com/i098/Crewship/issues/724)).
+- Batch read-only checks of required inputs, installed outputs, and legacy paths without changing missing-path or error behavior ([#726](https://github.com/i098/Crewship/issues/726)).
+- Skip the redundant local plugin upgrade check on a fresh account while retaining marketplace updates and upgrades for existing installations ([#728](https://github.com/i098/Crewship/issues/728)).
+- Batch remaining setup path checks while preserving input order, first-write configuration, existing directory permissions, check-mode behavior, and installation privileges ([#734](https://github.com/i098/Crewship/issues/734)).
+- Install up to four independent native tools concurrently without changing latest-release resolution, checksum verification, dependent setup order, or unchanged-repeat behavior.
+  Keep concurrent download progress messages on separate lines ([#735](https://github.com/i098/Crewship/issues/735)).
+- Migration skips commands for missing legacy paths after stopping writers and refreshing collision checks, preserving existing data, migration order, and unchanged-repeat behavior ([#740](https://github.com/i098/Crewship/issues/740)).
+- Load inactive setup task files only when selected, while preserving profile behavior, privilege boundaries, tags, and existing configurations ([#741](https://github.com/i098/Crewship/issues/741)).
+- Batch Firstmate source inspection while retaining directory-aware copying, first-write behavior, symlink handling, and existing path-checker output ([#743](https://github.com/i098/Crewship/issues/743)).
+
+### Fixed
+
+- ETA and timeline charts keep date labels and the now marker clear, show completion only when supplied, and allow finish estimates based on stated evidence.
+  Fixed-day intervals that can occur twice in one month retain distinct day labels ([#653](https://github.com/i098/Crewship/issues/653)).
+- `ponytail-review` accepts one approved verdict unless a line starts with a finding location or negative net summary; it trusts prose-only cuts as clean.
+  Finding locations support file paths with spaces ([#676](https://github.com/i098/Crewship/issues/676)).
+- The guides clarify that unchanged applies report `changed=0` when no upstream tool has published a new release or source update since the last apply ([#680](https://github.com/i098/Crewship/issues/680)).
+- Skip absent Herdr, Herdr Spaces, Chrome pruner and stall nudge units during install previews, including notified restarts. Keep installed-unit errors visible and leave real service starts unchanged ([#681](https://github.com/i098/Crewship/issues/681)).
+- `scripts/new-issue` sends form data through the GitHub REST API and shows the child error summary and HTTP response body when issue creation fails ([#683](https://github.com/i098/Crewship/issues/683)).
+- Print the selected Crewship release before main package setup. Explain pnpm's release-age policy when the registry lists a newer release ([#687](https://github.com/i098/Crewship/issues/687)).
+- Ansible provisioning avoids injected-fact deprecation warnings and skips absent legacy directories while preserving migration through directory symlinks ([#688](https://github.com/i098/Crewship/issues/688)).
+- Check available RAM before Firstmate setup questions and during `survey` and `setup`. Report the 8,000 MB worker spawn floor without changing it ([#689](https://github.com/i098/Crewship/issues/689)).
+- Show short install progress lines, keep full output in private log files outside migration paths, and print the log path on success or failure.
+  Keep password-required apply output visible.
+  Keep the interactive terminal visible during new-host questions while capturing its output.
+  Drain both output streams before the terminal session closes ([#690](https://github.com/i098/Crewship/issues/690)).
+- Local provisioning now resolves the host configuration once and enables Ansible pipelining, while keeping the same tasks, tool versions, and verification ([#704](https://github.com/i098/Crewship/issues/704)).
+- Managed `gh` and `gh-axi` wrappers now reject missing, unauthorized, or unresolved issue-write targets before either CLI starts, while worker-image checks verify the wrapped release paths ([#727](https://github.com/i098/Crewship/issues/727)).
+- Include Mesa Vulkan drivers in the CI pool image for headless GPU tests ([#748](https://github.com/i098/Crewship/issues/748)).
+
 ## [0.4.6] - 2026-10-20
 
 ### Added
@@ -443,7 +500,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/i098/Crewship/releases/tag/v0.4.7
 [0.4.6]: https://github.com/i098/Crewship/releases/tag/v0.4.6
 [0.4.5]: https://github.com/i098/Crewship/releases/tag/v0.4.5
 [0.4.4]: https://github.com/i098/Crewship/releases/tag/v0.4.4
