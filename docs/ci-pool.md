@@ -103,6 +103,13 @@ sudo docker inspect ci-runner-<slot> --format '{{.HostConfig.CgroupParent}}'   #
 - Data-disk directories for the heavy writes: Docker keeps the files that a container writes on the system disk, so each slot mounts its own directories from `<data_dir>` over `/tmp`, `/var/lib/postgresql`, and `~/.bun`, besides the apt and cache paths above. The slot deletes these three with `sudo -n rm` when a job starts (the job's files belong to other user IDs), so a job starts with an empty `/tmp` and `~/.bun` and, in the pool's own image, fresh Postgres 17 and 18 clusters. A custom `image` finds `/var/lib/postgresql` empty (it has no cluster to start from).
 - A check before the first step: the runner's job-started hook ends the job container when its code comes from outside the repository, which is a pull request from a fork or a `workflow_run` that a fork's pull request started. The hook kills every process in the container, so no later step runs, not even an `if: always()` step. The slot then deletes the runner. Only the repositories in the pool's list, and only their own branches, run on the host.
 
+### Headless GPU rendering
+
+The pool image includes `mesa-vulkan-drivers` for headless rendering through Mesa's software Vulkan adapter.
+It needs no display server or `/dev/dri` device.
+`libvulkan-dev` supplies headers and the loader, but it does not supply a Vulkan driver.
+Keep both packages in custom images that run headless GPU tests.
+
 ### Postgres in the pool's image
 
 The image has a `main` cluster for Postgres 17 and for Postgres 18. Both clusters use port 5432 and do not start at boot, so a job starts only the version it needs, with one command:
