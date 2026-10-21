@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import termios
 import time
 from pathlib import Path
 
@@ -288,6 +289,7 @@ def test_install_logs_keep_details_private_on_success_and_failure(release, statu
 def terminal_install(release, responses):
     pid, terminal = pty.fork()
     if pid == 0:
+        termios.tcsetwinsize(0, (40, 120))
         os.execve(BASH, [BASH, str(ROOT / "install.sh")], release.env)
     output = b""
     deadline = time.monotonic() + 20
@@ -363,6 +365,7 @@ def test_install_questions_keep_terminal_and_capture_output(release, question_st
         "    print('{\"models\": [{\"id\": \"test\"}]}')\n"
         "    sys.exit(0)\n"
         "assert all(os.isatty(fd) for fd in (0, 1, 2)), 'missing terminal'\n"
+        "assert all(os.get_terminal_size(1)), 'missing terminal size'\n"
         "home = pathlib.Path(os.environ['HOME'])\n"
         "assert pathlib.Path.cwd() == home / 'Dev/firstmate'\n"
         "answer = input('Choose a host name: ')\n"
