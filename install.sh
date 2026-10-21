@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Select a release before running its installer; main contains only this bootstrap.
+# Download and verify a released installer before running it.
 set -euo pipefail
 
+# The same text is in tools/npm/crewship.js; tests/test_install.py keeps the two equal.
 USAGE='Usage: crewship [update] [--container] [--with NAMES] [--user NAME] [--home DIR]
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
