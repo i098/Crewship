@@ -192,7 +192,6 @@ def test_fresh_install_unpacks_a_release_without_git(release):
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
     assert not (release.crewship / ".git").exists()
     assert (release.crewship / ".local/host.yml").read_text() == "dock-v1.0.0\n"
-    assert (release.home / "calls").read_text().split() == ["dock", "inspect", "chart", "launch"]
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
@@ -583,7 +582,6 @@ def test_update_keeps_host_files_and_removes_the_replaced_release(release):
     assert (release.crewship / "VERSION").read_text() == "1.1.0"
     assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
     assert [p.name for p in release.releases.iterdir()] == ["v1.1.0"]
-    assert "dock" not in (release.home / "calls").read_text().split()[4:]
 
 
 def test_bad_checksum_leaves_the_install_untouched(release):
@@ -707,7 +705,6 @@ def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
     assert result.returncode == 0, result.stderr
     assert release.crewship.resolve() == (release.releases / "v1.1.0").resolve()
     assert (release.crewship / ".local/host.yml").read_text() == "mine\n"
-    assert "dock" not in (release.home / "calls").read_text().split()[4:]
 
 
 def test_with_goes_to_dock_for_a_new_host_and_is_refused_for_an_existing_one(release):

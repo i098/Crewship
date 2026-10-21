@@ -5,7 +5,7 @@
 # `--help` prints the usage and changes nothing.
 # Installs the OS prerequisites, downloads and verifies the selected release
 # artifact (no git clone) into ~/.local/share/crewship/releases/TAG, points
-# ~/Crewship at it, then runs onboard, dock, inspect, chart and launch. Run it
+# ~/Crewship at it, then runs onboard, dock, inspect and launch. Run it
 # again to update: the host's own files (.local/) move to the new release and the
 # link switches in one step. An old ~/Crewship git clone is kept as a backup.
 # Safe to run again: each step skips or reports no change when its work is done.
@@ -301,10 +301,6 @@ main() {
     done
   fi
   run_step 'Checking host settings' ./ship.sh inspect
-  # Some tasks need installed tools that check mode cannot supply.
-  # See docs/configuration.md#commands for preview behavior and side effects.
-  echo 'Previewing changes...'
-  ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
   echo 'Applying host configuration...'
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
