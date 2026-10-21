@@ -36,7 +36,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [btop](https://github.com/aristocratos/btop) (`btop`): the resource monitor pane. License: Apache-2.0.
 - [Neovim](https://github.com/neovim/neovim) (`nvim`): the terminal editor installed on every host. License: Apache-2.0.
 - [LazyVim starter](https://github.com/LazyVim/starter): the vendored Neovim configuration in `blueprint/config/nvim/`, with an added Pyrefly configuration. License: Apache-2.0.
-- [rustup](https://github.com/rust-lang/rustup) (`rustup-init`): the [Rust toolchain](docs/dependencies.md#latest-releases). License: MIT OR Apache-2.0.
+- [rustup](https://github.com/rust-lang/rustup) (`rustup-init`): the Rust toolchain of the `development` profile. License: MIT OR Apache-2.0.
 - [Ansible](https://github.com/ansible/ansible): runs the recipe. License: GPL-3.0-or-later.
 - [jsonschema](https://github.com/python-jsonschema/jsonschema): validates the host config. License: MIT.
 - [PyYAML](https://github.com/yaml/pyyaml): reads the host config. License: MIT.
@@ -58,7 +58,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [TigerVNC](https://github.com/TigerVNC/tigervnc): the VNC server of the desktop. License: GPL-2.0-or-later.
 - [noVNC](https://github.com/novnc/noVNC): the VNC client in the browser. License: MPL-2.0.
 - [websockify](https://github.com/novnc/websockify): the WebSocket bridge for noVNC. License: LGPL-3.0-only.
-- [ripgrep](https://github.com/BurntSushi/ripgrep): code search. License: Unlicense OR MIT.
+- [ripgrep](https://github.com/BurntSushi/ripgrep): code search in the `development` profile. License: Unlicense OR MIT.
 - [PostgreSQL](https://www.postgresql.org/): an optional compose backing service. License: PostgreSQL.
 - [Redis](https://github.com/redis/redis): an optional compose backing service. License: RSALv2 OR SSPLv1 OR AGPLv3.
 - [Headroom](https://github.com/headroomlabs-ai/headroom): an optional model proxy, patched by Crewship. License: Apache-2.0.
