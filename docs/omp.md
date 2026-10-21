@@ -6,7 +6,8 @@ omp (`@oh-my-pi/pi-coding-agent`) is the agent harness Crewship installs. This g
 
 With the `agents` profile on, `./ship.sh launch`:
 
-1. Installs the latest published omp, resolved from the npm registry on every apply, plus the omp plugins ponytail, i-have-adhd and caveman, upgraded on every apply (see [Dependencies](dependencies.md#latest-releases)).
+1. Installs the latest published omp and its plugins.
+   See [Dependencies](dependencies.md#latest-releases) for sources and update behavior.
 2. Copies [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) to `~/.omp/agent/config.yml` (directory `0700`, file `0600`), and [`blueprint/config/omp-lsp.json`](../blueprint/config/omp-lsp.json) to `~/.omp/agent/lsp.json`, which disables the markdown language server (marksman): it costs each session about 90 MB, and markdown diagnostics add nothing to agent work.
    Every apply also merges [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) into `~/.omp/agent/models.yml`, preserving user providers and unshipped model keys.
    Shipped override keys take precedence over existing values.

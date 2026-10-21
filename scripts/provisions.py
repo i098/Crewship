@@ -740,7 +740,7 @@ def fdu_install(home, environment):
     return version() != before
 
 
-# omp marketplace plugins, upgraded on every apply to the default branch: name -> repository.
+# omp marketplace plugins: name -> repository.
 OMP_PLUGINS = {
     "ponytail": "DietrichGebert/ponytail",
     "i-have-adhd": "ayghri/i-have-adhd",
@@ -749,7 +749,7 @@ OMP_PLUGINS = {
 
 
 def omp_plugins(home, environment):
-    """Install each plugin from its marketplace, then upgrade all to its default branch."""
+    """Install missing plugins and update previously installed marketplace plugins."""
 
     def omp(*argv):
         result = subprocess.run(
@@ -775,7 +775,9 @@ def omp_plugins(home, environment):
         if f"{name}@{name}" not in installed:
             omp("install", f"{name}@{name}")
             changed = True
-    return "up to date" not in omp("upgrade") or changed
+    if installed:
+        return "up to date" not in omp("upgrade") or changed
+    return changed
 
 
 def main():
