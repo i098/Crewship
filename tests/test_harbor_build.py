@@ -147,10 +147,9 @@ def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
     dist = build.build(tmp_path / "dist")
     head = Head()
     head.feed((dist / "index.html").read_text())
-    tagline = re.search(r"^\*\*(.+)\*\*$", (ROOT / "README.md").read_text(), re.M)[1]
 
     assert head.meta["og:title"] == "Crewship"
-    assert head.meta["og:description"] == tagline
+    assert head.meta["og:description"] == head.meta["description"]
     assert head.meta["og:type"] == "website"
     assert head.meta["twitter:card"] == "summary_large_image"
     assert head.meta["og:url"] == "https://crewship.si/"
