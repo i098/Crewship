@@ -78,7 +78,7 @@ If the selected release is already installed, the download is skipped. Edits to 
 If `~/Crewship` is a git clone from an older installer, the next run:
 
 1. downloads and verifies the selected release;
-2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and prints each file;
+2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and records each copied file in the install log;
 3. moves the clone to `~/Crewship.git-backup-<date>` and points `~/Crewship` at the release.
 
 The backup is never deleted: unpushed commits and edits to tracked files stay there (the installer warns when a tracked file has local edits). A second run finds the symlink and does nothing to the layout. A `~/Crewship` that is neither a symlink nor a git clone makes the installer stop.

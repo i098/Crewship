@@ -56,11 +56,13 @@ See [Install, update and migrate](docs/install.md) for release selection and ins
 `--with` applies to a new host only.
 Sign in and apply again in the later steps.
 
-If the installer reports a package-lock error, follow the [recovery instructions](docs/install.md#install).
+Read the log file at the printed path if installation fails.
+Remove private data before showing the log's last lines to the user.
+Follow the [recovery instructions](docs/install.md#install).
 
 - STOP: if `sudo` asks for a password, the user must type it in the terminal. Never store or echo it.
 - Check: `ls ~/Crewship/ship.sh ~/Crewship/.local/host.yml` lists both files, and the installer ended without an error.
-- STOP: if the installer's output ends with a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
+- STOP: if the installer prints a web address ([Web pages from anywhere](docs/gateway.md)), the gateway is on. Give the user only that address. Tell the user to get the password without you: read `~/.config/crewship/gateway/initial-password` over SSH, or run `crewship-gateway password` in their own terminal. Never read, print, or relay the password.
 
 ### Resume setup
 
