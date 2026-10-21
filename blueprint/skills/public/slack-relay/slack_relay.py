@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """Relay important Slack messages to the operator by text, and drop the rest.
 
-Read-only: the only input is the cache database of the slk TUI, opened with mode=ro. The script
-never calls Slack and never writes to it (no post, reaction, read mark or join). New messages go to
-one `omp -p` call that keeps or drops each; kept ones are sent with at most one text per window.
-
-  slack_relay.py run                         loop forever (the systemd unit)
-  slack_relay.py once                        one cycle, then exit
-  slack_relay.py replay WORKSPACE CHANNEL TS  run one cached message through the filter, text marked [test]
+See SKILL.md beside this script for filtering, configuration, commands, and safety rules.
 """
 
 import argparse
@@ -180,7 +174,7 @@ def verdicts(cfg, batch):
 
 
 def decide(cfg, m, v):
-    """(keep, reason, line). A message the model skipped is kept only when it is a DM or a mention."""
+    """Return (keep, reason, line)."""
     if cfg["mention_only"] and not m["view"]["mentions_him"]:
         return False, "not tagged", ""
     if v is None:
@@ -297,7 +291,7 @@ def main():
         try:
             cycle(cfg, st, time.time())
             fails = 0
-        except Exception as e:  # a failed cycle loses nothing: unseen messages are retried
+        except Exception as e:  # Unseen eligible messages are retried.
             fails += 1
             print(f"cycle failed: {e}", file=sys.stderr, flush=True)
         if args.cmd == "once":
