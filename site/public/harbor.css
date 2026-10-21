@@ -50,6 +50,7 @@ code, kbd { font-family: var(--mono); font-size: 0.9em; }
 .js .menu-panel { position: fixed; inset: 0; margin: auto; }
 .js .menu-panel::backdrop { background: rgb(6 10 20 / 38%); }
 html:not(.js) #menu { position: static; margin: 24px auto; }
+html:not(.js) #menu button { display: none; }
 .menu-panel form { display: grid; gap: 10px; }
 .menu-panel select { width: 100%; }
 .sound-choice { display: flex; align-items: center; gap: 12px; min-height: 48px; cursor: pointer; }
@@ -62,7 +63,7 @@ html:not(.js) #menu { position: static; margin: 24px auto; }
 .menu-panel dd { margin: 2px 0 0; color: var(--muted); }
 .settings-actions { display: flex; gap: 12px; margin-top: 14px; }
 .settings-actions button { flex: 1; }
-.menu-open { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+.menu-open { position: absolute; bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right)); height: 48px; }
 .stage.menu-active { cursor: default; }
 .stage.menu-active > :not(canvas) { visibility: hidden; }
 
@@ -122,7 +123,7 @@ html:not(.js) #menu { position: static; margin: 24px auto; }
 }
 
 .zoomhint {
-  position: absolute; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: calc(106px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   width: max-content; max-width: calc(100% - 140px); margin: 0; padding: 6px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid rgba(126, 224, 195, 0.35); background: rgba(10, 15, 28, 0.8);
   color: var(--fg); font: 12px/1.5 var(--mono); text-align: center;

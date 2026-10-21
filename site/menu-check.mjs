@@ -21,6 +21,9 @@ export async function checkMenu(page, origin) {
   assert.equal(await image(), initial, "The start view must stay still");
   assert.equal(await page.eval(() => performance.getEntriesByType("resource").some(e => e.name.includes("/audio/"))), false);
   assert.equal(await focus(), "explore");
+  await page.press("Escape");
+  await page.wait("#menu[open]");
+  assert.equal(await focus(), "explore");
   await page.press("Tab");
   assert.equal(await focus(), "GitHub");
   await page.press("Tab");
@@ -75,9 +78,18 @@ export async function checkMenu(page, origin) {
   await page.click("#menu-open");
   assert.equal(await page.eval(() => document.querySelector("#menu").open), true);
   await page.click("#settings-open");
-  await page.eval(() => { Storage.prototype.setItem = () => { throw new DOMException("Blocked", "SecurityError"); }; });
+  await page.eval(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "harbor-settings" && JSON.parse(value).graphics === "high") throw new DOMException("Full", "QuotaExceededError");
+      return setItem.call(this, key, value);
+    };
+  });
   await choose("graphics", "high");
   assert.match(await page.eval(() => document.querySelector("#save-status").textContent), /cannot be saved/);
+  await choose("graphics", "low");
+  assert.equal(await page.eval(() => document.querySelector("#save-status").textContent), "");
+  assert.equal(await page.eval(() => JSON.parse(localStorage.getItem("harbor-settings")).graphics), "low");
   await page.press("Escape");
   await page.click("#menu a[href='/about']");
   assert.equal(await page.eval(() => location.pathname), "/about");

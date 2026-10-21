@@ -26,6 +26,7 @@ function plainFallback() {
   const stage = document.getElementById("stage");
   if (stage) stage.hidden = true;
   for (const dialog of document.querySelectorAll("dialog")) dialog.close();
+  document.getElementById("menu").setAttribute("open", "");
 }
 // Only the scene's own errors show the plain page: browser add-ons add failing resources and promises too.
 addEventListener("error", (e) => (e.filename || e.target.src || "").endsWith("/harbor.js") && plainFallback(), true);

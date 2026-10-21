@@ -127,10 +127,15 @@ Settings provides Auto, Low, and High graphics, plus System, Reduce, and Full mo
 Auto keeps adaptive phone detail; Low uses larger glyphs without shadows; High keeps full detail.
 The small `harbor-settings` record stores only graphics and motion values.
 If storage fails, changes apply for the visit and Settings shows a notice.
+The notice clears after a successful save.
 Reset restores Auto graphics, System motion, and sound on without clearing other storage.
 The Controls section lists the existing keyboard and touch controls.
 The scene Menu button pauses the view and releases movement input.
+Opening Menu renders the current view and discards older worker frames, including their bitmaps.
 Escape first releases pointer lock or closes the map; a later press opens the menu.
+The start menu remains available after Escape, including before the first user action.
+The scene Menu button stays clear of map controls, sign links, and the zoom hint.
+If the scene script fails, the plain page retains GitHub and About links without inactive scene buttons.
 
 Run the menu check through `chrome-devtools-axi run` with the preview server URL:
 
@@ -214,6 +219,8 @@ It checks that `/how?preview=1` serves HTML with the How canonical URL and that 
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 The check enters through Explore before it exercises the scene.
+It checks the first rendered frame after Explore for black pixels and checks that scene time advances during the intro.
+It checks Menu clearance and the map toggle in both map sizes.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
 It checks the how, docsboard, and mailbox signs against the placement rules above.

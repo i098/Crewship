@@ -2757,6 +2757,7 @@ function view(tenths) {
 // dropped: they would compose an older moment over it.
 function render() {
   if (frames.some((f) => f.settled)) DG.fill(undefined);
+  for (const f of frames) for (const [, bmp] of f.bitmaps) bmp.close();
   frames.length = 0;
   view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
@@ -2980,16 +2981,18 @@ function label(at, span = 0) {
     right: Math.max(...shown.map((r) => r.right)), bottom: Math.max(...shown.map((r) => r.bottom)) } : null;
   const padLeft = controls ? Math.floor((controls.left - 12 - padX) / cellW) : i1;
   const padTop = controls ? Math.floor((controls.top - 12 - padY) / cellH) : j1;
+  const menuBounds = document.getElementById("menu-open").getBoundingClientRect();
+  const menuLeft = Math.floor((menuBounds.left - 12 - padX) / cellW), menuTop = Math.floor((menuBounds.top - 12 - padY) / cellH);
   const below = mapBox ? Math.max(j0, mapBox.oj + mapBox.h + 1) : j0;
   const side = Math.min(i1, mapBox ? mapBox.oi - 1 : i1, padLeft);
   const anchor = at && [Math.max(i0, Math.min(i1 - 1, at[0])), Math.max(j0, Math.min(j1 - 1, at[1]))];
   const areas = [
-    [i0, below, i1, Math.min(j1, padTop)],
-    [i0, below, Math.min(i1, padLeft), j1],
-    [i0, j0, side, j1]
+    [i0, below, i1, Math.min(j1, padTop, menuTop)],
+    [i0, below, Math.min(i1, padLeft, menuLeft), j1],
+    [i0, j0, Math.min(side, menuLeft), j1]
   ];
   if (span) {
-    const obstacles = [];
+    const obstacles = [[menuLeft, menuTop, Math.ceil((menuBounds.right + 12 - padX) / cellW), Math.ceil((menuBounds.bottom + 12 - padY) / cellH)]];
     if (mapBox) obstacles.push([mapBox.oi - 1, mapBox.oj - 1, mapBox.oi + mapBox.w + 1, mapBox.oj + mapBox.h + 1]);
     if (controls) obstacles.push([padLeft, padTop, Math.ceil((controls.right + 12 - padX) / cellW), Math.ceil((controls.bottom + 12 - padY) / cellH)]);
     signBox = signPlace(at, [[i0, j0, i1, j1]], span, obstacles);
@@ -2997,7 +3000,8 @@ function label(at, span = 0) {
   signBox ||= signPlace(anchor, areas);
   if (!signBox) {
     const clearLeft = controls ? Math.max(i0, Math.ceil((controls.right + 12 - padX) / cellW)) : i0;
-    signBox = signFit(anchor, clearLeft, j0, i1, j1, 3);
+    signBox = signFit(anchor, clearLeft, j0, i1, Math.min(j1, menuTop), 3)
+      || signFit(anchor, clearLeft, j0, Math.min(i1, menuLeft), j1, 3);
   }
   if (signBox && anchor && !signBox.seated) signLeader(...anchor);
 }
@@ -3072,7 +3076,7 @@ function minimap() {
   MAPCELLS = new Map();
   if (interior) { mapBox = null; return; }
   const left = Math.max(1, Math.ceil((safe.left - padX) / cellW)), right = Math.max(1, Math.ceil((safe.right - padX) / cellW));
-  const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom - padY) / cellH));
+  const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom + 72 - padY) / cellH));
   const full = mapMode === 2, w = full ? cols - left - right : Math.min(30, cols - left - right), h = full ? rows - top - bottom : Math.min(15, rows - top - bottom);
   mapBox = { oi: full ? left : cols - w - right, oj: top, w, h, iw: w - 2, ih: h - 3 };
   mapFrame();
@@ -4331,6 +4335,7 @@ function savePreferences() {
   try {
     localStorage.setItem("harbor-settings", JSON.stringify(preferences));
     localStorage.setItem("harbor-sound", soundOn ? "on" : "off");
+    document.getElementById("save-status").textContent = "";
   } catch { storageFailed(); }
 }
 function applyPreferences() {
@@ -4352,6 +4357,7 @@ function releaseInput() {
 function openMenu() {
   cancelAnimationFrame(frameRequest);
   releaseInput();
+  if (exploring) { render(); dirty = layoutDirty; }
   if (document.pointerLockElement) document.exitPointerLock();
   stage.classList.add("menu-active");
   menu.showModal();
@@ -4365,6 +4371,9 @@ if (PAGE) {
   document.addEventListener("visibilitychange", () => audio && setSound(soundOn));
   document.getElementById("menu-open").addEventListener("click", openMenu);
   menu.addEventListener("cancel", (e) => e.preventDefault());
+  menu.addEventListener("close", () => {
+    if (!menu.open && stage.classList.contains("menu-active") && document.documentElement.classList.contains("js")) openMenu();
+  });
   document.getElementById("settings-open").addEventListener("click", () => {
     releaseInput();
     settings.showModal();
@@ -4585,6 +4594,7 @@ function startWorkers() {
 }
 function stopWorkers() {
   for (const w of rayWorkers) w.terminate();
+  for (const f of frames) for (const [, bmp] of f.bitmaps) bmp.close();
   rayWorkers.length = workerCount = frames.length = 0;
   dirty = true;
   DG?.fill(undefined); // a frame in hand may have composed rows that were never painted
