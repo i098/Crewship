@@ -1,11 +1,21 @@
 """install.sh and the npm launcher print the usage before any install step."""
 
+import errno
+import getpass
 import importlib.util
+import os
+import pty
+import select
 import shutil
+import signal
 import subprocess
+import sys
+import termios
+import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).parents[1]
 BASH = shutil.which("bash")
@@ -32,6 +42,13 @@ def install(env, *args):
         env=env,
         timeout=10,
     )
+
+
+def install_log(result):
+    for line in (result.stdout + result.stderr).splitlines():
+        if line.startswith("Full install log: "):
+            return Path(line.removeprefix("Full install log: "))
+    pytest.fail("The installer did not print its log path")
 
 
 @pytest.mark.parametrize("args", [["--help"], ["-h"], ["--container", "--help"], ["--user", "--help"]])
@@ -248,8 +265,263 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
     assert result.returncode == 0, result.stderr
     assert (release.home / "https-installed").exists()
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
-    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("MAIN_PACKAGE_SETUP")
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("Updating OS packages...")
+    assert "MAIN_PACKAGE_SETUP" not in result.stdout
+    assert "MAIN_PACKAGE_SETUP" in install_log(result).read_text()
     assert ("HTTPS_BOOTSTRAP" in result.stderr) is (missing is not None)
+
+
+@pytest.mark.parametrize("status", [0, 23])
+def test_install_logs_keep_details_private_on_success_and_failure(release, status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "onboard.sh").write_text(
+        f"#!/bin/sh\necho package-details\necho diagnostic-details >&2\nexit {status}\n"
+    )
+    result = release.install("v1.0.0")
+    assert result.returncode == status
+    assert "package-details" not in result.stdout + result.stderr
+    assert "diagnostic-details" not in result.stdout + result.stderr
+    log = install_log(result)
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert log.parent == release.home / ".local/state/crewship-install"
+    assert "package-details\n" in log.read_text()
+    assert "diagnostic-details\n" in log.read_text()
+
+
+def terminal_install(release, responses):
+    pid, terminal = pty.fork()
+    if pid == 0:
+        termios.tcsetwinsize(0, (40, 120))
+        os.execve(BASH, [BASH, str(ROOT / "install.sh")], release.env)
+    output = b""
+    deadline = time.monotonic() + 20
+    status = None
+    responses = dict(responses)
+    try:
+        while True:
+            ready, _, _ = select.select([terminal], [], [], max(0, deadline - time.monotonic()))
+            assert ready, f"The installer did not exit:\n{output.decode(errors='replace')}"
+            try:
+                chunk = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                break
+            if not chunk:
+                break
+            output += chunk
+            for prompt, answer in list(responses.items()):
+                if prompt in output:
+                    os.write(terminal, answer)
+                    del responses[prompt]
+        _, status = os.waitpid(pid, 0)
+    finally:
+        os.close(terminal)
+        if status is None:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+    assert not responses, output.decode(errors="replace")
+    return subprocess.CompletedProcess(
+        [], os.waitstatus_to_exitcode(status), output.decode(errors="replace"), ""
+    )
+
+
+@pytest.mark.parametrize("status", [0, 23])
+def test_terminal_install_drains_output_before_exit(release, tmp_path, status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "ship.sh").write_text(
+        SHIP + f'\nif [ "$1" = launch ]; then\n'
+        '  echo terminal-output\n'
+        '  echo terminal-error >&2\n'
+        f'  exit {status}\nfi\n'
+    )
+    tee = tmp_path / "bin/tee"
+    tee.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys, time\n"
+        "data = sys.stdin.buffer.read()\n"
+        "time.sleep(0.1)\n"
+        f"sys.exit(subprocess.run([{shutil.which('tee')!r}, *sys.argv[1:]], input=data).returncode)\n"
+    )
+    tee.chmod(0o755)
+    result = terminal_install(release, {})
+    assert result.returncode == status, result.stdout
+    log = install_log(result)
+    footer = f"Full install log: {log}"
+    assert result.stdout.count(footer) == 1
+    assert log.read_text().count(footer) == 1
+    assert result.stdout.index("Installing repository tools...") < result.stdout.index(footer)
+    assert result.stdout.index("terminal-output") < result.stdout.index(footer)
+    assert result.stdout.count("terminal-error") == 1
+    assert log.read_text().count("terminal-output") == 1
+    assert log.read_text().count("terminal-error") == 1
+    assert ("Crewship installation failed" in result.stdout) == bool(status)
+
+
+def test_interrupt_during_package_lock_wait_does_not_hang(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    (release.home / "calls").unlink()
+    bin_dir = tmp_path / "bin"
+    for name, body in {
+        "dpkg-query": "#!/bin/sh\nexit 1\n",
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "apt-get": "#!/bin/sh\necho 'E: Could not get lock /var/lib/apt/lists/lock'\nexit 100\n",
+        "sleep": "#!/bin/sh\necho ready-to-interrupt >/dev/tty\nexec /bin/sleep 60\n",
+    }.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    result = terminal_install(release, {b"ready-to-interrupt": b"\x03"})
+    assert result.returncode == -signal.SIGINT, result.stdout
+    assert not (release.home / "calls").exists()
+
+
+@pytest.mark.parametrize("question_status", [0, 17])
+def test_install_questions_keep_terminal_and_capture_output(release, question_status):
+    assert release.install("v1.0.0").returncode == 0
+    config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    config["crewship"].update(
+        home=str(release.home), user=ship.pwd.getpwuid(os.getuid()).pw_name,
+        workspace=str(release.home / "Dev"),
+    )
+    config["crewship"]["profiles"]["firstmate"] = True
+    config["crewship"]["firstmate"].pop("checklist", None)
+    (release.crewship / ".local/host.yml").write_text(yaml.safe_dump(config))
+    (release.home / "Dev/firstmate").mkdir(parents=True)
+    omp = release.home / ".local/bin/omp"
+    omp.parent.mkdir(parents=True)
+    omp.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys\n"
+        "if sys.argv[1:] == ['models', '--json']:\n"
+        "    print('{\"models\": [{\"id\": \"test\"}]}')\n"
+        "    sys.exit(0)\n"
+        "assert all(os.isatty(fd) for fd in (0, 1, 2)), 'missing terminal'\n"
+        "assert all(os.get_terminal_size(1)), 'missing terminal size'\n"
+        "home = pathlib.Path(os.environ['HOME'])\n"
+        "assert pathlib.Path.cwd() == home / 'Dev/firstmate'\n"
+        "answer = input('Choose a host name: ')\n"
+        "(home / 'answer').write_text(answer)\n"
+        "print('Configured host: ' + answer, flush=True)\n"
+        "print('Question diagnostic', file=sys.stderr, flush=True)\n"
+        f"sys.exit({question_status})\n"
+    )
+    omp.chmod(0o755)
+    (release.crewship / "ship.sh").write_text(
+        f"#!{sys.executable}\n"
+        "import importlib.util, pathlib, sys\n"
+        "if sys.argv[1] != 'launch':\n"
+        "    sys.exit(0)\n"
+        f"spec = importlib.util.spec_from_file_location('ship', {str(ROOT / 'scripts/ship.py')!r})\n"
+        "ship = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(ship)\n"
+        "ship.provision = lambda document, check: 0\n"
+        "ship.load_config = lambda path: ship.yaml.safe_load(path.read_text())\n"
+        "config = pathlib.Path(__file__).parent / '.local/host.yml'\n"
+        "sys.argv = [sys.argv[0], 'launch', '--config', str(config)]\n"
+        "sys.exit(ship.main())\n"
+    )
+    result = terminal_install(release, {b"Choose a host name: ": b"test-host\n"})
+    assert result.returncode == 0, result.stdout
+    assert (release.home / "answer").read_text() == "test-host"
+    log = install_log(result)
+    assert log.stat().st_mode & 0o777 == 0o600
+    for message in ("Configured host: test-host", "Question diagnostic"):
+        assert message in result.stdout
+        assert log.read_text().count(message) == 1
+    marker = release.home / ".local/share/crewship/new-host-questions-done"
+    assert marker.exists() == (question_status == 0)
+    assert (f"omp exited {question_status}" in result.stdout) == bool(question_status)
+
+
+def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    for directory in (".local/state", ".cache"):
+        old = release.home / directory / "code-factory"
+        old.mkdir(parents=True)
+        (old / "data").write_text(directory)
+    migration = yaml.safe_load((ROOT / "blueprint/ansible/tasks/rename.yml").read_text())[0]
+    migration["vars"]["crewship_renamed_paths"] = [
+        pair for pair in migration["vars"]["crewship_renamed_paths"]
+        if pair[0].endswith(("/.local/state/code-factory", "/.cache/code-factory"))
+    ]
+    tasks = migration["block"]
+    migration["block"] = tasks[:3] + [
+        next(task for task in tasks if task["name"] == "Move the pre-rename home paths to their new names")
+    ]
+    playbook = tmp_path / "migration.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {
+            "ansible_become": False, "ansible_python_interpreter": sys.executable,
+            "crewship_become_target": False,
+            "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
+            "crewship_share_dir": str(release.home / ".local/share/crewship"),
+        },
+        "tasks": [migration],
+    }]))
+    (release.crewship / "ship.sh").write_text(
+        SHIP + '\ncase $1 in\n'
+        '  chart) set -- --check ;;\n'
+        '  launch) set -- ;;\n'
+        '  *) exit 0 ;;\n'
+        'esac\n'
+        f'exec "{Path(sys.executable).parent / "ansible-playbook"}"'
+        f' -i localhost, "{playbook}" "$@"\n'
+    )
+    release.env["ANSIBLE_PIPELINING"] = "1"
+    result = release.install("v1.0.0")
+    assert result.returncode == 0, install_log(result).read_text()
+    assert "chart could not preview every change" not in result.stderr
+    for directory in (".local/state", ".cache"):
+        assert not (release.home / directory / "code-factory").exists()
+        assert (release.home / directory / "crewship/data").read_text() == directory
+    assert install_log(result).stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("password_required", [False, True])
+@pytest.mark.parametrize("chart_status", [0, 23])
+def test_install_routes_preview_and_apply_output(release, tmp_path, password_required, chart_status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "ship.sh").write_text(
+        f"#!{sys.executable}\n"
+        "import importlib.util, os, sys\n"
+        "if sys.argv[1] not in ('chart', 'launch'):\n"
+        "    sys.exit(0)\n"
+        f"spec = importlib.util.spec_from_file_location('ship', {str(ROOT / 'scripts/ship.py')!r})\n"
+        "ship = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(ship)\n"
+        "ship.os.geteuid = lambda: 1000\n"
+        "ship.sys.stdin.isatty = lambda: True\n"
+        "sys.exit(ship.provision({'crewship': {'home': os.environ['HOME']}}, sys.argv[1] == 'chart'))\n"
+    )
+    bin_dir = tmp_path / "bin"
+    (bin_dir / "sudo").write_text(f"#!/bin/sh\nexit {int(password_required)}\n")
+    (bin_dir / "sudo").chmod(0o755)
+    ansible = bin_dir / "ansible-playbook"
+    ansible.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "assert ('--ask-become-pass' in sys.argv) == (os.environ['PASSWORD_REQUIRED'] == '1')\n"
+        "check = '--check' in sys.argv\n"
+        "phase = 'preview' if check else 'apply'\n"
+        "print(phase + '-details')\n"
+        "print(phase + '-diagnostic', file=sys.stderr)\n"
+        "sys.exit(int(os.environ['CHART_STATUS']) if check else 0)\n"
+    )
+    ansible.chmod(0o755)
+    release.env.update(PASSWORD_REQUIRED=str(int(password_required)), CHART_STATUS=str(chart_status))
+    result = release.install("v1.0.0")
+    log = install_log(result).read_text()
+    assert result.returncode == 0, log
+    for phase in ("preview", "apply"):
+        for stream in ("details", "diagnostic"):
+            message = f"{phase}-{stream}"
+            assert log.count(message) == 1
+            assert (message in result.stdout + result.stderr) == password_required
+    assert ("chart could not preview every change" in result.stderr) == bool(chart_status)
 
 
 
@@ -296,9 +568,9 @@ def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
         assert result.returncode == 100
         assert not release.crewship.exists()
         if failure.endswith("timeout"):
-            assert "package locks did not clear within 600 seconds" in result.stderr
+            assert "package locks did not clear within 600 seconds" in install_log(result).read_text()
         else:
-            assert "Unable to locate package missing" in result.stderr
+            assert "Unable to locate package missing" in install_log(result).read_text()
             assert len(calls) == 1
 
 
@@ -401,9 +673,30 @@ def test_v040_host_is_migrated_before_the_reapply(release):
     assert (bin_dir / "mine").read_text() == "not ours"
     assert (old / "uv").read_text() == "x"
     assert "factory:\n  home: /h\n  fleet:\n    keep: 1\n" == host.read_text()
-    for key in ("supabase_project_id", "fixture_archive", "worktree_pools"):
-        assert f"dropped fleet.{key}" in result.stdout
     assert "supabase_project_id" in (host.parent / "host.yml.v0.4.0").read_text()
+
+
+def test_failed_link_migration_stops_before_reapplying(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    old = release.home / ".local/share/code-factory/tools/uv/1/linux"
+    old.mkdir(parents=True)
+    (old / "uv").write_text("x")
+    links = release.home / ".local/bin"
+    links.mkdir(parents=True)
+    link = links / "uv"
+    link.symlink_to(old / "uv")
+    env = tmp_path / "bash-env"
+    env.write_text(
+        'rm() {\n'
+        '  if [[ $# == 2 && $1 == -f && $2 == "$FAILED_LINK" ]]; then return 73; fi\n'
+        '  command rm "$@"\n'
+        '}\n'
+    )
+    release.env.update(BASH_ENV=str(env), FAILED_LINK=str(link))
+    result = release.install("v1.1.0")
+    assert result.returncode == 73
+    assert link.is_symlink()
+    assert (release.home / "calls").read_text().split().count("launch") == 1
 
 
 def test_update_installs_the_newest_release_and_passes_options_to_dock(release):
@@ -484,6 +777,5 @@ def test_migration_is_a_noop_on_a_current_host(release):
     host.write_text("crewship:\n  fleet:\n    keep: 1\n")
     result = release.install("v1.1.0")
     assert result.returncode == 0, result.stderr
-    assert "dropped" not in result.stdout and "relinking" not in result.stdout
     assert host.read_text() == "crewship:\n  fleet:\n    keep: 1\n"
     assert not (host.parent / "host.yml.v0.4.0").exists()

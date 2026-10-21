@@ -303,6 +303,7 @@ def provision(document, check):
             "keep all Docker volumes. Use docs/project-databases.md for the replacement."
         )
     environment = {**os.environ, "ANSIBLE_CONFIG": str(ROOT / "blueprint/ansible/ansible.cfg")}
+    install_log = os.environ.get("CREWSHIP_INSTALL_LOG")
     argv = [
         "ansible-playbook",
         "-i",
@@ -324,6 +325,12 @@ def provision(document, check):
                 "sudo access required; run interactively to supply the become password"
             )
         argv.append("--ask-become-pass")
+        install_log = None
+    if install_log:
+        with open(install_log, "a") as output:
+            return subprocess.run(
+                argv, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT
+            ).returncode
     return subprocess.run(argv, cwd=ROOT, env=environment).returncode
 
 
@@ -608,7 +615,10 @@ def questions(document, config_path):
             "If yes, set crewship.profiles.project_databases to true in "
             f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
-    returncode = subprocess.run([omp, prompt], cwd=firstmate, env=environment).returncode
+    argv = [omp, prompt]
+    if os.environ.get("CREWSHIP_INSTALL_LOG"):
+        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
+    returncode = subprocess.run(argv, cwd=firstmate, env=environment).returncode
     if returncode:
         print(
             f"New-host questions did not complete (omp exited {returncode}); rerun "

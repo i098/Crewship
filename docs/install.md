@@ -49,6 +49,12 @@ The installer:
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, `chart` and `launch`. On a first run in a terminal, `dock` shows one checklist of the opt-in features (everything beyond the Firstmate core); `--with NAMES` answers it, and `--with none` installs the core only. A rerun on an existing host refuses `--with`: set the profile in `.local/host.yml`.
    If the [Firstmate memory check](configuration.md#commands) fails, the installer stops before its final completion message.
 
+The installer shows short progress lines and keeps the full output in `~/.local/state/crewship-install/install-*.log`.
+It prints the log path when it finishes or fails.
+Log files have mode `0600`; check them for private data before sharing them.
+Interactive setup questions stay visible.
+Ansible preview and apply output stays visible when sudo needs a password.
+
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
 Let the other package manager finish, then run the installer again.
@@ -74,7 +80,7 @@ If the selected release is already installed, the download is skipped. Edits to 
 If `~/Crewship` is a git clone from an older installer, the next run:
 
 1. downloads and verifies the selected release;
-2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and prints each file;
+2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and records each copied file in the install log;
 3. moves the clone to `~/Crewship.git-backup-<date>` and points `~/Crewship` at the release.
 
 The backup is never deleted: unpushed commits and edits to tracked files stay there (the installer warns when a tracked file has local edits). A second run finds the symlink and does nothing to the layout. A `~/Crewship` that is neither a symlink nor a git clone makes the installer stop.

@@ -10,7 +10,8 @@ The tunnel gives an `https://….trycloudflare.com` address and needs no Cloudfl
 
 ## Open a page
 
-1. Find the address. With the gateway on, the installer and every `./ship.sh launch` print it at the end. On the host, this command prints it again:
+1. Find the address printed by the installer or `./ship.sh launch`.
+   On the host, this command prints it again:
 
    ```bash
    crewship-gateway url
