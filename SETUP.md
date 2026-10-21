@@ -72,11 +72,11 @@ Run each printed command, then repeat `setup`.
 It checks existing state instead of installing again.
 It exits with status 1 while a required step is missing.
 GitHub and provider sign-ins still need the user's consent.
-The fleet check covers the Firstmate installation, new-host questions, and the Herdr service when enabled.
+The fleet check covers the Firstmate installation, new-host questions, and the running Herdr service when the Firstmate profile is enabled.
 It does not prove capacity or a successful agent task.
 Use [`Capacity`](docs/capacity.md) before starting workers.
 
-The manual steps below use `./ship.sh` from `~/Crewship`; the absolute path above needs no directory change.
+The commands below also work from any directory.
 
 ## 1. Sign in to GitHub
 
@@ -118,16 +118,16 @@ omp models --json
 
 ## 3. Review the profiles
 
-`.local/host.yml` holds the host config. Open it and show the user the `profiles` block. Step 0 already set the user's choices. To change one later, set its key to `true` or `false`.
+`~/Crewship/.local/host.yml` holds the host config. Open it and show the user the `profiles` block. Step 0 already set the user's choices. To change one later, set its key to `true` or `false`.
 
 The full list and the rules between profiles are in [Profiles](docs/configuration.md#profiles).
 
 - STOP: ask the user which profiles to change, if any. Change only the keys the user chose.
-- Never put secrets, host names, or personal details in `.local/host.yml` that the user did not give you.
+- Never put secrets, host names, or personal details in `~/Crewship/.local/host.yml` that the user did not give you.
 - Check:
 
 ```bash
-./ship.sh inspect
+"$HOME/Crewship/ship.sh" inspect
 ```
 
 It must print no error. If it names a key, fix that key and run it again.
@@ -135,7 +135,7 @@ It must print no error. If it names a key, fix that key and run it again.
 ## 4. Preview the change
 
 ```bash
-./ship.sh chart
+"$HOME/Crewship/ship.sh" chart
 ```
 
 Follow the [`chart` contract](docs/configuration.md#commands) for preview behavior and side effects.
@@ -148,14 +148,14 @@ Tell the user what it would change, in a few lines.
 The installer already applied the default profiles. This run applies your changes and the new sign-ins.
 
 ```bash
-./ship.sh launch
+"$HOME/Crewship/ship.sh" launch
 ```
 
 - It may ask for the sudo password. STOP and let the user type it. Never store or echo it.
 - Run it in an interactive terminal. With the `firstmate` profile on and omp signed in, the first launch then opens omp with the new-host questions ([New-host questions](docs/configuration.md#new-host-questions)). Relay each question to the user and pass on the answer.
-- If omp was not signed in at the first launch, the questions are skipped. Run `./ship.sh launch` again after step 2.
+- If omp was not signed in at the first launch, the questions are skipped. Run `"$HOME/Crewship/ship.sh" launch` again after step 2.
 - Check: the command ends with no failed task.
-  An unchanged `./ship.sh launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
+  An unchanged `"$HOME/Crewship/ship.sh" launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
   A newer release or source update shows as an expected change in the toolchain step.
 
 ## 6. Verify and report

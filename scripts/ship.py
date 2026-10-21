@@ -289,7 +289,7 @@ def initialize(args):
     with destination.open("x") as stream:
         yaml.safe_dump(config, stream, sort_keys=False)
     destination.chmod(0o600)
-    print(f"Created {destination}; review profiles before ./ship.sh launch.")
+    print(f"Created {destination}; review profiles before {shlex.quote(str(ROOT / 'ship.sh'))} launch.")
 
 
 def provision(document, check):
@@ -436,22 +436,21 @@ def firstmate_checks(config, environment):
         pending.append("Firstmate installation")
     if not (home / ".local/share/crewship/new-host-questions-done").is_file():
         pending.append("new-host questions")
-    if config["start_services"]:
-        runtime = f"/run/user/{os.getuid()}"
-        environment = {
-            **environment,
-            "XDG_RUNTIME_DIR": runtime,
-            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
-        }
-        try:
-            service = subprocess.run(
-                ["systemctl", "--user", "is-active", "--quiet", "herdr.service"],
-                env=environment, capture_output=True, timeout=20,
-            )
-            if service.returncode:
-                pending.append("Herdr service")
-        except (OSError, subprocess.TimeoutExpired):
+    runtime = f"/run/user/{os.getuid()}"
+    environment = {
+        **environment,
+        "XDG_RUNTIME_DIR": runtime,
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
+    }
+    try:
+        service = subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", "herdr.service"],
+            env=environment, capture_output=True, timeout=20,
+        )
+        if service.returncode:
             pending.append("Herdr service")
+    except (OSError, subprocess.TimeoutExpired):
+        pending.append("Herdr service")
     return pending
 
 
@@ -484,13 +483,16 @@ def setup_status(document, config_path):
     if failed or missing:
         print(f"Fleet ready: no; finish the commands above, then run: {resume}")
     elif pending:
+        if "Herdr service" in pending:
+            runtime = f"/run/user/{os.getuid()}"
+            start_service = (
+                f"XDG_RUNTIME_DIR={runtime} DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus "
+                "systemctl --user start herdr.service"
+            )
+            command = f"{command} && {start_service}" if len(pending) > 1 else start_service
         print(f"Fleet ready: no ({', '.join(pending)}); run: {command}")
     elif not config["profiles"]["firstmate"]:
         print("Fleet ready: not enabled (worker-only profile)")
-    elif not config["start_services"]:
-        edit_config = f"${{EDITOR:-nano}} {shlex.quote(str(config_path))}"
-        print(f"Fleet ready: no (start_services is false); enable services with: {edit_config}")
-        return 1
     else:
         print("Fleet ready: setup checks passed; a live agent task is not verified")
     return int(bool(failed or missing or pending))
@@ -499,6 +501,7 @@ def setup_status(document, config_path):
 def questions(document, config_path):
     """Open Firstmate on omp to ask the operator the new-host move questions."""
     config = document["crewship"]
+    command = shlex.join([str(ROOT / "ship.sh"), "launch", "--config", str(config_path)])
     home = Path(config["home"])
     environment = host_environment(config)
     marker = home / ".local/share/crewship/new-host-questions-done"
@@ -509,14 +512,14 @@ def questions(document, config_path):
     ):
         print(
             "New-host questions skipped (needs an interactive terminal); "
-            f"rerun ./ship.sh launch interactively as {config['user']} to start them "
+            f"rerun {command} interactively as {config['user']} to start them "
             f"(asked once, then {marker} records it)"
         )
         return 0
     if marker.exists():
         print(
             f"New-host questions already asked ({marker} exists); delete it and rerun "
-            f"./ship.sh launch interactively as {config['user']} to ask them again"
+            f"{command} interactively as {config['user']} to ask them again"
         )
         return 0
     omp = home / ".local/bin/omp"
@@ -524,7 +527,7 @@ def questions(document, config_path):
     if not omp_signed_in(environment):
         print(
             f"New-host questions not started: sign in to omp with /login (run omp as "
-            f"{config['user']}), then rerun ./ship.sh launch interactively"
+            f"{config['user']}), then rerun {command} interactively"
         )
         return 0
     source = f"the runbook {ROOT / 'docs/agent-host-move.md'}"
@@ -577,7 +580,7 @@ def questions(document, config_path):
     if returncode:
         print(
             f"New-host questions did not complete (omp exited {returncode}); rerun "
-            f"./ship.sh launch interactively as {config['user']} to ask them again"
+            f"{command} interactively as {config['user']} to ask them again"
         )
         return returncode
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -640,7 +643,8 @@ def main():
         return doctor(document)
     if args.command == "launch" and args.config is None and not (ROOT / ".local/host.yml").exists():
         raise ValueError(
-            "run ./ship.sh dock and review .local/host.yml before launching, or pass an explicit --config"
+            f"run {shlex.quote(str(ROOT / 'ship.sh'))} dock and review {ROOT / '.local/host.yml'} "
+            "before launching, or pass an explicit --config"
         )
     result = provision(document, args.command == "chart")
     config = document["crewship"]

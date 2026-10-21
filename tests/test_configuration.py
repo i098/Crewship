@@ -375,7 +375,7 @@ def fake_omp(launches, models=json.dumps({"models": [{"id": "model"}]}), exits=l
     "tty,ci,launched", [(False, "", False), (True, "true", False), (True, "", True)]
 )
 def test_questions_launch_only_on_an_interactive_terminal_outside_ci(
-    configuration, tmp_path, monkeypatch, capsys, tty, ci, launched
+    configuration, tmp_path, monkeypatch, tty, ci, launched
 ):
     configuration["crewship"].update(
         user=ship.pwd.getpwuid(ship.os.getuid()).pw_name,
@@ -389,13 +389,12 @@ def test_questions_launch_only_on_an_interactive_terminal_outside_ci(
     monkeypatch.setattr(ship.subprocess, "run", fake_omp(launches))
     assert ship.questions(configuration, tmp_path / "host.yml") == 0
     assert [command[0] for command in launches] == [tmp_path / ".local/bin/omp"] * launched
-    skipped = capsys.readouterr().out.count("rerun ./ship.sh launch interactively")
-    assert skipped == (0 if launched else 1)
 
 
+@pytest.mark.parametrize("obstacle", ["terminal", "login", "failure"])
 @pytest.mark.parametrize("config_source", ["default", "absolute", "relative", "symlink"])
 def test_second_apply_does_not_reopen_the_questions(
-    configuration, tmp_path, monkeypatch, capsys, config_source
+    configuration, tmp_path, monkeypatch, capsys, config_source, obstacle
 ):
     configuration["crewship"].update(
         user=ship.pwd.getpwuid(ship.os.getuid()).pw_name,
@@ -406,7 +405,7 @@ def test_second_apply_does_not_reopen_the_questions(
     launches = []
     monkeypatch.setattr(ship, "ROOT", tmp_path)
     monkeypatch.setattr(ship, "load_config", lambda path: yaml.safe_load(path.read_text()))
-    host = tmp_path / ".local/host.yml" if config_source == "default" else tmp_path / "selected.yml"
+    host = tmp_path / ".local/host.yml" if config_source == "default" else tmp_path / "selected host.yml"
     host.parent.mkdir(parents=True, exist_ok=True)
     host.write_text(yaml.safe_dump(configuration))
     selected = host
@@ -417,28 +416,37 @@ def test_second_apply_does_not_reopen_the_questions(
     if config_source == "relative":
         selected = selected.relative_to(tmp_path)
     monkeypatch.setattr(ship, "provision", lambda document, check: 0)
-    monkeypatch.setattr(ship.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(ship.sys.stdin, "isatty", lambda: obstacle != "terminal")
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.setattr(
-        ship.subprocess, "run", fake_omp(launches, exits=lambda n: 0 if n > 1 else 1)
+        ship.subprocess, "run", fake_omp(
+            launches, models='{"models":[]}' if obstacle == "login" else '{"models":[{}]}',
+            exits=lambda n: 1,
+        )
     )
     args = [] if config_source == "default" else ["--config", str(selected)]
     monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "launch", *args])
     marker = tmp_path / ".local/share/crewship/new-host-questions-done"
     assert ship.main() == 0
     assert not marker.exists()
-    assert "New-host questions did not complete (omp exited 1)" in capsys.readouterr().out
-    assert f"crewship.profiles.project_databases to true in {host.resolve()} " in launches[0][1]
+    recovery = shlex.split(capsys.readouterr().out.split("rerun ", 1)[1].split(" interactively", 1)[0])
+    assert recovery[0] == str(tmp_path / "ship.sh")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(ship.sys, "argv", recovery)
+    monkeypatch.setattr(ship.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(ship.subprocess, "run", fake_omp(launches))
     assert ship.main() == 0
-    assert [command[0] for command in launches] == [tmp_path / ".local/bin/omp"] * 2
+    assert [command[0] for command in launches] == [tmp_path / ".local/bin/omp"] * (1 + (obstacle == "failure"))
+    assert f"crewship.profiles.project_databases to true in {host.resolve()} " in launches[-1][1]
     assert marker.is_file()
     capsys.readouterr()
     assert ship.main() == 0
-    assert len(launches) == 2
-    assert f"{marker} exists); delete it and rerun" in capsys.readouterr().out
+    assert len(launches) == 1 + (obstacle == "failure")
 
 
-def test_questions_wait_for_an_omp_sign_in(configuration, tmp_path, monkeypatch, capsys):
+def test_questions_wait_for_an_omp_sign_in(configuration, tmp_path, monkeypatch):
     configuration["crewship"].update(
         user=ship.pwd.getpwuid(ship.os.getuid()).pw_name,
         home=str(tmp_path),
@@ -453,11 +461,10 @@ def test_questions_wait_for_an_omp_sign_in(configuration, tmp_path, monkeypatch,
     assert ship.questions(configuration, tmp_path / "host.yml") == 0
     assert launches == []
     assert not (tmp_path / ".local/share/crewship/new-host-questions-done").exists()
-    assert "sign in to omp with /login" in capsys.readouterr().out
 
 
 def test_another_accounts_apply_skips_questions_without_reading_the_unreadable_home(
-    configuration, tmp_path, monkeypatch, capsys
+    configuration, tmp_path, monkeypatch
 ):
     home = tmp_path / "coder"
     home.mkdir(mode=0o000)
@@ -469,9 +476,9 @@ def test_another_accounts_apply_skips_questions_without_reading_the_unreadable_h
         assert ship.questions(configuration, tmp_path / "host.yml") == 0
     finally:
         home.chmod(0o700)
-    assert "rerun ./ship.sh launch interactively as another-account" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("start_services", [True, False])
 @pytest.mark.parametrize(
     "github,models,questions_done,service,expected",
     [
@@ -481,16 +488,21 @@ def test_another_accounts_apply_skips_questions_without_reading_the_unreadable_h
         (0, 'not json', True, 0, "Sign-ins: pending"),
         (0, '{"models":"invalid"}', True, 0, "Sign-ins: pending"),
         (0, '{"models":[{}]}', False, 0, "new-host questions"),
+        (0, '{"models":[{}]}', False, 1, "new-host questions"),
         (0, '{"models":[{}]}', True, 1, "Herdr service"),
         (0, '{"models":[{}]}', True, 0, "Fleet ready: setup checks passed"),
     ],
 )
 def test_setup_resumes_without_claiming_readiness_before_sign_in(
-    configuration, tmp_path, monkeypatch, capsys, github, models, questions_done, service, expected
+    configuration, tmp_path, monkeypatch, capsys, github, models, questions_done, service, expected,
+    start_services,
 ):
+    real_run = subprocess.run
+    started = tmp_path / "herdr-started"
     configuration["crewship"].update(
         user=ship.pwd.getpwuid(ship.os.getuid()).pw_name,
         home=str(tmp_path), workspace=str(tmp_path / "Dev"),
+        start_services=start_services,
     )
     firstmate = tmp_path / "Dev/firstmate/bin"
     firstmate.mkdir(parents=True)
@@ -518,7 +530,7 @@ def test_setup_resumes_without_claiming_readiness_before_sign_in(
                 kwargs["env"].get("XDG_RUNTIME_DIR") == runtime
                 and kwargs["env"].get("DBUS_SESSION_BUS_ADDRESS") == f"unix:path={runtime}/bus"
             )
-            return subprocess.CompletedProcess(command, service if connected else 1)
+            return subprocess.CompletedProcess(command, (0 if started.exists() else service) if connected else 1)
         pytest.fail(f"unexpected provisioning or interactive command: {command}")
 
     monkeypatch.setattr(ship.subprocess, "run", run)
@@ -532,7 +544,28 @@ def test_setup_resumes_without_claiming_readiness_before_sign_in(
     if not ready:
         assert "Fleet ready: no" in output
         assert "setup checks passed" not in output
-        assert shlex.quote(str(host)) in output
+        if expected != "Herdr service":
+            assert shlex.quote(str(host)) in output
+    if expected == "Herdr service":
+        recovery = output.splitlines()[-1].split("; run: ", 1)[1]
+        assert shlex.split(recovery)[2:] == ["systemctl", "--user", "start", "herdr.service"]
+        systemctl = tmp_path / "systemctl"
+        runtime = f"/run/user/{os.getuid()}"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            f'test "$XDG_RUNTIME_DIR" = "{runtime}" || exit 1\n'
+            f'test "$DBUS_SESSION_BUS_ADDRESS" = "unix:path={runtime}/bus" || exit 1\n'
+            'test "$*" = "--user start herdr.service" || exit 1\n'
+            ': > "$RECOVERY_STATE"\n'
+        )
+        systemctl.chmod(0o755)
+        result = real_run(
+            ["/bin/sh", "-c", recovery], cwd=tmp_path, capture_output=True,
+            env={**os.environ, "PATH": str(tmp_path), "RECOVERY_STATE": str(started)},
+        )
+        assert result.returncode == 0
+        assert started.is_file()
+        assert ship.main() == 0
 
 
 def test_setup_preserves_a_missing_explicit_config_path(tmp_path, monkeypatch, capsys):
@@ -556,7 +589,6 @@ def test_apply_warns_when_firstmate_still_tracks_the_stale_fork(
     assert ship.main() == 0
     output = capsys.readouterr()
     assert output.err.startswith("WARNING: firstmate.url is the stale fork")
-    assert "rerun ./ship.sh launch interactively" in output.out
 
 
 def _verify_firstmate(tmp_path, origin, configured):

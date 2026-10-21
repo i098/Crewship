@@ -27,7 +27,8 @@ Errors from installed units remain visible.
 
 Run `"$HOME/Crewship/ship.sh" setup` from any directory after installation.
 It uses the same tool checks as `survey`, then checks GitHub authentication and `omp models --json`.
-For Firstmate, it checks the installed entry point, the new-host question marker, and the Herdr user service when enabled.
+For the Firstmate profile, it checks the installed entry point, the new-host question marker, and the running Herdr user service.
+The service check does not depend on `start_services`, which controls provisioning actions only.
 It does not start Firstmate, prove worker capacity, or send a model request.
 Repeat it after each printed command; it reads current state and does not repeat an apply.
 `setup` accepts `--config <path>` and requires an existing host config instead of using the default example.
