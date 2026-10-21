@@ -1,12 +1,15 @@
 """Run the installed gh and gh-axi guard wrappers through PATH and bash in front of recording stubs."""
 
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -320,7 +323,7 @@ def test_destinations_listing_and_help(run, tmp_path, command, options, allowed)
     ("issue edit 1 -R i098/sanctum --add-blocking https://github.com/i098/sanctum/issues/2", {}, True),
     ("issue edit 1 -R i098/sanctum --parent 2", {}, False),
     ("issue edit 1 -R i098/sanctum --remove-parent", {}, False),
-    ("issue edit 1 -R i098/sanctum --parent 2", {"approved": "i098/other"}, True),
+    ("issue edit 1 -R i098/sanctum --parent 2", {"approved": "i098/other"}, False),
     ("issue edit 1 -R i098/sanctum --title x --remove-parent=false", {}, True),
 ])
 def test_selectors_and_relationship_targets(run, tmp_path, command, options, allowed):
@@ -355,9 +358,9 @@ def test_rest_api_methods_and_paths(run, tmp_path, command, options, allowed):
     "-X DELETE repos/i098/sanctum/issues/1/sub_issue -F sub_issue_id=123",
     "-X POST repos/i098/sanctum/issues/1/dependencies/blocked_by --input payload.json",
 ])
-@pytest.mark.parametrize("approved,allowed", [(None, False), ("i098/other", True)])
-def test_rest_relationship_ids_require_approval(run, tmp_path, arguments, approved, allowed):
-    check(run, tmp_path, f"api {arguments}", allowed, approved=approved)
+@pytest.mark.parametrize("approved", [None, CONTRACT, UPSTREAM])
+def test_rest_relationship_ids_never_use_approval_as_a_target(run, tmp_path, arguments, approved):
+    check(run, tmp_path, f"api {arguments}", False, approved=approved)
 
 
 CREATE_ISSUE = 'query=mutation { createIssue(input: {repositoryId: "x"}) { clientMutationId } }'
@@ -365,14 +368,14 @@ CREATE_ISSUE = 'query=mutation { createIssue(input: {repositoryId: "x"}) { clien
 
 @pytest.mark.parametrize("arguments,approved,allowed", [
     (f"--field {shlex.quote(CREATE_ISSUE)}", None, False),
-    (f"-f {shlex.quote(CREATE_ISSUE)}", UPSTREAM, True),
+    (f"-f {shlex.quote(CREATE_ISSUE)}", UPSTREAM, False),
     ("--input payload.json", None, False),
-    ("--input payload.json", CONTRACT, True),
+    ("--input payload.json", CONTRACT, False),
     ("-F query=@query.graphql", None, False),
     ("-f 'query=query { viewer { login } }'", None, True),
     ("-f 'query=mutation { mergePullRequest(input: {}) { clientMutationId } }'", None, True),
 ])
-def test_graphql_issue_writes_and_opaque_input_need_approval(run, tmp_path, arguments, approved, allowed):
+def test_graphql_issue_writes_and_opaque_input_are_blocked(run, tmp_path, arguments, approved, allowed):
     check(run, tmp_path, f"api graphql {arguments}", allowed, approved=approved)
 
 
@@ -411,8 +414,8 @@ def test_unknown_write_flags_still_block_before_real_gh(run, tmp_path, command):
     check(run, tmp_path, command, False)
 
 
-@pytest.mark.parametrize("approved,allowed", [(None, False), (CONTRACT, True)])
-def test_observed_gh_axi_subissue_calls_require_mutation_approval(run, tmp_path, approved, allowed):
+@pytest.mark.parametrize("approved", [None, CONTRACT])
+def test_lookup_does_not_authorize_opaque_graphql_mutation(run, tmp_path, approved):
     lookup = [
         "api", "graphql", "-f",
         'query=query { repository(owner: "i098", name: "sanctum") { parent: issue(number: 1) { id number } c0: issue(number: 2) { id number } } }',
@@ -423,12 +426,10 @@ def test_observed_gh_axi_subissue_calls_require_mutation_approval(run, tmp_path,
     ]
     script = shlex.join(["gh", *lookup]) + "; " + shlex.join(["gh", *mutation])
     result = run(script, approved=approved)
-    assert result.returncode == (0 if allowed else 2)
-    expected = [lookup, mutation] if allowed else [lookup]
-    assert [call["argv"] for call in result.calls] == expected
+    assert result.returncode == 2
+    assert [call["argv"] for call in result.calls] == [lookup]
     assert all(call["cwd"] == str(tmp_path / "work") for call in result.calls)
-    if not allowed:
-        assert "Blocked:" in result.stderr
+    assert "Blocked:" in result.stderr
 
 
 AXI_WRITES = [
@@ -487,30 +488,16 @@ def test_gh_axi_explicit_contract_writes_reach_real_gh_axi(run, command, calls, 
     axi(run, command, calls, **env)
 
 
-def sub_mutation(name):
-    return ["api", "graphql", "-f", f"query=mutation {{ {name}(input: {{}}) {{ clientMutationId }} }}"]
-
-
-TYPE_CALLS = ["api", "graphql", "-f", "id=I_1", "-f", TYPE_MUTATION]
 GRAPHQL_PATHS = [
-    ("issue subissue add 1 2", [["api", "graphql", "-f", LOOKUP], sub_mutation("addSubIssue")]),
-    ("issue subissue remove 1 2", [["api", "graphql", "-f", LOOKUP], sub_mutation("removeSubIssue")]),
-    ("issue create --title x --type Bug",
-     [["api", "graphql", "-f", TYPES], ["issue", "create", "--title", "x", *R], TYPE_CALLS]),
-    ("issue edit 1 --type Bug", [["api", "graphql", "-f", TYPES], ["issue", "edit", "1", *R], TYPE_CALLS]),
-    ("issue edit 1 --no-type", [["issue", "edit", "1", *R], TYPE_CALLS]),
+    "issue subissue add 1 2", "issue subissue remove 1 2",
+    "issue create --title x --type Bug", "issue edit 1 --type Bug", "issue edit 1 --no-type",
 ]
 
 
-@pytest.mark.parametrize("command,calls", GRAPHQL_PATHS)
-@pytest.mark.parametrize("approved", [None, "i098/other", UPSTREAM])
-def test_gh_axi_internal_graphql_paths_need_source_repo_approval(run, command, calls, approved):
+@pytest.mark.parametrize("command", GRAPHQL_PATHS)
+@pytest.mark.parametrize("approved", [None, CONTRACT, "i098/other", UPSTREAM])
+def test_gh_axi_internal_graphql_paths_stop_before_any_read(run, command, approved):
     axi(run, f"{command} -R i098/sanctum", None, approved=approved)
-
-
-@pytest.mark.parametrize("command,calls", GRAPHQL_PATHS)
-def test_gh_axi_internal_graphql_paths_run_with_exact_approval(run, command, calls):
-    axi(run, f"{command} -R i098/sanctum", calls, approved=CONTRACT)
 
 
 def test_gh_axi_upstream_writes_need_matching_approval(run):
@@ -520,7 +507,7 @@ def test_gh_axi_upstream_writes_need_matching_approval(run):
     axi(run, "issue subissue add 1 2 -R upstream/firstmate", None, approved=CONTRACT)
     axi(
         run, "issue subissue add 1 2 -R upstream/firstmate",
-        [["api", "graphql", "-f", LOOKUP], sub_mutation("addSubIssue")], approved=UPSTREAM,
+        None, approved=UPSTREAM,
     )
     axi(
         run, "issue create -R upstream/firstmate --title fix --body 'See https://github.com/python/cpython/issues/1'",
@@ -600,28 +587,41 @@ def test_gh_axi_reads_and_bare_help_reach_real_gh_axi(run, command, calls, env):
     "--type '' --type Bug",
     "--type=",
 ])
-@pytest.mark.parametrize("approved", [None, UPSTREAM])
-def test_every_type_flag_requires_approval_before_gh_axi_starts(run, command, flags, approved):
+@pytest.mark.parametrize("approved", [None, CONTRACT, UPSTREAM])
+def test_every_type_flag_is_blocked_before_gh_axi_starts(run, command, flags, approved):
     axi(run, f"{command} -R i098/sanctum {flags}", None, approved=approved)
 
 
-BOARD_STUB = f"""#!{sys.executable}
+BOARD_STUB = f"#!{sys.executable}\n" + r"""
 import json, os, sys
 from pathlib import Path
 calls = Path(os.environ["BOARD_STUB_CALLS"])
 argv = sys.argv[1:]
 with calls.open("a") as log:
-    log.write(json.dumps(argv) + "\\n")
+    log.write(json.dumps(argv) + "\n")
 args = argv[1:]
-if args[0] == "graphql" and "repositoryOwner" in args[2]:
-    options = [{{"id": f"option-{{name}}", "name": name}} for name in ("Queued", "In progress", "In review", "Done")]
-    answer = {{"data": {{"repositoryOwner": {{"projectV2": {{"id": "project", "field": {{"id": "status", "options": options}}}}}}}}}}
-elif args[0] == "graphql":
-    answer = {{"data": {{f"a{{i}}": {{"item": {{"id": f"item-{{i}}"}}}} for i in range(args[2].count("addProjectV2ItemById"))}}}}
-elif args[0].endswith("/issues"):
-    answer = {{"number": 1, "node_id": "issue-1"}}
+state = Path(os.environ["BOARD_STUB_STATE"])
+item = json.loads(state.read_text()) if state.exists() else None
+path = args[2] if args[0] == "-X" else args[0]
+if path == "users/i098":
+    answer = {"type": "User"}
+elif path.endswith("/fields?per_page=100"):
+    options = [{"id": f"option-{name}", "name": {"raw": name}} for name in ("Queued", "In progress", "In review", "Done")]
+    answer = [[{"id": 9, "name": "Status", "data_type": "single_select", "options": options}]]
+elif path.endswith("/items?per_page=100"):
+    answer = [[item]] if item else [[]]
+elif path.endswith("/items"):
+    item = {"id": 101, "content_type": "Issue", "content": {"url": "https://api.github.com/repos/i098/sanctum/issues/1"}}
+    state.write_text(json.dumps(item))
+    answer = {"id": item["id"]}
+elif "/items/" in path:
+    item["status"] = args[-1].removeprefix("fields[][value]=option-")
+    state.write_text(json.dumps(item))
+    answer = {}
+elif path.endswith("/issues"):
+    answer = {"number": 1}
 else:
-    answer = {{}}
+    answer = {}
 print(json.dumps(answer))
 """
 
@@ -651,7 +651,7 @@ def test_the_rendered_board_service_syncs_its_repo_through_the_guard(tmp_path):
     assert env["PATH"].split(":")[0] == str(home / ".local/bin")
     provisions.install_gh_guard(home, real)
     calls = tmp_path / "board-calls.jsonl"
-    env.update(HOME=str(home), BOARD_STUB_CALLS=str(calls))
+    env.update(HOME=str(home), BOARD_STUB_CALLS=str(calls), BOARD_STUB_STATE=str(tmp_path / "project-item.json"))
     firstmate = Path(command[2])
     (firstmate / "data").mkdir(parents=True)
     (firstmate / "state").mkdir()
@@ -663,22 +663,28 @@ def test_the_rendered_board_service_syncs_its_repo_through_the_guard(tmp_path):
         result = subprocess.run([sys.executable, *command[1:]], env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stderr
         made = [json.loads(line) for line in calls.read_text().splitlines()]
-        mutations = [call[3] for call in made if call[1] == "graphql" and call[3].startswith("query=mutation")]
-        assert ["addProjectV2ItemById" in mutations[0], "updateProjectV2ItemFieldValue" in mutations[1]] == [True, True]
+        project_writes = [call for call in made if "/projectsV2/" in " ".join(call) and ("-X" in call or "-f" in call)]
+        assert project_writes[-1] == [
+            "api", "-X", "PATCH", "users/i098/projectsV2/3/items/101",
+            "-F", "fields[][id]=9", "-f", f"fields[][value]=option-{section if section == 'Done' else 'In progress'}",
+        ]
+        assert not any("graphql" in call for call in made)
         return made, json.loads(state.read_text())
 
     made, saved = sync("In flight")
     assert made[0][:2] == ["api", f"repos/{CONTRACT}/issues"]
-    assert saved["items"]["a"] == {"issue": 1, "node": "issue-1", "status": "In progress", "posted": 0}
+    assert saved["items"]["a"] == {"issue": 1, "status": "In progress", "posted": 0}
 
     made, saved = sync("Done")
     assert ["api", "-X", "PATCH", f"repos/{CONTRACT}/issues/1", "-f", "state=closed"] in made
     assert saved == {"repo": CONTRACT, "project": 3,
-                     "items": {"a": {"issue": 1, "node": "issue-1", "status": "Done", "posted": 0}}}
+                     "items": {"a": {"issue": 1, "status": "Done", "posted": 0}}}
 
     calls.unlink()
-    blocked = subprocess.run(["gh", "api", f"repos/{UPSTREAM}/issues", "-f", "title=x"],
-                             env=env, capture_output=True, text=True, timeout=30)
+    blocked = subprocess.run(
+        ["gh", "api", "graphql", "-f", "query=mutation { addProjectV2ItemById(input: {}) { clientMutationId } }"],
+        env={**env, "CREWSHIP_GITHUB_APPROVED_REPO": CONTRACT}, capture_output=True, text=True, timeout=30,
+    )
     assert blocked.returncode == 2 and "Blocked:" in blocked.stderr
     assert not calls.exists()
 
@@ -689,7 +695,7 @@ def test_the_rendered_board_service_syncs_its_repo_through_the_guard(tmp_path):
     "--no-type --no-type=0",
     "--no-type --no-type=f",
 ])
-@pytest.mark.parametrize("approved", [None, UPSTREAM])
+@pytest.mark.parametrize("approved", [None, CONTRACT, UPSTREAM])
 def test_literal_no_type_cannot_be_cancelled_before_gh_axi_starts(run, flags, approved):
     axi(run, f"issue edit 1 -R i098/sanctum --title renamed {flags}", None, approved=approved)
 
@@ -707,3 +713,222 @@ console.log(JSON.stringify(result));
 """
     result = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == {}
+
+
+class Download(io.BytesIO):
+    def __init__(self, body, url="https://downloads.example.test/tool"):
+        super().__init__(body)
+        self.url = url
+
+    def geturl(self):
+        return self.url
+
+
+def gh_release(monkeypatch, version):
+    archive = io.BytesIO()
+    payload = f"#!/bin/sh\nprintf 'gh {version} %s\\n' \"$*\"\n".encode()
+    with tarfile.open(fileobj=archive, mode="w:gz") as stream:
+        member = tarfile.TarInfo(f"gh_{version}_linux_amd64/bin/gh")
+        member.size, member.mode = len(payload), 0o755
+        stream.addfile(member, io.BytesIO(payload))
+    body = archive.getvalue()
+    monkeypatch.setattr(provisions.urllib.request, "urlopen", lambda *a, **k: Download(body))
+    return {
+        "version": version,
+        "assets": {
+            "linux-x86_64": {
+                "url": "https://downloads.example.test/gh.tar.gz",
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "format": "tar",
+                "binaries": provisions.GITHUB_LATEST["gh"][3],
+            }
+        },
+    }
+
+
+def native_gh(home, version):
+    tools = home / ".local/share/crewship/tools/gh"
+    return tools / version / "linux-x86_64" / f"gh_{version}_linux_amd64/bin/gh"
+
+
+def assert_guarded(home, version):
+    guard = home / ".local/share/crewship/gh-guard"
+    command = home / ".local/bin/gh"
+    assert command.is_symlink() and command.resolve() == guard / "gh"
+    assert Path(os.readlink(guard / "gh-real")) == native_gh(home, version)
+    answer = subprocess.run([command, "--version"], capture_output=True, text=True, check=True)
+    assert answer.stdout.strip() == f"gh {version} --version"
+    blocked = subprocess.run(
+        [command, "issue", "create", "--title", "incident"], capture_output=True, text=True
+    )
+    assert blocked.returncode == 2
+    assert "explicit repository target" in blocked.stderr
+
+
+def test_gh_installs_behind_the_guard_and_an_upgrade_keeps_it(tmp_path, monkeypatch):
+    for version in ("1.0.0", "2.0.0"):
+        spec = gh_release(monkeypatch, version)
+        assert provisions.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+        assert_guarded(tmp_path, version)
+        assert not provisions.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+
+
+def test_gh_guard_replaces_the_old_managed_link_to_the_native_gh(tmp_path, monkeypatch):
+    spec = gh_release(monkeypatch, "1.0.0")
+    assert provisions.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    native = native_gh(tmp_path, "1.0.0")
+    shipped = native.read_bytes()
+    command = tmp_path / ".local/bin/gh"
+    command.unlink()
+    command.symlink_to(native)
+    assert provisions.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    assert_guarded(tmp_path, "1.0.0")
+    assert native.read_bytes() == shipped
+
+
+def test_unmanaged_gh_is_preserved(tmp_path, monkeypatch):
+    command = tmp_path / ".local/bin/gh"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"user-owned")
+    with pytest.raises(ValueError, match="unmanaged command"):
+        provisions.install_asset(tmp_path, "gh", gh_release(monkeypatch, "1.0.0"), "linux-x86_64")
+    assert not command.is_symlink() and command.read_bytes() == b"user-owned"
+
+
+def test_an_updated_gh_wrapper_source_is_installed_once(tmp_path, monkeypatch):
+    source = tmp_path / "source/gh"
+    source.parent.mkdir()
+    source.write_bytes(provisions.GH_GUARD_SOURCE.read_bytes())
+    monkeypatch.setattr(provisions, "GH_GUARD_SOURCE", source)
+    spec = gh_release(monkeypatch, "1.0.0")
+    assert provisions.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    source.write_text("#!/bin/sh\nprintf 'updated wrapper\\n'\nexit 7\n")
+    assert provisions.install_gh_guard(tmp_path, native_gh(tmp_path, "1.0.0"))
+    result = subprocess.run(
+        [tmp_path / ".local/bin/gh", "--version"], capture_output=True, text=True
+    )
+    assert (result.returncode, result.stdout) == (7, "updated wrapper\n")
+    assert not provisions.install_gh_guard(tmp_path, native_gh(tmp_path, "1.0.0"))
+
+
+def gh_axi_package(home, version):
+    destination = home / ".local/share/crewship/gh-axi" / version
+    root = destination / "node_modules/gh-axi"
+    (root / "bin").mkdir(parents=True)
+    (root / "package.json").write_text(json.dumps({"version": version, "bin": {"gh-axi": "bin/gh-axi.js"}}))
+    entry = root / "bin/gh-axi.js"
+    entry.write_text(f"#!/bin/sh\ntouch \"$0.started\"\nprintf 'gh-axi {version} %s\\n' \"$*\"\n")
+    entry.chmod(0o755)
+    return destination, entry
+
+
+def assert_axi_guarded(home, entry, version):
+    guard = home / ".local/share/crewship/gh-guard"
+    command = home / ".local/bin/gh-axi"
+    assert command.is_symlink() and command.resolve() == guard / "gh-axi"
+    assert Path(os.readlink(guard / "gh-axi-real")) == entry.resolve()
+    environment = {k: v for k, v in os.environ.items() if k != "GH_REPO"}
+    blocked = subprocess.run(
+        [command, "issue", "create", "--title", "incident"],
+        capture_output=True, text=True, env=environment,
+    )
+    assert blocked.returncode != 0 and not Path(f"{entry}.started").exists()
+    answer = subprocess.run([command, "--version"], capture_output=True, text=True, env=environment)
+    assert answer.stdout.strip() == f"gh-axi {version} --version"
+
+
+def test_gh_axi_installs_behind_the_guard_and_an_upgrade_keeps_it(tmp_path):
+    for version in ("1.0.0", "2.0.0"):
+        destination, entry = gh_axi_package(tmp_path, version)
+        assert provisions.link_package_bins(tmp_path, destination, ["gh-axi"])
+        assert_axi_guarded(tmp_path, entry, version)
+        Path(f"{entry}.started").unlink()
+        assert not provisions.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert not (tmp_path / ".local/bin/gh").exists()
+
+
+def test_gh_axi_guard_replaces_the_old_managed_link(tmp_path):
+    destination, entry = gh_axi_package(tmp_path, "1.0.0")
+    command = tmp_path / ".local/bin/gh-axi"
+    command.parent.mkdir(parents=True)
+    command.symlink_to(entry)
+    assert provisions.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert_axi_guarded(tmp_path, entry, "1.0.0")
+
+
+def test_unmanaged_gh_axi_is_preserved(tmp_path):
+    destination, _ = gh_axi_package(tmp_path, "1.0.0")
+    command = tmp_path / ".local/bin/gh-axi"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"user-owned")
+    with pytest.raises(ValueError, match="unmanaged command"):
+        provisions.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert not command.is_symlink() and command.read_bytes() == b"user-owned"
+
+
+def test_an_updated_gh_axi_wrapper_source_is_installed_once(tmp_path, monkeypatch):
+    source = tmp_path / "source/gh"
+    source.parent.mkdir()
+    source.write_bytes(provisions.GH_GUARD_SOURCE.read_bytes())
+    monkeypatch.setattr(provisions, "GH_GUARD_SOURCE", source)
+    destination, entry = gh_axi_package(tmp_path, "1.0.0")
+    assert provisions.link_package_bins(tmp_path, destination, ["gh-axi"])
+    source.write_text("#!/bin/sh\nprintf 'updated wrapper\\n'\nexit 7\n")
+    assert provisions.install_gh_guard(tmp_path, entry, "gh-axi")
+    result = subprocess.run([tmp_path / ".local/bin/gh-axi"], capture_output=True, text=True)
+    assert (result.returncode, result.stdout) == (7, "updated wrapper\n")
+    assert not provisions.install_gh_guard(tmp_path, entry, "gh-axi")
+
+
+def test_gh_guard_rejects_other_names(tmp_path):
+    with pytest.raises(ValueError, match="unsupported guarded command"):
+        provisions.install_gh_guard(tmp_path, tmp_path / "tool", "tool")
+
+
+@pytest.mark.parametrize("operation", ["create", "new"])
+@pytest.mark.parametrize("parent,approved,allowed", [
+    ("https://github.com/i098/other/issues/1", None, False),
+    ("http://github.com/i098/other/issues/1", None, False),
+    ("https://github.com/i098/other/issues/1", "i098/other", True),
+    ("https://github.com/i098/sanctum/issues/1", None, True),
+    ("1", None, True),
+])
+def test_new_issue_parent_targets_are_checked(run, tmp_path, operation, parent, approved, allowed):
+    check(
+        run, tmp_path,
+        f"issue {operation} -R {CONTRACT} --title x --body y --parent {parent}",
+        allowed, approved=approved,
+    )
+
+
+@pytest.mark.parametrize("command", ["issue create", "issue edit 1"])
+@pytest.mark.parametrize("flags", [
+    "--title --type Bug --body x", "--title --no-type --body x",
+    "--title x --type=Bug", "--title x --type Bug --type ''",
+])
+@pytest.mark.parametrize("approved", [None, CONTRACT, UPSTREAM])
+def test_hidden_type_operations_never_start_gh_axi(run, command, flags, approved):
+    axi(run, f"{command} -R {CONTRACT} {flags}", None, approved=approved)
+
+
+@pytest.mark.parametrize("repo", [
+    "https://github.com/i098/sanctum", "http://github.com/i098/sanctum",
+    "i098/sanctum/", "github.com/i098/sanctum",
+])
+@pytest.mark.parametrize("command", ["issue close 1", "issue list", "api repos/i098/sanctum/issues"])
+def test_gh_axi_rejects_nonliteral_repository_flags(run, command, repo):
+    result = axi(run, f"{command} --repo {repo}", None)
+    assert "literal owner/repo" in result.stderr
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("operation", [
+    "createIssue", "updateIssue", "closeIssue", "addComment", "deleteIssueComment",
+    "addProjectV2ItemById", "updateProjectV2ItemFieldValue",
+])
+def test_graphql_issue_mutations_are_blocked_even_with_approval(run, cli, operation):
+    field = shlex.quote(f'query=mutation {{ {operation}(input: {{id: "upstream-node"}}) {{ clientMutationId }} }}')
+    flag = "-f" if cli == "gh" else "--field"
+    result = run(f"{cli} api graphql {flag} {field}", approved=CONTRACT)
+    assert_blocked(result)
+    assert "Approval cannot replace an unresolved target" in result.stderr

@@ -65,7 +65,7 @@ def test_create_failure_reports_child_output(tmp_path, monkeypatch, error_body):
     gh.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
 
-    result = run("feature", "-R", "i098/Crewship", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
+    result = run("feature", "--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
 
     assert result.returncode == 1
     assert result.stdout == ""
@@ -89,11 +89,14 @@ def recording_gh(tmp_path, monkeypatch):
 FIELDS = ("--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
 
 
-@pytest.mark.parametrize("flag", ["-R", "--repo"])
-def test_create_posts_to_supplied_repository(tmp_path, monkeypatch, flag):
+def test_create_uses_explicit_crewship_repository(tmp_path, monkeypatch):
     argv, stdin = recording_gh(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "other-repository"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("GH_REPO", "upstream/firstmate")
 
-    result = run("feature", flag, "i098/Crewship", *FIELDS)
+    result = run("feature", *FIELDS)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "https://example.test/1\n"
@@ -102,25 +105,12 @@ def test_create_posts_to_supplied_repository(tmp_path, monkeypatch, flag):
     assert payload["title"] == "Do it" and payload["labels"] == ["enhancement"]
 
 
-@pytest.mark.parametrize(
-    "repo", [None, "", "i098", "{owner}/{repo}", ":owner/:repo", "i098/Crewship/x", "../x", "i098/..", "a b/c", "i098/Crewship\n"]
-)
-def test_missing_or_invalid_repository_never_starts_gh(tmp_path, monkeypatch, repo):
-    argv, _ = recording_gh(tmp_path, monkeypatch)
-    target = () if repo is None else ("--repo", repo)
-
-    result = run("feature", *target, *FIELDS)
-
-    assert result.returncode != 0
-    assert "--repo" in result.stderr
-    assert not argv.exists()
 
 
-@pytest.mark.parametrize("target", [(), ("--repo", "i098/Crewship")])
-def test_dry_run_never_starts_gh(tmp_path, monkeypatch, target):
+def test_dry_run_never_starts_gh(tmp_path, monkeypatch):
     argv, _ = recording_gh(tmp_path, monkeypatch)
 
-    result = run("feature", *target, *FIELDS, "--dry-run")
+    result = run("feature", *FIELDS, "--dry-run")
 
     assert result.returncode == 0
     assert result.stdout.startswith("title: Do it\nlabels: enhancement\n")

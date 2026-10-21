@@ -48,9 +48,12 @@ ISSUE_GRAPHQL_FIELD = re.compile(
 )
 TARGET_REQUIRED = (
     "Blocked: GitHub issue writes need an explicit repository target. "
-    "Use -R owner/repo, a full issue URL, or a literal repos/owner/repo/issues API path. "
-    "GraphQL issue writes and unresolved relationships also need "
-    "CREWSHIP_GITHUB_APPROVED_REPO after explicit approval."
+    "Use -R owner/repo, a full issue URL, or a literal repos/owner/repo/issues API path."
+)
+UNRESOLVED_TARGET = (
+    "Blocked: the repository of this issue mutation cannot be checked before a network call. "
+    "Approval cannot replace an unresolved target. Use a gh issue command with -R owner/repo "
+    "or a REST form with an explicit repository."
 )
 
 
@@ -116,6 +119,8 @@ def axi_arguments(argv):
         if not equals:
             value = next(words, "")
         key = "--hostname" if name == "--hostname" else "--repo"
+        if key == "--repo" and not re.fullmatch(r"[\w.-]+/[\w.-]+", value):
+            raise ValueError("Blocked: gh-axi -R/--repo requires literal owner/repo; URLs and trailing slashes are not supported.")
         context[key] = [value]
     positionals, flags, unknown = arguments(stripped)
     flags.update(context)
@@ -141,22 +146,19 @@ def issue_repository(value):
     return repository(match[1]) if match else ""
 
 
-def approval():
-    return repository(os.environ.get("CREWSHIP_GITHUB_APPROVED_REPO", ""))
-
 
 def graphql_targets(flags):
     queries = [field[6:] for name in ("--field", "--raw-field")
                for field in flags.get(name, []) if field.startswith("query=")]
     if "--input" in flags or len(queries) != 1 or queries[0].lstrip().startswith(("@", "$", "`")):
-        return [approval()]
+        raise ValueError(UNRESOLVED_TARGET)
     query = re.sub(r'"""[\s\S]*?"""|"(?:\\[\s\S]|[^"\\])*"|#[^\n]*', "", queries[0])
     mutation = re.search(r"\bmutation\b", query)
     if re.match(r"\s*(?:query\b|\{)", query) and not mutation:
         return []
     if mutation and not ISSUE_GRAPHQL_FIELD.search(query):
         return []
-    return [approval()]
+    raise ValueError(UNRESOLVED_TARGET)
 
 
 def api_targets(positionals, flags, cli):
@@ -167,7 +169,9 @@ def api_targets(positionals, flags, cli):
     endpoint = positionals[index] if len(positionals) > index else ""
     path = re.sub(r"^https://api\.github\.com/", "", endpoint).lstrip("/")
     if re.match(r"graphql(?:[?#]|$)", path):
-        return [approval()] if re.search(r"[?#]", path) else graphql_targets(flags)
+        if re.search(r"[?#]", path):
+            raise ValueError(UNRESOLVED_TARGET)
+        return graphql_targets(flags)
     payload = any(name in flags for name in ("--field", "--raw-field", "--input"))
     default_method = positionals[1] if positional_method else "POST" if payload and cli == "gh" else "GET"
     method = last(flags, "--method") or default_method
@@ -183,26 +187,26 @@ def api_targets(positionals, flags, cli):
     match = re.match(r"repos/([\w.-]+/[\w.-]+)/issues(?:[/?#]|$)", path)
     targets = [repository(match[1]) if match else ""]
     if re.search(r"/issues/[^/?#]+/(?:parent|sub_issues?|dependencies)(?:[/?#]|$)", path):
-        targets.append(approval())
+        raise ValueError(UNRESOLVED_TARGET)
     return targets
 
 
-def relationship_targets(flags):
+def relationship_targets(flags, operation):
     targets = []
     for name in RELATION_FLAGS:
         for field in flags.get(name, []):
             for value in field.split(","):
                 if value and not re.fullmatch(r"#?\d+", value):
                     targets.append(issue_repository(value))
-    if enabled(flags, "--remove-parent") or last(flags, "--parent") or last(flags, "--add-sub-issue"):
-        targets.append(approval())
+    if enabled(flags, "--remove-parent") or last(flags, "--add-sub-issue") or (operation == "edit" and last(flags, "--parent")):
+        raise ValueError(UNRESOLVED_TARGET)
     return targets
 
 
 def issue_source_targets(positionals, flags, cli):
     repos = flags.get("--repo", [""])
     if cli == "gh-axi":
-        return [repository(repos[-1])]
+        return [repos[-1].lower()]
     operation = positionals[1]
     selectors = [] if operation in {"create", "new"} else positionals[2:3] if operation == "transfer" else positionals[2:]
     urls = [value for value in selectors if not re.fullmatch(r"#?\d+", value)]
@@ -217,8 +221,8 @@ def issue_targets(positionals, flags, cli):
     if operation == "develop" and enabled(flags, "--list"):
         return []
     targets = issue_source_targets(positionals, flags, cli)
-    if operation == "edit":
-        targets.extend(relationship_targets(flags))
+    if operation in {"create", "new", "edit"}:
+        targets.extend(relationship_targets(flags, operation))
     if operation == "close":
         for value in flags.get("--duplicate-of", []):
             if not re.fullmatch(r"#?\d+", value):
@@ -228,10 +232,21 @@ def issue_targets(positionals, flags, cli):
         targets.append(repository(destination))
     if operation == "develop" and last(flags, "--branch-repo"):
         targets.append(repository(last(flags, "--branch-repo")))
-    if cli == "gh-axi" and (subissue or "--type" in flags or "true" in flags.get("--no-type", ())):
-        approved = approval()
-        targets.append(approved if approved == targets[0] else "")
     return targets
+
+
+def axi_graphql_write(argv, positionals):
+    if positionals[1:3] in (["subissue", "add"], ["subissue", "remove"]):
+        return True
+    if positionals[1:2] not in (["create"], ["new"], ["edit"]):
+        return False
+    words = iter(argv)
+    for word in words:
+        if word in {"--body", "--body-file"}:
+            next(words, None)
+        elif word in {"--type", "--no-type"} or word.startswith("--type="):
+            return True
+    return False
 
 
 def check_write(argv, cli):
@@ -243,13 +258,16 @@ def check_write(argv, cli):
     kind = positionals[0] if positionals else ""
     if kind not in {"issue", "api"}:
         return
+    if cli == "gh-axi" and kind == "issue" and axi_graphql_write(argv, positionals):
+        raise ValueError(UNRESOLVED_TARGET)
     targets = api_targets(positionals, flags, cli) if kind == "api" else issue_targets(positionals, flags, cli)
     if unknown and (kind == "api" or targets):
         raise ValueError("Blocked: cannot classify GitHub flags: " + ", ".join(unknown))
     if any(not target for target in targets):
         raise ValueError(TARGET_REQUIRED)
     contract = os.environ.get("CREWSHIP_GITHUB_REPO")
-    if contract and any(target not in {repository(contract), approval()} for target in targets):
+    approved = repository(os.environ.get("CREWSHIP_GITHUB_APPROVED_REPO", ""))
+    if contract and any(target not in {repository(contract), approved} for target in targets):
         raise ValueError(
             "Blocked: GitHub write target differs from CREWSHIP_GITHUB_REPO. "
             "Set CREWSHIP_GITHUB_APPROVED_REPO to the exact repository only after explicit approval."

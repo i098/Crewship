@@ -9,8 +9,6 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=CREWSHIP_GITHUB_REPO={{ crewship_cfg.github_board.repo }}
-Environment=CREWSHIP_GITHUB_APPROVED_REPO={{ crewship_cfg.github_board.repo }}
 ExecStart=/usr/bin/python3 %h/.local/bin/github-board.py "{{ crewship_firstmate_dir }}" {{ crewship_cfg.github_board.repo }} {{ crewship_cfg.github_board.project }}
 TimeoutStartSec=10min
 Nice=10
