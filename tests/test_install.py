@@ -327,6 +327,28 @@ def terminal_install(release, responses):
     )
 
 
+@pytest.mark.parametrize("status", [0, 23])
+def test_terminal_install_prints_log_path_before_exit(release, tmp_path, status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "onboard.sh").write_text(f"#!/bin/sh\nexit {status}\n")
+    tee = tmp_path / "bin/tee"
+    tee.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys, time\n"
+        "data = sys.stdin.buffer.read()\n"
+        "time.sleep(0.1)\n"
+        f"sys.exit(subprocess.run([{shutil.which('tee')!r}, *sys.argv[1:]], input=data).returncode)\n"
+    )
+    tee.chmod(0o755)
+    result = terminal_install(release, {})
+    assert result.returncode == status, result.stdout
+    log = install_log(result)
+    footer = f"Full install log: {log}"
+    assert result.stdout.count(footer) == 1
+    assert log.read_text().count(footer) == 1
+    assert ("Crewship installation failed" in result.stdout) == bool(status)
+
+
 def test_interrupt_during_package_lock_wait_does_not_hang(release, tmp_path):
     assert release.install("v1.0.0").returncode == 0
     (release.home / "calls").unlink()

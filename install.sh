@@ -49,10 +49,11 @@ exec > >(tee -a "$CREWSHIP_INSTALL_LOG" >&3) 2> >(tee -a "$CREWSHIP_INSTALL_LOG"
 finish() {
   local status=$?
   rm -rf "$work"
+  # Write the footer synchronously before the terminal session can close.
   if ((status)); then
-    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" >&2
+    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG" >&4
   else
-    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG"
+    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG" >&3
   fi
 }
 trap finish EXIT
