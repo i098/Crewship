@@ -1,6 +1,35 @@
 ---
-- name: Stop disabled token suggestions
-  when: not (crewship_token_suggestions.enabled | bool)
+- name: Detect changed token suggestion inputs without writing them
+  ansible.builtin.copy:
+    dest: "{{ crewship_token_suggestions_assets }}/config.json"
+    mode: "0600"
+    content: "{{ crewship_token_suggestions_inputs | to_nice_json }}"
+  check_mode: true
+  register: crewship_token_suggestions_input_change
+  when: crewship_token_suggestions_configured | bool
+
+- name: Inspect offline timer activation before changing inputs
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/timers.target.wants/crewship-token-suggestions.timer"
+    follow: false
+  register: crewship_token_suggestions_activation
+  when:
+    - crewship_token_suggestions_configured | bool
+    - not (crewship_manage_services | bool)
+    - crewship_token_suggestions_input_change.changed
+
+- name: Require runtime management to replace scheduled inputs
+  ansible.builtin.assert:
+    that:
+      - not (crewship_token_suggestions_activation.stat.exists | default(false))
+    fail_msg: "Enable service management before changing inputs of an enabled timer."
+  when:
+    - crewship_token_suggestions_configured | bool
+    - not (crewship_manage_services | bool)
+    - crewship_token_suggestions_input_change.changed
+
+- name: Stop disabled or changed token suggestions
+  when: not (crewship_token_suggestions.enabled | bool) or (crewship_token_suggestions_input_change.changed | default(false))
   block:
     - name: Read the loaded token suggestion timer state
       ansible.builtin.command:
@@ -75,18 +104,68 @@
       ansible.builtin.copy:
         dest: "{{ crewship_token_suggestions_assets }}/config.json"
         mode: "0600"
-        content: >-
-          {{ ({'fm_home': crewship_token_suggestions.fm_home,
-               'snapshots': crewship_token_suggestions.snapshots}
-              | combine({'ledger': crewship_token_suggestions.ledger}
-                        if crewship_token_suggestions.ledger else {})) | to_nice_json }}
+        content: "{{ crewship_token_suggestions_inputs | to_nice_json }}"
 
-    - name: Install the manual token suggestion service
+    - name: Install the token suggestion service and timer
       ansible.builtin.template:
-        src: crewship-token-suggestions.service.j2
-        dest: "{{ crewship_user_units }}/crewship-token-suggestions.service"
+        src: "{{ item }}.j2"
+        dest: "{{ crewship_user_units }}/{{ item }}"
         mode: "0644"
+      loop: [crewship-token-suggestions.service, crewship-token-suggestions.timer]
       notify: reload user systemd
+
+    - name: Activate only a proven and explicitly enabled schedule
+      when:
+        - crewship_token_suggestions.enabled | bool
+        - crewship_manage_services | bool
+      block:
+        - name: Require a completed cycle for these exact inputs
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -B
+              - -E
+              - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
+              - --config
+              - "{{ crewship_token_suggestions_assets }}/config.json"
+              - --check-cycle
+          changed_when: false
+          check_mode: false
+
+        - name: Detect token suggestion units changed during an offline apply
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, --user, show, --property=NeedDaemonReload, --value, "{{ item }}"]
+          environment: "{{ crewship_user_systemd_env }}"
+          loop: [crewship-token-suggestions.service, crewship-token-suggestions.timer]
+          register: crewship_token_suggestions_reload
+          changed_when: crewship_token_suggestions_reload.stdout | trim == 'yes'
+          when: not ansible_check_mode
+          notify: reload user systemd
+
+        - name: Load token suggestion units before scheduling
+          ansible.builtin.meta: flush_handlers
+
+        - name: Ensure the user timer activation directory
+          ansible.builtin.file:
+            path: "{{ crewship_user_units }}/timers.target.wants"
+            state: directory
+            mode: "0755"
+
+        - name: Enable the proven token suggestion timer
+          ansible.builtin.file:
+            src: "{{ crewship_user_units }}/crewship-token-suggestions.timer"
+            dest: "{{ crewship_user_units }}/timers.target.wants/crewship-token-suggestions.timer"
+            state: link
+            force: true
+            follow: false
+          notify: reload user systemd
+
+        - name: Start the proven token suggestion timer
+          ansible.builtin.systemd_service:
+            scope: user
+            name: crewship-token-suggestions.timer
+            state: started
+          environment: "{{ crewship_user_systemd_env }}"
 
 - name: Remove unconfigured token suggestion assets without removing reports
   when: not (crewship_token_suggestions_configured | bool)

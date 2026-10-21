@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Write private token suggestions daily (Crewship managed)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 America/Los_Angeles
+RandomizedDelaySec=15min
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
