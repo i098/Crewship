@@ -145,15 +145,3 @@ kbd {
 .about .top h1 { font-size: clamp(26px, 5vw, 38px); }
 .about .top nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .about .post { padding: 20px; }
-
-#product-summary { max-width: 48ch; margin-top: 24px; }
-#product-summary p { margin: 0 0 10px; }
-#product-summary a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); }
-.js #product-summary {
-  position: fixed; z-index: 1; pointer-events: none;
-  bottom: calc(112px + env(safe-area-inset-bottom)); left: calc(16px + env(safe-area-inset-left));
-  width: min(48ch, calc(100% - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)));
-  margin: 0; padding: 16px 20px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--bg); font-size: 14px;
-}
-.js #product-summary a { pointer-events: auto; }
