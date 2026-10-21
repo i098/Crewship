@@ -26,7 +26,8 @@ ROOT = Path(__file__).parents[1]
 def test_npm_release_channel(tmp_path, version, prerelease, tag, expected):
     workflow = yaml.safe_load((ROOT / ".github/workflows/npm-publish.yml").read_text())
     check = next(
-        step for step in workflow["jobs"]["publish"]["steps"]
+        step
+        for step in workflow["jobs"]["publish"]["steps"]
         if step.get("name") == "Check the package version matches the tag"
     )
     (tmp_path / "package.json").write_text(json.dumps({"version": version}))
@@ -84,7 +85,9 @@ def test_bootstrap_runs_only_the_selected_checked_installer(tmp_path, tag, legac
         (mirror / f"{name}.sha256").write_text(f"{digest}  {name}\n")
     if failure != "api-unavailable":
         api_digest = "0" * 64 if failure == "api-digest" else digest
-        (mirror / tag).write_text(json.dumps({"assets": [{"name": name, "digest": f"sha256:{api_digest}"}]}))
+        (mirror / tag).write_text(
+            json.dumps({"assets": [{"name": name, "digest": f"sha256:{api_digest}"}]})
+        )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     if failure == "lock":
@@ -183,10 +186,17 @@ def test_website_deploy_event_selection(event_name, event, expected):
     condition = workflow["jobs"]["deploy"].get("if", "true")
     condition = condition.removeprefix("${{").removesuffix("}}").strip()
     result = subprocess.run(
-        ["node", "-e",
-         "const github = JSON.parse(process.argv[2]);"
-         "console.log(Boolean(new Function('github', `return (${process.argv[1]})`)(github)));",
-         condition, json.dumps({"event_name": event_name, "event": event})],
-        capture_output=True, text=True, check=True, timeout=10,
+        [
+            "node",
+            "-e",
+            "const github = JSON.parse(process.argv[2]);"
+            "console.log(Boolean(new Function('github', `return (${process.argv[1]})`)(github)));",
+            condition,
+            json.dumps({"event_name": event_name, "event": event}),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
     )
     assert json.loads(result.stdout) is expected

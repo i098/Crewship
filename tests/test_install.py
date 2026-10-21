@@ -56,7 +56,9 @@ def install_log(result):
     pytest.fail("The installer did not print its log path")
 
 
-@pytest.mark.parametrize("args", [["--help"], ["-h"], ["--container", "--help"], ["--user", "--help"]])
+@pytest.mark.parametrize(
+    "args", [["--help"], ["-h"], ["--container", "--help"], ["--user", "--help"]]
+)
 def test_help_prints_usage_and_changes_nothing(tmp_path, args):
     result = install(sandbox(tmp_path), *args)
     assert (result.returncode, result.stderr) == (0, "")
@@ -85,7 +87,13 @@ def test_launcher_help_matches_install_without_fetch(tmp_path):
     stub = tmp_path / "no-fetch.js"
     stub.write_text("globalThis.fetch = () => { throw new Error('fetch called'); };\n")
     result = subprocess.run(
-        [shutil.which("node"), "--require", str(stub), str(ROOT / "tools/npm/crewship.js"), "--help"],
+        [
+            shutil.which("node"),
+            "--require",
+            str(stub),
+            str(ROOT / "tools/npm/crewship.js"),
+            "--help",
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -120,118 +128,127 @@ echo "$*" >>"$HOME/args"
 if [ "$1" = dock ]; then mkdir -p .local && echo "dock-v$(cat VERSION)" >.local/host.yml; fi
 """
 
-INSTALLER_V047 = lzma.decompress(base64.b64decode(
-    b"/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Ds2FsddABGIQkeKIzPDdw8z/VWX7afG1TtMjxXpQsg+dBWsTnInIaaojqnerPjybjd4"
-    b"Ll6L8kURqEVyRvVJtKI7VSZcE5Q0wTTRNA7JB7EdnqtYfv1A09vKl5DnEzbeP8y+Qbwk4svDXXmtD2+eTNSyI3jWHtEngzLSLzYI"
-    b"koVi1PQfCrSl506GoYMJgF6p0VT92S4xGCHkMzhxokUhewemt/JKKdcW5UT7WOlwK67ZtohVDBnRHBfafxEKwGGMFVjgpzent6QM"
-    b"ouBCI/bGjs6NCBJhJsh5S2vX47LHqBfL/ZJP07zY1HbKaTzMjS9EqLVDPuI4VqWliNNsh3FwQXvwUGodqtI3Uslk4iWwSdYb9k/I"
-    b"vR66nPKcDmA+vSGZV762YyZbviARquFFXo+ibq2v8x+/yDxaoNXf7CrBQrFOQMm2iEgPYDMemoy2EqutvN6OVtGNhiLy6kCgEkP6"
-    b"5LdwKF2DlNu48uqSSUMS4jCBKsnVIH2E0mP+ZNZ0xd0ws8WdxFIw7x2PFUTcDyehFnadoal3ozybxWD4nuD9RhI3p3J2M0wLUDTO"
-    b"VG128q+Ehy9jj/7qLX/HBtRPRTfXgQJhU6y39n//ugwOGdwpv24Ja1dTMIiI0gHghVTkMA6TVcF61Cgs7YrIgrGNxg2sw+M1J7Eb"
-    b"1vpyo1oHzJ+lY+5NUxHZCv8tFQvNuSkN51PW4AkEkv/4h5HbmM6v4wu0KtOgAgJ9Y6Ai/2IunZpXya26yfq3RGXrhlRV+ZgX/lPX"
-    b"/RXhgV5ztzLnV8BqGvjjeKEcnIPobX4sbVLUN5lNQMyPDHDb1Taxq4BaqvU7vMJqp4R8JrGNvJEDoHahJHB0Vs2AObYC3YKhaf3R"
-    b"uSVc+/bMdsBfzZpuFFY2tAtNOho+8SRjZlZYkaQgVrhTNP1qgSVdO0ygxaASYNSPdUCOBsUMnrSzgCUIEmvGxyAQ1Nox9JIVq0LJ"
-    b"9vhb7RGXD4C8PUUc9lxTm4402hi5TjR1J94anBbFP0gVSjomre0LPPEv43ThBIPTzbMyRRF/iimdTZr2NmsPO1xPOyClBGOCvdXu"
-    b"lau8G+cRq5OWl/PdSQJ4itwffeScjOTBIHuwQzCXicR/lclrgWyefUpxi12eNCIsqXzqjMceW6rsI64Y3jPdxA/0TPktbx5RSW4B"
-    b"vMD9DfiA3+oaS/rhCGa0XRXyDdi5KoDaji1BRJ5a337xNQ86Ix79nQe8SqtQHQOwHuhX6X7OjO9TQa50L9JvCw7gCsNG8wkw78Dc"
-    b"CntOTNfgFJGP0ALX1catKq/q/rBf1O1bX7E8oKLDvuE3pZmgqZ89ETHD0X8rO1U0Tqybt9X7wi295ubnPorTu8UChzqCs+eeF79Z"
-    b"FnuTvJedu1Z2UIY7Gdsq6v8tOS1g9l65Z2SPPsECje8IeWDMP84a5sql9UhxfyuP0yIhVwgz3X0Nk3r93CFOh0is4J97P1iwit+a"
-    b"LwnF2e3DPeUJIaRH78siAIBttGF7OYcX1w7eVvpSGyHpKHFxa1M824uPjFW6YRwJZv/jf5e8VN2jzA6r/Nl63K51QUaMojdt8onX"
-    b"LtAUxbXPRC/mSoxuqvEO7jQGG5SvwzanXnh8DgkEIaSi75yZxWY1jddLE/o/L6FJHSSj7T7m60RG1aHvOsn581nc5F0p6eBA8mfb"
-    b"OHJoFPY0IpvkfdZiPvupOGarpwUeYk8Roa+EM64QaLeUgSX8ERLLBwA4t9pu/On8MzikveNIppY5zDHnPHiNaNL+azF8B7bJTL9n"
-    b"XYUJ+5Ei6VeoGj6KWQdl0v1Xbh6qbylhRxC/GBAFPXHkxtmVRQ+1ocHOgnd+wnuGvNFamhjDcj+I+4aNrmV0ePY11/fIBo1SsiIc"
-    b"nrWwzZktEbl2fiEEuK2FHHS9Vn/t/cwv6E3B9OI0M23xb8B7HaqHU9lSn1XTO4qCFKNM9b2T5uAqXtu4IiHG8enXloK5KYkZT/Ti"
-    b"3IaZT66dTJkTSleK6w6rRw4SbuDYfTfv0BCnbVsXO4PLV0ZcbACd2CA+Y+xMSHy509q5MbMKM/Vid3wXlXciefVSaGNTNMyv9G+8"
-    b"gvjTy1KZ+YKozkhoteUVbgPKcpFr2ARNAWjZ++Ey9rp/pFdkz5xeDdO6VgQFeYDHcpsw66cC1mkvPpYUqAJc3hg2B7vAq4nvZ4PW"
-    b"EgtyYbiHnUBOu8NT2eRU4HZVbqKlpa9BeBuccKh0iAxzeEanNIb2A4jIpiTeSMf3jdpwOcdmA7eYh/9SOY6qsjh20CIgPoHJ9dXD"
-    b"i1Ur6p2iWxxap/n7KJRAgGX1gERqdKgZaLpFuWKAKGq651v42jk3d8+OLOHkLIpVb3rHg6j4v3qOUqRsYKKjyylEZTTAEbMlpTC1"
-    b"5sErvoNmFDU+3/FtcSux8m/S89GszJVv3Nbf87ryOzGhWSeq329KoOCz7X7uv+r6TRFhQzXEGfqmWJBlLfwlr+eTmRG9zTAfFtAU"
-    b"p9i2tnsxkwrbdRQeXeJcJjtaNHM3M/MaQUCyHWtzukxlSOTFE9u+PI98KyyL2FXsWljYqu+lYPEYkacc6WPicNxN6XuuboKWa+2Q"
-    b"4PV2/IlHcccz7/72WIEh89k0D1XCgZA+y8PyrBazi1IYwHK16UKbDtRuGdMMoCuPRhE+eHbQA7LfV2opxGWHTmuRBCh7/TpfnKp5"
-    b"CaGThAPS/gr+vvbPemCO+U2aZz2IWjWlKAq50CY14xo+1gaJ9412H8efNTQNXtcso9EKmN7tzOLhREb8yxBYLSv5gEJnryybQ8yB"
-    b"YakT8YnV0rfXhXHrJGPAf71INs1ynMMReQ3X/k0ioUg6wuy766wPCrVzQijj9BQE7URaIztKwLn1ty49AmGQQJrYrixTxDEDroPq"
-    b"xsDGjDMiRjpkq4p2MLrJqeZNBWNOhI6AnFJPeWy9hLrpbobhW4PIp0GoxGFLwSPOwqWPRmFQV4WDww/ESaPg8j3BCZa6ufY0UfT5"
-    b"jM9jjjXFvxqP2DUEH3BxZCA7QPA1dRDetSRVJOkbMeGmiKNsYT3viKSgohelQBxF7JXw1CxyrFqLWAFAs0e6BIXs8wVYvyWF8i18"
-    b"6+ZcvVBKF/qr2Lr1FSDwUrZJ8y5yg961r5C15FPwdAXle4LKq7eXxuGN10M39WNGIniiC4w25GJDx5U4xAkYFRw1au9hC47wIrL+"
-    b"2RnAeo7nt753cgC5UdnU5jprB764/pBZrlqcWU+cbZuKrxJ+2SSevqhv3uVeZpQilflXVbAmNV0B88zoH+Y5Zk0/OOY80dKm44wt"
-    b"SzR8S2RsB/VQ1fHaMR+j4Hqhs9+S2vyK1o2YSUjs/HYMDt3WiB0uewasWa4jQkGdZXtywe7fkrdtgT6u1zumIESEovL9t+0aPU7s"
-    b"MmiNWoSis9S4X0iev+EaEqpMJgfk15u5P40PPe9D62NW6T8oT9tZkXJdVk+A/W8dzY5+4+bMHyhCrMQYwXfv5JuFAWp0owBVqXev"
-    b"yqglv+9DLeHO3gVi9R+eRXI/ONKjtiiwnBqv0mSTvWtd9Ciao+iJ6Ahkj7KyLZD3pQ1hSvNMqYXoZqL5vPMWcsx2Wves1nTQzzEw"
-    b"3ecsEnEpoAzHUNKmnwSeXqC9d0PWJSe+2HNmUEZsgjV7h70Tfcpu+hik+CY5Xe2UnYR63FHK0hbxtP2Tlcl49JC81JnUMMYvzVf8"
-    b"X8o0OF6xtyPGQR/HdM21lH1WvOh+VQ49LVdIBxt3llAuPfFOer3ZW1NXULXzBdgtZ4YhDJLBo1cbk3xNEhlAA4qjaxfuLAS3ft3i"
-    b"ZjtAPdYAOVN7XPUNyiCF0zO5tq2tTzTh/LbtoAKt/AhtYWcjvU6pNFCUZtcwT2bl9YROPQsQmbfhSu+lMH/YILfuc9gKpD/c3YTu"
-    b"uXqjX7ddr5Et4Yc3sDdfQedSGDPtKvd9uyMSgd2PiiC2FD6Cxvlse41AgLjgRRJRUsFZ+SS97gCWFrONdl2BODeUr1crNaaLpQ/D"
-    b"P7ij0AIcRmT0Cb2aDKSmRtlsgi85E2CI962lyJLSWRG6Ey0RotUNuLfcU9oExC0GEOrhH2bwgAqin2s5oEAcN0fBmVG2neAiagia"
-    b"uAmGRYTdc19QzRmL3Xrqd7IMN4nw1MMZ5V6KkgILeFD6Wo14m33fR8Fk61VGCWKqZRpusLZVZzwucphCl56PTeOERyKMM6I1IQ3x"
-    b"mjo327UKiCAr7lRE7S9v6wSB44b7KP6aGS9x3FSQl5p9Qn+xJFGQ55VGoap/keayenIITQH71wxZGu5LmvJPaQ7vj5xc2LMmW64Y"
-    b"5cjm7aevg4dHqKREAAOaoQkKEX4OGOfF6w2M+T/ASTEilQZkmobpq+YaD4aPgaN7VPXwW43pO/AUjXcjCoowoWRswAIFyuRWZzc0"
-    b"qmzVqWWoPfTlsnYGSYAUbGr/FkHPaX2aF79uJjs7HOUQnY34iLfpoDrTJun2Ny+KkZcDVxwiX16YYKTkKyL2qlq98MEVTsTvxKkC"
-    b"LRli8RwNx+0D4Ra6a+nGaVL2s8UqxmrENZG6EUwm521aBS+acP0vhTZ5wJ6HgJEcafjkIWaBlIHsXOqC6aw6w495VF40me2FNbAm"
-    b"Frsb9TjwJxAljI+xVeDYB/kYhjqSeboZEdNyouUOhcVh1G+a9srS/b9x0ko0GD92YY4K6TVvx0vnK3ko9kplD6dklBfpaiT8cUMQ"
-    b"87w8RwaDZd+rzJTa7fLVA/T01JwNt4t1UKoN4HMJTqQsQYZlMP3+FdqwQMCgeeEk7Akgi83bpJOjW3J8GyCq50FLH4zYiTsvP6dm"
-    b"+d478xS6WM4LwXt4DnCM0uf+dwUBD1MIWe5BcL/tuaMSgyBmL+jgrgfhT8TJNCr0rZBUmQMMPQS1qCdapKZ2xW+NWPvMtQuUDTZ7"
-    b"ZI/UGXn4A+gBYI2VLaMXb8UOLmmRAYcZFdqrIqS02a0KLpTYapg9BlExUtmnHgGRFO/x6hV7YZhbpcbYHmpDjmFqQSRE6g4x+rq1"
-    b"8e1yw1eCxXHqRm4C10SNEZU9JKYp/BdroJo3fdNAuS1Y4pA2DYRupE3+FkKmOZd4WcU7jJMtZh39nqmt5ly/gRsxoqbnmnpJOdAc"
-    b"UznRWkcX8Tyamt+5UNDRY2d1BFr5QxiLVT5u/Rs6soDNKVdL6j0cKlAdc4/noktBoeoztKyLWNQUWm3vS+JuZqcuUgC05YTqvDRd"
-    b"e4QZJTyupUpyO1cMPSlmArJg3Xrrr5w3GmOZTqorGu+c3/8i78KzgFFdt8rSrZFSnaOmSb0s35XnZt/7dOoBqOLK3y1GUypKcws2"
-    b"x4J4mEIMinYNK3sjqUgAHl7eebahwPwaILQbvqd2UpeANglO3woIaWDaPOSy1hOjHjE7SZJ8PDwe/FpRRtB/bfTpq77OWa5Hm7p/"
-    b"Ult/9qSjK0PEohyn/pSZtL7afCc2vu+DTNFS3R/msl/4+KNlLGsxwvYO3IeHkrHwGWJtPM7FCpsWc8ebL5oxnAYl/Oy09yYIa/Ml"
-    b"zpPWMynYc4vYmMbBX0EkQAbTghgJdz8l34Q7lP4MvaOdVK+86LC0u5eAgcYFvHdQ7B0TrJgbJK5HBeQB1w090CZXsw9kaePK0Z9+"
-    b"5zEnAaz4zfXWSNbBpRlpPZ3iLig0caSax0Lg+AjaNjaur9NLExx6jnDwQD3Bvu6OVcFr8IRjOofrM5kfnljDLCKyitbCKEb0zSlh"
-    b"oqu2uCinXRiBakK3p4hpNMgtEQPY/QE9jG4uOM72M8KLEKihrbHqcbfmS8YfFaaRbStTLfVuSUcbfawbeGlNymYFdYlwxyNqIL9z"
-    b"Esi6joCh7WM9HJUItNSV9iSReFqWrIOPqDjQS39wr2f2JTLet6E3GucnFEUekiOMOi3ZQm95l3uIeG/fi8NICt5XUdU03I0PyyDO"
-    b"UwhmGK1WC5f3uGiHu/AHjeivIW5rSObicsOC51sdaJinEdUriqQEqF957z8ZcpmpF2znADX5gHRzlIBdJ4cDkarE0esWzTJBLYBo"
-    b"7zmt9nAK+DxZ1hR6u4UYqm1o2GTc22k6G1tcMeNnCuur+s1UQ7zbU0SthXX5K13vkz0xieIYDdBhvB6M+t1JHgFqT3fPm8HkBQro"
-    b"JWVa1SdqS7YT/pSCVGew5Yqyu4ATtAZYPs/CL1UlmCuP9GcG+9oD5fddd95fJO0cC8LYnlDgiquVz61CqftUbsLAY4gny1yo7Kzh"
-    b"Ijk4m7Q1i80aSG93Ef3ZfcHtmBmpiDZDkian9JhB1kDTQiZUctTyDEEoKy37M/HhARm7iiNgPKWtefEHaUHPMInANPVCzpEYzzb7"
-    b"4TmQRk3xzAl0vAbNVXABIr8b08ng5qsR1KzyRxYMdBqAhgf77Uqvi9TdjBE+VNYRBRfXsZKP5/gaFC8CDENVwBKW4d6i51yH6y/5"
-    b"Ma0oCgmeSSnmtxVt2cVu0KKq2E9QyHRgFSglbiEA5YdrPvAGnbnLxE7MJzZ6ST869ajs7yXjj6UEiswTCQkRr4MPFLKpy0aCc0Ib"
-    b"bav8gI5Lr3XFuJtRJuKUqvVZU+kdFGaoSAeRyQc1oRdQwzI0sC273cFeSmyqu2+s1vMlerl1XPbkIuT32iCWYz25DMZfUTvsDthX"
-    b"ciZZ+ih/N16UTlQViY0k+AZdLb64J93T+LTFRQX79WiTI3P5h+valNDG1aBR3OdhohIjxg//lcajLuTI9CxeZBhkMa/2dNCsoh+i"
-    b"nm7/A/iHiGxdBqHpK2yA29OeE2X4Id4WvBvDuPHQsW9l7vHJfaHFQnziQHjIb84/RSBIH9NSWsnlENiITNe18NRUZvxpRTjGU6iH"
-    b"UIUYxfhkYeYdP06nWxk6B3SBQMcIGP2JTztJbgnk+E1YYi6RXga4BrDVBd+4HgIrSAHLB8NVOVxkPSzULd+o2I4VEiEk1CphslZb"
-    b"DxbUDtF1Ei6G44nXfWt9qRhbZgLnBXPZ5bHU59UHozTHzHArPysxiyuai31yDIUgUpRNM1mYnw3F9JlkJtMjgr4GpVcHcnM1FzvN"
-    b"WdZXA77+o35d3/ZDfgyLhp7M/ggYVydOwL5ZCx3H0mOA7qcbqNgp26ndTGvgs0TCtls3tfxhladDrkhsBYMKYnTTdkJbYdVmWCs+"
-    b"eAtzlm83zA9DTxSuRTJC4lCGAg4/0v+uPeYaSquEKwuoi+hlVyb6gQ9Pparr/ioZ0m1xQP0Dgvo4CrIFL9BW+XkrWxWRcX3TVprX"
-    b"O5BFNimlXDI20R548YbcHhpoE1sedBQztL8pMHzQKiFQHuYHPNZLCcj/q9oMTZcmlvclkXP4FV2CxC6a0gdGJ3OhuIAH1fybvius"
-    b"BHGzkpYztNpHyuvLa6QJw3YYxGeMaPNe0gY/rSlKApgLYZKyU+/Llf+yTaD8Rz0K5u8kYssYFWuwG7YEs+ApchU7xBSuUsywJZQE"
-    b"Wkjyju40SeZiUnAxkGyIsyhT9jOuGwzMQlemiLj244dSAp0p/2ux8AtUEonjU2geBejz+MIs7SZ8Hp6K8xXELOdgSFeUvzuOOVrK"
-    b"Z4GslgoAPt+ENJ4NsJKchnrYtfTEMJmdVBIL//QK5nyxpKC0XfdyKtOSlr0VC5LgmRCjOBQILDmBLz9JNtdEKPcpO3JMtGVv5/9e"
-    b"MDbnNKbYQ1DfVmcrsxHdYDtLbOBddP55bTKTnaokRREW1oGhldRh6AJMz7xTZwOr4yyuA4MA8iCLRy8qJCdTsOetR6OXutXsVHqY"
-    b"sbdfEhA3fsRm8a4QJEQAbkIygvkgsY/VyMCuna7BuTCFP3nv6V2xCQ+wHzToupJTyPtmucFBRViNV1C/L2nI92VHbL0hG37tozqR"
-    b"STtTvqdBY9bdt6qoAADPp1E6wdpf3AAB4y23dgAAhTQNurHEZ/sCAAAAAARZWg=="
-))
+INSTALLER_V047 = lzma.decompress(
+    base64.b64decode(
+        b"/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Ds2FsddABGIQkeKIzPDdw8z/VWX7afG1TtMjxXpQsg+dBWsTnInIaaojqnerPjybjd4"
+        b"Ll6L8kURqEVyRvVJtKI7VSZcE5Q0wTTRNA7JB7EdnqtYfv1A09vKl5DnEzbeP8y+Qbwk4svDXXmtD2+eTNSyI3jWHtEngzLSLzYI"
+        b"koVi1PQfCrSl506GoYMJgF6p0VT92S4xGCHkMzhxokUhewemt/JKKdcW5UT7WOlwK67ZtohVDBnRHBfafxEKwGGMFVjgpzent6QM"
+        b"ouBCI/bGjs6NCBJhJsh5S2vX47LHqBfL/ZJP07zY1HbKaTzMjS9EqLVDPuI4VqWliNNsh3FwQXvwUGodqtI3Uslk4iWwSdYb9k/I"
+        b"vR66nPKcDmA+vSGZV762YyZbviARquFFXo+ibq2v8x+/yDxaoNXf7CrBQrFOQMm2iEgPYDMemoy2EqutvN6OVtGNhiLy6kCgEkP6"
+        b"5LdwKF2DlNu48uqSSUMS4jCBKsnVIH2E0mP+ZNZ0xd0ws8WdxFIw7x2PFUTcDyehFnadoal3ozybxWD4nuD9RhI3p3J2M0wLUDTO"
+        b"VG128q+Ehy9jj/7qLX/HBtRPRTfXgQJhU6y39n//ugwOGdwpv24Ja1dTMIiI0gHghVTkMA6TVcF61Cgs7YrIgrGNxg2sw+M1J7Eb"
+        b"1vpyo1oHzJ+lY+5NUxHZCv8tFQvNuSkN51PW4AkEkv/4h5HbmM6v4wu0KtOgAgJ9Y6Ai/2IunZpXya26yfq3RGXrhlRV+ZgX/lPX"
+        b"/RXhgV5ztzLnV8BqGvjjeKEcnIPobX4sbVLUN5lNQMyPDHDb1Taxq4BaqvU7vMJqp4R8JrGNvJEDoHahJHB0Vs2AObYC3YKhaf3R"
+        b"uSVc+/bMdsBfzZpuFFY2tAtNOho+8SRjZlZYkaQgVrhTNP1qgSVdO0ygxaASYNSPdUCOBsUMnrSzgCUIEmvGxyAQ1Nox9JIVq0LJ"
+        b"9vhb7RGXD4C8PUUc9lxTm4402hi5TjR1J94anBbFP0gVSjomre0LPPEv43ThBIPTzbMyRRF/iimdTZr2NmsPO1xPOyClBGOCvdXu"
+        b"lau8G+cRq5OWl/PdSQJ4itwffeScjOTBIHuwQzCXicR/lclrgWyefUpxi12eNCIsqXzqjMceW6rsI64Y3jPdxA/0TPktbx5RSW4B"
+        b"vMD9DfiA3+oaS/rhCGa0XRXyDdi5KoDaji1BRJ5a337xNQ86Ix79nQe8SqtQHQOwHuhX6X7OjO9TQa50L9JvCw7gCsNG8wkw78Dc"
+        b"CntOTNfgFJGP0ALX1catKq/q/rBf1O1bX7E8oKLDvuE3pZmgqZ89ETHD0X8rO1U0Tqybt9X7wi295ubnPorTu8UChzqCs+eeF79Z"
+        b"FnuTvJedu1Z2UIY7Gdsq6v8tOS1g9l65Z2SPPsECje8IeWDMP84a5sql9UhxfyuP0yIhVwgz3X0Nk3r93CFOh0is4J97P1iwit+a"
+        b"LwnF2e3DPeUJIaRH78siAIBttGF7OYcX1w7eVvpSGyHpKHFxa1M824uPjFW6YRwJZv/jf5e8VN2jzA6r/Nl63K51QUaMojdt8onX"
+        b"LtAUxbXPRC/mSoxuqvEO7jQGG5SvwzanXnh8DgkEIaSi75yZxWY1jddLE/o/L6FJHSSj7T7m60RG1aHvOsn581nc5F0p6eBA8mfb"
+        b"OHJoFPY0IpvkfdZiPvupOGarpwUeYk8Roa+EM64QaLeUgSX8ERLLBwA4t9pu/On8MzikveNIppY5zDHnPHiNaNL+azF8B7bJTL9n"
+        b"XYUJ+5Ei6VeoGj6KWQdl0v1Xbh6qbylhRxC/GBAFPXHkxtmVRQ+1ocHOgnd+wnuGvNFamhjDcj+I+4aNrmV0ePY11/fIBo1SsiIc"
+        b"nrWwzZktEbl2fiEEuK2FHHS9Vn/t/cwv6E3B9OI0M23xb8B7HaqHU9lSn1XTO4qCFKNM9b2T5uAqXtu4IiHG8enXloK5KYkZT/Ti"
+        b"3IaZT66dTJkTSleK6w6rRw4SbuDYfTfv0BCnbVsXO4PLV0ZcbACd2CA+Y+xMSHy509q5MbMKM/Vid3wXlXciefVSaGNTNMyv9G+8"
+        b"gvjTy1KZ+YKozkhoteUVbgPKcpFr2ARNAWjZ++Ey9rp/pFdkz5xeDdO6VgQFeYDHcpsw66cC1mkvPpYUqAJc3hg2B7vAq4nvZ4PW"
+        b"EgtyYbiHnUBOu8NT2eRU4HZVbqKlpa9BeBuccKh0iAxzeEanNIb2A4jIpiTeSMf3jdpwOcdmA7eYh/9SOY6qsjh20CIgPoHJ9dXD"
+        b"i1Ur6p2iWxxap/n7KJRAgGX1gERqdKgZaLpFuWKAKGq651v42jk3d8+OLOHkLIpVb3rHg6j4v3qOUqRsYKKjyylEZTTAEbMlpTC1"
+        b"5sErvoNmFDU+3/FtcSux8m/S89GszJVv3Nbf87ryOzGhWSeq329KoOCz7X7uv+r6TRFhQzXEGfqmWJBlLfwlr+eTmRG9zTAfFtAU"
+        b"p9i2tnsxkwrbdRQeXeJcJjtaNHM3M/MaQUCyHWtzukxlSOTFE9u+PI98KyyL2FXsWljYqu+lYPEYkacc6WPicNxN6XuuboKWa+2Q"
+        b"4PV2/IlHcccz7/72WIEh89k0D1XCgZA+y8PyrBazi1IYwHK16UKbDtRuGdMMoCuPRhE+eHbQA7LfV2opxGWHTmuRBCh7/TpfnKp5"
+        b"CaGThAPS/gr+vvbPemCO+U2aZz2IWjWlKAq50CY14xo+1gaJ9412H8efNTQNXtcso9EKmN7tzOLhREb8yxBYLSv5gEJnryybQ8yB"
+        b"YakT8YnV0rfXhXHrJGPAf71INs1ynMMReQ3X/k0ioUg6wuy766wPCrVzQijj9BQE7URaIztKwLn1ty49AmGQQJrYrixTxDEDroPq"
+        b"xsDGjDMiRjpkq4p2MLrJqeZNBWNOhI6AnFJPeWy9hLrpbobhW4PIp0GoxGFLwSPOwqWPRmFQV4WDww/ESaPg8j3BCZa6ufY0UfT5"
+        b"jM9jjjXFvxqP2DUEH3BxZCA7QPA1dRDetSRVJOkbMeGmiKNsYT3viKSgohelQBxF7JXw1CxyrFqLWAFAs0e6BIXs8wVYvyWF8i18"
+        b"6+ZcvVBKF/qr2Lr1FSDwUrZJ8y5yg961r5C15FPwdAXle4LKq7eXxuGN10M39WNGIniiC4w25GJDx5U4xAkYFRw1au9hC47wIrL+"
+        b"2RnAeo7nt753cgC5UdnU5jprB764/pBZrlqcWU+cbZuKrxJ+2SSevqhv3uVeZpQilflXVbAmNV0B88zoH+Y5Zk0/OOY80dKm44wt"
+        b"SzR8S2RsB/VQ1fHaMR+j4Hqhs9+S2vyK1o2YSUjs/HYMDt3WiB0uewasWa4jQkGdZXtywe7fkrdtgT6u1zumIESEovL9t+0aPU7s"
+        b"MmiNWoSis9S4X0iev+EaEqpMJgfk15u5P40PPe9D62NW6T8oT9tZkXJdVk+A/W8dzY5+4+bMHyhCrMQYwXfv5JuFAWp0owBVqXev"
+        b"yqglv+9DLeHO3gVi9R+eRXI/ONKjtiiwnBqv0mSTvWtd9Ciao+iJ6Ahkj7KyLZD3pQ1hSvNMqYXoZqL5vPMWcsx2Wves1nTQzzEw"
+        b"3ecsEnEpoAzHUNKmnwSeXqC9d0PWJSe+2HNmUEZsgjV7h70Tfcpu+hik+CY5Xe2UnYR63FHK0hbxtP2Tlcl49JC81JnUMMYvzVf8"
+        b"X8o0OF6xtyPGQR/HdM21lH1WvOh+VQ49LVdIBxt3llAuPfFOer3ZW1NXULXzBdgtZ4YhDJLBo1cbk3xNEhlAA4qjaxfuLAS3ft3i"
+        b"ZjtAPdYAOVN7XPUNyiCF0zO5tq2tTzTh/LbtoAKt/AhtYWcjvU6pNFCUZtcwT2bl9YROPQsQmbfhSu+lMH/YILfuc9gKpD/c3YTu"
+        b"uXqjX7ddr5Et4Yc3sDdfQedSGDPtKvd9uyMSgd2PiiC2FD6Cxvlse41AgLjgRRJRUsFZ+SS97gCWFrONdl2BODeUr1crNaaLpQ/D"
+        b"P7ij0AIcRmT0Cb2aDKSmRtlsgi85E2CI962lyJLSWRG6Ey0RotUNuLfcU9oExC0GEOrhH2bwgAqin2s5oEAcN0fBmVG2neAiagia"
+        b"uAmGRYTdc19QzRmL3Xrqd7IMN4nw1MMZ5V6KkgILeFD6Wo14m33fR8Fk61VGCWKqZRpusLZVZzwucphCl56PTeOERyKMM6I1IQ3x"
+        b"mjo327UKiCAr7lRE7S9v6wSB44b7KP6aGS9x3FSQl5p9Qn+xJFGQ55VGoap/keayenIITQH71wxZGu5LmvJPaQ7vj5xc2LMmW64Y"
+        b"5cjm7aevg4dHqKREAAOaoQkKEX4OGOfF6w2M+T/ASTEilQZkmobpq+YaD4aPgaN7VPXwW43pO/AUjXcjCoowoWRswAIFyuRWZzc0"
+        b"qmzVqWWoPfTlsnYGSYAUbGr/FkHPaX2aF79uJjs7HOUQnY34iLfpoDrTJun2Ny+KkZcDVxwiX16YYKTkKyL2qlq98MEVTsTvxKkC"
+        b"LRli8RwNx+0D4Ra6a+nGaVL2s8UqxmrENZG6EUwm521aBS+acP0vhTZ5wJ6HgJEcafjkIWaBlIHsXOqC6aw6w495VF40me2FNbAm"
+        b"Frsb9TjwJxAljI+xVeDYB/kYhjqSeboZEdNyouUOhcVh1G+a9srS/b9x0ko0GD92YY4K6TVvx0vnK3ko9kplD6dklBfpaiT8cUMQ"
+        b"87w8RwaDZd+rzJTa7fLVA/T01JwNt4t1UKoN4HMJTqQsQYZlMP3+FdqwQMCgeeEk7Akgi83bpJOjW3J8GyCq50FLH4zYiTsvP6dm"
+        b"+d478xS6WM4LwXt4DnCM0uf+dwUBD1MIWe5BcL/tuaMSgyBmL+jgrgfhT8TJNCr0rZBUmQMMPQS1qCdapKZ2xW+NWPvMtQuUDTZ7"
+        b"ZI/UGXn4A+gBYI2VLaMXb8UOLmmRAYcZFdqrIqS02a0KLpTYapg9BlExUtmnHgGRFO/x6hV7YZhbpcbYHmpDjmFqQSRE6g4x+rq1"
+        b"8e1yw1eCxXHqRm4C10SNEZU9JKYp/BdroJo3fdNAuS1Y4pA2DYRupE3+FkKmOZd4WcU7jJMtZh39nqmt5ly/gRsxoqbnmnpJOdAc"
+        b"UznRWkcX8Tyamt+5UNDRY2d1BFr5QxiLVT5u/Rs6soDNKVdL6j0cKlAdc4/noktBoeoztKyLWNQUWm3vS+JuZqcuUgC05YTqvDRd"
+        b"e4QZJTyupUpyO1cMPSlmArJg3Xrrr5w3GmOZTqorGu+c3/8i78KzgFFdt8rSrZFSnaOmSb0s35XnZt/7dOoBqOLK3y1GUypKcws2"
+        b"x4J4mEIMinYNK3sjqUgAHl7eebahwPwaILQbvqd2UpeANglO3woIaWDaPOSy1hOjHjE7SZJ8PDwe/FpRRtB/bfTpq77OWa5Hm7p/"
+        b"Ult/9qSjK0PEohyn/pSZtL7afCc2vu+DTNFS3R/msl/4+KNlLGsxwvYO3IeHkrHwGWJtPM7FCpsWc8ebL5oxnAYl/Oy09yYIa/Ml"
+        b"zpPWMynYc4vYmMbBX0EkQAbTghgJdz8l34Q7lP4MvaOdVK+86LC0u5eAgcYFvHdQ7B0TrJgbJK5HBeQB1w090CZXsw9kaePK0Z9+"
+        b"5zEnAaz4zfXWSNbBpRlpPZ3iLig0caSax0Lg+AjaNjaur9NLExx6jnDwQD3Bvu6OVcFr8IRjOofrM5kfnljDLCKyitbCKEb0zSlh"
+        b"oqu2uCinXRiBakK3p4hpNMgtEQPY/QE9jG4uOM72M8KLEKihrbHqcbfmS8YfFaaRbStTLfVuSUcbfawbeGlNymYFdYlwxyNqIL9z"
+        b"Esi6joCh7WM9HJUItNSV9iSReFqWrIOPqDjQS39wr2f2JTLet6E3GucnFEUekiOMOi3ZQm95l3uIeG/fi8NICt5XUdU03I0PyyDO"
+        b"UwhmGK1WC5f3uGiHu/AHjeivIW5rSObicsOC51sdaJinEdUriqQEqF957z8ZcpmpF2znADX5gHRzlIBdJ4cDkarE0esWzTJBLYBo"
+        b"7zmt9nAK+DxZ1hR6u4UYqm1o2GTc22k6G1tcMeNnCuur+s1UQ7zbU0SthXX5K13vkz0xieIYDdBhvB6M+t1JHgFqT3fPm8HkBQro"
+        b"JWVa1SdqS7YT/pSCVGew5Yqyu4ATtAZYPs/CL1UlmCuP9GcG+9oD5fddd95fJO0cC8LYnlDgiquVz61CqftUbsLAY4gny1yo7Kzh"
+        b"Ijk4m7Q1i80aSG93Ef3ZfcHtmBmpiDZDkian9JhB1kDTQiZUctTyDEEoKy37M/HhARm7iiNgPKWtefEHaUHPMInANPVCzpEYzzb7"
+        b"4TmQRk3xzAl0vAbNVXABIr8b08ng5qsR1KzyRxYMdBqAhgf77Uqvi9TdjBE+VNYRBRfXsZKP5/gaFC8CDENVwBKW4d6i51yH6y/5"
+        b"Ma0oCgmeSSnmtxVt2cVu0KKq2E9QyHRgFSglbiEA5YdrPvAGnbnLxE7MJzZ6ST869ajs7yXjj6UEiswTCQkRr4MPFLKpy0aCc0Ib"
+        b"bav8gI5Lr3XFuJtRJuKUqvVZU+kdFGaoSAeRyQc1oRdQwzI0sC273cFeSmyqu2+s1vMlerl1XPbkIuT32iCWYz25DMZfUTvsDthX"
+        b"ciZZ+ih/N16UTlQViY0k+AZdLb64J93T+LTFRQX79WiTI3P5h+valNDG1aBR3OdhohIjxg//lcajLuTI9CxeZBhkMa/2dNCsoh+i"
+        b"nm7/A/iHiGxdBqHpK2yA29OeE2X4Id4WvBvDuPHQsW9l7vHJfaHFQnziQHjIb84/RSBIH9NSWsnlENiITNe18NRUZvxpRTjGU6iH"
+        b"UIUYxfhkYeYdP06nWxk6B3SBQMcIGP2JTztJbgnk+E1YYi6RXga4BrDVBd+4HgIrSAHLB8NVOVxkPSzULd+o2I4VEiEk1CphslZb"
+        b"DxbUDtF1Ei6G44nXfWt9qRhbZgLnBXPZ5bHU59UHozTHzHArPysxiyuai31yDIUgUpRNM1mYnw3F9JlkJtMjgr4GpVcHcnM1FzvN"
+        b"WdZXA77+o35d3/ZDfgyLhp7M/ggYVydOwL5ZCx3H0mOA7qcbqNgp26ndTGvgs0TCtls3tfxhladDrkhsBYMKYnTTdkJbYdVmWCs+"
+        b"eAtzlm83zA9DTxSuRTJC4lCGAg4/0v+uPeYaSquEKwuoi+hlVyb6gQ9Pparr/ioZ0m1xQP0Dgvo4CrIFL9BW+XkrWxWRcX3TVprX"
+        b"O5BFNimlXDI20R548YbcHhpoE1sedBQztL8pMHzQKiFQHuYHPNZLCcj/q9oMTZcmlvclkXP4FV2CxC6a0gdGJ3OhuIAH1fybvius"
+        b"BHGzkpYztNpHyuvLa6QJw3YYxGeMaPNe0gY/rSlKApgLYZKyU+/Llf+yTaD8Rz0K5u8kYssYFWuwG7YEs+ApchU7xBSuUsywJZQE"
+        b"Wkjyju40SeZiUnAxkGyIsyhT9jOuGwzMQlemiLj244dSAp0p/2ux8AtUEonjU2geBejz+MIs7SZ8Hp6K8xXELOdgSFeUvzuOOVrK"
+        b"Z4GslgoAPt+ENJ4NsJKchnrYtfTEMJmdVBIL//QK5nyxpKC0XfdyKtOSlr0VC5LgmRCjOBQILDmBLz9JNtdEKPcpO3JMtGVv5/9e"
+        b"MDbnNKbYQ1DfVmcrsxHdYDtLbOBddP55bTKTnaokRREW1oGhldRh6AJMz7xTZwOr4yyuA4MA8iCLRy8qJCdTsOetR6OXutXsVHqY"
+        b"sbdfEhA3fsRm8a4QJEQAbkIygvkgsY/VyMCuna7BuTCFP3nv6V2xCQ+wHzToupJTyPtmucFBRViNV1C/L2nI92VHbL0hG37tozqR"
+        b"STtTvqdBY9bdt6qoAADPp1E6wdpf3AAB4y23dgAAhTQNurHEZ/sCAAAAAARZWg=="
+    )
+)
 
-INSTALLER_V040 = lzma.decompress(base64.b64decode(
-    b"/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4A1UBq1dABGIQkeKIzPDdw8z/VWX7afG1TtMjxXpQsg+dBWsTnInIaaojqnerPjybjd4"
-    b"Ll6L8kURqEVyRvVJtKI7VSZcE5Q0wTTRNA7JB7EdnqtYfv1A09vKl5DnEzbeP8y+Qbwk4svDXXmtD2+eTNSyI3jWHtEngzLSLzYI"
-    b"koVi1PQfCrSl506GoYMJgF6p0VT92S4xGCHkMzhxokUhewemt/JKKdcW5UT7WOlwK67ZtohVDBnRHBfafxEKwGGMFVjgpzent6QM"
-    b"ouBCI/bGjs6NCBJhJsh5S2vX47LHqBfL/ZJP07zY1HbKaTzMjS9EqLVDPuI4VqWliNNsh3FwQXvwUGodqtI3Usf32zLRd349YvCK"
-    b"Ml9NNOm9oIdrJau8wyrHr+HncmXiqI4xXv7OYEzWp2wAZ1+tdzcbcMwov72J2Si/rx9oQJdVL+xvU4htYZjpOeNE+Ma8dxSxtbYj"
-    b"ZnrXoSKowCM8Oo9K8qNIflBYCuZjF2v1JOwp49KRsiEP4tUonMyKWWzDBugzQ2zW6SutUf1Wmq9GcWSEYiSRKwGcBlhi7maoQIvF"
-    b"ZzyC9HazrSjqEuAxk12iK9Q97RTRjP0+ntyNGBUpjKX8e1L3/ExPMrn/iufBRYdAUpMhvn9LRgpvHNTxvWUA7QtTMfZGcEmtAmJn"
-    b"dRzexVLlykdC36UOjZVF0Nj6TRO8vvwyRLrXm5iFeit10I7v9rK3u6/6HSzh3VG77QySYtICpwPDRnlTmmnRBfv5tGus+bJq51t7"
-    b"PZAQq7EE95B5RwgYaVtnSHOXZjQHP+PxiL9wlCg/mjC6U7l9s+WhYH6l9kwOZxQzcxAyFLgjvxwWOl5T6eionAWgKxwXgODa8Zq/"
-    b"uPGqXJs5E/0pXBbecVg/3e+phwCOoCd+yPI/tdQt3e1OB4ZX4cOF3QXNNEmgjV5vlzjgN200U/Al0THlJ35uBpqiRyVCbw5aVLZE"
-    b"tQaSMAIhBksyGU9iRcI6Uv9jxc21jgtKSYRJu59juL9Lk0dK+ariAOR0ZZSz8Ev4rbgzMkvkkb0k3Md7BrSKOyAOnry4AYeX12Ot"
-    b"TbwhK0TQipFxriPrtbFbUpTWr+KZLMmr+UIVPthG+CMSHw0HIuMD1WQlvTevQ1yYNJiGdViK/mVNiDFyjI4EGLQcRcJz6mxuarl8"
-    b"KIXixjG4mveCcm97tGHbDVXZU838MskW+9qYUzRT0mtASNFhF0c1wwwPw1brRMvwdBL9XHFORQsSqZyo38R/WsXOOCnM4EQcb4y4"
-    b"Ahwi4ofJ3s1NPLTZkE1htqu6uQQcYqP4Snzdap+ZtQwszUnPct9b3G2hQe3LvIHo2kFzOtGmw+X57u8+AemRRwUxYQTWynQp33yo"
-    b"i5UZyunk1p/udnHUJhQY+mATxiIdFN4Jgz+C9TJ4Af3ztLJEjBkOVg6lK8KGP8D+eJIZ262Y87w6SsfpLkY4LBYyStQI3RbkgIH/"
-    b"XAUOlLi19JQqoHxeyMXHmQy1vlKguIU7WIs5FImiNKnnbUqJ3tx5Gz7kiAKGUdXUaWnFJ2MukysXnb92RelnwQwrrHvhP5BKlZv1"
-    b"4ePECS9i3QSX4ikzSGdSX9EIPC9/+qDrFDpWEElMl4JDJSlhDYZ56IZKEb2IyZfRNw4ZHXLsce8rSp4nImHhOcuTw4TRfcmRi3q0"
-    b"dYKo2QrU8XLJnaPPVfJdcYiJc0Y42SXko01rnJor7mJfu1dLp4caL5VAaywW3/hXZLahI8/QOa8V/y3TT3d0XksXJwbxR6fBwVnU"
-    b"a08feSAlT2tuTug+2G0BY3JzxOHvUHJpPLkRS7oBv5SA67cSU8OxKbtJJys/McKiK5Irrixd+rP6IRkvi+lBx91BtvzcHobUqJol"
-    b"b1JIKW6bedkqtzH3dtNWv2dLy0ImrYYKEZ4/KxQz9V7OE56IaR+eJAB7ByBeUZpQISuBNnIpsWg2vCRLpR5Omy9zEtPsd+uU1qA0"
-    b"zYvHT5kpcE7CCYLQ5X2YxFLx7twPfFDIHxlyMi+JSkA5kSd14XCmOpohTLEknVT5P3a8Z6btndW+FUd+JH5YkhbsG5VrarOBVFQn"
-    b"AAYBJLX/tDi16O2WKWZnRuAS33dayYYm2G06CWBGR2pqlFMbtWD6CCRunGyUPJnYL28YuQhj8QOhRJYpBicg60eBtRdmkU0nset3"
-    b"VXuyx4bJrSgQyyRYA5/4EKGSgFwqsEH57CmMM8r7FKx4fxZWMgAk5Lvcald9GhkOzXs65WoeIuAOgLT2Ybk84Yrez7NxC68j9xqG"
-    b"3XFdYUyQzyk2+qgS9OWSAAAAALDe4aC6XkBWAAHJDdUaAAAdMBkNscRn+wIAAAAABFla"
-))
+INSTALLER_V040 = lzma.decompress(
+    base64.b64decode(
+        b"/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4A1UBq1dABGIQkeKIzPDdw8z/VWX7afG1TtMjxXpQsg+dBWsTnInIaaojqnerPjybjd4"
+        b"Ll6L8kURqEVyRvVJtKI7VSZcE5Q0wTTRNA7JB7EdnqtYfv1A09vKl5DnEzbeP8y+Qbwk4svDXXmtD2+eTNSyI3jWHtEngzLSLzYI"
+        b"koVi1PQfCrSl506GoYMJgF6p0VT92S4xGCHkMzhxokUhewemt/JKKdcW5UT7WOlwK67ZtohVDBnRHBfafxEKwGGMFVjgpzent6QM"
+        b"ouBCI/bGjs6NCBJhJsh5S2vX47LHqBfL/ZJP07zY1HbKaTzMjS9EqLVDPuI4VqWliNNsh3FwQXvwUGodqtI3Usf32zLRd349YvCK"
+        b"Ml9NNOm9oIdrJau8wyrHr+HncmXiqI4xXv7OYEzWp2wAZ1+tdzcbcMwov72J2Si/rx9oQJdVL+xvU4htYZjpOeNE+Ma8dxSxtbYj"
+        b"ZnrXoSKowCM8Oo9K8qNIflBYCuZjF2v1JOwp49KRsiEP4tUonMyKWWzDBugzQ2zW6SutUf1Wmq9GcWSEYiSRKwGcBlhi7maoQIvF"
+        b"ZzyC9HazrSjqEuAxk12iK9Q97RTRjP0+ntyNGBUpjKX8e1L3/ExPMrn/iufBRYdAUpMhvn9LRgpvHNTxvWUA7QtTMfZGcEmtAmJn"
+        b"dRzexVLlykdC36UOjZVF0Nj6TRO8vvwyRLrXm5iFeit10I7v9rK3u6/6HSzh3VG77QySYtICpwPDRnlTmmnRBfv5tGus+bJq51t7"
+        b"PZAQq7EE95B5RwgYaVtnSHOXZjQHP+PxiL9wlCg/mjC6U7l9s+WhYH6l9kwOZxQzcxAyFLgjvxwWOl5T6eionAWgKxwXgODa8Zq/"
+        b"uPGqXJs5E/0pXBbecVg/3e+phwCOoCd+yPI/tdQt3e1OB4ZX4cOF3QXNNEmgjV5vlzjgN200U/Al0THlJ35uBpqiRyVCbw5aVLZE"
+        b"tQaSMAIhBksyGU9iRcI6Uv9jxc21jgtKSYRJu59juL9Lk0dK+ariAOR0ZZSz8Ev4rbgzMkvkkb0k3Md7BrSKOyAOnry4AYeX12Ot"
+        b"TbwhK0TQipFxriPrtbFbUpTWr+KZLMmr+UIVPthG+CMSHw0HIuMD1WQlvTevQ1yYNJiGdViK/mVNiDFyjI4EGLQcRcJz6mxuarl8"
+        b"KIXixjG4mveCcm97tGHbDVXZU838MskW+9qYUzRT0mtASNFhF0c1wwwPw1brRMvwdBL9XHFORQsSqZyo38R/WsXOOCnM4EQcb4y4"
+        b"Ahwi4ofJ3s1NPLTZkE1htqu6uQQcYqP4Snzdap+ZtQwszUnPct9b3G2hQe3LvIHo2kFzOtGmw+X57u8+AemRRwUxYQTWynQp33yo"
+        b"i5UZyunk1p/udnHUJhQY+mATxiIdFN4Jgz+C9TJ4Af3ztLJEjBkOVg6lK8KGP8D+eJIZ262Y87w6SsfpLkY4LBYyStQI3RbkgIH/"
+        b"XAUOlLi19JQqoHxeyMXHmQy1vlKguIU7WIs5FImiNKnnbUqJ3tx5Gz7kiAKGUdXUaWnFJ2MukysXnb92RelnwQwrrHvhP5BKlZv1"
+        b"4ePECS9i3QSX4ikzSGdSX9EIPC9/+qDrFDpWEElMl4JDJSlhDYZ56IZKEb2IyZfRNw4ZHXLsce8rSp4nImHhOcuTw4TRfcmRi3q0"
+        b"dYKo2QrU8XLJnaPPVfJdcYiJc0Y42SXko01rnJor7mJfu1dLp4caL5VAaywW3/hXZLahI8/QOa8V/y3TT3d0XksXJwbxR6fBwVnU"
+        b"a08feSAlT2tuTug+2G0BY3JzxOHvUHJpPLkRS7oBv5SA67cSU8OxKbtJJys/McKiK5Irrixd+rP6IRkvi+lBx91BtvzcHobUqJol"
+        b"b1JIKW6bedkqtzH3dtNWv2dLy0ImrYYKEZ4/KxQz9V7OE56IaR+eJAB7ByBeUZpQISuBNnIpsWg2vCRLpR5Omy9zEtPsd+uU1qA0"
+        b"zYvHT5kpcE7CCYLQ5X2YxFLx7twPfFDIHxlyMi+JSkA5kSd14XCmOpohTLEknVT5P3a8Z6btndW+FUd+JH5YkhbsG5VrarOBVFQn"
+        b"AAYBJLX/tDi16O2WKWZnRuAS33dayYYm2G06CWBGR2pqlFMbtWD6CCRunGyUPJnYL28YuQhj8QOhRJYpBicg60eBtRdmkU0nset3"
+        b"VXuyx4bJrSgQyyRYA5/4EKGSgFwqsEH57CmMM8r7FKx4fxZWMgAk5Lvcald9GhkOzXs65WoeIuAOgLT2Ybk84Yrez7NxC68j9xqG"
+        b"3XFdYUyQzyk2+qgS9OWSAAAAALDe4aC6XkBWAAHJDdUaAAAdMBkNscRn+wIAAAAABFla"
+    )
+)
 
 
 def git(cwd, *args):
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
 
 
 class Release:
@@ -253,16 +270,32 @@ class Release:
             git(self.repo, "add", "-A")
             git(self.repo, "commit", "-qm", tag)
             git(self.repo, "tag", tag)
-            subprocess.run([BASH, str(ROOT / "scripts/build-release-artifact.sh"), tag, str(self.mirror)], cwd=self.repo, check=True)
+            subprocess.run(
+                [BASH, str(ROOT / "scripts/build-release-artifact.sh"), tag, str(self.mirror)],
+                cwd=self.repo,
+                check=True,
+            )
             # GitHub's source archive of the tag: a git archive whose header names the commit.
             subprocess.run(
-                ["git", "archive", "--format=tar.gz", f"--prefix=Crewship-{tag[1:]}/", "-o", str(self.mirror / f"src-{tag}.tar.gz"), tag],
+                [
+                    "git",
+                    "archive",
+                    "--format=tar.gz",
+                    f"--prefix=Crewship-{tag[1:]}/",
+                    "-o",
+                    str(self.mirror / f"src-{tag}.tar.gz"),
+                    tag,
+                ],
                 cwd=self.repo,
                 check=True,
             )
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
-        for name, body in {"curl": CURL_SHIM, "apt-get": "#!/bin/sh\n", "dpkg-query": "#!/bin/sh\nprintf installed\n"}.items():
+        for name, body in {
+            "curl": CURL_SHIM,
+            "apt-get": "#!/bin/sh\n",
+            "dpkg-query": "#!/bin/sh\nprintf installed\n",
+        }.items():
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
         self.env = {
@@ -310,7 +343,10 @@ def test_fresh_install_unpacks_a_release_without_git(release):
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
-@pytest.mark.parametrize("latest, warns", [("1.1.0", True), ("1.0.0", False), ("0.9.0", False), (None, False), ("offline", False)])
+@pytest.mark.parametrize(
+    "latest, warns",
+    [("1.1.0", True), ("1.0.0", False), ("0.9.0", False), (None, False), ("offline", False)],
+)
 def test_pnpm_release_policy_preserves_the_selected_release(release, tmp_path, latest, warns):
     import json
 
@@ -331,15 +367,25 @@ def test_pnpm_release_policy_preserves_the_selected_release(release, tmp_path, l
         "};\n"
     )
     result = subprocess.run(
-        [shutil.which("node"), "--require", str(stub), str(launcher / "crewship.js"), "--with", "none"],
-        capture_output=True, text=True, timeout=60,
+        [
+            shutil.which("node"),
+            "--require",
+            str(stub),
+            str(launcher / "crewship.js"),
+            "--with",
+            "none",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
         env={**release.env, "npm_config_user_agent": "pnpm/12.14.0 npm/? node/v24.0.0 linux x64"},
     )
     assert result.returncode == 0, result.stderr
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
     assert ("minimumReleaseAge" in result.stdout) is warns
-    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("Crewship v1.0.0 in")
-
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index(
+        "Crewship v1.0.0 in"
+    )
 
 
 @pytest.mark.parametrize(
@@ -356,7 +402,7 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
     (bin_dir / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
     (bin_dir / "sudo").chmod(0o755)
     (bin_dir / "apt-get").write_text(
-        '#!/bin/sh\n'
+        "#!/bin/sh\n"
         'if [ -f "$HOME/https-installed" ]; then echo MAIN_PACKAGE_SETUP; else echo HTTPS_BOOTSTRAP; fi\n'
         'case "$*" in *install*) touch "$HOME/https-installed" ;; esac\n'
     )
@@ -364,22 +410,25 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
         '#!/bin/sh\n[ "$3" != git ] && [ -f "$HOME/https-installed" ] || exit 1\nprintf installed\n'
     )
     (bin_dir / "curl").write_text(
-        '#!/usr/bin/env bash\n[ -f "$HOME/https-installed" ] || exit 127\n' + CURL_SHIM.split("\n", 1)[1]
+        '#!/usr/bin/env bash\n[ -f "$HOME/https-installed" ] || exit 127\n'
+        + CURL_SHIM.split("\n", 1)[1]
     )
     if missing == "curl":
         env = tmp_path / "bash-env"
         env.write_text(
-            'command() {\n'
+            "command() {\n"
             '  if [[ $* == "-v curl" && ! -f "$HOME/https-installed" ]]; then return 1; fi\n'
             '  builtin command "$@"\n'
-            '}\n'
+            "}\n"
         )
         release.env["BASH_ENV"] = str(env)
     result = release.install("v1.1.0" if ref else "v1.0.0")
     assert result.returncode == 0, result.stderr
     assert (release.home / "https-installed").exists()
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
-    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("Updating OS packages...")
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index(
+        "Updating OS packages..."
+    )
     assert "MAIN_PACKAGE_SETUP" not in result.stdout
     assert "MAIN_PACKAGE_SETUP" in install_log(result).read_text()
     assert ("HTTPS_BOOTSTRAP" in result.stderr) is (missing is not None)
@@ -448,9 +497,9 @@ def test_terminal_install_drains_output_before_exit(release, tmp_path, status):
     assert release.install("v1.0.0").returncode == 0
     (release.crewship / "ship.sh").write_text(
         SHIP + f'\nif [ "$1" = launch ]; then\n'
-        '  echo terminal-output\n'
-        '  echo terminal-error >&2\n'
-        f'  exit {status}\nfi\n'
+        "  echo terminal-output\n"
+        "  echo terminal-error >&2\n"
+        f"  exit {status}\nfi\n"
     )
     tee = tmp_path / "bin/tee"
     tee.write_text(
@@ -497,7 +546,8 @@ def test_install_questions_keep_terminal_and_capture_output(release, question_st
     assert release.install("v1.0.0").returncode == 0
     config = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     config["crewship"].update(
-        home=str(release.home), user=ship.pwd.getpwuid(os.getuid()).pw_name,
+        home=str(release.home),
+        user=ship.pwd.getpwuid(os.getuid()).pw_name,
         workspace=str(release.home / "Dev"),
     )
     config["crewship"]["profiles"]["firstmate"] = True
@@ -510,7 +560,7 @@ def test_install_questions_keep_terminal_and_capture_output(release, question_st
         f"#!{sys.executable}\n"
         "import os, pathlib, sys\n"
         "if sys.argv[1:] == ['models', '--json']:\n"
-        "    print('{\"models\": [{\"id\": \"test\"}]}')\n"
+        '    print(\'{"models": [{"id": "test"}]}\')\n'
         "    sys.exit(0)\n"
         "assert all(os.isatty(fd) for fd in (0, 1, 2)), 'missing terminal'\n"
         "assert all(os.get_terminal_size(1)), 'missing terminal size'\n"
@@ -550,10 +600,12 @@ def test_install_questions_keep_terminal_and_capture_output(release, question_st
     assert (f"omp exited {question_status}" in result.stdout) == bool(question_status)
 
 
-@pytest.mark.parametrize("cache_state", ["present", "recreated", "home-conflict", "system-conflict"])
+@pytest.mark.parametrize(
+    "cache_state", ["present", "recreated", "home-conflict", "system-conflict"]
+)
 def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path, cache_state):
     assert release.install("v1.0.0").returncode == 0
-    for directory in ((".local/state", ".cache") if cache_state == "present" else (".local/state",)):
+    for directory in (".local/state", ".cache") if cache_state == "present" else (".local/state",):
         old = release.home / directory / "code-factory"
         old.mkdir(parents=True)
         (old / "data").write_text(directory)
@@ -588,40 +640,54 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
     )
     migration = yaml.safe_load((ROOT / "blueprint/ansible/tasks/rename.yml").read_text())[0]
     migration["vars"]["crewship_renamed_paths"] = [
-        pair for pair in migration["vars"]["crewship_renamed_paths"]
+        pair
+        for pair in migration["vars"]["crewship_renamed_paths"]
         if pair[0].endswith(("/.local/state/code-factory", "/.cache/code-factory"))
     ] + [[str(system_old), str(system_new)]]
     tasks = migration["block"]
-    stop = next(task for task in tasks if task["name"] == "Stop the units that use the pre-rename paths")
+    stop = next(
+        task for task in tasks if task["name"] == "Stop the units that use the pre-rename paths"
+    )
     del stop["ansible.builtin.systemd_service"]
     stop["ansible.builtin.command"] = {
         "argv": [sys.executable, str(shutdown), "{{ item.item }}"],
     }
     stop["changed_when"] = False
     last_move = next(
-        index for index, task in enumerate(tasks)
+        index
+        for index, task in enumerate(tasks)
         if task["name"] == "Move the pre-rename system paths to their new names"
     )
-    migration["block"] = tasks[:last_move + 1]
+    migration["block"] = tasks[: last_move + 1]
     playbook = tmp_path / "migration.yml"
-    playbook.write_text(yaml.safe_dump([{
-        "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "vars": {
-            "ansible_become": False, "ansible_python_interpreter": sys.executable,
-            "crewship_become_target": False,
-            "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
-            "crewship_share_dir": str(release.home / ".local/share/crewship"),
-            "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
-            "crewship_user_units": str(units),
-            "crewship_manage_services": True, "crewship_user_systemd_env": {},
-        },
-        "tasks": [migration],
-    }]))
+    playbook.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "hosts": "localhost",
+                    "connection": "local",
+                    "gather_facts": False,
+                    "vars": {
+                        "ansible_become": False,
+                        "ansible_python_interpreter": sys.executable,
+                        "crewship_become_target": False,
+                        "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
+                        "crewship_share_dir": str(release.home / ".local/share/crewship"),
+                        "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
+                        "crewship_user_units": str(units),
+                        "crewship_manage_services": True,
+                        "crewship_user_systemd_env": {},
+                    },
+                    "tasks": [migration],
+                }
+            ]
+        )
+    )
     (release.crewship / "ship.sh").write_text(
-        SHIP + '\ncase $1 in\n'
-        '  launch) set -- ;;\n'
-        '  *) exit 0 ;;\n'
-        'esac\n'
+        SHIP + "\ncase $1 in\n"
+        "  launch) set -- ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
         f'exec "{Path(sys.executable).parent / "ansible-playbook"}"'
         f' -i localhost, "{playbook}" "$@"\n'
     )
@@ -629,7 +695,9 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
     result = release.install("v1.0.0")
     if conflict:
         assert result.returncode != 0
-        assert f"{conflict.parent / 'code-factory'} and {conflict}" in install_log(result).read_text()
+        assert (
+            f"{conflict.parent / 'code-factory'} and {conflict}" in install_log(result).read_text()
+        )
         assert (conflict / "data").read_text() == "keep"
         assert (release.home / ".local/state/code-factory/data").read_text() == ".local/state"
         assert (release.home / ".cache/code-factory/data").read_text() == ".cache"
@@ -684,7 +752,6 @@ def test_install_routes_apply_output(release, tmp_path, password_required):
         assert (message in result.stdout + result.stderr) == password_required
 
 
-
 @pytest.mark.parametrize("failure", ["lock", "timeout", "frontend-timeout", "package"])
 def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
     release.env["CREWSHIP_REF"] = "v1.0.0"
@@ -728,7 +795,9 @@ def test_package_failures_wait_only_for_locks(release, tmp_path, failure):
         assert result.returncode == 100
         assert not release.crewship.exists()
         if failure.endswith("timeout"):
-            assert "package locks did not clear within 600 seconds" in install_log(result).read_text()
+            assert (
+                "package locks did not clear within 600 seconds" in install_log(result).read_text()
+            )
         else:
             assert "Unable to locate package missing" in install_log(result).read_text()
             assert len(calls) == 1
@@ -747,7 +816,9 @@ def test_update_keeps_host_files_and_removes_the_replaced_release(release):
 
 def test_bad_checksum_leaves_the_install_untouched(release):
     assert release.install("v1.0.0").returncode == 0
-    (release.mirror / "crewship-v1.1.0.tar.gz.sha256").write_text(f"{'0' * 64}  crewship-v1.1.0.tar.gz\n")
+    (release.mirror / "crewship-v1.1.0.tar.gz.sha256").write_text(
+        f"{'0' * 64}  crewship-v1.1.0.tar.gz\n"
+    )
     result = release.install("v1.1.0")
     assert result.returncode != 0
     assert "does not match its .sha256" in result.stderr
@@ -769,7 +840,9 @@ def test_release_without_artifact_installs_the_verified_source_archive(release):
 def test_source_archive_of_another_commit_is_refused(release):
     (release.mirror / "crewship-v1.1.0.tar.gz").unlink()
     # The v1.0.0 archive under the v1.1.0 name: a different commit than the tag's.
-    (release.mirror / "src-v1.1.0.tar.gz").write_bytes((release.mirror / "src-v1.0.0.tar.gz").read_bytes())
+    (release.mirror / "src-v1.1.0.tar.gz").write_bytes(
+        (release.mirror / "src-v1.0.0.tar.gz").read_bytes()
+    )
     result = release.install("v1.1.0")
     assert result.returncode != 0
     assert "refusing to install" in result.stderr
@@ -791,9 +864,17 @@ def legacy_release(release, tmp_path):
     git(release.repo, "commit", "-qm", "Legacy release with its cloning installer")
     git(release.repo, "tag", "v0.4.0")
     subprocess.run(
-        ["git", "archive", "--format=tar.gz", "--prefix=Crewship-0.4.0/",
-         "-o", str(release.mirror / "src-v0.4.0.tar.gz"), "v0.4.0"],
-        cwd=release.repo, check=True,
+        [
+            "git",
+            "archive",
+            "--format=tar.gz",
+            "--prefix=Crewship-0.4.0/",
+            "-o",
+            str(release.mirror / "src-v0.4.0.tar.gz"),
+            "v0.4.0",
+        ],
+        cwd=release.repo,
+        check=True,
     )
     wrapper = tmp_path / "bin/git"
     wrapper.write_text(
@@ -822,7 +903,12 @@ def legacy_release(release, tmp_path):
     ],
 )
 def test_public_bootstrap_installs_legacy_archive(
-    legacy_release, tmp_path, archive_kind, existing, repo, failure,
+    legacy_release,
+    tmp_path,
+    archive_kind,
+    existing,
+    repo,
+    failure,
 ):
     release = legacy_release
     private = {
@@ -838,24 +924,38 @@ def test_public_bootstrap_installs_legacy_archive(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
         (release.home / "args").unlink()
-    release.env.update(CREWSHIP_REF="v0.4.0", CREWSHIP_REPO=repo,
-                       GIT_CONFIG_VALUE_0=f"https://github.com/{repo}")
+    release.env.update(
+        CREWSHIP_REF="v0.4.0", CREWSHIP_REPO=repo, GIT_CONFIG_VALUE_0=f"https://github.com/{repo}"
+    )
     source = release.mirror / "src-v0.4.0.tar.gz"
     if failure in {"other-commit", "tree"}:
         ref = "v1.1.0" if failure == "other-commit" else "v0.4.0^{tree}"
         subprocess.run(
-            ["git", "archive", "--format=tar.gz", "--prefix=Crewship-0.4.0/",
-             "-o", str(source), ref], cwd=release.repo, check=True,
+            [
+                "git",
+                "archive",
+                "--format=tar.gz",
+                "--prefix=Crewship-0.4.0/",
+                "-o",
+                str(source),
+                ref,
+            ],
+            cwd=release.repo,
+            check=True,
         )
     if archive_kind == "artifact":
         artifact = release.mirror / "crewship-v0.4.0.tar.gz"
         artifact.write_bytes(source.read_bytes())
         if failure != "missing-checksum":
-            digest = "0" * 64 if failure == "checksum" else hashlib.sha256(artifact.read_bytes()).hexdigest()
+            digest = (
+                "0" * 64
+                if failure == "checksum"
+                else hashlib.sha256(artifact.read_bytes()).hexdigest()
+            )
             artifact.with_name(artifact.name + ".sha256").write_text(f"{digest}  {artifact.name}\n")
     if failure == "missing-git":
         (tmp_path / "bin/dpkg-query").write_text(
-            '#!/bin/sh\n'
+            "#!/bin/sh\n"
             '[ "$3" != git ] || [ -f "$HOME/git-installed" ] || exit 1\nprintf installed\n'
         )
         (tmp_path / "bin/apt-get").write_text(
@@ -887,13 +987,19 @@ def test_public_bootstrap_installs_legacy_archive(
             assert packages[0].endswith("update -q")
             assert packages[1].endswith("install -y -q git")
     if existing:
-        assert all((release.crewship / name).read_text() == content for name, content in private.items())
+        assert all(
+            (release.crewship / name).read_text() == content for name, content in private.items()
+        )
     assert "legacy clone called" not in result.stderr
     calls = release.home / "git-calls"
-    assert not calls.exists() or not any(line.startswith("clone ") for line in calls.read_text().splitlines())
+    assert not calls.exists() or not any(
+        line.startswith("clone ") for line in calls.read_text().splitlines()
+    )
     urls = (tmp_path / "requests").read_text().splitlines()
     assert f"https://github.com/{repo}/releases/download/v0.4.0/crewship-v0.4.0.tar.gz" in urls
-    assert "https://github.com/i098/Crewship/releases/download/v0.4.7/crewship-v0.4.7.tar.gz" in urls
+    assert (
+        "https://github.com/i098/Crewship/releases/download/v0.4.7/crewship-v0.4.7.tar.gz" in urls
+    )
     assert not any("raw.githubusercontent.com" in url or "/main/" in url for url in urls)
 
 
@@ -961,7 +1067,9 @@ def test_v040_host_is_migrated_before_the_reapply(release):
     (bin_dir / "uv").symlink_to(old / "uv")
     (bin_dir / "mine").write_text("not ours")
     host = release.crewship / ".local/host.yml"
-    host.write_text("factory:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n")
+    host.write_text(
+        "factory:\n  home: /h\n  fleet:\n    supabase_project_id: a\n    fixture_archive: b\n    worktree_pools: [c]\n    keep: 1\n"
+    )
     result = release.install("v1.1.0")
     assert result.returncode == 0, result.stderr
     assert not (bin_dir / "uv").exists() and not (bin_dir / "uv").is_symlink()
@@ -982,10 +1090,10 @@ def test_failed_link_migration_stops_before_reapplying(release, tmp_path):
     link.symlink_to(old / "uv")
     env = tmp_path / "bash-env"
     env.write_text(
-        'rm() {\n'
+        "rm() {\n"
         '  if [[ $# == 2 && $1 == -f && $2 == "$FAILED_LINK" ]]; then return 73; fi\n'
         '  command rm "$@"\n'
-        '}\n'
+        "}\n"
     )
     release.env.update(BASH_ENV=str(env), FAILED_LINK=str(link))
     result = release.install("v1.1.0")
@@ -1034,11 +1142,18 @@ def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, 
         "    return new Response(null, { status: 302, headers: location ? { location } : {} });\n"
         "  }\n"
         "  const ref = url.split('/')[5];\n"
-        "  return new Response(`echo \"ref=$CREWSHIP_REF args=$*\"; echo \"url-ref=${ref}\"`);\n"
+        '  return new Response(`echo "ref=$CREWSHIP_REF args=$*"; echo "url-ref=${ref}"`);\n'
         "};\n"
     )
     result = subprocess.run(
-        [shutil.which("node"), "--require", str(stub), str(ROOT / "tools/npm/crewship.js"), "update", "--container"],
+        [
+            shutil.which("node"),
+            "--require",
+            str(stub),
+            str(ROOT / "tools/npm/crewship.js"),
+            "update",
+            "--container",
+        ],
         capture_output=True,
         text=True,
         env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LATEST_LOCATION": location},
