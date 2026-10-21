@@ -224,7 +224,7 @@ def test_api_flags_preserve_authorized_targets(guarded, flag):
     guarded(f"gh api {flag} -X POST repos/i098/sanctum/issues -f title=incident")
 
 
-@pytest.mark.parametrize("flag", ["--remove-milestone", "--remove-parent", "--remove-type"])
+@pytest.mark.parametrize("flag", ["--remove-milestone", "--remove-type"])
 def test_issue_boolean_flags_preserve_authorized_targets(guarded, flag):
     guarded(f"gh issue edit 1 {flag} -R i098/sanctum")
 
@@ -261,7 +261,8 @@ def test_authorized_relationships_run(guarded):
     guarded(
         "gh issue edit 1 -R i098/sanctum --parent 2 --add-sub-issue 3,4 "
         "--remove-sub-issue 5 --add-blocked-by 6 --remove-blocked-by 7 "
-        "--add-blocking http://github.com/i098/sanctum/issues/8 --remove-blocking 9"
+        "--add-blocking http://github.com/i098/sanctum/issues/8 --remove-blocking 9",
+        approved="i098/sanctum",
     )
 
 
@@ -338,3 +339,115 @@ def test_develop_checkout_flags_remain_boolean(guarded, flag):
 ])
 def test_uncertain_api_flags_block_before_execution(guarded, command):
     guarded(command, allowed=False)
+
+
+@pytest.mark.parametrize("flag", ["-h", "--help=true", "--help=1", "--help=t"])
+@pytest.mark.parametrize("command", [
+    "issue create --title incident --body regression",
+    "api -X POST repos/upstream/firstmate/issues --field title=incident",
+])
+def test_axi_help_lookalikes_do_not_bypass_guard(guarded, flag, command):
+    guarded(f"gh-axi {command} {flag}", allowed=False)
+
+
+@pytest.mark.parametrize("cli,flag", [
+    ("gh", "-h"), ("gh", "--help=true"), ("gh", "--help=1"),
+    ("gh", "--help=t"), ("gh", "--help"), ("gh-axi", "--help"),
+])
+def test_each_cli_recognized_help_remains_available(guarded, cli, flag):
+    guarded(f"{cli} issue create {flag}")
+
+
+@pytest.mark.parametrize("flag", [
+    "--remove-parent", "--remove-parent=true", "--remove-parent=1",
+    "--parent 2", "--parent=https://github.com/i098/sanctum/issues/2",
+    "--add-sub-issue 2,3",
+])
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("i098/other", True), ("invalid", False)])
+def test_implicit_parent_targets_require_approval(guarded, flag, approved, allowed):
+    guarded(f"gh issue edit 1 -R i098/sanctum {flag}", approved=approved, allowed=allowed)
+
+
+@pytest.mark.parametrize("flag", ["--remove-parent=false", "--remove-parent=0"])
+def test_disabled_parent_removal_needs_no_approval(guarded, flag):
+    guarded(f"gh issue edit 1 -R i098/sanctum --title changed {flag}")
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("arguments", [
+    "-X POST repos/i098/sanctum/issues/1/sub_issues --field sub_issue_id=123",
+    "-X POST repos/i098/sanctum/issues/1/sub_issues --field sub_issue_id=123 --field replace_parent=true",
+    "-X DELETE repos/i098/sanctum/issues/1/sub_issue --field sub_issue_id=123",
+    "-X PATCH repos/i098/sanctum/issues/1/sub_issues/priority --field sub_issue_id=123 --field after_id=456",
+    "-X PATCH repos/i098/sanctum/issues/1/sub_issues/priority --field sub_issue_id=123 --field before_id=456",
+    "-X POST repos/i098/sanctum/issues/1/dependencies/blocked_by --field issue_id=123",
+    "-X DELETE repos/i098/sanctum/issues/1/dependencies/blocked_by/123",
+    "-X POST repos/i098/sanctum/issues/1/sub_issues --input payload.json",
+    "-X POST repos/i098/sanctum/issues/1/dependencies/blocked_by --input -",
+])
+@pytest.mark.parametrize("approved,allowed", [(None, False), ("i098/other", True)])
+def test_rest_relationship_targets_require_approval(guarded, cli, arguments, approved, allowed):
+    guarded(f"{cli} api {arguments}", approved=approved, allowed=allowed)
+
+
+@pytest.mark.parametrize("endpoint", [
+    "repos/i098/sanctum/issues/1/parent",
+    "repos/i098/sanctum/issues/1/sub_issues",
+    "repos/i098/sanctum/issues/1/dependencies/blocked_by",
+    "repos/i098/sanctum/issues/1/dependencies/blocking",
+])
+def test_relationship_reads_need_no_approval(guarded, endpoint):
+    guarded(f"gh api {endpoint}")
+
+
+def test_axi_numbered_relationships_keep_explicit_repo(guarded):
+    guarded("gh-axi issue subissue add 1 2 -R i098/sanctum")
+
+
+@pytest.mark.parametrize("shell", [
+    "bash -e -c", "sh -e -c", "bash -o pipefail -c", "bash --noprofile --login -c",
+    "bash -O extglob -c", "bash --noprofile --norc -ec", "bash -c -e",
+    "bash --rcfile /dev/null -c",
+])
+@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
+def test_nested_shell_options_do_not_hide_writes(guarded, shell, target, allowed):
+    command = f'"$GUARD_CWD/gh-axi" issue create --title incident {target}'
+    guarded(f"{shell} {shlex.quote(command)}", allowed=allowed)
+
+
+def test_nested_login_shell_requires_target(guarded):
+    guarded("bash --login -c 'gh-axi issue create --title incident'", allowed=False)
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("prefix", ["", "/", "https://api.github.com/"])
+@pytest.mark.parametrize("resource", [
+    "pulls/42", "pulls/42/comments", "releases/1", "comments/1",
+    "branches/main/protection", "labels/bug",
+])
+def test_non_issue_api_placeholders_remain_outside_guard(guarded, cli, prefix, resource):
+    guarded(f"{cli} api -X PATCH '{prefix}repos/{{owner}}/{{repo}}/{resource}' --field body=changed")
+
+
+@pytest.mark.parametrize("endpoint", [
+    "repos/{owner}/{repo}/{resource}", "$ENDPOINT",
+    "repos/${OWNER}/${REPO}/pulls/42", "repos/{owner}/{repo}/issues/42",
+])
+def test_unresolved_api_targets_still_block(guarded, endpoint):
+    guarded(f"gh api -X PATCH {shlex.quote(endpoint)} --field title=changed", allowed=False)
+
+
+@pytest.mark.parametrize("flag", ["--list", "-l", "--list=true", "-l=true", "--list=1", "-l=t"])
+def test_develop_listing_needs_no_target(guarded, flag):
+    guarded(f"gh issue develop 1 {flag}")
+
+
+@pytest.mark.parametrize("flag", [
+    "--list=false", "-l=false", "--list=0", "--list=f", "--list -l=false",
+])
+def test_develop_false_listing_still_requires_target(guarded, flag):
+    guarded(f"gh issue develop 1 {flag}", allowed=False)
+
+
+def test_develop_last_list_value_wins(guarded):
+    guarded("gh issue develop 1 -l=false --list")

@@ -68,7 +68,8 @@ const RELATION_FLAGS = [
 const TARGET_REQUIRED =
 	"Blocked: GitHub issue writes need an explicit repository target. Use -R owner/repo, " +
 	"a supported issue URL, or a literal repos/owner/repo/issues API path. " +
-	"GraphQL issue writes require CREWSHIP_GITHUB_APPROVED_REPO after explicit approval.";
+	"GraphQL issue writes and unresolved relationship writes require " +
+	"CREWSHIP_GITHUB_APPROVED_REPO after explicit approval.";
 
 type GithubArgs = { positionals: string[]; flags: Record<string, string[]>; uncertain: boolean };
 type ShellWord = { value: string; operator: boolean };
@@ -98,7 +99,7 @@ function commandArgs(words: ShellWord[], start: number): string[] {
 	return args;
 }
 
-function githubArgs(words: string[]): GithubArgs {
+function githubArgs(words: string[], cli: string): GithubArgs {
 	const positionals: string[] = [];
 	const flags: Record<string, string[]> = {};
 	let uncertain = false;
@@ -117,8 +118,12 @@ function githubArgs(words: string[]): GithubArgs {
 			continue;
 		}
 		const flag = word.match(/^(--[^=]+|-[a-zA-Z])(?:=(.*)|(.+))?$/);
-		const name = flag?.[1] === "-c" && positionals[0] === "issue" && positionals[1] === "develop" ?
-			"--checkout" : aliases[flag?.[1] ?? word] ?? flag?.[1] ?? word;
+		let name = aliases[flag?.[1] ?? word] ?? flag?.[1] ?? word;
+		if (cli === "gh" && positionals[0] === "issue" && positionals[1] === "develop") {
+			if (flag?.[1] === "-c") name = "--checkout";
+			if (flag?.[1] === "-l") name = "--list";
+		}
+		if (cli === "gh-axi" && name === "--help" && word !== "--help") continue;
 		const attached = flag?.[2] ?? flag?.[3];
 		let value: string;
 		if (BOOL_FLAGS[name]) {
@@ -172,9 +177,29 @@ function apiTargets(args: GithubArgs, cli: string): string[] {
 	if (/^(GET|HEAD|OPTIONS)$/i.test(method)) return [];
 	if (!/^(POST|PATCH|PUT|DELETE)$/i.test(method)) return [""];
 	if (!endpoint) return [""];
+	const resource = path.match(/^repos\/(?:[\w.-]+|\{owner\})\/(?:[\w.-]+|\{repo\})\/([\w-]+)(?:[/?#]|$)/)?.[1];
+	if (resource && resource !== "issues") return [];
 	if (!/(?:^|\/)issues(?:[/?#]|$)/.test(endpoint) && !/[$`{]/.test(endpoint)) return [];
 	const match = path.match(/^repos\/([\w.-]+\/[\w.-]+)\/issues(?:[/?#]|$)/);
-	return [match?.[1].toLowerCase() ?? ""];
+	const targets = [match?.[1].toLowerCase() ?? ""];
+	if (/\/issues\/[^/?#]+\/(?:parent|sub_issues?|dependencies)(?:[/?#]|$)/.test(path)) {
+		targets.push(literalRepo(process.env.CREWSHIP_GITHUB_APPROVED_REPO ?? ""));
+	}
+	return targets;
+}
+
+function relationshipTargets({ flags, positionals }: GithubArgs, cli: string): string[] {
+	const targets: string[] = [];
+	for (const name of RELATION_FLAGS) {
+		for (const value of (flags[name] ?? []).flatMap((field) => field.split(","))) {
+			if (!/^#?\d+$/.test(value)) targets.push(urlRepo(value));
+		}
+	}
+	if (cli === "gh" && positionals[1] === "edit" && (
+		/^(true|1|t)$/i.test(flags["--remove-parent"]?.at(-1) ?? "") ||
+		flags["--parent"]?.some(Boolean) || flags["--add-sub-issue"]?.some(Boolean)
+	)) targets.push(literalRepo(process.env.CREWSHIP_GITHUB_APPROVED_REPO ?? ""));
+	return targets;
 }
 
 function mutationTargets(args: GithubArgs, cli: string): string[] {
@@ -183,6 +208,7 @@ function mutationTargets(args: GithubArgs, cli: string): string[] {
 	const subissueWrite = cli === "gh-axi" && operation === "subissue" && /^(add|remove)$/.test(selector);
 	if (kind !== "issue" || (!ISSUE_WRITES[operation] && !subissueWrite)) return [];
 	if (args.uncertain) return [""];
+	if (cli === "gh" && operation === "develop" && /^(true|1|t)$/i.test(flags["--list"]?.at(-1) ?? "")) return [];
 	const targets = (flags["--repo"] ?? []).map(literalRepo);
 	const selectors = operation === "create" || operation === "new" ? [] :
 		positionals.slice(subissueWrite ? 3 : 2, operation === "transfer" ? 3 : undefined);
@@ -191,11 +217,7 @@ function mutationTargets(args: GithubArgs, cli: string): string[] {
 		targets.push(cli === "gh" ? urlRepo(value) : "");
 	}
 	if (targets.length === 0) targets.push("");
-	for (const name of RELATION_FLAGS) {
-		for (const value of (flags[name] ?? []).flatMap((field) => field.split(","))) {
-			if (!/^#?\d+$/.test(value)) targets.push(urlRepo(value));
-		}
-	}
+	targets.push(...relationshipTargets(args, cli));
 	if (operation === "transfer") {
 		const destination = cli === "gh-axi" ? flags["--to-repo"]?.at(-1) : positionals[3];
 		targets.push(literalRepo(destination ?? ""));
@@ -204,7 +226,7 @@ function mutationTargets(args: GithubArgs, cli: string): string[] {
 }
 
 function checkGithubWrite(words: string[], cli: string): string {
-	const args = githubArgs(words);
+	const args = githubArgs(words, cli);
 	if (!args.uncertain && /^(true|1|t)$/i.test(args.flags["--help"]?.at(-1) ?? "")) return "";
 	const targets = args.positionals[0] === "api" ? apiTargets(args, cli) : mutationTargets(args, cli);
 	if (targets.some((target) => !target)) return TARGET_REQUIRED;
@@ -221,9 +243,21 @@ function githubWriteReason(command: string): string {
 	const words = shellWords(command);
 	for (let i = 0; i < words.length; i++) {
 		const cli = words[i].value.split("/").pop() ?? "";
-		if (/^(?:bash|sh|zsh)$/.test(cli) && /^-[a-z]*c[a-z]*$/.test(words[i + 1]?.value ?? "")) {
-			const reason = githubWriteReason(words[i + 2]?.value ?? "");
-			if (reason) return reason;
+		if (/^(?:bash|sh|zsh)$/.test(cli)) {
+			const args = commandArgs(words, i + 1);
+			let commandString = false;
+			for (let j = 0; j < args.length; j++) {
+				const arg = args[j];
+				if (arg === "--" || !/^[+-].+/.test(arg)) {
+					if (commandString) {
+						const reason = githubWriteReason(args[arg === "--" ? j + 1 : j] ?? "");
+						if (reason) return reason;
+					}
+					break;
+				}
+				if (/^-[^-]*c/.test(arg)) commandString = true;
+				if (/^(?:--rcfile|--init-file|[+-][^-]*[oO])$/.test(arg) && !/^[+-]/.test(args[j + 1] ?? "")) j++;
+			}
 		}
 		if (cli !== "gh" && cli !== "gh-axi") continue;
 		const args = commandArgs(words, i + 1);

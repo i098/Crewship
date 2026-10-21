@@ -135,6 +135,8 @@ Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional
 `gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
 The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
 Recognized reads and help commands pass unchanged.
+`gh` accepts `-h` and boolean help values; `gh-axi` recognizes only bare `--help`.
+`gh issue develop --list` and `-l` remain read-only; false values still require a write target.
 Unknown flags or invalid boolean values block API commands because the guard cannot safely determine whether they write.
 
 The guard also checks API writes to `repos/owner/repo/issues`, including issue comments and other child paths.
@@ -145,11 +147,15 @@ API targets must use literal repository names, not `{owner}` or `{repo}` placeho
 GraphQL issue mutations and shared mutations that can change issues require `CREWSHIP_GITHUB_APPROVED_REPO`, even when the task contract is set.
 The value names the explicitly approved target repository because the guard cannot resolve GraphQL node IDs.
 File and stdin GraphQL payloads also require this approval because the command-text guard cannot inspect their contents.
+`gh issue edit --parent`, `--add-sub-issue`, and active `--remove-parent` also require approval because an existing parent can be outside the target repository.
+REST writes to issue `parent`, `sub_issue`, `sub_issues`, and `dependencies` paths require approval for unresolved relationship targets.
+This includes IDs in fields, file input, stdin, and dependency URLs.
+Resolve those targets before approving the exact repository with `CREWSHIP_GITHUB_APPROVED_REPO`.
 
 Missing-target blocking is always active.
 Repository mismatch checks apply only when `CREWSHIP_GITHUB_REPO=owner/repo` is set in the environment that starts the task's omp session.
 Crewship has no repository-aware task launcher here; Firstmate owns that launch path and must supply this variable separately.
-Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact additional repository.
+Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact repository.
 Both values compare without letter case.
 `GH_REPO`, the working directory, shell comments, and URLs in titles or bodies do not satisfy an explicit target.
 
@@ -160,7 +166,8 @@ Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kil
 
 This command-text guard is not an operating-system security boundary.
 It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
-Literal shell commands and nested `sh -c` forms are covered; arbitrary eval-language programs and argv arrays are not.
+Literal shell commands and nested `sh -c` forms are covered, including preceding shell options and their operands.
+Arbitrary eval-language programs and argv arrays are not covered.
 
 ## Quality gate
 
