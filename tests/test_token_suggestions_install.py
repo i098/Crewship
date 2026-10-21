@@ -28,6 +28,9 @@ DEFAULTS = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     {"fm_home": "/srv/reports", "snapshots": ["/srv/saved.json"]},
     {"fm_home": "/srv/reports", "ledger": "/srv/usage.sqlite", "enabled": False},
     {"fm_home": "/srv/reports", "omp_sessions": "/srv/omp/sessions"},
+    {"fm_home": "/home/your-user/.reports", "ledger": "/home/your-user/.usage/usage.sqlite",
+     "omp_sessions": "/home/your-user/.omp/agent/sessions",
+     "snapshots": ["/home/your-user/.reports/saved.json"]},
 ])
 def test_optional_reader_configuration_is_accepted(settings):
     config = {**DEFAULTS, "crewship": {**DEFAULTS["crewship"], "token_suggestions": settings}}
@@ -42,6 +45,16 @@ def test_optional_reader_configuration_is_accepted(settings):
     {"fm_home": "/srv/reports", "scan_sessions": True},
 ])
 def test_unsafe_reader_configuration_is_rejected(settings):
+    config = {**DEFAULTS, "crewship": {**DEFAULTS["crewship"], "token_suggestions": settings}}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(config, SCHEMA)
+
+
+@pytest.mark.parametrize("field", ["fm_home", "ledger", "omp_sessions", "snapshots"])
+@pytest.mark.parametrize("path", ["/.", "/..", "/srv/./sessions", "/srv/../sessions",
+                                 "/srv/sessions/.", "/srv/sessions/.."])
+def test_reader_paths_reject_traversal_components(field, path):
+    settings = {"fm_home": "/srv/reports", field: [path] if field == "snapshots" else path}
     config = {**DEFAULTS, "crewship": {**DEFAULTS["crewship"], "token_suggestions": settings}}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(config, SCHEMA)

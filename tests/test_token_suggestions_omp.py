@@ -27,12 +27,12 @@ def session(root, name, rows):
     return path
 
 
-def omp_fixture(root, bounds):
+def omp_fixture(root, bounds, calls=3):
     at = bounds[1] + timedelta(hours=1)
     for index in range(3):
         rows = [message(f"context-{index}", at, "user", [
             {"type": "text", "text": CANARY * 40}])]
-        for call in range(3 if index == 0 else 0):
+        for call in range(calls if index == 0 else 0):
             rows.append(message(f"assistant-{index}-{call}", at, "assistant", [
                 {"type": "toolCall", "id": f"call-{call}", "name": CANARY,
                  "arguments": {"path": CANARY}}], provider=CANARY, model=CANARY,
@@ -85,6 +85,11 @@ def test_omp_window_and_unknown_usage_stay_separate(tmp_path, report):
     ]:
         rows.append(message(key, at, "assistant", [], provider=CANARY, model=CANARY, usage=usage))
     session(tmp_path, "window", rows)
+    source = importlib.import_module("token_suggestions_sources")
+    _, cache, _ = source.read_omp(tmp_path, bounds)
+    assert len(cache) == 1
+    assert cache[0]["current"] == 1
+    assert cache[0]["requests"] == 2
     collected = report.collect({"omp_sessions": str(tmp_path)}, bounds)
     text = report.markdown(bounds, collected, False)
     assert "2 completions; 1 excluded rows" in text
@@ -93,19 +98,74 @@ def test_omp_window_and_unknown_usage_stay_separate(tmp_path, report):
     assert "Previous seven complete days:" not in text
 
 
-@pytest.mark.parametrize("copy", ["complete", "shorter"])
-def test_omp_copied_entries_do_not_duplicate_measurements(tmp_path, report, copy):
+@pytest.mark.parametrize("copy", ["complete", "prefix", "suffix"])
+@pytest.mark.parametrize("newer", [False, True])
+def test_omp_copied_entries_do_not_duplicate_measurements(tmp_path, report, copy, newer):
     bounds = report.windows(CUTOFF)
-    omp_fixture(tmp_path, bounds)
+    omp_fixture(tmp_path, bounds, calls=4)
     before = report.collect({"omp_sessions": str(tmp_path)}, bounds)[0]
     path = tmp_path / "project/session-0.jsonl"
     copied = path.parent / "copied.jsonl"
     lines = path.read_text().splitlines()
-    copied.write_text("\n".join(lines if copy == "complete" else lines[:6]) + "\n")
-    os.utime(copied, (path.stat().st_mtime + 60,) * 2)
+    copied_lines = {"complete": lines, "prefix": lines[:8], "suffix": lines[:2] + lines[4:]}
+    copied.write_text("\n".join(copied_lines[copy]) + "\n")
+    os.utime(copied, (path.stat().st_mtime + (60 if newer else -60),) * 2)
     after = report.collect({"omp_sessions": str(tmp_path)}, bounds)[0]
     assert sorted((row["detector"], row["tokens"], row["signal"]) for row in before) == sorted(
         (row["detector"], row["tokens"], row["signal"]) for row in after)
+
+
+def test_omp_overlapping_retry_segments_count_unique_events(tmp_path, report):
+    bounds = report.windows(CUTOFF)
+    omp_fixture(tmp_path, bounds, calls=4)
+    path = tmp_path / "project/session-0.jsonl"
+    lines = path.read_text().splitlines()
+    path.unlink()
+    for index, (start, end) in enumerate([(2, 6), (6, 10), (4, 8)]):
+        segment = path.parent / f"segment-{index}.jsonl"
+        segment.write_text("\n".join(lines[:2] + lines[start:end]) + "\n")
+        os.utime(segment, (CUTOFF.timestamp() + index,) * 2)
+    rows = report.collect({"omp_sessions": str(tmp_path)}, bounds)[0]
+    retries = [row for row in rows if row["detector"] == 2]
+    assert len(retries) == 1
+    assert retries[0]["tokens"] == len(CANARY) * 80
+    assert retries[0]["signal"].startswith("4 normalized calls;")
+
+
+@pytest.mark.parametrize("call_at", ["before-day", "before-history"])
+@pytest.mark.parametrize("reset", [None, "user", "developer", "toolResult"])
+def test_omp_prior_calls_correlate_with_day_results(tmp_path, report, call_at, reset):
+    source = importlib.import_module("token_suggestions_sources")
+    bounds = report.windows(CUTOFF)
+    prior = bounds[1 if call_at == "before-day" else 0] - timedelta(seconds=2)
+    rows = []
+    for index in range(3):
+        rows.append(message(f"a-{index}", prior if index == 0 else bounds[1], "assistant", [
+            {"type": "toolCall", "id": str(index), "name": CANARY, "arguments": {}}],
+            provider=CANARY, model=CANARY,
+            usage={"input": 100, "cacheRead": 0, "cacheWrite": 0}))
+        if index == 0 and reset:
+            rows.append(message("reset", prior + timedelta(seconds=1), reset, [],
+                                toolCallId="0", toolName=CANARY, isError=True))
+        rows.append(message(f"r-{index}", bounds[1], "toolResult", [
+            {"type": "text", "text": CANARY * 4}], toolCallId=str(index),
+            toolName=CANARY, isError=True))
+    session(tmp_path, "boundary", rows)
+    candidates, cache, counts = source.read_omp(tmp_path, bounds)
+    retries = [row for row in candidates if row["detector"] == 2]
+    tools = next(row for row in candidates if row["detector"] == 1)
+    assert counts["messages"] == 5
+    assert cache[0]["requests"] == 2
+    assert cache[0]["input_total"] == 200
+    if reset:
+        assert retries == []
+    else:
+        assert len(retries) == 1
+        assert retries[0]["tokens"] == len(CANARY) * 3
+        assert retries[0]["signal"].startswith("3 normalized calls;")
+        assert tools["tool_shapes"] == [{
+            "calls": 3, "tokens": len(CANARY) * 3,
+            "largest_call": len(CANARY), "error_calls": 3}]
 
 
 def test_omp_invalid_unicode_preserves_valid_observations(tmp_path, report):

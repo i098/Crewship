@@ -442,7 +442,7 @@ The reader does not search other homes or unconfigured session roots.
 Set `omp_sessions` explicitly to the root used by omp, normally `~/.omp/agent/sessions`, expanded to an absolute path.
 The source reads JSONL files in that root and its direct project directories without following symbolic links.
 It considers at most 8,192 directory entries and reads at most 256 files, newest modified first.
-Only files modified since the cache history window are eligible.
+Only files modified since the selected day began are eligible.
 Each scan has a 15-second deadline, a 128 MiB total limit, and a 100,000-record limit.
 Each file has a 16 MiB limit; each JSONL record has a 2 MiB limit.
 Limit hits and malformed records appear as counts, not private excerpts.
@@ -453,8 +453,9 @@ The omp source measures text sizes locally and uses temporary hashes to match re
 It never exports those hashes, message text, tool output, arguments, paths, identifiers, model names, or provider names.
 It ignores unknown fields, image data, and thinking blocks.
 Identical entry IDs count once across copied session files.
-The reader reconstructs retry sequences from copied entries, then collapses matching retry groups.
+The reader reconstructs retry sequences from copied entries, then merges overlapping sequences and counts each result once.
 Malformed text encoding increases the malformed-record count without discarding other valid sessions.
+The reader retains earlier call metadata in eligible files to match tool results from the selected day.
 All omp coverage stays partial because session files do not establish a complete request history.
 
 Run one manual cycle:
@@ -464,7 +465,7 @@ python3 scripts/token_suggestions.py --config /path/to/private-config.json
 ```
 
 The cutoff selects the previous complete Pacific day, including daylight-saving changes.
-Only cache comparison reads the preceding seven complete days.
+Only ledger cache comparison reads the preceding seven complete days.
 Saved reports must have a window inside the selected day.
 Older reports and reports that span a wider window are unavailable; their totals cannot be split safely.
 Source caveats or a shorter saved window make coverage partial.
@@ -494,6 +495,7 @@ Duplicate gap and shutdown records count once per producer, event, and kind.
 Zero denominators remain unavailable.
 Cache reuse changes pricing, not total input tokens.
 OMP input tokens exclude cache buckets; the reader adds both cache buckets through the existing normalizer.
+OMP cache aggregation covers only the selected day.
 Missing omp usage fields stay unknown, and omp cache shares never claim a complete seven-day comparison.
 
 Token ranks apply only within one window and measurement basis.
