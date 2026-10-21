@@ -1572,6 +1572,7 @@ def test_herdr_start_uses_reloaded_manager_and_unit_without_bulk_restart(
     herdr_names = {
         "Read the installed Herdr user unit", "Render the Herdr user unit",
         "Restart Herdr for a unit change beyond the data-disk environment",
+        "Check for the installed Herdr user service",
         "Enable and start the Herdr user service",
     }
     herdr_tasks = [

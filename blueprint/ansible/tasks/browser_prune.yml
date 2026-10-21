@@ -196,6 +196,12 @@
     follow: false
   become: true
 
+- name: Check for the installed Chrome pruner timer
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/chrome-autoprune.timer"
+  register: crewship_pruner_timer
+  when: ansible_check_mode
+
 - name: Enable and start the Chrome pruner timer
   ansible.builtin.systemd_service:
     scope: user
@@ -205,4 +211,6 @@
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_systemd_env }}"
-  when: crewship_manage_services | bool
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode or crewship_pruner_timer.stat.exists

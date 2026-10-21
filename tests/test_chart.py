@@ -132,6 +132,56 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         assert (home / path).is_dir() == (existing_home or enabled)
 
 
+@pytest.mark.parametrize("task_file,unit,handler", [
+    ("herdr.yml", "herdr.service", False),
+    ("herdr.yml", "herdr-spaces.timer", False),
+    ("browser_prune.yml", "chrome-autoprune.timer", False),
+    ("stall_nudge.yml", "fm-main-stall-nudge.timer", False),
+    ("herdr.yml", "herdr.service", True),
+    ("browser_prune.yml", "chrome-autoprune.timer", True),
+])
+@pytest.mark.parametrize("check_mode,installed", [(True, False), (True, True), (False, False)])
+def test_service_preview_skips_only_absent_units(tmp_path, task_file, unit, handler, check_mode, installed):
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks" / task_file).read_text())
+    probes = [
+        task for task in tasks
+        if any(task.get(module, {}).get(key) == "{{ crewship_user_units }}/" + unit
+               for module, key in (("ansible.builtin.stat", "path"), ("ansible.builtin.slurp", "src")))
+    ]
+    if handler:
+        tasks = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["handlers"]
+    start = next(task for task in tasks
+                 if task.get("ansible.builtin.systemd_service", {}).get("name") == unit)
+    start.pop("listen", None)
+    if installed:
+        (tmp_path / unit).write_text("[Unit]\nDescription=Preview test\n")
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text("#!/bin/sh\necho 'systemd probe failed' >&2\nexit 1\n")
+    systemctl.chmod(0o755)
+    playbook = tmp_path / "preview.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {
+            "crewship_user_units": str(tmp_path), "crewship_manage_services": True,
+            "crewship_become_target": False, "crewship_cfg": {"user": getpass.getuser()},
+            "crewship_user_systemd_env": {"PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        },
+        "tasks": probes + [start],
+    }]))
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
+         *(["--check"] if check_mode else [])],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    if check_mode and not installed:
+        assert result.returncode == 0, output
+        assert "skipping: [localhost]" in output
+    else:
+        assert result.returncode != 0, output
+        assert "systemd probe failed" in output
+
+
 @pytest.mark.parametrize("check_mode", [True, False])
 @pytest.mark.parametrize("release_state", ["absent", "empty", "installed"])
 def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state):

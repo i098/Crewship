@@ -43,6 +43,12 @@
     force: true
     follow: false
 
+- name: Check for the installed stall nudge timer
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/fm-main-stall-nudge.timer"
+  register: crewship_stall_nudge_timer
+  when: ansible_check_mode
+
 - name: Enable and start the stall nudge timer
   ansible.builtin.systemd_service:
     scope: user
@@ -50,4 +56,6 @@
     enabled: true
     state: started
   environment: "{{ crewship_user_systemd_env }}"
-  when: crewship_manage_services | bool
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode or crewship_stall_nudge_timer.stat.exists

@@ -46,7 +46,11 @@ Run the installer with the chosen names, comma separated. Use `--with none` for 
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash -s -- --with public_skills,docker
 ```
 
-`bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
+Use curl on a fresh server; it does not need a JavaScript runtime.
+`bunx crewship` needs Bun and Node.js 18 or newer; Bun's Linux installer also needs `unzip`.
+`npx crewship` needs Node.js 18 or newer and npm.
+`pnpm dlx crewship` may select an older release because of pnpm's release-age policy.
+See [Launcher prerequisites](docs/install.md#install); do not clone the repository.
 
 The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock --with …`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). `--with` applies to a new host only. The later steps sign in, then apply again.
 
@@ -64,8 +68,13 @@ gh auth status
 ```
 
 - If it says you are logged in, go to step 2.
-- Otherwise run `gh auth login`.
-- STOP: the user must choose the options and finish the browser or device-code step. Show the one-time code and the URL that `gh` prints. Wait until the user says the login is done.
+- Otherwise run `gh auth login --hostname github.com --git-protocol https --web` in an interactive terminal.
+- STOP: let the user answer any prompt about Git credentials.
+  Show the one-time code and `https://github.com/login/device` URL printed by `gh`.
+  The user opens that URL in a browser on their own computer or phone, enters the code, and approves access.
+  A remote server does not need a browser or clipboard.
+  If `gh` cannot copy the code or open a browser, copy the displayed code manually and keep the terminal open.
+  Press Enter if prompted to continue; wait for `gh` to report success.
 - Check: `gh auth status` prints a logged-in account.
 
 ## 2. Sign in to omp
@@ -77,8 +86,17 @@ omp models --json
 ```
 
 - If the output lists models, a login exists. Go to step 3.
-- Otherwise start `omp`, and ask the user which provider they use. For Anthropic, type `/login anthropic`. `/login` with no argument lists every provider.
-- STOP: the user must finish the browser or device-code step. Show the URL or code that omp prints. Wait until the user says it is done.
+- Otherwise start `omp` in an interactive terminal and ask the user which provider they use.
+- On first run, finish the theme screen first: let the user choose a theme or use the displayed skip option.
+  Then use the provider setup screen to select the user's provider.
+  Do not type `/login anthropic` into the theme or provider screen; slash commands work at the normal prompt.
+- STOP: show the provider's printed login URL and instructions.
+  The user opens the URL in their own browser and completes the login.
+  If omp asks for a returned code or redirect URL, let the user enter it directly in the terminal.
+  Never invent a callback URL or assume that a browser on the user's computer can reach the server's localhost.
+- If the wizard was already completed or skipped, use `/login` at the normal prompt to select a provider.
+  For Anthropic, use `/login anthropic`.
+  Wait for the login to finish, then leave omp before running the check below in the shell.
 - Check: `omp models --json` lists at least one model. Never copy a credentials file from another host.
 
 ## 3. Review the profiles

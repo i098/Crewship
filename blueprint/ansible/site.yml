@@ -312,7 +312,9 @@
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
       environment: "{{ crewship_user_systemd_env }}"
-      when: crewship_manage_services | bool
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode or crewship_herdr_service.stat.exists
       listen: restart herdr
 
     - name: Restart the Docker daemon after a configuration merge
@@ -467,7 +469,9 @@
       become: "{{ crewship_become_target | bool }}"
       become_user: "{{ crewship_cfg.user }}"
       environment: "{{ crewship_user_systemd_env }}"
-      when: crewship_manage_services | bool
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode or crewship_pruner_timer.stat.exists
       listen: restart chrome autoprune timer
 
     - name: Restart the noVNC bridge

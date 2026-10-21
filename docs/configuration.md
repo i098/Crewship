@@ -18,6 +18,10 @@
 | `scripts/put-secret.sh NAME` | | Creates or updates one secret in Cloudflare Secrets Store from stdin. Deletes nothing and deploys nothing. |
 | `scripts/fetch-secrets.sh` | `scripts/fetch-super-env.sh` | Pulls `super.env` from the fleet-secrets Worker into `~/super.env`. With `NAME`, prints that one readable secret instead. |
 
+For absent Herdr, Herdr Spaces, Chrome pruner, and stall nudge units, `chart` skips service starts and notified restarts.
+Errors from installed units remain visible.
+`launch` keeps its existing service enablement and start behavior.
+
 `inspect`, `chart`, `launch`, and `survey` read `--config <path>` if you pass one, otherwise `.local/host.yml`. If `.local/host.yml` does not exist, `inspect`, `chart`, and `survey` fall back to `blueprint/config/default.yml` (user `coder`); `launch` refuses to run.
 
 The next config read rewrites an old root key to `crewship` and prints one notice.
