@@ -48,7 +48,9 @@ curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bas
 
 `bunx crewship` does the same when bun is installed; `npx crewship` and `pnpm dlx crewship` work too. Do not clone the repository.
 
-The installer installs the OS packages, downloads and verifies the latest release into `~/Crewship`, and runs `onboard.sh`, `ship.sh dock --with …`, `inspect`, `chart`, and `launch` ([Install, update and migrate](docs/install.md)). `--with` applies to a new host only. The later steps sign in, then apply again.
+See [Install, update and migrate](docs/install.md) for release selection and installation steps.
+`--with` applies to a new host only.
+Sign in and apply again in the later steps.
 
 If the installer reports a package-lock error, follow the [recovery instructions](docs/install.md#install).
 

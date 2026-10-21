@@ -18,8 +18,9 @@ The installer:
 
 With `pnpm dlx crewship`, pnpm can select an older release under its `minimumReleaseAge` policy.
 The default delay in pnpm 12 is 1,440 minutes.
-When the registry lists a newer release, the launcher explains this policy and keeps the selected release.
-It does not change your pnpm settings.
+For stable releases, the launcher checks the registry and explains this policy if it finds a newer release.
+It keeps the selected release and does not change your pnpm settings.
+The check does not run for `update`; a failed check does not stop installation.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
