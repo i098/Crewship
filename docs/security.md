@@ -27,7 +27,28 @@ The persistent desktop browser uses exactly one profile, `~/.vnc-chrome-profile`
 
 ## Remote access
 
-Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding. To open the host's web pages from a browser, use the [password gateway](gateway.md), which is on by default for a new host: one password, then a Cloudflare Quick Tunnel to the loopback ports. The gateway opens no port on the host. SSH port forwarding and Tailscale are the other ways in. Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
+Keep application and desktop listeners on loopback unless a reviewed deployment explicitly needs another binding.
+The [password gateway](gateway.md) is opt-in and off until selected.
+When enabled, it provides password access through a Cloudflare Quick Tunnel to the loopback ports.
+The gateway opens no port on the host.
+SSH port forwarding and Tailscale are the other ways in.
+Do not publish a Docker socket or mount the host socket into an agent container; it grants host-level control.
+
+### Laptop setup over SSH
+
+Run `npx crewship init` or `bunx crewship init` on the laptop.
+Run the installer and later setup commands on the target server.
+The guide uses existing SSH keys from your SSH configuration or agent.
+It does not create keys or collect, copy, or store SSH passwords or private keys.
+It keeps host-key checks on and agent forwarding off.
+Verify a new fingerprint against the provider console before accepting it.
+Stop on a changed key; do not bypass the warning.
+Approve the named server and install action before the guide connects.
+If no usable key exists, use the manual server command from [Install](install.md#install).
+Type any sudo password directly in the native terminal; never pass it through an agent or a saved answer.
+GitHub and model-provider sign-ins remain manual on the server.
+
+### Other remote access
 
 Loopback is shared by local accounts. The optional desktop therefore requires an operator-created private VNC credential in addition to SSH transport. It never offers unauthenticated RFB access. Its service will not kill another desktop to claim an occupied display.
 
@@ -147,7 +168,8 @@ Host <alias>
   User <Crewship account>
 ```
 
-mosh reads the alias too, because it starts its session over `ssh`. Then:
+mosh reads the alias too, because it starts its session over `ssh`.
+Run these commands on the Mac:
 
 ```bash
 ssh <alias>
@@ -164,7 +186,8 @@ Upstream supports Debian 12/13 and Ubuntu 22.04/24.04 only. `blueprint/patches/k
 
 `/etc/koncreet.conf` makes the account that ran `./ship.sh launch` the sudo user, installs the SSH keys it logs in with, and keeps SSH open (Koncreet always allows the ports sshd listens on). With the `tailscale` profile it also opens 41641/udp for Tailscale's direct connections. When apply ran as root, or as the Crewship account (which runs the agents and must not gain sudo), no sudo user is set: `user=` and `pubkey_file=` stay commented out until you fill in the operator's login. Apply never overwrites it; edit it there.
 
-Run it once, by hand, from an SSH session you keep open until the last step works:
+Run these commands once, by hand, on the server.
+Keep the SSH session open until the last step works:
 
 1. With the `tailscale` profile: `sudo ufw allow in on tailscale0`, so the tailnet stays reachable once ufw denies incoming traffic. Koncreet keeps existing ufw rules.
 2. `sudo koncreet doctor`

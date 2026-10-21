@@ -1,9 +1,31 @@
 # Install, update and migrate
 
-`install.sh` (also `bunx crewship`, `npx crewship`, `pnpm dlx crewship`) installs a release of Crewship. It never clones the repository.
+`install.sh` and the bare npm launchers install a Crewship release on the machine where you run them.
+They never clone the repository.
+
+## Start on your laptop
+
+Do you already have a server for Crewship?
+If yes, check its [capacity](capacity.md) and run the [server install](#install).
+If no, run the guided setup on your laptop with Node.js 18 or newer and npm:
+
+```bash
+npx crewship init
+```
+
+Or use `bunx crewship init` with Bun and Node.js installed.
+The guide recommends a size from your expected load and waits for explicit purchase confirmation.
+It then offers SSH setup or a command to run manually on the server.
+It does not install Crewship on the laptop.
+SSH setup uses existing keys only and requires permission for the named target.
+Verify new host fingerprints through the provider console; never bypass a changed host key.
+If no usable key exists, use the manual server route.
+See [Agent setup](../SETUP.md#before-installation-choose-the-server) for the full sequence.
 
 ## Install
 
+Run all commands in this section on the server, as a non-root user with sudo.
+Use Ubuntu 24.04 or 26.04 with systemd and check the [capacity requirements](capacity.md).
 Use the curl installer on a fresh server.
 It does not need Node.js, npm, pnpm, or Bun:
 
@@ -13,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bas
 
 If `curl` is missing, install it with `sudo apt-get update && sudo apt-get install -y curl`.
 
-Other launchers need an existing runtime:
+Other server launchers need an existing runtime:
 
 | Launcher | Prerequisite | Release selection |
 | --- | --- | --- |
@@ -73,6 +95,8 @@ A failure at that stage leaves the current Crewship installation unchanged.
 
 ## Update
 
+Run update commands on the server that already has Crewship installed.
+
 Run `bunx crewship update` (or `npx crewship update`; it takes the newest release, whatever the version of the npm package), or run the installer again: `bunx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
 
 - copies the host's own files into it: `.local/` (including `host.yml`), `blueprint/skills/private/` and `blueprint/rules/private/`; a release from before the `blueprint/` folder kept the private files in `skills/private/` and `rules/private/`, and the installer moves them to the new place;
@@ -85,7 +109,7 @@ If the selected release is already installed, the download is skipped. Edits to 
 
 ## Migrate a git install
 
-If `~/Crewship` is a git clone from an older installer, the next run:
+Run the installer on the server that holds the existing `~/Crewship` clone:
 
 1. downloads and verifies the selected release;
 2. copies every untracked file of the clone into it (`.local/host.yml`, private skills and rules, other local state), except `.venv`, `node_modules` and caches, which `uv` rebuilds, and records each copied file in the install log;
@@ -99,4 +123,5 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 
 ## Attach the artifact to a draft release
 
+Run release commands from a maintainer's repository checkout, not from the laptop setup guide.
 Part of the release steps in [CONTRIBUTING.md](../CONTRIBUTING.md#changelog-and-releases). Create the release as a draft, then run the `release-artifact` workflow by hand (Actions, `release-artifact`, Run workflow, with the tag, for example `v1.2.3`, as input) or `gh workflow run release-artifact.yml -f tag=v1.2.3`. It builds the artifact from the tag and uploads it with `--clobber`; it refuses a release that is already published, because immutable releases accept no new assets. It creates no release, tag or version. Publish the draft afterwards.
