@@ -532,3 +532,82 @@ def test_executable_shell_regions_check_issue_targets(guarded, cli, script, targ
 def test_non_executable_shell_text_stays_inert(guarded, tmp_path, script):
     guarded(f"{script}; gh issue list")
     assert (tmp_path / "calls").read_text() == "issue list\n"
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("script", [
+    'value="$(case ready in ready) {command} ;; esac)"',
+    'value="$(case ready in (other|ready) {command} ;; esac)"',
+    'value="$(case in in (in) {command} ;; esac)"',
+    r'value="$(case r\eady in ready) {command} ;; esac)"',
+    'value="$(case outer in outer) case ready in ready) {command} ;; esac ;; esac)"',
+    "{ eval '{command}'; }",
+    "2>/dev/null eval '{command}'",
+    "{ 2>/dev/null eval '{command}'; }",
+    "2>/dev/null builtin eval '{command}'",
+])
+@pytest.mark.parametrize("target,allowed", [
+    ("", False), ("-R i098/sanctum", True), ("-R upstream/firstmate", False),
+])
+def test_case_and_prefixed_eval_keep_write_checks(guarded, cli, script, target, allowed):
+    command = f"{cli} issue create --title incident {target}"
+    guarded(script.replace("{command}", command), allowed=allowed)
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("operator", ["<<", "<<-"])
+@pytest.mark.parametrize("delimiter", ["'EOF'", '"EOF"', r"\EOF", "E'OF'"])
+def test_quoted_heredoc_bodies_stay_inert(guarded, tmp_path, cli, operator, delimiter):
+    indent = "\t" if operator == "<<-" else ""
+    body = f'value="$({cli} issue create --title example)"\neval \'{cli} issue create\'\n'
+    indented = "".join(indent + line for line in body.splitlines(keepends=True))
+    result = guarded(f"cat {operator}{delimiter}\n{indented}{indent}EOF\ngh issue list")
+    assert result.stdout == body
+    assert (tmp_path / "calls").read_text() == "issue list\n"
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
+def test_unquoted_heredoc_expansions_are_checked(guarded, cli, target, allowed):
+    guarded(
+        f"cat <<EOF\n'value=\"$({cli} issue create --title example {target})\"'\nEOF\ngh issue list",
+        allowed=allowed,
+    )
+
+
+def test_multiple_and_nested_quoted_heredocs_stay_inert(guarded, tmp_path):
+    command = (
+        "value=\"$(cat <<'INNER'\n$(gh-axi issue create --title example)\nINNER\n)\"\n"
+        "cat <<'FIRST' <<\\SECOND\n"
+        "gh-axi issue create --title example\nFIRST\n"
+        "eval 'gh-axi issue create --title example'\nSECOND\n"
+        "gh issue list"
+    )
+    guarded(command)
+    assert (tmp_path / "calls").read_text() == "issue list\n"
+
+
+@pytest.mark.parametrize("cli", ["gh", "gh-axi"])
+@pytest.mark.parametrize("flag_text", [
+    "-R i098/sanctum", "--repo=i098/sanctum", "-Ri098/sanctum", "--help",
+])
+@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
+def test_nested_body_quotes_cannot_supply_flags(guarded, cli, flag_text, target, allowed):
+    guarded(
+        f'{cli} issue create --title incident --body "$(printf \'%s\' "use {flag_text} here")" {target}',
+        allowed=allowed,
+    )
+
+
+@pytest.mark.parametrize("target,allowed", [("", False), ("-R i098/sanctum", True)])
+def test_heredoc_body_cannot_supply_target(guarded, target, allowed):
+    guarded(
+        'gh-axi issue create --title incident --body "$(cat <<\'EOF\'\n'
+        f'use -R i098/sanctum here\nEOF\n)" {target}',
+        allowed=allowed,
+    )
+
+
+def test_eval_word_after_echo_and_redirection_stays_data(guarded, tmp_path):
+    guarded("printf '%s' 2>/dev/null eval 'gh-axi issue create'; gh issue list")
+    assert (tmp_path / "calls").read_text() == "issue list\n"

@@ -169,8 +169,10 @@ Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kil
 This command-text guard is not an operating-system security boundary.
 It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
 Literal shell commands and nested `sh -c` forms are covered, including preceding shell options and their operands.
-The guard also checks executable `$()` substitutions, backticks, and literal shell `eval` operands.
-Single-quoted and escaped substitution text remains data.
+The guard also checks executable `$()` substitutions, case arms, backticks, and literal shell `eval` operands, including groups and leading redirections.
+Nested substitutions remain inside their outer arguments and cannot supply repository or help flags.
+Single-quoted text, escaped substitutions, and quoted here-document bodies remain data.
+Unquoted here-document bodies receive expansion checks only.
 Arbitrary eval-language programs and argv arrays are not covered.
 
 ## Quality gate
