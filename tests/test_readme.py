@@ -31,6 +31,7 @@ FEATURES = {
     "crewship.profiles.forgejo": "docs/forgejo.md",
     "crewship.data_dir": "docs/configuration.md#data-disk",
     "crewship.usage": "docs/usage.md",
+    "crewship.token_suggestions": "docs/usage.md#optional-reader-installation",
     "crewship.firstmate.checklist": "docs/configuration.md#new-host-questions",
     "crewship.mac_ssh": "docs/security.md#ssh-to-a-mac",
     "crewship.imessage": "docs/imessage.md",

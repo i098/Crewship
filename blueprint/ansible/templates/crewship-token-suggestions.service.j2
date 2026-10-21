@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Write private metadata-only token suggestions (Crewship managed)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B -E "{{ crewship_token_suggestions_assets }}/token_suggestions.py" --config "{{ crewship_token_suggestions_assets }}/config.json"
+TimeoutStartSec=60
+Nice=19
+NoNewPrivileges=true
+UMask=0077

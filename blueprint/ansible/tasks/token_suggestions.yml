@@ -1,0 +1,103 @@
+---
+- name: Stop disabled token suggestions
+  when: not (crewship_token_suggestions.enabled | bool)
+  block:
+    - name: Read the loaded token suggestion timer state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-token-suggestions.timer]
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_token_suggestions_timer
+      changed_when: false
+      failed_when: crewship_token_suggestions_timer.rc != 0 and (crewship_token_suggestions_timer.stdout | trim) != 'inactive'
+      check_mode: false
+      when: crewship_manage_services | bool
+
+    - name: Stop the timer before reading the report state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, stop, crewship-token-suggestions.timer]
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_token_suggestions_timer.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
+
+    - name: Read the loaded token suggestion report state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, show, --property=ActiveState, --value, crewship-token-suggestions.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_token_suggestions_service
+      changed_when: false
+      failed_when: crewship_token_suggestions_service.rc != 0 and (crewship_token_suggestions_service.stdout | trim) != 'inactive'
+      check_mode: false
+      when: crewship_manage_services | bool
+
+    - name: Stop any active token suggestion report
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, --user, stop, crewship-token-suggestions.service]
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - crewship_token_suggestions_service.stdout | trim in ['active', 'activating', 'deactivating', 'reloading']
+
+    - name: Remove token suggestion activation
+      ansible.builtin.file:
+        path: "{{ crewship_user_units }}/timers.target.wants/crewship-token-suggestions.timer"
+        state: absent
+      notify: reload user systemd
+
+- name: Install the configured manual token suggestion reader
+  when: crewship_token_suggestions_configured | bool
+  block:
+    - name: Require an explicit owning home for private reports
+      ansible.builtin.assert:
+        that:
+          - crewship_token_suggestions.fm_home is defined
+          - crewship_token_suggestions.fm_home is string
+          - crewship_token_suggestions.fm_home is match('^/')
+        fail_msg: "Set token_suggestions.fm_home to the explicit report owner home."
+
+    - name: Ensure private token suggestion assets and user unit directory
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: "{{ crewship_token_suggestions_assets }}", mode: "0700"}
+        - {path: "{{ crewship_user_units }}", mode: "0755"}
+
+    - name: Install the read-only report and metadata reader
+      ansible.builtin.copy:
+        src: "{{ crewship_repo }}/scripts/{{ item }}"
+        dest: "{{ crewship_token_suggestions_assets }}/{{ item }}"
+        mode: "0600"
+      loop: [token_suggestions.py, token_suggestions_sources.py, usage.py]
+
+    - name: Write private explicit report inputs
+      ansible.builtin.copy:
+        dest: "{{ crewship_token_suggestions_assets }}/config.json"
+        mode: "0600"
+        content: >-
+          {{ ({'fm_home': crewship_token_suggestions.fm_home,
+               'snapshots': crewship_token_suggestions.snapshots}
+              | combine({'ledger': crewship_token_suggestions.ledger}
+                        if crewship_token_suggestions.ledger else {})) | to_nice_json }}
+
+    - name: Install the manual token suggestion service
+      ansible.builtin.template:
+        src: crewship-token-suggestions.service.j2
+        dest: "{{ crewship_user_units }}/crewship-token-suggestions.service"
+        mode: "0644"
+      notify: reload user systemd
+
+- name: Remove unconfigured token suggestion assets without removing reports
+  when: not (crewship_token_suggestions_configured | bool)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ crewship_user_units }}/crewship-token-suggestions.service"
+    - "{{ crewship_user_units }}/crewship-token-suggestions.timer"
+    - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
+    - "{{ crewship_token_suggestions_assets }}/token_suggestions_sources.py"
+    - "{{ crewship_token_suggestions_assets }}/usage.py"
+    - "{{ crewship_token_suggestions_assets }}/config.json"
+  notify: reload user systemd

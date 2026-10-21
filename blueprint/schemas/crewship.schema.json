@@ -58,6 +58,35 @@
             }
           }
         },
+        "token_suggestions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fm_home"],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "fm_home": {
+              "type": "string",
+              "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$",
+              "maxLength": 4096
+            },
+            "ledger": {
+              "type": "string",
+              "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$",
+              "maxLength": 4096
+            },
+            "snapshots": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
         "instructions_mode": {
           "enum": [
             "skip",
