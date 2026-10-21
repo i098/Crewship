@@ -21,7 +21,8 @@ Each cycle (every 15 s) reads the unseen messages of other people, with these fa
 
 - Keep: DMs to him, @mentions, threads he is in, decisions, deadlines, asks of him, incidents, and teammates about his work.
 - Drop: chatter, bots, announcements.
-- A message the model skips is kept only when it is a human DM or a mention. A failed or unparsable call changes nothing: the messages stay unseen and the next cycle retries, with a backoff up to 5 min.
+- A message the model skips is kept only when it is a human DM or a mention. A failed or unparsable call leaves eligible messages unseen for a retry, with a backoff up to 5 min.
+- `mention_only` (default `false`) drops untagged messages before the model call, including DMs and thread replies. Enabling it clears previously queued lines.
 
 Every decision is one line in `~/.local/state/crewship/slack-relay/log.jsonl`: time, key, workspace, channel, ts, sender, `kept` or `dropped`, and the reason. To see why a text did or did not come, read that file.
 
@@ -49,3 +50,5 @@ systemctl --user daemon-reload && systemctl --user enable --now slack-relay.serv
 ```
 
 Both files sit next to this one. Write the config first. `slack_relay.py once` runs one cycle by hand. `slack_relay.py replay WORKSPACE CHANNEL TS` runs one cached message through the filter and texts it with a `[test]` prefix; it does not mark the message as seen.
+`slack_relay.py dry-run` counts recent tagged, untagged, kept, and dropped messages with the fallback filter.
+It makes no model calls, sends no notifications, and changes no state.
