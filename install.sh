@@ -3,7 +3,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 # Arguments go to `./ship.sh dock` (for example `bash -s -- --container`);
 # `--help` prints the usage and changes nothing.
-# Installs the OS prerequisites, downloads and verifies the latest release
+# Installs the OS prerequisites, downloads and verifies the selected release
 # artifact (no git clone) into ~/.local/share/crewship/releases/TAG, points
 # ~/Crewship at it, then runs onboard, dock, inspect, chart and launch. Run it
 # again to update: the host's own files (.local/) move to the new release and the
