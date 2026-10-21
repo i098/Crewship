@@ -478,6 +478,17 @@ def firstmate_checks(config, environment):
     return pending
 
 
+def firstmate_recovery_command(pending, launch):
+    if "Herdr service" not in pending:
+        return launch
+    runtime = f"/run/user/{os.getuid()}"
+    start_service = (
+        f"XDG_RUNTIME_DIR={runtime} DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus "
+        "systemctl --user start herdr.service"
+    )
+    return f"{launch} && {start_service}" if len(pending) > 1 else start_service
+
+
 def setup_status(document, config_path):
     config = document["crewship"]
     command = shlex.join([str(ROOT / "ship.sh"), "launch", "--config", str(config_path)])
@@ -504,22 +515,19 @@ def setup_status(document, config_path):
     print(f"Sign-ins: pending; run: {' && '.join(missing)}"
           if missing else "Sign-ins: ready")
     pending = firstmate_checks(config, environment)
+    memory_ready = firstmate_memory_ready(config)
     if failed or missing:
         print(f"Fleet ready: no; finish the commands above, then run: {resume}")
     elif pending:
-        if "Herdr service" in pending:
-            runtime = f"/run/user/{os.getuid()}"
-            start_service = (
-                f"XDG_RUNTIME_DIR={runtime} DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus "
-                "systemctl --user start herdr.service"
-            )
-            command = f"{command} && {start_service}" if len(pending) > 1 else start_service
+        command = firstmate_recovery_command(pending, command)
         print(f"Fleet ready: no ({', '.join(pending)}); run: {command}")
+    elif not memory_ready:
+        print(f"Fleet ready: no (memory floor); free memory or add RAM, then run: {resume}")
     elif not config["profiles"]["firstmate"]:
         print("Fleet ready: not enabled (worker-only profile)")
     else:
         print("Fleet ready: setup checks passed; a live agent task is not verified")
-    return int(bool(failed or missing or pending))
+    return int(bool(failed or missing or pending or not memory_ready))
 
 
 def questions(document, config_path):

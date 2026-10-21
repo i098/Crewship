@@ -482,22 +482,27 @@ def test_another_accounts_apply_skips_questions_without_reading_the_unreadable_h
 
 @pytest.mark.parametrize("start_services", [True, False])
 @pytest.mark.parametrize(
-    "github,models,questions_done,service,expected",
+    "github,models,questions_done,service,available,expected",
     [
-        (1, '{"models":[]}', True, 0, "Sign-ins: pending"),
-        (0, '{"models":[]}', True, 0, "Sign-ins: pending"),
-        (1, '{"models":[{}]}', True, 0, "Sign-ins: pending"),
-        (0, 'not json', True, 0, "Sign-ins: pending"),
-        (0, '{"models":"invalid"}', True, 0, "Sign-ins: pending"),
-        (0, '{"models":[{}]}', False, 0, "new-host questions"),
-        (0, '{"models":[{}]}', False, 1, "new-host questions"),
-        (0, '{"models":[{}]}', True, 1, "Herdr service"),
-        (0, '{"models":[{}]}', True, 0, "Fleet ready: setup checks passed"),
+        (1, '{"models":[]}', True, 0, 8000, "Sign-ins: pending"),
+        (0, '{"models":[]}', True, 0, 8000, "Sign-ins: pending"),
+        (1, '{"models":[{}]}', True, 0, 8000, "Sign-ins: pending"),
+        (0, 'not json', True, 0, 8000, "Sign-ins: pending"),
+        (0, '{"models":"invalid"}', True, 0, 8000, "Sign-ins: pending"),
+        (0, '{"models":[{}]}', False, 0, 8000, "new-host questions"),
+        (0, '{"models":[{}]}', False, 1, 8000, "new-host questions"),
+        (0, '{"models":[{}]}', True, 1, 8000, "Herdr service"),
+        (0, '{"models":[{}]}', True, 0, 8000, "Fleet ready: setup checks passed"),
+        (0, '{"models":[{}]}', True, 0, 7999, "Fleet ready: no (memory floor)"),
+        (0, '{"models":[{}]}', True, 0, None, "Fleet ready: no (memory floor)"),
+        (0, '{"models":[{}]}', False, 0, 7999, "new-host questions"),
+        (0, '{"models":[{}]}', False, 1, 7999, "new-host questions"),
+        (0, '{"models":[{}]}', True, 1, 7999, "Herdr service"),
     ],
 )
 def test_setup_resumes_without_claiming_readiness_before_sign_in(
     configuration, tmp_path, monkeypatch, capsys, github, models, questions_done, service, expected,
-    start_services,
+    available, start_services,
 ):
     real_run = subprocess.run
     started = tmp_path / "herdr-started"
@@ -515,6 +520,14 @@ def test_setup_resumes_without_claiming_readiness_before_sign_in(
         marker.touch()
     host = tmp_path / "host config.yml"
     host.write_text(yaml.safe_dump(configuration))
+    original_read = Path.read_text
+    meminfo = "MemTotal: 16384000 kB\n" if available is None else (
+        f"MemAvailable: {available * 1024} kB\nSwapFree: 999999999 kB\n"
+    )
+    monkeypatch.setattr(
+        Path, "read_text",
+        lambda path, *a, **kw: meminfo if str(path) == "/proc/meminfo" else original_read(path, *a, **kw),
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(ship, "tool_checks", lambda *_: [("omp", True, "OK omp")])
     monkeypatch.setattr(ship, "load_config", lambda path: yaml.safe_load(path.read_text()))
@@ -537,11 +550,13 @@ def test_setup_resumes_without_claiming_readiness_before_sign_in(
 
     monkeypatch.setattr(ship.subprocess, "run", run)
     monkeypatch.setattr(ship.sys, "argv", ["ship.sh", "setup", "--config", str(host)])
-    ready = github == 0 and models == '{"models":[{}]}' and questions_done and service == 0
+    ready = (
+        github == 0 and models == '{"models":[{}]}' and questions_done
+        and service == 0 and available == 8000
+    )
     assert ship.main() == (0 if ready else 1)
     output = capsys.readouterr().out
     assert output.startswith("Software: ready\n")
-    assert len(output.splitlines()) == 3
     assert expected in output
     if not ready:
         assert "Fleet ready: no" in output
@@ -567,6 +582,10 @@ def test_setup_resumes_without_claiming_readiness_before_sign_in(
         )
         assert result.returncode == 0
         assert started.is_file()
+        if available != 8000:
+            assert ship.main() == 1
+            assert "Fleet ready: no (memory floor)" in capsys.readouterr().out
+            meminfo = "MemAvailable: 8192000 kB\n"
         assert ship.main() == 0
 
 

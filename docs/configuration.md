@@ -26,10 +26,10 @@ Errors from installed units remain visible.
 `inspect`, `chart`, `launch`, and `survey` read `--config <path>` if you pass one, otherwise `.local/host.yml`. If `.local/host.yml` does not exist, `inspect`, `chart`, and `survey` fall back to `blueprint/config/default.yml` (user `coder`); `launch` refuses to run.
 
 Run `"$HOME/Crewship/ship.sh" setup` from any directory after installation.
-It reports three status lines: software, sign-ins, and fleet readiness.
+It reports three status lines: software, sign-ins, and fleet readiness, plus a Firstmate memory result when enabled.
 It uses the same tool checks as `survey`.
 With the `agents` profile enabled, it also checks GitHub authentication and requires a non-empty model list from `omp models --json`.
-With the `firstmate` profile enabled, it checks the installed entry point, the new-host question marker, and the running Herdr user service.
+With the `firstmate` profile enabled, it checks the installed entry point, the new-host question marker, the running Herdr user service, and available RAM.
 The service check does not depend on `start_services`, which controls provisioning actions only.
 Without the `firstmate` profile, the fleet line reports that Firstmate is not enabled.
 Run it as `crewship.user`; another account gets unchecked states and a command to switch accounts.
@@ -38,15 +38,16 @@ It does not start Firstmate, prove [worker capacity](capacity.md), or send a mod
 Run each printed recovery command, then repeat `setup`.
 Recovery commands for `ship.sh` use absolute paths and preserve the selected config.
 If only Herdr is stopped, the recovery command starts its user service without another apply.
+A memory failure does not hide recovery commands for other pending setup steps.
 `setup` accepts `--config <path>`; otherwise it reads `.local/host.yml` under the Crewship installation.
 It requires an existing host config instead of using the default example.
 Like the other config readers, it performs the one-time rewrite below when needed.
 
-With the `firstmate` profile on, `launch` and `survey` also check available RAM against the worker spawn floor.
-Both commands read `MemAvailable` from `/proc/meminfo`, not total RAM or swap.
+With the `firstmate` profile on, `launch`, `survey`, and `setup` also check available RAM against the worker spawn floor.
+All three commands read `MemAvailable` from `/proc/meminfo`, not total RAM or swap.
 They use [`blueprint/config/spawn-memory-floor-mb`](../blueprint/config/spawn-memory-floor-mb); see [Capacity](capacity.md#load-estimate) for sizing.
 `launch` checks after provisioning succeeds and before the [new-host questions](#new-host-questions).
-Below the floor, or when available RAM cannot be read, both commands return a failure status.
+Below the floor, or when available RAM cannot be read, all three commands return a failure status.
 `launch` does not open the questions when this check fails.
 The installed software stays in place.
 Free memory or add RAM, then run the command again.
