@@ -2,7 +2,6 @@
 """Collect read-only schedule metadata for the OpenTUI viewer."""
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -98,10 +97,11 @@ def row_order(item):
             next_run[0] if next_run else "9999", item["name"], item["source"])
 
 
-def owner_for(evidence, owners):
+def owner_for(paths, owners):
+    paths = [os.path.normpath(path) for path in paths if Path(path).is_absolute()]
     matches = [(root, name) for root, name in owners.items()
-               if re.search(r"(?<![\w./-])" + re.escape(root.rstrip("/")) +
-                            r"(?=/|[\s;\"']|$)", evidence)]
+               if any(path == os.path.normpath(root) or
+                      path.startswith(os.path.normpath(root).rstrip("/") + "/") for path in paths)]
     if not matches:
         return UNKNOWN, "No registered home path matches. Worker: Unknown."
     names = {name for _, name in matches}
@@ -111,14 +111,35 @@ def owner_for(evidence, owners):
     return name, f"Registry and home identity: {root}. Worker: Unknown."
 
 
-def row(name, source, schedule, command, purpose, owners, **fields):
-    owner, evidence = owner_for(command + " " + fields.get("path", ""), owners)
+def row(name, source, schedule, command, purpose, owners, *, owner_paths=(), **fields):
+    owner, evidence = owner_for(owner_paths, owners)
     return dict(name=name, source=source, schedule=schedule, command=command,
                 purpose=purpose, owner=owner, evidence=evidence, next=UNKNOWN,
                 last=UNKNOWN, result=UNKNOWN, **fields)
 
 
-def command_name(command):
+def command_paths(arguments):
+    if not arguments:
+        return []
+    executable, *arguments = arguments
+    paths = [executable]
+    interpreter = Path(executable).name
+    python = re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", interpreter)
+    shell = interpreter in ("sh", "bash", "dash", "zsh", "ksh")
+    if python or shell:
+        options = r"-[bBdEiIOPqRsSuvx]+" if python else r"-[Befhknptuvx]+"
+        for argument in arguments:
+            if argument == "--":
+                options = r"(?!)"
+            elif not argument.startswith("-"):
+                paths.append(argument)
+                break
+            elif not re.fullmatch(options, argument):
+                break
+    return paths
+
+
+def cron_tokens(command):
     escaped = False
     for index, char in enumerate(command):
         if char == "%" and not escaped:
@@ -126,21 +147,43 @@ def command_name(command):
             break
         escaped = char == "\\" and not escaped
     try:
-        tokens = list(shlex.shlex(command, posix=True, punctuation_chars=True))
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
     except ValueError:
-        return "cron"
+        return []
+
+
+def shell_arguments(tokens):
     arguments, redirect = [], False
-    for token in tokens:
+    for index, token in enumerate(tokens):
+        if token in (";", "&&", "||", "|", "&", "(", ")"):
+            break
         if redirect:
             redirect = False
         elif token and token[0] in "<>":
             redirect = True
-        elif token not in (";", "&&", "||", "|", "&"):
+        elif token.isdigit() and index + 1 < len(tokens) and tokens[index + 1][0] in "<>":
+            continue
+        elif not arguments and re.match(r"[A-Za-z_]\w*=", token):
+            continue
+        else:
             arguments.append(token)
-    paths = [token for token in arguments if "/" in token and "=" not in token
-             and not token.startswith("/dev/")]
-    scripts = [token for token in arguments if token.endswith((".py", ".sh"))]
-    return Path((scripts or paths)[-1]).name.rstrip(";") if paths else (tokens[0] if tokens else "cron")
+    return arguments
+
+
+def cron_paths(command):
+    tokens = cron_tokens(command)
+    directory = ""
+    if (len(tokens) > 3 and tokens[0] == "cd" and tokens[2] == "&&"
+            and not tokens[1].startswith("-") and not re.search(r"[$`*?\[\]]", tokens[1])):
+        directory, tokens = tokens[1], tokens[3:]
+    paths = command_paths(shell_arguments(tokens))
+    if directory and paths:
+        paths = [os.path.join(directory, path) if index or "/" in path else path
+                 for index, path in enumerate(paths)]
+        return [directory, *paths]
+    return paths
 
 
 def cron_rows(output, source, owners, system=False):
@@ -165,15 +208,25 @@ def cron_rows(output, source, owners, system=False):
         if timezone:
             schedule += f" (CRON_TZ={timezone})"
         command = parts[-1]
-        name = command_name(command)
+        paths = cron_paths(command)
+        name = Path(paths[-1]).name if paths else "cron"
         rows.append(row(name, source, schedule, command, comment or PURPOSES.get(name, f"Run {name}"), owners,
-                        path=f"{source}:{number}", user=parts[-2] if system else "Current login"))
+                        owner_paths=paths, path=f"{source}:{number}",
+                        user=parts[-2] if system else "Current login"))
         comment = ""
     return rows
 
 
 def timer_row(timer, service, source, owners):
     command = service.get("ExecStart", "")
+    paths = [timer.get("FragmentPath", ""), service.get("FragmentPath", ""),
+             service.get("WorkingDirectory", "")]
+    for executable, arguments in re.findall(r"\{\s*path=(.*?)\s*;\s*argv\[\]=(.*?)\s*;", command):
+        paths.append(executable)
+        try:
+            paths.extend(command_paths([executable, *shlex.split(arguments)[1:]]))
+        except ValueError:
+            pass
     triggers = re.findall(r"\{\s*(On\w+=.*?)\s*;\s*next_elapse=",
                           timer.get("TimersCalendar", "") + "; " + timer.get("TimersMonotonic", ""))
     policy = [f"{key}={timer[key]}" for key in
@@ -181,6 +234,7 @@ def timer_row(timer, service, source, owners):
     schedule = "; ".join(triggers + policy) or UNKNOWN
     item = row(timer["Id"].removesuffix(".timer"), source, schedule, command,
                service.get("Description") or timer.get("Description") or UNKNOWN, owners,
+               owner_paths=paths,
                path=timer.get("FragmentPath", "") + " " + service.get("FragmentPath", "") +
                " " + service.get("WorkingDirectory", ""),
                timer=timer, service=service, unit=service.get("Id", timer.get("Unit", "")))
@@ -242,24 +296,22 @@ def read_registry(registry):
 
 
 def check_row(script, owners):
-    state_stat = script.parent.lstat()
-    if not stat.S_ISDIR(state_stat.st_mode):
-        raise ValueError("Check state is not a plain directory")
-    trust = script.with_name(script.name.removesuffix(".check.sh") + ".check-trust")
-    for path, mode in ((script, 0o700), (trust, 0o600)):
-        file_stat = path.lstat()
-        if (not stat.S_ISREG(file_stat.st_mode) or stat.S_IMODE(file_stat.st_mode) != mode
-                or file_stat.st_nlink != 1 or file_stat.st_dev != state_stat.st_dev):
-            raise ValueError(f"Untrusted check: {script.name}")
-    content = script.read_bytes()
-    digest = hashlib.sha256(content).hexdigest()
-    if trust.read_text().splitlines() != ["fm-custom-check-v1", digest]:
-        raise ValueError(f"Untrusted check: {script.name}")
-    description = next((line.lstrip("# ") for line in content.decode(errors="replace").splitlines()
-                        if line.startswith("#") and not line.startswith("#!")), "Registered check")
+    mode = script.lstat().st_mode
+    if not stat.S_ISREG(mode):
+        raise ValueError(f"Check is not a plain file: {script.name}")
     return row(script.name, f"home check: {script}", "Watcher sweep (default 5m)",
-               str(script), PURPOSES.get(script.name, description), owners, path=str(script),
-               registration=f"fm-custom-check-v1; SHA256={digest}; script 0700; trust 0600")
+               str(script), PURPOSES.get(script.name, "Registered check"), owners,
+               owner_paths=[str(script)], path=str(script),
+               registration=f"Metadata only; script {stat.S_IMODE(mode):04o}")
+
+
+def check_rows(home, owners):
+    state = home / "state"
+    if not stat.S_ISDIR(state.lstat().st_mode):
+        raise ValueError("Check state is not a plain directory")
+    owners = {root: owner for root, owner in owners.items() if Path(root) == home}
+    return [check_row(script, owners) for script in sorted(state.iterdir())
+            if script.name.endswith(".check.sh")]
 
 
 class Inventory:
@@ -281,19 +333,16 @@ class Inventory:
                 self.errors.pop(source, None)
 
     def refresh_checks(self):
-        try:
-            state = self.home / "state"
-            if not stat.S_ISDIR(state.lstat().st_mode):
-                raise ValueError("Check state is not a plain directory")
-            scripts = sorted(p.with_name(p.name.removesuffix(".check-trust") + ".check.sh")
-                             for p in state.iterdir() if p.name.endswith(".check-trust"))
+        homes = {Path(root) for root in self.owners}
+        if self.home:
+            homes.add(self.home)
+        self.forget_removed("Home checks: ", [f"Home checks: {home}" for home in homes])
+        for home in sorted(homes):
+            self.collect(f"Home checks: {home}", lambda h=home: check_rows(h, self.owners))
+        if homes:
             self.errors.pop("Home checks", None)
-        except (OSError, ValueError) as error:
-            self.errors["Home checks"] = text(error)
-            return
-        self.forget_removed("home check: ", [f"home check: {p}" for p in scripts])
-        for script in scripts:
-            self.collect(f"home check: {script}", lambda p=script: [check_row(p, self.owners)])
+        else:
+            self.errors["Home checks"] = "No Firstmate home configured; checks are not listed."
 
     def refresh(self):
         if self.registry:
@@ -319,13 +368,9 @@ class Inventory:
             self.errors["/etc/cron.d"] = text(error)
         for source in ("user timer", "system timer"):
             self.collect(source, lambda s=source: timer_rows(s, self.owners))
-        if self.home:
-            self.refresh_checks()
-        else:
-            self.errors["Home checks"] = "No Firstmate home configured; checks are not listed."
+        self.refresh_checks()
         rows = [dict(item, stale=source in self.errors or
                      (source.startswith("/etc/cron.d/") and "/etc/cron.d" in self.errors) or
-                     (source.startswith("home check: ") and "Home checks" in self.errors) or
                      ("Owner registry" in self.errors and item["owner"] != UNKNOWN))
                 for source, items in self.saved.items() for item in items]
         rows.extend(row("Read error", source, UNKNOWN, "", message, {}, path=source, stale=False)

@@ -89,8 +89,10 @@ The installation records its Firstmate home in `~/.config/crewship/schedules.jso
 The viewer reads that home's `data/secondmates.md`; `--registry FILE` selects another registry.
 Only registered home paths with matching `.fm-secondmate-home` metadata establish second-mate ownership.
 Worker ownership stays Unknown without proof.
-Checks come only from the selected home's state directory.
-The viewer verifies each check's `fm-custom-check-v1` hash and private-file metadata without running the check.
+Checks come from `state/*.check.sh` in the selected home and every validated registry home.
+The viewer reads only check names, paths, and file modes; it never reads script contents or trust files.
+Each check shows the default five-minute watcher interval.
+Checks use the same validated home ownership; unmatched homes remain Unknown.
 
 The inventory covers the current login's crontab and user timers, plus system cron and system timers.
 It does not scan other logins, remote hosts, containers, unloaded timer files, or the child scripts under `/etc/cron.*`.
@@ -102,6 +104,8 @@ Read errors remain visible as rows; failed refreshes retain previous rows marked
 Control characters appear as text.
 Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
 Other commands use their executable name as a label.
+For a leading `cd DIR && command`, the viewer uses DIR as working-directory evidence and resolves relative executable or script paths.
+Other wrappers keep their executable names; the viewer does not inspect their child commands.
 
 
 ## The host config

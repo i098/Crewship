@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -9,14 +8,18 @@ schedules = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(schedules)
 
 
-def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
+def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch):
     home = tmp_path / "orbit"
     home.mkdir()
     marker = home / ".fm-secondmate-home"
     marker.write_text("orbit-mate-a1\n")
+    other = tmp_path / "nova"
+    other.mkdir()
+    (other / ".fm-secondmate-home").write_text("nova-mate-b2\n")
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(
         f"- orbit-mate-a1 - Report owner (home: {home}; scope: Reports; projects: orbit; added 2026-10-21)\n"
+        f"- nova-mate-b2 - Other owner (home: {other}; scope: Reports; projects: nova; added 2026-10-21)\n"
     )
     owners, errors = schedules.read_registry(tmp_path / "data/secondmates.md")
     assert not errors
@@ -30,6 +33,34 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
     system_cron = schedules.cron_rows(
         f"0 9 * * * root {home}/bin/report\n", "/etc/crontab", owners, True
     )
+    commands = [
+        (f"/usr/bin/find {home}/data -type f -delete", "find", "Unknown"),
+        (f"/usr/bin/curl https://example.net/health >> {home}/health.log", "curl", "Unknown"),
+        (f"/usr/bin/cat {home}/data.py", "cat", "Unknown"),
+        (f"/usr/bin/echo '{home}/data.sh' ; /usr/bin/cat {other}/data.py", "echo", "Unknown"),
+        (f"/usr/bin/python3 -u {home}/report.py {other}/data.py", "report.py", "orbit-mate-a1"),
+        (f"/bin/sh -e {home}/report.sh {other}/data.sh", "report.sh", "orbit-mate-a1"),
+        (f"/bin/sh -c '{home}/report.sh'", "sh", "Unknown"),
+        (f"/usr/bin/python3 -c 'print(\"{home}\")'", "python3", "Unknown"),
+        (f"/usr/bin/python3 -m package {home}/data.py", "python3", "Unknown"),
+        (f"HOME={other} /usr/bin/python3 '{home}/report task.py'", "report task.py", "orbit-mate-a1"),
+        (f"2>{other}/errors.log /bin/bash {home}/report.sh", "report.sh", "orbit-mate-a1"),
+        (f"{home}/../foreign/report", "report", "Unknown"),
+        (f"cd {home} && ./bin/report.sh", "report.sh", "orbit-mate-a1"),
+        (f"cd {home} && python3 report.py {other}/data.py", "report.py", "orbit-mate-a1"),
+        (f"cd {home} && /usr/bin/cat {other}/data.py", "cat", "orbit-mate-a1"),
+        (f"cd {home} && /usr/bin/python3 {other}/report.py", "report.py", "Unknown"),
+        (f"cd {home} ; ./bin/report.sh", "cd", "Unknown"),
+        (f"cd {home} || ./bin/report.sh", "cd", "Unknown"),
+        (f"cd {home}/$SUBDIR && ./bin/report.sh", "cd", "Unknown"),
+        (f"/usr/bin/env HOME={home} /usr/bin/cat {home}/data.py", "env", "Unknown"),
+    ]
+    for source, system in (("user cron", False), ("/etc/crontab", True), ("/etc/cron.d/report", True)):
+        for command, name, owner in commands:
+            item, = schedules.cron_rows(
+                f"0 9 * * * {'root ' if system else ''}{command}\n", source, owners, system
+            )
+            assert (item["name"], item["owner"], item["purpose"]) == (name, owner, f"Run {name}")
     timer, empty, running, success = schedules.properties(
         "Id=report.timer\nUnit=report.service\nActiveState=active\n"
         "TimersCalendar={ OnCalendar=daily ; next_elapse=Thu 2026-10-22 09:00:00 UTC }\n"
@@ -59,25 +90,102 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
     assert completed["result"] == "OK 2"
     assert completed["owner"] == "orbit-mate-a1"
     assert completed["last"] != completed["service"]["ExecMainExitTimestamp"]
+    for source in ("user timer", "system timer"):
+        data_command = dict(success, ExecStart=(
+            f"{{ path=/usr/bin/curl ; argv[]=/usr/bin/curl {home}/data.py ; ignore_errors=no ; }}"
+        ))
+        assert schedules.timer_row(timer, data_command, source, owners)["owner"] == "Unknown"
+        for key in ("FragmentPath", "WorkingDirectory"):
+            service = dict(data_command, **{key: f"{home}/units/report"})
+            assert schedules.timer_row(timer, service, source, owners)["owner"] == "orbit-mate-a1"
+        unit = dict(timer, FragmentPath=f"{home}/units/report.timer")
+        assert schedules.timer_row(unit, data_command, source, owners)["owner"] == "orbit-mate-a1"
+        service = dict(success, ExecStart=(
+            f"{{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -u {home}/report.py"
+            f" {other}/data.py ; ignore_errors=no ; }}"
+        ))
+        assert schedules.timer_row(timer, service, source, owners)["owner"] == "orbit-mate-a1"
     failed = dict(completed, name="broken", result="exit-code (1)", next="2026-10-23 09:00:00 UTC")
     earlier = dict(completed, name="earlier", next="2026-10-22 07:00:00 UTC")
     ordered = sorted([completed, earlier, failed], key=schedules.row_order)
     assert [item["name"] for item in ordered] == ["broken", "earlier", "report"]
     assert schedules.text("report\x1b[31m\n\u202e") == r"report\x1b[31m\n\u202e"
-    (tmp_path / "state").mkdir()
-    check = tmp_path / "state/report.check.sh"
-    check.write_text("#!/bin/sh\n# Check the report\nexit 17\n")
-    check.chmod(0o700)
-    trust = tmp_path / "state/report.check-trust"
-    trust.write_text("fm-custom-check-v1\n" + hashlib.sha256(check.read_bytes()).hexdigest() + "\n")
-    trust.chmod(0o600)
-    (tmp_path / "state/pull-request.check.sh").write_text("not a registered custom check")
-    inventory = schedules.Inventory(tmp_path)
-    inventory.owners = {str(tmp_path): "orbit-mate-a1"}
-    inventory.refresh_checks()
-    checks = [item for items in inventory.saved.values() for item in items]
-    assert [item["name"] for item in checks] == ["report.check.sh"]
-    assert (checks[0]["owner"], checks[0]["result"]) == ("orbit-mate-a1", "Unknown")
+    expected = {}
+    for root, mode in ((tmp_path, 0o700), (home, 0o600), (other, 0o755)):
+        (root / "state").mkdir()
+        check = root / "state/report.check.sh"
+        check.write_text("#!/bin/sh\nexit 17\n")
+        check.chmod(mode)
+        (root / "state/report.check-trust").write_text("Do not read this file")
+        expected[str(check)] = (owners.get(str(root), "Unknown"), f"Metadata only; script {mode:04o}")
+    extra = tmp_path / "state/pull-request.check.sh"
+    extra.write_text("Do not read or run this file")
+    extra.chmod(0o600)
+    expected[str(extra)] = ("Unknown", "Metadata only; script 0600")
+    original_open, original_iterdir = Path.open, Path.iterdir
+    original_read_text = Path.read_text
+    scanned, unavailable = set(), set()
+
+    def metadata_only_open(path, *args, **kwargs):
+        assert path.parent.name != "state", f"Read check contents: {path}"
+        return original_open(path, *args, **kwargs)
+
+    def list_directory(path):
+        if str(path) == "/etc/cron.d":
+            return iter(())
+        assert path in {root / "state" for root in (tmp_path, home, other)}
+        scanned.add(path)
+        if path in unavailable:
+            raise PermissionError("State directory unavailable")
+        return original_iterdir(path)
+
+    def read_text(path, *args, **kwargs):
+        return "" if str(path) == "/etc/crontab" else original_read_text(path, *args, **kwargs)
+
+    def run(argv):
+        if argv == ["crontab", "-l"]:
+            return ""
+        assert argv in (
+            ["systemctl", "list-timers", "--all", "--no-pager", "--output=json"],
+            ["systemctl", "--user", "list-timers", "--all", "--no-pager", "--output=json"],
+        )
+        return "[]"
+
+    monkeypatch.setattr(Path, "open", metadata_only_open)
+    monkeypatch.setattr(Path, "iterdir", list_directory)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(schedules, "run", run)
+    registry = tmp_path / "data/secondmates.md"
+    snapshot = schedules.collect_snapshot(tmp_path, registry, {})
+    assert not snapshot["errors"]
+    checks = [item for item in snapshot["rows"] if item["source"].startswith("home check: ")]
+    assert {item["path"]: (item["owner"], item["registration"]) for item in checks} == expected
+    assert all(item["result"] == "Unknown" and not item["stale"] for item in checks)
+    assert all(item["schedule"] == "Watcher sweep (default 5m)" for item in checks)
+    assert scanned == {root / "state" for root in (tmp_path, home, other)}
+    for selected in (None, home):
+        registered = schedules.collect_snapshot(selected, registry, {})
+        assert not registered["errors"]
+        assert {item["path"] for item in registered["rows"]} == {
+            str(root / "state/report.check.sh") for root in (home, other)
+        }
+    unavailable.add(home / "state")
+    stale = schedules.collect_snapshot(tmp_path, registry, snapshot)
+    assert f"Home checks: {home}" in stale["errors"]
+    assert {item["path"] for item in stale["rows"] if item["stale"]} == {
+        str(home / "state/report.check.sh")
+    }
+    unavailable.clear()
+    recovered = schedules.collect_snapshot(tmp_path, registry, stale)
+    assert not recovered["errors"]
+    assert all(not item["stale"] for item in recovered["rows"])
+    extra.unlink()
+    removed = schedules.collect_snapshot(tmp_path, registry, recovered)
+    assert str(extra) not in {item["path"] for item in removed["rows"]}
     marker.write_text("another-mate\n")
-    owners, errors = schedules.read_registry(tmp_path / "data/secondmates.md")
-    assert str(home) not in owners and f"Owner metadata: {home}" in errors
+    scanned.clear()
+    rejected = schedules.collect_snapshot(tmp_path, registry, removed)
+    assert f"Owner metadata: {home}" in rejected["errors"]
+    assert str(home) not in rejected["owners"]
+    assert home / "state" not in scanned
+    assert str(home / "state/report.check.sh") not in {item["path"] for item in rejected["rows"]}
