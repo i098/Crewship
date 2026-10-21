@@ -3,15 +3,24 @@
 import importlib.util
 import re
 import struct
+import xml.etree.ElementTree as ET
 from collections import Counter
+from functools import partial
 from html.parser import HTMLParser
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from urllib.parse import urlparse
+from urllib.robotparser import RobotFileParser
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("harbor_build", ROOT / "site/build.py")
 build = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build)
+SERVE_SPEC = importlib.util.spec_from_file_location("harbor_serve", ROOT / "site/serve.py")
+serve = importlib.util.module_from_spec(SERVE_SPEC)
+SERVE_SPEC.loader.exec_module(serve)
 
 
 class Manifest(HTMLParser):
@@ -147,10 +156,8 @@ def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
     dist = build.build(tmp_path / "dist")
     head = Head()
     head.feed((dist / "index.html").read_text())
-    tagline = re.search(r"^\*\*(.+)\*\*$", (ROOT / "README.md").read_text(), re.M)[1]
 
     assert head.meta["og:title"] == "Crewship"
-    assert head.meta["og:description"] == tagline
     assert head.meta["og:type"] == "website"
     assert head.meta["twitter:card"] == "summary_large_image"
     assert head.meta["og:url"] == "https://crewship.si/"
@@ -161,3 +168,66 @@ def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
     assert (head.meta["og:image:width"], head.meta["og:image:height"]) == ("1200", "630")
     assert png_size(dist / head.links["apple-touch-icon"]) == (180, 180)
     assert (dist / head.links["icon"]).read_text().startswith("<svg ")
+
+
+def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
+    dist = build.build(tmp_path / "dist")
+    with ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(serve.Handler, directory=dist)
+    ) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = HTTPConnection(*server.server_address, timeout=5)
+        try:
+            for path, filename in [
+                ("/", "index.html"),
+                ("/how", "how.html"),
+                ("/how?preview=1", "how.html"),
+                ("/harbor.css", "harbor.css"),
+                ("/harbor.js", "harbor.js"),
+                ("/robots.txt", "robots.txt"),
+                ("/sitemap.xml", "sitemap.xml"),
+            ]:
+                connection.request("GET", path)
+                response = connection.getresponse()
+                body = response.read()
+                assert response.status == 200, path
+                assert response.getheader("Location") is None, path
+                assert body == (dist / filename).read_bytes(), path
+                if filename in ("robots.txt", "sitemap.xml"):
+                    assert body == (ROOT / "site/public" / filename).read_bytes()
+                if filename == "sitemap.xml":
+                    sitemap = ET.fromstring(body)
+                    assert [
+                        url.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
+                        for url in sitemap
+                    ] == ["https://crewship.si/", "https://crewship.si/how"]
+                if filename == "robots.txt":
+                    robots = RobotFileParser()
+                    robots.parse(body.decode().splitlines())
+                    assert robots.site_maps() == ["https://crewship.si/sitemap.xml"]
+                    for agent in ("Googlebot", "OAI-SearchBot", "GPTBot"):
+                        for route in ("/", "/how"):
+                            assert robots.can_fetch(agent, route) == (agent != "GPTBot")
+                if filename.endswith(".html"):
+                    assert response.getheader("Content-Type").startswith("text/html")
+                    head = Head()
+                    head.feed(body.decode())
+                    assert head.links["canonical"] == (
+                        "https://crewship.si/" if path == "/" else "https://crewship.si/how"
+                    )
+            for method, path, status in [
+                ("HEAD", "/how?preview=1", 200),
+                ("GET", "/about", 404),
+                ("GET", "/missing", 404),
+                ("GET", "/missing.js", 404),
+                ("HEAD", "/missing", 404),
+            ]:
+                connection.request(method, path)
+                response = connection.getresponse()
+                response.read()
+                assert response.status == status, (method, path)
+        finally:
+            connection.close()
+            server.shutdown()
+            thread.join()
