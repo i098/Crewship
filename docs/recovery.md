@@ -67,7 +67,26 @@ Runtime application activity, deliberate self-updates, and changed package index
 
 ### Upgrade from a pre-rename install
 
-The first `./ship.sh launch` after the Crewship rename migrates a host installed before it, once. It stops the old desktop units and deletes their files and links. It stops the chrome-devtools-axi bridges that run from the old install directory, because the browser timer cannot stop them after the move. It moves each old path to its new name, for example `~/.local/share/crewship`, and points command links and user unit files at the new paths. It restarts each running user service whose unit file or drop-in it changed, except the no-mistakes daemon: restart that daemon by hand when no pipeline run is active. The desktop tasks then install and enable `crewship-vnc.service` and `crewship-novnc.service`. [`blueprint/ansible/tasks/rename.yml`](../blueprint/ansible/tasks/rename.yml) holds the full old-to-new table. Run that apply when no agent session is active, because running tools lose their old paths, and do not run `./onboard.sh` before it. If an old path and its new name both exist, the apply stops before it changes anything; merge or remove one by hand and run it again. The one exception is the share directory when the new one holds only what `install.sh` and `onboard.sh` create (`releases`, `tools`, `.install.lock`): the old directory then merges into it, and the apply stops without changes if an entry differs in both. A second apply reports `changed=0`.
+The first `./ship.sh launch` after the Crewship rename migrates a host installed before it, once.
+It stops the old desktop units and deletes their files and links.
+When legacy paths exist, it also stops `herdr-spaces.timer` and `herdr-spaces.service` before moving data.
+It stops the chrome-devtools-axi bridges that run from the old install directory, because the browser timer cannot stop them after the move.
+It checks for collisions again after shutdown to catch paths recreated while the writers stop.
+It skips missing legacy paths.
+It moves existing legacy paths to their new names, for example `~/.local/share/crewship`, and points command links and user unit files at the new paths.
+It restarts each running user service whose unit file or drop-in it changed, except the no-mistakes daemon.
+Restart that daemon by hand when no pipeline run is active.
+The desktop tasks then install and enable `crewship-vnc.service` and `crewship-novnc.service`.
+[`blueprint/ansible/tasks/rename.yml`](../blueprint/ansible/tasks/rename.yml) holds the full old-to-new table.
+Run that apply when no agent session is active.
+Running tools lose their old paths.
+Do not run `./onboard.sh` before that apply.
+If an old path and its new name both exist, the apply stops before moving data.
+Merge or remove one by hand and run it again.
+The one exception is the share directory when the new one holds only what `install.sh` and `onboard.sh` create (`releases`, `tools`, `.install.lock`).
+The old directory then merges into it.
+If an entry differs in both, the apply stops and leaves both share directories unchanged.
+A second apply reports `changed=0`.
 
 Migration skips an absent user unit directory or SSH directory.
 It still updates unit paths and SSH block markers when those directories are symbolic links.

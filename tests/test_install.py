@@ -435,21 +435,59 @@ def test_install_questions_keep_terminal_and_capture_output(release, question_st
     assert (f"omp exited {question_status}" in result.stdout) == bool(question_status)
 
 
-def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path):
+@pytest.mark.parametrize("cache_state", ["present", "recreated", "home-conflict", "system-conflict"])
+def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path, cache_state):
     assert release.install("v1.0.0").returncode == 0
-    for directory in (".local/state", ".cache"):
+    for directory in ((".local/state", ".cache") if cache_state == "present" else (".local/state",)):
         old = release.home / directory / "code-factory"
         old.mkdir(parents=True)
         (old / "data").write_text(directory)
+    system_old = tmp_path / "system/code-factory"
+    system_new = tmp_path / "system/crewship"
+    system_old.parent.mkdir()
+    if cache_state == "present":
+        system_old.mkdir()
+        (system_old / "data").write_text("system")
+    conflict = {
+        "home-conflict": release.home / ".cache/crewship",
+        "system-conflict": system_new,
+    }.get(cache_state)
+    if conflict:
+        conflict.mkdir(parents=True)
+        (conflict / "data").write_text("keep")
+    units = release.home / ".config/systemd/user"
+    units.mkdir(parents=True)
+    for unit in ("herdr-spaces.timer", "herdr-spaces.service"):
+        (units / unit).touch()
+    shutdown = tmp_path / "shutdown.py"
+    shutdown.write_text(
+        "import pathlib, sys\n"
+        f"state = pathlib.Path({str(release.home / '.local/state/code-factory')!r})\n"
+        "if sys.argv[1] != 'herdr-spaces.service' or not state.exists():\n"
+        "    sys.exit(0)\n"
+        f"for name, data in {[(str(release.home / '.cache/code-factory'), '.cache'), (str(system_old), 'system')]!r}:\n"
+        "    path = pathlib.Path(name)\n"
+        "    if not path.exists():\n"
+        "        path.mkdir(parents=True)\n"
+        "        (path / 'data').write_text(data)\n"
+    )
     migration = yaml.safe_load((ROOT / "blueprint/ansible/tasks/rename.yml").read_text())[0]
     migration["vars"]["crewship_renamed_paths"] = [
         pair for pair in migration["vars"]["crewship_renamed_paths"]
         if pair[0].endswith(("/.local/state/code-factory", "/.cache/code-factory"))
-    ]
+    ] + [[str(system_old), str(system_new)]]
     tasks = migration["block"]
-    migration["block"] = tasks[:3] + [
-        next(task for task in tasks if task["name"] == "Move the pre-rename home paths to their new names")
-    ]
+    stop = next(task for task in tasks if task["name"] == "Stop the units that use the pre-rename paths")
+    del stop["ansible.builtin.systemd_service"]
+    stop["ansible.builtin.command"] = {
+        "argv": [sys.executable, str(shutdown), "{{ item.item }}"],
+    }
+    stop["changed_when"] = False
+    last_move = next(
+        index for index, task in enumerate(tasks)
+        if task["name"] == "Move the pre-rename system paths to their new names"
+    )
+    migration["block"] = tasks[:last_move + 1]
     playbook = tmp_path / "migration.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
@@ -459,6 +497,8 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
             "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
             "crewship_share_dir": str(release.home / ".local/share/crewship"),
             "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
+            "crewship_user_units": str(units),
+            "crewship_manage_services": True, "crewship_user_systemd_env": {},
         },
         "tasks": [migration],
     }]))
@@ -472,11 +512,24 @@ def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_
     )
     release.env["ANSIBLE_PIPELINING"] = "1"
     result = release.install("v1.0.0")
+    if conflict:
+        assert result.returncode != 0
+        assert f"{conflict.parent / 'code-factory'} and {conflict}" in install_log(result).read_text()
+        assert (conflict / "data").read_text() == "keep"
+        assert (release.home / ".local/state/code-factory/data").read_text() == ".local/state"
+        assert (release.home / ".cache/code-factory/data").read_text() == ".cache"
+        assert (system_old / "data").read_text() == "system"
+        return
     assert result.returncode == 0, install_log(result).read_text()
     for directory in (".local/state", ".cache"):
         assert not (release.home / directory / "code-factory").exists()
         assert (release.home / directory / "crewship/data").read_text() == directory
+    assert not system_old.exists()
+    assert (system_new / "data").read_text() == "system"
     assert install_log(result).stat().st_mode & 0o777 == 0o600
+    repeated = release.install("v1.0.0")
+    assert repeated.returncode == 0, install_log(repeated).read_text()
+    assert "changed=0" in install_log(repeated).read_text()
 
 
 @pytest.mark.parametrize("password_required", [False, True])
