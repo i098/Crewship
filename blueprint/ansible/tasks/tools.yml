@@ -144,14 +144,48 @@
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
 
-- name: Install the read-only schedule viewer
-  ansible.builtin.copy:
-    src: "{{ crewship_blueprint }}/maintenance/crewship-schedules.py"
-    dest: "{{ crewship_local_bin }}/crewship-schedules"
+- name: Ensure the OpenTUI schedule directory
+  ansible.builtin.file:
+    path: "{{ crewship_share_dir }}/schedules"
+    state: directory
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
     mode: "0755"
+
+- name: Install the OpenTUI schedule assets
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/tools/schedules/{{ item }}"
+    dest: "{{ crewship_share_dir }}/schedules/{{ item }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
     remote_src: true
+  loop: [main.ts, package.json, bun.lock]
+
+- name: Install the read-only schedule collector
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/crewship-schedules.py"
+    dest: "{{ crewship_share_dir }}/schedules/collector.py"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+
+- name: Install the locked OpenTUI dependencies
+  ansible.builtin.command:
+    argv: ["{{ crewship_local_bin }}/bun", install, --frozen-lockfile, --production, --ignore-scripts]
+    chdir: "{{ crewship_share_dir }}/schedules"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_schedules_install
+  changed_when: "'packages installed' in crewship_schedules_install.stdout"
+  when: not ansible_check_mode
+
+- name: Remove the superseded curses entry point
+  ansible.builtin.file:
+    path: "{{ crewship_local_bin }}/crewship-schedules"
+    state: absent
 
 - name: Ensure the schedule viewer config directory
   ansible.builtin.file:

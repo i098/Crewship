@@ -69,7 +69,7 @@ Host paths, unit names, and the compose image name do not change in this step.
 ## Schedule viewer
 
 Run `crewship schedules` in a terminal after installing Crewship.
-The viewer uses Python's standard library and curses.
+The viewer uses OpenTUI's native TypeScript API on Bun and a Python standard-library collector.
 It never runs a job, writes a schedule, starts a service, or sends a model request.
 Press `r` to refresh; the viewer does not poll while open.
 
@@ -78,7 +78,7 @@ Press `/` to search, `s` to cycle sources, `o` to cycle owners, and Escape to cl
 Use Page Up and Page Down to scroll details.
 Press `J` to read the selected service's last 40 journal lines, and `q` to quit.
 Press `p` to show or hide raw systemd properties.
-Each subprocess has an eight-second timeout.
+Each source command has an eight-second timeout; the collector process has a 75-second limit.
 Narrow terminals show the job name and result first.
 Failed jobs appear first; other jobs follow their next run time.
 Results use red for failure, yellow for running, green for success, and dim text for unknown values.
@@ -87,7 +87,7 @@ The time and result columns show unknown values as `-`; owner labels keep `Unkno
 The installation records its Firstmate home in `~/.config/crewship/schedules.json`.
 `FM_HOME` or `--home DIR` overrides that home.
 The viewer reads that home's `data/secondmates.md`; `--registry FILE` selects another registry.
-Only registered home paths establish second-mate ownership.
+Only registered home paths with matching `.fm-secondmate-home` metadata establish second-mate ownership.
 Worker ownership stays Unknown without proof.
 Checks come only from the selected home's state directory.
 The viewer verifies each check's `fm-custom-check-v1` hash and private-file metadata without running the check.

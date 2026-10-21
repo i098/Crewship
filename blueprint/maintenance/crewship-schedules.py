@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Browse local schedules without running or changing jobs."""
+"""Collect read-only schedule metadata for the OpenTUI viewer."""
 
 import argparse
-import curses
 import hashlib
 import json
 import os
@@ -10,7 +9,7 @@ import re
 import shlex
 import stat
 import subprocess
-import textwrap
+import sys
 import time
 import unicodedata
 from pathlib import Path
@@ -109,7 +108,7 @@ def owner_for(evidence, owners):
     if len(names) != 1:
         return UNKNOWN, "Multiple registered owners match. Worker: Unknown."
     root, name = matches[0]
-    return name, f"Registry home: {root}. Worker: Unknown."
+    return name, f"Registry and home identity: {root}. Worker: Unknown."
 
 
 def row(name, source, schedule, command, purpose, owners, **fields):
@@ -225,7 +224,7 @@ def timer_rows(source, owners):
 
 
 def read_registry(registry):
-    owners = {}
+    owners, errors = {}, {}
     for line in registry.read_text().splitlines():
         match = re.search(r"\(home:\s*([^;]+);", line)
         if match:
@@ -233,8 +232,13 @@ def read_registry(registry):
             identity = re.match(r"- ([A-Za-z0-9._-]+) - ", line)
             if not identity or not Path(root).is_absolute() or root in owners:
                 raise ValueError("Invalid second-mate registry entry")
-            owners[root] = identity[1]
-    return owners
+            try:
+                if (Path(root) / ".fm-secondmate-home").read_text().strip() != identity[1]:
+                    raise ValueError("Home identity does not match the registry")
+                owners[root] = identity[1]
+            except (OSError, ValueError) as error:
+                errors[f"Owner metadata: {root}"] = text(error)
+    return owners, errors
 
 
 def check_row(script, owners):
@@ -294,7 +298,10 @@ class Inventory:
     def refresh(self):
         if self.registry:
             try:
-                self.owners = read_registry(self.registry)
+                self.owners, metadata_errors = read_registry(self.registry)
+                self.errors = {key: value for key, value in self.errors.items()
+                               if not key.startswith("Owner metadata: ")}
+                self.errors.update(metadata_errors)
                 self.errors.pop("Owner registry", None)
             except (OSError, ValueError) as error:
                 self.errors["Owner registry"] = text(error)
@@ -352,38 +359,6 @@ def raw_details(item):
     return lines or ["No systemd properties for this source."]
 
 
-def put(screen, y, value, attr=0, x=0):
-    height, width = screen.getmaxyx()
-    if 0 <= y < height and width - x > 1:
-        try:
-            screen.addnstr(y, x, text(value), width - x - 1, attr)
-        except curses.error:
-            pass  # A resize or a wide glyph can reach the last terminal cell.
-
-
-def cycle(current, values):
-    return values[(values.index(current) + 1) % len(values)] if current in values else values[0]
-
-
-def visible_rows(rows, source, owner, search):
-    return [r for r in rows if (source == "All" or r["source"] == source)
-            and (owner == "All" or r["owner"] == owner)
-            and search.casefold() in " ".join(str(v) for v in r.values()).casefold()]
-
-
-def draw_header(screen, caption, search_line, errors):
-    height, _ = screen.getmaxyx()
-    accent = curses.color_pair(1) if curses.has_colors() else curses.A_BOLD
-    failure = curses.color_pair(2) if curses.has_colors() else curses.A_BOLD
-    screen.erase()
-    put(screen, 0, caption, accent | curses.A_BOLD)
-    put(screen, 1, search_line)
-    messages = [f"READ ERROR {name}: {message}" for name, message in errors.items()]
-    for y, message in enumerate(messages[:max(1, height // 5)], 2):
-        put(screen, y, message, failure)
-    return 2 + min(len(messages), max(1, height // 5))
-
-
 def cell_value(item, key):
     value = item[key]
     if key in ("next", "last"):
@@ -395,164 +370,33 @@ def cell_value(item, key):
     return "STALE " + value if key == "result" and item["stale"] else value
 
 
-def cell_style(item, key):
-    if key == "result":
-        kind = result_kind(item[key])
-        if kind == "unknown":
-            return curses.A_DIM
-        return curses.color_pair({"ok": 1, "failed": 2, "running": 3}[kind]) if curses.has_colors() else curses.A_BOLD
-    return curses.A_DIM if key in ("next", "last") and item[key] == UNKNOWN else 0
+def collect_snapshot(home, registry, previous):
+    inventory = Inventory(home, registry)
+    inventory.saved = previous.get("saved", {})
+    inventory.owners = previous.get("owners", {})
+    inventory.errors = previous.get("errors", {})
+    rows = inventory.refresh()
+    for item in rows:
+        item["display"] = {key: text(cell_value(item, key)) for key in
+                           ("name", "schedule", "next", "last", "result", "owner", "purpose")}
+        item["summary"] = list(map(text, details(item)))
+        item["properties"] = list(map(text, raw_details(item)))
+        item["kind"] = result_kind(item["result"])
+    return dict(rows=rows, saved=inventory.saved, owners=inventory.owners, errors=inventory.errors)
 
 
-def draw_row(screen, y, item, layout, selected):
-    base, x = (curses.A_REVERSE if selected else 0), 0
-    _, width = screen.getmaxyx()
-    put(screen, y, " " * (width - 1), base)
-    for index, (key, size) in enumerate(layout):
-        value = text(cell_value(item, key))[:size].ljust(size)
-        put(screen, y, value, base | cell_style(item, key), x)
-        x += size
-        if index < len(layout) - 1:
-            put(screen, y, " │ ", base | curses.A_DIM, x)
-            x += 3
-
-
-def draw_table(screen, visible, selected, header, expanded):
-    height, width = screen.getmaxyx()
-    if width >= 120:
-        layout = [("name", 22), ("schedule", 16), ("next", 11), ("last", 11), ("result", 13), ("owner", 18), ("purpose", width - 110)]
-    elif width >= 75:
-        layout = [("name", 23), ("result", 14), ("owner", 17), ("purpose", width - 64)]
-    else:
-        layout = [("name", max(8, width - 22)), ("result", 18)]
-    put(screen, header, " │ ".join(key.title().ljust(size) for key, size in layout), curses.A_BOLD)
-    count = min(max(1, len(visible)), max(1, (height - header - 4) // (2 if expanded else 1)))
-    start = max(0, selected - count + 1)
-    for y, item in enumerate(visible[start:start + count], header + 1):
-        draw_row(screen, y, item, layout, y - header - 1 + start == selected)
-    return header + count + 2
-
-
-def draw_details(screen, lines, top, offset):
-    height, width = screen.getmaxyx()
-    accent = curses.color_pair(1) if curses.has_colors() else curses.A_BOLD
-    wrapped = [part for line in lines
-               for part in textwrap.wrap(text(line), max(1, width - 2)) or [""]]
-    offset = min(offset, max(0, len(wrapped) - max(1, height - top - 2)))
-    for y, line in enumerate(wrapped[offset:offset + max(0, height - top - 2)], top):
-        put(screen, y, line, accent if y == top else 0)
-    return offset
-
-
-def edit_search(search, key):
-    if key in ("\n", "\r", "\x1b"):
-        return search, False
-    if key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
-        return search[:-1], True
-    return search + key if isinstance(key, str) and key.isprintable() else search, True
-
-
-def read_journal(item):
-    try:
-        return ["Journal (last 40 lines):", *run(["journalctl", *(["--user"] if item["source"] == "user timer" else []), "--no-pager", "-n", "40", "-o", "short-iso", "--unit=" + item["unit"]]).splitlines()]
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return [f"Journal read error: {error}"]
-
-
-class View:
-    def __init__(self, screen, inventory):
-        self.screen, self.inventory = screen, inventory
-        self.rows = inventory.refresh()
-        self.selected, self.expanded, self.offset = 0, True, 0
-        self.search, self.source, self.owner = "", "All", "All"
-        self.editing, self.journal = False, []
-        self.raw_properties = False
-
-    def draw(self, visible):
-        height, width = self.screen.getmaxyx()
-        self.selected = min(self.selected, max(0, len(visible) - 1))
-        header = draw_header(
-            self.screen, f"crewship schedules   READ ONLY | UTC | {len(visible)}/{len(self.rows)} records",
-            f"{'Search: ' if self.editing else '/ '}{self.search or 'Search name or purpose'} | Source: {self.source} | Owner: {self.owner}",
-            self.inventory.errors)
-        top = draw_table(self.screen, visible, self.selected, header, self.expanded)
-        if self.expanded and visible:
-            item = visible[self.selected]
-            lines = [item["name"], *self.journal] if self.journal else details(item)
-            if self.raw_properties:
-                lines.extend(["Properties:", *raw_details(item)])
-            self.offset = draw_details(self.screen, lines, top, self.offset)
-        put(self.screen, height - 2, "Local login + system only; no other accounts, containers, remote hosts, or cron child scripts.", curses.A_DIM)
-        help_line = "q quit  j/k select  Enter details  / search  s source  o owner  r refresh  p properties  J journal  PgUp/Dn scroll"
-        accent = curses.color_pair(1) if curses.has_colors() else curses.A_BOLD
-        put(self.screen, height - 1, help_line if width >= 115 else "q quit | j/k Enter / s o r p J PgUp/Dn", accent)
-        self.screen.refresh()
-
-    def filter_key(self, key):
-        if key == "s":
-            self.source = cycle(self.source, ["All", *sorted({r["source"] for r in self.rows})])
-        elif key == "o":
-            self.owner = cycle(self.owner, ["All", *sorted({r["owner"] for r in self.rows})])
-        else:
-            self.search, self.source, self.owner = "", "All", "All"
-        self.selected, self.offset, self.journal = 0, 0, []
-        self.raw_properties = False
-
-    def handle_key(self, key, visible):
-        if self.editing:
-            self.search, self.editing = edit_search(self.search, key)
-            self.selected, self.offset, self.journal = 0, 0, []
-        elif key in ("j", "k", curses.KEY_DOWN, curses.KEY_UP):
-            step = 1 if key in ("j", curses.KEY_DOWN) else -1
-            self.selected = max(0, min(self.selected + step, len(visible) - 1))
-            self.offset, self.journal = 0, []
-        elif key in ("\n", "\r", curses.KEY_ENTER):
-            self.expanded = not self.expanded
-        elif key == "/":
-            self.editing = True
-        elif key in ("\x1b", "s", "o"):
-            self.filter_key(key)
-        elif key == "r":
-            self.rows = self.inventory.refresh()
-            self.journal = []
-        elif key == "p":
-            self.raw_properties = not self.raw_properties
-            self.offset, self.journal = 0, []
-            self.expanded = True
-        elif key in (curses.KEY_NPAGE, curses.KEY_PPAGE):
-            self.offset = max(0, self.offset + (5 if key == curses.KEY_NPAGE else -5))
-        elif key == "J" and visible:
-            item = visible[self.selected]
-            if item.get("unit"):
-                self.journal = read_journal(item)
-                self.expanded, self.offset, self.raw_properties = True, 0, False
-
-    def run(self):
-        while True:
-            visible = visible_rows(self.rows, self.source, self.owner, self.search)
-            self.draw(visible)
-            key = self.screen.get_wch()
-            if key == "q" and not self.editing:
-                return
-            self.handle_key(key, visible)
-
-
-def view(screen, inventory):
-    curses.curs_set(0)
-    screen.keypad(True)
-    if curses.has_colors():
-        curses.start_color()
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_RED, -1)
-        curses.init_pair(3, curses.COLOR_YELLOW, -1)
-    View(screen, inventory).run()
+def read_journal(unit, user):
+    return list(map(text, run(["journalctl", *(["--user"] if user else []),
+                              "--no-pager", "-n", "40", "-o", "short-iso",
+                              "--unit=" + unit]).splitlines()))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, help="Firstmate home with data/secondmates.md")
     parser.add_argument("--registry", type=Path, help="second-mate registry file for owner matching")
+    parser.add_argument("--journal", help="read the last 40 journal lines for this unit")
+    parser.add_argument("--user", action="store_true", help="read the user manager's journal")
     args = parser.parse_args()
     home = args.home or (Path(os.environ["FM_HOME"]) if os.environ.get("FM_HOME") else None)
     if home is None:
@@ -560,13 +404,18 @@ def main():
         if config.exists():
             configured = json.loads(config.read_text()).get("home")
             home = Path(configured) if configured else None
-    if not os.isatty(0) or not os.isatty(1):
-        parser.error("Open schedules in a terminal.")
-    curses.wrapper(view, Inventory(home, args.registry))
+    if args.journal:
+        result = {"journal": read_journal(args.journal, args.user)}
+    else:
+        previous = json.loads(sys.stdin.read(8 * 1024 * 1024) or "{}")
+        if not isinstance(previous, dict):
+            raise ValueError("The prior inventory must be an object")
+        result = collect_snapshot(home, args.registry, previous)
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, curses.error) as error:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         raise SystemExit(f"crewship schedules: {text(error)}") from error

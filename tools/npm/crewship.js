@@ -228,8 +228,8 @@ async function explainPnpmRelease(ref) {
 
 async function main() {
   if (args[0] === "schedules") {
-    const path = require("node:path").join(require("node:os").homedir(), ".local/bin/crewship-schedules");
-    const result = spawnSync("python3", [path, ...args.slice(1)], { stdio: "inherit" });
+    const path = require("node:path").join(require("node:os").homedir(), ".local/share/crewship/schedules/main.ts");
+    const result = spawnSync("bun", [path, ...args.slice(1)], { stdio: "inherit" });
     if (result.error) throw result.error;
     process.exit(result.status ?? 1);
   }

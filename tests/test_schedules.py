@@ -10,19 +10,25 @@ spec.loader.exec_module(schedules)
 
 
 def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
+    home = tmp_path / "orbit"
+    home.mkdir()
+    marker = home / ".fm-secondmate-home"
+    marker.write_text("orbit-mate-a1\n")
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(
-        "- orbit-mate-a1 - Report owner (home: /srv/orbit; scope: Reports; projects: orbit; added 2026-10-21)\n"
+        f"- orbit-mate-a1 - Report owner (home: {home}; scope: Reports; projects: orbit; added 2026-10-21)\n"
     )
-    owners = schedules.read_registry(tmp_path / "data/secondmates.md")
+    owners, errors = schedules.read_registry(tmp_path / "data/secondmates.md")
+    assert not errors
     cron = schedules.cron_rows(
         "CRON_TZ=UTC\n# Purpose: Publish the report\n0 9 * * * /srv/orbit/bin/report\n"
         "@reboot /srv/orbital/bin/report\n"
         "* * * * * /usr/bin/printf hello%I'm awake\n"
-        "0 3 * * * /srv/orbit/bin/report >> /var/log/nightly.log\n", "user cron", owners
+        "0 3 * * * /srv/orbit/bin/report >> /var/log/nightly.log\n".replace("/srv/orbit", str(home)),
+        "user cron", owners
     )
     system_cron = schedules.cron_rows(
-        "0 9 * * * root /srv/orbit/bin/report\n", "/etc/crontab", owners, True
+        f"0 9 * * * root {home}/bin/report\n", "/etc/crontab", owners, True
     )
     timer, empty, running, success = schedules.properties(
         "Id=report.timer\nUnit=report.service\nActiveState=active\n"
@@ -36,7 +42,7 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
         "Id=report.service\nActiveState=inactive\nResult=success\nExecMainCode=1\n"
         "ExecMainStatus=2\nExecMainStartTimestamp=Wed 2026-10-21 09:00:01 UTC\n"
         "ExecMainExitTimestamp=Wed 2026-10-21 09:00:03 UTC\nSuccessExitStatus=2\n"
-        "ExecStart={ path=/srv/orbit/bin/report ; argv[]=/srv/orbit/bin/report ; }\n"
+        "ExecStart={ path=/srv/orbit/bin/report ; argv[]=/srv/orbit/bin/report ; }\n".replace("/srv/orbit", str(home))
     )
     assert cron[0]["owner"] == system_cron[0]["owner"] == "orbit-mate-a1"
     assert cron[1]["owner"] == "Unknown"
@@ -72,3 +78,6 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path):
     checks = [item for items in inventory.saved.values() for item in items]
     assert [item["name"] for item in checks] == ["report.check.sh"]
     assert (checks[0]["owner"], checks[0]["result"]) == ("orbit-mate-a1", "Unknown")
+    marker.write_text("another-mate\n")
+    owners, errors = schedules.read_registry(tmp_path / "data/secondmates.md")
+    assert str(home) not in owners and f"Owner metadata: {home}" in errors

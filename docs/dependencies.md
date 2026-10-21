@@ -28,6 +28,15 @@ Use `ondine file.md --svg` to write local SVG files instead.
 To edit a documentation diagram, run `ondine file.md --restore`, edit the restored fence, then run `ondine file.md`.
 Run `ondine file.md --check` to check the result without writing files.
 
+## Schedule viewer
+
+`tools/schedules/package.json` and `tools/schedules/bun.lock` pin `@opentui/core` 0.6.6 and its native platform packages.
+This is Crewship's own application dependency, so the lockfile stays checked in.
+The existing Bun tool runs its native TypeScript API.
+Provisioning installs production dependencies with `--frozen-lockfile --ignore-scripts`.
+The read-only collector uses Python's standard library.
+See [Schedule viewer](configuration.md#schedule-viewer) for its controls and inventory limits.
+
 ## Repository tooling
 
 `onboard.sh`, `pyproject.toml`, `uv.lock`
