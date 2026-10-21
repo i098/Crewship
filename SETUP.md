@@ -1,10 +1,50 @@
 # Set up Crewship (for an AI agent)
 
-You are an AI agent. A user has a fresh Ubuntu machine and asked you to set up Crewship on it. Do the steps below in order. Run each command yourself. Stop and ask the user where a step says STOP. Never guess a login, a code, or a choice.
+Ask the user first: "Do you already have a server for Crewship?"
+Follow the steps below in order.
+Stop and ask the user where a step says STOP.
+Never guess a login, a code, or a choice.
+Report each result in one line.
+If a command fails, remove private data before showing its last lines.
+Do not skip a step to hide a failure.
 
-You need Ubuntu 24.04 or 26.04 with systemd, and a non-root account that has sudo. Check with `lsb_release -rs`, `id -u` (not 0), and `sudo -n true`. If the machine does not fit, STOP and tell the user.
+## Before installation: choose the server
 
-Report each result to the user in one line. If a command fails, show its last lines, then fix it or ask. Do not skip a step to hide a failure.
+Run the guided setup on the laptop, with Node.js 18 or newer and npm:
+
+```bash
+npx crewship init
+```
+
+Or use `bunx crewship init` with Bun and Node.js installed.
+The guide does not install Crewship on the laptop.
+If no launcher runtime exists, guide the user through the choices below without installing a runtime.
+
+1. If the user has a server, ask for its OS, CPU, RAM, free disk, and SSH access details.
+   Check it against [Capacity](docs/capacity.md); do not start a purchase interview.
+2. If the user has no server, ask how many agents will work at once and how many will run browsers and dev servers.
+   Ask for the monthly server budget, currency, region, expected sustained load, and extra storage needs.
+   Keep model API costs separate.
+   Recommend the smallest documented preset that meets the CPU, RAM, and disk needs.
+   Treat the estimates as planning figures, not a concurrency guarantee.
+3. STOP: after recommending a purchase, ask whether the user has purchased or provisioned a suitable server.
+   Continue only after an explicit yes.
+   Do not buy a server or start setup for the user before confirmation.
+4. Ask whether to connect from the laptop over SSH or show a command to run manually on the server.
+   For SSH, use an existing alias or the hostname, non-root user, and optional port.
+   Use existing SSH keys only; never request, copy, or store a private key or SSH password.
+   Keep host-key checks on and agent forwarding off.
+   Ask the user to verify a new fingerprint through the provider console; stop on a changed key.
+   If no usable key exists, show the manual server command from step 0.
+   Choose optional features with the checklist in step 0 before requesting installation permission.
+5. STOP: show the target server, chosen features, and install action; ask for permission before connecting or installing.
+   Let the user enter any sudo password directly in the terminal.
+   On a failed connection or target check, stop and offer the manual route.
+   Never fall back to installing on the laptop.
+
+If `init` completed installation, continue at [Resume setup](#resume-setup) on the server.
+Otherwise, follow step 0 on the server.
+For an existing Crewship installation, follow [Update](docs/install.md#update); do not pass `--with` again.
 
 ## Setup flow
 
@@ -17,6 +57,13 @@ Report each result to the user in one line. If a command fails, show its last li
 
 ## 0. Choose features and install Crewship
 
+Run this step and all later setup commands on the server, not the laptop.
+Use Ubuntu 24.04 or 26.04 with systemd and a non-root account that has sudo.
+Check the OS with `lsb_release -rs` and the account with `id -u` (not 0).
+Check CPU, RAM, and free disk with `lscpu`, `free -h`, and `df -h`.
+Confirm sudo access; if it needs a password, let the user type it directly in the terminal.
+STOP if the server does not meet the OS or [capacity requirements](docs/capacity.md).
+
 Crewship installs a core, the omp agents and Firstmate. Everything else is opt-in and off until the user chooses it. `docker` comes with `fleet_guards` and `project_databases`, and `development` comes with `board`.
 
 - STOP: show the user the [profiles](docs/configuration.md#profiles) and the optional [crew board](docs/board.md).
@@ -26,7 +73,9 @@ Crewship installs a core, the omp agents and Firstmate. Everything else is opt-i
   If one exists, ask whether to `skip`, `overwrite` after a backup, or `append` a marked block (the default).
   See [Global instructions](docs/omp.md#global-instructions) for the target files and mode settings.
 
-Run the installer with the chosen names, comma separated. Use `--with none` for none. You have no terminal for the installer's own checklist, so always pass `--with`:
+Run the installer on the server with the chosen names, comma separated.
+Use `--with none` for none.
+Without an interactive terminal, always pass `--with` to answer the checklist:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash -s -- --with public_skills,docker
@@ -61,7 +110,7 @@ Follow the remaining steps below for manual approvals and sign-ins.
 GitHub and provider sign-ins still need the user's consent.
 See [Setup checks](docs/configuration.md#commands) for the reported states and limits.
 
-The commands below also work from any directory.
+The commands below also work from any directory on the server.
 
 ## 1. Sign in to GitHub
 

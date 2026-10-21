@@ -16,19 +16,27 @@
 
 ## Quick start
 
-Use a fresh Ubuntu 24.04 server with systemd, at least 4 vCPUs and 16 GB of RAM.
-Sign in over SSH with a non-root account that has sudo.
-See [Capacity](docs/capacity.md) for sizing.
-Ubuntu 26.04 is also supported.
+Do you already have a server for Crewship?
 
-Run this command on the server:
+**No:** run this on your laptop with Node.js 18 or newer and npm:
+
+```bash
+npx crewship init
+```
+
+Or use `bunx crewship init` with Bun and Node.js installed.
+The guide recommends a server size from your expected load and waits for purchase confirmation before setup.
+
+**Yes:** use Ubuntu 24.04 or 26.04 with systemd, at least 4 vCPUs, and 16 GB RAM.
+Check [Capacity](docs/capacity.md) for your load.
+Sign in over SSH with a non-root account that has sudo, then run this **on the server**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
 The installer offers a feature checklist and installs omp agents and Firstmate.
-Then check or resume setup from any directory:
+Then check or resume setup **on the server**, from any directory:
 
 ```bash
 "$HOME/Crewship/ship.sh" setup
@@ -37,10 +45,13 @@ Then check or resume setup from any directory:
 Follow the printed commands and the [manual sign-in steps](SETUP.md#1-sign-in-to-github).
 See [Setup checks](docs/configuration.md#commands) for the command's scope and limits.
 
-For agent-assisted setup, give your coding agent this instruction on the server:
+For agent-assisted setup, give your coding agent this instruction:
 
 ```text
-Set up Crewship on this machine by following https://github.com/i098/Crewship/blob/main/SETUP.md
+Ask whether I already have a server for Crewship first.
+If yes, check its details and start setup on that server.
+If no, recommend a server for my expected load and wait for purchase confirmation.
+Follow https://github.com/i098/Crewship/blob/main/SETUP.md
 ```
 
 To update, run the same install command again.
