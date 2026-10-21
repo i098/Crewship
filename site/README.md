@@ -2,7 +2,7 @@
 
 `site/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
 
-The home page has a visible product summary and an About link.
+The home page keeps its product summary and About link in the HTML and the initial harbor sign.
 The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
 It uses the main README as its factual source and needs no JavaScript.
 
@@ -142,7 +142,7 @@ The docs board shows on the mini map like the other points.
 Add an object and a `SCENE` entry to give the link its own place.
 The build limits each sign to a title, a short description and one link.
 Unmapped pages share a short summary with a count and one link to the README feature index.
-The welcome sign has three project links.
+The welcome sign shows the home page's project links, including About.
 Posted signs first place their bottom frame row on the lowest projected support top.
 Paired posts keep a screen-aligned rectangle wide enough to cover both supports; the higher support top passes behind the board.
 Projection uses the same cell centers as the ray-cast scene, not the aimed surface or the object's center.
@@ -211,11 +211,12 @@ It includes 320×568 phones in both orientations and landscape heights of 256 an
 The geometry fixtures use fixed normal and coarse grids, independent of host rendering speed.
 The Python checks exercise adaptive detail with controlled render costs and painting delays in the exterior, house, cabin, and gun deck.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
-On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks that the canvas draws at the display pixel ratio.
+On iPhone 15 Pro, it checks that the canvas draws at the display pixel ratio.
 It also taps six pixels above and below each stacked link center to check the separate hit regions.
 It also checks feature-link focus with the full map open and an arrival selection pending.
 It fails if rendering stalls.
-It taps or clicks every link and opens the docs index with the keyboard.
+It taps or clicks every link, checks same-tab and new-tab navigation, and returns to the scene.
+It also opens the docs index with the keyboard.
 See [how.html](public/how.html) for the rendering limits on touch devices.
 
 CI also loads the page in Playwright Chromium in a 3651x2160 window at DPR 2, with `chromium-check.mjs`.
