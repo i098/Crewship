@@ -6,7 +6,7 @@
 - **Gates:** the [no-mistakes pipeline](omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. Gates use Sonnet 5.5 at high thinking, and Opus 5.5 for hard work. Pick another model for one run with `--model`.
 - **Skills and rules:** [`blueprint/skills/`](../blueprint/skills/) and [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) serve omp, Claude Code, and Codex. Public files install only with `profiles.public_skills` (opt-in; a host that already has them keeps them), and private files take precedence ([omp](omp.md#skills)). The [rules](omp.md#rules) set plain technical writing, always-on skills, and native stacked PRs.
 - **Profiles on by default:** `agents`, `firstmate`
-- **Opt-in profiles:** `development`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
+- **Opt-in profiles:** `development`, `sgrep`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
 - **New hosts:** `./ship.sh dock` writes the core only: `agents` and `firstmate`. Pick more with the checklist `bunx crewship` shows, or `--with NAMES` ([Configuration](configuration.md)). A host config made before this keeps its own values.
 - **Opt-in settings:** `data_dir`, `usage`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `ci_pool`
 - **Full lists:** [`blueprint/config/default.yml`](../blueprint/config/default.yml), [`blueprint/config/omp.yml`](../blueprint/config/omp.yml), and the [wiki](https://github.com/i098/Crewship/wiki).

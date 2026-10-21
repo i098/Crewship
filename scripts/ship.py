@@ -44,6 +44,7 @@ OPT_IN = {
     "koncreet": ("the Koncreet host hardening toolkit, installed as root and never run", ()),
     "desktop": ("an XFCE desktop over noVNC", ()),
     "board": ("the crew message board", ("development",)),
+    "sgrep": ("semantic code search, built with the Rust toolchain", ()),
 }
 # The files agent_instructions writes (scripts/instructions.py TARGETS), under the home.
 INSTRUCTION_FILES = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS.md")
@@ -337,7 +338,9 @@ def host_environment(config):
 
 
 def tool_checks(config, environment):
-    tools = ["herdr", "node", "bun", "uv", "git", "rg", "sgrep"]
+    tools = ["herdr", "node", "bun", "uv", "git", "rg"]
+    if config["profiles"].get("sgrep", False):
+        tools.append("sgrep")
     if config["profiles"]["agents"]:
         tools += [
             "omp",

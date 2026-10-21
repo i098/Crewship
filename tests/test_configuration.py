@@ -280,6 +280,19 @@ def test_dock_writes_the_core_only_unless_a_choice_is_given(tmp_path, monkeypatc
     assert config["profiles"]["public_skills"] is False
 
 
+def test_sgrep_can_be_selected_without_development(tmp_path, monkeypatch):
+    config = dock(tmp_path, monkeypatch, with_=["sgrep"])
+    assert on(config) == {"agents", "firstmate", "sgrep"}
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_survey_requires_sgrep_only_when_selected(configuration, monkeypatch, capsys, enabled):
+    configuration["crewship"]["profiles"].update(agents=False, firstmate=False, sgrep=enabled)
+    configuration["crewship"]["start_services"] = False
+    monkeypatch.setattr(ship.shutil, "which", lambda name, **kwargs: None if name == "sgrep" else "/usr/bin/true")
+    assert ship.doctor(configuration) == int(enabled)
+    assert ("MISSING sgrep" in capsys.readouterr().out) is enabled
+
 def test_dock_with_turns_on_the_choices_and_what_they_need(tmp_path, monkeypatch):
     config = dock(tmp_path, monkeypatch, with_=["fleet_guards,board", "public_skills"])
     assert on(config) == {"agents", "firstmate", "fleet_guards", "docker", "board", "development", "public_skills"}
@@ -308,6 +321,7 @@ def test_dock_in_a_container_offers_what_a_container_can_run(tmp_path, monkeypat
         "public_skills",
         "agent_instructions",
         "development",
+        "sgrep",
         "jj",
         "fdu",
         "fleet_browsers",
