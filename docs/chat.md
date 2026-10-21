@@ -1,6 +1,8 @@
 # Chat clients
 
-The `chat` profile installs two terminal chat clients. It is on by default and off in the container image. Each client runs in its own Herdr tab.
+The `chat` profile installs two terminal chat clients.
+See [Profiles](configuration.md#profiles) for its default and selection.
+Each client runs in its own Herdr tab.
 
 For a shared message board on GitHub, see the optional [GitHub board](github-board.md).
 

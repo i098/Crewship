@@ -65,7 +65,8 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
     ]
     site_tasks = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["tasks"]
     for include in site_tasks:
-        task_file = include.get("ansible.builtin.import_tasks")
+        dynamic = include.get("ansible.builtin.include_tasks", {})
+        task_file = include.get("ansible.builtin.import_tasks") or dynamic.get("file")
         if task_file not in {
             "tasks/fleet_guards.yml", "tasks/fleet_units.yml", "tasks/fleet-browsers.yml",
             "tasks/imessage.yml", "tasks/instagram_dm.yml",
@@ -80,6 +81,7 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
                              or task.get("ansible.builtin.file", {}).get("state") == "directory"]
         tasks.append({
             "block": profile_tasks,
+            **dynamic.get("apply", {}),
             **{key: include[key] for key in ("when", "become", "become_user", "environment")
                if key in include},
         })
@@ -198,6 +200,51 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
     assert (destination / "settings.conf").read_text() == expected
     assert (destination / "nested/operator.conf").read_text() == "operator nested settings\n"
     assert (destination / "nested/managed.conf").exists() is not first_write
+
+
+@pytest.mark.parametrize("enabled,options", [
+    (True, ["--tags", "chat"]),
+    (False, ["--tags", "chat"]),
+    (True, ["--tags", "all", "--skip-tags", "chat"]),
+])
+def test_profile_selection_and_tags_preserve_chat_configuration(tmp_path, enabled, options):
+    home = tmp_path / "home"
+    home.mkdir()
+    include = next(
+        task for task in yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["tasks"]
+        if task["name"] == "Terminal chat client configs"
+    )
+    source = str(ROOT / "blueprint/ansible/tasks/chat.yml")
+    if "ansible.builtin.import_tasks" in include:
+        include["ansible.builtin.import_tasks"] = source
+    else:
+        include["ansible.builtin.include_tasks"]["file"] = source
+    playbook = tmp_path / "profile.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {
+            "crewship_cfg": {"home": str(home), "user": getpass.getuser(),
+                             "profiles": {"chat": enabled}},
+            "crewship_blueprint": str(ROOT / "blueprint"),
+            "crewship_account_ready": True, "crewship_become_target": False,
+            "crewship_user_env": {"HOME": str(home)}, "ansible_become": False,
+        },
+        "tasks": [include],
+    }]))
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook), *options]
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if not enabled or "--skip-tags" in options:
+        assert not (home / ".config").exists()
+        return
+    configuration = home / ".config/concord/config.toml"
+    assert configuration.is_file()
+    assert (home / ".config/slk/config.toml").is_file()
+    configuration.write_text("operator configuration\n")
+    repeated = subprocess.run(command, capture_output=True, text=True)
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert configuration.read_text() == "operator configuration\n"
 
 
 @pytest.mark.parametrize("task_file,unit,handler", [
