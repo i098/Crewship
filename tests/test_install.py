@@ -1,11 +1,14 @@
 """install.sh and the npm launcher print the usage before any install step."""
 
+import getpass
 import importlib.util
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).parents[1]
 BASH = shutil.which("bash")
@@ -271,8 +274,97 @@ def test_install_logs_keep_details_private_on_success_and_failure(release, statu
     assert "diagnostic-details" not in result.stdout + result.stderr
     log = install_log(result)
     assert log.stat().st_mode & 0o777 == 0o600
+    assert log.parent == release.home / ".local/state/crewship-install"
     assert "package-details\n" in log.read_text()
     assert "diagnostic-details\n" in log.read_text()
+
+
+def test_install_preserves_legacy_state_and_cache_during_migration(release, tmp_path):
+    assert release.install("v1.0.0").returncode == 0
+    for directory in (".local/state", ".cache"):
+        old = release.home / directory / "code-factory"
+        old.mkdir(parents=True)
+        (old / "data").write_text(directory)
+    migration = yaml.safe_load((ROOT / "blueprint/ansible/tasks/rename.yml").read_text())[0]
+    migration["vars"]["crewship_renamed_paths"] = [
+        pair for pair in migration["vars"]["crewship_renamed_paths"]
+        if pair[0].endswith(("/.local/state/code-factory", "/.cache/code-factory"))
+    ]
+    tasks = migration["block"]
+    migration["block"] = tasks[:3] + [
+        next(task for task in tasks if task["name"] == "Move the pre-rename home paths to their new names")
+    ]
+    playbook = tmp_path / "migration.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {
+            "ansible_become": False, "ansible_python_interpreter": sys.executable,
+            "crewship_become_target": False,
+            "crewship_cfg": {"home": str(release.home), "user": getpass.getuser()},
+            "crewship_share_dir": str(release.home / ".local/share/crewship"),
+        },
+        "tasks": [migration],
+    }]))
+    (release.crewship / "ship.sh").write_text(
+        SHIP + '\ncase $1 in\n'
+        '  chart) set -- --check ;;\n'
+        '  launch) set -- ;;\n'
+        '  *) exit 0 ;;\n'
+        'esac\n'
+        f'exec "{Path(sys.executable).parent / "ansible-playbook"}"'
+        f' -i localhost, "{playbook}" "$@"\n'
+    )
+    release.env["ANSIBLE_PIPELINING"] = "1"
+    result = release.install("v1.0.0")
+    assert result.returncode == 0, install_log(result).read_text()
+    assert "chart could not preview every change" not in result.stderr
+    for directory in (".local/state", ".cache"):
+        assert not (release.home / directory / "code-factory").exists()
+        assert (release.home / directory / "crewship/data").read_text() == directory
+    assert install_log(result).stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("password_required", [False, True])
+@pytest.mark.parametrize("chart_status", [0, 23])
+def test_install_routes_preview_and_apply_output(release, tmp_path, password_required, chart_status):
+    assert release.install("v1.0.0").returncode == 0
+    (release.crewship / "ship.sh").write_text(
+        f"#!{sys.executable}\n"
+        "import importlib.util, os, sys\n"
+        "if sys.argv[1] not in ('chart', 'launch'):\n"
+        "    sys.exit(0)\n"
+        f"spec = importlib.util.spec_from_file_location('ship', {str(ROOT / 'scripts/ship.py')!r})\n"
+        "ship = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(ship)\n"
+        "ship.os.geteuid = lambda: 1000\n"
+        "ship.sys.stdin.isatty = lambda: True\n"
+        "sys.exit(ship.provision({'crewship': {'home': os.environ['HOME']}}, sys.argv[1] == 'chart'))\n"
+    )
+    bin_dir = tmp_path / "bin"
+    (bin_dir / "sudo").write_text(f"#!/bin/sh\nexit {int(password_required)}\n")
+    (bin_dir / "sudo").chmod(0o755)
+    ansible = bin_dir / "ansible-playbook"
+    ansible.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "assert ('--ask-become-pass' in sys.argv) == (os.environ['PASSWORD_REQUIRED'] == '1')\n"
+        "check = '--check' in sys.argv\n"
+        "phase = 'preview' if check else 'apply'\n"
+        "print(phase + '-details')\n"
+        "print(phase + '-diagnostic', file=sys.stderr)\n"
+        "sys.exit(int(os.environ['CHART_STATUS']) if check else 0)\n"
+    )
+    ansible.chmod(0o755)
+    release.env.update(PASSWORD_REQUIRED=str(int(password_required)), CHART_STATUS=str(chart_status))
+    result = release.install("v1.0.0")
+    log = install_log(result).read_text()
+    assert result.returncode == 0, log
+    for phase in ("preview", "apply"):
+        for stream in ("details", "diagnostic"):
+            message = f"{phase}-{stream}"
+            assert log.count(message) == 1
+            assert (message in result.stdout + result.stderr) == password_required
+    assert ("chart could not preview every change" in result.stderr) == bool(chart_status)
 
 
 

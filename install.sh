@@ -40,7 +40,7 @@ check_args() {
 check_args "$@"
 
 work=
-log_dir=$HOME/.local/state/crewship
+log_dir=$HOME/.local/state/crewship-install
 mkdir -p -m 700 "$log_dir"
 export CREWSHIP_INSTALL_LOG
 CREWSHIP_INSTALL_LOG=$(mktemp "$log_dir/install-XXXXXX.log")
@@ -306,7 +306,8 @@ main() {
   run_step 'Checking host settings' ./ship.sh inspect
   # Some tasks need installed tools that check mode cannot supply.
   # See docs/configuration.md#commands for preview behavior and side effects.
-  run_step 'Previewing changes' ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
+  echo 'Previewing changes...'
+  ./ship.sh chart || echo 'install.sh: chart could not preview every change (normal on a fresh host); launching' >&2
   echo 'Applying host configuration...'
   ./ship.sh launch
   echo 'Crewship is installed. Next: gh auth login, then sign in to omp (docs/omp.md#sign-in) and rerun install.sh.'
