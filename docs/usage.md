@@ -491,11 +491,11 @@ SIGTERM also records failure and keeps the last successful report.
 Cancellation during a SQLite callback still fails the cycle before publication.
 The next successful report states that a prior cycle failed.
 No permitted source means failure, not a zero-saving report.
-This manual reader does not install or enable a timer.
+The reader never changes scheduler state.
 
 ### Optional reader installation
 
-Add `crewship.token_suggestions` to the host configuration to install the private reader and its manual user service:
+Add `crewship.token_suggestions` to install the private reader, its user service, and a disabled daily timer:
 
 ```yaml
 crewship:
@@ -511,9 +511,7 @@ The object is omitted by default.
 The reader requires an explicit `fm_home`; either metadata source can be omitted.
 The installer writes private assets and `config.json` under `~/.local/share/crewship/token-suggestions`.
 It does not open metadata sources or run the report during apply.
-This PR installs no timer and starts no report during apply.
-Setting `enabled: true` does not schedule anything yet.
-The daily 09:00 America/Los_Angeles (Pacific) timer arrives in the next PR, after one complete report cycle is proven.
+Apply enables the timer only when configuration opts in, service management is on, and the latest cycle receipt matches the configured inputs.
 The service has a 60-second limit, low CPU priority, and a private umask.
 The reader leaves time for failure status before the service limit.
 
@@ -522,6 +520,23 @@ Run the installed service manually after reviewing its configured inputs:
 ```sh
 systemctl --user start crewship-token-suggestions.service
 ```
+
+### Daily activation
+
+1. Keep `enabled: false` and apply the configuration.
+2. Run the installed service manually and read `FM_HOME/data/token-savings/latest.md`.
+3. Set `enabled: true` and apply with `start_services: true` only after that complete cycle succeeds.
+
+The timer runs daily at 09:00 `America/Los_Angeles`, with up to 15 minutes of random delay.
+It follows Pacific daylight-saving changes and does not catch up missed runs.
+The service keeps its existing runtime limit and cannot overlap another report.
+
+Each successful cycle publishes the report before writing a private receipt for its configured source paths.
+A changed configuration or a failed latest cycle requires another successful manual cycle before activation.
+Reports from older reader versions lack this receipt and also need one new manual cycle.
+The activation check reads the receipt without opening metadata sources or writing files.
+Apply stops and disables an existing timer before replacing changed report inputs.
+With service management off, it rejects changed inputs while a timer activation link exists.
 
 Setting `enabled: false` stops the timer before checking and stopping an active report when service management is on.
 It also removes any timer activation link.

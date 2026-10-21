@@ -1,9 +1,11 @@
 import configparser
+import fcntl
 import getpass
 import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -114,7 +116,7 @@ def test_install_manual_cycle_disable_and_remove_preserve_data(installation):
     saved_report(snapshot, cutoff)
     preserved = snapshot.read_bytes()
     home = root / "reports"
-    settings = {"fm_home": str(home), "snapshots": [str(snapshot)], "enabled": True}
+    settings = {"fm_home": str(home), "snapshots": [str(snapshot)]}
     account = root / "account"
     assets = account / ".local/share/crewship/token-suggestions"
     units = account / ".config/systemd/user"
@@ -126,7 +128,7 @@ def test_install_manual_cycle_disable_and_remove_preserve_data(installation):
     assert assets.stat().st_mode & 0o777 == 0o700
     assert all(p.stat().st_mode & 0o777 == 0o600 for p in assets.iterdir())
     assert not activation.exists()
-    assert not (units / "crewship-token-suggestions.timer").exists()
+    assert (units / "crewship-token-suggestions.timer").is_file()
     unit = configparser.ConfigParser(interpolation=None)
     unit.read(service)
     command = shlex.split(unit["Service"]["ExecStart"])
@@ -135,10 +137,19 @@ def test_install_manual_cycle_disable_and_remove_preserve_data(installation):
     assert result.returncode == 0, result.stderr
     latest = home / "data/token-savings/latest.md"
     assert "Observed tokens: 800" in latest.read_text()
+    assert "changed=0" in apply({**settings, "enabled": True})
+    assert not activation.is_symlink()
     reports = {p.name: p.read_bytes() for p in latest.parent.iterdir()}
     assert not (assets / "__pycache__").exists()
     activation.parent.mkdir()
     activation.symlink_to(units / "crewship-token-suggestions.timer")
+    old_config = (assets / "config.json").read_bytes()
+    changed = root / "changed.json"
+    changed.write_bytes(snapshot.read_bytes())
+    with pytest.raises(AssertionError, match="Enable service management"):
+        apply({**settings, "snapshots": [str(changed)]})
+    assert (assets / "config.json").read_bytes() == old_config
+    assert activation.is_symlink()
     disabled = {**settings, "enabled": False}
     apply(disabled)
     assert not activation.is_symlink()
@@ -175,7 +186,7 @@ def test_runtime_failure_status_and_disable_stop(installation):
     cutoff = datetime.now(UTC)
     snapshot = root / "saved.json"
     saved_report(snapshot, cutoff)
-    settings = {"fm_home": str(home), "snapshots": [str(snapshot)], "enabled": True}
+    settings = {"fm_home": str(home), "snapshots": [str(snapshot)], "enabled": False}
     apply(settings, manage=True)
     assert "changed=0" in apply(settings, manage=True)
     units = home / ".config/systemd/user"
@@ -191,9 +202,35 @@ def test_runtime_failure_status_and_disable_stop(installation):
                    + shlex.join([*command, "--cutoff", cutoff.isoformat()]) + "\n")
     override.write_text(fixed_start)
     userctl("daemon-reload")
+    with pytest.raises(AssertionError, match="completed cycle for this configuration"):
+        apply({**settings, "enabled": True}, manage=True)
+    assert not (units / "timers.target.wants" / timer).is_symlink()
     userctl("start", service)
     latest = home / "data/token-savings/latest.md"
     before = latest.read_bytes()
+    enabled = {**settings, "enabled": True}
+    apply(enabled, manage=True)
+    assert "changed=0" in apply(enabled, manage=True)
+    assert userctl("show", "--property=ActiveState", "--value", timer).stdout.strip() == "active"
+    changed = root / "changed.json"
+    changed.write_bytes(snapshot.read_bytes())
+    with pytest.raises(AssertionError, match="completed cycle for this configuration"):
+        apply({**enabled, "snapshots": [str(changed)]}, manage=True)
+    assert userctl("show", "--property=ActiveState", "--value", timer).stdout.strip() == "inactive"
+    assert not (units / "timers.target.wants" / timer).is_symlink()
+    apply(enabled, manage=True)
+    assert userctl("show", "--property=ActiveState", "--value", timer).stdout.strip() == "active"
+    calendar = configparser.ConfigParser(interpolation=None)
+    calendar.read(units / timer)
+    assert not calendar["Timer"].getboolean("Persistent")
+    assert calendar["Timer"]["RandomizedDelaySec"] == "15min"
+    schedule = subprocess.run(
+        ["systemd-analyze", "calendar", "--iterations=2",
+         "--base-time=2026-03-07 12:00:00 UTC", calendar["Timer"]["OnCalendar"]],
+        env={**os.environ, "TZ": "UTC"}, capture_output=True, text=True, check=True)
+    assert "Sat 2026-03-07 17:00:00 UTC" in schedule.stdout
+    assert "Sun 2026-03-08 16:00:00 UTC" in schedule.stdout
+    userctl("stop", timer)
     delay = root / "delay.py"
     delay.write_text(
         "import sys, time\n"
@@ -214,10 +251,8 @@ def test_runtime_failure_status_and_disable_stop(installation):
     assert json.loads(latest.with_name("status.json").read_text())["state"] == "failed"
     assert latest.read_bytes() == before
     override.write_text(fixed_start + "ExecStartPre=/usr/bin/sleep 30\n")
-    (units / timer).write_text("[Timer]\nOnActiveSec=1h\n"
-                              f"Unit={service}\n[Install]\nWantedBy=timers.target\n")
     userctl("daemon-reload")
-    userctl("enable", "--now", timer)
+    userctl("start", timer)
     userctl("start", "--no-block", service)
     pid = wait_for_start_process(service)
     apply({**settings, "enabled": False}, manage=True)
@@ -298,3 +333,84 @@ runpy.run_path({str(ROOT / "scripts/token_suggestions.py")!r}, run_name="__main_
     assert "previous cycle failed" in latest.read_text()
 
 
+
+
+def test_activation_requires_a_completed_cycle_for_exact_inputs(tmp_path, report):
+    snapshot = tmp_path / "saved.json"
+    saved_report(snapshot, CUTOFF)
+    config = {"fm_home": str(tmp_path / "home"), "snapshots": [str(snapshot)]}
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config))
+    args = ["--config", str(path), "--check-cycle"]
+    assert report.main(args) == 1
+    report.publish(config, CUTOFF)
+    status = tmp_path / "home/data/token-savings/status.json"
+    latest = status.with_name("latest.md")
+    before = status.read_bytes(), latest.read_bytes(), snapshot.read_bytes()
+    assert report.main(args) == 0
+    assert before == (status.read_bytes(), latest.read_bytes(), snapshot.read_bytes())
+    fd = os.open(status.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert report.main(args) == 1
+    finally:
+        os.close(fd)
+    assert before == (status.read_bytes(), latest.read_bytes(), snapshot.read_bytes())
+    other = tmp_path / "other.json"
+    other.write_bytes(snapshot.read_bytes())
+    path.write_text(json.dumps({**config, "snapshots": [str(other)]}))
+    assert report.main(args) == 1
+    path.write_text(json.dumps(config))
+    with pytest.raises(ValueError):
+        report.publish({**config, "snapshots": []}, CUTOFF)
+    assert report.main(args) == 1
+    assert latest.read_bytes() == before[1]
+
+
+@pytest.mark.parametrize("boundary", ["latest.md", "status.json"])
+def test_killed_publication_never_proves_a_cycle(tmp_path, report, boundary):
+    snapshot = tmp_path / "saved.json"
+    saved_report(snapshot, CUTOFF)
+    config = {"fm_home": str(tmp_path / "home"), "snapshots": [str(snapshot)]}
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config))
+    script = f"""
+import os, signal, sys
+sys.path.insert(0, {str(ROOT / "scripts")!r})
+import token_suggestions as report
+write = report.atomic_write
+def kill_before(path, content):
+    if path.name == {boundary!r}:
+        os.kill(os.getpid(), signal.SIGKILL)
+    write(path, content)
+report.atomic_write = kill_before
+sys.exit(report.main(["--config", {str(path)!r}, "--cutoff", {CUTOFF.isoformat()!r}]))
+"""
+    result = subprocess.run([sys.executable, "-B", "-c", script], capture_output=True,
+                            text=True, timeout=120)
+    assert result.returncode == -signal.SIGKILL
+    assert report.main(["--config", str(path), "--check-cycle"]) == 1
+
+
+def test_receipt_write_failure_keeps_previous_report(tmp_path, report, monkeypatch):
+    snapshot = tmp_path / "saved.json"
+    saved_report(snapshot, CUTOFF)
+    config = {"fm_home": str(tmp_path / "home"), "snapshots": [str(snapshot)]}
+    report.publish(config, CUTOFF)
+    latest = tmp_path / "home/data/token-savings/latest.md"
+    before = latest.read_bytes()
+    data = json.loads(snapshot.read_text())
+    data["sinks"][0]["evidence"]["occurrence_tokens_total"] = 1200
+    snapshot.write_text(json.dumps(data))
+    write = report.atomic_write
+
+    def fail_receipt(path, content):
+        if path.name == "status.json" and json.loads(content)["state"] == "complete":
+            raise OSError("synthetic receipt write failure")
+        write(path, content)
+
+    monkeypatch.setattr(report, "atomic_write", fail_receipt)
+    with pytest.raises(OSError, match="synthetic receipt"):
+        report.publish(config, CUTOFF)
+    assert latest.read_bytes() == before
+    assert json.loads(latest.with_name("status.json").read_text())["state"] == "failed"

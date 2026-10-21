@@ -232,6 +232,34 @@ def atomic_write(path, content):
         Path(temporary).unlink(missing_ok=True)
 
 
+def publish_completed(directory, text, receipt):
+    latest = directory / "latest.md"
+    previous = latest.read_text() if latest.exists() else None
+    try:
+        atomic_write(latest, text)
+        atomic_write(directory / "status.json", json.dumps(receipt) + "\n")
+    except BaseException:
+        if previous is None:
+            latest.unlink(missing_ok=True)
+        else:
+            atomic_write(latest, previous)
+        raise
+
+
+def require_completed_cycle(config):
+    directory = Path(config["fm_home"]) / "data/token-savings"
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        receipt = read_json(directory / "status.json")
+        if (not isinstance(receipt, dict) or receipt.get("state") != "complete"
+                or not (directory / "latest.md").is_file()
+                or receipt.get("configuration") != metadata_identity([config]).hex()):
+            raise ValueError("a completed cycle for this configuration is required")
+    finally:
+        os.close(fd)
+
+
 def publish(config, cutoff, *, started=None):
     if started is None:
         started = time.monotonic()
@@ -271,9 +299,11 @@ def publish(config, cutoff, *, started=None):
             atomic_write(directory / f"{day}.md", text)
             for old in sorted(directory.glob("????-??-??.md"))[:-8]:
                 old.unlink()
-            atomic_write(status_path, json.dumps({"state": "complete", "cutoff": cutoff.isoformat(),
-                                                  "window": [t.isoformat() for t in bounds[1:]]}) + "\n")
-            atomic_write(directory / "latest.md", text)
+            publish_completed(directory, text, {
+                "state": "complete", "cutoff": cutoff.isoformat(),
+                "window": [t.isoformat() for t in bounds[1:]],
+                "configuration": metadata_identity([config]).hex(),
+            })
         except (TimeoutError, *SOURCE_ERRORS):
             signal.setitimer(signal.ITIMER_REAL, 0)
             atomic_write(status_path, json.dumps({"state": "failed", "cutoff": cutoff.isoformat(),
@@ -293,14 +323,23 @@ def main(argv=None, *, started=None):
         started = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--cutoff", type=instant, help="fixed aware time for a manual fixture cycle")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--cutoff", type=instant, help="fixed aware time for a manual fixture cycle")
+    mode.add_argument("--check-cycle", action="store_true",
+                      help="verify a completed cycle for the configured inputs without writing")
     args = parser.parse_args(argv)
     try:
-        publish(settings(args.config), args.cutoff or datetime.now(UTC), started=started)
+        config = settings(args.config)
+        if args.check_cycle:
+            require_completed_cycle(config)
+        else:
+            publish(config, args.cutoff or datetime.now(UTC), started=started)
     except (TimeoutError, *SOURCE_ERRORS):
-        print("Token suggestions failed; previous successful report retained.", file=sys.stderr)
+        message = ("A completed cycle for this configuration is required." if args.check_cycle
+                   else "Token suggestions failed; previous successful report retained.")
+        print(message, file=sys.stderr)
         return 1
-    print("Token suggestions published.")
+    print("Completed report cycle verified." if args.check_cycle else "Token suggestions published.")
     return 0
 
 
