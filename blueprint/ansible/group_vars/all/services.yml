@@ -6,7 +6,7 @@ crewship_manage_services: "{{ crewship_cfg.start_services | bool }}"
 crewship_manage_linger: "{{ (crewship_cfg.start_services | bool) and (crewship_cfg.enable_linger | bool) }}"
 
 # Escalate to the target account only when we are not already that account.
-crewship_become_target: "{{ (ansible_user_id | default('')) != crewship_cfg.user }}"
+crewship_become_target: "{{ (ansible_facts['user_id'] | default('')) != crewship_cfg.user }}"
 crewship_user_runtime_dir: "/run/user/{{ crewship_user_uid | default('') }}"
 crewship_user_systemd_env:
   XDG_RUNTIME_DIR: "{{ crewship_user_runtime_dir }}"

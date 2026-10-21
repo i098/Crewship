@@ -3,7 +3,7 @@
 ## New-device sequence
 
 1. Start with a supported Ubuntu installation and working SSH/sudo access. `blueprint/cloud-init/user-data.yaml` installs initial OS prerequisites; it does not create credentials, log in to services, or clone this private repository.
-2. Authenticate GitHub on the new device and install Crewship ([Install, update and migrate](install.md)). Run the [Quick start](../README.md#quick-start): `onboard.sh`, then `ship.sh` `dock`, `inspect`, `chart`, `launch`, and `survey`.
+2. Install Crewship and complete setup through the [Quick start](../README.md#quick-start).
 3. Confirm Herdr's user service and executable agree. Both resolve to the versioned release that apply resolved and installed (see [Latest releases](dependencies.md#latest-releases)).
 4. Authenticate agent/provider CLIs under the configured operator account (for omp, see [Sign in](omp.md#sign-in)). Confirm the configured models exist for that account. Recreate per-project approval/trust choices instead of copying a global auto-approval list.
 5. If selected, authenticate Tailscale as a new device and review its ACL/SSH policy. Installation alone does not authorize incoming connections.
@@ -66,6 +66,9 @@ Runtime application activity, deliberate self-updates, and changed package index
 ### Upgrade from a pre-rename install
 
 The first `./ship.sh launch` after the Crewship rename migrates a host installed before it, once. It stops the old desktop units and deletes their files and links. It stops the chrome-devtools-axi bridges that run from the old install directory, because the browser timer cannot stop them after the move. It moves each old path to its new name, for example `~/.local/share/crewship`, and points command links and user unit files at the new paths. It restarts each running user service whose unit file or drop-in it changed, except the no-mistakes daemon: restart that daemon by hand when no pipeline run is active. The desktop tasks then install and enable `crewship-vnc.service` and `crewship-novnc.service`. [`blueprint/ansible/tasks/rename.yml`](../blueprint/ansible/tasks/rename.yml) holds the full old-to-new table. Run that apply when no agent session is active, because running tools lose their old paths, and do not run `./onboard.sh` before it. If an old path and its new name both exist, the apply stops before it changes anything; merge or remove one by hand and run it again. The one exception is the share directory when the new one holds only what `install.sh` and `onboard.sh` create (`releases`, `tools`, `.install.lock`): the old directory then merges into it, and the apply stops without changes if an entry differs in both. A second apply reports `changed=0`.
+
+Migration skips an absent user unit directory or SSH directory.
+It still updates unit paths and SSH block markers when those directories are symbolic links.
 
 The Compose project is now `crewship`, so Compose and the devcontainer use new volume names. The old volumes stay; copy their data by hand if you need it. The containers of the project under the old name keep their ports, so stop them before the first `up` under the new name: run `docker compose ls` to find the old project name, then run `docker compose -p <old project> down`.
 

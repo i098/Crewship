@@ -4,6 +4,8 @@
 
 Crewship sets up a cloud server for developers who want coding agents to work in parallel.
 
+**This makes it super easy to start using agents in the cloud, enjoy!**
+
 [Docs](#more-docs) · [Install](#quick-start) · [Changelog](CHANGELOG.md) · [Discussions](https://github.com/i098/Crewship/discussions)
 
 </div>
@@ -22,7 +24,14 @@ curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bas
 ```
 
 The installer offers a feature checklist and installs omp agents and Firstmate.
-Then follow [SETUP.md](SETUP.md#1-sign-in-to-github) to sign in to GitHub and your model provider.
+Then check or resume setup from any directory:
+
+```bash
+"$HOME/Crewship/ship.sh" setup
+```
+
+Follow the printed commands and the [manual sign-in steps](SETUP.md#1-sign-in-to-github).
+See [Setup checks](docs/configuration.md#commands) for the command's scope and limits.
 
 For agent-assisted setup, give your coding agent this instruction on the server:
 
