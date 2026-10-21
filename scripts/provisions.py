@@ -35,7 +35,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
+from threading import Lock
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
 FORGEJO_RELEASES = (
@@ -172,6 +174,7 @@ DOWNLOAD_ATTEMPTS = 3
 SGREP_REPOSITORY = "https://github.com/context-dot-dev/sgrep"
 # One extension per language sgrep parses with Tree-sitter (its README).
 SGREP_LANGUAGES = ("py", "c", "cpp", "cs", "go", "java", "rs", "js", "jsx", "ts", "tsx")
+INSTALL_OUTPUT_LOCK = Lock()
 
 
 def digest(path):
@@ -565,7 +568,7 @@ def bun_latest_install(home, tool, version, environment):
             # `bun add -g` with bun's global directory and bin directory pointed at the
             # staging prefix: the package lands in <prefix>/node_modules, one version per
             # prefix, and ~/.bun is untouched.
-            command(
+            result = subprocess.run(
                 [
                     home / ".local/bin/bun",
                     "add",
@@ -574,12 +577,19 @@ def bun_latest_install(home, tool, version, environment):
                     "--no-progress",
                     f"{package_name}@{version}",
                 ],
-                {
+                env={
                     **environment,
                     "BUN_INSTALL_GLOBAL_DIR": str(staging),
                     "BUN_INSTALL_BIN": str(staging / ".bin"),
                 },
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
+            with INSTALL_OUTPUT_LOCK:
+                print(f"provisions: {tool} {version}", file=sys.stderr)
+                print(result.stdout, end="", file=sys.stderr, flush=True)
+            result.check_returncode()
             staging.rename(final)
         changed = True
     changed = link_package_bins(home, final, [package_name]) or changed
@@ -756,6 +766,8 @@ def omp_plugins(home, environment):
     marketplaces = home / ".omp/marketplaces.json"
     known = marketplaces.read_text() if marketplaces.is_file() else ""
     installed = {plugin["id"] for plugin in json.loads(omp("list", "--json"))["marketplace"]}
+    if known:
+        omp("marketplace", "update")
     for name, repository in OMP_PLUGINS.items():
         if repository not in known:
             omp("marketplace", "add", repository)
@@ -763,7 +775,6 @@ def omp_plugins(home, environment):
         if f"{name}@{name}" not in installed:
             omp("install", f"{name}@{name}")
             changed = True
-    omp("marketplace", "update")
     return "up to date" not in omp("upgrade") or changed
 
 
@@ -827,8 +838,13 @@ def main():
             store = prefix / "tools/sentrux-grammars" / version / key
             changed = link_grammars(home, store) or changed
         if args.npm:
-            for tool in NPM_LATEST:
-                changed = bun_latest_install(home, tool, latest[tool], environment) or changed
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                installs = [
+                    pool.submit(bun_latest_install, home, tool, latest[tool], environment)
+                    for tool in NPM_LATEST
+                ]
+                for install in installs:
+                    changed = install.result() or changed
             changed = retire_legacy_npm(home) or changed
             changed = omp_plugins(home, environment) or changed
         if rust:
