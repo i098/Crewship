@@ -32,8 +32,11 @@
       tags: [packages]
 
     - name: Bounded native syslog on the configured data filesystem
-      ansible.builtin.import_tasks: tasks/syslog.yml
-      become: true
+      ansible.builtin.include_tasks:
+        file: tasks/syslog.yml
+        apply:
+          become: true
+          tags: [syslog]
       when: crewship_data_dir | length > 0
       tags: [syslog]
 
@@ -60,10 +63,13 @@
       tags: [herdr]
 
     - name: Terminal chat client configs
-      ansible.builtin.import_tasks: tasks/chat.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/chat.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [chat]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.chat | bool
@@ -137,10 +143,13 @@
       tags: [firstmate, stuck_composer]
 
     - name: GitHub reply alerts for main Firstmate
-      ansible.builtin.import_tasks: tasks/gh_replies.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/gh_replies.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [firstmate, gh_replies]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.firstmate | bool
@@ -148,10 +157,13 @@
       tags: [firstmate, gh_replies]
 
     - name: Instagram DM alerts for main Firstmate
-      ansible.builtin.import_tasks: tasks/instagram_dm.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/instagram_dm.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [firstmate, instagram_dm]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.firstmate | bool
@@ -159,10 +171,13 @@
       tags: [firstmate, instagram_dm]
 
     - name: Optional iMessage bridge to Firstmate over Photon or BlueBubbles
-      ansible.builtin.import_tasks: tasks/imessage.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/imessage.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [imessage]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.firstmate | bool
@@ -197,33 +212,48 @@
       tags: [gateway]
 
     - name: Docker engine and Compose v2 from Ubuntu
-      ansible.builtin.import_tasks: tasks/docker.yml
+      ansible.builtin.include_tasks:
+        file: tasks/docker.yml
+        apply:
+          tags: [docker]
       when: crewship_cfg.profiles.docker | bool
       tags: [docker]
 
     - name: CI pool - just-in-time GitHub Actions runners, one job per container
-      ansible.builtin.import_tasks: tasks/ci_pool.yml
+      ansible.builtin.include_tasks:
+        file: tasks/ci_pool.yml
+        apply:
+          tags: [ci_pool]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.ci_pool is defined
       tags: [ci_pool]
 
     - name: Fleet guards - Docker guard, reapers and storage guard
-      ansible.builtin.import_tasks: tasks/fleet_guards.yml
+      ansible.builtin.include_tasks:
+        file: tasks/fleet_guards.yml
+        apply:
+          tags: [fleet]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.fleet_guards | bool
       tags: [fleet]
 
     - name: Optional per-project databases and worktree database environment
-      ansible.builtin.import_tasks: tasks/project_databases.yml
+      ansible.builtin.include_tasks:
+        file: tasks/project_databases.yml
+        apply:
+          tags: [fleet, project_databases]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.project_databases | default(false) | bool
       tags: [fleet, project_databases]
 
     - name: Fleet guard units - retire the flotilla units, render and start the crewship ones
-      ansible.builtin.import_tasks: tasks/fleet_units.yml
+      ansible.builtin.include_tasks:
+        file: tasks/fleet_units.yml
+        apply:
+          tags: [fleet]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.profiles.fleet_guards | bool
@@ -237,38 +267,53 @@
       tags: [fleet, fleet_browsers]
 
     - name: Tailscale package installation only
-      ansible.builtin.import_tasks: tasks/tailscale.yml
+      ansible.builtin.include_tasks:
+        file: tasks/tailscale.yml
+        apply:
+          tags: [tailscale]
       when: crewship_cfg.profiles.tailscale | bool
       tags: [tailscale]
 
     # After Tailscale, so a new host can publish Forgejo with tailscale serve.
     - name: Optional self-hosted Forgejo, its nightly dump and the no-mistakes forge profile
-      ansible.builtin.import_tasks: tasks/forgejo.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/forgejo.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [forgejo]
       when:
         - crewship_account_ready | bool
         - crewship_forgejo_enabled | bool
       tags: [forgejo]
 
     - name: Optional `ssh mac` key and Host entry for an operator Mac
-      ansible.builtin.import_tasks: tasks/mac_ssh.yml
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_env }}"
+      ansible.builtin.include_tasks:
+        file: tasks/mac_ssh.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [mac_ssh]
       when:
         - crewship_account_ready | bool
         - crewship_cfg.mac_ssh is defined
       tags: [mac_ssh]
 
     - name: Koncreet host hardening toolkit, installed but never run
-      ansible.builtin.import_tasks: tasks/koncreet.yml
+      ansible.builtin.include_tasks:
+        file: tasks/koncreet.yml
+        apply:
+          tags: [koncreet]
       when: "'koncreet' in crewship_latest"
       tags: [koncreet]
 
     - name: Google Chrome from the official distribution repository
-      ansible.builtin.import_tasks: tasks/browser.yml
+      ansible.builtin.include_tasks:
+        file: tasks/browser.yml
+        apply:
+          tags: [browser, desktop]
       when: >-
         (crewship_chrome_install | string | lower == 'true')
         or ((crewship_chrome_install | string | lower == 'auto')
