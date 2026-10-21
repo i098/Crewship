@@ -50,6 +50,9 @@ def test_npm_release_channel(tmp_path, version, prerelease, tag, expected):
     ("tag", "legacy", "failure"),
     [
         ("v0.4.7", True, ""),
+        ("v0.4.7", True, "checksum"),
+        ("v0.4.7", True, "missing-checksum"),
+        ("v0.4.7", True, "archive-server"),
         ("v0.4.8", False, ""),
         ("v0.4.8-rc.1", False, ""),
         ("v0.4.8", False, "checksum"),
@@ -109,6 +112,7 @@ def test_bootstrap_runs_only_the_selected_checked_installer(tmp_path, tag, legac
         "source = pathlib.Path(os.environ['MIRROR']) / url.rsplit('/', 1)[-1]\n"
         "code = 200 if source.exists() else 404\n"
         "if os.environ['FAILURE'] == 'server' and url.endswith('/install.sh'): code = 500\n"
+        "if os.environ['FAILURE'] == 'archive-server' and url.endswith('.tar.gz'): code = 500\n"
         "output = pathlib.Path(args[args.index('-o') + 1])\n"
         "output.write_bytes(source.read_bytes() if code == 200 else b'')\n"
         "if '-w' in args: print(code, end='')\n"
@@ -136,10 +140,10 @@ def test_bootstrap_runs_only_the_selected_checked_installer(tmp_path, tag, legac
         timeout=10,
     )
     urls = requests.read_text().splitlines()
-    if failure in {"checksum", "missing-checksum", "server", "api-digest"}:
+    if failure in {"checksum", "missing-checksum", "server", "archive-server", "api-digest"}:
         assert result.returncode != 0
         assert "selected=" not in result.stdout
-        assert not any(".tar.gz" in url for url in urls)
+        assert not any("/archive/refs/tags/" in url for url in urls)
     else:
         assert result.returncode == 0, result.stderr
         assert f"selected={tag} args=--container" in result.stdout
@@ -154,3 +158,33 @@ def test_bootstrap_runs_only_the_selected_checked_installer(tmp_path, tag, legac
     else:
         assert urls[0] == "https://github.com/i098/Crewship/releases/latest"
         assert all("-rc." not in url for url in urls)
+
+
+@pytest.mark.parametrize(
+    ("event_name", "event", "expected"),
+    [
+        ("push", {"ref": "refs/heads/main"}, True),
+        ("workflow_dispatch", {}, True),
+        ("release", {"action": "published", "release": {"prerelease": False}}, True),
+        ("release", {"action": "published", "release": {"prerelease": True}}, False),
+    ],
+)
+def test_website_deploy_event_selection(event_name, event, expected):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/harbor.yml").read_text())
+    events = workflow.get("on", workflow.get(True))
+    if event_name == "push":
+        assert "main" in events["push"]["branches"]
+    elif event_name == "release":
+        assert event["action"] in events["release"]["types"]
+    else:
+        assert event_name in events
+    condition = workflow["jobs"]["deploy"].get("if", "true")
+    condition = condition.removeprefix("${{").removesuffix("}}").strip()
+    result = subprocess.run(
+        ["node", "-e",
+         "const github = JSON.parse(process.argv[2]);"
+         "console.log(Boolean(new Function('github', `return (${process.argv[1]})`)(github)));",
+         condition, json.dumps({"event_name": event_name, "event": event})],
+        capture_output=True, text=True, check=True, timeout=10,
+    )
+    assert json.loads(result.stdout) is expected

@@ -77,6 +77,13 @@ check_asset() {
   [ -z "$digest" ] || [ "$digest" = "sha256:$got" ] || { echo "install.sh: $name does not match the release asset digest; refusing to install" >&2; return 1; }
 }
 
+verify_source_archive() {
+  local repo=$1 tag=$2 file=$3 want got
+  want=$(git ls-remote "https://github.com/$repo" "refs/tags/$tag^{}" "refs/tags/$tag" | awk 'END {print $1}')
+  got=$(gzip -dc "$file" 2>/dev/null | head -c 1024 | tr -d '\0' | grep -ao 'comment=[0-9a-f]*' | head -1 | cut -d= -f2 || true)
+  [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: the source archive of $tag is not commit '$want' of the tag (got '$got'); refusing to install" >&2; return 1; }
+}
+
 repo=${CREWSHIP_REPO:-i098/Crewship}
 ref=${CREWSHIP_REF:-}
 if ! command -v curl >/dev/null || ! command -v jq >/dev/null || ! dpkg-query -W -f='${db:Status-Status}' ca-certificates 2>/dev/null | grep -qx installed; then
@@ -103,8 +110,22 @@ case $code in
   404)
     # Older stable releases, including v0.4.7, carry the installer in their archive.
     name=crewship-$ref.tar.gz
-    curl -fsSL "$base/$name" -o "$work/$name"
-    check_asset "$name"
+    code=$(curl -sSL -o "$work/$name" -w '%{http_code}' "$base/$name")
+    case $code in
+      200) check_asset "$name" ;;
+      404)
+        if ! command -v git >/dev/null; then
+          sudo=
+          [ "$(id -u)" -eq 0 ] || sudo=sudo
+          apt_get update -q
+          apt_get install -y -q git
+        fi
+        name=source.tar.gz
+        curl -fsSL "https://github.com/$repo/archive/refs/tags/$ref.tar.gz" -o "$work/$name"
+        verify_source_archive "$repo" "$ref" "$work/$name"
+        ;;
+      *) echo "install.sh: archive download failed (HTTP $code)" >&2; exit 1 ;;
+    esac
     mkdir "$work/tree"
     tar -xzf "$work/$name" -C "$work/tree" --strip-components=1
     installer=$work/tree/scripts/install.sh

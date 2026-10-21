@@ -661,6 +661,70 @@ def test_source_archive_of_another_commit_is_refused(release):
     assert not release.crewship.exists()
 
 
+@pytest.mark.parametrize(
+    ("installer_path", "source", "explicit"),
+    [
+        ("install.sh", "tag", True),
+        ("install.sh", "tag", False),
+        ("scripts/install.sh", "tag", True),
+        ("install.sh", "other-commit", True),
+        ("scripts/install.sh", "other-commit", True),
+        ("install.sh", "tree", True),
+        ("install.sh", "missing-git", True),
+    ],
+)
+def test_public_bootstrap_checks_source_before_installing(release, tmp_path, installer_path, source, explicit):
+    installer = release.repo / installer_path
+    installer.parent.mkdir(parents=True, exist_ok=True)
+    installer.write_text((ROOT / "scripts/install.sh").read_text())
+    git(release.repo, "add", installer_path)
+    git(release.repo, "commit", "-qm", "Include the release installer")
+    git(release.repo, "tag", "v0.4.0")
+    archive_ref = {
+        "other-commit": "v1.1.0",
+        "tree": "v0.4.0^{tree}",
+    }.get(source, "v0.4.0")
+    subprocess.run(
+        ["git", "archive", "--format=tar.gz", "--prefix=Crewship-0.4.0/",
+         "-o", str(release.mirror / "src-v0.4.0.tar.gz"), archive_ref],
+        cwd=release.repo, check=True,
+    )
+    (release.mirror / "latest").write_text("v0.4.0")
+    release.env.update(CREWSHIP_REF="v0.4.0" if explicit else "", TMPDIR=str(tmp_path))
+    if source == "missing-git":
+        env = tmp_path / "bash-env"
+        env.write_text(
+            'command() {\n'
+            '  if [[ $* == "-v git" && ! -f "$HOME/git-installed" ]]; then return 1; fi\n'
+            '  builtin command "$@"\n'
+            '}\n'
+        )
+        release.env["BASH_ENV"] = str(env)
+        (tmp_path / "bin/apt-get").write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$*" >>"$HOME/packages"\ntouch "$HOME/git-installed"\n'
+        )
+        sudo = tmp_path / "bin/sudo"
+        sudo.write_text('#!/bin/sh\nexec "$@"\n')
+        sudo.chmod(0o755)
+    result = install(release.env, "--container")
+    if source in {"other-commit", "tree"}:
+        assert result.returncode != 0
+        assert "refusing to install" in result.stderr
+        assert not release.crewship.exists()
+        assert not (release.home / "calls").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert release.crewship.resolve() == (release.releases / "v0.4.0").resolve()
+        assert (release.home / "args").read_text().splitlines() == [
+            "dock --container", "inspect", "launch",
+        ]
+        if source == "missing-git":
+            packages = (release.home / "packages").read_text().splitlines()
+            assert len(packages) == 2
+            assert packages[0].endswith("update -q")
+            assert packages[1].endswith("install -y -q git")
+
+
 def test_unknown_release_is_an_error_and_never_clones(release):
     result = release.install("v9.9.9")
     assert result.returncode != 0
