@@ -30,7 +30,8 @@ Run `ondine file.md --check` to check the result without writing files.
 
 ## Schedule viewer
 
-`tools/schedules/package.json` and `tools/schedules/bun.lock` pin `@opentui/core` 0.6.6 and its native platform packages.
+[`tools/schedules/package.json`](../tools/schedules/package.json) declares the OpenTUI dependency.
+[`tools/schedules/bun.lock`](../tools/schedules/bun.lock) records the exact versions, including native platform packages.
 This is Crewship's own application dependency, so the lockfile stays checked in.
 The existing Bun tool runs its native TypeScript API.
 Provisioning installs production dependencies with `--frozen-lockfile --ignore-scripts`.

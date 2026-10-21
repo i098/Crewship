@@ -74,7 +74,8 @@ It never runs a job, writes a schedule, starts a service, or sends a model reque
 Press `r` to refresh; the viewer does not poll while open.
 
 Use arrows or `j`/`k` to select a row, and Enter to open or close its details.
-Press `/` to search, `s` to cycle sources, `o` to cycle owners, and Escape to clear the filters.
+Press `/` to enter search; press Enter or Escape to leave search entry.
+Outside search entry, press `s` to cycle sources, `o` to cycle owners, and Escape to clear all filters.
 Use Page Up and Page Down to scroll details.
 Press `J` to read the selected service's last 40 journal lines, and `q` to quit.
 Press `p` to show or hide raw systemd properties.
@@ -105,10 +106,11 @@ A nonzero exit can be successful under systemd's policy.
 An `ExecCondition` skip appears as `Skipped`, not as a failure or missing history.
 Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
 Unreadable home identity metadata keeps cached checks stale without reading that home's state directory.
-Confirmed identity mismatches and removed registrations discard the affected cached checks.
+Home identity mismatches discard cached checks.
+Registry removals discard cached checks from homes other than the selected home.
 Control and format characters appear as visible code-point escapes in terminal filters and errors.
 Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
-Other commands use their executable name as a label.
+Other labels use the script name for recognized interpreters, or the executable name.
 For a leading `cd DIR && command`, the viewer uses DIR as working-directory evidence and resolves relative executable or script paths.
 Other wrappers keep their executable names; the viewer does not inspect their child commands.
 
