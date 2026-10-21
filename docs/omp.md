@@ -23,6 +23,7 @@ With the `agents` profile on, `./ship.sh launch`:
 3. Installs the extension `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`, which feeds the Herdr Agent sidebar the session topic, the pane's short name, and the pull request line (pull request, issue and diff size). Every apply rewrites it. See [Herdr sidebar](herdr.md).
 4. Installs the extension `~/.omp/agent/extensions/aa-mode-icons.ts` from [`blueprint/config/omp-status-icons.ts`](../blueprint/config/omp-status-icons.ts). Every apply rewrites it. See [Status line icons](#status-line-icons).
 5. Installs the extension `~/.omp/agent/extensions/fm-no-pattern-kill.ts` from [`blueprint/config/omp-no-pattern-kill.ts`](../blueprint/config/omp-no-pattern-kill.ts). It blocks `pkill`, `killall` and kill-by-`pgrep` commands in every omp session: all agents on the host run as one user and each worker's brief sits in its command line, so a name or pattern can match other workers. Kill a process by the PID you started instead. Every apply rewrites it. It is a best-effort seatbelt, not a barrier: it matches the command text, so it lets through an absolute path (`/usr/bin/pkill`), a kill whose targets come from `pidof`, `ps | grep` or a `pgrep` loop, and the list form in an eval cell (`subprocess.run(["pkill", ...])`), and it blocks read-only mentions such as `grep -rn pkill docs/`. Removing worker briefs from the command line is the real fix and is out of scope for this recipe.
+   The toolchain installer separately installs the execution-time `gh` and `gh-axi` wrappers; see [GitHub write guard](#github-write-guard).
 6. Installs the extension `~/.omp/agent/extensions/crewship-quality-gate.ts` from [`blueprint/config/omp-quality-gate.ts`](../blueprint/config/omp-quality-gate.ts), the sentrux and fallow check at the end of every agent turn. Every apply rewrites it. See [Quality gate](#quality-gate).
 7. Sets up omp as the no-mistakes pipeline agent. See [no-mistakes pipeline agent](#no-mistakes-pipeline-agent).
 8. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
@@ -125,6 +126,54 @@ The row needs two keys in `statusLine`: `status` in `leftSegments`, which shows 
 omp config get statusLine.leftSegments
 omp config get statusLine.showHookStatus
 ```
+
+## GitHub write guard
+
+Crewship installs managed `gh` and `gh-axi` wrappers at `~/.local/bin/`.
+Both wrappers use the policy in [`blueprint/maintenance/gh`](../blueprint/maintenance/gh).
+Each wrapper checks its own actual arguments before starting the real executable.
+The `gh-axi` check therefore runs before its preliminary issue lookups or API calls.
+Shell quoting, here-documents, here-strings, and working-directory changes cannot borrow a target from another invocation.
+Text in titles, bodies, and comments is not a repository target.
+
+Issue writes require `-R owner/repo`, `--repo owner/repo`, or a supported full issue URL.
+`gh-axi` issue writes require a literal `owner/repo` repository flag.
+On reads and writes, `gh-axi` repository flags reject URLs and trailing slashes before the CLI starts.
+Issue REST writes require literal `repos/owner/repo/issues` paths, including issue comments and child paths.
+GitHub CLI fields and input imply POST unless an explicit method overrides it.
+`gh-axi api` defaults to GET even with fields; its positional method and `-X` are both checked.
+Recognized reads, help requests, PR-only commands, and standalone commit-comment endpoints do not require an issue-write target.
+Unknown write or API flags fail closed when the wrapper cannot classify them.
+
+The wrappers check effective issue selectors, transfer destinations, linked-branch repositories, and explicit relationship targets.
+Both CLIs use the last repository flag; `gh-axi --to-repo` uses the first destination.
+GraphQL issue mutations and opaque GraphQL payloads are always blocked because their target repository cannot be verified before a network call.
+Approval never substitutes for an unresolved target.
+REST parent, sub-issue, and dependency writes are blocked even with an explicit repository.
+Changing an existing parent or adding sub-issues also stops before the CLI starts.
+Use a native `gh issue` command with an explicit repository or a REST form whose targets are known.
+`gh-axi` sub-issue writes and type edits stop before the CLI starts because their later GraphQL issue mutation would be blocked.
+
+Missing-target blocking is always active.
+Set `CREWSHIP_GITHUB_REPO=owner/repo` in the task environment to enforce a repository contract.
+Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` only after approval for that exact repository.
+Targets compare without letter case.
+`GH_REPO` and git-inferred context do not substitute for explicit issue-write arguments on either CLI.
+Crewship has no repository-aware task launcher here; Firstmate must supply the contract separately.
+See [GitHub board](github-board.md#rate-limits) for its API use and rate limits.
+See [Issues](../CONTRIBUTING.md#issues) for Crewship issue reports with `scripts/new-issue`.
+
+The existing tool installer owns both wrappers under `~/.local/share/crewship/gh-guard/`.
+Adjacent `gh-real` and `gh-axi-real` links name the verified native release and installed npm entrypoint directly.
+The wrappers never search PATH for their real executable.
+Normal native and npm upgrades preserve this arrangement and do not replace unmanaged commands.
+Arguments, environment, stdin, working directory, and exit status pass through unchanged.
+The omp pattern-kill extension retains its process checks and does not parse GitHub command text.
+Run `uv run pytest tests/test_omp_github_target.py tests/test_github_board.py tests/test_new_issue.py tests/test_omp_no_pattern_kill.py` for local checks with recording stubs.
+
+This prevents accidental writes; it is not a security sandbox.
+It applies only when PATH resolves the CLI to its managed wrapper.
+Direct `curl`, other API clients, internal GitHub CLI aliases, and deliberate wrapper bypass remain outside scope.
 
 ## Quality gate
 

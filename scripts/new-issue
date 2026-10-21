@@ -3,7 +3,7 @@
 
 scripts/new-issue <feature|bug> --title "..." --field problem=@file|text --field proposal=...
 scripts/new-issue feature --json input.json    # {"title": "...", "fields": {"problem": "..."}}
---dry-run prints the title, the labels and the body; without it the issue is created with gh api.
+--dry-run prints the title, labels and body; without it the issue is created in i098/Crewship with gh api.
 On failure, child errors and any HTTP response body go to stderr; the child exit code is preserved.
 """
 
@@ -67,7 +67,7 @@ def main(argv=None):
     if a.dry_run:
         print(f"title: {title}\nlabels: {', '.join(labels)}\n\n{body}", end="")
         return
-    cmd = ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/issues", "--input", "-"]
+    cmd = ["gh", "api", "-X", "POST", "repos/i098/Crewship/issues", "--input", "-"]
     payload = json.dumps({"title": title, "body": body, "labels": labels})
     result = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, text=True)
     if result.returncode:

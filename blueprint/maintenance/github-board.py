@@ -26,19 +26,6 @@ ITEM = re.compile(r"^- \[[ x]\] ([A-Za-z0-9][\w.-]*) - (.*)$")
 METADATA = re.compile(r"(\s*\([\w-]+:? [^)]*\))+$")
 # A comment carries at most this many status lines; older ones in the batch are dropped.
 COMMENT_LINES = 50
-# One GraphQL call reads the Project id and its Status field for a user or an organization.
-PROJECT_QUERY = """
-query($owner: String!, $number: Int!) {
-  repositoryOwner(login: $owner) {
-    ... on User { projectV2(number: $number) { ...board } }
-    ... on Organization { projectV2(number: $number) { ...board } }
-  }
-}
-fragment board on ProjectV2 {
-  id
-  field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } }
-}
-"""
 
 
 def gh(args):
@@ -82,32 +69,34 @@ def code_block(lines):
     return "".join(f"    {line}\n" for line in lines)
 
 
+def listing(gh, path):
+    """Every entry of a paginated REST list; --slurp wraps each page in one outer array."""
+    pages = gh([f"{path}?per_page=100", "--paginate", "--slurp"])
+    return [entry for page in pages for entry in page]
+
+
 def set_statuses(gh, repo, project, moves):
-    """Add each issue to the Project (a no-op when it is already there) and set its Status."""
-    owner = repo.split("/")[0]
-    data = gh(["graphql", "-f", f"query={PROJECT_QUERY}", "-f", f"owner={owner}", "-F", f"number={project}"])
-    board = (data["data"]["repositoryOwner"] or {}).get("projectV2")
-    if not board or not board.get("field"):
+    """Put each issue on the Project once and set its Status. moves: {issue number: status}."""
+    owner, name = repo.split("/")
+    kind = "orgs" if gh([f"users/{owner}"])["type"] == "Organization" else "users"
+    base = f"{kind}/{owner}/projectsV2/{project}"
+    field = next((field for field in listing(gh, f"{base}/fields")
+                  if field["name"] == "Status" and field["data_type"] == "single_select"), None)
+    if not field:
         raise SystemExit(f"github-board: project {project} of {owner} has no Status field")
-    options = {option["name"].lower(): option["id"] for option in board["field"]["options"]}
+    options = {option["name"]["raw"].lower(): option["id"] for option in field["options"]}
     missing = sorted({status for status in moves.values() if status.lower() not in options})
     if missing:
         raise SystemExit(f"github-board: add these options to the Status field: {', '.join(missing)}")
-    project_id = json.dumps(board["id"])
-    # Aliased fields batch every item into one call; the ids are GitHub node ids.
-    added = gh(["graphql", "-f", "query=mutation {" + " ".join(
-        f"a{i}: addProjectV2ItemById(input: {{projectId: {project_id}, "
-        f"contentId: {json.dumps(node)}}}) {{ item {{ id }} }}"
-        for i, node in enumerate(moves)
-    ) + "}"])["data"]
-    gh(["graphql", "-f", "query=mutation {" + " ".join(
-        f"s{i}: updateProjectV2ItemFieldValue(input: {{projectId: {project_id}, "
-        f"itemId: {json.dumps(added[f'a{i}']['item']['id'])}, "
-        f"fieldId: {json.dumps(board['field']['id'])}, "
-        f"value: {{singleSelectOptionId: {json.dumps(options[status.lower()])}}}}}) "
-        "{ clientMutationId }"
-        for i, status in enumerate(moves.values())
-    ) + "}"])
+    present = {item["content"]["url"].lower().split("/repos/")[-1]: item["id"]
+               for item in listing(gh, f"{base}/items")
+               if item["content_type"] == "Issue" and item["content"]}
+    for number, status in moves.items():
+        item = present.get(f"{repo}/issues/{number}".lower()) or gh([
+            f"{base}/items", "-f", "type=Issue", "-f", f"owner={owner}", "-f", f"repo={name}",
+            "-F", f"number={number}"])["id"]
+        gh(["-X", "PATCH", f"{base}/items/{item}", "-F", f"fields[][id]={field['id']}",
+            "-f", f"fields[][value]={options[status.lower()]}"])
 
 
 def sync(home, repo, project, gh=gh):
@@ -127,8 +116,7 @@ def sync(home, repo, project, gh=gh):
                 continue  # finished before the board saw it
             issue = gh([f"repos/{repo}/issues", "-f", f"title={key}: {item['title']}",
                         "-f", f"body={code_block(item['note'].splitlines())}"])
-            known = state[key] = {"issue": issue["number"], "node": issue["node_id"],
-                                  "status": None, "posted": 0}
+            known = state[key] = {"issue": issue["number"], "status": None, "posted": 0}
             save()
         new = item["lines"][known["posted"]:]
         if new:
@@ -143,7 +131,8 @@ def sync(home, repo, project, gh=gh):
                 gh(["-X", "PATCH", f"repos/{repo}/issues/{known['issue']}", "-f", f"state={state_name}"])
             moves[key] = item["status"]
     if moves:
-        set_statuses(gh, repo, project, {state[key]["node"]: status for key, status in moves.items()})
+        issues = {state[key]["issue"]: status for key, status in moves.items()}
+        set_statuses(gh, repo, project, issues)
         for key, status in moves.items():
             state[key]["status"] = status
         save()

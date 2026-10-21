@@ -57,26 +57,43 @@ def test_the_board_needs_the_firstmate_profile(configuration):
 
 
 class FakeGitHub:
-    """Answers the calls github-board.py makes, with no network."""
+    """Answers the REST calls github-board.py makes and keeps a Project board, with no network."""
 
-    def __init__(self):
-        self.calls = []
+    def __init__(self, owner_type="User"):
+        self.calls, self.owner_type = [], owner_type
+        self.options = ["Queued", "In Progress", "In review", "Done"]
+        self.items = [{"id": 1, "content_type": "DraftIssue", "content": None}]
 
     def __call__(self, args):
         self.calls.append(args)
-        if args[0] == "graphql":
-            query = args[2]
-            if "repositoryOwner" in query:
-                names = ("Queued", "In Progress", "In review", "Done")
-                options = [{"id": f"option-{name}", "name": name} for name in names]
-                return {"data": {"repositoryOwner": {"projectV2": {
-                    "id": "project", "field": {"id": "status", "options": options}}}}}
-            count = query.count("addProjectV2ItemById")
-            return {"data": {f"a{i}": {"item": {"id": f"item-{i}"}} for i in range(count)}}
-        if args[0].endswith("/issues"):
-            number = sum(call[0].endswith("/issues") for call in self.calls)
-            return {"number": number, "node_id": f"issue-{number}"}
+        path = args[2] if args[0] == "-X" else args[0]
+        if path.count("/") == 1 and path.startswith("users/"):
+            return {"type": self.owner_type}
+        if path.endswith("/fields?per_page=100"):
+            options = [{"id": f"option-{name}", "name": {"raw": name}} for name in self.options]
+            status = {"id": 9, "name": "Status", "data_type": "single_select", "options": options}
+            return [[{"id": 8, "name": "Title", "data_type": "title"}], [status]]
+        if path.endswith("/items?per_page=100"):
+            return [self.items[:1], self.items[1:]]
+        if path.endswith("/items"):
+            added = dict(arg.split("=", 1) for arg in args[2::2])
+            url = "https://api.github.com/repos/{owner}/{repo}/issues/{number}".format(**added)
+            item = {"id": 100 + len(self.items), "content_type": "Issue", "content": {"url": url}}
+            self.items.append(item)
+            return {"id": item["id"]}
+        if "/projectsV2/" in path:
+            [item] = [item for item in self.items if path.endswith(f"/items/{item['id']}")]
+            assert args[3:] == ["-F", "fields[][id]=9", "-f", args[6]]
+            item["status"] = args[6].removeprefix("fields[][value]=option-")
+            return {}
+        if path.endswith("/issues"):
+            return {"number": sum(call[0].endswith("/issues") for call in self.calls)}
         return {}
+
+    def board(self):
+        """{issue number: Status} for every issue on the Project."""
+        return {int(item["content"]["url"].rsplit("/", 1)[1]): item.get("status")
+                for item in self.items if item["content_type"] == "Issue"}
 
     def take(self):
         calls, self.calls = self.calls, []
@@ -92,8 +109,13 @@ def write_backlog(home, queued, in_flight, done):
     )
 
 
-def status_updates(calls):
-    return [call[2] for call in calls if call[0] == "graphql" and "updateProjectV2" in call[2]]
+def project_writes(calls):
+    return [call for call in calls
+            if "/projectsV2/" in " ".join(call) and ("-X" in call or "-f" in call)]
+
+
+def saved():
+    return json.loads(board.STATE.read_text())["items"]
 
 
 @pytest.fixture
@@ -105,8 +127,10 @@ def home(tmp_path, monkeypatch):
     return home
 
 
-def test_sync_maps_states_batches_comments_and_skips_an_unchanged_run(home):
-    github = FakeGitHub()
+@pytest.mark.parametrize("owner_type, family", [("User", "users"), ("Organization", "orgs")])
+def test_sync_maps_states_batches_comments_and_skips_an_unchanged_run(home, owner_type, family):
+    github = FakeGitHub(owner_type)
+    project = f"{family}/owner/projectsV2/3"
     write_backlog(home, queued=["a"], in_flight=["b", "c"], done=["d"])
     (home / "state/b.status").write_text("working [at=1]: started\n")
     (home / "state/c.status").write_text("working [at=1]: started\ndone [at=2]: PR ready\n")
@@ -123,10 +147,20 @@ def test_sync_maps_states_batches_comments_and_skips_an_unchanged_run(home):
         "repos/owner/board/issues/2/comments":
             "body=    working [at=1]: started\n    done [at=2]: PR ready\n",
     }
-    # Every Status change goes in one batched mutation.
-    [update] = status_updates(calls)
-    assert [update.count(f'"option-{name}"') for name in ("Queued", "In Progress", "In review")] == [1, 1, 1]
-    assert sum(call[0] == "graphql" for call in calls) == 3
+    assert not [call for call in calls if "graphql" in call]
+    assert [call for call in calls if call[0] == f"{project}/items"] == [
+        [f"{project}/items", "-f", "type=Issue", "-f", "owner=owner", "-f", "repo=board",
+         "-F", f"number={n}"]
+        for n in (1, 2, 3)
+    ]
+    assert ["-X", "PATCH", f"{project}/items/101", "-F", "fields[][id]=9",
+            "-f", "fields[][value]=option-In Progress"] in calls
+    assert github.board() == {1: "In Progress", 2: "In review", 3: "Queued"}
+    assert saved() == {
+        "a": {"issue": 3, "posted": 0, "status": "Queued"},
+        "b": {"issue": 1, "posted": 1, "status": "In progress"},
+        "c": {"issue": 2, "posted": 2, "status": "In review"},
+    }
 
     board.sync(home, "owner/board", 3, github)
     assert github.take() == []
@@ -141,8 +175,22 @@ def test_sync_maps_states_batches_comments_and_skips_an_unchanged_run(home):
         "-f", "body=    paused [at=3]: waiting\n    working [at=4]: resumed\n",
     ]]
     assert ["-X", "PATCH", "repos/owner/board/issues/3", "-f", "state=closed"] in calls
-    [update] = status_updates(calls)
-    assert update.count("updateProjectV2ItemFieldValue") == 1 and '"option-Done"' in update
+    assert project_writes(calls) == [["-X", "PATCH", f"{project}/items/103", "-F", "fields[][id]=9",
+                                      "-f", "fields[][value]=option-Done"]]
+    assert github.board() == {1: "In Progress", 2: "In review", 3: "Done"}
+    assert saved()["a"] == {"issue": 3, "posted": 0, "status": "Done"}
+
+
+def test_an_issue_already_on_the_board_is_not_added_again(home):
+    github = FakeGitHub()
+    url = "https://api.github.com/repos/Owner/Board/issues/1"
+    github.items.append({"id": 50, "content_type": "Issue", "content": {"url": url}})
+    write_backlog(home, queued=["a"], in_flight=[], done=[])
+
+    board.sync(home, "owner/board", 3, github)
+    assert project_writes(github.take()) == [["-X", "PATCH", "users/owner/projectsV2/3/items/50",
+                                              "-F", "fields[][id]=9", "-f", "fields[][value]=option-Queued"]]
+    assert github.board() == {1: "Queued"}
 
 
 def test_a_missing_backlog_makes_no_calls(home):
@@ -161,7 +209,7 @@ def test_a_changed_repo_or_project_starts_fresh_instead_of_reusing_issue_numbers
     board.sync(home, repo, project, github)
     calls = github.take()
     assert [call[0] for call in calls if call[0].endswith("/issues")] == [f"repos/{repo}/issues"]
-    assert not [call for call in calls if "PATCH" in call]
+    assert not [call for call in calls if "PATCH" in call and call[2].startswith("repos/")]
 
     board.sync(home, repo, project, github)
     assert github.take() == []
@@ -173,23 +221,18 @@ def test_a_failed_gh_call_reports_gh_stderr(monkeypatch):
 
     monkeypatch.setattr(board.subprocess, "run", failing)
     with pytest.raises(SystemExit, match="missing scope: project"):
-        board.gh(["graphql", "-f", "query=secret query text"])
+        board.gh(["users/owner/projectsV2/3/fields?per_page=100", "--paginate", "--slurp"])
 
 
 def test_a_status_option_missing_from_the_project_stops_before_any_status_change(home):
     github = FakeGitHub()
+    github.options.remove("In Progress")
     write_backlog(home, queued=[], in_flight=["b"], done=[])
 
-    def without_in_progress(args):
-        answer = github(args)
-        if args[0] == "graphql" and "repositoryOwner" in args[2]:
-            field = answer["data"]["repositoryOwner"]["projectV2"]["field"]
-            field["options"] = [o for o in field["options"] if o["name"] != "In Progress"]
-        return answer
-
     with pytest.raises(SystemExit, match="In progress"):
-        board.sync(home, "owner/board", 3, without_in_progress)
-    assert status_updates(github.take()) == []
+        board.sync(home, "owner/board", 3, github)
+    assert project_writes(github.take()) == []
+    assert github.board() == {}
 
 
 def _apply(tmp_path, home, github_board):

@@ -351,7 +351,7 @@ check_core_tools() {
 # chrome-devtools-mcp are exactly
 # the releases the build resolved and recorded in RESOLVED_STAMP.
 check_resolved_releases() {
-    local tool version banner package prefix
+    local tool version banner package prefix target
     [ -f "${RESOLVED_STAMP}" ] || fail "installer wrote no ${RESOLVED_STAMP}"
     for tool in herdr gh no-mistakes treehouse gws nvim; do
         version=$(resolved_version ".\"${tool}\".version")
@@ -367,9 +367,17 @@ check_resolved_releases() {
         package=${tool#*:}; tool=${tool%%:*}
         version=$(resolved_version ".\"${tool}\"")
         prefix="${HOME}/.local/share/crewship/${tool}/${version}"
-        case "$(readlink -f "${HOME}/.local/bin/${tool}")" in
+        target=$(readlink -f "${HOME}/.local/bin/${tool}")
+        if [ "${tool}" = gh-axi ]; then
+            [ "${target}" = "${HOME}/.local/share/crewship/gh-guard/gh-axi" ] \
+                || fail "gh-axi does not select its managed wrapper"
+            cmp -s "${target}" "${CF_ROOT}/blueprint/maintenance/gh" \
+                || fail "gh-axi wrapper differs from the installed guard source"
+            target=$(readlink -f "${target}-real")
+        fi
+        case "${target}" in
             "${prefix}"/*) ;;
-            *) fail "${tool} resolves to $(readlink -f "${HOME}/.local/bin/${tool}"), expected the resolved release under ${prefix}" ;;
+            *) fail "${tool} resolves to ${target}, expected the resolved release under ${prefix}" ;;
         esac
         [ "$(jq -r .version "${prefix}/node_modules/${package}/package.json")" = "${version}" ] \
             || fail "${tool} under ${prefix} is not version ${version}"

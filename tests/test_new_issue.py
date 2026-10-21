@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -69,3 +70,48 @@ def test_create_failure_reports_child_output(tmp_path, monkeypatch, error_body):
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == summary + error_body
+
+
+def recording_gh(tmp_path, monkeypatch):
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\nfrom pathlib import Path\n"
+        f"Path({str(tmp_path / 'argv')!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        f"Path({str(tmp_path / 'stdin')!r}).write_text(sys.stdin.read())\n"
+        "print(json.dumps({'html_url': 'https://example.test/1'}))\n"
+    )
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    return tmp_path / "argv", tmp_path / "stdin"
+
+
+FIELDS = ("--title", "Do it", "--field", "problem=p", "--field", "proposal=q")
+
+
+def test_create_uses_explicit_crewship_repository(tmp_path, monkeypatch):
+    argv, stdin = recording_gh(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "other-repository"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("GH_REPO", "upstream/firstmate")
+
+    result = run("feature", *FIELDS)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "https://example.test/1\n"
+    assert json.loads(argv.read_text()) == ["api", "-X", "POST", "repos/i098/Crewship/issues", "--input", "-"]
+    payload = json.loads(stdin.read_text())
+    assert payload["title"] == "Do it" and payload["labels"] == ["enhancement"]
+
+
+
+
+def test_dry_run_never_starts_gh(tmp_path, monkeypatch):
+    argv, _ = recording_gh(tmp_path, monkeypatch)
+
+    result = run("feature", *FIELDS, "--dry-run")
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("title: Do it\nlabels: enhancement\n")
+    assert not argv.exists()

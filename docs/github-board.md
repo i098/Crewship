@@ -56,7 +56,7 @@ Remove the `github_board` block from `.local/host.yml` and run `./ship.sh launch
 - `github-board.timer` starts a run 5 minutes after the last run started, and never runs two at a time.
 - The board keeps a record of what it already sent. A run with no new item, no new status line and no status change makes no GitHub calls.
 - Issues, comments and closes use the REST API. Each item gets at most one comment per run, which holds all of its new status lines (the last 50 when there are more).
-- The Project needs GraphQL. A run with status changes makes three GraphQL calls for all items together: one to read the Project, one to add the issues to it, and one to set their status.
+- Project fields, items, and status changes use the REST API for the configured user or organization. Existing items are reused.
 - Each call waits one second before the next.
 
 ## Troubleshooting
