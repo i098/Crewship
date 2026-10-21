@@ -206,6 +206,81 @@ def test_an_updated_gh_wrapper_source_is_installed_once(tmp_path, monkeypatch):
     assert not installer.install_gh_guard(tmp_path, native_gh(tmp_path, "1.0.0"))
 
 
+def gh_axi_package(home, version):
+    destination = home / ".local/share/crewship/gh-axi" / version
+    root = destination / "node_modules/gh-axi"
+    (root / "bin").mkdir(parents=True)
+    (root / "package.json").write_text(json.dumps({"version": version, "bin": {"gh-axi": "bin/gh-axi.js"}}))
+    entry = root / "bin/gh-axi.js"
+    entry.write_text(f"#!/bin/sh\ntouch \"$0.started\"\nprintf 'gh-axi {version} %s\\n' \"$*\"\n")
+    entry.chmod(0o755)
+    return destination, entry
+
+
+def assert_axi_guarded(home, entry, version):
+    guard = home / ".local/share/crewship/gh-guard"
+    command = home / ".local/bin/gh-axi"
+    assert command.is_symlink() and command.resolve() == guard / "gh-axi"
+    assert Path(os.readlink(guard / "gh-axi-real")) == entry.resolve()
+    environment = {k: v for k, v in os.environ.items() if k != "GH_REPO"}
+    blocked = subprocess.run(
+        [command, "issue", "create", "--title", "incident"],
+        capture_output=True, text=True, env=environment,
+    )
+    assert blocked.returncode != 0 and not Path(f"{entry}.started").exists()
+    answer = subprocess.run([command, "--version"], capture_output=True, text=True, env=environment)
+    assert answer.stdout.strip() == f"gh-axi {version} --version"
+
+
+def test_gh_axi_installs_behind_the_guard_and_an_upgrade_keeps_it(tmp_path):
+    for version in ("1.0.0", "2.0.0"):
+        destination, entry = gh_axi_package(tmp_path, version)
+        assert installer.link_package_bins(tmp_path, destination, ["gh-axi"])
+        assert_axi_guarded(tmp_path, entry, version)
+        Path(f"{entry}.started").unlink()
+        assert not installer.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert not (tmp_path / ".local/bin/gh").exists()
+
+
+def test_gh_axi_guard_replaces_the_old_managed_link(tmp_path):
+    destination, entry = gh_axi_package(tmp_path, "1.0.0")
+    command = tmp_path / ".local/bin/gh-axi"
+    command.parent.mkdir(parents=True)
+    command.symlink_to(entry)
+    assert installer.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert_axi_guarded(tmp_path, entry, "1.0.0")
+
+
+def test_unmanaged_gh_axi_is_preserved(tmp_path):
+    destination, _ = gh_axi_package(tmp_path, "1.0.0")
+    command = tmp_path / ".local/bin/gh-axi"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"user-owned")
+    with pytest.raises(ValueError, match="unmanaged command"):
+        installer.link_package_bins(tmp_path, destination, ["gh-axi"])
+    assert not command.is_symlink() and command.read_bytes() == b"user-owned"
+
+
+def test_an_updated_gh_axi_wrapper_source_is_installed_once(tmp_path, monkeypatch):
+    source = tmp_path / "source/gh"
+    source.parent.mkdir()
+    source.write_bytes(installer.GH_GUARD_SOURCE.read_bytes())
+    monkeypatch.setattr(installer, "GH_GUARD_SOURCE", source)
+    destination, entry = gh_axi_package(tmp_path, "1.0.0")
+    assert installer.link_package_bins(tmp_path, destination, ["gh-axi"])
+    source.write_text("#!/bin/sh\nprintf 'updated wrapper\\n'\nexit 7\n")
+    assert installer.install_gh_guard(tmp_path, entry, "gh-axi")
+    result = subprocess.run([tmp_path / ".local/bin/gh-axi"], capture_output=True, text=True)
+    assert (result.returncode, result.stdout) == (7, "updated wrapper\n")
+    assert not installer.install_gh_guard(tmp_path, entry, "gh-axi")
+
+
+def test_gh_guard_rejects_other_names(tmp_path):
+    with pytest.raises(ValueError, match="unsupported guarded command"):
+        installer.install_gh_guard(tmp_path, tmp_path / "tool", "tool")
+
+
+
 @pytest.mark.parametrize("kind", ["tar", "zip"])
 def test_archive_traversal_cannot_escape_staging(tmp_path, kind):
     archive = tmp_path / "archive"

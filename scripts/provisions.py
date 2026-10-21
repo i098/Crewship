@@ -466,10 +466,12 @@ def link_binary(home, name, target):
 GH_GUARD_SOURCE = Path(__file__).resolve().parents[1] / "blueprint/maintenance/gh"
 
 
-def install_gh_guard(home, real_binary):
+def install_gh_guard(home, real_binary, name="gh"):
+    if name not in ("gh", "gh-axi"):
+        raise ValueError(f"unsupported guarded command: {name}")
     guard = home / ".local/share/crewship/gh-guard"
     guard.mkdir(parents=True, exist_ok=True)
-    wrapper, real, target = guard / "gh", guard / "gh-real", real_binary.resolve()
+    wrapper, real, target = guard / name, guard / f"{name}-real", real_binary.resolve()
     source = GH_GUARD_SOURCE.read_bytes()
     changed = False
     if (
@@ -478,19 +480,19 @@ def install_gh_guard(home, real_binary):
         or wrapper.read_bytes() != source
         or stat.S_IMODE(wrapper.stat().st_mode) != 0o755
     ):
-        staged = guard / ".new-gh"
+        staged = guard / f".new-{name}"
         staged.unlink(missing_ok=True)
         staged.write_bytes(source)
         staged.chmod(0o755)
         os.replace(staged, wrapper)
         changed = True
     if not (real.is_symlink() and Path(os.readlink(real)) == target):
-        staged = guard / ".new-gh-real"
+        staged = guard / f".new-{name}-real"
         staged.unlink(missing_ok=True)
         staged.symlink_to(target)
         os.replace(staged, real)
         changed = True
-    return link_binary(home, "gh", wrapper) or changed
+    return link_binary(home, name, wrapper) or changed
 
 
 def install_asset(home, name, spec, key):
@@ -577,7 +579,10 @@ def link_package_bins(home, destination, package_names):
             target = root / relative
             if not target.is_file() or not target.resolve().is_relative_to(destination.resolve()):
                 raise ValueError(f"invalid installed package command: {name}")
-            changed = link_binary(home, name, target) or changed
+            if name == "gh-axi":
+                changed = install_gh_guard(home, target, name) or changed
+            else:
+                changed = link_binary(home, name, target) or changed
     return changed
 
 
