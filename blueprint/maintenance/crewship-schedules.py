@@ -138,6 +138,10 @@ def command_paths(arguments):
     return paths
 
 
+def command_evidence(paths):
+    return [path for path in paths if not re.search(r"[$`*?\[\]{}]", path)]
+
+
 def cron_tokens(command):
     escaped = False
     for index, char in enumerate(command):
@@ -210,7 +214,7 @@ def cron_rows(output, source, owners, system=False):
         paths = cron_paths(command)
         name = Path(paths[-1]).name if paths else "cron"
         rows.append(row(name, source, schedule, command, comment or PURPOSES.get(name, f"Run {name}"), owners,
-                        owner_paths=paths, path=f"{source}:{number}",
+                        owner_paths=command_evidence(paths), path=f"{source}:{number}",
                         user=parts[-2] if system else "Current login"))
         comment = ""
     return rows
@@ -236,11 +240,12 @@ def timer_row(timer, service, source, owners):
     paths = [timer.get("FragmentPath", ""), service.get("FragmentPath", ""),
              service.get("WorkingDirectory", "")]
     for executable, arguments in re.findall(r"\{\s*path=(.*?)\s*;\s*argv\[\]=(.*?)\s*;", command):
-        paths.append(executable)
+        targets = [executable]
         try:
-            paths.extend(command_paths([executable, *shlex.split(arguments)[1:]]))
+            targets = command_paths([executable, *shlex.split(arguments)[1:]])
         except ValueError:
             pass
+        paths.extend(command_evidence(targets))
     triggers = re.findall(r"\{\s*(On\w+=.*?)\s*;\s*next_elapse=",
                           timer.get("TimersCalendar", "") + "; " + timer.get("TimersMonotonic", ""))
     policy = [f"{key}={timer[key]}" for key in
@@ -294,11 +299,14 @@ def read_registry(registry):
             if root in owners:
                 raise ValueError("Invalid second-mate registry entry")
             try:
-                if (Path(root) / ".fm-secondmate-home").read_text().strip() != identity[1]:
-                    raise ValueError("Home identity does not match the registry")
+                home_identity = (Path(root) / ".fm-secondmate-home").read_text().strip()
+            except (OSError, UnicodeError) as error:
+                errors[f"Owner metadata read: {root}"] = text(error)
+                continue
+            if home_identity == identity[1]:
                 owners[root] = identity[1]
-            except (OSError, ValueError) as error:
-                errors[f"Owner metadata: {root}"] = text(error)
+            else:
+                errors[f"Owner metadata: {root}"] = "Home identity does not match the registry"
     return owners, errors
 
 
@@ -342,12 +350,14 @@ class Inventory:
 
     def refresh_checks(self):
         homes = {Path(root) for root in self.owners}
-        if self.home:
+        if self.home and f"Owner metadata: {self.home}" not in self.errors:
             homes.add(self.home)
-        self.forget_removed("Home checks: ", [f"Home checks: {home}" for home in homes])
-        for home in sorted(homes):
+        unreadable = {Path(key.removeprefix("Owner metadata read: ")) for key in self.errors
+                      if key.startswith("Owner metadata read: ")}
+        self.forget_removed("Home checks: ", [f"Home checks: {home}" for home in homes | unreadable])
+        for home in sorted(homes - unreadable):
             self.collect(f"Home checks: {home}", lambda h=home: check_rows(h, self.owners))
-        if homes:
+        if homes or unreadable:
             self.errors.pop("Home checks", None)
         else:
             self.errors["Home checks"] = "No Firstmate home configured; checks are not listed."
@@ -357,7 +367,7 @@ class Inventory:
             try:
                 self.owners, metadata_errors = read_registry(self.registry)
                 self.errors = {key: value for key, value in self.errors.items()
-                               if not key.startswith("Owner metadata: ")}
+                               if not key.startswith(("Owner metadata: ", "Owner metadata read: "))}
                 self.errors.update(metadata_errors)
                 self.errors.pop("Owner registry", None)
             except (OSError, ValueError) as error:
@@ -379,6 +389,8 @@ class Inventory:
         self.refresh_checks()
         rows = [dict(item, stale=source in self.errors or
                      (source.startswith("/etc/cron.d/") and "/etc/cron.d" in self.errors) or
+                     (source.startswith("Home checks: ") and
+                      f"Owner metadata read: {source.removeprefix('Home checks: ')}" in self.errors) or
                      ("Owner registry" in self.errors and item["owner"] != UNKNOWN))
                 for source, items in self.saved.items() for item in items]
         rows.extend(row("Read error", source, UNKNOWN, "", message, {}, path=source, stale=False)

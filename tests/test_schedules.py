@@ -58,11 +58,17 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         (f"cd {home}/$SUBDIR && ./bin/report.sh", "cd", "Unknown"),
         (f"/usr/bin/env HOME={home} /usr/bin/cat {home}/data.py", "env", "Unknown"),
         (f"{home_alias}/bin/report", "report", "orbit-mate-a1"),
+        (f"/usr/bin/python3 {home}/$JOB.py", "$JOB.py", "Unknown"),
+        (f"{home}/$RUNNER", "$RUNNER", "Unknown"),
+        (f"/usr/bin/python3 {home}/${{JOB}}.py", "${JOB}.py", "Unknown"),
+        (f'/usr/bin/python3 "{home}/$(printf report).py"', "$(printf report).py", "Unknown"),
+        (f'/usr/bin/python3 "{home}/`printf report`.py"', "`printf report`.py", "Unknown"),
+        (f"/usr/bin/python3 {home}/reports/*.py", "*.py", "Unknown"),
     ]
     for source, system in (("user cron", False), ("/etc/crontab", True), ("/etc/cron.d/report", True)):
         for command, name, owner in commands:
             item, = schedules.cron_rows(
-                f"0 9 * * * {'root ' if system else ''}{command}\n", source, owners, system
+                f"JOB=../nova/report\n0 9 * * * {'root ' if system else ''}{command}\n", source, owners, system
             )
             assert (item["name"], item["owner"], item["purpose"]) == (name, owner, f"Run {name}")
     timer, empty, running, success, skipped = schedules.properties(
@@ -119,15 +125,24 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         ))
         assert schedules.timer_row(timer, data_command, source, owners)["owner"] == "Unknown"
         for key in ("FragmentPath", "WorkingDirectory"):
-            service = dict(data_command, **{key: f"{home}/units/report"})
+            service = dict(data_command, **{key: f"{home}/units/$literal"})
             assert schedules.timer_row(timer, service, source, owners)["owner"] == "orbit-mate-a1"
-        unit = dict(timer, FragmentPath=f"{home}/units/report.timer")
+        unit = dict(timer, FragmentPath=f"{home}/units/$literal.timer")
         assert schedules.timer_row(unit, data_command, source, owners)["owner"] == "orbit-mate-a1"
         service = dict(success, ExecStart=(
             f"{{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -u {home}/report.py"
             f" {other}/data.py ; ignore_errors=no ; }}"
         ))
         assert schedules.timer_row(timer, service, source, owners)["owner"] == "orbit-mate-a1"
+        for executable, arguments in (
+            ("/usr/bin/python3", f"/usr/bin/python3 {home}/$JOB.py"),
+            (f"{home}/$RUNNER", f"{home}/$RUNNER"),
+            ("/usr/bin/python3", f'/usr/bin/python3 "{home}/$(printf report).py"'),
+        ):
+            service = dict(success, ExecStart=(
+                f"{{ path={executable} ; argv[]={arguments} ; ignore_errors=no ; }}"
+            ))
+            assert schedules.timer_row(timer, service, source, owners)["owner"] == "Unknown"
     failed = dict(completed, name="broken", result="exit-code (1)", next="2026-10-23 09:00:00 UTC")
     earlier = dict(completed, name="earlier", next="2026-10-22 07:00:00 UTC")
     ordered = sorted([completed, earlier, failed], key=schedules.row_order)
@@ -146,9 +161,14 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     extra.write_text("Do not read or run this file")
     extra.chmod(0o600)
     expected[str(extra)] = ("Unknown", "Metadata only; script 0600")
+    literal_check = home / "state/$literal.check.sh"
+    literal_check.write_text("Do not read or run this file")
+    literal_check.chmod(0o700)
+    expected[str(literal_check)] = ("orbit-mate-a1", "Metadata only; script 0700")
+    home_checks = {path for path in expected if Path(path).parent == home / "state"}
     original_open, original_iterdir = Path.open, Path.iterdir
     original_read_text = Path.read_text
-    scanned, unavailable = set(), set()
+    scanned, unavailable, unreadable_metadata = set(), set(), set()
 
     def metadata_only_open(path, *args, **kwargs):
         assert path.parent.name != "state", f"Read check contents: {path}"
@@ -164,6 +184,8 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         return original_iterdir(path)
 
     def read_text(path, *args, **kwargs):
+        if path in unreadable_metadata:
+            raise PermissionError("Home metadata unavailable")
         return "" if str(path) == "/etc/crontab" else original_read_text(path, *args, **kwargs)
 
     def run(argv):
@@ -192,14 +214,51 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         registered = schedules.collect_snapshot(selected, registry, {})
         assert not registered["errors"]
         assert {item["path"]: item["owner"] for item in registered["rows"]} == {
-            str(root / "state/report.check.sh"): owners[str(root)] for root in (home, other)
+            path: owner for path, (owner, _) in expected.items() if owner != "Unknown"
         }
+    unreadable_metadata.add(marker)
+    scanned.clear()
+    blocked = schedules.collect_snapshot(tmp_path, registry, snapshot)
+    assert f"Owner metadata read: {home}" in blocked["errors"]
+    assert str(home) not in blocked["owners"]
+    assert home / "state" not in scanned
+    assert {item["path"] for item in blocked["rows"] if item["stale"]} == home_checks
+    assert {item["path"] for item in blocked["rows"] if item["source"].startswith("home check: ")} == set(expected)
+    scanned.clear()
+    selected_blocked = schedules.collect_snapshot(home_alias, registry, blocked)
+    assert home / "state" not in scanned
+    assert {item["path"] for item in selected_blocked["rows"] if item["stale"]} == home_checks
+    unreadable_metadata.add(registry)
+    scanned.clear()
+    registry_blocked = schedules.collect_snapshot(home_alias, registry, selected_blocked)
+    assert "Owner registry" in registry_blocked["errors"]
+    assert home / "state" not in scanned
+    assert home_checks <= {item["path"] for item in registry_blocked["rows"] if item["stale"]}
+    unreadable_metadata.remove(registry)
+    registry_content = registry.read_text()
+    registry.write_text(
+        f"- nova-mate-b2 - Other owner (home: {other}; scope: Reports; projects: nova; added 2026-10-21)\n"
+    )
+    scanned.clear()
+    unregistered = schedules.collect_snapshot(tmp_path, registry, registry_blocked)
+    assert not unregistered["errors"]
+    assert home / "state" not in scanned
+    assert not home_checks & {item["path"] for item in unregistered["rows"]}
+    registry.write_text(registry_content)
+    scanned.clear()
+    uncached = schedules.collect_snapshot(tmp_path, registry, unregistered)
+    assert f"Owner metadata read: {home}" in uncached["errors"]
+    assert home / "state" not in scanned
+    assert not home_checks & {item["path"] for item in uncached["rows"]}
+    unreadable_metadata.clear()
+    snapshot = schedules.collect_snapshot(tmp_path, registry, uncached)
+    assert not snapshot["errors"]
+    assert all(not item["stale"] for item in snapshot["rows"])
+    assert home_checks <= {item["path"] for item in snapshot["rows"]}
     unavailable.add(home / "state")
     stale = schedules.collect_snapshot(tmp_path, registry, snapshot)
     assert f"Home checks: {home}" in stale["errors"]
-    assert {item["path"] for item in stale["rows"] if item["stale"]} == {
-        str(home / "state/report.check.sh")
-    }
+    assert {item["path"] for item in stale["rows"] if item["stale"]} == home_checks
     unavailable.clear()
     recovered = schedules.collect_snapshot(tmp_path, registry, stale)
     assert not recovered["errors"]
@@ -207,10 +266,14 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     extra.unlink()
     removed = schedules.collect_snapshot(tmp_path, registry, recovered)
     assert str(extra) not in {item["path"] for item in removed["rows"]}
+    unreadable_metadata.add(marker)
+    blocked = schedules.collect_snapshot(tmp_path, registry, removed)
+    assert {item["path"] for item in blocked["rows"] if item["stale"]} == home_checks
+    unreadable_metadata.clear()
     marker.write_text("another-mate\n")
     scanned.clear()
-    rejected = schedules.collect_snapshot(tmp_path, registry, removed)
+    rejected = schedules.collect_snapshot(home_alias, registry, blocked)
     assert f"Owner metadata: {home}" in rejected["errors"]
     assert str(home) not in rejected["owners"]
     assert home / "state" not in scanned
-    assert str(home / "state/report.check.sh") not in {item["path"] for item in rejected["rows"]}
+    assert not home_checks & {item["path"] for item in rejected["rows"]}

@@ -94,6 +94,7 @@ Checks come from `state/*.check.sh` in the selected home and every validated reg
 The viewer reads only check names, paths, and file modes; it never reads script contents or trust files.
 Each check shows the default five-minute watcher interval.
 Checks use the same validated home ownership; unmatched homes remain Unknown.
+Unresolved command expansions do not establish ownership; literal unit, working-directory, and listed-check paths remain valid evidence.
 
 The inventory covers the current login's crontab and user timers, plus system cron and system timers.
 It does not scan other logins, remote hosts, containers, unloaded timer files, or the child scripts under `/etc/cron.*`.
@@ -103,6 +104,8 @@ Details keep service start, exit, result, exit code, and success policy separate
 A nonzero exit can be successful under systemd's policy.
 An `ExecCondition` skip appears as `Skipped`, not as a failure or missing history.
 Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
+Unreadable home identity metadata keeps cached checks stale without reading that home's state directory.
+Confirmed identity mismatches and removed registrations discard the affected cached checks.
 Control and format characters appear as visible code-point escapes in terminal filters and errors.
 Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
 Other commands use their executable name as a label.
