@@ -41,7 +41,8 @@
          and crewship_renamed_share_entries.stdout_lines | difference(['releases', 'tools', '.install.lock']) | length == 0 }}
     crewship_renamed_home_re: "^{{ crewship_cfg.home | regex_escape }}/"
   block:
-    - name: Find the pre-rename paths and their new names
+    - &crewship_renamed_path_snapshot
+      name: Find the pre-rename paths and their new names
       ansible.builtin.command:
         argv:
           - python3
@@ -54,7 +55,8 @@
 
     # install.sh keeps its release, and onboard.sh bootstraps uv (and its lock file), under the new share
     # directory before this runs, so a directory holding only those does not make the new name taken.
-    - name: List what the new share directory already holds
+    - &crewship_renamed_share_snapshot
+      name: List what the new share directory already holds
       ansible.builtin.command:
         argv: [find, "{{ crewship_share_dir }}", -mindepth, "1", -maxdepth, "1", -printf, '%f\n']
       become: true
@@ -63,7 +65,8 @@
       failed_when: false
       check_mode: false
 
-    - name: Stop when a pre-rename path and its new name both exist
+    - &crewship_renamed_collision_check
+      name: Stop when a pre-rename path and its new name both exist
       ansible.builtin.assert:
         that: crewship_renamed_conflicts | length == 0
         fail_msg: >-
@@ -151,6 +154,10 @@
       ansible.builtin.debug:
         msg: "chrome-devtools-axi bridge {{ item }}"
       loop: "{{ crewship_renamed_bridges.stdout_lines | default([]) }}"
+
+    - *crewship_renamed_path_snapshot
+    - *crewship_renamed_share_snapshot
+    - *crewship_renamed_collision_check
 
     - name: Move the pre-rename home paths to their new names
       ansible.builtin.command:
