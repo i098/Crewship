@@ -13,6 +13,7 @@
 | `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. Then follows the [new-host question rules](#new-host-questions). |
 | `./ship.sh survey` | | Checks expected tools and `gh` authentication, plus Firstmate memory as described below. Changes nothing except for the one-time config rewrite below. |
 | `./ship.sh setup` | | Checks setup readiness; see the details below. Does not install or sign in. |
+| `crewship schedules` | | Opens a read-only terminal view of local cron entries, systemd timers, and registered Firstmate checks. |
 | `scripts/ship.py` | | The Python program behind `ship.sh`. |
 | `scripts/provisions.py` | `scripts/install_tools.py` | Installs the public tools into the user-owned Crewship prefix. |
 | `scripts/stow-secrets.sh` | `scripts/push-super-env.sh` | Pushes `~/super.env` to Cloudflare Secrets Store and redeploys the fleet-secrets Worker. |
@@ -64,6 +65,40 @@ The rewrite keeps unknown keys and values; schema validation still rejects unsup
 If both root names or an existing backup are present, the command stops without changing the config.
 Keep an existing backup and move it aside before you try the rewrite again.
 Host paths, unit names, and the compose image name do not change in this step.
+
+## Schedule viewer
+
+Run `crewship schedules` in a terminal after installing Crewship.
+The viewer uses Python's standard library and curses.
+It never runs a job, writes a schedule, starts a service, or sends a model request.
+Press `r` to refresh; the viewer does not poll while open.
+
+Use arrows or `j`/`k` to select a row, and Enter to open or close its details.
+Press `/` to search, `s` to cycle sources, `o` to cycle owners, and Escape to clear the filters.
+Use Page Up and Page Down to scroll details.
+Press `J` to read the selected service's last 40 journal lines, and `q` to quit.
+Each subprocess has an eight-second timeout.
+Narrow terminals show the job name and result first.
+
+The installation records its Firstmate home in `~/.config/crewship/schedules.json`.
+`FM_HOME` or `--home DIR` overrides that home.
+The viewer reads that home's `data/secondmates.md`; `--registry FILE` selects another registry.
+Only registered home paths establish second-mate ownership.
+Worker ownership stays Unknown without proof.
+Checks come only from the selected home's state directory.
+The viewer verifies each check's `fm-custom-check-v1` hash and private-file metadata without running the check.
+
+The inventory covers the current login's crontab and user timers, plus system cron and system timers.
+It does not scan other logins, remote hosts, containers, unloaded timer files, or the child scripts under `/etc/cron.*`.
+Cron history and results stay Unknown.
+The Last column means the timer's last trigger, not service completion.
+Details keep service start, exit, result, exit code, and success policy separate.
+A nonzero exit can be successful under systemd's policy.
+Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
+Control characters appear as text.
+Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
+Other commands use their executable name as a label.
+
 
 ## The host config
 
