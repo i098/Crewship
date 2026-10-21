@@ -265,7 +265,9 @@ def test_release_is_announced_before_main_package_setup(release, tmp_path, ref, 
     assert result.returncode == 0, result.stderr
     assert (release.home / "https-installed").exists()
     assert release.crewship.resolve() == (release.releases / "v1.0.0").resolve()
-    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("MAIN_PACKAGE_SETUP")
+    assert result.stdout.index("Installing Crewship v1.0.0") < result.stdout.index("Updating OS packages...")
+    assert "MAIN_PACKAGE_SETUP" not in result.stdout
+    assert "MAIN_PACKAGE_SETUP" in install_log(result).read_text()
     assert ("HTTPS_BOOTSTRAP" in result.stderr) is (missing is not None)
 
 
