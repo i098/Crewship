@@ -27,6 +27,7 @@ DEFAULTS = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
 @pytest.mark.parametrize("settings", [
     {"fm_home": "/srv/reports", "snapshots": ["/srv/saved.json"]},
     {"fm_home": "/srv/reports", "ledger": "/srv/usage.sqlite", "enabled": False},
+    {"fm_home": "/srv/reports", "omp_sessions": "/srv/omp/sessions"},
 ])
 def test_optional_reader_configuration_is_accepted(settings):
     config = {**DEFAULTS, "crewship": {**DEFAULTS["crewship"], "token_suggestions": settings}}
@@ -36,6 +37,7 @@ def test_optional_reader_configuration_is_accepted(settings):
 @pytest.mark.parametrize("settings", [
     {}, {"fm_home": "relative"}, {"fm_home": "/srv/reports", "enabled": "yes"},
     {"fm_home": "/srv/reports", "ledger": "relative.sqlite"},
+    {"fm_home": "/srv/reports", "omp_sessions": "relative"},
     {"fm_home": "/srv/reports", "snapshots": ["/srv/saved.json"] * 9},
     {"fm_home": "/srv/reports", "scan_sessions": True},
 ])
@@ -116,7 +118,8 @@ def test_install_manual_cycle_disable_and_remove_preserve_data(installation):
     saved_report(snapshot, cutoff)
     preserved = snapshot.read_bytes()
     home = root / "reports"
-    settings = {"fm_home": str(home), "snapshots": [str(snapshot)]}
+    settings = {"fm_home": str(home), "snapshots": [str(snapshot)],
+                "omp_sessions": str(root / "sessions")}
     account = root / "account"
     assets = account / ".local/share/crewship/token-suggestions"
     units = account / ".config/systemd/user"

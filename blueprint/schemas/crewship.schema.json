@@ -76,6 +76,11 @@
               "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$",
               "maxLength": 4096
             },
+            "omp_sessions": {
+              "type": "string",
+              "pattern": "^(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$",
+              "maxLength": 4096
+            },
             "snapshots": {
               "type": "array",
               "maxItems": 8,
