@@ -192,6 +192,7 @@ uv run scripts/new-issue feature --title "Explain the fresh-server install requi
 
 Replace the example values with observed facts.
 Review the printed title, labels, and body, then remove `--dry-run` to create the issue.
+The script always targets `i098/Crewship`, regardless of the current directory or `GH_REPO`.
 Use `--field logs=@/path/to/redacted-log.txt` to read a field from a file.
 The script applies the form's label and rejects missing required fields or commit-prefixed titles.
 

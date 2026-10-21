@@ -136,17 +136,20 @@ Shell quoting, here-documents, here-strings, and working-directory changes canno
 Text in titles, bodies, and comments is not a repository target.
 
 Issue writes require `-R owner/repo`, `--repo owner/repo`, or a supported full issue URL.
-`gh-axi` requires a literal `owner/repo` repository flag; URLs and trailing slashes are rejected before the CLI starts.
-API writes require literal `repos/owner/repo/issues` paths, including issue comments and child paths.
+`gh-axi` issue writes require a literal `owner/repo` repository flag.
+On reads and writes, `gh-axi` repository flags reject URLs and trailing slashes before the CLI starts.
+Issue REST writes require literal `repos/owner/repo/issues` paths, including issue comments and child paths.
 GitHub CLI fields and input imply POST unless an explicit method overrides it.
 `gh-axi api` defaults to GET even with fields; its positional method and `-X` are both checked.
-Reads, help requests, PR-only commands, and standalone commit-comment endpoints remain unchanged.
+Recognized reads, help requests, PR-only commands, and standalone commit-comment endpoints do not require an issue-write target.
 Unknown write or API flags fail closed when the wrapper cannot classify them.
 
 The wrappers check effective issue selectors, transfer destinations, linked-branch repositories, and explicit relationship targets.
 Both CLIs use the last repository flag; `gh-axi --to-repo` uses the first destination.
 GraphQL issue mutations and opaque GraphQL payloads are always blocked because their target repository cannot be verified before a network call.
-Approval never substitutes for an unresolved target, including relationship IDs or an existing parent outside the command.
+Approval never substitutes for an unresolved target.
+REST parent, sub-issue, and dependency writes are blocked even with an explicit repository.
+Changing an existing parent or adding sub-issues also stops before the CLI starts.
 Use a native `gh issue` command with an explicit repository or a REST form whose targets are known.
 `gh-axi` sub-issue writes and type edits stop before the CLI starts because their later GraphQL issue mutation would be blocked.
 
@@ -156,8 +159,8 @@ Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` only after approval for that exac
 Targets compare without letter case.
 `GH_REPO` and git-inferred context do not substitute for explicit issue-write arguments on either CLI.
 Crewship has no repository-aware task launcher here; Firstmate must supply the contract separately.
-The GitHub board uses its configured repository and Project REST endpoints, without opaque GraphQL mutations.
-`scripts/new-issue` targets `i098/Crewship` directly, independent of the current checkout.
+See [GitHub board](github-board.md#rate-limits) for its API use and rate limits.
+See [Issues](../CONTRIBUTING.md#issues) for Crewship issue reports with `scripts/new-issue`.
 
 The existing tool installer owns both wrappers under `~/.local/share/crewship/gh-guard/`.
 Adjacent `gh-real` and `gh-axi-real` links name the verified native release and installed npm entrypoint directly.
@@ -165,7 +168,6 @@ The wrappers never search PATH for their real executable.
 Normal native and npm upgrades preserve this arrangement and do not replace unmanaged commands.
 Arguments, environment, stdin, working directory, and exit status pass through unchanged.
 The omp pattern-kill extension retains its process checks and does not parse GitHub command text.
-This guide links the omp guard documentation to the separately installed GitHub wrappers.
 Run `uv run pytest tests/test_omp_github_target.py tests/test_github_board.py tests/test_new_issue.py tests/test_omp_no_pattern_kill.py` for local checks with recording stubs.
 
 This prevents accidental writes; it is not a security sandbox.
