@@ -53,6 +53,8 @@ def test_npm_release_channel(tmp_path, version, prerelease, tag, expected):
         ("v0.4.7", True, "checksum"),
         ("v0.4.7", True, "missing-checksum"),
         ("v0.4.7", True, "archive-server"),
+        ("v0.4.7", True, "api-digest"),
+        ("v0.4.7", True, "api-unavailable"),
         ("v0.4.8", False, ""),
         ("v0.4.8-rc.1", False, ""),
         ("v0.4.8", False, "checksum"),

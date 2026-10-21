@@ -153,7 +153,8 @@ It has no `published` trigger: immutable releases accept assets only before publ
 See [Release steps](../../CONTRIBUTING.md#release-steps).
 The root `install.sh` is a download script; it selects the latest stable release unless `CREWSHIP_REF` selects an exact tag.
 It checks the released installer against its checksum before running it.
-For releases without an installer asset, it extracts the installer from the checked release archive.
+For releases without an installer asset, it extracts the approved installer from the checked `i098/Crewship` archive for `v0.4.7`.
+That installer verifies and installs the requested tag and repository; it does not run the old cloning installer.
 The full installer stays in `scripts/install.sh` and ships as a release asset ([Install, update and migrate](../install.md)).
 
 ## Primary sources

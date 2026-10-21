@@ -67,7 +67,8 @@ asset_digest() {
 }
 
 check_asset() {
-  local name=$1 want got digest
+  local name=$1 repo=$2 ref=$3 want got digest
+  local base=https://github.com/$repo/releases/download/$ref
   curl -fsSL "$base/$name.sha256" -o "$work/$name.sha256"
   want=$(awk '{print $1; exit}' "$work/$name.sha256")
   got=$(sha256sum "$work/$name")
@@ -75,13 +76,6 @@ check_asset() {
   [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: $name does not match its .sha256; refusing to install" >&2; return 1; }
   digest=$(asset_digest "$repo" "$ref" "$name")
   [ -z "$digest" ] || [ "$digest" = "sha256:$got" ] || { echo "install.sh: $name does not match the release asset digest; refusing to install" >&2; return 1; }
-}
-
-verify_source_archive() {
-  local repo=$1 tag=$2 file=$3 want got
-  want=$(git ls-remote "https://github.com/$repo" "refs/tags/$tag^{}" "refs/tags/$tag" | awk 'END {print $1}')
-  got=$(gzip -dc "$file" 2>/dev/null | head -c 1024 | tr -d '\0' | grep -ao 'comment=[0-9a-f]*' | head -1 | cut -d= -f2 || true)
-  [ -n "$want" ] && [ "$want" = "$got" ] || { echo "install.sh: the source archive of $tag is not commit '$want' of the tag (got '$got'); refusing to install" >&2; return 1; }
 }
 
 repo=${CREWSHIP_REPO:-i098/Crewship}
@@ -104,32 +98,16 @@ base=https://github.com/$repo/releases/download/$ref
 code=$(curl -sSL -o "$work/install.sh" -w '%{http_code}' "$base/install.sh")
 case $code in
   200)
-    check_asset install.sh
+    check_asset install.sh "$repo" "$ref"
     installer=$work/install.sh
     ;;
   404)
-    # Older stable releases, including v0.4.7, carry the installer in their archive.
-    name=crewship-$ref.tar.gz
-    code=$(curl -sSL -o "$work/$name" -w '%{http_code}' "$base/$name")
-    case $code in
-      200) check_asset "$name" ;;
-      404)
-        if ! command -v git >/dev/null; then
-          sudo=
-          [ "$(id -u)" -eq 0 ] || sudo=sudo
-          apt_get update -q
-          apt_get install -y -q git
-        fi
-        name=source.tar.gz
-        curl -fsSL "https://github.com/$repo/archive/refs/tags/$ref.tar.gz" -o "$work/$name"
-        verify_source_archive "$repo" "$ref" "$work/$name"
-        ;;
-      *) echo "install.sh: archive download failed (HTTP $code)" >&2; exit 1 ;;
-    esac
+    name=crewship-v0.4.7.tar.gz
+    curl -fsSL "https://github.com/i098/Crewship/releases/download/v0.4.7/$name" -o "$work/$name"
+    check_asset "$name" i098/Crewship v0.4.7
     mkdir "$work/tree"
     tar -xzf "$work/$name" -C "$work/tree" --strip-components=1
-    installer=$work/tree/scripts/install.sh
-    [ -f "$installer" ] || installer=$work/tree/install.sh
+    installer=$work/tree/install.sh
     ;;
   *) echo "install.sh: installer download failed (HTTP $code)" >&2; exit 1 ;;
 esac

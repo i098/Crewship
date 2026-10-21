@@ -14,9 +14,10 @@ curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bas
 The script on `main` only selects and downloads a released installer.
 It follows GitHub's latest stable release, verifies `install.sh` against its `.sha256`, and runs that copy.
 It also compares the digest from GitHub's release API when the API is available.
-For older releases without an installer asset, including `v0.4.7`, it extracts the installer from the checked release archive.
-If the release also has no archive asset, the bootstrap verifies GitHub's source archive against the tag's commit before running its installer.
-This source check installs Git if needed.
+If the selected release has no installer asset, the bootstrap uses the installer from the verified, approved `i098/Crewship` release `v0.4.7`.
+That installer installs the requested tag and repository, not `v0.4.7`, from a checked archive.
+It verifies GitHub's source archive against the tag's commit when the requested release has no archive asset.
+It does not run the cloning installer inside old releases, and it does not use installer code from `main`.
 Changes to the full installer in `scripts/install.sh` do not reach stable users until an approved stable release includes them.
 The small download script itself still comes from `main`.
 
