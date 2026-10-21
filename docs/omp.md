@@ -128,58 +128,46 @@ omp config get statusLine.showHookStatus
 
 ## GitHub write guard
 
-The existing `fm-no-pattern-kill.ts` extension checks raw `gh` and `gh-axi` text before omp runs a bash or eval tool.
-It covers issue mutations, including issue transfers and both repositories in a transfer.
-It also checks `gh-axi issue subissue add|remove`; `subissue list` remains read-only.
-Each write needs `-R owner/repo`, `--repo owner/repo`, or a supported positional GitHub URL.
-`gh-axi` requires a repository flag because its issue selectors are numbers, not URLs.
-The guard checks every issue selector and each parent, sub-issue, or blocking relationship target.
-Linked-branch creation also checks `--branch-repo`, including repository URLs.
-`gh-axi` uses the first transfer destination; a task contract checks every raw destination value.
-Raw issue-write patterns require readable repository text, even in help requests or commands that only print examples.
-`gh` accepts `-h` and boolean help values; `gh-axi` recognizes only bare `--help`.
-`gh issue develop --list` and `-l` remain read-only, but their raw text still needs a repository target.
-Unknown flags or invalid boolean values block API commands because the guard cannot safely determine whether they write.
+Crewship installs a managed `gh` wrapper at `~/.local/bin/gh`.
+The wrapper checks each invocation's actual arguments before it executes the verified GitHub CLI.
+Shell quoting, here-documents, here-strings, scripts, and working-directory changes cannot supply a target from another invocation.
+Text in titles, bodies, and comments is not a repository target.
 
-The guard also checks API writes to `repos/owner/repo/issues`, including issue comments and other child paths.
-It recognizes `-X`, `--method`, and the positional HTTP method in `gh-axi api`.
-For `gh api`, fields and input imply POST unless an explicit method overrides it.
-`gh-axi api` defaults to GET even with fields or input.
-The raw API check uses these same method and payload rules, so read-only API requests do not require repository approval.
-API targets must use literal repository names, not `{owner}` or `{repo}` placeholders.
-GraphQL issue mutations and shared mutations that can change issues require `CREWSHIP_GITHUB_APPROVED_REPO`, even when the task contract is set.
-Inline GraphQL issue mutations also need readable repository text in the command.
-The value names the explicitly approved target repository because the guard cannot resolve GraphQL node IDs.
-File and stdin GraphQL payloads also require this approval because the command-text guard cannot inspect their contents.
-`gh issue edit --parent`, `--add-sub-issue`, and active `--remove-parent` also require approval because an existing parent can be outside the target repository.
-REST writes to issue `parent`, `sub_issue`, `sub_issues`, and `dependencies` paths require approval for unresolved relationship targets.
-This includes IDs in fields, file input, stdin, and dependency URLs.
-Resolve those targets before approving the exact repository with `CREWSHIP_GITHUB_APPROVED_REPO`.
+Issue writes require `-R owner/repo`, `--repo owner/repo`, or a supported full issue URL.
+The wrapper checks the effective issue selectors, transfer destination, linked-branch repository, and explicit relationship targets.
+Read-only commands, help requests, PR-only commands, and standalone commit-comment endpoints remain unchanged.
+`gh issue develop --list` and `-l` remain read-only.
+Unknown issue-write flags and unclassifiable API flags fail closed; read-only issue commands pass their flags to the real CLI.
+
+The wrapper checks API writes to `repos/owner/repo/issues`, including issue comments and child paths.
+API write paths must contain literal repository names, not `{owner}` or `{repo}` placeholders.
+GitHub CLI fields and input imply POST unless an explicit method overrides it.
+GraphQL issue mutations and opaque GraphQL payloads require `CREWSHIP_GITHUB_APPROVED_REPO`, because node IDs do not identify a readable repository.
+Implicit parent changes and REST relationship writes also require this approval.
 
 Missing-target blocking is always active.
-Repository mismatch checks apply only when `CREWSHIP_GITHUB_REPO=owner/repo` is set in the environment that starts the task's omp session.
-Crewship has no repository-aware task launcher here; Firstmate owns that launch path and must supply this variable separately.
-Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` there only after approval for that exact repository.
-Both values compare without letter case.
-With a contract, the raw check collects `-R`/`--repo`, `--to-repo`, `--branch-repo`, `github.com` repository URLs, and literal `repos/owner/repo/` paths.
-Each collected repository must match the contract or the explicitly approved repository.
-This includes references in comments, bodies, here-documents, and here-strings; unrelated references can therefore block an otherwise authorized write.
-Without a contract, the existing presence check accepts repository flags, full issue URLs, or literal repository API paths anywhere in the text.
-Without a contract, a target from another command in the same line can satisfy that presence check.
+Set `CREWSHIP_GITHUB_REPO=owner/repo` in the task environment to enforce a repository contract.
+Set `CREWSHIP_GITHUB_APPROVED_REPO=owner/repo` only after approval for that exact repository.
+Targets compare without letter case.
+Crewship has no repository-aware task launcher here; Firstmate must supply the contract separately.
 
-The normal agent apply installs the guard for host and worker omp sessions.
-To update only this guard from a verified checkout, run `install -m 0644 blueprint/config/omp-no-pattern-kill.ts ~/.omp/agent/extensions/fm-no-pattern-kill.ts`.
-Start a new omp session to load the update; existing sessions retain their loaded extension.
-Run `uv run pytest tests/test_omp_github_target.py tests/test_omp_no_pattern_kill.py` for offline checks with recording stubs.
+Installed `gh-axi 0.1.35` issue and API operations execute `gh`, so they pass through the same wrapper.
+Its explicit repository flag or `GH_REPO` context becomes a `--repo` argument; git-inferred context does not.
+The wrapper rejects missing targets in that last case.
+Its sub-issue operations send an ID-only GraphQL mutation without repository context, so `-R` alone cannot authorize that mutation.
+Set explicit approval for the mutation after resolving its repository.
+Direct `gh` calls cannot use `GH_REPO` or the current checkout as a substitute for an explicit argument.
 
-This command-text guard is not an operating-system security boundary.
-It does not cover raw terminals, sessions with extensions disabled, other clients such as curl, or commands hidden in scripts or constructed dynamically.
-The raw check scans quoted text, comments, here-documents, and here-strings without masking them.
-An example that only prints an issue-write command can therefore block.
-Include an explicit repository target in the example.
-This conservative check does not prove which text the shell will execute or bind each target to each command.
-Existing direct-command checks still validate parsed targets and approvals.
-Computed strings passed to `eval`, commands loaded from script files, and direct `curl` requests remain outside coverage.
+The existing tool installer owns the wrapper and the adjacent `gh-real` link under `~/.local/share/crewship/gh-guard/`.
+The link names the verified native release directly; the wrapper never searches PATH for another `gh`.
+Normal tool updates preserve this arrangement and do not replace unmanaged commands.
+The wrapper preserves arguments, environment, stdin, working directory, and the native CLI's exit status.
+The omp pattern-kill extension no longer inspects GitHub command text.
+Run `uv run pytest tests/test_omp_github_target.py tests/test_provisions.py tests/test_omp_no_pattern_kill.py` for local checks with recording stubs.
+
+This is an execution guard, not an operating-system security boundary.
+It applies only when PATH resolves `gh` to the managed wrapper.
+Direct `curl`, other API clients, internal GitHub CLI aliases, and direct execution of the native binary can bypass it.
 
 ## Quality gate
 

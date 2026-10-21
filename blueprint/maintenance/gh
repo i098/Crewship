@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+import os
+import re
+import sys
+from pathlib import Path
+
+ISSUE_WRITES = {
+    "create", "new", "edit", "comment", "close", "reopen", "delete", "transfer",
+    "lock", "unlock", "pin", "unpin", "develop",
+}
+BOOL_FLAGS = {
+    "--help", "--version", "--web", "--editor", "--yes", "--verify", "--undo",
+    "--remove", "--confirm", "--paginate", "--slurp", "--include", "--silent",
+    "--verbose", "--allow-escape-sequences", "--remove-milestone", "--remove-parent",
+    "--remove-type", "--edit-last", "--create-if-none", "--delete-last", "--checkout",
+    "--list",
+}
+VALUE_FLAGS = {
+    "--repo", "--method", "--field", "--raw-field", "--header", "--preview", "--input",
+    "--jq", "--template", "--cache", "--hostname", "--title", "--body", "--body-file",
+    "--assignee", "--label", "--milestone", "--project", "--type", "--reason",
+    "--comment", "--parent", "--add-sub-issue", "--remove-sub-issue", "--add-blocked-by",
+    "--remove-blocked-by", "--add-blocking", "--remove-blocking", "--duplicate-of",
+    "--add-assignee", "--remove-assignee", "--add-label", "--remove-label",
+    "--add-project", "--remove-project", "--lock-reason", "--recover", "--attach",
+    "--base", "--name", "--branch-repo", "--worktree", "--json", "--state", "--search",
+    "--limit", "--author", "--sort",
+}
+ALIASES = {
+    "-R": "--repo", "-X": "--method", "-f": "--raw-field", "-F": "--field",
+    "-H": "--header", "-p": "--preview", "-q": "--jq", "-t": "--title",
+    "-h": "--help", "-v": "--version", "-V": "--version", "-w": "--web",
+    "-e": "--editor", "-y": "--yes", "-i": "--include", "-c": "--comment",
+    "-l": "--label", "-a": "--assignee", "-m": "--milestone", "-b": "--body",
+    "-n": "--name", "-r": "--reason", "-S": "--search", "-L": "--limit",
+    "-s": "--state", "-T": "--template", "-P": "--project", "-B": "--base",
+}
+RELATION_FLAGS = {
+    "--parent", "--add-sub-issue", "--remove-sub-issue", "--add-blocked-by",
+    "--remove-blocked-by", "--add-blocking", "--remove-blocking", "--duplicate-of",
+}
+ISSUE_GRAPHQL_FIELD = re.compile(
+    r"\b(?:\w*Issue\w*|(?:create|delete)LinkedBranch|addComment|(?:un)?minimizeComment|"
+    r"clearLabelsFromLabelable|replaceActorsForAssignable|(?:add|remove)(?:BlockedBy|"
+    r"Blocking|RelatesTo|Reaction|LabelsToLabelable|LabelsFromLabelable|"
+    r"AssigneesToAssignable|AssigneesFromAssignable)|(?:un)?lockLockable|"
+    r"(?:add|delete|update)ProjectV2Item\w*)\s*[({]"
+)
+TARGET_REQUIRED = (
+    "Blocked: GitHub issue writes need an explicit repository target. "
+    "Use -R owner/repo, a full issue URL, or a literal repos/owner/repo/issues API path. "
+    "GraphQL issue writes and unresolved relationships also need "
+    "CREWSHIP_GITHUB_APPROVED_REPO after explicit approval."
+)
+
+
+def flag_name(name, positionals):
+    if positionals[:2] == ["issue", "develop"]:
+        return {"-c": "--checkout", "-l": "--list", "-b": "--base"}.get(name, ALIASES.get(name, name))
+    if positionals[:1] == ["issue"] and name == "-F":
+        return "--body-file"
+    if positionals[:1] == ["api"] and name == "-t":
+        return "--template"
+    return ALIASES.get(name, name)
+
+
+def arguments(argv):
+    words = list(argv)
+    positionals, flags, unknown = [], {}, []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if word == "--":
+            positionals.extend(words[i:])
+            break
+        if not word.startswith("-") or word == "-":
+            positionals.append(word)
+            continue
+        if word.startswith("--"):
+            name, equals, value = word.partition("=")
+            attached = bool(equals)
+        else:
+            name, value = word[:2], word[2:]
+            attached = value.startswith("=")
+            value = value[1:] if attached else value
+        name = flag_name(name, positionals)
+        if name in BOOL_FLAGS:
+            if not word.startswith("--") and value and not attached:
+                words.insert(i, "-" + value)
+                value = ""
+            value = value if attached else "true"
+            if value.lower() not in {"true", "false", "1", "0", "t", "f"}:
+                unknown.append(word)
+        elif name in VALUE_FLAGS:
+            if not attached and not value:
+                value = words[i] if i < len(words) else ""
+                i += 1
+        else:
+            if not positionals:
+                raise ValueError("Blocked: cannot classify a GitHub command with unknown leading flags.")
+            unknown.append(word)
+            continue
+        flags.setdefault(name, []).append(value)
+    return positionals, flags, unknown
+
+
+def last(flags, name):
+    return flags.get(name, [""])[-1]
+
+
+def enabled(flags, name):
+    return last(flags, name).lower() in {"true", "1", "t"}
+
+
+def repository(value):
+    value = re.sub(r"^(?:https?://)?github\.com/", "", value, flags=re.I)
+    value = value.rstrip("/").removesuffix(".git")
+    return value.lower() if re.fullmatch(r"[\w.-]+/[\w.-]+", value) else ""
+
+
+def issue_repository(value):
+    match = re.match(r"^https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/\d+", value, re.I)
+    return repository(match[1]) if match else ""
+
+
+def approval():
+    return repository(os.environ.get("CREWSHIP_GITHUB_APPROVED_REPO", ""))
+
+
+def graphql_targets(flags):
+    queries = [field[6:] for name in ("--field", "--raw-field")
+               for field in flags.get(name, []) if field.startswith("query=")]
+    if "--input" in flags or len(queries) != 1 or queries[0].lstrip().startswith(("@", "$", "`")):
+        return [approval()]
+    query = re.sub(r'"""[\s\S]*?"""|"(?:\\[\s\S]|[^"\\])*"|#[^\n]*', "", queries[0])
+    mutation = re.search(r"\bmutation\b", query)
+    if re.match(r"\s*(?:query\b|\{)", query) and not mutation:
+        return []
+    if mutation and not ISSUE_GRAPHQL_FIELD.search(query):
+        return []
+    return [approval()]
+
+
+def api_targets(positionals, flags):
+    endpoint = positionals[1] if len(positionals) > 1 else ""
+    path = re.sub(r"^https://api\.github\.com/", "", endpoint).lstrip("/")
+    if re.match(r"graphql(?:[?#]|$)", path):
+        return [approval()] if re.search(r"[?#]", path) else graphql_targets(flags)
+    payload = any(name in flags for name in ("--field", "--raw-field", "--input"))
+    method = last(flags, "--method") or ("POST" if payload else "GET")
+    if method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return []
+    if method.upper() not in {"POST", "PATCH", "PUT", "DELETE"} or not endpoint:
+        return [""]
+    resource = re.match(r"repos/[^/]+/[^/]+/([\w-]+)(?:[/?#]|$)", path)
+    if resource and resource[1] != "issues":
+        return []
+    if not re.search(r"(?:^|/)issues(?:[/?#]|$)|[$`{]", path):
+        return []
+    match = re.match(r"repos/([\w.-]+/[\w.-]+)/issues(?:[/?#]|$)", path)
+    targets = [repository(match[1]) if match else ""]
+    if re.search(r"/issues/[^/?#]+/(?:parent|sub_issues?|dependencies)(?:[/?#]|$)", path):
+        targets.append(approval())
+    return targets
+
+
+def relationship_targets(flags):
+    targets = []
+    for name in RELATION_FLAGS:
+        for field in flags.get(name, []):
+            for value in field.split(","):
+                if value and not re.fullmatch(r"#?\d+", value):
+                    targets.append(issue_repository(value))
+    if enabled(flags, "--remove-parent") or last(flags, "--parent") or last(flags, "--add-sub-issue"):
+        targets.append(approval())
+    return targets
+
+
+def issue_targets(positionals, flags):
+    operation = positionals[1] if len(positionals) > 1 else ""
+    if operation not in ISSUE_WRITES or (operation == "develop" and enabled(flags, "--list")):
+        return []
+    selectors = [] if operation in {"create", "new"} else positionals[2:3] if operation == "transfer" else positionals[2:]
+    urls = [value for value in selectors if not re.fullmatch(r"#?\d+", value)]
+    targets = [issue_repository(value) for value in urls] if urls else [repository(last(flags, "--repo"))]
+    if operation == "edit":
+        targets.extend(relationship_targets(flags))
+    if operation == "close":
+        for value in flags.get("--duplicate-of", []):
+            if not re.fullmatch(r"#?\d+", value):
+                targets.append(issue_repository(value))
+    if operation == "transfer":
+        targets.append(repository(positionals[3] if len(positionals) > 3 else ""))
+    if operation == "develop" and last(flags, "--branch-repo"):
+        targets.append(repository(last(flags, "--branch-repo")))
+    return targets
+
+
+def check_write(argv):
+    positionals, flags, unknown = arguments(argv)
+    if enabled(flags, "--help") or enabled(flags, "--version"):
+        return
+    kind = positionals[0] if positionals else ""
+    if kind not in {"issue", "api"}:
+        return
+    targets = api_targets(positionals, flags) if kind == "api" else issue_targets(positionals, flags)
+    if unknown and (kind == "api" or targets):
+        raise ValueError("Blocked: cannot classify GitHub flags: " + ", ".join(unknown))
+    if any(not target for target in targets):
+        raise ValueError(TARGET_REQUIRED)
+    contract = os.environ.get("CREWSHIP_GITHUB_REPO")
+    if contract and any(target not in {repository(contract), approval()} for target in targets):
+        raise ValueError(
+            "Blocked: GitHub write target differs from CREWSHIP_GITHUB_REPO. "
+            "Set CREWSHIP_GITHUB_APPROVED_REPO to the exact repository only after explicit approval."
+        )
+
+
+def main():
+    check_write(sys.argv[1:])
+    wrapper = Path(__file__).resolve()
+    real = wrapper.with_name("gh-real").resolve(strict=True)
+    if real == wrapper:
+        raise ValueError("Blocked: the managed gh target points back to its wrapper.")
+    os.execv(real, [str(real), *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        print(f"gh guard: {error}", file=sys.stderr)
+        sys.exit(2)

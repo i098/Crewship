@@ -119,6 +119,93 @@ def test_local_binary_drift_is_not_silently_accepted(tmp_path, monkeypatch):
         installer.install_asset(tmp_path, "tool", spec, "linux-x86_64")
 
 
+def gh_release(monkeypatch, version):
+    archive = io.BytesIO()
+    payload = f"#!/bin/sh\nprintf 'gh {version} %s\\n' \"$*\"\n".encode()
+    with tarfile.open(fileobj=archive, mode="w:gz") as stream:
+        member = tarfile.TarInfo(f"gh_{version}_linux_amd64/bin/gh")
+        member.size, member.mode = len(payload), 0o755
+        stream.addfile(member, io.BytesIO(payload))
+    body = archive.getvalue()
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(body))
+    return {
+        "version": version,
+        "assets": {
+            "linux-x86_64": {
+                "url": "https://downloads.example.test/gh.tar.gz",
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "format": "tar",
+                "binaries": installer.GITHUB_LATEST["gh"][3],
+            }
+        },
+    }
+
+
+def native_gh(home, version):
+    tools = home / ".local/share/crewship/tools/gh"
+    return tools / version / "linux-x86_64" / f"gh_{version}_linux_amd64/bin/gh"
+
+
+def assert_guarded(home, version):
+    guard = home / ".local/share/crewship/gh-guard"
+    command = home / ".local/bin/gh"
+    assert command.is_symlink() and command.resolve() == guard / "gh"
+    assert Path(os.readlink(guard / "gh-real")) == native_gh(home, version)
+    answer = subprocess.run([command, "--version"], capture_output=True, text=True, check=True)
+    assert answer.stdout.strip() == f"gh {version} --version"
+    blocked = subprocess.run(
+        [command, "issue", "create", "--title", "incident"], capture_output=True, text=True
+    )
+    assert blocked.returncode == 2
+    assert "explicit repository target" in blocked.stderr
+
+
+def test_gh_installs_behind_the_guard_and_an_upgrade_keeps_it(tmp_path, monkeypatch):
+    for version in ("1.0.0", "2.0.0"):
+        spec = gh_release(monkeypatch, version)
+        assert installer.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+        assert_guarded(tmp_path, version)
+        assert not installer.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+
+
+def test_gh_guard_replaces_the_old_managed_link_to_the_native_gh(tmp_path, monkeypatch):
+    spec = gh_release(monkeypatch, "1.0.0")
+    assert installer.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    native = native_gh(tmp_path, "1.0.0")
+    shipped = native.read_bytes()
+    command = tmp_path / ".local/bin/gh"
+    command.unlink()
+    command.symlink_to(native)
+    assert installer.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    assert_guarded(tmp_path, "1.0.0")
+    assert native.read_bytes() == shipped
+
+
+def test_unmanaged_gh_is_preserved(tmp_path, monkeypatch):
+    command = tmp_path / ".local/bin/gh"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"user-owned")
+    with pytest.raises(ValueError, match="unmanaged command"):
+        installer.install_asset(tmp_path, "gh", gh_release(monkeypatch, "1.0.0"), "linux-x86_64")
+    assert not command.is_symlink() and command.read_bytes() == b"user-owned"
+
+
+def test_an_updated_gh_wrapper_source_is_installed_once(tmp_path, monkeypatch):
+    source = tmp_path / "source/gh"
+    source.parent.mkdir()
+    source.write_bytes(installer.GH_GUARD_SOURCE.read_bytes())
+    monkeypatch.setattr(installer, "GH_GUARD_SOURCE", source)
+    spec = gh_release(monkeypatch, "1.0.0")
+    assert installer.install_asset(tmp_path, "gh", spec, "linux-x86_64")
+    source.write_text("#!/bin/sh\nprintf 'updated wrapper\\n'\nexit 7\n")
+    assert installer.install_gh_guard(tmp_path, native_gh(tmp_path, "1.0.0"))
+    result = subprocess.run(
+        [tmp_path / ".local/bin/gh", "--version"], capture_output=True, text=True
+    )
+    assert (result.returncode, result.stdout) == (7, "updated wrapper\n")
+    assert not installer.install_gh_guard(tmp_path, native_gh(tmp_path, "1.0.0"))
+
+
 @pytest.mark.parametrize("kind", ["tar", "zip"])
 def test_archive_traversal_cannot_escape_staging(tmp_path, kind):
     archive = tmp_path / "archive"

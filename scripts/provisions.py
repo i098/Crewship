@@ -463,6 +463,36 @@ def link_binary(home, name, target):
     return True
 
 
+GH_GUARD_SOURCE = Path(__file__).resolve().parents[1] / "blueprint/maintenance/gh"
+
+
+def install_gh_guard(home, real_binary):
+    guard = home / ".local/share/crewship/gh-guard"
+    guard.mkdir(parents=True, exist_ok=True)
+    wrapper, real, target = guard / "gh", guard / "gh-real", real_binary.resolve()
+    source = GH_GUARD_SOURCE.read_bytes()
+    changed = False
+    if (
+        wrapper.is_symlink()
+        or not wrapper.is_file()
+        or wrapper.read_bytes() != source
+        or stat.S_IMODE(wrapper.stat().st_mode) != 0o755
+    ):
+        staged = guard / ".new-gh"
+        staged.unlink(missing_ok=True)
+        staged.write_bytes(source)
+        staged.chmod(0o755)
+        os.replace(staged, wrapper)
+        changed = True
+    if not (real.is_symlink() and Path(os.readlink(real)) == target):
+        staged = guard / ".new-gh-real"
+        staged.unlink(missing_ok=True)
+        staged.symlink_to(target)
+        os.replace(staged, real)
+        changed = True
+    return link_binary(home, "gh", wrapper) or changed
+
+
 def install_asset(home, name, spec, key):
     version = spec["version"]
     if (
@@ -507,7 +537,10 @@ def install_asset(home, name, spec, key):
             unpacked.rename(final)
         changed = True
     for binary, path in binaries_in(final, asset["binaries"]).items():
-        changed = link_binary(home, binary, path) or changed
+        if binary == "gh":
+            changed = install_gh_guard(home, path) or changed
+        else:
+            changed = link_binary(home, binary, path) or changed
     return changed
 
 
