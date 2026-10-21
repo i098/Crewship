@@ -131,7 +131,7 @@ Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `
 
 `build.py` (Python standard library) copies `public/` to `dist/` and fills the points of interest from the README's Features list and More docs row and from `docs/features.md`.
 Every object in the scene needs a `SCENE` entry whose docs link appears in one of them; a test checks this.
-It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and how.html.
+It also adds the quick start, the repository, the latest release from `CHANGELOG.md`, and `/how`.
 A link with an object in the scene (mapped in `build.py`'s `SCENE`) opens on that object.
 A link with no mapping prints a warning but never blocks the build.
 The docs board shows on the mini map like the other points.
@@ -164,18 +164,21 @@ See [how.html](public/how.html) for the movement and Enter controls.
 
 ```bash
 python3 site/build.py
-python3 -m http.server --directory site/dist 8000
+python3 site/serve.py
 ```
 
 Then open <http://localhost:8000>.
+The preview serves `/how` without a redirect and returns 404 for unknown routes.
+Pass a port to `site/serve.py` to use a port other than 8000.
 
 ## Link preview
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
+Each page defines its own title, description, and absolute canonical URL in `public/index.html` or `public/how.html`.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
 `og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
-After a scene, preview layout, metadata tagline, or favicon change, regenerate both PNGs in the Playwright container and commit them:
+After a scene, preview layout, or favicon change, regenerate both PNGs in the Playwright container and commit them:
 
 ```bash
 python3 site/build.py
@@ -191,6 +194,7 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 ## Browser checks
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
+It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 It also checks that the first intro frame is black and that the scene keeps moving during the intro.
@@ -238,3 +242,9 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 ```
 
 The site serves on https://crewship.si, a custom domain attached to the Worker outside `wrangler.jsonc`, and each deploy records that URL under Deployments.
+
+The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
+The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
+The sitemap lists the canonical home and How URLs without modification dates.
+Origin redirects and Cloudflare-managed crawler settings live outside this repository.
+Check that the deployed `/robots.txt` matches the file before changing those settings.

@@ -132,7 +132,7 @@ def points(readme, changelog, index=""):
         (
             "how",
             "How this is built",
-            "how.html",
+            "/how",
             "How the text scene works.",
         ),
     ]

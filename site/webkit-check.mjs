@@ -16,10 +16,11 @@ for (const [name, width, height, touch, scale = 1] of [
   ["short-landscape", 568, 256, true, 1.15 ** 6],
   ["shortest-landscape", 568, 192, true, 1.15 ** 6]
 ]) {
-const page = await browser.newPage({
+const context = await browser.newContext({
   ...(touch ? devices["iPhone 15 Pro"] : {}),
   viewport: { width, height }
 });
+const page = await context.newPage();
 const expectedInsets = touch ? (width > height ? [0, 47, 21, 47] : [47, 0, 34, 0]) : [0, 0, 0, 0];
 page.on("pageerror", (e) => errors.push(`uncaught: ${e.message}`));
 page.on("crash", () => errors.push("the page crashed"));
@@ -38,7 +39,7 @@ await page.context().route("**/*", async (route) => {
     await route.fulfill({ body: "<title>Link destination</title>", contentType: "text/html" });
     return;
   }
-  const path = url.pathname.slice(1) || "index.html";
+  const path = url.pathname === "/how" ? "how.html" : url.pathname.slice(1) || "index.html";
   const type = { html: "text/html", js: "text/javascript", css: "text/css" }[path.split(".").pop()];
   if (path === "harbor.js") {
     const source = await readFile(new URL(path, dist), "utf8");
@@ -160,8 +161,23 @@ stage.addEventListener("pointerdown", () => { if (padId !== null) for (let i = 0
 }
 ` });
   }
-  await route.fulfill({ body: await readFile(new URL(path, dist)), contentType: type });
+  try {
+    await route.fulfill({ body: await readFile(new URL(path, dist)), contentType: type });
+  } catch (error) {
+    if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    await route.fulfill({ status: 404, body: "" });
+  }
 });
+if (name === "desktop") {
+  const probe = await page.context().newPage();
+  const how = await probe.goto("http://harbor.test/how?preview=1");
+  assert.equal(how.status(), 200);
+  assert(how.headers()["content-type"].startsWith("text/html"));
+  assert.equal(await probe.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
+  const missing = await probe.goto("http://harbor.test/missing");
+  assert.equal(missing.status(), 404);
+  await probe.close();
+}
 await page.goto("http://harbor.test/");
 try {
   await page.waitForFunction(() => window.frames?.length >= 30, null, { timeout: 30000 });
@@ -314,6 +330,9 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
     const opened = await popup;
     await opened.waitForLoadState();
     assert.equal(opened.url(), link.href, `${id}: grid tap opened the wrong link`);
+    if (new URL(link.href).pathname === "/how") {
+      assert.equal(await opened.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
+    }
     await opened.close();
   }
   for (let n = 0; n < bounds.links.length; n++) {
@@ -383,7 +402,7 @@ if (!page.isClosed()) {
   if (touch && longest !== 1) errors.push(`fillText drew ${longest} glyphs at once; touch devices must draw one at a time`);
 }
 }
-await page.close();
+await context.close();
 }
 await browser.close();
 if (errors.length) {
