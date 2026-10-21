@@ -18,6 +18,7 @@ import tarfile
 import termios
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -1000,7 +1001,10 @@ def test_public_bootstrap_installs_legacy_archive(
     assert (
         "https://github.com/i098/Crewship/releases/download/v0.4.7/crewship-v0.4.7.tar.gz" in urls
     )
-    assert not any("raw.githubusercontent.com" in url or "/main/" in url for url in urls)
+    for url in urls:
+        parsed = urlsplit(url)
+        assert parsed.hostname != "raw.githubusercontent.com"
+        assert "main" not in parsed.path.split("/")
 
 
 def test_public_bootstrap_updates_a_legacy_release(legacy_release):
