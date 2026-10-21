@@ -88,7 +88,7 @@ def result_kind(value):
         return "ok"
     if value == "Running":
         return "running"
-    return "unknown" if value in (UNKNOWN, "No record") else "failed"
+    return "unknown" if value in (UNKNOWN, "No record", "Skipped") else "failed"
 
 
 def row_order(item):
@@ -216,6 +216,21 @@ def cron_rows(output, source, owners, system=False):
     return rows
 
 
+def service_result(service):
+    state = service.get("ActiveState")
+    started = timestamp(service.get("ExecMainStartTimestamp")) != UNKNOWN
+    if state in ("activating", "deactivating") or (state == "active" and service.get("SubState") != "exited"):
+        return "Running"
+    if service.get("Result") == "exec-condition":
+        return "Skipped"
+    if started and service.get("ExecMainCode", "0") != "0":
+        result, status = service.get("Result", UNKNOWN), service.get("ExecMainStatus", UNKNOWN)
+        return f"OK {status}" if result == "success" else f"{result} ({status})"
+    if state == "failed" and service.get("Result") not in ("", None, "success"):
+        return service["Result"]
+    return "No record"
+
+
 def timer_row(timer, service, source, owners):
     command = service.get("ExecStart", "")
     paths = [timer.get("FragmentPath", ""), service.get("FragmentPath", ""),
@@ -243,17 +258,7 @@ def timer_row(timer, service, source, owners):
         item["next"] = "Not armed"
     elif item["next"] == UNKNOWN:
         item["next"] = "Pending"
-    state = service.get("ActiveState")
-    started = timestamp(service.get("ExecMainStartTimestamp")) != UNKNOWN
-    if state in ("activating", "deactivating") or (state == "active" and service.get("SubState") != "exited"):
-        item["result"] = "Running"
-    elif started and service.get("ExecMainCode", "0") != "0":
-        result, status = service.get("Result", UNKNOWN), service.get("ExecMainStatus", UNKNOWN)
-        item["result"] = f"OK {status}" if result == "success" else f"{result} ({status})"
-    elif state == "failed" and service.get("Result") not in ("", None, "success"):
-        item["result"] = service["Result"]
-    else:
-        item["result"] = "No record"
+    item["result"] = service_result(service)
     return item
 
 

@@ -81,7 +81,7 @@ Press `p` to show or hide raw systemd properties.
 Each source command has an eight-second timeout; the collector process has a 75-second limit.
 Narrow terminals show the job name and result first.
 Failed jobs appear first; other jobs follow their next run time.
-Results use red for failure, yellow for running, green for success, and dim text for unknown values.
+Results use red for failure, yellow for running, green for success, and dim text for unknown or skipped results.
 The time and result columns show unknown values as `-`; owner labels keep `Unknown`.
 
 The installation records its Firstmate home in `~/.config/crewship/schedules.json`.
@@ -101,6 +101,7 @@ Cron history and results stay Unknown.
 The Last column means the timer's last trigger, not service completion.
 Details keep service start, exit, result, exit code, and success policy separate.
 A nonzero exit can be successful under systemd's policy.
+An `ExecCondition` skip appears as `Skipped`, not as a failure or missing history.
 Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
 Control and format characters appear as visible code-point escapes in terminal filters and errors.
 Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.

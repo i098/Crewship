@@ -65,7 +65,7 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
                 f"0 9 * * * {'root ' if system else ''}{command}\n", source, owners, system
             )
             assert (item["name"], item["owner"], item["purpose"]) == (name, owner, f"Run {name}")
-    timer, empty, running, success = schedules.properties(
+    timer, empty, running, success, skipped = schedules.properties(
         "Id=report.timer\nUnit=report.service\nActiveState=active\n"
         "TimersCalendar={ OnCalendar=daily ; next_elapse=Thu 2026-10-22 09:00:00 UTC }\n"
         "LastTriggerUSec=Wed 2026-10-21 09:00:00 UTC\n"
@@ -77,7 +77,10 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
         "Id=report.service\nActiveState=inactive\nResult=success\nExecMainCode=1\n"
         "ExecMainStatus=2\nExecMainStartTimestamp=Wed 2026-10-21 09:00:01 UTC\n"
         "ExecMainExitTimestamp=Wed 2026-10-21 09:00:03 UTC\nSuccessExitStatus=2\n"
-        "ExecStart={ path=/srv/orbit/bin/report ; argv[]=/srv/orbit/bin/report ; }\n".replace("/srv/orbit", str(home))
+        "ExecStart={ path=/srv/orbit/bin/report ; argv[]=/srv/orbit/bin/report ; }\n\n"
+        "Id=report.service\nActiveState=inactive\nSubState=dead\nResult=exec-condition\n"
+        "ExecMainCode=0\nExecMainStatus=0\nExecMainStartTimestamp=\n"
+        "ExecMainExitTimestamp=\n".replace("/srv/orbit", str(home))
     )
     assert cron[0]["owner"] == system_cron[0]["owner"] == "orbit-mate-a1"
     assert cron[1]["owner"] == "Unknown"
@@ -95,6 +98,22 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     assert completed["owner"] == "orbit-mate-a1"
     assert completed["last"] != completed["service"]["ExecMainExitTimestamp"]
     for source in ("user timer", "system timer"):
+        for history in (skipped, dict(success, Result="exec-condition")):
+            skipped_row = schedules.timer_row(timer, history, source, owners)
+            assert skipped_row["result"] == "Skipped"
+            assert schedules.result_kind(skipped_row["result"]) == "unknown"
+            assert schedules.cell_value(dict(skipped_row, stale=False), "result") == "Skipped"
+            assert skipped_row["last"] == timer["LastTriggerUSec"]
+        no_main = schedules.timer_row(timer, skipped, source, owners)
+        assert schedules.timestamp(no_main["service"]["ExecMainStartTimestamp"]) == "Unknown"
+        assert schedules.timestamp(no_main["service"]["ExecMainExitTimestamp"]) == "Unknown"
+        assert schedules.timer_row(timer, empty, source, owners)["result"] == "No record"
+        assert schedules.timer_row(timer, {}, source, owners)["result"] == "No record"
+        active = dict(skipped, ActiveState="activating")
+        assert schedules.timer_row(timer, active, source, owners)["result"] == "Running"
+        condition_failed = dict(skipped, ActiveState="failed", Result="exit-code")
+        failure = schedules.timer_row(timer, condition_failed, source, owners)
+        assert (failure["result"], schedules.result_kind(failure["result"])) == ("exit-code", "failed")
         data_command = dict(success, ExecStart=(
             f"{{ path=/usr/bin/curl ; argv[]=/usr/bin/curl {home}/data.py ; ignore_errors=no ; }}"
         ))
@@ -113,6 +132,7 @@ def test_mixed_sources_preserve_identity_history_and_owner(tmp_path, monkeypatch
     earlier = dict(completed, name="earlier", next="2026-10-22 07:00:00 UTC")
     ordered = sorted([completed, earlier, failed], key=schedules.row_order)
     assert [item["name"] for item in ordered] == ["broken", "earlier", "report"]
+    assert sorted([no_main, failed], key=schedules.row_order)[0] is failed
     assert schedules.text("report\x1b[31m\n\u202e") == r"report\x1b[31m\n\u202e"
     expected = {}
     for root, mode in ((tmp_path, 0o700), (home, 0o600), (other, 0o755)):
