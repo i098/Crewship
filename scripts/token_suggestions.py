@@ -105,25 +105,46 @@ def deduplicate_source_measurements(source, seen):
         source[kind] = unique
 
 
+def collect_ledger(path, bounds):
+    rows, coverage = read_ledger(path, bounds)
+    notes = [
+        "Current ledger completions: "
+        f"{sum(r['requests'] for r in rows if r['current'])}; excluded rows: "
+        f"{sum(r['excluded'] for r in rows if r['current'])}.",
+        "Ledger coverage: " + "; ".join(
+            f"{'day' if c['current'] else 'prior seven days'}: "
+            f"{c['producers']} registered sources, {c['incomplete']} incomplete, "
+            f"{c['gaps']} retained gaps, {c['shutdowns']} shutdowns; "
+            f"{'partial' if c['partial'] else 'complete for registered sources'}"
+            for c in coverage) + ".",
+    ]
+    return cache_candidates(rows, coverage, bounds), notes
+
+
+def collect_omp(path, bounds):
+    rows, cache, counts = read_omp(path, bounds)
+    cache_rows = cache_candidates(cache, [{"current": 1, "partial": True}], bounds, "omp sessions")
+    detectors = list(range(3)) if counts["messages"] else []
+    if cache_rows:
+        detectors.append(3)
+    note = (
+        f"OMP bounded local scan: {counts['files']} files; {counts['messages']} day messages; "
+        f"{counts['malformed']} malformed records; limit reached: {bool(counts['limited'])}. "
+        "Coverage is partial; session history has no request completeness guarantee.")
+    return [*rows, *cache_rows], note, detectors
+
+
 def collect(config, bounds):
     candidates, sources, notes = [], [], []
     available = False
     statuses = ["unavailable: no matching saved measurement" for _ in DETECTORS]
     if config.get("ledger"):
         try:
-            rows, coverage = read_ledger(config["ledger"], bounds)
-            candidates.extend(cache_candidates(rows, coverage, bounds))
+            rows, ledger_notes = collect_ledger(config["ledger"], bounds)
+            candidates.extend(rows)
             available = True
-            statuses[3] = "available" if candidates else "unavailable: no known nonzero input denominator"
-            notes.append("Current ledger completions: "
-                         f"{sum(r['requests'] for r in rows if r['current'])}; excluded rows: "
-                         f"{sum(r['excluded'] for r in rows if r['current'])}.")
-            notes.append("Ledger coverage: " + "; ".join(
-                f"{'day' if c['current'] else 'prior seven days'}: "
-                f"{c['producers']} registered sources, {c['incomplete']} incomplete, "
-                f"{c['gaps']} retained gaps, {c['shutdowns']} shutdowns; "
-                f"{'partial' if c['partial'] else 'complete for registered sources'}"
-                for c in coverage) + ".")
+            statuses[3] = "available" if rows else "unavailable: no known nonzero input denominator"
+            notes.extend(ledger_notes)
         except TimeoutError:
             raise
         except SOURCE_ERRORS:
@@ -133,20 +154,12 @@ def collect(config, bounds):
     notes.append("SigNoz source_unavailable: no authorized read-only query path is integrated.")
     if config.get("omp_sessions"):
         try:
-            rows, cache, counts = read_omp(config["omp_sessions"], bounds)
-            cache_rows = cache_candidates(cache, [{"current": 1, "partial": True}], bounds,
-                                          "omp sessions")
-            candidates.extend([*rows, *cache_rows])
-            if counts["messages"]:
-                available = True
-                for detector in range(3):
-                    statuses[detector] = "available: bounded omp observations (partial)"
-            if cache_rows:
-                statuses[3] = "available: bounded omp observations (partial)"
-            notes.append(
-                f"OMP bounded local scan: {counts['files']} files; {counts['messages']} day messages; "
-                f"{counts['malformed']} malformed records; limit reached: {bool(counts['limited'])}. "
-                "Coverage is partial; session history has no request completeness guarantee.")
+            rows, note, detectors = collect_omp(config["omp_sessions"], bounds)
+            candidates.extend(rows)
+            notes.append(note)
+            available = available or bool(detectors)
+            for detector in detectors:
+                statuses[detector] = "available: bounded omp observations (partial)"
         except TimeoutError:
             raise
         except SOURCE_ERRORS:
