@@ -2692,8 +2692,9 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  // The 0.9 zoom holds up to FULL_AREA; a bigger stage gets bigger glyphs so the cell cap falls with the square root of its
-  // area (about 51000 cells at 3840 by 2160). A cell is about twice as tall as wide.
+  // Before the Low multiplier, the base grid grows glyphs above FULL_AREA.
+  // Its cell cap falls with the square root of stage area: about 51000 cells at 3840 by 2160.
+  // Each cell is about twice as tall as wide.
   const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale) * (preferences.graphics === "low" ? COARSEST : 1);
   aspect = w / h;
   viewW = w; viewH = h;

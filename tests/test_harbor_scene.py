@@ -14,8 +14,14 @@ ROOT = Path(__file__).parents[1]
 # The auto-walk sweeps are CPU-bound; each part runs the shared setup and one sweep.
 @pytest.mark.parametrize(
     "part",
-    ["routes", "plaza", "ship", "reduced", *(f"world-grid:{i}" for i in range(2)),
-     *(f"plaza-grid:{i}" for i in range(3))],
+    [
+        "routes",
+        "plaza",
+        "ship",
+        "reduced",
+        *(f"world-grid:{i}" for i in range(2)),
+        *(f"plaza-grid:{i}" for i in range(3)),
+    ],
 )
 def test_fountain_stops_walking_and_leaves_room_to_pass(part):
     node = shutil.which("node")

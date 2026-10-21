@@ -6,7 +6,7 @@ It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
-The cell count is the cost of a frame, so web workers cast and draw the rows on every core; desktops keep every cell and shadow, and only a slow phone drops shadow rays and then grows the glyphs, up to 1.5 times; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
+Web workers share the drawing work; see [how.html](public/how.html#frame-loop) for rendering costs and graphics detail.
 
 Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
@@ -19,6 +19,7 @@ The start menu shows a still Harbor view with Explore, GitHub, About, and Settin
 Explore starts the existing scene and moves keyboard focus to the stage.
 The scene starts with a 1.2-second glyph-noise sweep.
 Reduced motion skips the sweep.
+Press a key, click, touch the screen, or use the mouse wheel to skip the sweep.
 Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
@@ -125,8 +126,11 @@ See [how.html](public/how.html) for the audio graph.
 
 Settings provides Auto, Low, and High graphics, plus System, Reduce, and Full motion.
 Auto keeps adaptive phone detail, and High keeps full detail.
-Low multiplies the complete base glyph size by 1.5 and disables shadows.
+Low uses larger glyphs and disables shadows.
 Low stays active through house doors, cabin doors, and the ship's hatch.
+System follows the operating system's motion setting.
+Reduce stops idle scene animation; Full allows it.
+Close Settings with Escape or Back to return focus to the Settings button.
 The small `harbor-settings` record stores only graphics and motion values.
 If storage fails, changes apply for the visit and Settings shows a notice.
 The notice clears after a successful save.

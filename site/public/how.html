@@ -298,14 +298,16 @@ zoom  300%  ##                        8,000</pre>
   Grid measurement clears the complete canvas, including padding, even when the backing-store size does not change.
   The intro overlay uses CSS dimensions to cover the transformed canvas at any rendering ratio.
   The first grid measurement waits for fonts; if the requested font fails to load, the scene uses a fallback font.
-  Up to 2560 by 1440 CSS pixels the glyph height is 0.9 of the old default, as if you had pressed Cmd-minus once, so the same view uses about 1.23 times as many cells; a larger stage gets taller glyphs because the cell cap falls with the square root of the stage area (about 51000 cells at 3840 by 2160), and each cell is still a whole number of device pixels.
-  In Auto, desktops keep a fixed glyph size for the stage dimensions.
-  Slow phones can use glyphs up to 1.5 times larger.
-  Low selects larger glyphs without shadows; High keeps full detail.
+  The base glyph size uses a 0.9 zoom factor and an area-based minimum.
+  Above 2560 by 1440 CSS pixels, the cell cap falls with the square root of the stage area.
+  At 3840 by 2160, the base grid has about 51000 cells.
+  Low multiplies the complete base glyph size by 1.5 before rounding each cell to whole device pixels.
+  Door and hatch crossings reset Auto's adaptive scale but retain Low's multiplier.
+  See the <a href="https://github.com/i098/Crewship/tree/main/site/#harbor">harbor README</a> for graphics and motion settings.
   Resizes wait until the viewport settles, then update the canvas immediately before the next draw.
   In Auto, slow phone rendering first disables shadow rays, then uses glyphs up to 1.5 times larger.
   Fast rendering restores a finer grid.
-  Missed frames also reduce a phone's detail relative to the measured display refresh rate.
+  In Auto, missed frames also reduce a phone's detail relative to the measured display refresh rate.
   Before counting slower callbacks as painting load, the renderer skips one repaint to measure the display period without that load.
   This sample also detects display refresh changes during continuous input.
   Each door or hatch crossing requests the same unloaded sample, so timing from the previous scene does not hide room painting load.
