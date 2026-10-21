@@ -167,7 +167,6 @@ NPM_LATEST = {
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
 PRERELEASE_CHANNEL = {"no-mistakes"}
-# Native tools the agents profile adds; bun installs the registry tools, so it comes first.
 AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws"]
 # Attempts per download; transient 5xx and connection errors back off 1 s, then 2 s.
 DOWNLOAD_ATTEMPTS = 3
@@ -393,7 +392,8 @@ def download(url, checksum, destination):
         or not re.fullmatch(r"[0-9a-f]{64}", checksum)
     ):
         raise ValueError("downloads require HTTPS and an explicit SHA-256")
-    print(f"Downloading {url}", file=sys.stderr)
+    with INSTALL_OUTPUT_LOCK:
+        print(f"Downloading {url}", file=sys.stderr)
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         try:
             with (
@@ -804,12 +804,13 @@ def main():
     )
     args = parser.parse_args()
     key = platform_key()
-    names = list(dict.fromkeys(args.tools.split(",") + (AGENT_TOOLS if args.npm else [])))
+    names = args.tools.split(",") + (AGENT_TOOLS if args.npm else [])
     if "sentrux" in names:
         names.append("sentrux-grammars")
     rust = args.development or args.sgrep
     if rust:
         names.append("rustup-init")
+    names = list(dict.fromkeys(names))
     sources = {*names, *(NPM_LATEST if args.npm else ()), *filter(None, args.also.split(","))}
     if args.resolve:
         print(json.dumps(resolve_latest(key, sources)))
@@ -828,8 +829,13 @@ def main():
     with (prefix / ".install.lock").open("a") as guard:
         fcntl.flock(guard, fcntl.LOCK_EX)
         changed = False
-        for name in names:
-            changed = install_asset(home, name, latest[name], key) or changed
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            installs = [
+                pool.submit(install_asset, home, name, latest[name], key)
+                for name in names
+            ]
+            for install in installs:
+                changed = install.result() or changed
         if "bun" in names:
             # The release zip ships only `bun`; bun runs as `bunx` when invoked under that name.
             changed = link_binary(home, "bunx", (home / ".local/bin/bun").resolve()) or changed

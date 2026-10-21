@@ -37,7 +37,9 @@ Run `ondine file.md --check` to check the result without writing files.
 
 ## Latest releases
 
-`scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. bun is installed first, from the release below. Superseded versions stay on disk.
+`scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. Superseded versions stay on disk.
+The installer downloads and extracts at most four native assets at once.
+Every native installation must pass verification before registry setup starts.
 The installer runs at most four independent registry installations at once.
 Plugin setup starts only after those installations succeed.
 Bun output stays in one labeled block per package, including command failures.
