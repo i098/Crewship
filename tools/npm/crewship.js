@@ -49,6 +49,7 @@ function sshArgs(target) {
   if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) throw new Error("Use a port from 1 to 65535.");
   return [
     "-a", "-o", "ForwardAgent=no", "-o", "BatchMode=yes",
+    "-o", "PreferredAuthentications=publickey",
     "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
     "-o", "StrictHostKeyChecking=ask", "-o", "ControlPath=none",
     "-o", "ConnectTimeout=10", ...(port ? ["-p", port] : []), ...(alias ? [] : ["-l", user]),
@@ -163,6 +164,8 @@ async function newServer(ask) {
   const estimate = recommend(light, ui, extraDisk, extraBrowsers);
   console.log(`Estimate: ${estimate.ram} GB RAM and ${estimate.cpu} vCPU; ${estimate.disk} GB disk. These are estimates, not guarantees.`);
   if (!estimate.preset) {
+    console.log(`RAM_GB = 11 + 2L + 8U + 2 x extra browsers = 11 + 2 x ${light} + 8 x ${ui} + 2 x ${extraBrowsers} = ${estimate.ram}`);
+    console.log(`vCPU = L + 2U = ${light} + 2 x ${ui} = ${estimate.cpu}`);
     console.log("The load exceeds the documented presets. Obtain a larger server quote before setup.");
     return;
   }

@@ -27,6 +27,7 @@ Otherwise, enter the simultaneous light and UI lane counts, or explicitly choose
 Select the required features and enter the number of extra idle browser bridges and extra storage in GB.
 Each extra browser adds 2 GB RAM; extra storage adds to the workload preset's disk capacity.
 The guide selects the smallest [documented preset](https://github.com/i098/Crewship/blob/main/docs/capacity.md) that meets CPU, RAM, and disk requirements.
+For loads above the presets, the guide shows both formulas with your values before requesting a larger quote.
 Use SSD or NVMe storage.
 Start with a VPS; compare dedicated hardware for sustained 16 vCPU / 64 GB load.
 Only an explicit `yes` confirms that you have purchased or provisioned the recommended server.
@@ -36,7 +37,7 @@ Choose the printed server command, or choose SSH with an existing key.
 SSH accepts an existing alias or a hostname, non-root username, and optional port.
 Leave the port blank to use the SSH configuration.
 It checks Ubuntu 24.04 or 26.04, systemd, sudo, CPU, RAM, and total disk before installation.
-SSH does not forward your agent or accept passwords.
+SSH permits only public-key authentication and does not forward your agent.
 For an unknown host key, first use your SSH client to verify the fingerprint against the provider console.
 Enter any sudo password directly in the native terminal.
 The guide does not read or save passwords or keys.

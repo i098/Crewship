@@ -209,11 +209,18 @@ def test_ssh_uses_key_only_argument_arrays_and_a_native_terminal(run_init, ssh_s
 
 
 @pytest.mark.skipif(not shutil.which("ssh"), reason="needs ssh")
-@pytest.mark.parametrize("port,expected", [("", "2222"), ("2223", "2223")])
-def test_alias_keeps_its_configured_port_unless_overridden(run_init, tmp_path, port, expected):
+@pytest.mark.parametrize("target,port,expected", [
+    ("server\n", "", "2222"),
+    ("server\n", "2223", "2223"),
+    ("\nserver.example\nworker\n", "", "2222"),
+])
+def test_ssh_preserves_port_and_limits_authentication(run_init, tmp_path, target, port, expected):
     config = tmp_path / "ssh-config"
-    config.write_text("Host server\n  HostName server.invalid\n  User worker\n  Port 2222\n")
-    result = run_init(f"yes\n4\n16\n100\nnone\nb\nserver\n{port}\nyes\n")
+    config.write_text(
+        "Host *\n  HostName server.invalid\n  User worker\n  Port 2222\n"
+        "  GSSAPIAuthentication yes\n  PreferredAuthentications gssapi-with-mic,hostbased,publickey\n"
+    )
+    result = run_init(f"yes\n4\n16\n100\nnone\nb\n{target}{port}\nyes\n")
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line.removeprefix("SPAWN:")) for line in result.stdout.splitlines()
              if line.startswith("SPAWN:")]
@@ -224,6 +231,8 @@ def test_alias_keeps_its_configured_port_unless_overridden(run_init, tmp_path, p
             capture_output=True, text=True, check=True,
         )
         assert f"port {expected}" in resolved.stdout.splitlines()
+        policy = dict(line.split(maxsplit=1) for line in resolved.stdout.splitlines())
+        assert policy["preferredauthentications"] == "publickey"
 
 
 @pytest.fixture
@@ -368,14 +377,21 @@ def test_existing_server_accepts_nominal_capacity_tolerance(run_init, cpu, ram, 
     assert "ON THE SERVER" in result.stdout
 
 
-@pytest.mark.parametrize("light,ui,browsers,disk,estimate", [
-    (32, 8, 0, 0, "139 GB RAM and 48 vCPU"),
-    (2, 0, 25, 0, "65 GB RAM and 2 vCPU"),
-    (2, 0, 0, 201, "301 GB disk"),
+@pytest.mark.parametrize("light,ui,browsers,disk,ram,cpu,estimate", [
+    (32, 8, 0, 0, 139, 48, "139 GB RAM and 48 vCPU"),
+    (2, 0, 25, 0, 65, 2, "65 GB RAM and 2 vCPU"),
+    (2, 0, 0, 201, 15, 2, "301 GB disk"),
 ])
-def test_load_above_presets_stops_at_recommendation(run_init, light, ui, browsers, disk, estimate):
+def test_load_above_presets_stops_at_recommendation(run_init, light, ui, browsers, disk, ram, cpu, estimate):
     result = run_init(f"no\nno\n{light}\n{ui}\nnone\n{browsers}\n{disk}\nyes\na\n")
     assert result.returncode == 0
     assert estimate in result.stdout
+    ram_formula = (
+        "RAM_GB = 11 + 2L + 8U + 2 x extra browsers = "
+        f"11 + 2 x {light} + 8 x {ui} + 2 x {browsers} = {ram}"
+    )
+    cpu_formula = f"vCPU = L + 2U = {light} + 2 x {ui} = {cpu}"
+    quote = result.stdout.index("Obtain a larger server quote")
+    assert result.stdout.index(ram_formula) < result.stdout.index(cpu_formula) < quote
     assert "SPAWN:" not in result.stdout
     assert "ON THE SERVER" not in result.stdout
