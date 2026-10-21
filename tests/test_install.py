@@ -330,9 +330,14 @@ def terminal_install(release, responses):
 
 
 @pytest.mark.parametrize("status", [0, 23])
-def test_terminal_install_prints_log_path_before_exit(release, tmp_path, status):
+def test_terminal_install_drains_output_before_exit(release, tmp_path, status):
     assert release.install("v1.0.0").returncode == 0
-    (release.crewship / "onboard.sh").write_text(f"#!/bin/sh\nexit {status}\n")
+    (release.crewship / "ship.sh").write_text(
+        SHIP + f'\nif [ "$1" = launch ]; then\n'
+        '  echo terminal-output\n'
+        '  echo terminal-error >&2\n'
+        f'  exit {status}\nfi\n'
+    )
     tee = tmp_path / "bin/tee"
     tee.write_text(
         f"#!{sys.executable}\n"
@@ -348,6 +353,11 @@ def test_terminal_install_prints_log_path_before_exit(release, tmp_path, status)
     footer = f"Full install log: {log}"
     assert result.stdout.count(footer) == 1
     assert log.read_text().count(footer) == 1
+    assert result.stdout.index("Installing repository tools...") < result.stdout.index(footer)
+    assert result.stdout.index("terminal-output") < result.stdout.index(footer)
+    assert result.stdout.count("terminal-error") == 1
+    assert log.read_text().count("terminal-output") == 1
+    assert log.read_text().count("terminal-error") == 1
     assert ("Crewship installation failed" in result.stdout) == bool(status)
 
 

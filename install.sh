@@ -44,16 +44,12 @@ log_dir=$HOME/.local/state/crewship-install
 mkdir -p -m 700 "$log_dir"
 export CREWSHIP_INSTALL_LOG
 CREWSHIP_INSTALL_LOG=$(mktemp "$log_dir/install-XXXXXX.log")
-exec 3>&1 4>&2
-exec > >(tee -a "$CREWSHIP_INSTALL_LOG" >&3) 2> >(tee -a "$CREWSHIP_INSTALL_LOG" >&4)
 finish() {
   local status=$?
-  rm -rf "$work"
-  # Write the footer synchronously before the terminal session can close.
   if ((status)); then
-    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG" >&4
+    printf 'Crewship installation failed (exit %s).\nFull install log: %s\n' "$status" "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG" >&2
   else
-    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG" >&3
+    printf 'Full install log: %s\n' "$CREWSHIP_INSTALL_LOG" | tee -a "$CREWSHIP_INSTALL_LOG"
   fi
 }
 trap finish EXIT
@@ -322,6 +318,11 @@ main() {
   fi
 }
 
-# Under `curl | bash` the script is stdin, so prompts (sudo, the new-host
-# questions) read the terminal instead; without one, launch needs passwordless sudo.
-if { : </dev/tty; } 2>/dev/null; then main "$@" </dev/tty; else main "$@" </dev/null; fi
+# Foreground pipelines drain both streams before the terminal session closes.
+{
+  (
+    trap 'rm -rf "$work"' EXIT
+    # Under `curl | bash`, prompts read the terminal rather than the script.
+    if { : </dev/tty; } 2>/dev/null; then main "$@" </dev/tty; else main "$@" </dev/null; fi
+  ) 2>&1 >&3 | tee -a "$CREWSHIP_INSTALL_LOG" >&2
+} 3>&1 | tee -a "$CREWSHIP_INSTALL_LOG"
