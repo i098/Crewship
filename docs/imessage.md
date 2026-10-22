@@ -30,7 +30,7 @@ For each message from the owner, the service does these steps:
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
-   It stops when the transport accepts the answer or reaction, or when the response is cancelled, handed off, or discarded.
+   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, handed off, or discarded.
    The service stops refreshes before saving delivery progress, even if that save fails.
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
@@ -45,10 +45,15 @@ For each message from the owner, the service does these steps:
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
    Later corrections and follow-ups guide that selection.
    A purely social burst can receive one reaction and finish without a Firstmate note or wake.
-   Every message must contain only a supported acknowledgement, thanks, laughter, or emoji.
+   Every message must contain only a supported acknowledgement, thanks, laughter, celebration, or emoji.
    An answer to a prior question or approval request cannot use this shortcut.
    Only a small set of thanks, laughter, and celebration emoji can close a social turn.
-   Thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
+   Incoming thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
+   The prompt asks for occasional reactions, not a reaction on every message or every social turn.
+   It favors a fitting heart, laugh, or emphasis reaction instead of a default thumbs-up.
+   Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction.
+   A social reaction may include one short text from a fixed list of safe acknowledgements.
+   The text cannot contain facts or work claims; an invalid text sends the whole burst to Firstmate.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
    Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
@@ -78,31 +83,40 @@ The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
-Both desks accept text only from one complete JSON object whose `kind` or `decision` is `reply`.
+For a standalone text, both desks accept only one complete JSON object whose `kind` or `decision` is `reply`.
 The `answer` must be a non-empty string with no directive.
 iMessage also checks the existing source evidence before sending that answer.
 An action can occupy the whole trimmed output, any JSON `kind` or `decision` field, or the final line after prose.
 Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, and `HANDOFF`.
 A JSON tapback uses `{"kind":"tapback","emoji":"👍"}`.
-An action sends only its reaction or silence, never the surrounding prose.
+An action never sends the surrounding prose.
+A JSON iMessage tapback may include `text`, for example `{"kind":"tapback","emoji":"❤️","text":"nice!"}`.
+The allowed text is `thanks`, `thank you`, `you're welcome`, `anytime`, `haha`, `nice`, `congrats`, or `love it`.
+Capitalization may vary, and one final period or exclamation mark is allowed.
+Only a verified social burst can use this text, which shares the reaction's target and durable outbox item.
+The Instagram desk ignores this optional text.
 The parser validates the complete emoji; quotes, braces, and extra characters cannot become part of it.
 Repeated matching decision fields produce one action, while conflicts produce no visible response.
 All other output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
 Each rejected draft records one short outcome without raw model text.
-Suppressed drafts and non-social reactions retain the existing single request filing, without an extra operator request.
+Suppressed drafts and rejected non-social reactions retain the existing single request filing, without an extra operator request.
 Social reactions retain all original messages and the completion decision in the routing journal, without filing a request.
 Photon, BlueBubbles, and the Instagram desk share this parser.
 
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
-If a direct answer or social reaction is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
+If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
 The outbox saves possible reaction delivery after all lookups, health checks, and capability checks, immediately before the mutation.
 It retains that state across retries and restarts.
 Read-only preparation does not add delivery uncertainty.
 It does not clear uncertainty from an earlier reaction attempt.
+For a combined social response, the service saves text delivery before attempting the reaction.
+Reaction retries and restarts do not repeat the text or hand it to Firstmate after delivery.
+Text deliveries use a stable outbox identity in memory, so restart recovery records each delivered reply once.
+This also recovers a reply when the bridge stops after saving delivery progress but before recording memory.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
