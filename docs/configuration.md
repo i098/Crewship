@@ -303,7 +303,9 @@ The Inception provider uses `https://api.inceptionlabs.ai/v1` and reads `INCEPTI
 Set that variable before starting omp; Crewship never installs its value.
 Without the variable, Mercury requests cannot authenticate; other providers remain available.
 Edit the `inception` provider in `~/.omp/agent/models.yml` to override its endpoint, credential command, or model list.
-Apply adds missing Inception fields but preserves existing fields.
+Apply seeds Inception only when no `models.yml`, `models.yaml`, or `models.json` file exists.
+Existing model files keep their Inception settings unchanged, including missing fields or a removed provider.
+Apply still merges the shipped Codex context-window overrides; those keys replace existing values without changing other model settings.
 Disable `profiles.agents` to skip agent configuration on a new host.
 
 ## Data disk

@@ -106,9 +106,7 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
     for model, values in shipped["providers"]["openai-codex"]["modelOverrides"].items():
         assert overrides[model].items() >= values.items()
     if sources:
-        assert merged["providers"]["inception"] == {
-            **shipped["providers"]["inception"], **custom["providers"]["inception"],
-        }
+        assert merged["providers"]["inception"] == custom["providers"]["inception"]
         assert merged["providers"]["source"] == {"baseUrl": f"https://{sources[0]}.example.com"}
         assert merged["providers"]["private-provider"] == custom["providers"]["private-provider"]
         assert merged["providers"]["openai-codex"]["models"] == [{"id": "user-model"}]
@@ -123,6 +121,31 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
     assert read_models(target) == merged
     assert all(source.read_bytes() == content for source, content in originals.items()
                if source != target)
+
+
+@pytest.mark.parametrize("extension", ["yml", "yaml", "json"])
+@pytest.mark.parametrize("inception", [None, {}, {"models": []}])
+def test_model_merge_does_not_restore_inception_choices(tmp_path, extension, inception):
+    target = tmp_path / ".omp/agent/models.yml"
+    target.parent.mkdir(parents=True)
+    source = target.with_suffix(f".{extension}")
+    providers = {} if inception is None else {"inception": inception}
+    source.write_text(json.dumps({"providers": providers}))
+    original = source.read_bytes()
+
+    assert merge_models(tmp_path, check=True) == 1
+    assert source.read_bytes() == original
+    assert merge_models(tmp_path) == 1
+    merged = read_models(target)
+    if inception is None:
+        assert "inception" not in merged["providers"]
+    else:
+        assert merged["providers"]["inception"] == inception
+    written = target.read_bytes()
+    assert merge_models(tmp_path) == 0
+    assert target.read_bytes() == written
+    if source != target:
+        assert source.read_bytes() == original
 
 
 @pytest.mark.parametrize("extension", ["yaml", "json"])

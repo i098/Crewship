@@ -11,7 +11,7 @@ With the `agents` profile on, `./ship.sh launch`:
 2. Copies [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) to `~/.omp/agent/config.yml` (directory `0700`, file `0600`), and [`blueprint/config/omp-lsp.json`](../blueprint/config/omp-lsp.json) to `~/.omp/agent/lsp.json`, which disables the markdown language server (marksman): it costs each session about 90 MB, and markdown diagnostics add nothing to agent work.
    Every apply also merges [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) into `~/.omp/agent/models.yml`, preserving user providers and unshipped model keys.
    Shipped Codex override keys take precedence over existing values.
-   Inception fields supply defaults only; existing endpoint, credential, and model choices take precedence.
+   Inception is seeded only when no model file exists; existing files keep missing fields and removed providers unchanged.
    It reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
    The installed Bun parser preserves YAML 1.2 scalar types and reads legacy JSONC comments and trailing commas.
    When an existing model file needs parsing, missing Bun makes check mode report the installation prerequisite and skip the dependent merge.
