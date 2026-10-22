@@ -141,6 +141,7 @@
     src: "{{ crewship_share_dir }}/cli/crewship.js"
     dest: "{{ crewship_local_bin }}/crewship"
     state: link
+    force: "{{ ansible_check_mode }}"
     owner: "{{ crewship_cfg.user }}"
     group: "{{ crewship_group }}"
 
