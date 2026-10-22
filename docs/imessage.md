@@ -28,7 +28,7 @@ For each message from the owner, the service does these steps:
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
-   It stops when the transport accepts the answer or reaction, or when the response is cancelled, handed off, or discarded.
+   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, handed off, or discarded.
    The service stops refreshes before saving delivery progress, even if that save fails.
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
@@ -46,7 +46,7 @@ For each message from the owner, the service does these steps:
    Every message must contain only a supported acknowledgement, thanks, laughter, celebration, or emoji.
    An answer to a prior question or approval request cannot use this shortcut.
    Only a small set of thanks, laughter, and celebration emoji can close a social turn.
-   Thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
+   Incoming thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
    The prompt asks for occasional reactions, not a reaction on every message or every social turn.
    It favors a fitting heart, laugh, or emphasis reaction instead of a default thumbs-up.
    Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction.
@@ -104,7 +104,7 @@ Photon, BlueBubbles, and the Instagram desk share this parser.
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
-If a direct answer or social reaction is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
+If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
 The outbox saves possible reaction delivery after all lookups, health checks, and capability checks, immediately before the mutation.

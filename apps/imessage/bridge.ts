@@ -149,10 +149,10 @@ let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
 // were transports has no `line` and is Photon's.
 type Ref = { line?: string; space: string; id: string };
-// One outbox item for his text `id`: a tapback, or bubbles (`done` of them sent so far), the first one threaded to
-// his text `reply` when set. A photo, when `image` is set, is bubble 0 and the text bubbles follow it. `kind` is whose
-// memory line it makes (Firstmate's unless "desk"); `silent` makes none.
-// `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued.
+// One outbox item for his text `id`: bubbles followed by an optional tapback; `done` counts sent bubbles.
+// The first bubble threads to his text `reply` when set. A photo in `image` is bubble 0, before text bubbles.
+// `kind` selects the memory author (Firstmate unless "desk"); `silent` omits the text memory record.
+// `guid` identifies sends (BlueBubbles tempGuid) and deduplicates text memory. `at` is the queue time.
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
