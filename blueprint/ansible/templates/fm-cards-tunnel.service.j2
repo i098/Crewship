@@ -11,8 +11,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=%h/super.env
-ExecStart=/bin/sh -c 'TUNNEL_TOKEN="$${{ crewship_imessage_card_tunnel_token_env }}" exec {{ crewship_local_bin }}/cloudflared tunnel --config /dev/null --no-autoupdate --metrics {{ crewship_imessage_card_metrics }} run'
+ExecStart=/bin/sh -c 'set -a; . "$$HOME/super.env"; set +a; TUNNEL_TOKEN="$${{ crewship_imessage_card_tunnel_token_env }}" exec "{{ crewship_local_bin }}/cloudflared" tunnel --config /dev/null --no-autoupdate --metrics {{ crewship_imessage_card_metrics }} run'
 Restart=always
 RestartSec=5
 

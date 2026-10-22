@@ -205,6 +205,9 @@ crewship:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
 ```
 
+See [iMessage credential loading](imessage.md#enable-it) for the shell format and security requirements of `~/super.env`.
+Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the card tunnel off.
+
 `inspect` also enforces these rules:
 
 - `user` is not `root`, and `workspace` is inside `home`.

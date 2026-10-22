@@ -10,6 +10,7 @@ import itertools
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -22,9 +23,75 @@ from pathlib import Path
 
 import pytest
 import yaml
+from jinja2 import Environment
 
 ROOT = Path(__file__).parents[1]
 SEND = ROOT / "apps/imessage/fm-imessage"
+
+
+@pytest.mark.parametrize("backend", ["instagrapi", "graph"])
+@pytest.mark.parametrize("unit,binary,args", [
+    ("fm-imessage", "bun", ["bridge.ts"]),
+    ("fm-cards-tunnel", "cloudflared", [
+        "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
+    ]),
+])
+def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend):
+    home = tmp_path / "home with spaces"
+    local_bin = home / ".local/bin"
+    local_bin.mkdir(parents=True)
+    (home / "super.env").write_text("export EXPORTED_SECRET='fake export value'\nCARD_TOKEN='fake token value'\n")
+    executable = local_bin / binary
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "print(json.dumps([os.environ.get('EXPORTED_SECRET'), os.environ.get('CARD_TOKEN'), "
+        "os.environ.get('TUNNEL_TOKEN'), sys.argv[1:]]))\n"
+    )
+    executable.chmod(0o755)
+    env = Environment()
+    env.filters["comment"] = lambda text: "# " + text
+    env.filters["dirname"] = os.path.dirname
+    rendered = env.from_string(
+        (ROOT / f"blueprint/ansible/templates/{unit}.service.j2").read_text()
+    ).render(
+        ansible_managed="test",
+        crewship_cfg={"imessage": {"owner": "", "cards": {"url": "https://cards.example.com"}}},
+        crewship_local_bin=str(local_bin), crewship_imessage_dir=str(home),
+        crewship_firstmate_dir=str(home), crewship_imessage_desk_provider="omp",
+        crewship_imessage_desk_model="test", crewship_imessage_desk_reasoning="off",
+        crewship_imessage_supervisor_model="", crewship_imessage_owner_name="the owner",
+        crewship_instagram_dm_backend=backend, crewship_imessage_card_port=8767,
+        crewship_instagram_dm_session="/example/instagram/session.json",
+        crewship_instagram_dm_operator="test",
+        crewship_instagram_dm_log="/example/instagram/dm.log",
+        crewship_instagram_dm_notify="",
+        crewship_imessage_card_tunnel_token_env="CARD_TOKEN",
+        crewship_imessage_card_metrics="127.0.0.1:20242",
+    )
+    environment_files = []
+    for line in rendered.splitlines():
+        directive, separator, value = line.partition("=")
+        if separator and directive.strip() == "EnvironmentFile":
+            environment_files.extend(
+                Path(path.removeprefix("-")) for path in shlex.split(value)
+            )
+    assert all(path.name != "super.env" for path in environment_files)
+    assert environment_files == (
+        [Path("/example/instagram/dm.env")]
+        if unit == "fm-imessage" and backend == "graph" else []
+    )
+    command = next(line.removeprefix("ExecStart=") for line in rendered.splitlines()
+                   if line.startswith("ExecStart="))
+    result = subprocess.run(
+        shlex.split(command.replace("$$", "$")), env={**os.environ, "HOME": str(home)},
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(result.stdout) == [
+        "fake export value", "fake token value",
+        "fake token value" if binary == "cloudflared" else None, args,
+    ]
+    assert result.stderr == ""
 
 
 def send(tmp_path, *args):
