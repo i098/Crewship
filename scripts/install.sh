@@ -13,10 +13,12 @@ set -euo pipefail
 
 USAGE='Usage: crewship [update] [--container] [--with NAMES] [--user NAME] [--home DIR]
        crewship init
+       crewship schedules [--home DIR]
 
 Run npx crewship init on your laptop for guided server setup.
 The guide does not install Crewship on the laptop.
 
+Run crewship schedules on the server to view local schedules without changing jobs.
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
   update        install the newest release over this host, keeping its .local/ files

@@ -227,6 +227,13 @@ async function explainPnpmRelease(ref) {
 }
 
 async function main() {
+  if (args[0] === "schedules") {
+    const path = require("node:path").join(require("node:os").homedir(), ".local/share/crewship/schedules/main.ts");
+    const result = spawnSync("bun", [path, ...args.slice(1)], { stdio: "inherit" });
+    if (result.error) throw result.error;
+    process.exit(result.status ?? 1);
+  }
+
   if (args[0] === "init") {
     if (args.length !== 1) throw new Error("Usage: crewship init");
     return init();
@@ -235,10 +242,12 @@ async function main() {
   if (args.some((arg) => arg === "-h" || arg === "--help")) {
     console.log(`Usage: crewship [update] [--container] [--with NAMES] [--user NAME] [--home DIR]
        crewship init
+       crewship schedules [--home DIR]
 
 Run npx crewship init on your laptop for guided server setup.
 The guide does not install Crewship on the laptop.
 
+Run crewship schedules on the server to view local schedules without changing jobs.
 Installs Crewship on this Ubuntu 24.04 or 26.04 machine (bunx crewship, npx crewship or install.sh).
 The options go to ./ship.sh dock, which writes the host config on the first run.
   update        install the newest release over this host, keeping its .local/ files

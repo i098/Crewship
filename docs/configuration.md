@@ -13,6 +13,7 @@
 | `./ship.sh launch` | | Does the one-time config rewrite below if needed, then runs the playbook for real. Asks for the sudo password when passwordless sudo is not available. Then follows the [new-host question rules](#new-host-questions). |
 | `./ship.sh survey` | | Checks expected tools and `gh` authentication, plus Firstmate memory as described below. Changes nothing except for the one-time config rewrite below. |
 | `./ship.sh setup` | | Checks setup readiness; see the details below. Does not install or sign in. |
+| `crewship schedules` | | Opens a read-only terminal view of local cron entries, systemd timers, and registered Firstmate checks. |
 | `scripts/ship.py` | | The Python program behind `ship.sh`. |
 | `scripts/provisions.py` | `scripts/install_tools.py` | Installs the public tools into the user-owned Crewship prefix. |
 | `scripts/stow-secrets.sh` | `scripts/push-super-env.sh` | Pushes `~/super.env` to Cloudflare Secrets Store and redeploys the fleet-secrets Worker. |
@@ -64,6 +65,55 @@ The rewrite keeps unknown keys and values; schema validation still rejects unsup
 If both root names or an existing backup are present, the command stops without changing the config.
 Keep an existing backup and move it aside before you try the rewrite again.
 Host paths, unit names, and the compose image name do not change in this step.
+
+## Schedule viewer
+
+Run `crewship schedules` in a terminal after installing Crewship.
+The viewer uses OpenTUI's native TypeScript API on Bun and a Python standard-library collector.
+It never runs a job, writes a schedule, starts a service, or sends a model request.
+Press `r` to refresh; the viewer does not poll while open.
+
+Use arrows or `j`/`k` to select a row, and Enter to open or close its details.
+Press `/` to enter search; press Enter or Escape to leave search entry.
+Outside search entry, press `s` to cycle sources, `o` to cycle owners, and Escape to clear all filters.
+Use Page Up and Page Down to scroll details.
+Press `J` to read the selected service's last 40 journal lines, and `q` to quit.
+Press `p` to show or hide raw systemd properties.
+Each source command has an eight-second timeout; the collector process has a 75-second limit.
+Narrow terminals show the job name and result first.
+Failed jobs appear first; other jobs follow their next run time.
+Results use red for failure, yellow for running, green for success, and dim text for unknown or skipped results.
+The time and result columns show unknown values as `-`; owner labels keep `Unknown`.
+
+The installation records its Firstmate home in `~/.config/crewship/schedules.json`.
+`FM_HOME` or `--home DIR` overrides that home.
+The viewer reads that home's `data/secondmates.md`; `--registry FILE` selects another registry.
+Only registered home paths with matching `.fm-secondmate-home` metadata establish second-mate ownership.
+The viewer resolves relative components and symbolic links before it compares home paths or matches ownership evidence.
+Worker ownership stays Unknown without proof.
+Checks come from `state/*.check.sh` in the selected home and every validated registry home.
+The viewer reads only check names, paths, and file modes; it never reads script contents or trust files.
+Each check shows the default five-minute watcher interval.
+Checks use the same validated home ownership; unmatched homes remain Unknown.
+Unresolved command expansions do not establish ownership; literal unit, working-directory, and listed-check paths remain valid evidence.
+
+The inventory covers the current login's crontab and user timers, plus system cron and system timers.
+It does not scan other logins, remote hosts, containers, unloaded timer files, or the child scripts under `/etc/cron.*`.
+Cron history and results stay Unknown.
+The Last column means the timer's last trigger, not service completion.
+Details keep service start, exit, result, exit code, and success policy separate.
+A nonzero exit can be successful under systemd's policy.
+An `ExecCondition` skip appears as `Skipped`, not as a failure or missing history.
+Read errors remain visible as rows; failed refreshes retain previous rows marked STALE.
+Unreadable home identity metadata keeps cached checks stale without reading that home's state directory.
+Home identity mismatches discard cached checks.
+Registry removals discard cached checks from homes other than the selected home.
+Control and format characters appear as visible code-point escapes in terminal filters and errors.
+Purpose labels come from service descriptions, explicit `# Purpose:` comments, or known maintenance names.
+Other labels use the script name for recognized interpreters, or the executable name.
+For a leading `cd DIR && command`, the viewer uses DIR as working-directory evidence and resolves relative executable or script paths.
+Other wrappers keep their executable names; the viewer does not inspect their child commands.
+
 
 ## The host config
 

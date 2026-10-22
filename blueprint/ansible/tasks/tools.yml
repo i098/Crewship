@@ -117,3 +117,88 @@
 
 - name: Install the first-write Neovim configuration
   ansible.builtin.import_tasks: nvim.yml
+
+- name: Ensure the Crewship command directory
+  ansible.builtin.file:
+    path: "{{ crewship_share_dir }}/cli"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+
+- name: Install the Crewship command
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/tools/npm/{{ item }}"
+    dest: "{{ crewship_share_dir }}/cli/{{ item }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "{{ '0755' if item == 'crewship.js' else '0644' }}"
+    remote_src: true
+  loop: [crewship.js, package.json]
+
+- name: Link the Crewship command on PATH
+  ansible.builtin.file:
+    src: "{{ crewship_share_dir }}/cli/crewship.js"
+    dest: "{{ crewship_local_bin }}/crewship"
+    state: link
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+
+- name: Ensure the OpenTUI schedule directory
+  ansible.builtin.file:
+    path: "{{ crewship_share_dir }}/schedules"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+
+- name: Install the OpenTUI schedule assets
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/tools/schedules/{{ item }}"
+    dest: "{{ crewship_share_dir }}/schedules/{{ item }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  loop: [main.ts, package.json, bun.lock]
+
+- name: Install the read-only schedule collector
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/crewship-schedules.py"
+    dest: "{{ crewship_share_dir }}/schedules/collector.py"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+
+- name: Install the locked OpenTUI dependencies
+  ansible.builtin.command:
+    argv: ["{{ crewship_local_bin }}/bun", install, --frozen-lockfile, --production, --ignore-scripts]
+    chdir: "{{ crewship_share_dir }}/schedules"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_schedules_install
+  changed_when: "'packages installed' in crewship_schedules_install.stdout"
+  when: not ansible_check_mode
+
+- name: Remove the superseded curses entry point
+  ansible.builtin.file:
+    path: "{{ crewship_local_bin }}/crewship-schedules"
+    state: absent
+
+- name: Ensure the schedule viewer config directory
+  ansible.builtin.file:
+    path: "{{ crewship_cfg.home }}/.config/crewship"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0700"
+
+- name: Record the schedule viewer Firstmate home
+  ansible.builtin.copy:
+    dest: "{{ crewship_cfg.home }}/.config/crewship/schedules.json"
+    content: "{{ {'home': (crewship_firstmate_dir if crewship_cfg.profiles.firstmate else none)} | to_json }}\n"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0600"
