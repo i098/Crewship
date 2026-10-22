@@ -30,6 +30,8 @@ With the `agents` profile on, `./ship.sh launch`:
 9. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex, when `profiles.agent_instructions` is on. See [Global instructions](#global-instructions).
 10. Installs the omp rules in [`blueprint/rules/`](../blueprint/rules/) to omp's global rules folder. See [Rules](#rules).
 11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
+12. Installs the opt-in extension [`fm-gluttony.ts`](../blueprint/config/fm-gluttony.ts) as `~/.omp/agent/extensions/fm-gluttony.ts`.
+    See [Gluttony mode](#gluttony-mode).
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
@@ -102,6 +104,53 @@ omp models --kind chat      # models you can assign
 For every future host, edit [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) in this repository and commit it. New hosts get it on their first apply. Existing hosts do not; see below.
 
 For one repository only, create `<repo>/.omp/config.yml` with the keys to override. It is merged over the global config when omp starts in that directory. Arrays replace the global value instead of appending to it.
+
+## Gluttony mode
+
+Gluttony mode is off by default.
+Enable it for one Firstmate home with `touch <home>/config/gluttony`.
+Disable it with `rm -f <home>/config/gluttony`.
+The extension reads the switch at session start; running sessions keep their mode.
+Crewship installs the extension on every apply but never creates the switch.
+
+Only interactive crewmate and scout sessions enter vibe mode.
+The launch must set `FM_OMP_HARNESS=omp`, `OMP_SKIP_SETUP=1`, `FM_TASK_ID`, and `FM_TASK_INBOX=<home>/state/<id>.inbox`.
+Main sessions, secondmates, and in-process subagents do not enter vibe mode through this extension.
+The director only plans and reads with `read`, `todo`, and `vibe_*`.
+Assign a **good worker** to append status, acknowledge the steering inbox, edit files, and commit.
+The director cannot perform these steps itself.
+The extension adds this requirement to the director's brief.
+
+| Session provider | Fast workers | Good workers |
+| --- | --- | --- |
+| Anthropic | `inception/mercury-3` (default, high) or `anthropic/claude-haiku-5-5`; medium, high, xhigh, or max | `anthropic/claude-sonnet-5-5` (default, medium); medium, high, xhigh, or max |
+| `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium; session-local `priority` for `openai-codex`, `ultrafast` for `openai` |
+
+Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
+Saved worker models take precedence over saved role aliases.
+If Mercury 3 or Sonnet 5.5 has no usable credential, the extension tries Haiku 5.5 at the selected effort.
+Anthropic-side workers can also retry on Haiku 5.5; other retry models must stay within the worker's tier.
+A spawn or restore fails with a clear message when no allowed model has a usable credential.
+Choose a worker's model on the first line of its `vibe_spawn` prompt:
+
+```text
+@model anthropic/claude-sonnet-5-5 medium
+Perform the edits, status appends, and commit for this task.
+```
+
+The extension strips this line and rejects models or levels outside the selected worker tier.
+Without the line, it uses the defaults above.
+See [Omp model defaults](configuration.md#omp-model-defaults) for the model allowlist and credential setup.
+Enable every model in the table above before using gluttony mode.
+Native `openai-codex` supports only `priority` in omp 18.12.1; unsupported tiers are omitted from requests.
+Re-check this tier limit after `omp update`.
+The extension leaves the director's tier and shared settings unchanged and installs no credentials.
+
+The extension depends on omp 18.12.1 internals: `pi.pi.Settings`, `pi.pi.VibeSpawnTool`, `pi.pi.SessionManager`, scoped settings, retry settings, and session mode reconciliation.
+Re-check these APIs after `omp update`.
+Without the private worker APIs, the director still enters vibe mode, but workers keep the host's default models.
+Known caveat: direct `openai/gpt-6-luna` calls reject `tier.openai: ultrafast` with `Invalid service_tier argument`.
+This also affects a Luna fallback from `openai-codex` to direct OpenAI.
 
 ## Advisor
 
