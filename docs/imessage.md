@@ -10,6 +10,7 @@ For each message from the owner, the service does these steps:
 2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
+   It keeps authored text separate from quoted thread metadata for action and social checks.
 3. It marks the text as read.
 4. It waits 3 seconds of silence to combine a burst.
    Each new text cancels a running draft, starts the wait again, and starts a fresh status read.
@@ -33,11 +34,23 @@ For each message from the owner, the service does these steps:
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
+   The desk answers a burst once and selects the message that needs the answer, including an earlier question.
+   Later corrections and follow-ups guide that selection.
+   A purely social burst can receive one reaction and finish without a Firstmate note or wake.
+   Every message must contain only a supported acknowledgement, thanks, laughter, or emoji.
+   An answer to a prior question or approval request cannot use this shortcut.
+   Only a small set of thanks, laughter, and celebration emoji can close a social turn.
+   Thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
    Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
-   It targets the last received request in the pending burst.
+   A reply or reaction can set `target` to the message's 1-based position in the pending burst.
+   Without `target`, the service selects the last pending message; an invalid target causes a handoff.
+   The service threads a text only when another bubble separates the selected message from its answer.
+   It checks separation at delivery, using the same rule as `fm-imessage --reply`.
+   Desk answers stay on the selected message's transport and chat, including during retries and after restarts.
+   They never use another chat or transport as a fallback.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
@@ -55,7 +68,6 @@ The BlueBubbles line does not report edits: an edit there files no note.
 
 The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
-A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
 Both desks accept text only from one complete JSON object whose `kind` or `decision` is `reply`.
@@ -69,20 +81,25 @@ The parser validates the complete emoji; quotes, braces, and extra characters ca
 Repeated matching decision fields produce one action, while conflicts produce no visible response.
 All other output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
 Each rejected draft records one short outcome without raw model text.
-A suppressed draft or reaction retains the existing single request filing, without an extra operator request.
+Suppressed drafts and non-social reactions retain the existing single request filing, without an extra operator request.
+Social reactions retain all original messages and the completion decision in the routing journal, without filing a request.
 Photon, BlueBubbles, and the Instagram desk share this parser.
 
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
-If the transport definitely refuses a direct answer, the saved burst ids cause one stable-id Firstmate handoff.
+If a direct answer or social reaction is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
-A prior uncertain send never causes this fallback because a desk answer might already exist.
+A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
+The outbox saves possible reaction delivery after all lookups, health checks, and capability checks, immediately before the mutation.
+It retains that state across retries and restarts.
+Read-only preparation does not add delivery uncertainty.
+It does not clear uncertainty from an earlier reaction attempt.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
 
-The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, the newest of them is his latest text again, so replies, tapbacks, and typing still go to the right text. A file from before the time was kept counts as the oldest.
+The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, typing and command tapbacks target the newest saved text. A file from before the time was kept counts as the oldest.
 The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
 
 ## Upstream outages
@@ -126,7 +143,7 @@ The log shows each try.
 
 The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `apps/imessage/memory.ts`.
 
-- **The log.** The service records owner texts, Firstmate texts and tapbacks, and direct desk answers.
+- **The log.** The service records owner texts, Firstmate texts and tapbacks, and desk texts and tapbacks.
   The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`.
   The service never edits or deletes a record.
   Inbound records also keep their stable request id, so a repaired memory write does not repeat after another restart.
@@ -181,7 +198,7 @@ At start, the service skips a memory log line that does not parse.
 
 ## Instagram front desk
 
-The Instagram desk uses the [shared reply contract](#what-it-does).
+The Instagram desk uses the same [decision parser](../apps/imessage/desk.ts), not the iMessage routing rules.
 `instagram-desk.service` runs `apps/imessage/instagram-desk.ts` and reuses the memory, runner, input budget, and timing helpers.
 Its channel-specific prompt does not use iMessage direct routing.
 It has no Instagram client.
@@ -305,6 +322,7 @@ The bridge uses these routing rules with one or both transports:
   An outage on that transport holds the send in the queue; it does not move the text to another line.
   An explicit threaded reply tries its target's transport first.
   Only a provably unsent reply can use another transport.
+  See [What it does](#what-it-does) for desk-answer routing.
   A timeout or an unreadable answer saves the possible transport and chat in `maybe`, with the attempt time.
   The outbox retries the item or reports a final error through its existing dead-letter path.
 - **A retry after an unsure send.** BlueBubbles searches the original chat for the text.
@@ -315,8 +333,8 @@ The bridge uses these routing rules with one or both transports:
   A saved transport that is no longer configured is ignored.
 - **Where a fallback text arrives.** A fallback send goes into the owner's latest conversation on that transport. Before he texts the BlueBubbles line, it goes to a new chat with his number from the line's Apple Account. Photon can only answer in a conversation that he started.
 - **Replies, typing, and tapbacks.** See [Commands](#commands) for reply behavior.
-  A read-only failure can use a fallback because no send has happened yet.
-  Typing bubbles and tapbacks target the latest text across transports, including after a restart.
+  A command's read-only failure can use a fallback because no send has happened yet.
+  Typing bubbles and command tapbacks target the latest text across transports, including after a restart.
   See [What it does](#what-it-does) for direct desk answers.
   A typing error never fails a send.
   A tapback and typing are best effort and never block the outbox.
@@ -344,6 +362,8 @@ The bridge uses these routing rules with one or both transports:
 - **Private API.** Each health check reads the relay's `private_api` flag.
   When it is off, the bridge sends no typing or tapback request to that relay and sends replies there as plain messages.
   Typing and tapbacks use the next healthy relay with the Private API on, or send no request if none supports them.
+  An unsupported tapback reports failure; see [delivery recovery](#what-it-does).
+  Unsupported typing remains silent.
   The bridge logs one line per relay when it first finds the Private API off or when the flag changes.
 - **Sends.** Text sends and read receipts go to the first healthy relay, then to the next one if it fails.
   Typing and tapbacks follow the Private API rule above.
@@ -353,7 +373,7 @@ The bridge uses these routing rules with one or both transports:
   Older history on a relay does not count; tapbacks and other chats do not count.
   A later bubble on any relay permits threading, even when the first relay has old history.
   Thread support follows the Private API rule above.
-  A failed history read can use the transport fallback if no relay proves separation.
+  A failed history read follows the [transport fallback rules](#choose-the-transports) if no relay proves separation.
 - **No double sends.** Each outbox item keeps a client GUID, and each bubble sends with its own one (BlueBubbles `tempGuid`). If a relay may have sent a text but did not answer (a timeout, a server error, or an answer that cannot be read), the bridge asks the relays whether the text is in the chat before it sends that bubble again, on any relay or transport (see above). It looks for the same text from the line in the last minute or so. The relay that may have sent is asked first, even when its health check says it is down. Known limits: when that relay cannot answer, another relay can still send the text a second time; a text that reaches the other Macs through iCloud late can be sent twice; a text identical to one sent in the same minute counts as sent; and a text that may be out on Photon cannot be checked, so Photon sends it again (at least once).
 - **Inbound.** Every relay posts its webhook.
   A webhook carries only the message GUID that the bridge acts on.

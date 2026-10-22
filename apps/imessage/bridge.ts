@@ -29,7 +29,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause } from "./desk.ts";
+import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -145,11 +145,12 @@ type Ref = { line?: string; space: string; id: string };
 // One outbox item for his text `id`: a tapback, or bubbles (`done` of them sent so far), the first one threaded to
 // his text `reply` when set. A photo, when `image` is set, is bubble 0 and the text bubbles follow it. `kind` is whose
 // memory line it makes (Firstmate's unless "desk"); `silent` makes none.
-// `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
-// where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
+// `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued.
+// `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
+// `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
-type Received = { requestId: string; text: string; ref: Ref; memoryId: number; firstmate: boolean };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
@@ -168,7 +169,7 @@ type Line = {
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
-  react(ref: Ref, emoji: string): Promise<unknown>;
+  react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
   home?: string;
@@ -199,7 +200,7 @@ async function startLine(name: string): Promise<Line> {
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
-      react: (ref, emoji) => bb.react(ref.space, ref.id, emoji),
+      react: (ref, emoji, beforeSend) => bb.react(ref.space, ref.id, emoji, beforeSend),
       home: `iMessage;-;${OWNER}`,
     };
   }
@@ -263,7 +264,13 @@ async function startLine(name: string): Promise<Line> {
       await chat.send(edit(content, target as never));
       return target.miniAppCardSession;
     },
-    react: async (ref, emoji) => (await find(ref)).react(emoji),
+    react: async (ref, emoji, beforeSend) => {
+      const message = await find(ref).catch((e: unknown) => {
+        throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
+      });
+      beforeSend();
+      return message.react(emoji);
+    },
   };
 }
 const startups = TRANSPORTS.map((name) => {
@@ -297,7 +304,7 @@ const refOn = (name: string, space: string, id: string): Ref => (name === "photo
 // Each transport's latest text, kept so a restart can still reach him: space, id and time, one per line.
 // Photon keeps the file name it always had. A file without the time (the older format) counts as the oldest.
 const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATEST_FILE}-${name}`);
-let latest: LineMessage | undefined; // his latest text on any transport: typing and tapbacks go there
+let latest: LineMessage | undefined; // his latest text on any transport: typing and command tapbacks go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
@@ -484,16 +491,7 @@ function put(item: Out) {
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
-  if (o.react) {
-    // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
-    if (o.at === undefined) save((o = { ...o, at: Date.now() }));
-    if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
-    const line = lineOf(o);
-    if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
-    await line.react(o, o.react);
-    remember(kind, `tapback ${o.react} on his last text`);
-    return;
-  }
+  if (o.react) return deliverReaction(o, save);
   if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   for (let i = o.done ?? 0; i < parts.length; i++) {
@@ -508,6 +506,21 @@ async function deliver(o: Out, save: (o: Out) => void) {
   }
   if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
   if (o.image) rmSync(o.image.path, { force: true });
+}
+
+async function deliverReaction(o: Out, save: (o: Out) => void) {
+  // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
+  if (o.at === undefined) save((o = { ...o, at: Date.now() }));
+  if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
+  const line = lineOf(o);
+  if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
+  try {
+    await line.react(o, o.react!, () => save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } }));
+  } catch (e) {
+    if (notSent(e)) save(o);
+    throw e;
+  }
+  remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
 // Sends a card's bubble. A link card is its page's URL as a plain text, which iMessage shows as a link preview from
@@ -549,6 +562,7 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
   const maybe: Record<string, string> = {};
   for (const [name, space] of Object.entries(o.maybe ?? {})) {
+    if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
     const line = lines.find((l) => l.name === name);
     if (!line) {
       if (TRANSPORTS.includes(name)) maybe[name] = space;
@@ -568,14 +582,15 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
   }
 }
 
-// The transports to try for bubble `i`, in order. Plain sends stay on their queued chat's transport, including
-// --no-thread replies and desk responses. An uncertain attempt (`retry`) may use any transport: `routes` keeps it in
-// its original chat, even when a newer inbound text changes line.latest. A photo whose chat's transport cannot send
-// it goes to any transport that can.
+// Desk responses stay on their queued chat's transport, even during retries.
+// Other plain sends, including --no-thread replies, stay there unless retrying an uncertain attempt.
+// `routes` preserves each uncertain attempt's chat even when a newer inbound text changes line.latest.
+// A photo can use another transport when its queued transport cannot send images.
 function candidates(o: Out, i: number, retry: boolean): Line[] {
   const photo = o.image !== undefined && i === 0;
   const pool = photo ? lines.filter((line) => line.sendImage) : lines;
   const queued = lineOf(o);
+  if (o.kind === "desk") return queued ? [queued] : [];
   const preferred = (!o.reply || i === 0) && queued && pool.includes(queued) ? queued : undefined;
   if (retry || (photo && !preferred)) return pool;
   if (!o.reply) return preferred ? [preferred] : [];
@@ -587,7 +602,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
   const only = Object.keys(maybe);
   return candidates(o, i, only.length > 0).flatMap((line) => {
     const own = line === lineOf(o);
-    const space = maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
+    const space = o.kind === "desk" ? o.space : maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (bubble: Bubble) => {
@@ -634,19 +649,23 @@ async function runDesk(current: () => boolean) {
   const pending = pendingRoutes();
   if (!pending.length) return;
   if (pending.some((r) => r.firstmate) || !DESK_VETTED) return handoffPending();
-  const at = pending.at(-1)!.ref;
-  const target = latest;
-  typing(target?.space, true);
-  const answer = await draftBasic(pending, current);
-  typing(target?.space, false);
+  const typingTarget = latest;
+  typing(typingTarget?.space, true);
+  const result = await draftBasic(pending, current);
+  typing(typingTarget?.space, false);
   if (stopping || !current()) return;
-  if (answer === undefined) handoffPending();
+  if (result === undefined) handoffPending();
   else {
-    recordRoute({ ids: pending.map((r) => r.requestId), route: typeof answer === "string" ? "desk" : "handoff",
-      out: { ...at, requestId: pending.at(-1)!.requestId, ...(typeof answer === "string" ? { requests: pending.map((r) => r.requestId), bubbles: [answer] } : answer), kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+    const { answer, target, complete } = result;
+    const ids = pending.map((r) => r.requestId);
+    recordRoute({ ids, route: complete ? "desk" : "handoff",
+      out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
+        ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id } : { react: answer.react }),
+        kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
     flushRoutes();
   }
-  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${answer === undefined ? "handoff" : typeof answer === "string" ? "basic" : `react ${answer.react}`}\n`, { mode: 0o600 });
+  const at = result?.target.ref ?? pending.at(-1)!.ref;
+  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
 }
 
 async function draftBasic(pending: Routing[], current: () => boolean) {
@@ -654,7 +673,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (!result || stopping || !current()) return;
   const { status, statusOk } = result;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
-  const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
+  const latestText = pending.map((r, i) => `owner ${i + 1}: ${r.text}`).join("\n");
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER);
   if (!statusOk || !prompt.includes(latestText)) return;
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
@@ -663,7 +682,12 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
-  return basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
+  const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
+  if (!answer) return;
+  const target = pending[(answer.target ?? pending.length) - 1];
+  if (!target) return;
+  const complete = "answer" in answer || socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1]);
+  return { answer, target, complete };
 }
 
 function applyRoute(event: RouteEvent) {
@@ -778,7 +802,8 @@ async function handle(line: Line, message: LineMessage) {
   console.log(`fm-imessage: inbound ${line.name} ${message.content.type} -> ${text === undefined ? "ignored" : "note"}`);
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
-  receive(`${line.name}-${message.id}`, text, ref, !plainText(message.content) || !directChat.test(ref.space));
+  const authored = authoredText(message.content);
+  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored);
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);
@@ -803,11 +828,11 @@ async function handle(line: Line, message: LineMessage) {
 }
 
 // Persist the full input before marking it read or seen. A duplicate never opens another routing decision.
-function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) {
+function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text) {
   if (routing.has(requestId)) return;
   // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
-  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
-  const received = { requestId, text, ref, memoryId: memory.msgs.length, firstmate };
+  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
+  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate };
   prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);
@@ -816,11 +841,14 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) 
   desk.inboundText();
 }
 
-function plainText(content: LineMessage["content"]): boolean {
-  if (content.type === "text" || content.type === "markdown") return true;
-  if (content.type === "reply" || content.type === "effect") return plainText(content.content);
-  if (content.type === "group") return content.items.every((m) => plainText(m.content));
-  return false;
+function authoredText(content: LineMessage["content"]): string | undefined {
+  if (content.type === "text") return content.text;
+  if (content.type === "markdown") return content.markdown;
+  if (content.type === "reply" || content.type === "effect") return authoredText(content.content);
+  if (content.type === "group") {
+    const parts = content.items.map((m) => authoredText(m.content));
+    return parts.every((part) => part !== undefined) ? parts.join("\n") : undefined;
+  }
 }
 
 function heard(id: string, text: string) {
