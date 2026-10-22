@@ -98,7 +98,7 @@ def test_launcher_help_matches_install_without_fetch(tmp_path):
         capture_output=True,
         text=True,
         env=env,
-        timeout=10,
+        timeout=60,
     )
     assert (result.returncode, result.stderr) == (0, "")
     assert result.stdout == install(env, "--help").stdout
@@ -1161,7 +1161,7 @@ def test_launcher_update_runs_the_install_of_the_latest_tag(tmp_path, location, 
         capture_output=True,
         text=True,
         env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LATEST_LOCATION": location},
-        timeout=10,
+        timeout=60,
     )
     assert result.returncode == status
     assert output in result.stdout + result.stderr

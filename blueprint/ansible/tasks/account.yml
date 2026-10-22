@@ -1,10 +1,9 @@
 ---
 # Target account, home layout and (optionally) the user manager.
 #
-# Conservative by design: an account that already exists is never re-homed,
-# re-shelled, re-grouped or given new privileges. Modes of pre-existing
-# standard directories are left alone - `mode` is only set where this playbook
-# owns the directory outright.
+# An existing account keeps its home, shell and primary group.
+# Modes of pre-existing standard directories are left alone - `mode` is only
+# set where this playbook owns the directory outright.
 
 - name: Reject unsafe home paths before privileged account operations
   ansible.builtin.command:
@@ -153,6 +152,9 @@
       - python3
       - "{{ crewship_path_checker }}"
       - "{{ crewship_home_layout_paths | to_json }}"
+      - --owned-by
+      - "{{ crewship_cfg.user }}"
+      - "{{ crewship_group }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   register: crewship_home_layout_stat
@@ -170,7 +172,9 @@
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_env }}"
   check_mode: "{{ ansible_check_mode and item in (crewship_home_layout_stat.stdout | from_json).existing }}"
-  loop: "{{ crewship_home_layout_paths }}"
+  loop: >-
+    {{ crewship_home_layout_paths
+       | reject('in', (crewship_home_layout_stat.stdout | from_json).owned_directories) | list }}
   when: crewship_account_ready | bool
 
 - name: Require a mounted data filesystem before creating bulk directories
