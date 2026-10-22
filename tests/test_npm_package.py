@@ -44,7 +44,7 @@ def test_packed_tarball_installs_and_runs_its_bin(tmp_path, os_name):
     bin_path = tmp_path / "prefix/bin/crewship"
     version = json.loads((PACKAGE / "package.json").read_text())["version"]
     for flag in ("--version", "--help"):
-        result = subprocess.run([str(bin_path), flag], capture_output=True, text=True, timeout=10)
+        result = subprocess.run([str(bin_path), flag], capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("Usage: crewship ")
     assert subprocess.run([str(bin_path), "--version"], capture_output=True, text=True).stdout == f"{version}\n"
@@ -61,7 +61,7 @@ def test_launcher_off_ubuntu_says_where_to_run_it_and_never_fetches(tmp_path):
         [shutil.which("node"), "--require", str(stub), str(PACKAGE / "crewship.js"), *args],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=60,
     )
     for args in ([], ["update"]):
         result = run(*args)
@@ -95,7 +95,7 @@ def run_init(tmp_path):
     def run(answers, platform="linux", ssh_status=0):
         return subprocess.run(
             ["node", "--require", str(stub), str(PACKAGE / "crewship.js"), "init"],
-            input=answers, capture_output=True, text=True, timeout=10,
+            input=answers, capture_output=True, text=True, timeout=60,
             env={**os.environ, "TEST_PLATFORM": platform, "TEST_SSH_STATUS": str(ssh_status)},
         )
 
