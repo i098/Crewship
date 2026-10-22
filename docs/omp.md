@@ -9,16 +9,15 @@ With the `agents` profile on, `./ship.sh launch`:
 1. Installs the latest published omp and its plugins.
    See [Dependencies](dependencies.md#latest-releases) for sources and update behavior.
 2. Copies [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) to `~/.omp/agent/config.yml` (directory `0700`, file `0600`), and [`blueprint/config/omp-lsp.json`](../blueprint/config/omp-lsp.json) to `~/.omp/agent/lsp.json`, which disables the markdown language server (marksman): it costs each session about 90 MB, and markdown diagnostics add nothing to agent work.
-   Every apply also merges [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) into `~/.omp/agent/models.yml`, preserving user providers and unshipped model keys.
-   Shipped Codex override keys take precedence over existing values.
-   Inception is seeded only when no model file exists; existing files keep missing fields and removed providers unchanged.
-   It reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
+   Each apply merges model settings into `~/.omp/agent/models.yml`.
+   See [Omp model defaults](configuration.md#omp-model-defaults) for the model list, Inception credentials, and the apply merge policy.
+   The model merge reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
    The installed Bun parser preserves YAML 1.2 scalar types and reads legacy JSONC comments and trailing commas.
    When an existing model file needs parsing, missing Bun makes check mode report the installation prerequisite and skip the dependent merge.
    Normal apply fails if that parser is unavailable.
    When the merge changes the configuration or creates `models.yml`, it writes JSON, a YAML 1.2 subset, to preserve scalar types.
    It leaves the other source files unchanged.
-   See [Default config](default-config.md) for the Codex context windows.
+   See [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) for the Codex context windows.
    omp limits the effective window to the provider's supported input window.
    The config seed enables `extendedContext: true`; existing hosts must enable it in their own config.
 3. Installs the extension `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`, which feeds the Herdr Agent sidebar the session topic, the pane's short name, and the pull request line (pull request, issue and diff size). Every apply rewrites it. See [Herdr sidebar](herdr.md).
@@ -33,7 +32,6 @@ With the `agents` profile on, `./ship.sh launch`:
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
-Model overrides follow the merge policy above.
 See [Updating an existing host](#updating-an-existing-host).
 
 No credentials are installed. You sign in on each host.

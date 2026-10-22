@@ -11,7 +11,7 @@ providers:
         contextWindow: 1000000
         maxTokens: 131072
   openai-codex:
-    # See docs/default-config.md for context windows and the effective limit.
+    # See docs/omp.md for the effective context-window limit.
     modelOverrides:
       gpt-6-astra:
         contextWindow: 272000

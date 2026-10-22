@@ -294,10 +294,10 @@ See [Project databases](project-databases.md) for existing-host management and s
 
 ### Omp model defaults
 
-New `agents` hosts limit `enabledModels` to Claude Opus 5.5, Fable 5.1, Haiku 5.5, Sonnet 5.5, GPT Sol 6.1, Astra 6, Luna 6, and Mercury 3.
-The GPT models support both the `openai` and `openai-codex` providers.
+New `agents` hosts receive the restricted `enabledModels` list from the [shipped omp configuration](../blueprint/config/omp.yml).
+The list includes Anthropic models, GPT models through `openai` and `openai-codex`, and Mercury 3 through Inception.
 Edit `enabledModels` in `~/.omp/agent/config.yml` to change this list, or remove the key to use omp's full model list.
-This file is first-write-only; apply preserves existing host choices.
+Apply preserves existing model choices in this file; see [omp configuration](omp.md#what-the-recipe-sets-up) for the status-line exceptions.
 
 The Inception provider uses `https://api.inceptionlabs.ai/v1` and reads `INCEPTION_API_KEY` from the omp process environment.
 Set that variable before starting omp; Crewship never installs its value.
