@@ -292,6 +292,21 @@ The latest Herdr release is always installed, with the captured UI preferences, 
 
 See [Project databases](project-databases.md) for existing-host management and safe removal.
 
+### Spawned Opus effort cap
+
+The `agents` profile caps Opus 5.5 at `high` effort in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
+Other models and lower effort levels remain unchanged.
+The extension requires both `FM_OMP_HARNESS=omp` and `OMP_SKIP_SETUP=1`, so primary sessions remain unchanged.
+It caps the provider payload after `auto` resolves; the status line can still show the requested level.
+The gate wrapper caps explicit `xhigh`, `max`, and `auto` requests, including model suffixes, and selects `high` when effort is absent.
+The `acp:omp` fallback does not use the wrapper.
+
+Set `FM_OPUS_EFFORT_UNCAPPED=1` in the spawned omp process environment to disable the cap for that process.
+For no-mistakes gates, set this variable in the daemon environment before starting the daemon.
+A shell export does not change an existing daemon or tmux pane.
+Wait until no pipeline runs remain before restarting the daemon.
+Crewship installs both guards on every apply; it does not restart the daemon.
+
 ## Data disk
 
 Set `data_dir` to an existing absolute path on a mounted data disk.
