@@ -108,6 +108,8 @@ const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every 
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
 const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
+// Mute: while $STATE/muted exists, nothing outgoing is queued (Firstmate, the desk, every service); inbound texts still arrive.
+const muted = () => existsSync(`${STATE}/muted`);
 const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
 const IG_MISSING = ["INSTAGRAM_GRAPH_APP_SECRET", "INSTAGRAM_GRAPH_VERIFY_TOKEN"].filter((name) => !env[name]);
 if (env.INSTAGRAM_DM_BACKEND === "graph" && IG_MISSING.length) console.error(`fm-imessage: the Instagram webhook is off: set ${IG_MISSING.join(" and ")}`);
@@ -398,8 +400,8 @@ Bun.serve({
       }
     }
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
+    if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
-    if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
     recordRoute({ deskCancelled: true });
     desk.firstmateActive();
@@ -503,6 +505,8 @@ function stage(photo: PreparedImage): Picture {
 // Puts one item in the outbox with a client GUID of its own.
 function put(item: Out) {
   if (stopping) return;
+  // Mute: while $STATE/muted exists, nothing outgoing is queued (Firstmate, the desk, every service); inbound texts still arrive.
+  if (muted()) return;
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
@@ -877,7 +881,7 @@ function flushRoutes() {
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
       } else if (item.route !== "desk") continue;
-      if (item.out) outbox.add(item.out);
+      if (item.out && !muted()) outbox.add(item.out);
       recordRoute({ ids: [item.requestId], route: "done" });
     } catch (e) {
       log("route delivery")(e);

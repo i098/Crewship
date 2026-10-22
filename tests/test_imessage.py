@@ -2169,6 +2169,38 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     logs = text(err)
     assert "UNAVAILABLE" in logs and not re.search(r"^\s+at ", logs, re.M), logs
 
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path):
+    """While $STATE/muted exists, nothing outgoing is queued; unmuting resumes; inbound texts still arrive."""
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    (fake / "desk-on").touch()
+    bridge = start(1)
+    try:
+        outbox = lambda: list((state / "outbox").glob("*.json"))
+        sent = lambda: text(fake / "sent").splitlines()
+        # Warm up: his first text establishes a chat, and the desk answers while unmuted.
+        inbound("m1", wait_note=False, text="you there")
+        wait_for(lambda: sent() == ["send claude-haiku-5-5"], "the desk reply while unmuted")
+        wait_for(lambda: outbox() == [], "the warmup item dequeued")
+        assert outbox() == []
+        # Mute: nothing outgoing is queued, for a Firstmate send, a reaction, and a desk answer.
+        (state / "muted").touch()
+        assert "nothing queued: muted" in cli("hello from firstmate", fails=True)
+        assert "nothing queued: muted" in cli("--react", "👍", fails=True)
+        inbound("m2", wait_note=False, text="What desk model answers?")
+        wait_for(lambda: "m2 basic" in text(state / "desk.log"), "the muted desk turn ran")
+        assert outbox() == [] and sent() == ["send claude-haiku-5-5"]
+        # Inbound is still recorded while muted: the owner text reaches desk memory.
+        source = [json.loads(line) for path in (state / "memory/main").glob("*.jsonl") for line in path.read_text().splitlines()]
+        assert any(record["text"] == "What desk model answers?" for record in source)
+        # Unmute: sends are queued again.
+        (state / "muted").unlink()
+        cli("after unmute")
+        wait_for(lambda: sent() == ["send claude-haiku-5-5", "send after unmute"], "the send after unmute")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_bridge_files_his_edits_as_new_notes(tmp_path):

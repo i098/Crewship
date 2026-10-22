@@ -546,6 +546,19 @@ Plain Photon sends still use the public SDK.
 Explicit threaded replies can use a configured fallback because the bridge cannot check the latest bubble.
 
 `fm-imessage` exits 0 only when the message is on disk in the outbox, and prints that it is queued. It exits non-zero when it queues nothing. An unknown option queues nothing and exits with code 2.
+## Mute
+
+To mute all outgoing messages, create `~/.local/state/fm-imessage/muted`.
+While that file exists, the bridge queues no outgoing item.
+Firstmate sends, desk answers, cards, photos, voice memos, and tapbacks all stay out.
+Inbound texts still arrive, and their notes still reach Firstmate.
+While the file exists, `fm-imessage` queues nothing and exits non-zero with `nothing queued: muted`.
+Remove the file to resume sending.
+
+```bash
+touch ~/.local/state/fm-imessage/muted
+rm ~/.local/state/fm-imessage/muted
+```
 
 ## Send a photo
 
