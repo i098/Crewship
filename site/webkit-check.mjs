@@ -32,6 +32,12 @@ await page.addInitScript(() => {
     window.longest = Math.max(window.longest, text.length);
     return fillText.call(this, text, ...rest);
   };
+  const start = AudioBufferSourceNode.prototype.start;
+  window.startedLoops = 0;
+  AudioBufferSourceNode.prototype.start = function (...args) {
+    start.apply(this, args);
+    window.startedLoops++;
+  };
 });
 await page.context().route("**/*", async (route) => {
   const url = new URL(route.request().url());
@@ -39,7 +45,8 @@ await page.context().route("**/*", async (route) => {
     await route.fulfill({ body: "<title>Link destination</title>", contentType: "text/html" });
     return;
   }
-  const path = url.pathname === "/how" ? "how.html" : url.pathname.slice(1) || "index.html";
+  let path = url.pathname.slice(1) || "index.html";
+  if (path === "how" || path === "about") path += ".html";
   const type = { html: "text/html", js: "text/javascript", css: "text/css" }[path.split(".").pop()];
   if (path === "harbor.js") {
     const source = await readFile(new URL(path, dist), "utf8");
@@ -88,6 +95,7 @@ let signCheckWidth = Infinity;
 const fitSign = signFit;
 signFit = (at, i0, j0, i1, j1, mode, ...options) => fitSign(at, i0, j0, Math.min(i1, i0 + signCheckWidth), j1, mode, ...options);
 window.harborCheck = {
+  soundReady() { return window.startedLoops === LOOPS.length; },
   place(x, z, yaw) { Object.assign(me, {x, z, yaw, pitch: 0}); moved = dirty = true; },
   state() { return {inside: interior === HOUSE, below: interior === GUN_DECK, x: me.x, z: me.z, yaw: me.yaw, clear: !blocked(me.x, me.z, floorAt(me.x, me.z))}; },
   ids: ORDER,
@@ -151,7 +159,7 @@ window.harborCheck = {
       links: signLinks.map(({start, height, left = 1, width = signBox.w - 2, a}) => ({
         x: padX + (signBox.i + left + width / 2) * cellW,
         y: padY + (signBox.j + 1 + start + height / 2) * cellH,
-        href: a.href, height: height * cellH,
+        href: a.href, target: a.target, height: height * cellH,
         hit: signHit(padX + (signBox.i + left + width / 2) * cellW,
           padY + (signBox.j + 1 + start + height / 2) * cellH)?.href,
         top: padY + (signBox.j + 1 + start) * cellH,
@@ -182,6 +190,33 @@ if (name === "desktop") {
   const missing = await probe.goto("http://harbor.test/missing");
   assert.equal(missing.status(), 404);
   await probe.close();
+}
+async function clickLink(link, offset = 0) {
+  if (await page.locator("#sound").getAttribute("aria-pressed") !== "true") {
+    await page.locator("#sound").click();
+  }
+  await page.waitForFunction(() => window.harborCheck.soundReady());
+  const popup = link.target === "_blank";
+  const navigation = popup ? page.waitForEvent("popup") : page.waitForNavigation();
+  if (touch) await page.touchscreen.tap(link.x, link.y + offset);
+  else await page.mouse.click(link.x, link.y + offset);
+  const result = await navigation;
+  const opened = popup ? result : page;
+  await opened.waitForLoadState();
+  assert.equal(opened.url(), link.href, `${name}: grid click opened the wrong link`);
+  if (new URL(link.href).pathname === "/how") {
+    assert.equal(await opened.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
+  }
+  if (popup) {
+    await opened.close();
+  } else {
+    assert.equal(result.status(), 200, `${name}: same-tab destination did not load`);
+    await page.getByRole("heading", { name: "About Crewship", exact: true }).waitFor();
+    await page.goBack();
+    await page.waitForFunction(() => !document.getElementById("explore").disabled);
+    if (await page.locator("#menu").evaluate((dialog) => dialog.open)) await page.click("#explore");
+    await page.waitForFunction(() => window.frames?.length > 0);
+  }
 }
 await page.goto("http://harbor.test/");
 await page.waitForFunction(() => !document.getElementById("explore").disabled);
@@ -330,14 +365,11 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
     assert(!overlaps(bounds, bounds.map), `${name}/${id}: sign covers the map`);
     assert(!overlaps(bounds, bounds.pad), `${name}/${id}: sign covers the move pad`);
   }
-  // A sign has its title link; the docs board also lists a link per unmapped doc in its body.
-  const docLinks = id ? await page.evaluate((id) => document.querySelectorAll(`#manifest li[data-spot="${id}"] a`).length, id) : 3;
-  assert.equal(bounds.links.length, docLinks, `${id}: a sign link is missing`);
+  const expectedLinks = await page.evaluate((id) =>
+    [...document.querySelectorAll(id ? `#manifest li[data-spot="${id}"] a` : ".top nav a")]
+      .map((link) => link.href).sort(), id);
+  assert.deepEqual(bounds.links.map((link) => link.href).sort(), expectedLinks, `${id}: sign destinations differ from the page`);
   if (touch) assert(Math.abs(bounds.dpr - bounds.ratio) < 0.01, `${name}/${id}: the touch canvas must draw at the display pixel ratio, not be rescaled`);
-  if (name === "iphone15pro" && !id) {
-    // Title, description, one blank row, one link row, and two frame rows.
-    assert(bounds.height <= 6 * bounds.cellH, `${name}: welcome sign has excess vertical spacing`);
-  }
   for (const link of bounds.links) {
     assert.equal(link.hit, link.href, `${name}/${id}: link is not hit-testable`);
     assert(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.getElementById("scene"),
@@ -352,16 +384,8 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
       if (!bounds.box.overlay) assert(!overlaps(hitBox, bounds.map), `${name}/${id}: link hit padding covers the map`);
     } else assert(link.top >= bounds.y && link.bottom <= bounds.y + bounds.height, `${id}: link region extends outside the frame`);
     assert(link.left >= bounds.x && link.right <= bounds.x + bounds.width, `${id}: link region extends outside the frame`);
-    const popup = page.waitForEvent("popup");
-    if (touch) await page.touchscreen.tap(link.x, link.y);
-    else await page.mouse.click(link.x, link.y);
-    const opened = await popup;
-    await opened.waitForLoadState();
-    assert.equal(opened.url(), link.href, `${id}: grid tap opened the wrong link`);
-    if (new URL(link.href).pathname === "/how") {
-      assert.equal(await opened.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
-    }
-    await opened.close();
+    await clickLink(link);
+    if (link.target !== "_blank") await page.evaluate((id) => window.harborCheck.go(id), id);
   }
   for (let n = 0; n < bounds.links.length; n++) {
     const focus = await page.evaluate(({ n, id }) =>
@@ -384,12 +408,8 @@ if (name === "iphone15pro") {
     for (const offset of [-6, 6]) {
       assert(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.getElementById("scene"),
         { x: link.x, y: link.y + offset }), "stacked tap point is covered by an HTML control");
-      const popup = page.waitForEvent("popup");
-      await page.touchscreen.tap(link.x, link.y + offset);
-      const opened = await popup;
-      await opened.waitForLoadState();
-      assert.equal(opened.url(), link.href, "off-center stacked tap opened the wrong link");
-      await opened.close();
+      await clickLink(link, offset);
+      if (link.target !== "_blank") await page.evaluate(() => window.harborCheck.stack());
     }
   }
   await page.evaluate(() => window.harborCheck.go(null));

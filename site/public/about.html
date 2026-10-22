@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>About Crewship: a cloud host for coding agents</title>
+<meta name="description" content="Crewship sets up a cloud server for parallel coding agents with Firstmate, omp, Herdr, and optional tools. Read the requirements and setup guides.">
+<link rel="canonical" href="https://crewship.si/about">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="harbor.css">
+</head>
+<body class="how about">
+<header class="top">
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a></nav>
+  <h1>About Crewship</h1>
+</header>
+<main>
+<section class="post">
+  <h2>What Crewship is</h2>
+  <p>Crewship is a repeatable cloud-server setup for running coding agents in parallel.</p>
+  <p>It brings Firstmate, omp, Herdr, and an Ansible playbook together on your server.</p>
+</section>
+<section class="post">
+  <h2>Who it serves</h2>
+  <p>Crewship serves developers who want many coding agents on their own server, with one supervisor and shared tools.</p>
+</section>
+<section class="post">
+  <h2>How the parts work together</h2>
+  <ul>
+    <li><b>Ansible</b> provisions the host.</li>
+    <li><b>Firstmate</b> supervises coding agents and hands work to second mates, who lead workers.</li>
+    <li><b>omp</b> runs the agents. Each worker uses its own isolated copy of the repository.</li>
+    <li><b>Herdr</b> shows workspaces, agents, state, and load in its sidebar.</li>
+  </ul>
+</section>
+<section class="post">
+  <h2>What is included</h2>
+  <p>The installer offers a feature checklist and installs omp agents and Firstmate.</p>
+  <ul>
+    <li><b>Supervision and workspaces:</b> Firstmate coordinates agents, and the Herdr sidebar shows their work.</li>
+    <li><b>Guards (optional):</b> block <code>pkill</code>, gate quality, and clean up stray containers and development servers.</li>
+    <li><b>Credentials:</b> use one <code>super.env</code> file. An external private Worker can supply it to new hosts.</li>
+    <li><b>Web gateway (optional):</b> one password opens agent pages and previews.</li>
+    <li><b>Message board (optional):</b> agents on one host communicate through in-memory topics.</li>
+    <li><b>Browser ladder (optional):</b> start with a light browser; use full Chrome or noVNC when needed.</li>
+    <li><b>Chat clients (optional):</b> use Discord, Slack, and iMessage from the terminal.</li>
+    <li><b>Mac control (optional):</b> agents control apps on your Mac over SSH.</li>
+  </ul>
+  <p>See the <a href="https://github.com/i098/Crewship#features">README feature list</a> for the linked guides and supporting tools.</p>
+</section>
+<section class="post">
+  <h2>What you need</h2>
+  <ul>
+    <li>A fresh Ubuntu 24.04 or 26.04 server with systemd.</li>
+    <li>At least 4 vCPUs and 16 GB of RAM.</li>
+    <li>SSH access with a non-root account that has sudo.</li>
+    <li>Sign-ins for GitHub and the model providers you use.</li>
+  </ul>
+</section>
+<section class="post">
+  <h2>How to start</h2>
+  <p>Follow the <a href="https://github.com/i098/Crewship#quick-start">README quick start</a> for the current install command.</p>
+  <p>Use the <a href="https://github.com/i098/Crewship/blob/main/SETUP.md">SETUP guide</a> for the setup flow and manual sign-in steps.</p>
+  <p>The setup command checks or resumes setup. To update, run the install command again.</p>
+</section>
+<section class="post">
+  <h2>Control, safety, and limits</h2>
+  <p>The agents run on your server and use model providers and GitHub. Web access, chat, and Mac control are optional.</p>
+  <p>Review and check agent changes before use. Keep credentials private and enable only the remote access you need.</p>
+  <p>Read the <a href="https://github.com/i098/Crewship/blob/main/docs/security.md">security guide</a> and <a href="https://github.com/i098/Crewship/blob/main/docs/architecture.md">architecture guide</a> before you configure access.</p>
+</section>
+<section class="post">
+  <h2>Short factual answers</h2>
+  <h3>Where does it run?</h3>
+  <p>On your server. You reach Firstmate from a phone or laptop through a terminal over SSH or optional iMessage.</p>
+  <h3>Which server systems are supported?</h3>
+  <p>The README lists Ubuntu 24.04 and 26.04 with systemd.</p>
+  <h3>Do I need every optional tool?</h3>
+  <p>No. The installer offers a feature checklist. The gateway, board, browser ladder, chat clients, and Mac control are optional.</p>
+  <h3>Do I need provider accounts?</h3>
+  <p>The workers use model providers and GitHub. Follow the SETUP guide for the required sign-ins.</p>
+</section>
+</main>
+<footer class="foot"><p><a href="/">Return to Harbor</a> · <a href="https://github.com/i098/Crewship">Read the README</a></p></footer>
+</body>
+</html>

@@ -183,6 +183,8 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                 ("/", "index.html"),
                 ("/how", "how.html"),
                 ("/how?preview=1", "how.html"),
+                ("/about", "about.html"),
+                ("/about?preview=1", "about.html"),
                 ("/harbor.css", "harbor.css"),
                 ("/harbor.js", "harbor.js"),
                 ("/robots.txt", "robots.txt"),
@@ -201,24 +203,26 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                     assert [
                         url.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
                         for url in sitemap
-                    ] == ["https://crewship.si/", "https://crewship.si/how"]
+                    ] == [
+                        "https://crewship.si/",
+                        "https://crewship.si/how",
+                        "https://crewship.si/about",
+                    ]
                 if filename == "robots.txt":
                     robots = RobotFileParser()
                     robots.parse(body.decode().splitlines())
                     assert robots.site_maps() == ["https://crewship.si/sitemap.xml"]
                     for agent in ("Googlebot", "OAI-SearchBot", "GPTBot"):
-                        for route in ("/", "/how"):
+                        for route in ("/", "/how", "/about"):
                             assert robots.can_fetch(agent, route) == (agent != "GPTBot")
                 if filename.endswith(".html"):
                     assert response.getheader("Content-Type").startswith("text/html")
                     head = Head()
                     head.feed(body.decode())
-                    assert head.links["canonical"] == (
-                        "https://crewship.si/" if path == "/" else "https://crewship.si/how"
-                    )
+                    assert head.links["canonical"] == "https://crewship.si" + urlparse(path).path
             for method, path, status in [
                 ("HEAD", "/how?preview=1", 200),
-                ("GET", "/about", 404),
+                ("HEAD", "/about?preview=1", 200),
                 ("GET", "/missing", 404),
                 ("GET", "/missing.js", 404),
                 ("HEAD", "/missing", 404),

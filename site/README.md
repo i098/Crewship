@@ -2,7 +2,11 @@
 
 `site/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
 
-It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
+The home page keeps its product summary and About link in the HTML and the initial harbor sign.
+The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
+It uses the main README as its factual source and needs no JavaScript.
+
+The harbor is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
@@ -165,7 +169,7 @@ The docs board shows on the mini map like the other points.
 Add an object and a `SCENE` entry to give the link its own place.
 The build limits each sign to a title, a short description and one link.
 Unmapped pages share a short summary with a count and one link to the README feature index.
-The welcome sign has three project links.
+The welcome sign shows the home page's project links, including About.
 Posted signs first place their bottom frame row on the lowest projected support top.
 Paired posts keep a screen-aligned rectangle wide enough to cover both supports; the higher support top passes behind the board.
 Projection uses the same cell centers as the ray-cast scene, not the aimed surface or the object's center.
@@ -195,13 +199,13 @@ python3 site/serve.py
 ```
 
 Then open <http://localhost:8000>.
-The preview serves `/how` without a redirect and returns 404 for unknown routes.
+The preview serves `/how` and `/about` without redirects and returns 404 for unknown routes.
 Pass a port to `site/serve.py` to use a port other than 8000.
 
 ## Link preview
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
-Each page defines its own title, description, and absolute canonical URL in `public/index.html` or `public/how.html`.
+Each page defines its own title, description, and absolute canonical URL in `public/index.html`, `public/how.html`, or `public/about.html`.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
 `og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
@@ -236,11 +240,15 @@ It includes 320×568 phones in both orientations and landscape heights of 256 an
 The geometry fixtures use fixed normal and coarse grids, independent of host rendering speed.
 The Python checks exercise adaptive detail with controlled render costs and painting delays in the exterior, house, cabin, and gun deck.
 It checks measured safe insets, visible signs, link hit regions, and keyboard focus without stage scrolling.
-On iPhone 15 Pro, it limits the welcome sign to six scene rows, including the frame, and checks that the canvas draws at the display pixel ratio.
+On iPhone 15 Pro, it checks that the canvas draws at the display pixel ratio.
 It also taps six pixels above and below each stacked link center to check the separate hit regions.
 It also checks feature-link focus with the full map open and an arrival selection pending.
 It fails if rendering stalls.
-It taps or clicks every link and opens the docs index with the keyboard.
+It taps or clicks every link, checks same-tab and new-tab navigation, and returns to the scene.
+After Back, it waits for page startup and selects Explore when the start menu is open.
+Before link navigation, it starts sound through the speaker button and waits for every audio loop to start.
+This keeps repeated About visits from cancelling the restored scene's audio loads.
+It also opens the docs index with the keyboard.
 See [how.html](public/how.html) for the rendering limits on touch devices.
 
 CI also loads the page in Playwright Chromium in a 3651x2160 window at DPR 2, with `chromium-check.mjs`.
@@ -274,6 +282,6 @@ The site serves on https://crewship.si, a custom domain attached to the Worker o
 
 The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
 The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
-The sitemap lists the canonical home and How URLs without modification dates.
+The sitemap lists the canonical home, How, and About URLs without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.
