@@ -225,7 +225,7 @@ Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple
 Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
 Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
 Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
-Fable is not a spawn choice; see [Default config](default-config.md) for the unchanged automatic fallback chain.
+Fable is not a spawn choice; see [Default config](default-config.md) for the automatic fallback chain.
 Provider credentials are not included in the dispatch file.
 
 Each apply normally updates the seeded Firstmate settings.
