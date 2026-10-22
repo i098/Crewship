@@ -337,6 +337,14 @@
       ansible.builtin.meta: flush_handlers
       tags: [always]
 
+    - name: Open the machine schedule viewer after service restarts
+      ansible.builtin.import_tasks: tasks/herdr_schedules.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when: crewship_account_ready | bool
+      tags: [herdr]
+
     - name: Verify provisioning outputs
       ansible.builtin.import_tasks: tasks/verify.yml
       become: "{{ crewship_become_target | bool }}"

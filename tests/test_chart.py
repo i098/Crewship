@@ -372,3 +372,99 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
             assert (release / binary).read_bytes() == expected
             assert (browsers / binary).is_symlink()
             assert (browsers / binary).resolve() == release / binary
+
+
+@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check"])
+def test_default_schedules_tab_preserves_existing_layout(tmp_path, mode):
+    home = tmp_path / "home with spaces"
+    local_bin = home / ".local/bin"
+    local_bin.mkdir(parents=True)
+    (home / ".local/share/crewship/cli").mkdir(parents=True)
+    state = tmp_path / "herdr.json"
+    initial = {"workspaces": [{"workspace_id": "w9", "label": "other"}], "tabs": [], "runs": []}
+    if mode == "existing":
+        initial["workspaces"].append({"workspace_id": "w1", "label": "machine"})
+        initial["tabs"].append({"tab_id": "w1:t1", "label": "custom"})
+    state.write_text(json.dumps(initial))
+    herdr = tmp_path / "herdr"
+    herdr.write_text(f"""#!{sys.executable}
+import json, os, subprocess, sys
+from pathlib import Path
+p = Path({str(state)!r})
+s = json.loads(p.read_text())
+a = sys.argv[1:]
+if a[:2] == ["workspace", "list"]:
+    result = {{"workspaces": s["workspaces"]}}
+elif a[:2] == ["workspace", "create"]:
+    assert "--no-focus" in a
+    workspace = {{"workspace_id": "w1", "label": a[a.index("--label") + 1]}}
+    s["workspaces"].append(workspace)
+    result = {{"workspace": workspace}}
+elif a[:2] == ["tab", "list"]:
+    assert a[a.index("--workspace") + 1] == "w1"
+    result = {{"tabs": s["tabs"]}}
+elif a[:2] == ["tab", "create"]:
+    assert "--no-focus" in a
+    tab = {{"tab_id": "w1:t2", "label": a[a.index("--label") + 1]}}
+    s["tabs"].append(tab)
+    result = {{"root_pane": {{"pane_id": "w1:p2"}}}}
+elif a[:2] == ["pane", "run"]:
+    assert a[2] == "w1:p2"
+    subprocess.run(a[3], shell=True, check=True)
+    s["runs"].append(a[3])
+    result = {{}}
+else:
+    raise AssertionError(a)
+p.write_text(json.dumps(s))
+print(json.dumps({{"result": result}}))
+""")
+    herdr.chmod(0o755)
+    viewer_call = tmp_path / "viewer.json"
+    bun = local_bin / "bun"
+    bun.write_text(f"#!{sys.executable}\nimport json, sys\n"
+                   f"from pathlib import Path\nPath({str(viewer_call)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+    bun.chmod(0o755)
+    tool_tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/tools.yml").read_text())
+    start = next(i for i, task in enumerate(tool_tasks) if task["name"] == "Ensure the Crewship command directory")
+    end = next(i for i, task in enumerate(tool_tasks) if task["name"] == "Ensure the OpenTUI schedule directory")
+    site = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]
+    # Run the real post-task sequence: the viewer must start after notified restarts.
+    post_tasks = [task for task in site["post_tasks"]
+                  if task.get("ansible.builtin.import_tasks") != "tasks/verify.yml"]
+    for task in post_tasks:
+        if path := task.get("ansible.builtin.import_tasks"):
+            task["ansible.builtin.import_tasks"] = str(ROOT / "blueprint/ansible" / path)
+    playbook = tmp_path / "schedules.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "environment": {"HOME": str(home), "PATH": f"{local_bin}:{os.environ['PATH']}"},
+        "tasks": tool_tasks[start:end],
+        "post_tasks": post_tasks,
+    }]))
+    variables = {
+        "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
+                         "herdr": {"schedules_tab": mode != "disabled"}},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
+        "crewship_share_dir": str(home / ".local/share/crewship"),
+        "crewship_herdr_bin": str(herdr), "crewship_manage_services": mode != "deferred",
+        "crewship_account_ready": True, "crewship_become_target": False,
+        "crewship_user_env": {"HOME": str(home), "PATH": f"{local_bin}:{os.environ['PATH']}"},
+    }
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook), "-e", json.dumps(variables), *(["--check"] if mode == "check" else [])]
+    for _ in range(2):
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(state.read_text())
+    if mode in ("disabled", "deferred", "check"):
+        assert actual == initial
+        assert not viewer_call.exists()
+    else:
+        assert actual["workspaces"] == [
+            {"workspace_id": "w9", "label": "other"}, {"workspace_id": "w1", "label": "machine"},
+        ]
+        assert actual["tabs"] == initial["tabs"] + [{"tab_id": "w1:t2", "label": "schedules"}]
+        assert len(actual["runs"]) == 1
+        assert json.loads(viewer_call.read_text()) == [str(home / ".local/share/crewship/schedules/main.ts")]
+        assert "changed=0" in result.stdout

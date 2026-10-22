@@ -63,11 +63,10 @@ Herdr's sidebar draws text cells only, so the terminal font on the machine that 
 
 ### The machine entry
 
-The whole-machine line goes on a workspace labelled `machine` when one exists. It is an otherwise empty workspace you create once, then move to the top of the workspace list:
-
-```bash
-herdr workspace create --cwd ~ --label machine --no-focus
-```
+With services enabled, `launch` creates the `machine` workspace when absent and opens a `schedules` tab running `crewship schedules`.
+It preserves existing tabs and does not change the focused workspace or tab.
+Set `crewship.herdr.schedules_tab: false` to skip this setup.
+See [Schedule viewer](configuration.md#schedule-viewer) for controls and deferred setup.
 
 Its entry shows the state dot and the machine line, followed by the provider row.
 It shows no name, label, workspace counts or workspace resource line.
