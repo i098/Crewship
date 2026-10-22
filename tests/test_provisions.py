@@ -13,6 +13,7 @@ import sys
 import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Barrier, BrokenBarrierError, Event, Thread
@@ -364,6 +365,88 @@ def test_npm_lookup_bounds_stalls_and_uses_the_latest_tag(
             stopped.set()
             server.shutdown()
             thread.join()
+
+
+@pytest.mark.parametrize(
+    ("source", "fallback"),
+    [("fetch_page", False), ("fetch", False), ("npm", False), ("npm", True)],
+)
+def test_incomplete_metadata_read_reports_context_without_retry(monkeypatch, source, fallback):
+    base = "https://registry.npmjs.org/acpx"
+    seen = []
+
+    class Registry(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            if fallback and self.path.endswith("/latest"):
+                self.send_response(504)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"version": "1.0.0"}')
+
+        def log_message(self, *args):
+            pass
+
+    real_urlopen = installer.urllib.request.urlopen
+    with ThreadingHTTPServer(("127.0.0.1", 0), Registry) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def local_urlopen(request, *, timeout):
+            path = installer.urllib.parse.urlsplit(request.full_url).path
+            return real_urlopen(f"http://127.0.0.1:{server.server_port}{path}", timeout=timeout)
+
+        monkeypatch.setattr(installer.urllib.request, "urlopen", local_urlopen)
+        try:
+            with pytest.raises(ValueError) as failure:
+                if source == "npm":
+                    installer.resolve_latest("linux-x86_64", {"acpx"})
+                else:
+                    getattr(installer, source)(base + "/latest", "test release")
+            final_url = base if fallback else base + "/latest"
+            assert final_url in str(failure.value)
+            assert f"after {2 if fallback else 1} attempt(s)" in str(failure.value)
+            assert isinstance(failure.value.__cause__, IncompleteRead)
+            assert seen == (["/acpx/latest", "/acpx"] if fallback else ["/acpx/latest"])
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+@pytest.mark.parametrize(
+    ("fallback", "body", "cause"),
+    [
+        (False, b'{"version":', json.JSONDecodeError),
+        (True, b'{"dist-tags":', json.JSONDecodeError),
+        (False, b"{}", KeyError),
+        (True, b"{}", KeyError),
+        (True, b'{"versions": {}}', KeyError),
+        (True, b'{"versions": {}, "dist-tags": {}}', KeyError),
+        (True, b'{"versions": {}, "dist-tags": {"latest": "2.0.0"}}', KeyError),
+        (True, b'{"versions": {"2.0.0": {}}, "dist-tags": {"latest": "2.0.0"}}', KeyError),
+    ],
+)
+def test_invalid_npm_metadata_reports_context_without_retry(monkeypatch, fallback, body, cause):
+    base = "https://registry.npmjs.org/acpx"
+    seen = []
+
+    def urlopen(request, *, timeout):
+        seen.append(request.full_url)
+        if fallback and request.full_url.endswith("/latest"):
+            raise http_error(504)
+        return Download(body)
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    with pytest.raises(ValueError) as failure:
+        installer.resolve_latest("linux-x86_64", {"acpx"})
+    final_url = base if fallback else base + "/latest"
+    assert final_url in str(failure.value)
+    assert f"after {2 if fallback else 1} attempt(s)" in str(failure.value)
+    assert isinstance(failure.value.__cause__, cause)
+    assert seen == ([base + "/latest", base] if fallback else [base + "/latest"])
 
 
 # What each fake GitHub release publishes for linux-x86_64: tag and asset name.

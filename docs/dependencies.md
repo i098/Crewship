@@ -54,7 +54,7 @@ Tools from the same GitHub repository share one release lookup per apply.
 Each npm metadata request has a 10-second socket timeout.
 If `/latest` times out or returns HTTP 5xx, the installer tries the full package document once and reads `dist-tags.latest`.
 Both requests use the same timeout, without extra retries or a cache.
-Final lookup errors include the URL and attempt count.
+Final lookup errors include the URL and attempt count, including incomplete reads, invalid npm JSON, and missing npm metadata fields.
 The installer downloads and extracts at most four native assets at once.
 Every native installation must pass verification before registry setup starts.
 The installer runs at most four independent registry installations at once.

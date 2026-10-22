@@ -20,6 +20,7 @@ import argparse
 import fcntl
 import hashlib
 import html
+import http.client
 import json
 import os
 import platform
@@ -209,10 +210,14 @@ def fetch_page(url, what):
                 urllib.request.Request(url, headers=headers), timeout=60
             ) as response:
                 return response.geturl(), response.read()
-        except OSError as error:
+        except (OSError, http.client.IncompleteRead) as error:
             # Connection resets, TLS EOFs, timeouts and 5xx are transient; a 4xx is final.
             status = getattr(error, "code", 500)
-            if status < 500 or attempt == DOWNLOAD_ATTEMPTS:
+            if (
+                isinstance(error, http.client.IncompleteRead)
+                or status < 500
+                or attempt == DOWNLOAD_ATTEMPTS
+            ):
                 if isinstance(error, urllib.error.HTTPError):
                     failure = RateLimited if github and status in (403, 429) else ValueError
                     raise failure(
@@ -238,7 +243,7 @@ def npm_latest(package):
             if attempt == 2:
                 metadata = metadata["versions"][metadata["dist-tags"]["latest"]]
             return metadata["version"]
-        except OSError as error:
+        except (OSError, http.client.IncompleteRead, json.JSONDecodeError, KeyError) as error:
             timeout = isinstance(getattr(error, "reason", error), TimeoutError)
             if attempt == 1 and (timeout or 500 <= getattr(error, "code", 0) < 600):
                 continue
