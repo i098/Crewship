@@ -286,12 +286,13 @@ def release_from_pages(repo, tool, prerelease):
 
 
 def latest_release(repo, tool, prerelease):
-    """The newest release of a repo from the API; the public pages once the API is rate limited."""
+    """The newest release from the API, or public pages when the API cannot supply it."""
     api = GITHUB_API.format(repo)
     try:
         if prerelease:
             releases = json.loads(fetch(api + "?per_page=10", f"{tool} release"))
-            return next((r for r in releases if not r["draft"]), None)
+            release = next((r for r in releases if not r["draft"]), None)
+            return release if release is not None else release_from_pages(repo, tool, prerelease)
         return json.loads(fetch(api + "/latest", f"{tool} release"))
     except RateLimited as error:
         print(f"provisions: {error}; reading github.com's release pages instead", file=sys.stderr)
@@ -334,8 +335,6 @@ def resolve_release_group(key, names):
         try:
             if tool in PRERELEASE_CHANNEL:
                 release = latest_release(repo, tool, True)
-                if release is None:
-                    raise ValueError(f"{tool} has no published release")
             else:
                 if repo not in stable:
                     stable[repo] = latest_release(repo, tool, False)
