@@ -27,6 +27,12 @@ For each message from the owner, the service does these steps:
    Its only tool is `zoom`.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
+   The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
+   It stops when the transport accepts the answer or reaction, or when the response is cancelled, handed off, or discarded.
+   The service stops refreshes before saving delivery progress, even if that save fails.
+   Shutdown stops typing and allows two seconds for pending cleanup.
+   Supervisor typing starts after desk cleanup.
+   A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. A clear basic question can receive one direct answer without a Firstmate note or wake.
    The answer must quote complete source lines from supplied status or prior supervisor or desk records.

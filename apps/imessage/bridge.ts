@@ -46,10 +46,11 @@ function track<T extends Bun.Subprocess>(proc: T): T {
 
 async function stop() {
   if (stopping) return;
+  stopDeskTyping?.();
   stopping = true;
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
-  await Promise.race([Promise.all(running.map((proc) => proc.exited)), Bun.sleep(2000)]);
+  await Promise.race([Promise.all([deskTypingPending, ...running.map((proc) => proc.exited)]), Bun.sleep(2000)]);
   for (const proc of children) proc.kill("SIGKILL");
   // Reap killed children, but do not let a stuck child hold the bridge open.
   await Promise.race([Promise.all([...children].map((proc) => proc.exited)), Bun.sleep(500)]);
@@ -125,18 +126,24 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
-const typing = (space: LineMessage["space"] | undefined, on: boolean) =>
-  space && !stopping && void (on ? space.startTyping() : space.stopTyping()).catch(log(on ? "start typing" : "stop typing"));
+const typing = (space: LineMessage["space"] | undefined, on: boolean) => {
+  if (!space) return;
+  deskTypingPending = deskTypingPending.then(() => {
+    if (!stopping) return on ? space.startTyping() : space.stopTyping();
+  }).catch(log(on ? "start typing" : "stop typing"));
+};
 // This service is the memory's one writer: systemd runs one instance of the unit.
 const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 const memoryByRequest = new Map<string, number>();
 for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((e) => {
   log("desk failed")(e);
-  typing(latest?.space, false);
   handoffPending();
 }));
 let deskRun: Bun.Subprocess | undefined;
+let stopDeskTyping: (() => void) | undefined;
+let deskTypingRequestId: string | undefined;
+let deskTypingPending: Promise<unknown> = Promise.resolve();
 let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
@@ -152,6 +159,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
+type DeskResult = { answer: { answer: string } | { react: string }; target: Routing; complete: boolean };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -304,7 +312,7 @@ const refOn = (name: string, space: string, id: string): Ref => (name === "photo
 // Each transport's latest text, kept so a restart can still reach him: space, id and time, one per line.
 // Photon keeps the file name it always had. A file without the time (the older format) counts as the oldest.
 const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATEST_FILE}-${name}`);
-let latest: LineMessage | undefined; // his latest text on any transport: typing and command tapbacks go there
+let latest: LineMessage | undefined; // his latest text on any transport: command typing and tapbacks go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
@@ -358,10 +366,10 @@ if (pendingRoutes().length) {
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
+  stopDeskTyping?.();
   if (!deskRun) return;
   deskRun.kill();
   deskRun = undefined;
-  if (latest) typing(latest.space, false);
 }
 
 Bun.serve({
@@ -386,9 +394,8 @@ Bun.serve({
     desk.firstmateActive();
     handoffPending();
     cancelDesk();
-    // Typing shows only while Firstmate is really composing: /typing starts it, and every send clears it.
     if (url.pathname === "/typing") {
-      if (latest) typing(latest.space, true);
+      typing(latest?.space, true);
       return new Response("typing\n");
     }
     if (url.pathname === "/react") {
@@ -488,6 +495,10 @@ function put(item: Out) {
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
+function finishDeskDelivery(o: Out) {
+  if (o.requestId && o.requestId === deskTypingRequestId) stopDeskTyping?.();
+}
+
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
@@ -497,11 +508,12 @@ async function deliver(o: Out, save: (o: Out) => void) {
   for (let i = o.done ?? 0; i < parts.length; i++) {
     const part = parts[i]!;
     if (i > 0 && typeof part === "string") {
-      if (latest) typing(latest.space, true);
+      if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, true);
       await Bun.sleep(typingPause(part));
     }
-    if (latest) typing(latest.space, false);
+    if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
+    finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
   if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
@@ -520,6 +532,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
     if (notSent(e)) save(o);
     throw e;
   }
+  finishDeskDelivery(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
@@ -643,32 +656,72 @@ async function readInboxStatus() {
   return { status, statusOk: await inbox.exited === 0 };
 }
 
+function startDeskTyping(pending: Routing[], current: () => boolean) {
+  const space = pending.every(({ ref }) => ref.space === latestRef?.space
+    && (ref.line ?? "photon") === (latestRef?.line ?? "photon")) ? latest?.space : undefined;
+  let active = true;
+  let refreshing = false;
+  const refresh = () => {
+    if (!active || refreshing || !space) return;
+    refreshing = true;
+    deskTypingPending = deskTypingPending.then(async () => {
+      if (active && !stopping && current()) await space.startTyping();
+    }).catch(log("start typing")).finally(() => { refreshing = false; });
+  };
+  const timer = setInterval(() => {
+    if (stopping || !current()) finishTyping();
+    else refresh();
+  }, 4000);
+  const finishTyping = () => {
+    if (!active) return;
+    active = false;
+    clearInterval(timer);
+    if (stopDeskTyping === finishTyping) {
+      stopDeskTyping = undefined;
+      deskTypingRequestId = undefined;
+    }
+    deskTypingPending = deskTypingPending.then(() => space?.stopTyping()).catch(log("stop typing"));
+  };
+  stopDeskTyping = finishTyping;
+  refresh();
+  return finishTyping;
+}
+
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
   const pending = pendingRoutes();
   if (!pending.length) return;
   if (pending.some((r) => r.firstmate) || !DESK_VETTED) return handoffPending();
-  const typingTarget = latest;
-  typing(typingTarget?.space, true);
-  const result = await draftBasic(pending, current);
-  typing(typingTarget?.space, false);
-  if (stopping || !current()) return;
-  if (result === undefined) handoffPending();
-  else {
-    const { answer, target, complete } = result;
-    const ids = pending.map((r) => r.requestId);
-    recordRoute({ ids, route: complete ? "desk" : "handoff",
-      out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
-        ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id } : { react: answer.react }),
-        kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
-    flushRoutes();
+  const finishTyping = startDeskTyping(pending, current);
+  let queued = false;
+  try {
+    const result = await draftBasic(pending, current);
+    if (stopping || !current()) return;
+    if (result === undefined) handoffPending();
+    else {
+      commitDeskAnswer(pending, result);
+      queued = result.complete;
+    }
+    const at = result?.target.ref ?? pending.at(-1)!.ref;
+    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
+  } finally {
+    if (!queued) finishTyping();
   }
-  const at = result?.target.ref ?? pending.at(-1)!.ref;
-  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
 }
 
-async function draftBasic(pending: Routing[], current: () => boolean) {
+function commitDeskAnswer(pending: Routing[], result: DeskResult) {
+  const { answer, target, complete } = result;
+  const ids = pending.map((r) => r.requestId);
+  if (complete) deskTypingRequestId = target.requestId;
+  recordRoute({ ids, route: complete ? "desk" : "handoff",
+    out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
+      ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id } : { react: answer.react }),
+      kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+  flushRoutes();
+}
+
+async function draftBasic(pending: Routing[], current: () => boolean): Promise<DeskResult | undefined> {
   const result = await inboxStatus;
   if (!result || stopping || !current()) return;
   const { status, statusOk } = result;
@@ -716,6 +769,7 @@ function ensureRemembered(item: Received) {
 }
 
 function lostDeskAnswer(item: Out) {
+  finishDeskDelivery(item);
   if (!item.requests?.length || item.done || Object.keys(item.maybe ?? {}).length) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
