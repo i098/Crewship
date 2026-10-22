@@ -32,8 +32,15 @@ open(os.environ["STUB_DIR"] + "/omp.views", "w").write(json.dumps(views))
 mode = open(os.environ["STUB_DIR"] + "/omp.mode").read().strip()
 if mode == "garbage":
     print("sorry"); sys.exit(0)
+if mode == "error":
+    sys.exit(1)
 out = [{"id": v["id"], "keep": "KEEP" in v["text"], "reason": "stub", "line": f"{v['from']}, {v['channel']}: {v['text']}"}
        for v in views if not (mode == "skip" and "SKIP" in v["text"])]
+if mode == "empty":
+    out = []
+if mode in ("no-line", "blank-line"):
+    for v in out:
+        v["line"] = None if mode == "no-line" else "   "
 print("Here you go:\\n" + json.dumps(out))
 """
 NOTIFY = """#!/bin/sh
@@ -166,7 +173,7 @@ def test_thread_and_mention_context_reaches_the_model_and_a_skipped_message_fall
     env.db.execute("insert into messages (ts, channel_id, workspace_id, user_id, text) values ('40.0','C1',?,?,'my root')", (WS, ME))
     env.db.commit()
     (env.stub / "omp.mode").write_text("skip")
-    found = sr.candidates(sr.open_cache(env.cfg), env.cfg, 100, set())
+    found = sr.cached_candidates(env.cfg, 100, set())
     flags = {m["ts"]: (m["view"]["in_his_thread"], m["view"]["mentions_him"]) for m in found}
     assert flags == {"101.1": (True, False), "101.2": (False, True), "101.3": (False, False),
                      "101.4": (False, False), "101.5": (True, False)}
@@ -181,9 +188,11 @@ def test_thread_and_mention_context_reaches_the_model_and_a_skipped_message_fall
     assert "http" not in "".join(env.texts()) and "slack://" not in "".join(env.texts())
 
 
-def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env):
+@pytest.mark.parametrize("mention_only", [False, True])
+def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env, mention_only):
+    env.cfg["mention_only"] = mention_only
     env.run(100)
-    env.add("101.1", "D1", BOB, "KEEP retry me")
+    env.add("101.1", "D1", BOB, f"<@{ME}> KEEP retry me")
     (env.stub / "omp.mode").write_text("garbage")
     with pytest.raises(ValueError):
         env.run(110)
@@ -194,7 +203,7 @@ def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env):
 
 
 def test_the_cache_is_opened_read_only(env):
-    db = sr.open_cache(env.cfg)
+    db = sr.open_cache(env.cfg["db"])
     with pytest.raises(sqlite3.OperationalError):
         db.execute("delete from messages")
 
@@ -221,6 +230,16 @@ def test_mention_only_keeps_explicit_mentions(env, mention):
     assert env.log()[0]["decision"] == "kept"
 
 
+@pytest.mark.parametrize("mention_only", [False, True])
+def test_boolean_modes_keep_the_model_veto(env, mention_only):
+    env.cfg["mention_only"] = mention_only
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"<@{ME}> hello")
+    env.run(110)
+    assert env.texts() == []
+    assert env.log()[0]["decision"] == "dropped"
+
+
 @pytest.mark.parametrize("channel,thread", [("D1", ""), ("C1", "50.0")])
 @pytest.mark.parametrize("text", ["KEEP untagged", "SKIP untagged"])
 def test_mention_only_drops_untagged_before_the_model(env, channel, thread, text):
@@ -242,7 +261,7 @@ def test_mention_only_drops_untagged_before_the_model(env, channel, thread, text
 def test_mention_only_rejects_a_forced_keep_or_missing_verdict(env, verdict):
     env.cfg["mention_only"] = True
     env.add("101.1", "D1", BOB, "KEEP untagged")
-    db = sr.open_cache(env.cfg)
+    db = sr.open_cache(env.cfg["db"])
     try:
         message = sr.candidates(db, env.cfg, 100, set())[0]
     finally:
@@ -281,3 +300,285 @@ def test_dry_run_reads_cache_without_models_notifications_or_state_writes(env, c
     assert json.loads(capsys.readouterr().out) == {"tagged": 1, "untagged": 1, "kept": 1, "dropped": 1}
     assert env.calls() == 0 and env.texts() == [] and env.log() == []
     assert not sr.state_dir().exists()
+
+
+@pytest.mark.parametrize("channel_type", ["dm", "group_dm", "mpim", "channel", "private"])
+@pytest.mark.parametrize("tagged", [False, True])
+def test_direct_mode_filters_before_the_model(env, channel_type, tagged):
+    env.cfg["mention_only"] = "direct"
+    env.db.execute("update channels set type=? where id='C1'", (channel_type,))
+    env.run(100)
+    text = f"<@{ME}> hello" if tagged else "hello"
+    env.add("101.1", "C1", BOB, text)
+    env.run(110)
+    allowed = tagged or channel_type == "dm"
+    assert env.calls() == int(allowed)
+    where = {"dm": "DM", "mpim": "group", "group_dm": "group"}.get(channel_type, "#dev")
+    assert env.texts() == ([f"Bob, {where}: {'@Me ' if tagged else ''}hello"] if allowed else [])
+    assert env.log()[0]["decision"] == ("kept" if allowed else "dropped")
+    if not allowed:
+        assert env.log()[0]["reason"] == "not tagged or DM"
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("mode", ["ok", "no-line", "blank-line", "empty", "garbage", "error"])
+@pytest.mark.parametrize("channel,text,where", [("D1", "hello", "DM"), ("C1", f"<@{ME}> hello", "#dev")])
+@pytest.mark.parametrize("sender,name", [(BOB, "Bob"), (BOT, "CI")])
+def test_direct_mode_delivers_despite_model_rejection_or_failure(
+    env, tmp_path, monkeypatch, command, mode, channel, text, where, sender, name
+):
+    env.cfg["mention_only"] = "direct"
+    (tmp_path / "config.json").write_text(json.dumps(env.cfg))
+    env.run(100)
+    env.add("101.1", channel, sender, text)
+    (env.stub / "omp.mode").write_text(mode)
+    args = ["slack_relay.py", command]
+    if command == "replay":
+        args.extend([WS, channel, "101.1"])
+    monkeypatch.setattr(sys, "argv", args)
+    monkeypatch.setattr(sr.time, "time", lambda: 110)
+    sr.main()
+    prefix = "[test] " if command == "replay" else ""
+    message = "@Me hello" if channel == "C1" else "hello"
+    assert env.texts() == [f"{prefix}{name}, {where}: {message}"]
+    assert [row["decision"] for row in env.log()] == ["kept"]
+
+
+@pytest.mark.parametrize("verdict", [None, {"keep": True, "reason": "keep everything"}])
+def test_direct_mode_blocks_untagged_thread_even_with_forced_keep(env, verdict):
+    env.cfg["mention_only"] = "direct"
+    env.db.execute("insert into thread_subscriptions values (?,?,?,1)", (WS, "C1", "50.0"))
+    env.add("101.1", "C1", BOB, "KEEP thread", thread_ts="50.0")
+    with sr.open_cache(env.cfg["db"]) as db:
+        message = sr.candidates(db, env.cfg, 100, set())[0]
+    assert sr.decide(env.cfg, message, verdict) == (False, "not tagged or DM", "")
+    env.run(100)
+    env.run(110)
+    assert env.calls() == 0 and env.texts() == []
+    assert env.log()[0]["reason"] == "not tagged or DM"
+
+
+@pytest.mark.parametrize("previous", [False, True])
+def test_switching_to_direct_discards_pending_without_replaying_dropped_messages(env, previous):
+    env.cfg["mention_only"] = previous
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"<@{ME}> KEEP first")
+    env.run(110)
+    env.add("120.1", "C1", BOB, f"<@{ME}> KEEP queued")
+    env.run(130)
+    if previous:
+        env.add("135.1", "D1", BOB, "KEEP previously dropped")
+        env.run(140)
+    env.cfg["mention_only"] = "direct"
+    env.add("150.1", "D1", BOB, "KEEP new DM")
+    env.run(171)
+    env.run(240)
+    assert env.texts() == ["Bob, #dev: @Me KEEP first", "Bob, DM: KEEP new DM"]
+    assert len(env.log()) == (4 if previous else 3)
+
+
+def test_direct_mode_preserves_dedup_and_burst_limits(env):
+    env.cfg.update(mention_only="direct", max_lines=2)
+    env.run(100)
+    for i in range(5):
+        env.add(f"101.{i}", "D1", BOB, f"KEEP DM {i}")
+    env.run(110)
+    env.run(130)
+    assert env.texts() == ["Bob, DM: KEEP DM 0\nBob, DM: KEEP DM 1"]
+    env.run(171)
+    env.run(232)
+    assert env.texts() == ["Bob, DM: KEEP DM 0\nBob, DM: KEEP DM 1",
+                           "Bob, DM: KEEP DM 2\nBob, DM: KEEP DM 3", "Bob, DM: KEEP DM 4"]
+    assert env.calls() == 1 and len(env.log()) == 5
+
+
+@pytest.fixture
+def two_caches(env, tmp_path):
+    env.add("101.1", "D1", BOB, "KEEP first cache")
+    path = tmp_path / "second.db"
+    with sqlite3.connect(path) as db:
+        env.db.backup(db)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("insert into workspaces values ('T2', 'Second')")
+        db.executemany("insert into users values (?, 'T2', ?, ?, 0)", [
+            ("UME2", "me2", "Me Two"), ("UBOB2", "bob2", "Bob Two")])
+        db.execute("insert into channels values ('D2', 'T2', '', 'dm')")
+        db.execute("insert into channels values ('C2', 'T2', 'second', 'channel')")
+        db.executemany("insert into messages (ts, channel_id, workspace_id, user_id, text) values (?, ?, 'T2', ?, ?)", [
+            ("101.1", "D2", "UBOB2", "KEEP second cache"),
+            ("101.2", "D2", "UME2", "KEEP own message"),
+            ("101.3", "C2", "UBOB2", f"<@{ME}> KEEP wrong workspace tag"),
+            ("101.4", "C2", "UBOB2", "<@UME2> KEEP second mention")])
+        db.commit()
+        env.cfg.update(dbs=[env.cfg["db"], str(path)], mention_only="direct")
+        env.cfg["self"]["T2"] = "UME2"
+        yield env
+
+
+def test_two_caches_keep_workspace_context_and_deduplicate(two_caches):
+    env = two_caches
+    env.run(100)
+    env.run(110)
+    env.run(180)
+    assert env.texts() == ["Bob, DM: KEEP first cache\nBob Two, DM: KEEP second cache\n"
+                           "Bob Two, #second: @Me Two KEEP second mention"]
+    assert {r["key"] for r in env.log()} == {
+        "T1/D1/101.1", "T2/D2/101.1", "T2/C2/101.3", "T2/C2/101.4"}
+    assert len(env.log()) == 4 and env.calls() == 1
+    views = json.loads((env.stub / "omp.views").read_text())
+    assert [v["workspace"] for v in views] == ["Acme", "Second", "Second"]
+    for path in env.cfg["dbs"]:
+        with sr.open_cache(path) as db:
+            with pytest.raises(sqlite3.OperationalError):
+                db.execute("delete from messages")
+
+
+def test_dry_run_counts_each_message_once_across_caches(two_caches, monkeypatch, capsys):
+    monkeypatch.setattr(sr.time, "time", lambda: 110)
+    sr.dry_run(two_caches.cfg)
+    assert json.loads(capsys.readouterr().out) == {"tagged": 1, "untagged": 3, "kept": 3, "dropped": 1}
+    assert two_caches.texts() == [] and two_caches.calls() == 0
+
+
+@pytest.mark.parametrize("mention", ["<!everyone>", "<!channel>", "<!here>"])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("workspace", [WS, "T2"])
+def test_broadcasts_require_workspace_opt_in(env, mention, enabled, workspace):
+    env.cfg["mention_only"] = "direct"
+    env.cfg["workspaces"][workspace] = {"name": "Workspace", "broadcasts": enabled}
+    (env.stub / "omp.mode").write_text("empty")
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"{mention} announcement")
+    env.run(110)
+    env.run(180)
+    allowed = enabled and workspace == WS
+    assert env.texts() == ([f"Workspace: Bob, #dev: @{mention[2:-1]} announcement"] if allowed else [])
+    assert [row["decision"] for row in env.log()] == ["kept" if allowed else "dropped"]
+
+
+@pytest.mark.parametrize("mode", [False, True])
+def test_broadcast_opt_in_does_not_change_boolean_modes(env, mode):
+    env.cfg["mention_only"] = mode
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    env.run(100)
+    env.add("101.1", "C1", BOB, "<!here> announcement")
+    env.run(110)
+    assert env.texts() == []
+
+
+def test_enabling_broadcasts_does_not_replay_dropped_messages(env):
+    env.cfg["mention_only"] = "direct"
+    env.run(100)
+    env.add("101.1", "C1", BOB, "<!here> old announcement")
+    env.run(110)
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    env.add("120.1", "C1", BOB, "<!here> new announcement")
+    env.run(130)
+    env.run(200)
+    assert env.texts() == ["Acme: Bob, #dev: @here new announcement"]
+    assert [row["decision"] for row in env.log()] == ["dropped", "kept"]
+
+
+@pytest.mark.parametrize("channel,text,expected", [
+    ("D1", "hello", "DM: hello"),
+    ("C1", f"<@{ME}> hello", "#dev: @Me hello"),
+])
+def test_broadcast_workspace_keeps_context_for_direct_messages(env, channel, text, expected):
+    env.cfg["mention_only"] = "direct"
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    (env.stub / "omp.mode").write_text("error")
+    env.run(100)
+    env.add("101.1", channel, BOB, text)
+    env.run(110)
+    assert env.texts() == [f"Acme: Bob, {expected}"]
+
+
+def test_replay_finds_a_message_in_the_second_cache(two_caches):
+    sr.replay(two_caches.cfg, "T2", "D2", "101.1")
+    assert two_caches.texts() == ["[test] Bob Two, DM: KEEP second cache"]
+    assert two_caches.log()[0]["key"] == "T2/D2/101.1"
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("mode", ["ok", "empty"])
+@pytest.mark.parametrize("mention_only,channel,mention", [
+    (False, "D1", ""),
+    (True, "C1", f"<@{ME}> "),
+    ("direct", "D1", ""),
+    ("direct", "C1", f"<@{ME}> "),
+    ("direct", "C1", "<!here> "),
+])
+def test_notifications_keep_one_line_without_links(env, command, mode, mention_only, channel, mention):
+    env.cfg["mention_only"] = mention_only
+    env.cfg["workspaces"][WS].update(name="Acme\nOperations", broadcasts=True)
+    env.db.execute("update users set display_name='Bob\nBuilder' where id=?", (BOB,))
+    env.db.execute("update channels set name='dev\nchat' where id='C1'")
+    env.run(100)
+    text = mention + (
+        "KEEP a\nb\rc\u2028d\t&lt;T&gt; &amp;lt;T&amp;gt; "
+        "<https://acme.slack.com/a|thread> https://acme.slack.com/b slack://channel?id=C1"
+    )
+    env.add("101.1", channel, BOB, text)
+    (env.stub / "omp.mode").write_text(mode)
+
+    workspace = "Acme Operations: " if mention_only == "direct" else ""
+    where = "DM" if channel == "D1" else "#dev chat"
+    tag = "@here " if mention == "<!here> " else "@Me " if mention else ""
+    expected = f"{workspace}Bob Builder, {where}: {tag}KEEP a b c d <T> &lt;T&gt; thread"
+    if command == "replay":
+        sr.replay(env.cfg, WS, channel, "101.1")
+        expected = "[test] " + expected
+    else:
+        env.st["sent_at"] = 100
+        env.run(110)
+        assert env.st["pending"] == [expected]
+        env.run(161)
+
+    assert env.texts() == [expected]
+
+
+def test_model_link_labels_do_not_strip_literal_brackets(env, monkeypatch):
+    env.run(100)
+    env.add("101.1", "D1", BOB, "KEEP review")
+    monkeypatch.setattr(sr, "verdicts", lambda cfg, batch: {
+        0: {"keep": True, "line": "Bob, DM: <T> &lt;T&gt;\n<https://acme.slack.com/a|thread> <slack://open>"}
+    })
+
+    env.run(110)
+
+    assert env.texts() == ["Bob, DM: <T> &lt;T&gt; thread"]
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("line", [
+    "<https://acme.slack.com/archives/C1/p1>",
+    " \nhttps://acme.slack.com/archives/C1/p1 slack://open\t",
+    "<https://acme.slack.com/archives/C1/p1|slack://open>",
+])
+@pytest.mark.parametrize("mention_only,channel,mention,broadcasts", [
+    (False, "D1", "", False),
+    (True, "C1", f"<@{ME}> ", False),
+    ("direct", "D1", "", False),
+    ("direct", "C1", f"<@{ME}> ", False),
+    ("direct", "C1", "<!here> ", True),
+    ("direct", "D1", "", True),
+])
+def test_link_only_model_line_uses_message_text(
+    env, monkeypatch, command, line, mention_only, channel, mention, broadcasts
+):
+    env.cfg["mention_only"] = mention_only
+    env.cfg["workspaces"][WS]["broadcasts"] = broadcasts
+    env.run(100)
+    env.add("101.1", channel, BOB, f"{mention}review\nthis https://acme.slack.com/a")
+    monkeypatch.setattr(sr, "verdicts", lambda cfg, batch: {0: {"keep": True, "line": line}})
+
+    if command == "replay":
+        sr.replay(env.cfg, WS, channel, "101.1")
+    else:
+        env.run(110)
+
+    prefix = "[test] " if command == "replay" else ""
+    workspace = "Acme: " if broadcasts else ""
+    where = "DM" if channel == "D1" else "#dev"
+    tag = "@here " if mention == "<!here> " else "@Me " if mention else ""
+    assert env.texts() == [f"{prefix}{workspace}Bob, {where}: {tag}review this"]
