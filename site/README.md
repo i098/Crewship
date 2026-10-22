@@ -245,6 +245,7 @@ It also taps six pixels above and below each stacked link center to check the se
 It also checks feature-link focus with the full map open and an arrival selection pending.
 It fails if rendering stalls.
 It taps or clicks every link, checks same-tab and new-tab navigation, and returns to the scene.
+After Back, it waits for page startup and selects Explore when the start menu is open.
 Before link navigation, it starts sound through the speaker button and waits for every audio loop to start.
 This keeps repeated About visits from cancelling the restored scene's audio loads.
 It also opens the docs index with the keyboard.

@@ -213,6 +213,8 @@ async function clickLink(link, offset = 0) {
     assert.equal(result.status(), 200, `${name}: same-tab destination did not load`);
     await page.getByRole("heading", { name: "About Crewship", exact: true }).waitFor();
     await page.goBack();
+    await page.waitForFunction(() => !document.getElementById("explore").disabled);
+    if (await page.locator("#menu").evaluate((dialog) => dialog.open)) await page.click("#explore");
     await page.waitForFunction(() => window.frames?.length > 0);
   }
 }
