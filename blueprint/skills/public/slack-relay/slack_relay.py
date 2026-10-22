@@ -210,6 +210,12 @@ def decide(cfg, m, v):
     return bool(v.get("keep")), str(v.get("reason") or "")[:80], str(v.get("line") or "").strip()[:240]
 
 
+def normalize_line(line):
+    line = re.sub(r"<(?:https?://|slack://)[^>|]*(?:\|([^>]*))?>",
+                  lambda match: match[1] or "", line, flags=re.I)
+    return " ".join(re.sub(r"(?:https?://|slack://)[^\s<>]+", "", line, flags=re.I).split())
+
+
 def process(cfg, batch, st, test=False):
     """Filter one batch; log every message; queue the kept lines."""
     eligible = []
@@ -232,12 +238,10 @@ def process(cfg, batch, st, test=False):
         write_log(key=key(m), ws=m["workspace_id"], channel=m["channel_id"], ts=m["ts"], user=v["from"],
                   decision="kept" if keep else "dropped", reason=reason, **({"test": True} if test else {}))
         if keep:
-            line = line or f"{v['from']}, {v['channel']}: {v['text'][:160]}"
+            line = normalize_line(line) or f"{v['from']}, {v['channel']}: {v['text'][:160]}"
             if cfg["mention_only"] == "direct" and cfg["workspaces"].get(m["workspace_id"], {}).get("broadcasts", False):
                 line = f"{v['workspace']}: {line}"
-            line = re.sub(r"<(?:https?://|slack://)[^>|]*(?:\|([^>]*))?>",
-                          lambda match: match[1] or "", line, flags=re.I)
-            line = " ".join(re.sub(r"(?:https?://|slack://)[^\s<>]+", "", line, flags=re.I).split())
+            line = normalize_line(line)
             st.setdefault("pending", []).append(f"{'[test] ' if test else ''}{line}")
 
 

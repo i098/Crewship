@@ -547,3 +547,38 @@ def test_model_link_labels_do_not_strip_literal_brackets(env, monkeypatch):
     env.run(110)
 
     assert env.texts() == ["Bob, DM: <T> &lt;T&gt; thread"]
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("line", [
+    "<https://acme.slack.com/archives/C1/p1>",
+    " \nhttps://acme.slack.com/archives/C1/p1 slack://open\t",
+    "<https://acme.slack.com/archives/C1/p1|slack://open>",
+])
+@pytest.mark.parametrize("mention_only,channel,mention,broadcasts", [
+    (False, "D1", "", False),
+    (True, "C1", f"<@{ME}> ", False),
+    ("direct", "D1", "", False),
+    ("direct", "C1", f"<@{ME}> ", False),
+    ("direct", "C1", "<!here> ", True),
+    ("direct", "D1", "", True),
+])
+def test_link_only_model_line_uses_message_text(
+    env, monkeypatch, command, line, mention_only, channel, mention, broadcasts
+):
+    env.cfg["mention_only"] = mention_only
+    env.cfg["workspaces"][WS]["broadcasts"] = broadcasts
+    env.run(100)
+    env.add("101.1", channel, BOB, f"{mention}review\nthis https://acme.slack.com/a")
+    monkeypatch.setattr(sr, "verdicts", lambda cfg, batch: {0: {"keep": True, "line": line}})
+
+    if command == "replay":
+        sr.replay(env.cfg, WS, channel, "101.1")
+    else:
+        env.run(110)
+
+    prefix = "[test] " if command == "replay" else ""
+    workspace = "Acme: " if broadcasts else ""
+    where = "DM" if channel == "D1" else "#dev"
+    tag = "@here " if mention == "<!here> " else "@Me " if mention else ""
+    assert env.texts() == [f"{prefix}{workspace}Bob, {where}: {tag}review this"]
