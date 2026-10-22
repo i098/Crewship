@@ -255,12 +255,15 @@ CI also loads the page in Playwright Chromium in a 3651x2160 window at DPR 2, wi
 It adds a failing image and a rejected promise, as a browser add-on can.
 It fails on the plain-page fallback, a black canvas 3 s after load, or a console error.
 It also fails if the backing-store area exceeds the [canvas limit](public/how.html).
-To run the checks locally:
+CI pins the Playwright package and official browser image to the same release.
+The image includes the browsers and system libraries, so slow Ubuntu package downloads cannot consume the browser checks' time.
+The job keeps its 10-minute limit.
+To run the checks locally, use the release in the `harbor-webkit` matrix in [ci.yml](../.github/workflows/ci.yml):
 
 ```bash
 python3 site/build.py
 cd site
-npm install --no-save --no-package-lock --prefix . playwright
+npm install --no-save --no-package-lock --prefix . playwright@1.64.1
 npx playwright install --with-deps webkit chromium
 node webkit-check.mjs
 node chromium-check.mjs

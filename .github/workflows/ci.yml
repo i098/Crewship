@@ -254,13 +254,19 @@ jobs:
   # an uncaught error, or text drawn in a way that grows iOS Safari until it kills the tab.
   # site/chromium-check.mjs loads it in desktop Chromium in a large DPR 2 window and fails on
   # the plain-page fallback, a black canvas after 3 s, or a console error.
-  # Playwright tracks its latest release, like the other tools.
+  # Keep the Playwright package and official browser image on the same release.
   harbor-webkit:
     name: harbor webkit iphone check
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      matrix:
+        playwright: ['1.64.1']
+    container:
+      image: mcr.microsoft.com/playwright:v${{ matrix.playwright }}-noble
+      options: --ipc=host
     permissions:
       contents: read
     steps:
@@ -269,12 +275,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Python for the page build
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
       - name: Build the page
         run: python3 site/build.py
 
-      - name: Install Playwright WebKit and Chromium
+      - name: Install Playwright
         working-directory: site
-        run: npm install --no-save --no-package-lock --prefix . playwright && npx playwright install --with-deps webkit chromium
+        run: npm install --no-save --no-package-lock --prefix . playwright@${{ matrix.playwright }}
 
       - name: WebKit iPhone check
         run: node site/webkit-check.mjs
