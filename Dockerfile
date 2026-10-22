@@ -44,8 +44,8 @@
 # Build targets:
 #   base     OS packages and the Crewship account only (no repository content)
 #   builder  base + the provisioning run, its caches and its build-only files
-#   worker   the builder's filesystem without them, as one layer; devcontainer
-#            and compose default
+#   worker   the builder's filesystem without them, as one layer; compose and CI
+#            default
 #   smoke    worker + tests/container-smoke.sh as CMD (behavior smoke)
 #
 # Distribution packages are intentionally not version-frozen: docs/security.md

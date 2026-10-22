@@ -431,8 +431,8 @@ jobs:
           doc = json.loads("".join(out))
           problems = []
 
-          if doc.get("build", {}).get("target") != "worker":
-              problems.append("build.target must be the worker stage")
+          if doc.get("build", {}).get("target") != "builder":
+              problems.append("build.target must be the provisioned builder stage")
           for key in ("containerUser", "remoteUser"):
               if doc.get(key) in (None, "root"):
                   problems.append(f"{key} must name the non-root Crewship account")
