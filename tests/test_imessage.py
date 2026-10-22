@@ -1629,6 +1629,7 @@ function call(op) {
     throw unavailable();
   }
 }
+const typingByChat = new Map();
 async function typing(chat, on) {
   if (on && existsSync(`${dir}/typing-hold`)) {
     writeFileSync(`${dir}/typing-waiting`, "");
@@ -1637,9 +1638,11 @@ async function typing(chat, on) {
   appendFileSync(`${dir}/typing-events`, JSON.stringify({ chat, on }) + "\\n");
   appendFileSync(`${dir}/calls`, "typing UNAVAILABLE\\n");
   if (existsSync(`${dir}/typing-down`)) throw unavailable();
+  typingByChat.set(chat, on);
 }
 const lastFile = (chat) => `${dir}/last-${encodeURIComponent(chat)}`;
 function sent(line, chat) {
+  appendFileSync(`${dir}/delivery-events`, JSON.stringify({ line, chat, typing: typingByChat.get(chat) ?? false }) + "\\n");
   appendFileSync(`${dir}/sent`, `${line}\\n`);
   if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
 }
@@ -1657,6 +1660,10 @@ function space(id) {
     startTyping: () => typing(id, true),
     stopTyping: () => typing(id, false),
     async send(content) {
+      if (existsSync(`${dir}/send-hold`)) {
+        writeFileSync(`${dir}/send-waiting`, "");
+        while (existsSync(`${dir}/send-hold`)) await Bun.sleep(5);
+      }
       call("send");
       if (content.type === "app" && existsSync(`${dir}/card-refused`)) throw Object.assign(new Error("app cards are not on this plan"), { grpcCode: 7 });
       sent(`send ${await shown(content)}`, id);
@@ -1665,6 +1672,7 @@ function space(id) {
     },
     async getMessage(mid) {
       call("getMessage");
+      await holdLookup();
       if (existsSync(`${dir}/lookup-timeout`)) throw Object.assign(new Error("lookup timed out"), { grpcCode: 4 });
       if (existsSync(`${dir}/lookup-missing`)) return undefined;
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
@@ -1683,7 +1691,7 @@ function message(m) {
       ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
     async react(emoji) {
-      call("react"); sent(`react ${m.id} ${emoji}`);
+      call("react"); sent(`react ${m.id} ${emoji}`, m.space);
       if (existsSync(`${dir}/react-unsure`)) throw Object.assign(new Error("reaction timed out"), { grpcCode: 4 });
     },
     async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
@@ -1712,10 +1720,16 @@ async function* lineEvents() {
     await Bun.sleep(20);
   }
 }
+async function holdLookup() {
+  if (!existsSync(`${dir}/lookup-hold`)) return;
+  writeFileSync(`${dir}/lookup-waiting`, "");
+  while (existsSync(`${dir}/lookup-hold`)) await Bun.sleep(5);
+}
 const line = {
   messages: { subscribeEvents: lineEvents },
   chats: { async get(chat) {
     call("last");
+    await holdLookup();
     const file = lastFile(chat);
     return { lastMessage: existsSync(file) ? { guid: readFileSync(file, "utf8") } : undefined };
   } },

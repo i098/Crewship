@@ -140,12 +140,7 @@ def basic_rig(tmp_path, test_mode=True):
     return fake, state, notes, err, start, receive, cli, text, records
 
 
-@pytest.mark.parametrize("exit_path", [
-    "answer", "reaction", "skip", "handoff", "error", "spawn-error", "cancel", "cancel-status",
-    "send", "react", "typing", "shutdown",
-])
-def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, exit_path):
-    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+def prepare_typing_exit(fake, exit_path):
     (fake / "typing-down").unlink()
     (fake / "model-hold").touch()
     if exit_path in ("spawn-error", "cancel-status"):
@@ -156,6 +151,32 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
         (fake / "answer").write_text(json.dumps({"kind": exit_path}))
     elif exit_path == "error":
         (fake / "model-fail").touch()
+
+
+def end_typing_turn(fake, exit_path, receive, cli, bridge):
+    if exit_path in ("cancel", "cancel-status"):
+        receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
+    elif exit_path == "spawn-error":
+        (fake / "spawn-error").touch()
+        (fake / "status-hold").unlink()
+    elif exit_path == "send":
+        cli("The build is paused.")
+    elif exit_path in ("react", "typing"):
+        cli(f"--{exit_path}", *(["❤️"] if exit_path == "react" else []))
+    elif exit_path == "shutdown":
+        bridge.terminate()
+        bridge.wait(10)
+    else:
+        (fake / "model-hold").unlink()
+
+
+@pytest.mark.parametrize("exit_path", [
+    "answer", "reaction", "skip", "handoff", "error", "spawn-error", "cancel", "cancel-status",
+    "send", "react", "typing", "shutdown",
+])
+def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, exit_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    prepare_typing_exit(fake, exit_path)
 
     def events():
         return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
@@ -171,21 +192,10 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
         assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}]
         desk_clock(4000)
         assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}] * 2
-        if exit_path in ("cancel", "cancel-status"):
-            receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
-        elif exit_path == "spawn-error":
-            (fake / "spawn-error").touch()
-            (fake / "status-hold").unlink()
-        elif exit_path == "send":
-            cli("The build is paused.")
-        elif exit_path in ("react", "typing"):
-            cli(f"--{exit_path}", *(["❤️"] if exit_path == "react" else []))
-        elif exit_path == "shutdown":
-            bridge.terminate()
-            bridge.wait(10)
-        else:
-            (fake / "model-hold").unlink()
+        end_typing_turn(fake, exit_path, receive, cli, bridge)
         wait_for(lambda: any(not row["on"] for row in events()), "typing stopped")
+        if exit_path == "typing":
+            wait_for(lambda: events()[-1]["on"], "supervisor typing after desk cleanup")
         if exit_path in ("answer", "reaction"):
             wait_for(lambda: text(fake / "sent"), "the desk response")
         elif exit_path in ("skip", "handoff", "error", "spawn-error"):
@@ -196,7 +206,7 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
             desk_clock(8000)
             assert events() == before
         assert all(row["chat"] == "iMessage;-;+10000000000" for row in events())
-        assert not events()[-1]["on"] or exit_path == "typing"
+        assert events()[-1]["on"] == (exit_path == "typing")
     finally:
         if bridge.poll() is None:
             bridge.terminate()
@@ -221,7 +231,7 @@ def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path,
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("exit_path", ["answer", "cancel", "shutdown"])
+@pytest.mark.parametrize("exit_path", ["answer", "cancel", "typing", "shutdown"])
 def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
@@ -245,18 +255,114 @@ def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_
             wait_for(lambda: text(fake / "sent"), "the response without waiting for typing")
         elif exit_path == "cancel":
             receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
+        elif exit_path == "typing":
+            cli("--typing")
         else:
             bridge.terminate()
         (fake / "typing-hold").unlink()
         if exit_path == "shutdown":
             bridge.wait(10)
-        wait_for(lambda: events()[-1] is False, "the final stop after the pending refresh")
-        assert events() == [True, True, False]
+        expected = [True, True, False] + ([True] if exit_path == "typing" else [])
+        wait_for(lambda: events() == expected, "the ordered typing state after the pending refresh")
         if exit_path != "shutdown":
             desk_clock(8000)
-            assert events() == [True, True, False]
+            assert events() == expected
     finally:
         (fake / "typing-hold").unlink(missing_ok=True)
+        if bridge.poll() is None:
+            bridge.terminate()
+            bridge.wait(10)
+
+
+@pytest.mark.parametrize("response", ["answer", "reaction"])
+@pytest.mark.parametrize("waiting", ["lookup", "queued", "retry"])
+def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waiting):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    if response == "reaction":
+        (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
+    hold = fake / {"lookup": "lookup-hold", "queued": "send-hold", "retry": "outage"}[waiting]
+    hold.touch()
+    bridge = start(1)
+    try:
+        if waiting == "queued":
+            hold.unlink()
+            receive("previous", "Deploy the build")
+            cli("An earlier response")
+            wait_for(lambda: text(fake / "sent"), "the previous completed response")
+            hold.touch()
+            cli("A queued response")
+            wait_for(lambda: (fake / "send-waiting").exists(), "the blocked older response")
+        receive("question", "thanks!" if response == "reaction" else "What is the build status?")
+        desk_clock()
+        wait_for(lambda: '"route":"desk"' in text(state / "routing.jsonl"), "the queued desk response")
+        if waiting == "lookup":
+            wait_for(lambda: (fake / "lookup-waiting").exists(), "the slow delivery lookup")
+        elif waiting == "retry":
+            wait_for(lambda: "failed (try" in text(err), "the delivery retry")
+        desk_clock(4000)
+        def events():
+            return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
+
+        expected = ([False, False] if waiting == "queued" else []) + [True, True]
+        assert [row["on"] for row in events()] == expected
+        hold.unlink()
+        wait_for(lambda: events()[-1]["on"] is False, "typing stopped after delivery")
+        deliveries = [json.loads(row) for row in text(fake / "delivery-events").splitlines()]
+        delivered = deliveries[-1]
+        expected_response = "react question ❤️" if response == "reaction" else "The build is paused."
+        assert delivered["line"].endswith(expected_response)
+        assert delivered["chat"] == "iMessage;-;+10000000000"
+        assert delivered["typing"] is True
+        before = events()
+        desk_clock(8000)
+        assert events() == before
+    finally:
+        hold.unlink(missing_ok=True)
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("response,ending", [
+    ("answer", "dead"), ("reaction", "dead"), ("reaction", "expired"),
+    ("answer", "cancel"), ("reaction", "cancel"),
+    ("answer", "shutdown"), ("reaction", "shutdown"),
+])
+def test_undelivered_desk_response_stops_typing(tmp_path, desk_clock, response, ending):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "outage").touch()
+    if response == "reaction":
+        (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
+    bridge = start(1)
+    try:
+        receive("question", "thanks!" if response == "reaction" else "What is the build status?")
+        desk_clock()
+        wait_for(lambda: "failed (try" in text(err), "the undelivered desk response")
+        desk_clock(4000)
+        if ending == "dead":
+            (fake / ("react-refused" if response == "reaction" else "send-refused")).touch()
+            (fake / "outage").unlink()
+        elif ending == "expired":
+            desk_clock(121_000)
+        elif ending == "cancel":
+            receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
+        else:
+            bridge.terminate()
+            bridge.wait(10)
+        def events():
+            return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
+
+        wait_for(lambda: events()[-1]["on"] is False, "typing stopped without delivery")
+        assert text(fake / "sent") == ""
+        assert all(row["chat"] == "iMessage;-;+10000000000" for row in events())
+        if ending in ("dead", "expired"):
+            wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the discarded response")
+        if ending != "shutdown":
+            before = events()
+            desk_clock(8000)
+            assert events() == before
+    finally:
         if bridge.poll() is None:
             bridge.terminate()
             bridge.wait(10)
