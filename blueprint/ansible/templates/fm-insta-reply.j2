@@ -11,5 +11,5 @@ export INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval | quote }}
 export INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log | quote }}
 exec {{ (crewship_local_bin ~ '/bun') | quote }} {{ (crewship_instagram_desk_dir ~ '/instagram-graph.ts') | quote }} reply "$@"
 {% else %}
-exec {{ crewship_uv_bin | quote }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script | quote }} reply "$@"
+exec {{ crewship_uv_bin | quote }} run --isolated --quiet --with instagrapi --with 'certifi>=2026.10.19' python {{ crewship_instagram_dm_script | quote }} reply "$@"
 {% endif %}

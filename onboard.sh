@@ -8,6 +8,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # The latest uv release, checksum-verified; a no-op when it is already installed.
 python3 "$ROOT/scripts/provisions.py" --home "$HOME" --tools uv >/dev/null
 uv sync --project "$ROOT" --locked
+python3 "$ROOT/scripts/provisions.py" --home "$HOME" --python-env "$ROOT/.venv/bin/python" >/dev/null
 if (($#)); then
   exec "$ROOT/ship.sh" "$@"
 fi

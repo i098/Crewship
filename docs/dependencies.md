@@ -17,6 +17,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 It verifies that the compromised roots are absent before Ansible's first network lookup.
 It then refreshes signed APT metadata, upgrades `ca-certificates` to the latest available package, and checks trust again.
 The disabled roots are emSign Root CA - C1 and G1, and emSign ECC Root CA - C3 and G3.
+An interrupted rebuild is retried when the effective trust store is still unsafe, even if all four configuration entries already match.
 The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2) states: “Certifi 2026.10.18 removes root certificates from "emSign" from the root store.”
 `chart` checks the existing trust store without upgrading packages.
 If that check fails, update the system trust store before requesting a release preview.
@@ -26,8 +27,15 @@ Node still follows the newest release, with minimum versions of 22.23.4, 24.22.1
 The installer rejects older or unsupported releases and checks the installed executable before linking it onto PATH.
 Newer major lines remain eligible.
 
-The default recipe does not install Python's `pip` or `certifi` packages.
+The default recipe does not add Python's `pip` or `certifi` packages when they are absent.
 The repository lock excludes both packages, and uv creates the pruner and tool environments without pip seeds.
+Adding unused packages would add another trust store without serving a runtime need.
+Every managed Python environment requires `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
+After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
+`onboard.sh` handles the repository environment; the normal `ship.sh` command path does not run the package updater.
+It does not run the environment's pip to update packages.
+The Instagram listener, poller, reply command, and curator use isolated environments without pip seeds.
+They require secure certifi alongside instagrapi, which already depends on certifi.
 `uv pip` is a uv command, not a Python pip installation.
 The optional desktop packages bring Ubuntu's `python3-certifi` through `websockify` and `requests`.
 Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.
@@ -35,7 +43,7 @@ The recipe does not replace distribution Python packages with PyPI packages.
 
 For separately managed Python environments, update the CA bundle or certifi to at least 2026.10.19 before further pip downloads.
 Then update pip to at least 26.2.2, which includes the updated certifi, before updating Node.
-Those environments remain outside this recipe.
+Environments created outside Crewship remain outside this recipe.
 The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2), [pip release notes](https://pip.pypa.io/en/stable/news/#v26-2-2), and [Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) describe the fixes.
 The sources do not prescribe a combined update order.
 

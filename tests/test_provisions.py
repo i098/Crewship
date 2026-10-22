@@ -7,6 +7,8 @@ import io
 import json
 import os
 import runpy
+import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -20,6 +22,7 @@ from threading import Barrier, BrokenBarrierError, Event, Thread
 
 import pytest
 import yaml
+from jinja2 import Environment, meta
 
 SPEC = importlib.util.spec_from_file_location(
     "provisions", Path(__file__).parents[1] / "scripts/provisions.py"
@@ -104,6 +107,138 @@ def test_node_install_checks_the_executable_version(tmp_path, monkeypatch, versi
         with pytest.raises(ValueError, match="node.*below security minimum"):
             installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
         assert not (tmp_path / ".local/bin/node").exists()
+
+
+def security_wheel(directory, name, version, dependencies=(), console=False):
+    dist_info = f"{name}-{version}.dist-info"
+    files = {
+        f"{dist_info}/METADATA": (
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+            + "".join(f"Requires-Dist: {dependency}\n" for dependency in dependencies)
+        ),
+        f"{dist_info}/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        f"{name}/__init__.py": (
+            f"def main():\n    print('{name} {version}')\n" if console else ""
+        ),
+    }
+    if console:
+        files[f"{dist_info}/entry_points.txt"] = f"[console_scripts]\n{name} = {name}:main\n"
+    files[f"{dist_info}/RECORD"] = "".join(f"{path},,\n" for path in files)
+    wheel = directory / f"{name}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return wheel
+
+
+@pytest.fixture
+def python_security_index(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    for name, versions in {
+        "pip": ("26.2.1", "26.2.2", "26.3.0"),
+        "certifi": ("2026.10.18", "2026.10.19", "2026.11.1"),
+    }.items():
+        for version in versions:
+            security_wheel(wheels, name, version)
+    environment = {
+        **os.environ, "UV_NO_CONFIG": "1", "UV_NO_INDEX": "1", "UV_OFFLINE": "1",
+        "UV_FIND_LINKS": str(wheels), "UV_CACHE_DIR": str(tmp_path / "cache"),
+        "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_PYTHON_DOWNLOADS": "never",
+        "UV_PYTHON": str(Path(sys.executable).resolve()), "UV_NO_PROJECT": "1",
+    }
+    environment.pop("VIRTUAL_ENV", None)
+    environment.pop("PYTHONPATH", None)
+    return Path(shutil.which("uv")), environment, wheels
+
+
+@pytest.mark.parametrize("installed", [
+    {}, {"pip": "26.2.1"}, {"certifi": "2026.10.18"},
+    {"pip": "26.2.1", "certifi": "2026.10.18"},
+    {"pip": "26.2.2", "certifi": "2026.11.1"},
+])
+def test_python_security_updates_only_present_packages(tmp_path, python_security_index, installed):
+    uv, environment, _ = python_security_index
+    managed = tmp_path / ".local/bin"
+    managed.mkdir(parents=True)
+    (managed / "uv").symlink_to(uv)
+    other = tmp_path / "other-bin"
+    other.mkdir()
+    (other / "uv").write_text("#!/bin/sh\nexit 99\n")
+    (other / "uv").chmod(0o755)
+    environment["PATH"] = f"{other}{os.pathsep}{environment['PATH']}"
+    python = tmp_path / "venv/bin/python"
+    subprocess.run([uv, "venv", "--python", sys.executable, python.parent.parent],
+                   env=environment, check=True, capture_output=True)
+    if installed:
+        subprocess.run(
+            [uv, "pip", "install", "--python", python,
+             *(f"{name}=={version}" for name, version in installed.items())],
+            env=environment, check=True, capture_output=True,
+        )
+    result = subprocess.run(
+        [sys.executable, SPEC.origin, "--home", tmp_path, "--python-env", python],
+        env=environment, check=True, capture_output=True, text=True,
+    )
+    expected = {
+        name: {"pip": "26.3.0", "certifi": "2026.11.1"}[name]
+        if version in ("26.2.1", "2026.10.18") else version
+        for name, version in installed.items()
+    }
+    actual = json.loads(subprocess.check_output(
+        [python, "-c", "import importlib.metadata as m, json; "
+         "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))"],
+        env=environment,
+    ))
+    assert actual == expected
+    assert json.loads(result.stdout)["changed"] == (installed != expected)
+    assert not installer.secure_python(python, uv, environment)
+
+
+@pytest.mark.parametrize("template", [
+    "fm-insta-reply.j2", "instagram-dm-listen.service.j2",
+    "instagram-dm-poll.service.j2", "instagram-reel-curator.service.j2",
+])
+def test_instagram_launchers_require_secure_certifi(tmp_path, python_security_index, template):
+    uv, environment, wheels = python_security_index
+    for wheel in wheels.glob("certifi-*.whl"):
+        if "2026.10.18" not in wheel.name:
+            wheel.unlink()
+    security_wheel(wheels, "instagrapi", "1.0.0", ("certifi>=2026.10.18",))
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import importlib.metadata as m, json\n"
+        "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))\n"
+    )
+    source = (Path(SPEC.origin).parents[1] / "blueprint/ansible/templates" / template).read_text()
+    jinja = Environment()
+    jinja.filters.update(
+        quote=shlex.quote, dirname=os.path.dirname, comment=lambda value: "# " + value,
+    )
+    variables = dict.fromkeys(meta.find_undeclared_variables(jinja.parse(source)), "unused")
+    variables.update(
+        crewship_uv_bin=str(uv), crewship_instagram_dm_backend="instagrapi",
+        crewship_instagram_dm_script=str(probe), crewship_instagram_curator_script=str(probe),
+        crewship_instagram_dm_session=str(tmp_path / "session.json"),
+    )
+    rendered = jinja.from_string(source).render(variables)
+    if template.endswith("service.j2"):
+        unit = configparser.ConfigParser(interpolation=None, strict=False)
+        unit.read_string(rendered)
+        command = shlex.split(unit["Service"]["ExecStart"])
+    else:
+        launcher = tmp_path / "reply"
+        launcher.write_text(rendered)
+        launcher.chmod(0o755)
+        command = [str(launcher)]
+    blocked = subprocess.run(command, cwd=tmp_path, env=environment, capture_output=True, text=True)
+    assert blocked.returncode != 0
+    assert "certifi" in blocked.stderr
+    security_wheel(wheels, "certifi", "2026.10.19")
+    result = subprocess.run(
+        command, cwd=tmp_path, env=environment, check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == {"instagrapi": "1.0.0", "certifi": "2026.10.19"}
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
@@ -1329,24 +1464,26 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     assert "error: network down" in capsys.readouterr().err
 
 
-def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(tmp_path):
+def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(
+    tmp_path, python_security_index,
+):
+    uv, environment, wheels = python_security_index
     bin_dir = tmp_path / ".local/bin"
     bin_dir.mkdir(parents=True)
-    release = tmp_path / "release"
-    release.write_text("fdu 0.5.0\n")
-    uv = bin_dir / "uv"
-    uv.write_text(
-        "#!/bin/sh\n"
-        '[ "$*" = "tool install --upgrade --no-build fdu" ] || exit 2\n'
-        f'printf \'#!/bin/sh\\necho "%s"\\n\' "$(cat {release})" > "$UV_TOOL_BIN_DIR/fdu"\n'
-        'chmod +x "$UV_TOOL_BIN_DIR/fdu"\n'
-    )
-    uv.chmod(0o755)
-    assert installer.fdu_install(tmp_path, {}) is True
+    (bin_dir / "uv").symlink_to(uv)
+    security_wheel(wheels, "fdu", "0.5.0", ("certifi>=2026.10.18",), console=True)
+    assert installer.fdu_install(tmp_path, environment) is True
     assert subprocess.check_output([bin_dir / "fdu"], text=True) == "fdu 0.5.0\n"
-    assert installer.fdu_install(tmp_path, {}) is False
-    release.write_text("fdu 0.6.0\n")
-    assert installer.fdu_install(tmp_path, {}) is True
+    assert installer.fdu_install(tmp_path, environment) is False
+    security_wheel(wheels, "fdu", "0.6.0", ("certifi>=2026.10.18",), console=True)
+    assert installer.fdu_install(tmp_path, environment) is True
+    assert subprocess.check_output([bin_dir / "fdu"], text=True) == "fdu 0.6.0\n"
+    python = tmp_path / "tools/fdu/bin/python"
+    assert json.loads(subprocess.check_output(
+        [python, "-c", "import importlib.metadata as m, json; "
+         "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))"],
+        env=environment,
+    )) == {"fdu": "0.6.0", "certifi": "2026.11.1"}
 
 
 def test_every_installed_tool_has_a_built_with_line():

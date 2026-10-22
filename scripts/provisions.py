@@ -642,6 +642,29 @@ def command(argv, environment):
     subprocess.run([str(arg) for arg in argv], env=environment, check=True, stdout=sys.stderr)
 
 
+def secure_python(python, uv, environment):
+    probe = (
+        "import importlib.metadata as m, json, sys; "
+        "assert sys.prefix != sys.base_prefix, 'refusing to modify system Python'; "
+        "print(json.dumps({d.metadata['Name'].lower(): d.version for d in m.distributions() "
+        "if d.metadata['Name'].lower() in ('pip', 'certifi')}))"
+    )
+    before = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
+    requirements = [
+        f"{name}>={floor}" for name, floor in (("certifi", "2026.10.19"), ("pip", "26.2.2"))
+        if name in before
+    ]
+    if not requirements:
+        return False
+    command(
+        [uv, "pip", "install", "--system-certs", "--no-build", "--no-deps",
+         "--python", python, *requirements],
+        environment,
+    )
+    after = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
+    return before != after
+
+
 def link_package_bins(home, destination, package_names):
     # Only expose explicitly requested packages, not incidental dependency bins.
     changed = False
@@ -851,7 +874,13 @@ def fdu_install(home, environment):
         [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build", "fdu"],
         {**environment, "UV_TOOL_BIN_DIR": str(home / ".local/bin")},
     )
-    return version() != before
+    tool_dir = subprocess.check_output(
+        [home / ".local/bin/uv", "tool", "dir"], env=environment, text=True
+    ).strip()
+    changed = secure_python(
+        Path(tool_dir) / "fdu/bin/python", home / ".local/bin/uv", environment
+    )
+    return version() != before or changed
 
 
 # omp marketplace plugins: name -> repository.
@@ -919,6 +948,7 @@ def main():
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
     parser.add_argument("--check-ca", action="store_true", help="reject compromised system CA roots")
+    parser.add_argument("--python-env", type=Path, help="secure present pip and certifi in a virtualenv")
     parser.add_argument("--development", action="store_true")
     parser.add_argument(
         "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
@@ -941,6 +971,10 @@ def main():
     args = parser.parse_args()
     if args.check_ca:
         return check_ca_bundle()
+    if args.python_env:
+        changed = secure_python(args.python_env, args.home / ".local/bin/uv", dict(os.environ))
+        print(json.dumps({"changed": changed}))
+        return
     key = platform_key()
     names = args.tools.split(",") + (AGENT_TOOLS if args.npm else [])
     if "sentrux" in names:

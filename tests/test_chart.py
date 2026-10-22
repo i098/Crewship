@@ -58,7 +58,8 @@ def test_chart_checks_ca_trust_without_updating_packages(tmp_path, subject, bloc
         assert "failed=0" in output
 
 
-def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path):
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path, interrupted):
     tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/preflight.yml").read_text())
     start = next(i for i, task in enumerate(tasks)
                  if task["name"] == "Distrust the compromised emSign roots")
@@ -90,20 +91,37 @@ def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path):
     ]
     subprocess.run(updater, check=True, capture_output=True)
     tasks[0]["ansible.builtin.lineinfile"]["path"] = str(config)
-    tasks[1]["ansible.builtin.command"]["argv"] = updater
+    rebuild = next(task for task in tasks
+                   if task["name"] == "Rebuild system CA trust after distrusting emSign")
+    rebuild["ansible.builtin.command"]["argv"] = updater
     for task in tasks:
         task["become"] = False
     playbook = tmp_path / "distrust.yml"
-    playbook.write_text(yaml.safe_dump([{
+    play = {
         "hosts": "localhost", "connection": "local", "gather_facts": False,
         "environment": {"SSL_CERT_FILE": str(store / "ca-certificates.crt"),
                         "SSL_CERT_DIR": str(empty)},
         "vars": {"crewship_installer": str(ROOT / "scripts/provisions.py"),
                  "crewship_cfg": {"home": str(tmp_path)}},
         "tasks": tasks,
-    }]))
+    }
     command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
                str(playbook)]
+    if interrupted:
+        playbook.write_text(yaml.safe_dump([{
+            **play, "tasks": [tasks[0], {"ansible.builtin.fail": {"msg": "interrupted"}}],
+        }]))
+        stopped = subprocess.run(command, capture_output=True, text=True)
+        assert stopped.returncode != 0
+        assert config.read_text().splitlines() == [*("!" + name for name in blocked), names[-1]]
+        unsafe = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/provisions.py"), "--home", str(tmp_path),
+             "--check-ca"],
+            env={**os.environ, **play["environment"]}, capture_output=True, text=True,
+        )
+        assert unsafe.returncode != 0
+        assert "still trusts compromised" in unsafe.stderr
+    playbook.write_text(yaml.safe_dump([play]))
     first = subprocess.run(command, capture_output=True, text=True)
     assert first.returncode == 0, first.stdout + first.stderr
     assert config.read_text().splitlines() == [*("!" + name for name in blocked), names[-1]]

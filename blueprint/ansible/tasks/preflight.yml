@@ -103,13 +103,21 @@
   register: crewship_ca_distrust
   when: not ansible_check_mode
 
+- name: Inspect system CA trust before rebuilding
+  ansible.builtin.command:
+    argv: [python3, "{{ crewship_installer }}", --home, "{{ crewship_cfg.home }}", --check-ca]
+  register: crewship_ca_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
 - name: Rebuild system CA trust after distrusting emSign
   ansible.builtin.command:
     argv: [update-ca-certificates, --fresh]
   become: true
   when:
     - not ansible_check_mode
-    - crewship_ca_distrust is changed
+    - crewship_ca_distrust is changed or crewship_ca_before.rc != 0
 
 - name: Reject compromised CA roots before network access
   ansible.builtin.command:

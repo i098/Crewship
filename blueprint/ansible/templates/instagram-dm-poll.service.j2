@@ -17,4 +17,4 @@ Environment="INSTAGRAM_DM_NOTIFY={{ crewship_instagram_dm_notify }}"
 Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
 # Optional KEY=value lines: the limiter and timing settings of instagram_dm.py (docs/architecture.md#instagram-dm-alerts).
 EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
-ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_dm_script }} poll
+ExecStart={{ crewship_uv_bin }} run --isolated --quiet --with instagrapi --with 'certifi>=2026.10.19' python {{ crewship_instagram_dm_script }} poll
