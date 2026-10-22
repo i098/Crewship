@@ -12,10 +12,12 @@ For each message from the owner, the service does these steps:
    It also appends the owner text to desk memory.
    It keeps authored text separate from quoted thread metadata for action and social checks.
 3. It marks the text as read.
-4. It waits 3 seconds of silence to combine a burst.
-   Each new text cancels a running draft, starts the wait again, and starts a fresh status read.
-   The desk uses that status result after the wait without reading it again.
-   Slow message persistence can make the status snapshot more than 3 seconds old.
+4. It combines text until 350 milliseconds of silence or 2 seconds from the first text, whichever comes first.
+   This cap limits the batching wait, not status retrieval, model work, or delivery.
+   Each new text cancels a running draft, resets the quiet timer, and starts a fresh status read.
+   Text received during a draft starts a new batching wait; the next draft includes every pending message.
+   The desk uses the latest status result after the wait without reading it again.
+   Slow message persistence can make the status snapshot older than the batching wait.
    Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
    A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
 5. The desk model classifies the whole pending burst.

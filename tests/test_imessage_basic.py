@@ -46,7 +46,8 @@ if (process.env.STATE_DIRECTORY) {
   const schedule = globalThis.setTimeout;
   const cancel = globalThis.clearTimeout;
   globalThis.setTimeout = (fn, ms, ...args) => {
-    if (ms !== Number(process.env.FM_IMESSAGE_TEST_QUIET_MS)) return schedule(fn, ms, ...args);
+    if (![process.env.FM_IMESSAGE_TEST_QUIET_MS, process.env.FM_IMESSAGE_TEST_MAX_WAIT_MS]
+        .some((value) => ms === Number(value))) return schedule(fn, ms, ...args);
     const timer = { at: Date.now() + ms, run: () => fn(...args) };
     timers.set(timer, timer);
     return timer;
@@ -747,6 +748,61 @@ def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path, desk
         bridge.wait(10)
 
 
+def test_single_text_starts_after_the_short_quiet_period(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("single", "What is the build status?")
+        wait_for(lambda: text(fake / "status-calls"), "status before the quiet period ends")
+        desk_clock(TEST_QUIET_MS - 1)
+        assert text(fake / "model-calls") == ""
+        desk_clock(1)
+        wait_for(lambda: text(fake / "sent"), "the single-text answer")
+        assert text(fake / "sent").splitlines() == ["send The build is paused."]
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_burst_cap_drafts_latest_text_and_a_correction_replaces_the_draft(tmp_path, monkeypatch, desk_clock):
+    monkeypatch.setenv("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 3))
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "model-hold").touch()
+    bridge = start(1)
+    try:
+        receive("first", "What is the build status?")
+        for i in range(3):
+            desk_clock(TEST_QUIET_MS - 1)
+            receive(f"more{i}", "Is the build paused?")
+        assert text(fake / "model-calls") == ""
+        desk_clock(3)
+        wait_for(lambda: (fake / "model-started").exists(), "the draft at the burst cap")
+        first = json.loads(text(fake / "model-calls").splitlines()[0])
+        assert "owner 4: Is the build paused?" in first["prompt"]
+        (fake / "status").write_text("The build is running.")
+        (fake / "answer").write_text(json.dumps({
+            "kind": "reply", "answer": "The build is running.",
+            "evidence": [{"source": "status", "quote": "The build is running."}],
+        }))
+        receive("correction", "Correction: is the build running?")
+        desk_clock(TEST_QUIET_MS - 1)
+        assert len(text(fake / "model-calls").splitlines()) == 1
+        assert text(fake / "sent") == ""
+        desk_clock(1)
+        wait_for(lambda: len(text(fake / "model-calls").splitlines()) == 2, "the replacement draft")
+        (fake / "model-hold").unlink()
+        wait_for(lambda: text(fake / "sent"), "the corrected answer")
+        assert text(fake / "sent").splitlines() == ["send The build is running."]
+        last = json.loads(text(fake / "model-calls").splitlines()[-1])
+        assert "owner 1: What is the build status?" in last["prompt"]
+        assert "owner 5: Correction: is the build running?" in last["prompt"]
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 def test_status_starts_during_quiet_and_refreshes_for_the_latest_text(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
@@ -1153,7 +1209,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         if mode != "answer":
             assert text(fake / "sent") == ""
         first = requests[0]
-        assert first["at"] - published >= (3 if mode == "answer" else TEST_QUIET_MS / 1000)
+        assert first["at"] - published >= (0.35 if mode == "answer" else TEST_QUIET_MS / 1000)
         if mode == "answer":
             assert first["at"] - published < 6
         assert first["auth"] == "Bearer test-inception-key"
@@ -1492,19 +1548,25 @@ def test_attachment_hands_off_without_using_the_basic_model(tmp_path):
         bridge.wait(10)
 
 
-def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(tmp_path):
+@pytest.mark.parametrize("activity,expected", [
+    (["--typing"], []),
+    (["--react", "❤️"], ["react activity ❤️"]),
+    (["The build is running."], ["send The build is running."]),
+])
+def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(tmp_path, desk_clock, activity, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "model-hold").touch()
     bridge = start(1)
     try:
         receive("activity", "What is the build status?")
+        desk_clock()
         wait_for(lambda: (fake / "model-started").exists(), "the draft")
-        cli("--typing")
+        cli(*activity)
         (fake / "model-hold").unlink()
         wait_for(lambda: "photon-activity " in text(notes), "the handoff after supervisor activity")
-        time.sleep(0.2)
+        desk_clock(TEST_QUIET_MS * 6)
         assert text(notes).count("photon-activity ") == 1
-        assert text(fake / "sent") == ""
+        assert text(fake / "sent").splitlines() == expected
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -394,32 +394,43 @@ async function audio(c: Saveable, id: string, save: (c: Saveable, id: string) =>
 
 type Timers = { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(t: unknown): void };
 
-// When the front desk may step in. Each text from him restarts the quiet period; when it ends with no
-// Firstmate send, tapback or typing since his last text, `run` gets one desk turn for the whole burst.
-// `run` must call its `current()` right before it sends: false means he sent more or Firstmate answered
-// meanwhile, so the draft is dropped (the next quiet period re-reads the whole thread).
-// No transport reports inbound typing, so only a new text restarts the wait.
+// Each text resets the quiet timer and invalidates an older draft. The optional cap limits batching,
+// not drafting: `current()` must still be checked before delivery, including after the cap fires.
 export class DeskTiming {
   private seq = 0;
   private inbound = 0;
   private firstmate = 0;
   private timer: unknown;
+  private maxTimer: unknown;
 
   constructor(
     private quietMs: number,
     private run: (current: () => boolean) => void,
     private timers: Timers = globalThis as unknown as Timers,
+    private maxWaitMs?: number,
   ) {}
 
   // `quietMs` overrides the quiet period for this burst: the Instagram desk waits longer while reel links come in.
   inboundText(quietMs = this.quietMs) {
-    const burst = this.inbound = ++this.seq;
+    this.inbound = ++this.seq;
     this.timers.clearTimeout(this.timer);
-    this.timer = this.timers.setTimeout(() => this.run(() => this.inbound === burst && this.firstmate < burst), quietMs);
+    const start = () => {
+      this.timers.clearTimeout(this.timer);
+      this.timers.clearTimeout(this.maxTimer);
+      this.maxTimer = undefined;
+      const burst = this.inbound;
+      this.run(() => this.inbound === burst && this.firstmate < burst);
+    };
+    this.timer = this.timers.setTimeout(start, quietMs);
+    if (this.maxTimer === undefined && this.maxWaitMs !== undefined) {
+      this.maxTimer = this.timers.setTimeout(start, this.maxWaitMs);
+    }
   }
 
   firstmateActive() {
     this.firstmate = ++this.seq;
     this.timers.clearTimeout(this.timer);
+    this.timers.clearTimeout(this.maxTimer);
+    this.maxTimer = undefined;
   }
 }

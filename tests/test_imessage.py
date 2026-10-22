@@ -387,6 +387,53 @@ console.log(JSON.stringify(out));
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_desk_caps_continuous_texts_and_resets_after_a_turn_or_stand_down():
+    result = bun(f"""
+import {{ DeskTiming }} from {DESK};
+let now = 0, next = 1;
+const pending = new Map(), turns = [];
+const clock = {{
+  setTimeout(fn, ms) {{ pending.set(next, [now + ms, fn]); return next++; }},
+  clearTimeout(id) {{ pending.delete(id); }},
+  advance(ms) {{
+    now += ms;
+    for (const [id, [at, fn]] of [...pending]) if (at <= now && pending.has(id)) {{
+      pending.delete(id); fn();
+    }}
+  }},
+}};
+const desk = new DeskTiming(350, (current) => turns.push(current), clock, 2000);
+desk.inboundText();
+for (let i = 0; i < 6; i++) {{ clock.advance(300); desk.inboundText(); }}
+clock.advance(199);
+const beforeCap = turns.length;
+clock.advance(1);
+const atCap = turns.length;
+const cappedCurrent = turns[0]?.();
+desk.inboundText();
+const oldCurrent = turns[0]?.();
+clock.advance(349);
+const beforeQuiet = turns.length;
+clock.advance(1);
+const afterQuiet = turns.length;
+desk.inboundText(); desk.firstmateActive(); clock.advance(2000);
+const afterStandDown = turns.length;
+desk.inboundText(); clock.advance(349);
+const beforeNext = turns.length;
+clock.advance(1);
+console.log(JSON.stringify({{
+  beforeCap, atCap, cappedCurrent, oldCurrent, beforeQuiet, afterQuiet,
+  afterStandDown, beforeNext, finalTurns: turns.length, current: turns.at(-1)?.(),
+}}));
+""")
+    assert result == {
+        "beforeCap": 0, "atCap": 1, "cappedCurrent": True, "oldCurrent": False,
+        "beforeQuiet": 1, "afterQuiet": 2, "afterStandDown": 2,
+        "beforeNext": 2, "finalTurns": 3, "current": True,
+    }
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_service_refuses_foreign_requests():
     result = bun(f"""
 import {{ localCommand }} from {DESK};
@@ -1807,13 +1854,13 @@ def publish_json(path, record):
     pending.replace(path)
 
 
-TEST_QUIET_MS = 2000  # the bridge's quiet period in test mode; production waits three seconds
+TEST_QUIET_MS = 2000  # the bridge's test quiet period; production waits 350 milliseconds
 
 
 def fake_bridge(tmp_path, test_mode=True):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
-    FM_IMESSAGE_TEST_QUIET_MS and waits its real three seconds."""
+    timer overrides and uses the production burst timing."""
     app, fake, state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
     shutil.copytree(ROOT / "apps/imessage", app, ignore=shutil.ignore_patterns("fm-*"))
     pkg = app / "node_modules/spectrum-ts"
@@ -1850,6 +1897,7 @@ def fake_bridge(tmp_path, test_mode=True):
         "PHOTON_PROJECT_SECRET": "fake",
         "STATE_DIRECTORY": str(state),
         "FM_IMESSAGE_TEST_QUIET_MS": str(TEST_QUIET_MS),
+        "FM_IMESSAGE_TEST_MAX_WAIT_MS": os.environ.get("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 6)),
         **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
     }
     out, err = tmp_path / "out", tmp_path / "err"
