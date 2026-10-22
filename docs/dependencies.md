@@ -45,6 +45,18 @@ See [Schedule viewer](configuration.md#schedule-viewer) for its controls and inv
 - The latest uv (below), then `uv sync --locked`: ansible-core 2.21.4, jsonschema 4.26.0, PyYAML 6.0.3. `uv.lock` is this repository's own development environment, so it stays locked.
 - See [pyproject.toml](../pyproject.toml) for the dev dependency group.
 
+## Instagram Python environments
+
+The listener, poller, reply command, and curator run instagrapi in isolated uv environments with `certifi>=2026.10.19`.
+Isolation prevents older pip or certifi packages in the base interpreter from entering these environments.
+The commands also use `--no-project` so the current project's dependencies cannot add an older pip.
+uv does not seed pip here, so no pip copy needs an update.
+The environments keep absent packages absent; any retained pip copy requires `pip>=26.2.2`.
+The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2) describes the compromised emSign roots.
+[pip 26.2.2](https://pip.pypa.io/en/stable/news/#v26-2-2) includes the updated certifi.
+Update the host CA store before dependency downloads; the [system trust change](https://github.com/i098/Crewship/issues/830) handles that separately.
+Already-running listeners keep their existing environment until restarted; this change applies to their next launch.
+
 ## Latest releases
 
 `scripts/provisions.py`. Native tools are linked into `~/.local/bin`; the npm-registry tools are each installed with `bun add -g` (bun's global directory pointed at `~/.local/share/crewship/<tool>/<version>`, so `~/.bun` stays untouched; bun checks the registry integrity) and linked from there. Superseded versions stay on disk.
