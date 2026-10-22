@@ -804,7 +804,6 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
   if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
-  if (stopping || !current()) return;
   return { answer, target };
 }
 
