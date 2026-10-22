@@ -39,6 +39,14 @@ if (process.env.STATE_DIRECTORY) {
     if (cmd[0] === "omp" && existsSync(`${process.env.FAKE_DIR}/spawn-error`)) throw new Error("test spawn failure");
     return spawn(cmd, ...args);
   };
+  const sleep = Bun.sleep;
+  Bun.sleep = async (ms) => {
+    const pause = `${process.env.FAKE_DIR}/bubble-pause`;
+    if (existsSync(pause) && ms === Number(readFileSync(pause, "utf8"))) {
+      writeFileSync(`${process.env.FAKE_DIR}/bubble-waiting`, "");
+      while (existsSync(pause)) await sleep(5);
+    } else await sleep(ms);
+  };
   const file = process.env.FM_TEST_CLOCK;
   Date.now = () => Number(readFileSync(file, "utf8"));
   Math.random = () => 0.5;
@@ -147,9 +155,10 @@ def basic_rig(tmp_path, test_mode=True):
 
 
 @pytest.mark.parametrize("rewrite,expected", [
-    ("there are 1,200 jobs\n\ndetails: https://example.test/jobs/12", "there are 1,200 jobs\nsend details: https://example.test/jobs/12"),
+    ("There are 1200 jobs\n\nDetails: https://example.test/jobs/12", "There are 1200 jobs\nsend Details: https://example.test/jobs/12"),
     ("There are 1201 jobs. Details: https://example.test/jobs/12", None),
     ("There are 1200 jobs. Details: https://example.test/jobs/13", None),
+    ("There are 1,200 jobs. Details: https://example.test/jobs/12", None),
     ("", None),
 ])
 def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, rewrite, expected):
@@ -180,6 +189,19 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
     ("The build is paused.", "The build is running."),
     ("Firstmate is not the desk.", "The desk is not Firstmate."),
     ("The fee is $12.", "The fee is 12."),
+    ("The failing test is test_login.", "The failing test is test-login."),
+    ("The failing test is test_login.", "The failing test is Test_login."),
+    ("Queue depth < 5", "Queue depth > 5"),
+    ("Queue depth <= 5", "Queue depth < 5"),
+    ("The path is /tmp/test_login.", "The path is /tmp/test-login."),
+    ("The issue is #123.", "The issue is 123."),
+    ("The version is v1.2.3.", "The version is v1.2.4."),
+    ("The timeout is 5 ms.", "The timeout is 5 s."),
+    ("The size is 5 MB.", "The size is 5 mb."),
+    ("The timeout is 5ms.", "The timeout is 5 ms."),
+    ("The path is /tmp/test_login.", "The path is /tmp/test_login"),
+    ("The config is .env.", "The config is env."),
+    ("The identifier is foo.bar.", "The identifier is foo bar."),
 ])
 def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -260,6 +282,58 @@ def test_voice_stands_down_before_delivery(tmp_path, desk_clock, activity):
         if activity == "new-text":
             wait_for(lambda: "photon-correction " in text(notes), "the replacement handoff")
     finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("activity", ["none", "send", "react", "typing", "new-text"])
+def test_voice_stands_down_between_bubbles(tmp_path, desk_clock, activity):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    first, second = "The build is paused.", "The queue is empty."
+    draft = f"{first}\n{second}"
+    (fake / "status").write_text(draft)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "answer": draft,
+        "evidence": [{"source": "status", "quote": line} for line in (first, second)],
+    }))
+    (fake / "voice-answer").write_text(f"{first}\n\n{second}")
+    pause = fake / "bubble-pause"
+    pause.write_text(str(400 + 25 * len(second)))
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: (fake / "bubble-waiting").exists(), "the pause after the first bubble")
+        assert text(fake / "sent") == f"send {first}\n"
+        if activity == "new-text":
+            receive("correction", "Deploy it instead")
+        elif activity == "send":
+            cli("Supervisor answer")
+        elif activity in ("react", "typing"):
+            cli(f"--{activity}", *(["❤️"] if activity == "react" else []))
+        pause.unlink()
+        wait_for(lambda: list((state / "outbox-done").glob("*.json")), "the finished desk delivery")
+        assert not list((state / "outbox-dead").glob("*.json"))
+        if activity == "none":
+            assert text(fake / "sent") == f"send {first}\nsend {second}\n"
+        else:
+            assert second not in text(fake / "sent")
+        if activity == "send":
+            wait_for(lambda: "send Supervisor answer\n" in text(fake / "sent"), "the supervisor answer")
+        if activity == "new-text":
+            desk_clock()
+            wait_for(lambda: "photon-correction " in text(notes), "the correction handoff")
+        expected = [f"{first}\n\n{second}" if activity == "none" else first]
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
+        sent = text(fake / "sent")
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        desk_clock()
+        assert text(fake / "sent") == sent
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
+    finally:
+        pause.unlink(missing_ok=True)
         bridge.terminate()
         bridge.wait(10)
 
@@ -1322,7 +1396,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
                 if body["reasoning_effort"] != "instant":
                     status, reply = 400, {"error": "unsupported reasoning effort"}
                 else:
-                    status, reply = 200, {"choices": [{"message": {"content": "the build is paused"}}]}
+                    status, reply = 200, {"choices": [{"message": {"content": "The build is paused"}}]}
             elif len(requests) == 1:
                 call = {"id": "c1", "type": "function", "function": {"name": "zoom", "arguments": '{"id": 0, "n": 1}'}}
                 status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
@@ -1351,7 +1425,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         receive("first", "What is the build status?")
         if mode == "answer":
             wait_for(lambda: text(fake / "sent"), "the direct answer")
-            assert text(fake / "sent").splitlines() == ["send the build is paused"]
+            assert text(fake / "sent").splitlines() == ["send The build is paused"]
             assert requests[2]["body"]["reasoning_effort"] == "instant"
             assert "tools" not in requests[2]["body"]
             assert text(notes) == ""

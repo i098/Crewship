@@ -142,6 +142,7 @@ const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((
   handoffPending();
 }), undefined, MAX_WAIT_MS);
 let deskRun: Bun.Subprocess | undefined;
+const deskDeliveries = new Map<string, () => boolean>();
 let stopDeskTyping: (() => void) | undefined;
 let deskTypingRequestId: string | undefined;
 let deskTypingPending: Promise<unknown> = Promise.resolve();
@@ -500,9 +501,16 @@ function finishDeskDelivery(o: Out) {
   if (o.requestId && o.requestId === deskTypingRequestId) stopDeskTyping?.();
 }
 
+function checkDeskDelivery(o: Out) {
+  if (o.kind === "desk" && deskDeliveries.get(o.guid!)?.() === false) {
+    throw Object.assign(new Error("desk response cancelled"), { permanent: true, maybeSent: false });
+  }
+}
+
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
+  if (!o.done) checkDeskDelivery(o);
   if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
@@ -512,8 +520,10 @@ async function deliver(o: Out, save: (o: Out) => void) {
       deliveryTyping(kind, true);
       await Bun.sleep(typingPause(part));
     }
-    deliveryTyping(kind, false);
-    await sendBubble(o, i, part, save);
+    if (!await sendCurrentBubble(o, i, part, save)) {
+      save((o = { ...o, bubbles: o.bubbles?.slice(0, o.done) }));
+      break;
+    }
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
@@ -521,6 +531,19 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
   if (o.react) return deliverReaction(o, save);
   if (o.image) rmSync(o.image.path, { force: true });
+  deskDeliveries.delete(o.guid!);
+}
+
+async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
+  try {
+    checkDeskDelivery(o);
+    if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
+    await sendBubble(o, i, part, save);
+    return true;
+  } catch (e) {
+    if (!o.done || o.kind !== "desk" || deskDeliveries.get(o.guid!)?.() !== false) throw e;
+    return false;
+  }
 }
 
 function deliveryTyping(kind: Kind, on: boolean) {
@@ -539,13 +562,17 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
   const line = lineOf(o);
   if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
   try {
-    await line.react(o, o.react!, () => save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } }));
+    await line.react(o, o.react!, () => {
+      checkDeskDelivery(o);
+      save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
+    });
   } catch (e) {
     if (notSent(e)) save(o);
     throw e;
   }
   finishDeskDelivery(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
+  deskDeliveries.delete(o.guid!);
 }
 
 // Sends a card's bubble. A link card is its page's URL as a plain text, which iMessage shows as a link preview from
@@ -639,6 +666,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
       const thread = separated ? reply : undefined;
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
+        checkDeskDelivery(o);
         if (typeof bubble === "string") await line.send(space, bubble, thread, guid);
         else await line.sendImage!(space, bubble, thread);
       } catch (e) {
@@ -715,7 +743,7 @@ async function runDesk(current: () => boolean) {
     if (stopping || !current()) return;
     if (result === undefined) handoffPending();
     else {
-      commitDeskAnswer(pending, result);
+      commitDeskAnswer(pending, result, current);
       queued = true;
     }
     const at = result?.target.ref ?? pending.at(-1)!.ref;
@@ -725,15 +753,17 @@ async function runDesk(current: () => boolean) {
   }
 }
 
-function commitDeskAnswer(pending: Routing[], result: DeskResult) {
+function commitDeskAnswer(pending: Routing[], result: DeskResult, current: () => boolean) {
   const { answer, target } = result;
   const ids = pending.map((r) => r.requestId);
+  const guid = crypto.randomUUID();
+  deskDeliveries.set(guid, current);
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
       ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
-      kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+      kind: "desk", guid, at: Date.now() } });
   flushRoutes();
 }
 
@@ -803,6 +833,7 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
+  deskDeliveries.delete(item.guid!);
   if (!item.requests?.length || item.done || Object.keys(item.maybe ?? {}).length) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();

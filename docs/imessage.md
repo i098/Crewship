@@ -44,9 +44,9 @@ For each message from the owner, the service does these steps:
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
    After those checks, one voice pass rewrites only the wording in the owner's short, blunt chat style.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
-   The service rejects changed numbers or links, empty replies, failed calls, and replies over 110% of the draft's length.
-   It also requires the original words in order, including negations, because number and link checks cannot prove a paraphrase safe.
-   Case, punctuation, spacing, and number grouping may change; links must match exactly.
+   The service rejects changed tokens or links, empty replies, failed calls, and replies over 110% of the draft's length.
+   It requires the original tokens in order and with the same case, including names, identifiers, paths, versions, numbers, units, and comparison operators.
+   Only whitespace and ordinary sentence punctuation may change; links must match exactly.
    A rejected rewrite sends the original checked draft.
    Blank lines separate bubbles; lists stay in one bubble.
    Reactions do not use the voice pass.
@@ -75,6 +75,8 @@ For each message from the owner, the service does these steps:
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
+   A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
+   The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
