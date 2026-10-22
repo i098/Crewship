@@ -41,7 +41,7 @@ The optional desktop packages bring Ubuntu's `python3-certifi` through `websocki
 Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.
 The recipe does not replace distribution Python packages with PyPI packages.
 
-For separately managed Python environments, update the CA bundle or certifi to at least 2026.10.19 before further pip downloads.
+For separately managed Python environments, Crewship recommends updating the CA bundle or certifi to at least 2026.10.19 before further pip downloads.
 Then update pip to at least 26.2.2, which includes the updated certifi, before updating Node.
 Environments created outside Crewship remain outside this recipe.
 The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2), [pip release notes](https://pip.pypa.io/en/stable/news/#v26-2-2), and [Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) describe the fixes.

@@ -7,7 +7,17 @@ description: Use when the operator says an Instagram account got a DM or shared 
 
 The agent has its own Instagram account. The operator sends reels to it by DM. Read the DMs, take the reel links, and watch them. Always assume a shared link is a reel.
 
-This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unofficial; it may break when Instagram changes its API). `instagram_dm.py` sits next to this file and runs through `uv`, so nothing is installed: `uv run --quiet --with instagrapi python instagram_dm.py COMMAND`.
+This skill wraps [`instagrapi`](https://pypi.org/project/instagrapi/) (MIT, unofficial; it may break when Instagram changes its API).
+`instagram_dm.py` sits next to this file.
+Run its commands in an isolated uv environment:
+
+```bash
+uv run --isolated --quiet --with instagrapi --with 'certifi>=2026.10.19' python instagram_dm.py COMMAND
+```
+
+Use the same prefix with `reel_curator.py` for curator commands.
+These commands install dependencies in uv's cache, not in the project environment.
+See [CA trust and security minimums](../../../../docs/dependencies.md#ca-trust-and-security-minimums) for the version policy.
 
 ## Rules
 
