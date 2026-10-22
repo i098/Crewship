@@ -63,11 +63,7 @@ Herdr's sidebar draws text cells only, so the terminal font on the machine that 
 
 ### The machine entry
 
-The whole-machine line goes on a workspace labelled `machine` when one exists. It is an otherwise empty workspace you create once, then move to the top of the workspace list:
-
-```bash
-herdr workspace create --cwd ~ --label machine --no-focus
-```
+See [Schedule viewer](configuration.md#schedule-viewer) for automatic `machine` workspace creation and the schedules tab policy.
 
 Its entry shows the state dot and the machine line, followed by the provider row.
 It shows no name, label, workspace counts or workspace resource line.
