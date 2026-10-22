@@ -872,7 +872,12 @@ function relay(password = "pw-test") {
         if (r.hang) return new Promise(() => {});
         return Response.json({ data: { guid: `sent-${r.sent.length}`, tempGuid: body.tempGuid } });
       }
-      if (path === "message/react") { r.sent.push(body); return Response.json({ data: {} }); }
+      if (path === "message/react") {
+        if (r.reactStatus) return new Response("reaction refused", { status: r.reactStatus });
+        r.sent.push(body);
+        if (r.hang) return new Promise(() => {});
+        return Response.json({ data: {} });
+      }
       if (path === "message/query") return Response.json({ data: [...r.messages.values()].filter((m) => m.dateCreated > body.after).sort((a, b) => (body.sort === "DESC" ? b.dateCreated - a.dateCreated : a.dateCreated - b.dateCreated)) });
       let m = path.match(/^chat\\/([^/]+)\\/message$/);
       if (m) return Response.json({ data: r.blind ? [] : icloud.filter((s) => s.chat === decodeURIComponent(m[1]) && s.at > Number(u.searchParams.get("after"))).map((s) => ({ isFromMe: true, text: s.text })) });
@@ -947,19 +952,21 @@ def test_bluebubbles_without_private_api_skips_actions_and_sends_plain_reply():
     """A relay without the Private API sends replies without a thread and never receives typing or tapback requests."""
     result = bun(f"""
 import {{ BlueBubbles }} from {BB};
+import {{ permanent }} from {OUTBOX};
 {FAKE_BB}
 const a = relay(); a.privateApi = false;
 a.messages.set("his-guid", text("his-guid", "hello"));
 const bb = line([a]);
 const message = await bb.message("his-guid");
 await message.space.startTyping(); await message.space.stopTyping();
-const reaction = await message.react("❤️").catch((e) => e.message);
+const reaction = await message.react("❤️").catch((e) => ({{ permanent: permanent(e), maybeSent: e.maybeSent }}));
 const reply = await message.reply("plain reply").catch((e) => e.message);
 done({{ calls: a.calls, sent: a.sent, reaction: reaction ?? null, reply: reply ?? null, logs }});
 """)
     assert not [call for call in result["calls"] if call.endswith("/typing") or call == "POST message/react"]
     assert [item["message"] for item in result["sent"]] == ["plain reply"]
-    assert result["reaction"] is None and result["reply"] is None
+    assert result["reaction"] == {"permanent": True, "maybeSent": False}
+    assert result["reply"] is None
     assert "selectedMessageGuid" not in result["sent"][0] and "partIndex" not in result["sent"][0]
     assert len(result["logs"]) == 1 and "Private API" in result["logs"][0]
 
@@ -983,9 +990,10 @@ await bb.typing(chat, "POST"); await bb.typing(chat, "DELETE");
 await bb.react(chat, "his-guid", "👍");
 await bb.send(chat, "thread on", "his-guid");
 a.down();
-await bb.typing(chat, "POST"); await bb.react(chat, "his-guid", "👍");
+await bb.typing(chat, "POST");
+const unsupported = await bb.react(chat, "his-guid", "👍").then(() => false, (e) => e.maybeSent === false);
 await bb.send(chat, "thread off", "his-guid");
-done({{ initial, calls: [a.calls, b.calls], sent: [a.sent, b.sent], capabilityLogs: logs.filter((l) => l.includes("Private API")) }});
+done({{ initial, calls: [a.calls, b.calls], sent: [a.sent, b.sent], unsupported, capabilityLogs: logs.filter((l) => l.includes("Private API")) }});
 """)
     first, second = result["initial"]
     assert "GET server/info" in first and "GET server/info" in second
@@ -1005,6 +1013,27 @@ done({{ initial, calls: [a.calls, b.calls], sent: [a.sent, b.sent], capabilityLo
     assert "relay 1" in result["capabilityLogs"][0] and "is off" in result["capabilityLogs"][0]
     assert any("relay 1" in line and "is on" in line for line in result["capabilityLogs"])
     assert any("relay 2" in line and "is off" in line for line in result["capabilityLogs"])
+    assert result["unsupported"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_bluebubbles_reaction_keeps_uncertainty_after_a_later_relay_refuses():
+    result = bun(f"""
+import {{ BlueBubbles }} from {BB};
+import {{ notSent }} from {DESK};
+{FAKE_BB}
+const a = relay(), b = relay();
+a.hang = true; b.reactStatus = 404;
+const bb = line([a, b], {{ callMs: 100 }});
+const error = await bb.react(chat, "his-guid", "👍").then(() => null,
+  (e) => ({{ maybeSent: e.maybeSent, notSent: notSent(e) }}));
+done({{ error, sent: a.sent }});
+""")
+    assert result["error"] == {"maybeSent": True, "notSent": False}
+    assert result["sent"] == [{
+        "chatGuid": "iMessage;-;+15550000000", "selectedMessageGuid": "his-guid",
+        "reaction": "like", "partIndex": 0,
+    }]
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -1593,6 +1622,7 @@ function call(op) {
   appendFileSync(`${dir}/calls`, `${op} ${left > 0 ? "UNAVAILABLE" : "ok"}\\n`);
   if (op === "send" && existsSync(`${dir}/send-unsure`)) throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
   if (op === "send" && existsSync(`${dir}/send-refused`)) throw Object.assign(new Error("send refused"), { status: 404 });
+  if (op === "react" && existsSync(`${dir}/react-refused`)) throw Object.assign(new Error("reaction refused"), { status: 404 });
   if (op === "last" && existsSync(`${dir}/read-timeout`)) throw Object.assign(new Error("read timed out"), { grpcCode: 4 });
   if (left > 0) {
     if (!outage) writeFileSync(`${dir}/down`, String(left - 1));
@@ -1645,7 +1675,10 @@ function message(m) {
     content: m.name
       ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
-    async react(emoji) { call("react"); sent(`react ${m.id} ${emoji}`); },
+    async react(emoji) {
+      call("react"); sent(`react ${m.id} ${emoji}`);
+      if (existsSync(`${dir}/react-unsure`)) throw Object.assign(new Error("reaction timed out"), { grpcCode: 4 });
+    },
     async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
     async read() {},
   };
@@ -2090,8 +2123,9 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   }
   if (path === "message/react") {
     const b = await req.json();
+    if (mode() === "react-refused") return new Response("reaction refused", { status: 404 });
     appendFileSync(`${dir}/relay-sent`, `react ${b.selectedMessageGuid} ${b.reaction}\\n`);
-    return Response.json({ data: {} });
+    return mode() === "react-garbled" ? new Response("garbled") : Response.json({ data: {} });
   }
   if (/^chat\\/[^/]+\\/message$/.test(path)) {
     if (mode() === "garbled") return new Response("down", { status: 500 });
@@ -2107,6 +2141,7 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   if (path === "message/query") {
     const b = await req.json();
     if (b.chatGuid) {
+      if (mode() === "last-down") return new Response("history unavailable", { status: 503 });
       if (mode() === "last-404") return new Response("chat not found", { status: 404 });
       db.run("DELETE FROM message");
       for (const m of history()) for (const chat of m.chats) {

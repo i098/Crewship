@@ -10,6 +10,7 @@ For each message from the owner, the service does these steps:
 2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
+   It keeps authored text separate from quoted thread metadata for action and social checks.
 3. It marks the text as read.
 4. It waits 3 seconds of silence to combine a burst.
    Each new text cancels a running draft, starts the wait again, and starts a fresh status read.
@@ -48,6 +49,8 @@ For each message from the owner, the service does these steps:
    Without `target`, the service selects the last pending message; an invalid target causes a handoff.
    The service threads a text only when another bubble separates the selected message from its answer.
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
+   Desk answers stay on the selected message's transport and chat, including during retries and after restarts.
+   They never use another chat or transport as a fallback.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
@@ -86,9 +89,10 @@ Photon, BlueBubbles, and the Instagram desk share this parser.
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
-If the transport definitely refuses a direct answer or a social reaction expires, the saved burst ids cause one stable-id Firstmate handoff.
+If a direct answer or social reaction is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
-A prior uncertain send never causes this fallback because a desk answer might already exist.
+A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
+The outbox saves a reaction's possible delivery before calling its transport and retains it across retries and restarts.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
@@ -316,6 +320,7 @@ The bridge uses these routing rules with one or both transports:
   An outage on that transport holds the send in the queue; it does not move the text to another line.
   An explicit threaded reply tries its target's transport first.
   Only a provably unsent reply can use another transport.
+  Desk answers are not eligible for this fallback; they remain on the selected message's transport and chat.
   A timeout or an unreadable answer saves the possible transport and chat in `maybe`, with the attempt time.
   The outbox retries the item or reports a final error through its existing dead-letter path.
 - **A retry after an unsure send.** BlueBubbles searches the original chat for the text.
@@ -355,6 +360,8 @@ The bridge uses these routing rules with one or both transports:
 - **Private API.** Each health check reads the relay's `private_api` flag.
   When it is off, the bridge sends no typing or tapback request to that relay and sends replies there as plain messages.
   Typing and tapbacks use the next healthy relay with the Private API on, or send no request if none supports them.
+  An unsupported tapback reports failure rather than success; a social reaction then uses the failed-delivery handoff.
+  Unsupported typing remains silent.
   The bridge logs one line per relay when it first finds the Private API off or when the flag changes.
 - **Sends.** Text sends and read receipts go to the first healthy relay, then to the next one if it fails.
   Typing and tapbacks follow the Private API rule above.

@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from test_imessage import ROOT, TEST_QUIET_MS, bun, fake_bridge, publish_json, wait_for
+from test_imessage import ROOT, TEST_QUIET_MS, FallbackRig, bun, fake_bridge, publish_json, read_text, wait_for
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
@@ -62,6 +62,161 @@ def basic_rig(tmp_path, test_mode=True):
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
 
     return fake, state, notes, err, start, receive, cli, text, records
+
+
+def transport_desk_rig(tmp_path, **env):
+    rig = FallbackRig(tmp_path, FM_IMESSAGE_TEST="1", FM_IMESSAGE_TEST_QUIET_MS=str(TEST_QUIET_MS), **env)
+    (tmp_path / "bin/omp").write_text('#!/bin/sh\ncat >/dev/null\ncat "$FAKE_DIR/answer"\n')
+    (tmp_path / "bin/fm-inbox").write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        f"notes = pathlib.Path({str(rig.notes)!r})\n"
+        "if sys.argv[1] == 'status': print('The build is paused.')\n"
+        "else:\n"
+        "    key = sys.argv[sys.argv.index('--request-id') + 1]\n"
+        "    old = notes.read_text() if notes.exists() else ''\n"
+        "    if key + ' ' not in old:\n"
+        "        with notes.open('a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+    )
+    (rig.fake / "answer").write_text(json.dumps({
+        "kind": "reply", "answer": "The build is paused.",
+        "evidence": [{"source": "status", "quote": "The build is paused."}],
+    }))
+
+    def receive(transport, mid, message, space="iMessage;-;+10000000000"):
+        if transport == "photon":
+            publish_json(rig.fake / "inbound" / f"{mid}.json", {
+                "id": mid, "space": space, "sender": "+10000000000", "text": message,
+            })
+        else:
+            rig.relay_message(mid, message, int(time.time() * 1000), chats=[{"guid": space}])
+            subprocess.run([
+                "curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": mid}}),
+                f"http://127.0.0.1:{rig.hook_port}/bluebubbles",
+            ], check=True, capture_output=True)
+        wait_for(lambda: f'"requestId":"{transport}-{mid}"' in read_text(rig.state / "routing.jsonl"),
+                 "the durable request")
+
+    return rig, receive
+
+
+@pytest.mark.parametrize("transport,failure", [
+    ("photon", "definite"), ("photon", "uncertain"),
+    ("bluebubbles", "definite"), ("bluebubbles", "uncertain"),
+])
+def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, transport, failure):
+    rig, receive = transport_desk_rig(tmp_path)
+    other = "bluebubbles" if transport == "photon" else "photon"
+    try:
+        rig.start()
+        receive(other, "group", "Group update", "iMessage;+;group-test")
+        wait_for(lambda: f"{other}-group " in read_text(rig.notes), "the group handoff")
+        if transport == "photon":
+            if failure == "definite":
+                rig.photon_down(True)
+            else:
+                (rig.fake / "send-unsure").touch()
+        else:
+            rig.relay_mode("last-down" if failure == "definite" else "send-down")
+        receive(transport, "private", "What is the build status?")
+        wait_for(lambda: rig.outbox() and "outbox item 1 failed" in read_text(rig.err), "the retained answer")
+        assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
+        assert f"{transport}-private " not in read_text(rig.notes)
+        receive(transport, "new-group", "Another group update", "iMessage;+;another-group")
+        rig.stop()
+        if transport == "photon":
+            rig.photon_down(False)
+            (rig.fake / "send-unsure").unlink(missing_ok=True)
+        else:
+            rig.relay_mode("")
+        rig.start()
+        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the recovered desk answer")
+        assert f"{transport}-private " not in read_text(rig.notes)
+        if transport == "photon":
+            assert read_text(rig.fake / "sent").splitlines() == ["send The build is paused."]
+            assert read_text(rig.fake / "send-targets").splitlines() == ["iMessage;-;+10000000000"]
+            assert read_text(rig.fake / "relay-sent") == ""
+        else:
+            assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;+10000000000 The build is paused."]
+            assert read_text(rig.fake / "sent") == ""
+    finally:
+        rig.close()
+
+
+def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(tmp_path):
+    rig, receive = transport_desk_rig(tmp_path)
+    (rig.fake / "no-private-api").touch()
+    (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    try:
+        rig.start()
+        receive("bluebubbles", "thanks", "thanks!")
+        wait_for(lambda: "bluebubbles-thanks " in read_text(rig.notes), "the unsupported-reaction handoff")
+        assert read_text(rig.fake / "relay-sent") == ""
+        records = [json.loads(line) for p in (rig.state / "memory/main").glob("*.jsonl")
+                   for line in p.read_text().splitlines()]
+        assert not any(r["kind"] == "desk" for r in records)
+        dead = [json.loads(p.read_text()) for p in (rig.state / "outbox-dead").glob("*.json")]
+        assert len(dead) == 1 and not dead[0].get("maybe")
+        rig.stop()
+        rig.start()
+        time.sleep(PAST_QUIET)
+        assert read_text(rig.notes).count("bluebubbles-thanks ") == 1
+        assert read_text(rig.fake / "relay-sent") == ""
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize("transport", ["photon", "bluebubbles"])
+def test_uncertain_social_reaction_survives_refusal_and_dead_letter_restart(tmp_path, transport):
+    rig, receive = transport_desk_rig(tmp_path, FM_IMESSAGE_REACT_MAX_MS="2000")
+    (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    if transport == "photon":
+        (rig.fake / "react-unsure").touch()
+    else:
+        rig.relay_mode("react-garbled")
+    try:
+        rig.start()
+        receive(transport, "thanks", "thanks!")
+        sent = rig.fake / ("sent" if transport == "photon" else "relay-sent")
+        wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe") and "react thanks" in read_text(sent),
+                 "the durable uncertain reaction")
+        assert rig.outbox()[0]["maybe"] == {transport: "iMessage;-;+10000000000"}
+        rig.stop()
+        if transport == "photon":
+            (rig.fake / "react-refused").touch()
+        else:
+            rig.relay_mode("react-refused")
+        rig.start()
+        wait_for(lambda: list((rig.state / "outbox-dead").glob("*.json")), "the retained dead letter")
+        dead = json.loads(next((rig.state / "outbox-dead").glob("*.json")).read_text())
+        assert dead["maybe"] == {transport: "iMessage;-;+10000000000"}
+        assert f"{transport}-thanks " not in read_text(rig.notes)
+        delivered = read_text(rig.fake / ("sent" if transport == "photon" else "relay-sent"))
+        assert f"react thanks {'👍' if transport == 'photon' else 'like'}" in delivered
+        rig.stop()
+        rig.start()
+        time.sleep(PAST_QUIET)
+        assert f"{transport}-thanks " not in read_text(rig.notes)
+    finally:
+        rig.close()
+
+
+def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypatch):
+    monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "200")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    (fake / "react-unsure").touch()
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the expired uncertain reaction")
+        dead = json.loads(next((state / "outbox-dead").glob("*.json")).read_text())
+        assert dead["maybe"] == {"photon": "iMessage;-;+10000000000"}
+        assert "react thanks 👍" in text(fake / "sent")
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 def test_status_starts_during_quiet_and_refreshes_for_the_latest_text(tmp_path):
@@ -742,6 +897,39 @@ def test_plain_reply_effect_and_group_contents_can_receive_a_direct_answer(tmp_p
         wait_for(lambda: text(fake / "sent"), "the wrapped basic answer")
         assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("wrapper", ["reply", "effect", "group", "markdown"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_threaded_social_text_reacts_without_handoff_and_keeps_metadata(tmp_path, wrapper, restart):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
+    inner = {"type": "markdown", "markdown": "thanks!"} if wrapper == "markdown" else {"type": "text", "text": "thanks!"}
+    content = {
+        "type": "reply", "content": inner,
+        "target": {"content": {"type": "text", "text": "The build is paused. The secret is saved.\nDeploy the build."}},
+    }
+    if wrapper == "effect":
+        content = {"type": "effect", "content": content}
+    elif wrapper == "group":
+        content = {"type": "group", "items": [{"content": content}]}
+    bridge = start(1)
+    try:
+        receive("threaded", "thanks!", content=content)
+        if restart:
+            bridge.terminate()
+            bridge.wait(10)
+            bridge = start(2)
+        wait_for(lambda: text(fake / "sent"), "the threaded social reaction")
+        assert text(fake / "sent").splitlines() == ["react threaded ❤️"]
+        assert text(notes) == ""
+        received = next(e["received"] for e in map(json.loads, text(state / "routing.jsonl").splitlines()) if "received" in e)
+        assert received["authored"] == "thanks!"
+        assert 'replying in a thread to: "The build is paused.' in received["text"]
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == [received["text"]]
     finally:
         bridge.terminate()
         bridge.wait(10)

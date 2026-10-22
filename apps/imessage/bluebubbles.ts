@@ -229,8 +229,12 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   // the outbox moves it to the dead-letter folder instead of holding the queue.
   async react(chat: string, guid: string, emoji: string) {
     const reaction = TAPBACKS[emoji.trim()];
-    if (!reaction) throw Object.assign(new Error(`no BlueBubbles tapback for ${emoji}; use one of ❤️ 👍 👎 😂 ‼️ ❓`), { permanent: true });
-    await this.first((r) => this.call(r, "POST", "message/react", undefined, { chatGuid: chat, selectedMessageGuid: guid, reaction, partIndex: 0 }), true);
+    if (!reaction) throw Object.assign(new Error(`no BlueBubbles tapback for ${emoji}; use one of ❤️ 👍 👎 😂 ‼️ ❓`), { permanent: true, maybeSent: false });
+    const healthy = await this.healthy();
+    if (healthy.length && !healthy.some((r) => this.privateApi.get(r)?.enabled)) {
+      throw new RelayError("no healthy relay supports the Private API", false, healthy.length === this.relays.length ? 400 : 503);
+    }
+    await this.first((r) => this.call(r, "POST", "message/react", undefined, { chatGuid: chat, selectedMessageGuid: guid, reaction, partIndex: 0 }), true, healthy);
   }
 
   // Download an attachment from whichever relay has it. The bridge's download queue retries a failure.
@@ -273,8 +277,8 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   // Run `fn` on each eligible healthy relay in order until one succeeds. A permanent failure (HTTP 404) is final only when every
   // configured relay was asked and gave one; otherwise a relay that was down or cut off may still have the item, so the
   // error is a transient one and the caller tries again.
-  private async first<T>(fn: (r: Relay) => Promise<T>, privateApiOnly = false): Promise<T | undefined> {
-    const healthy = await this.healthy();
+  private async first<T>(fn: (r: Relay) => Promise<T>, privateApiOnly = false, healthy?: Relay[]): Promise<T | undefined> {
+    healthy ??= await this.healthy();
     const asked = privateApiOnly ? healthy.filter((r) => this.privateApi.get(r)?.enabled) : healthy;
     if (privateApiOnly && healthy.length && !asked.length) return;
     const errors: unknown[] = [];
@@ -286,10 +290,11 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
       }
     }
     const last = errors.at(-1) ?? new RelayError("no relay is reachable", false, 503);
+    const uncertain = errors.find((e) => e instanceof RelayError && e.maybeSent);
     if (permanent(last) && !(asked.length === this.relays.length && errors.every(permanent))) {
-      throw new RelayError("a relay that was not asked or was cut off may still have it", false, 503);
+      throw new RelayError("a relay that was not asked or was cut off may still have it", !!uncertain, 503);
     }
-    throw last;
+    throw uncertain ?? last;
   }
 
   private async healthy(): Promise<Relay[]> {

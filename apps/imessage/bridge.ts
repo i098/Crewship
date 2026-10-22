@@ -149,7 +149,7 @@ type Ref = { line?: string; space: string; id: string };
 // where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
-type Received = { requestId: string; text: string; ref: Ref; memoryId: number; firstmate: boolean };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
@@ -484,16 +484,7 @@ function put(item: Out) {
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
-  if (o.react) {
-    // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
-    if (o.at === undefined) save((o = { ...o, at: Date.now() }));
-    if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
-    const line = lineOf(o);
-    if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
-    await line.react(o, o.react);
-    remember(kind, `tapback ${o.react} on message ${o.id}`);
-    return;
-  }
+  if (o.react) return deliverReaction(o, save);
   if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   for (let i = o.done ?? 0; i < parts.length; i++) {
@@ -508,6 +499,22 @@ async function deliver(o: Out, save: (o: Out) => void) {
   }
   if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
   if (o.image) rmSync(o.image.path, { force: true });
+}
+
+async function deliverReaction(o: Out, save: (o: Out) => void) {
+  // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
+  if (o.at === undefined) save((o = { ...o, at: Date.now() }));
+  if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
+  const line = lineOf(o);
+  if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
+  save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
+  try {
+    await line.react(o, o.react!);
+  } catch (e) {
+    if (notSent(e)) save(o);
+    throw e;
+  }
+  remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
 // Sends a card's bubble. A link card is its page's URL as a plain text, which iMessage shows as a link preview from
@@ -549,6 +556,7 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
   const maybe: Record<string, string> = {};
   for (const [name, space] of Object.entries(o.maybe ?? {})) {
+    if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
     const line = lines.find((l) => l.name === name);
     if (!line) {
       if (TRANSPORTS.includes(name)) maybe[name] = space;
@@ -576,6 +584,7 @@ function candidates(o: Out, i: number, retry: boolean): Line[] {
   const photo = o.image !== undefined && i === 0;
   const pool = photo ? lines.filter((line) => line.sendImage) : lines;
   const queued = lineOf(o);
+  if (o.kind === "desk") return queued ? [queued] : [];
   const preferred = (!o.reply || i === 0) && queued && pool.includes(queued) ? queued : undefined;
   if (retry || (photo && !preferred)) return pool;
   if (!o.reply) return preferred ? [preferred] : [];
@@ -587,7 +596,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
   const only = Object.keys(maybe);
   return candidates(o, i, only.length > 0).flatMap((line) => {
     const own = line === lineOf(o);
-    const space = maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
+    const space = o.kind === "desk" ? o.space : maybe[line.name] ?? (own ? o.space : line.latest?.space ?? line.home);
     if (!space || (only.length && !only.includes(line.name))) return [];
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (bubble: Bubble) => {
@@ -671,7 +680,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (!answer) return;
   const target = pending[(answer.target ?? pending.length) - 1];
   if (!target) return;
-  const complete = "answer" in answer || socialOnly(pending.map((r) => r.text), memory.msgs[from - 1]);
+  const complete = "answer" in answer || socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1]);
   return { answer, target, complete };
 }
 
@@ -787,7 +796,8 @@ async function handle(line: Line, message: LineMessage) {
   console.log(`fm-imessage: inbound ${line.name} ${message.content.type} -> ${text === undefined ? "ignored" : "note"}`);
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
-  receive(`${line.name}-${message.id}`, text, ref, !plainText(message.content) || !directChat.test(ref.space));
+  const authored = authoredText(message.content);
+  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored);
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);
@@ -812,11 +822,11 @@ async function handle(line: Line, message: LineMessage) {
 }
 
 // Persist the full input before marking it read or seen. A duplicate never opens another routing decision.
-function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) {
+function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text) {
   if (routing.has(requestId)) return;
   // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
-  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
-  const received = { requestId, text, ref, memoryId: memory.msgs.length, firstmate };
+  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
+  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate };
   prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);
@@ -825,11 +835,14 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) 
   desk.inboundText();
 }
 
-function plainText(content: LineMessage["content"]): boolean {
-  if (content.type === "text" || content.type === "markdown") return true;
-  if (content.type === "reply" || content.type === "effect") return plainText(content.content);
-  if (content.type === "group") return content.items.every((m) => plainText(m.content));
-  return false;
+function authoredText(content: LineMessage["content"]): string | undefined {
+  if (content.type === "text") return content.text;
+  if (content.type === "markdown") return content.markdown;
+  if (content.type === "reply" || content.type === "effect") return authoredText(content.content);
+  if (content.type === "group") {
+    const parts = content.items.map((m) => authoredText(m.content));
+    return parts.every((part) => part !== undefined) ? parts.join("\n") : undefined;
+  }
 }
 
 function heard(id: string, text: string) {
