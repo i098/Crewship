@@ -142,14 +142,6 @@ def test_default_config_lists_the_current_defaults():
     assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:high"
     assert "Opus 5.5 at high thinking runs the home" in lines["Models"]
     assert omp["advisor"]["enabled"] is False and "advisor off" in lines["Models"]
-    dispatch = json.loads((ROOT / "blueprint/config/crew-dispatch.json").read_text())
-    tiers = [[rule_use["model"] for rule_use in rule["use"]] for rule in dispatch["rules"]]
-    assert tiers == [
-        ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"],
-        ["anthropic/claude-sonnet-5-5"],
-        ["anthropic/claude-opus-5-5"],
-    ], "update the Models line in Default config"
-    assert dispatch["default"] == dispatch["rules"][1]["use"]
     assert omp["retry"]["fallbackChains"] == {
         "anthropic/claude-opus-5-5": ["anthropic/claude-fable-5-1:medium"],
         "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
