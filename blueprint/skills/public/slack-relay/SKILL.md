@@ -12,6 +12,8 @@ description: Use when the operator wants important Slack messages texted to his 
 - Read-only. The script opens the cache with `mode=ro` and never calls Slack. Do not add a post, a reaction, a read mark, an edit or a join, in any workspace. Do not open a workspace that the operator marked read-only in a mode that could write.
 - The `slk` TUI must stay running (for example in a tmux pane). When it is stopped, the cache gets no new messages and the relay has nothing to send.
 - Texts go out only with `fm-imessage`: at most one text per 60 s, one short line per kept message: who, where (DM, #channel, thread), and the message itself or a tight quote, plus the action in a few words when he must act. A text never holds a Slack link: he reads Slack in the `slk` tab on the same host. A burst becomes one text. The lines above the cap of 8 wait for the next window.
+  Before queuing a notification, the relay removes URLs and collapses whitespace to one line.
+  If URL removal empties the model's line, the relay uses the sender, channel, and message text.
 - A message is decided once. Its key (`workspace/channel/ts`) goes into the log, and an edit does not make it new.
 - Messages from before the first run, or older than 6 h, are never sent.
 
@@ -27,7 +29,7 @@ This stays far under 100k tokens.
 - In Boolean modes, drop: chatter, bots, announcements.
 - In Boolean modes, a missing verdict keeps only non-bot DMs or mentions that pass the configured filter.
   A failed or unparsable call leaves eligible messages unseen for a retry, with a backoff up to 5 min.
-- In direct mode, keep every eligible DM or mention, regardless of the model's verdict.
+- In direct mode, keep every eligible DM, mention, or enabled broadcast, regardless of the model's verdict.
   The model can shorten the line but cannot reject the message.
   A failed call or a missing line uses the plain sender, channel, and message text.
 
@@ -49,13 +51,14 @@ Every decision is one line in `~/.local/state/crewship/slack-relay/log.jsonl`: t
 Set `"mention_only": true` to drop untagged messages before the model call, including DMs and thread replies.
 A tag must use `<@USER_ID>` or `<@USER_ID|label>` with that workspace's `self` ID.
 This setting defaults to `false`.
-Set `"mention_only": "direct"` to notify for every eligible one-to-one DM and explicit mention; group DMs still need a tag.
+Set `"mention_only": "direct"` to notify for every eligible one-to-one DM and explicit mention.
+Group DMs need an explicit mention or an enabled broadcast mention.
 This guarantee also covers bot messages that pass the filter and messages sent through `replay`.
 Switching to `true` or `"direct"` clears queued lines.
 Changing modes does not automatically replay logged messages.
 Set `"broadcasts": true` inside a workspace's `workspaces` entry to also keep `<!everyone>`, `<!channel>`, and `<!here>` in direct mode.
 This option defaults to `false` and has no effect in Boolean modes or other workspaces.
-Notifications for an enabled workspace include its name before the sender and channel.
+In direct mode, notifications for an enabled workspace include its name before the sender and channel.
 Enabling broadcasts does not replay logged messages or change deduplication, the delivery window, or line limits.
 
 `self` is required: the operator's own user id in each workspace (his messages are skipped). Find it as the user id that is the author of one of his own messages in the slk cache. A workspace without `self` is not relayed. `workspaces` gives the model a display name for each workspace. Optional keys and defaults: `db` (`~/.local/share/slk/cache.db`), `model`, `notify` (`["fm-imessage", "--"]`), `interval` 15, `window` 60, `lookback` 21600, `max_batch` 150, `max_chars` 120000, `text_chars` 700, `max_lines` 8.
