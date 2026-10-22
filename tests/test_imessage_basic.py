@@ -219,6 +219,101 @@ def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypat
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("failure", ["missing", "timeout"])
+@pytest.mark.parametrize("prior_uncertain", [False, True])
+def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_path, monkeypatch, failure, prior_uncertain):
+    monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "2000")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    failure_flag = fake / f"lookup-{failure}"
+    (fake / "react-unsure" if prior_uncertain else failure_flag).touch()
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        if prior_uncertain:
+            wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
+            failure_flag.touch()
+        error = "message thanks not found" if failure == "missing" else "lookup timed out"
+        wait_for(lambda: error in text(err), "the failed read-only lookup")
+        bridge.terminate()
+        bridge.wait(10)
+        if failure == "timeout":
+            queued = json.loads(next((state / "outbox").glob("*.json")).read_text())
+            assert bool(queued.get("maybe")) == prior_uncertain
+        bridge = start(2)
+        wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the failed-reaction receipt")
+        dead = json.loads(next((state / "outbox-dead").glob("*.json")).read_text())
+        assert bool(dead.get("maybe")) == prior_uncertain
+        if prior_uncertain:
+            assert text(notes) == ""
+            assert "react thanks 👍" in text(fake / "sent")
+        else:
+            wait_for(lambda: "photon-thanks " in text(notes), "the unsent-reaction handoff")
+            assert text(fake / "sent") == ""
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(3)
+        time.sleep(PAST_QUIET)
+        assert text(notes).count("photon-thanks ") == int(not prior_uncertain)
+        assert not any(r["kind"] == "desk" for r in records())
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("prior_uncertain", [False, True])
+def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tmp_path, prior_uncertain):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    (fake / ("react-unsure" if prior_uncertain else "lookup-stop")).touch()
+    bridge = start(1)
+    try:
+        receive("lost", "thanks!")
+        if prior_uncertain:
+            wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
+            (fake / "lookup-stop").touch()
+        wait_for(lambda: (fake / "lookup-ready").exists(), "the held Photon lookup")
+        bridge.kill()
+        bridge.wait(10)
+        queued = json.loads(next((state / "outbox").glob("*.json")).read_text())
+        assert bool(queued.get("maybe")) == prior_uncertain
+        (fake / "lookup-missing").touch()
+        bridge = start(2)
+        wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the failed-reaction receipt")
+        if prior_uncertain:
+            assert text(notes) == ""
+            assert "react lost 👍" in text(fake / "sent")
+        else:
+            wait_for(lambda: "photon-lost " in text(notes), "the unsent-reaction handoff")
+            assert text(notes).count("photon-lost ") == 1
+            assert text(fake / "sent") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    (fake / "lookup-timeout").touch()
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        wait_for(lambda: "lookup timed out" in text(err), "the failed lookup")
+        bridge.terminate()
+        bridge.wait(10)
+        queued = json.loads(next((state / "outbox").glob("*.json")).read_text())
+        assert not queued.get("maybe")
+        (fake / "lookup-timeout").unlink()
+        bridge = start(2)
+        wait_for(lambda: text(fake / "sent"), "the recovered reaction")
+        assert text(fake / "sent").splitlines() == ["react thanks 👍"]
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 def test_status_starts_during_quiet_and_refreshes_for_the_latest_text(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)

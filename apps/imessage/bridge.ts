@@ -168,7 +168,7 @@ type Line = {
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
-  react(ref: Ref, emoji: string): Promise<unknown>;
+  react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
   home?: string;
@@ -199,7 +199,10 @@ async function startLine(name: string): Promise<Line> {
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
-      react: (ref, emoji) => bb.react(ref.space, ref.id, emoji),
+      react: (ref, emoji, beforeSend) => {
+        beforeSend();
+        return bb.react(ref.space, ref.id, emoji);
+      },
       home: `iMessage;-;${OWNER}`,
     };
   }
@@ -263,7 +266,13 @@ async function startLine(name: string): Promise<Line> {
       await chat.send(edit(content, target as never));
       return target.miniAppCardSession;
     },
-    react: async (ref, emoji) => (await find(ref)).react(emoji),
+    react: async (ref, emoji, beforeSend) => {
+      const message = await find(ref).catch((e: unknown) => {
+        throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
+      });
+      beforeSend();
+      return message.react(emoji);
+    },
   };
 }
 const startups = TRANSPORTS.map((name) => {
@@ -507,9 +516,8 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
   if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
   const line = lineOf(o);
   if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
-  save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
   try {
-    await line.react(o, o.react!);
+    await line.react(o, o.react!, () => save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } }));
   } catch (e) {
     if (notSent(e)) save(o);
     throw e;

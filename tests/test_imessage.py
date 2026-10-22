@@ -1660,6 +1660,8 @@ function space(id) {
     },
     async getMessage(mid) {
       call("getMessage");
+      if (existsSync(`${dir}/lookup-timeout`)) throw Object.assign(new Error("lookup timed out"), { grpcCode: 4 });
+      if (existsSync(`${dir}/lookup-missing`)) return undefined;
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
         writeFileSync(`${dir}/lookup-ready`, "");
         while (!existsSync(`${dir}/lookup-release`)) await Bun.sleep(10);
