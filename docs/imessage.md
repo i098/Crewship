@@ -554,7 +554,9 @@ Firstmate sends, desk answers, cards, photos, voice memos, and tapbacks all stay
 Inbound texts still arrive, and their notes still reach Firstmate.
 While the file exists, `fm-imessage` queues nothing and exits non-zero with `nothing queued: muted`.
 The bridge also refuses a command if mute starts while it reads the request.
-When mute discards a desk answer or tapback, the bridge stops its typing indicator.
+When mute blocks a desk answer or tapback, the bridge stops typing and hands every request to Firstmate.
+The bridge keeps each request until the inbox accepts its note, including across a restart.
+Refused photo and card commands leave no new files behind.
 Remove the file to resume sending.
 
 ```bash

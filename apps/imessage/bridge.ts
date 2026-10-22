@@ -428,6 +428,7 @@ Bun.serve({
       // Like a proactive text, a card goes to his latest direct chat. Only Photon can send an app bubble.
       const chat = proactiveRef;
       if (!chat || !lineOf(chat) || (card.app && !lineOf(chat)!.sendCard)) return new Response(`nothing queued: ${card.app ? "an app card needs his latest direct chat on the photon transport" : "no direct chat with him yet"}\n`, { status: 503 });
+      if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
       return queue({ ...chat, card: cards.add(card, chat).token }, `card ${card.key}`);
     }
     // /image is a multipart form: the file `image` and the optional text `caption`, sent as bubbles after the photo.
@@ -443,6 +444,7 @@ Bun.serve({
     // A threaded reply goes out on the transport and in the conversation of the text it replies to.
     const destination = target ?? proactiveRef;
     if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
+    if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
     return queue({ ...destination, image, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
@@ -485,8 +487,11 @@ if (latestRef) {
 
 // Puts one item in the outbox and answers once the item is on disk.
 function queue(item: Out, what: string) {
-  if (stopping) return new Response("stopping\n", { status: 503 });
-  if (!put(item)) return new Response("nothing queued: muted\n", { status: 503 });
+  if (!put(item)) {
+    if (item.image) rmSync(item.image.path, { force: true });
+    if (item.card) rmSync(`${STATE}/cards/${item.card}.json`, { force: true });
+    return new Response(stopping ? "stopping\n" : "nothing queued: muted\n", { status: 503 });
+  }
   return new Response(`queued ${what}; the bridge sends in order and retries while the upstream fails\n`);
 }
 
@@ -880,13 +885,14 @@ function flushRoutes() {
   let failed = false;
   for (const item of routing.values()) {
     try {
+      if (item.route === "desk" && muted()) {
+        if (item.out) finishDeskDelivery(item.out);
+        recordRoute({ ids: [item.requestId], route: "handoff" });
+      }
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
       } else if (item.route !== "desk") continue;
-      if (item.out) {
-        if (muted()) finishDeskDelivery(item.out);
-        else outbox.add(item.out);
-      }
+      if (item.out) outbox.add(item.out);
       recordRoute({ ids: [item.requestId], route: "done" });
     } catch (e) {
       log("route delivery")(e);
