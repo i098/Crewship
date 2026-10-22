@@ -77,6 +77,10 @@ For each message from the owner, the service does these steps:
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
+   The routing journal keeps a cancellation counter, so restored answers stop after later owner text or Firstmate activity.
+   Each transport checks cancellation after preparation and immediately before sending.
+   Cancellation does not remove uncertain delivery records.
+   The service checks available transport history before cancelling an uncertain send and keeps unresolved evidence in the completion receipt.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
