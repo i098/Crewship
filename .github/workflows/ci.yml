@@ -261,11 +261,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    strategy:
-      matrix:
-        playwright: ['1.64.1']
     container:
-      image: mcr.microsoft.com/playwright:v${{ matrix.playwright }}-noble
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --ipc=host
     permissions:
       contents: read
@@ -285,7 +282,7 @@ jobs:
 
       - name: Install Playwright
         working-directory: site
-        run: npm install --no-save --no-package-lock --prefix . playwright@${{ matrix.playwright }}
+        run: npm install --no-save --no-package-lock --prefix . playwright@1.64.1
 
       - name: WebKit iPhone check
         run: node site/webkit-check.mjs

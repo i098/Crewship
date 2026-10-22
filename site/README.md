@@ -258,7 +258,7 @@ It also fails if the backing-store area exceeds the [canvas limit](public/how.ht
 CI pins the Playwright package and official browser image to the same release.
 The image includes the browsers and system libraries, so slow Ubuntu package downloads cannot consume the browser checks' time.
 The job keeps its 10-minute limit.
-To run the checks locally, use the release in the `harbor-webkit` matrix in [ci.yml](../.github/workflows/ci.yml):
+To run the checks locally, use the release in the `harbor-webkit` job in [ci.yml](../.github/workflows/ci.yml):
 
 ```bash
 python3 site/build.py
