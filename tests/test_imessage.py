@@ -2170,7 +2170,8 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     assert "UNAVAILABLE" in logs and not re.search(r"^\s+at ", logs, re.M), logs
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path):
+@pytest.mark.parametrize("answer", ["reply", "tapback", "tapback-text"])
+def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path, answer):
     """While $STATE/muted exists, nothing outgoing is queued; unmuting resumes; inbound texts still arrive."""
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
     (fake / "desk-on").touch()
@@ -2182,21 +2183,101 @@ def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path):
         inbound("m1", wait_note=False, text="you there")
         wait_for(lambda: sent() == ["send claude-haiku-5-5"], "the desk reply while unmuted")
         wait_for(lambda: outbox() == [], "the warmup item dequeued")
+        wait_for(lambda: text(fake / "typing-events").splitlines()
+                 and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"],
+                 "typing stopped after the warmup")
+        typing_before = len(text(fake / "typing-events").splitlines())
+        if answer != "reply":
+            result = {"kind": "tapback", "emoji": "❤️"}
+            if answer == "tapback-text":
+                result["text"] = "thanks"
+            (tmp_path / "bin/omp").write_text(
+                f"#!/bin/bash\ncat >/dev/null\necho '{json.dumps(result)}'\n"
+            )
         assert outbox() == []
         # Mute: nothing outgoing is queued, for a Firstmate send, a reaction, and a desk answer.
         (state / "muted").touch()
         assert "nothing queued: muted" in cli("hello from firstmate", fails=True)
         assert "nothing queued: muted" in cli("--react", "👍", fails=True)
-        inbound("m2", wait_note=False, text="What desk model answers?")
-        wait_for(lambda: "m2 basic" in text(state / "desk.log"), "the muted desk turn ran")
+        inbound("m2", wait_note=False, text="What desk model answers?" if answer == "reply" else "thanks")
+        wait_for(lambda: f"m2 {'basic' if answer == 'reply' else 'react ❤️'}" in text(state / "desk.log"),
+                 "the muted desk turn ran")
+        wait_for(lambda: len(text(fake / "typing-events").splitlines()) >= typing_before + 2
+                 and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"],
+                 "typing stopped after the muted desk turn")
+        typing_after = text(fake / "typing-events")
+        time.sleep(4.2)
+        assert text(fake / "typing-events") == typing_after
         assert outbox() == [] and sent() == ["send claude-haiku-5-5"]
         # Inbound is still recorded while muted: the owner text reaches desk memory.
         source = [json.loads(line) for path in (state / "memory/main").glob("*.jsonl") for line in path.read_text().splitlines()]
-        assert any(record["text"] == "What desk model answers?" for record in source)
+        assert any(record["text"] == ("What desk model answers?" if answer == "reply" else "thanks") for record in source)
         # Unmute: sends are queued again.
         (state / "muted").unlink()
         cli("after unmute")
         wait_for(lambda: sent() == ["send claude-haiku-5-5", "send after unmute"], "the send after unmute")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("path", ["/send", "/react", "/image", "/card"])
+def test_bridge_rejects_commands_muted_while_reading_body(tmp_path, path):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    connection = None
+    try:
+        inbound("m1", text="hello")
+        port = int(re.search(r"listening on 127.0.0.1:(\d+)", text(tmp_path / "out"))[1])
+        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+        body = b"hello"
+        content_type = "text/plain"
+        if path == "/card":
+            body = json.dumps({"kind": "choice", "key": "mute", "title": "Pick", "options": ["a", "b"]}).encode()
+        elif path == "/image":
+            content_type = "multipart/form-data; boundary=mute-test"
+            body = (b'--mute-test\r\nContent-Disposition: form-data; name="image"; filename="a.png"\r\n'
+                    b"Content-Type: image/png\r\n\r\n" + png(2, 2) + b"\r\n--mute-test--\r\n")
+        before = text(state / "routing.jsonl").count('"deskCancelled":true')
+        connection.putrequest("POST", path)
+        connection.putheader("X-Firstmate", "1")
+        connection.putheader("Content-Type", content_type)
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders(body[:1])
+        wait_for(lambda: text(state / "routing.jsonl").count('"deskCancelled":true') > before,
+                 "the command waiting for its body")
+        (state / "muted").touch()
+        connection.send(body[1:])
+        response = connection.getresponse()
+        assert response.status == 503
+        assert response.read() == b"nothing queued: muted\n"
+        assert list((state / "outbox").glob("*.json")) == []
+        assert text(fake / "sent") == ""
+    finally:
+        if connection:
+            connection.close()
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("args", [("--typing",), ("--react", "👍")])
+def test_bridge_rejects_actions_without_an_owner_message(tmp_path, args):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        assert "no text from the owner yet" in cli(*args, fails=True)
+        assert list((state / "outbox").glob("*.json")) == []
+        assert text(fake / "typing-events") == ""
+        assert text(fake / "sent") == ""
+        inbound("m1", text="hello")
+        assert cli(*args).startswith("typing" if args[0] == "--typing" else "queued tapback")
+        if args[0] == "--typing":
+            wait_for(lambda: any(json.loads(line)["on"] for line in text(fake / "typing-events").splitlines()),
+                     "typing in the owner's chat")
+        else:
+            wait_for(lambda: "react m1 👍" in text(fake / "sent"), "the targeted reaction")
     finally:
         bridge.terminate()
         bridge.wait(10)

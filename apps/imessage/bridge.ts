@@ -402,6 +402,7 @@ Bun.serve({
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
+    if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
     recordRoute({ deskCancelled: true });
     desk.firstmateActive();
@@ -485,7 +486,7 @@ if (latestRef) {
 // Puts one item in the outbox and answers once the item is on disk.
 function queue(item: Out, what: string) {
   if (stopping) return new Response("stopping\n", { status: 503 });
-  put(item);
+  if (!put(item)) return new Response("nothing queued: muted\n", { status: 503 });
   return new Response(`queued ${what}; the bridge sends in order and retries while the upstream fails\n`);
 }
 
@@ -504,10 +505,11 @@ function stage(photo: PreparedImage): Picture {
 
 // Puts one item in the outbox with a client GUID of its own.
 function put(item: Out) {
-  if (stopping) return;
+  if (stopping) return false;
   // Mute: while $STATE/muted exists, nothing outgoing is queued (Firstmate, the desk, every service); inbound texts still arrive.
-  if (muted()) return;
+  if (muted()) return false;
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
+  return true;
 }
 
 function finishDeskDelivery(o: Out) {
@@ -881,7 +883,10 @@ function flushRoutes() {
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
       } else if (item.route !== "desk") continue;
-      if (item.out && !muted()) outbox.add(item.out);
+      if (item.out) {
+        if (muted()) finishDeskDelivery(item.out);
+        else outbox.add(item.out);
+      }
       recordRoute({ ids: [item.requestId], route: "done" });
     } catch (e) {
       log("route delivery")(e);

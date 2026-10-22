@@ -553,6 +553,8 @@ While that file exists, the bridge queues no outgoing item.
 Firstmate sends, desk answers, cards, photos, voice memos, and tapbacks all stay out.
 Inbound texts still arrive, and their notes still reach Firstmate.
 While the file exists, `fm-imessage` queues nothing and exits non-zero with `nothing queued: muted`.
+The bridge also refuses a command if mute starts while it reads the request.
+When mute discards a desk answer or tapback, the bridge stops its typing indicator.
 Remove the file to resume sending.
 
 ```bash
