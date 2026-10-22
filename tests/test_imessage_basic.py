@@ -794,36 +794,46 @@ def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, a
         rig.close()
 
 
-def test_cancelled_desk_reconciles_accepted_bluebubbles_send(tmp_path, desk_clock):
+@pytest.mark.parametrize("history", ["accepted", "not-sent", "unavailable"])
+def test_cancelled_desk_reconciliation_releases_supervisor(tmp_path, desk_clock, history):
     rig, receive = transport_desk_rig(tmp_path)
+    retry = rig.fake / "retry-pause"
     try:
         rig.start()
-        rig.relay_mode("garbled")
+        retry.write_text("15")
+        rig.relay_mode("lost" if history == "not-sent" else "garbled")
         receive("bluebubbles", "question", "What is the build status?")
         desk_clock()
-        wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe"), "the uncertain accepted send")
-        rig.cli("--typing")
-        rig.relay_mode("")
-        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the reconciled cancellation")
+        wait_for(lambda: (rig.fake / "retry-waiting").exists(), "the uncertain send retry")
+        assert rig.outbox()[0]["maybe"]
+        receive("photon", "correction", "Deploy it instead")
+        rig.cli("Supervisor answer")
+        if history != "unavailable":
+            rig.relay_mode("")
+        retry.unlink()
+        wait_for(lambda: "send Supervisor answer" in read_text(rig.fake / "sent"), "the unblocked supervisor")
         receipt = json.loads(next((rig.state / "outbox-done").glob("*.json")).read_text())
-        assert receipt["done"] == 1
-        assert not receipt.get("maybe")
-        assert read_text(rig.fake / "relay-sent").splitlines() == [
-            "iMessage;-;+10000000000 The build is paused.",
-        ]
+        assert receipt.get("done", 0) == (1 if history == "accepted" else 0)
+        assert bool(receipt.get("maybe")) == (history == "unavailable")
+        assert receipt["bubbles"] == ["The build is paused."]
+        assert ("bluebubbles-question " in read_text(rig.notes)) == (history == "not-sent")
         records = [json.loads(line) for p in (rig.state / "memory/main").glob("*.jsonl")
                    for line in p.read_text().splitlines()]
-        assert [row["text"] for row in records if row["kind"] == "desk"] == ["The build is paused."]
+        assert [row["text"] for row in records if row["kind"] == "desk"] == (
+            ["The build is paused."] if history == "accepted" else []
+        )
+        assert read_text(rig.fake / "sent") == "send Supervisor answer\n"
     finally:
+        retry.unlink(missing_ok=True)
         rig.close()
 
 
-@pytest.mark.parametrize("activity", ["none", "owner", "typing"])
+@pytest.mark.parametrize("offline_correction", [False, True])
 @pytest.mark.parametrize("transport,failure", [
     ("photon", "definite"), ("photon", "uncertain"),
     ("bluebubbles", "definite"), ("bluebubbles", "uncertain"),
 ])
-def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, desk_clock, transport, failure, activity):
+def test_restored_desk_text_is_dropped(tmp_path, desk_clock, transport, failure, offline_correction):
     rig, receive = transport_desk_rig(tmp_path)
     other = "bluebubbles" if transport == "photon" else "photon"
     try:
@@ -838,40 +848,55 @@ def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, desk
         else:
             rig.relay_mode("last-down" if failure == "definite" else "send-down")
         receive(transport, "private", "What is the build status?")
+        (rig.fake / "retry-pause").write_text("15")
         desk_clock()
-        wait_for(lambda: rig.outbox() and "outbox item 1 failed" in read_text(rig.err), "the retained answer")
+        wait_for(lambda: (rig.fake / "retry-waiting").exists(), "the retained answer before retry")
         assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
         assert f"{transport}-private " not in read_text(rig.notes)
-        if activity == "owner":
-            receive(transport, "correction", "Deploy it instead")
-        elif activity == "typing":
-            rig.cli("--typing")
         rig.stop()
+        (rig.fake / "retry-pause").unlink()
+        if offline_correction:
+            publish_json(rig.fake / "inbound/offline-correction.json", {
+                "id": "offline-correction", "space": "iMessage;-;+10000000000",
+                "sender": "+10000000000", "text": "Deploy it instead",
+            })
         if transport == "photon":
             rig.photon_down(False)
             (rig.fake / "send-unsure").unlink(missing_ok=True)
         else:
             rig.relay_mode("")
         rig.start()
-        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the recovered desk answer")
-        if activity != "none":
-            assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
-            receipt = json.loads(next((rig.state / "outbox-done").glob("*.json")).read_text())
-            assert receipt["bubbles"] == ["The build is paused."]
-            assert receipt.get("done", 0) == 0
-            if transport == "photon" and failure == "uncertain":
-                assert receipt["maybe"] == {"photon": "iMessage;-;+10000000000"}
-            return
-        assert f"{transport}-private " not in read_text(rig.notes)
-        if transport == "photon":
-            assert read_text(rig.fake / "sent").splitlines() == ["send The build is paused."]
-            assert read_text(rig.fake / "send-targets").splitlines() == ["iMessage;-;+10000000000"]
-            assert read_text(rig.fake / "relay-sent") == ""
-        else:
-            assert read_text(rig.fake / "relay-sent").splitlines() == ["iMessage;-;+10000000000 The build is paused."]
-            assert read_text(rig.fake / "sent") == ""
+        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the dropped desk receipt")
+        wait_for(lambda: f"{transport}-private " in read_text(rig.notes), "the restored question handoff")
+        assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
+        receipt = json.loads(next((rig.state / "outbox-done").glob("*.json")).read_text())
+        assert receipt["bubbles"] == ["The build is paused."]
+        assert receipt.get("done", 0) == 0
+        if failure == "uncertain":
+            assert receipt["maybe"] == {transport: "iMessage;-;+10000000000"}
+        if offline_correction:
+            wait_for(lambda: "photon-offline-correction " in read_text(rig.notes), "the offline correction")
     finally:
         rig.close()
+
+def test_restored_supervisor_text_still_sends(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("work", "Deploy the build")
+        (fake / "outage").touch()
+        cli("Supervisor recovery")
+        wait_for(lambda: list((state / "outbox").glob("*.json")), "the queued supervisor text")
+        bridge.terminate()
+        bridge.wait(10)
+        (fake / "outage").unlink()
+        bridge = start(2)
+        wait_for(lambda: text(fake / "sent"), "the recovered supervisor text")
+        assert text(fake / "sent") == "send Supervisor recovery\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
 
 
 def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(tmp_path, desk_clock):
@@ -1652,7 +1677,7 @@ console.log(JSON.stringify({{ system, prompt, LIMIT_REACHED, INCEPTION_MAX }}));
     assert "test-key" not in done.stderr and "he said" not in done.stderr
 
 
-def test_restart_recovers_owned_inbound_and_keeps_an_uncertain_send_out_of_firstmate(tmp_path):
+def test_restart_recovers_pending_inbound_but_drops_queued_desk_text(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "model-hold").touch()
     bridge = start(1)
@@ -1671,9 +1696,11 @@ def test_restart_recovers_owned_inbound_and_keeps_an_uncertain_send_out_of_first
         bridge.wait(10)
         (fake / "send-unsure").unlink()
         bridge = start(3)
-        wait_for(lambda: text(fake / "sent"), "the recovered direct send")
-        assert text(fake / "sent").splitlines() == ["send The build is paused."]
-        assert text(notes) == ""
+        wait_for(lambda: "photon-restart " in text(notes), "the restored desk handoff")
+        wait_for(lambda: list((state / "outbox-done").glob("*.json")), "the restored desk receipt")
+        assert text(fake / "sent") == ""
+        receipt = json.loads(next((state / "outbox-done").glob("*.json")).read_text())
+        assert receipt["maybe"] == {"photon": "iMessage;-;+10000000000"}
         assert len([r for r in records() if r["kind"] == "owner"]) == 1
     finally:
         bridge.terminate()
@@ -2278,7 +2305,7 @@ def test_a_definitely_refused_basic_burst_hands_off_once_even_after_lost_notice_
         bridge.wait(10)
 
 
-def test_a_refusal_after_an_uncertain_attempt_never_creates_a_second_answer(tmp_path):
+def test_restored_uncertain_text_is_not_retried_after_refusal(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "send-unsure").touch()
     bridge = start(1)
@@ -2290,8 +2317,10 @@ def test_a_refusal_after_an_uncertain_attempt_never_creates_a_second_answer(tmp_
         (fake / "send-unsure").unlink()
         (fake / "send-refused").touch()
         bridge = start(2)
-        wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the later refusal with retained uncertainty")
-        assert text(notes) == ""
+        wait_for(lambda: list((state / "outbox-done").glob("*.json")), "the retained uncertain receipt")
+        wait_for(lambda: "photon-uncertain " in text(notes), "the restored question handoff")
+        receipt = json.loads(next((state / "outbox-done").glob("*.json")).read_text())
+        assert receipt["maybe"] == {"photon": "iMessage;-;+10000000000"}
         assert text(fake / "sent") == ""
     finally:
         bridge.terminate()

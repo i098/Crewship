@@ -143,6 +143,7 @@ const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((
 }), undefined, MAX_WAIT_MS);
 let deskRun: Bun.Subprocess | undefined;
 let deskGeneration = 0;
+const deskSession = crypto.randomUUID();
 const deskCancelled = Object.assign(new Error("desk response cancelled"), { permanent: true, maybeSent: false });
 let stopDeskTyping: (() => void) | undefined;
 let deskTypingRequestId: string | undefined;
@@ -159,7 +160,7 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number };
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing };
@@ -509,14 +510,19 @@ function finishDeskDelivery(o: Out) {
   if (o.requestId && o.requestId === deskTypingRequestId) stopDeskTyping?.();
 }
 
+function hasRestoredUnsentText(o: Out): boolean {
+  return !!o.bubbles && (o.done ?? 0) < o.bubbles.length && o.deskSession !== deskSession;
+}
+
 function checkDeskDelivery(o: Out) {
-  if (o.kind === "desk" && o.deskGeneration !== deskGeneration) throw deskCancelled;
+  if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
 }
 
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
+  const update = (next: Out) => { save(next); o = next; };
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
   for (let i = o.done ?? 0; i < parts.length; i++) {
@@ -525,7 +531,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
       deliveryTyping(kind, true);
       await Bun.sleep(typingPause(part));
     }
-    if (!await sendCurrentBubble(o, i, part, save)) {
+    if (!await sendCurrentBubble(o, i, part, update)) {
       lostDeskAnswer(o);
       break;
     }
@@ -540,6 +546,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
 
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
   try {
+    if (o.deskSession !== deskSession) checkDeskDelivery(o);
     if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
     return true;
@@ -624,8 +631,16 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     }
     // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
     if (!line.sent || typeof bubble !== "string") maybe[name] = space;
-    else if (await line.sent(space, bubble, o.since ?? 0)) return;
+    else {
+      try {
+        if (await line.sent(space, bubble, o.since ?? 0)) return;
+      } catch (e) {
+        checkDeskDelivery(o);
+        throw e;
+      }
+    }
   }
+  if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   checkDeskDelivery(o);
   const since = o.since ?? Date.now();
   try {
@@ -765,7 +780,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
     out: { ...target.ref, requestId: target.requestId, requests: ids,
       ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
-      kind: "desk", guid, at: Date.now(), deskGeneration } });
+      kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
   flushRoutes();
 }
 
@@ -838,7 +853,7 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
-  if (!item.requests?.length || item.done || Object.keys(item.maybe ?? {}).length) return;
+  if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
 }

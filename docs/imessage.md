@@ -70,17 +70,20 @@ For each message from the owner, the service does these steps:
    Without `target`, the service selects the last pending message; an invalid target causes a handoff.
    The service threads a text only when another bubble separates the selected message from its answer.
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
-   Desk answers stay on the selected message's transport and chat, including during retries and after restarts.
+   Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
-   The routing journal keeps a cancellation counter, so restored answers stop after later owner text or Firstmate activity.
+   Startup drops restored desk text that has unsent bubbles and hands its requests to Firstmate, without waiting for inbound catch-up.
+   Firstmate and service sends keep their durable recovery.
    Each transport checks cancellation after preparation and immediately before sending.
    Cancellation does not remove uncertain delivery records.
    The service checks available transport history before cancelling an uncertain send and keeps unresolved evidence in the completion receipt.
+   Unavailable history cannot block later supervisor sends after cancellation.
+   A history check that disproves delivery clears the uncertainty before the service decides whether to hand off.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
