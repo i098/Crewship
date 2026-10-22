@@ -25,6 +25,8 @@ function plainFallback() {
   document.documentElement.classList.remove("js");
   const stage = document.getElementById("stage");
   if (stage) stage.hidden = true;
+  for (const dialog of document.querySelectorAll("dialog")) dialog.close();
+  document.getElementById("menu").setAttribute("open", "");
 }
 // Only the scene's own errors show the plain page: browser add-ons add failing resources and promises too.
 addEventListener("error", (e) => (e.filename || e.target.src || "").endsWith("/harbor.js") && plainFallback(), true);
@@ -57,12 +59,51 @@ addEventListener("unhandledrejection", (e) => String(e.reason?.stack).includes("
   <p>Crewship is built in the open at <a target="_blank" rel="noopener" href="https://github.com/i098/Crewship">github.com/i098/Crewship</a>. Read the <a href="https://github.com/i098/Crewship/blob/main/docs/architecture.md/">Architecture</a>. This page draws the scene as text, in your browser.</p>
 </footer>
 </div>
+<dialog id="menu" class="menu-panel" open aria-labelledby="menu-title">
+  <h2 id="menu-title">Crewship</h2>
+  <nav aria-label="Start menu">
+    <button id="explore" type="button" disabled>Explore</button>
+    <a href="https://github.com/i098/Crewship">GitHub</a>
+    <a href="/about">About</a>
+    <button id="settings-open" type="button" disabled>Settings</button>
+  </nav>
+  <noscript><p>Explore and Settings need JavaScript. The project links and manifest work without it.</p></noscript>
+</dialog>
+<dialog id="settings" class="menu-panel" aria-labelledby="settings-title">
+  <h2 id="settings-title">Settings</h2>
+  <form method="dialog">
+    <label for="graphics">Graphics</label>
+    <select id="graphics"><option value="auto">Auto</option><option value="low">Low</option><option value="high">High</option></select>
+    <label for="motion">Reduced motion</label>
+    <select id="motion"><option value="system">System</option><option value="reduce">Reduce</option><option value="full">Full</option></select>
+    <label class="sound-choice"><input id="sound-choice" type="checkbox"> Sound</label>
+    <p id="save-status" role="status"></p>
+    <details>
+    <summary>Controls</summary>
+    <dl>
+      <dt>W / S or ↑ / ↓</dt><dd>Move forward / back</dd>
+      <dt>A / D</dt><dd>Move left / right</dd>
+      <dt>← / → and R / F</dt><dd>Turn and look up / down</dd>
+      <dt>M, arrows, Enter</dt><dd>Open the map, select, then go</dd>
+      <dt>Click, mouse, Escape</dt><dd>Look around, then release the pointer</dd>
+      <dt>Touch</dt><dd>Drag the pad to move. Drag the view to look. Tap the map to select a place.</dd>
+      <dt>Enter or tap a link</dt><dd>Open the selected sign link</dd>
+      <dt>Escape</dt><dd>Close the map, then open the menu</dd>
+    </dl>
+    </details>
+    <div class="settings-actions">
+      <button id="settings-reset" type="button">Reset</button>
+      <button type="submit">Back</button>
+    </div>
+  </form>
+</dialog>
 <section id="stage" class="stage" hidden tabindex="0" role="application" aria-roledescription="3D harbor" aria-label="The ship at the dock, a walkable 3D scene. The feature list before it has the same content.">
   <canvas id="scene" aria-hidden="true"></canvas>
   <div id="card" class="sr-only" aria-live="polite"></div>
   <p id="zoomhint" class="zoomhint" role="status" hidden>Browser zoom changes the detail. Press <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>&minus;</kbd> for finer characters, <kbd>+</kbd> for bigger ones and a lighter load.</p>
   <div id="pad" class="pad" aria-hidden="true"><span></span></div>
   <button id="sound" class="sound" type="button" aria-label="Sound" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3z"/><path class="on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg></button>
+  <button id="menu-open" class="menu-open" type="button">Menu</button>
 </section>
 </body>
 </html>

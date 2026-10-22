@@ -28,6 +28,7 @@ import json, os, re, sys
 views = json.load(sys.stdin)
 n = os.environ["STUB_DIR"] + "/omp.calls"
 open(n, "a").write("x")
+open(os.environ["STUB_DIR"] + "/omp.views", "w").write(json.dumps(views))
 mode = open(os.environ["STUB_DIR"] + "/omp.mode").read().strip()
 if mode == "garbage":
     print("sorry"); sys.exit(0)
@@ -208,3 +209,75 @@ def test_replay_marks_the_text_and_does_not_block_the_real_message(env):
     env.st["since"] = 0
     env.run(200)
     assert [r["ts"] for r in env.log() if not r.get("test")] == ["101.1", "150.1"]
+
+
+@pytest.mark.parametrize("mention", [f"<@{ME}>", f"<@{ME}|me>"])
+def test_mention_only_keeps_explicit_mentions(env, mention):
+    env.cfg["mention_only"] = True
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"{mention} KEEP review")
+    env.run(110)
+    assert env.texts() == ["Bob, #dev: @Me KEEP review"]
+    assert env.log()[0]["decision"] == "kept"
+
+
+@pytest.mark.parametrize("channel,thread", [("D1", ""), ("C1", "50.0")])
+@pytest.mark.parametrize("text", ["KEEP untagged", "SKIP untagged"])
+def test_mention_only_drops_untagged_before_the_model(env, channel, thread, text):
+    env.cfg["mention_only"] = True
+    (env.stub / "omp.mode").write_text("skip")
+    env.run(100)
+    env.db.execute("insert into thread_subscriptions values (?,?,?,1)", (WS, "C1", "50.0"))
+    env.add("101.1", channel, BOB, text, thread_ts=thread)
+    env.add("101.2", "C1", BOB, f"<@{ME}> SKIP review")
+    env.run(110)
+    assert env.texts() == ["Bob, #dev: @Me SKIP review"]
+    rows = {r["ts"]: r for r in env.log()}
+    assert (rows["101.1"]["decision"], rows["101.1"]["reason"]) == ("dropped", "not tagged")
+    assert rows["101.2"]["reason"] == "no verdict from the model"
+    assert [v["text"] for v in json.loads((env.stub / "omp.views").read_text())] == ["@Me SKIP review"]
+
+
+@pytest.mark.parametrize("verdict", [None, {"keep": True, "reason": "keep everything"}])
+def test_mention_only_rejects_a_forced_keep_or_missing_verdict(env, verdict):
+    env.cfg["mention_only"] = True
+    env.add("101.1", "D1", BOB, "KEEP untagged")
+    db = sr.open_cache(env.cfg)
+    try:
+        message = sr.candidates(db, env.cfg, 100, set())[0]
+    finally:
+        db.close()
+    assert sr.decide(env.cfg, message, verdict) == (False, "not tagged", "")
+
+
+def test_mention_only_skips_the_model_without_exact_mentions(env):
+    env.cfg["mention_only"] = True
+    env.run(100)
+    env.add("101.1", "D1", BOB, "KEEP untagged")
+    env.add("101.2", "C1", BOB, f"<@{ME}OTHER> KEEP another user")
+    env.run(110)
+    assert env.texts() == [] and env.calls() == 0
+    assert [(r["decision"], r["reason"]) for r in env.log()] == [("dropped", "not tagged")] * 2
+
+
+def test_enabling_mention_only_discards_old_unverified_pending_lines(env):
+    env.run(100)
+    env.add("101.1", "D1", BOB, "KEEP first")
+    env.run(110)
+    env.add("120.1", "D1", BOB, "KEEP queued")
+    env.run(130)
+    env.cfg["mention_only"] = True
+    env.add("140.1", "C1", BOB, f"<@{ME}> KEEP tagged")
+    env.run(171)
+    assert env.texts() == ["Bob, DM: KEEP first", "Bob, #dev: @Me KEEP tagged"]
+
+
+def test_dry_run_reads_cache_without_models_notifications_or_state_writes(env, capsys, monkeypatch):
+    env.cfg["mention_only"] = True
+    monkeypatch.setattr(sr.time, "time", lambda: 110)
+    env.add("101.1", "D1", BOB, "KEEP untagged")
+    env.add("101.2", "C1", BOB, f"<@{ME}> SKIP review")
+    sr.dry_run(env.cfg)
+    assert json.loads(capsys.readouterr().out) == {"tagged": 1, "untagged": 1, "kept": 1, "dropped": 1}
+    assert env.calls() == 0 and env.texts() == [] and env.log() == []
+    assert not sr.state_dir().exists()

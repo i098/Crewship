@@ -52,7 +52,10 @@ const ear = () => { const [x, y, z] = audio.ctx.ear; return [x, y, -z]; };
 const flat = (a, b) => Math.hypot(a[0] - b[0], a[2] - b[2]);
 let clock = 0;
 const tick = () => { clock += 100; soundTick(clock); };
-assert.equal(audio, null, 'no audio before a click or tap');
+assert.equal(audio, null, 'no audio before Explore');
+setSound(true);
+assert.equal(audio, null, 'the sound preference must not start audio before Explore');
+exploring = true;
 setSound(true);
 
 // Outdoors by the fountain: the outdoor loops play, the fire is silent, the fountain stays at the basin.

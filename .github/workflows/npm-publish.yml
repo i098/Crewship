@@ -1,4 +1,4 @@
-# Publishes the crewship npm package (tools/npm/) for each published vX.Y.Z release.
+# Publishes the crewship npm package (tools/npm/) for each published v* release.
 #
 # npm trusted publishing: the job's GitHub OIDC token authenticates the
 # publish, so no npm token is stored, and npm adds a provenance attestation.
@@ -44,14 +44,27 @@ jobs:
       # The release PR sets tools/npm/package.json to the release version, so the
       # launcher fetches the install.sh of the same release.
       - name: Check the package version matches the tag
+        id: release
         env:
           TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           version=$(jq -r .version package.json)
           if [ "v$version" != "$TAG" ]; then
             echo "::error title=package version::tools/npm/package.json has $version but the release tag is $TAG; set it in the release PR"
             exit 1
           fi
+          prerelease=false
+          [[ "$version" != *-* ]] || prerelease=true
+          if [[ "$prerelease" != "$PRERELEASE" ]]; then
+            echo "::error title=release channel::The package version and GitHub prerelease flag must match"
+            exit 1
+          fi
+          tag=latest
+          [[ "$PRERELEASE" == false ]] || tag=next
+          echo "npm_tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Publish
-        run: npm publish --provenance --access public
+        env:
+          NPM_TAG: ${{ steps.release.outputs.npm_tag }}
+        run: npm publish --provenance --access public --tag "$NPM_TAG"

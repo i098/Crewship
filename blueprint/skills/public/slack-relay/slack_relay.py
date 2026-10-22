@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """Relay important Slack messages to the operator by text, and drop the rest.
 
-Read-only: the only input is the cache database of the slk TUI, opened with mode=ro. The script
-never calls Slack and never writes to it (no post, reaction, read mark or join). New messages go to
-one `omp -p` call that keeps or drops each; kept ones are sent with at most one text per window.
-
-  slack_relay.py run                         loop forever (the systemd unit)
-  slack_relay.py once                        one cycle, then exit
-  slack_relay.py replay WORKSPACE CHANNEL TS  run one cached message through the filter, text marked [test]
+See SKILL.md beside this script for filtering, configuration, commands, and safety rules.
 """
 
 import argparse
@@ -26,6 +20,7 @@ DEFAULTS = {
     "db": "~/.local/share/slk/cache.db",
     "self": {},  # workspace team id -> the operator's Slack user id (required)
     "operator_name": "the operator",
+    "mention_only": False,
     "teammates": [],  # names whose messages about the operator's work matter
     "workspaces": {},  # team id -> {"name": ...}, a display name for the model
     "model": "anthropic/claude-haiku-5-5",
@@ -138,7 +133,7 @@ def view_of(cfg, db, m, me, ref):
         "type": kind,
         "from": who,
         "bot": bool(is_bot or m["subtype"] == "bot_message" or m["user_id"].startswith("B") or ctype == "app"),
-        "mentions_him": f"<@{me}" in m["text"],
+        "mentions_him": bool(re.search(rf"<@{re.escape(me)}(?:\|[^>]*)?>", m["text"])),
         "in_his_thread": in_his_thread(db, m, me),
         "text": clean(m["text"], names)[: cfg["text_chars"]],
     }
@@ -179,7 +174,9 @@ def verdicts(cfg, batch):
 
 
 def decide(cfg, m, v):
-    """(keep, reason, line). A message the model skipped is kept only when it is a DM or a mention."""
+    """Return (keep, reason, line)."""
+    if cfg["mention_only"] and not m["view"]["mentions_him"]:
+        return False, "not tagged", ""
     if v is None:
         sure = m["view"]["type"] == "dm" or m["view"]["mentions_him"]
         return sure and not m["view"]["bot"], "no verdict from the model", ""
@@ -188,8 +185,15 @@ def decide(cfg, m, v):
 
 def process(cfg, batch, st, test=False):
     """Filter one batch; log every message; queue the kept lines."""
-    got = verdicts(cfg, batch)
-    for i, m in enumerate(batch):
+    eligible = []
+    for m in batch:
+        if cfg["mention_only"] and not m["view"]["mentions_him"]:
+            write_log(key=key(m), ws=m["workspace_id"], channel=m["channel_id"], ts=m["ts"],
+                      user=m["view"]["from"], decision="dropped", reason="not tagged", **({"test": True} if test else {}))
+        else:
+            eligible.append(m)
+    got = verdicts(cfg, eligible) if eligible else {}
+    for i, m in enumerate(eligible):
         keep, reason, line = decide(cfg, m, got.get(i))
         v = m["view"]
         write_log(key=key(m), ws=m["workspace_id"], channel=m["channel_id"], ts=m["ts"], user=v["from"],
@@ -211,6 +215,9 @@ def flush(cfg, st, now):
 
 
 def cycle(cfg, st, now):
+    if cfg["mention_only"] and not st.get("mention_only"):
+        st["pending"] = []  # Old queued lines have no mention metadata.
+    st["mention_only"] = cfg["mention_only"]
     db = open_cache(cfg)
     try:
         seen = {r["key"] for r in read_log() if not r.get("test")}
@@ -230,6 +237,21 @@ def cycle(cfg, st, now):
         save_state(st)
     flush(cfg, st, now)
     save_state(st)
+
+
+def dry_run(cfg):
+    """Count recent cached messages with the fallback filter; do not call the model, notify, or write state."""
+    db = open_cache(cfg)
+    try:
+        batch = candidates(db, cfg, time.time() - cfg["lookback"], set())
+    finally:
+        db.close()
+    counts = {"tagged": 0, "untagged": 0, "kept": 0, "dropped": 0}
+    for m in batch:
+        counts["tagged" if m["view"]["mentions_him"] else "untagged"] += 1
+        keep, _, _ = decide(cfg, m, None)
+        counts["kept" if keep else "dropped"] += 1
+    print(json.dumps(counts))
 
 
 def replay(cfg, workspace, channel, ts):
@@ -254,18 +276,22 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run")
     sub.add_parser("once")
+    sub.add_parser("dry-run")
     rp = sub.add_parser("replay")
     rp.add_argument("workspace"), rp.add_argument("channel"), rp.add_argument("ts")
     args = ap.parse_args()
     cfg = load_config()
+    if args.cmd == "dry-run":
+        return dry_run(cfg)
     if args.cmd == "replay":
         return replay(cfg, args.workspace, args.channel, args.ts)
+    print(f"slack-relay started: mention_only={cfg['mention_only']}", flush=True)
     st, fails = load_state(), 0
     while True:
         try:
             cycle(cfg, st, time.time())
             fails = 0
-        except Exception as e:  # a failed cycle loses nothing: unseen messages are retried
+        except Exception as e:  # Unseen eligible messages are retried.
             fails += 1
             print(f"cycle failed: {e}", file=sys.stderr, flush=True)
         if args.cmd == "once":

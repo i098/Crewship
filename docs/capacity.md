@@ -46,6 +46,23 @@ Idle chrome-devtools-axi bridges come on top: each holds about 2 GB until
 - **Disk:** Docker images and build cache grow with the lane count. The storage guard warns at 85% and prunes at 92%, stale gitignored worktree output first (see [Stale worktree output](fleet-guards.md#stale-worktree-output)).
 - **File watchers:** every agent runs file watchers (LSP servers, bundlers, test runners) as the one Crewship account, and the stock limit is 128 inotify instances per user. Every host that starts services gets `/etc/sysctl.d/60-agent-host.conf` with `fs.inotify.max_user_instances = 8192`; apply loads it with `sysctl -p` when it writes the file.
 
+### Hosting advice
+
+This is buying advice, not a measurement.
+Start with a VPS for the 16 GB and 32 GB presets.
+For sustained 16 vCPU / 64 GB work, compare dedicated hardware with a dedicated-vCPU VPS.
+Prefer dedicated hardware if its price fits that sustained load.
+A 64 GB requirement alone does not require dedicated hardware.
+Provider vCPU labels do not guarantee equal performance.
+Choose SSD or NVMe storage and add space for your repositories, images, and data.
+
+The laptop guide, `npx crewship init`, uses these presets to recommend a size before purchase.
+Count active work lanes, including review and test agents, rather than queued jobs.
+Choose a preset that meets both the CPU and RAM estimates, plus your disk needs.
+For needs above 16 vCPU or 64 GB, use the formulas above and request a larger offer.
+If the budget is too low, reduce the agreed concurrency or stop before purchase.
+Never count swap as RAM capacity.
+
 ## Auto pruners
 
 ### Provisioned by this recipe
