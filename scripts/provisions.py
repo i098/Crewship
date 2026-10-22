@@ -838,7 +838,22 @@ def omp_plugins(home, environment):
     changed = False
     marketplaces = home / ".omp/marketplaces.json"
     known = marketplaces.read_text() if marketplaces.is_file() else ""
-    installed = {plugin["id"] for plugin in json.loads(omp("list", "--json"))["marketplace"]}
+    installed = None
+    if not any(environment.get(key) for key in (
+        "PI_CONFIG_DIR", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "XDG_DATA_HOME",
+    )):
+        try:
+            registry = json.loads((home / ".omp/plugins/installed_plugins.json").read_text())
+        except (OSError, ValueError):
+            registry = {}
+        if (
+            isinstance(registry, dict)
+            and registry.get("version") == 2
+            and isinstance(registry.get("plugins"), dict)
+        ):
+            installed = set(registry["plugins"])
+    if installed is None:
+        installed = {plugin["id"] for plugin in json.loads(omp("list", "--json"))["marketplace"]}
     if known:
         omp("marketplace", "update")
     for name, repository in OMP_PLUGINS.items():

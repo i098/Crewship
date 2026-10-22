@@ -1031,7 +1031,10 @@ def test_omp_plugins_are_managed_from_the_target_home_whatever_the_installer_cwd
     assert set((tmp_path / "cwds").read_text().split()) == {str(home)}
 
 
-def test_plugin_catalogs_are_fetched_once_per_apply_and_existing_plugins_upgrade(tmp_path):
+@pytest.mark.parametrize("registry_mode", ("current", "malformed", "future", "relocated"))
+def test_plugin_catalogs_are_fetched_once_per_apply_and_existing_plugins_upgrade(
+    tmp_path, registry_mode
+):
     omp = tmp_path / ".local/bin/omp"
     omp.parent.mkdir(parents=True)
     state_file = tmp_path / "marketplace-state.json"
@@ -1072,6 +1075,12 @@ elif args == ["upgrade"]:
 else:
     raise SystemExit(1)
 state_file.write_text(json.dumps(state))
+registry = home / ".omp/plugins/installed_plugins.json"
+registry.parent.mkdir(parents=True, exist_ok=True)
+registry.write_text(json.dumps({
+    "version": 2,
+    "plugins": {name: [{"version": str(version)}] for name, version in state["plugins"].items()},
+}))
 """
     )
     omp.chmod(0o755)
@@ -1082,6 +1091,16 @@ state_file.write_text(json.dumps(state))
     assert state["downloads"] == {name: 1 for name in installer.OMP_PLUGINS}
 
     state["remote"] = 2
+    del state["plugins"]["ponytail@ponytail"]
+    registry = tmp_path / ".omp/plugins/installed_plugins.json"
+    saved = json.loads(registry.read_text())
+    if registry_mode == "current":
+        del saved["plugins"]["ponytail@ponytail"]
+    elif registry_mode == "future":
+        saved["version"] = 3
+    elif registry_mode == "relocated":
+        environment["XDG_DATA_HOME"] = str(tmp_path / "data")
+    registry.write_text("invalid JSON" if registry_mode == "malformed" else json.dumps(saved))
     state_file.write_text(json.dumps(state))
     assert installer.omp_plugins(tmp_path, environment)
     state = json.loads(state_file.read_text())

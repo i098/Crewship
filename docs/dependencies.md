@@ -82,6 +82,8 @@ Bun output stays in one labeled block per package, including command failures.
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
   Apply fetches each new marketplace once, refreshes existing marketplaces, and installs missing plugins.
+  For the default version-2 plugin registry, apply reads installed IDs directly from `~/.omp/plugins/installed_plugins.json`.
+  It uses `omp plugin list --json` for custom paths, profiles, missing or unreadable files, and unsupported registry formats.
   If no marketplace plugins were installed before apply, it skips `omp plugin upgrade`.
   Otherwise, it runs that command after installation.
   These plugins have no publisher checksums and track each author's default branch.
