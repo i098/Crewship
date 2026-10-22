@@ -20,6 +20,16 @@ REPLY = {
     "kind": "reply", "answer": FACT, "evidence": [{"source": "status", "quote": FACT}],
 }
 
+REACTIONS = [
+    (LEAKED, "👍"),
+    ("REACT:👍", "👍"),
+    ("tapback:❤️", "❤️"),
+    (json.dumps({"kind": "tapback", "emoji": "👍"}), "👍"),
+    (json.dumps({"decision": "REACT:❤️"}), "❤️"),
+    (json.dumps({**REPLY, "other": {"kind": "tapback", "emoji": "👍"}}), "👍"),
+    (json.dumps({"kind": "tapback", "emoji": "👍", "other": {"decision": "REACT:👍"}}), "👍"),
+]
+
 pytestmark = pytest.mark.skipif(
     not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl"
 )
@@ -74,15 +84,9 @@ def run_desk(tmp_path, surface, output, status=FACT, message=REQUEST):
 
 @pytest.mark.parametrize("surface", ["instagram", "photon", "bluebubbles"])
 @pytest.mark.parametrize("output,action", [
-    (LEAKED, "👍"),
-    ("REACT:👍", "👍"),
-    ("tapback:❤️", "❤️"),
-    (json.dumps({"kind": "tapback", "emoji": "👍"}), "👍"),
-    (json.dumps({"decision": "REACT:❤️"}), "❤️"),
+    *REACTIONS,
     (json.dumps({**REPLY, "decision": "SKIP"}), "skip"),
     (json.dumps({**REPLY, "other": {"decision": "handoff"}}), "handoff"),
-    (json.dumps({**REPLY, "other": {"kind": "tapback", "emoji": "👍"}}), "👍"),
-    (json.dumps({"kind": "tapback", "emoji": "👍", "other": {"decision": "REACT:👍"}}), "👍"),
     (json.dumps({"kind": "tapback", "emoji": "👍", "other": {"decision": "REACT:👎"}}), "skip"),
     (json.dumps({**REPLY, "decision": "not a decision"}), "skip"),
     ("handoff", "handoff"),
@@ -110,7 +114,8 @@ def run_desk(tmp_path, surface, output, status=FACT, message=REQUEST):
     (json.dumps({**REPLY, "kind": "basic"}), "skip"),
 ])
 def test_only_structural_actions_leave_the_desk(tmp_path, surface, output, action):
-    result = run_desk(tmp_path, surface, output)
+    message = "thanks!" if surface != "instagram" and action not in ("skip", "handoff") else REQUEST
+    result = run_desk(tmp_path, surface, output, message=message)
     if action in ("skip", "handoff"):
         expected = []
     elif surface == "instagram":
@@ -122,8 +127,21 @@ def test_only_structural_actions_leave_the_desk(tmp_path, surface, output, actio
     assert len(result["log"]) == 1
     assert not any(line in result["log"][0] for line in output.splitlines() if len(line) > 30)
     if surface != "instagram":
-        assert result["notes"].count(f"{surface}-report ") == 1
-        assert REQUEST in result["notes"]
+        if action in ("skip", "handoff"):
+            assert result["notes"].count(f"{surface}-report ") == 1
+            assert message in result["notes"]
+        else:
+            assert result["notes"] == ""
+
+
+@pytest.mark.parametrize("surface", ["photon", "bluebubbles"])
+@pytest.mark.parametrize("output", [output for output, _ in REACTIONS])
+def test_request_hands_off_despite_a_reaction_directive(tmp_path, surface, output):
+    result = run_desk(tmp_path, surface, output)
+    assert result["sends"] == []
+    assert result["notes"].count(f"{surface}-report ") == 1
+    assert REQUEST in result["notes"]
+    assert result["log"] == ["handoff"]
 
 
 @pytest.mark.parametrize("surface", ["instagram", "photon", "bluebubbles"])
