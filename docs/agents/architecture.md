@@ -68,7 +68,7 @@ The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`
 
 | File | Value |
 | --- | --- |
-| `crew-dispatch.json` | [Per-task model choice](../configuration.md#firstmate-dispatch-defaults): mechanical, simple coding, ordinary, and hard tiers, with Sonnet 5.5 as the default. Mercury 3 handles simple coding at high thinking. Opus 5.5 handles hard work at high thinking, never extra-high. Fable is not a spawn choice. GPT-6.1 Sol takes ordinary work only when the Anthropic quota is exhausted. |
+| `crew-dispatch.json` | See [Firstmate dispatch defaults](../configuration.md#firstmate-dispatch-defaults) for per-task model choices and thinking levels. |
 | `secondmate-harness` | `omp anthropic/claude-opus-5-5 medium`. |
 | `omp-crew-overlay.yml` | omp overlay Firstmate applies to crewmate and scout launches, never secondmates, ahead of its tracked worker overlay. It sets `modelRoles.advisor: anthropic/claude-fable-5-1:low`, `advisor.enabled: true`, `advisor.immuneTurns: 10` and `advisor.syncBacklog: "off"`, plus `providers.anthropic.serverSideFallback: false`: with the global server-side fallback on, Anthropic rejects every advisor call with a 400. Every omp crewmate runs a fable-5.1 advisor at low thinking (its lowest level). Crews never wait on it, because `syncBacklog: "off"` overrides the global `"1"`. Turns that land during a review batch into the next call instead of one call per turn, and the advisor interrupts at most once per 10 turns. omp has no every-N-turns setting. |
 | `spawn-memory-floor-mb` | `8000`; see [fleet guards](../fleet-guards.md). |

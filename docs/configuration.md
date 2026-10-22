@@ -221,9 +221,11 @@ The Firstmate checkout tracks the default branch of upstream Firstmate, not a sh
 ### Firstmate dispatch defaults
 
 The `firstmate` profile copies `blueprint/config/crew-dispatch.json` to `<workspace>/firstmate/config/crew-dispatch.json`.
-The profile selects Haiku or Luna for mechanical work, Mercury 3 for simple coding, Sonnet for ordinary engineering, and Opus for hard work.
+Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple coding.
+Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
+Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
 Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
-Fable is not a spawn choice; the existing automatic Opus fallback remains unchanged.
+Fable is not a spawn choice; see [Default config](default-config.md) for the unchanged automatic fallback chain.
 Provider credentials are not included in the dispatch file.
 
 Each apply normally updates the seeded Firstmate settings.
@@ -235,7 +237,7 @@ uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/sit
 ```
 
 Then edit `<workspace>/firstmate/config/crew-dispatch.json` to change a model or effort.
-This option preserves all existing seeded Firstmate settings and still creates missing files.
+This option preserves existing entries in `crewship_firstmate_config_names` and copies only absent entries, including whole directories.
 To skip Firstmate provisioning entirely, set `crewship.profiles.firstmate: false` in `.local/host.yml`.
 
 ## New-host questions

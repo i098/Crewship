@@ -1,6 +1,6 @@
 # Default config
 
-- **Models:** [omp](omp.md) runs the agents. Opus 5.5 at high thinking runs the home, with the advisor off. OpenAI requests use the priority tier. Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 at high thinking for simple coding. Sonnet 5.5 handles ordinary work by default; Opus 5.5 at high thinking handles hard work only. Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted. The spawning agent picks the thinking level for other tiers. Fable is not a spawn choice.
+- **Models:** [omp](omp.md) runs the agents. Opus 5.5 at high thinking runs the home, with the advisor off. OpenAI requests use the priority tier. See [Firstmate dispatch defaults](configuration.md#firstmate-dispatch-defaults) for per-task model choices and thinking levels.
 - **Fallbacks:** a model that keeps failing falls back to the next one. Opus 5.5 falls back to Fable 5.1 at medium thinking, Fable 5.1 to Opus 5, and Sonnet 5 to Fable 5.1, then Opus 5.
 - **Plugins and extensions:** the omp plugins `ponytail`, `i-have-adhd`, and `caveman`. Extensions add the [turn-end quality check](omp.md#quality-gate), [status-line icons](omp.md#status-line-icons), the [Herdr sidebar](herdr.md) feed, and a block on kill-by-name commands such as `pkill` and `killall`.
 - **Gates:** the [no-mistakes pipeline](omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. Gates use Sonnet 5.5 at high thinking, and Opus 5.5 for hard work. Pick another model for one run with `--model`.
