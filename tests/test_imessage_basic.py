@@ -1341,10 +1341,12 @@ def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restar
     (["got it"], "Tests pass. Say the word and I'll merge."),
     (["🙏"], "Let me know when to deploy."),
     (["thanks", "Run tests"], None),
+    (["What is the build status?"], None),
     (["thanks", "What is the build status?"], None),
     (["thanks, please check the account"], None),
+    (["My account password is secret"], None),
 ])
-def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, desk_clock, messages, context):
+def test_approval_and_mixed_bursts_hand_off_without_a_reaction(tmp_path, desk_clock, messages, context):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     bridge = start(1)
@@ -1358,7 +1360,71 @@ def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, d
         desk_clock()
         wait_for(lambda: all(f"photon-turn{i} " in text(notes) for i in range(len(messages))), "the full handoff")
         assert [r["text"] for r in records() if r["kind"] == "owner"] == (["A question"] if context else []) + messages
-        assert not any(line.startswith(("send ", "reply ")) for line in text(fake / "sent").splitlines()[int(bool(context)):])
+        assert text(fake / "sent").splitlines()[int(bool(context)):] == []
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("messages,response,expected", [
+    (["thanks!"], {"kind": "tapback", "emoji": "❤️"}, ["react social0 ❤️"]),
+    (["hahaha", "nice"], {"kind": "tapback", "emoji": "😂"}, ["react social1 😂"]),
+    (["great news!", "awesome"], {"kind": "tapback", "emoji": "‼️", "text": "nice!"},
+     ["send nice!", "react social1 ‼️"]),
+])
+def test_social_burst_sends_one_fitting_reaction_with_optional_text(tmp_path, desk_clock, messages, response, expected):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text(json.dumps(response))
+    bridge = start(1)
+    try:
+        for i, message in enumerate(messages):
+            receive(f"social{i}", message)
+        desk_clock()
+        wait_for(lambda: text(fake / "sent").splitlines() == expected, "the social response")
+        assert text(notes) == ""
+        assert sum(line.startswith("react ") for line in text(fake / "sent").splitlines()) == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("extra", ["I fixed it", "checking now", "your account is safe", "run tests", ""])
+def test_social_reaction_rejects_unchecked_extra_text(tmp_path, desk_clock, extra):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text(json.dumps({"kind": "tapback", "emoji": "❤️", "text": extra}))
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        desk_clock()
+        wait_for(lambda: "photon-thanks " in text(notes), "the unsafe-text handoff")
+        assert text(fake / "sent") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("ending", ["retry", "expired"])
+def test_social_text_is_not_repeated_or_handed_off_when_its_reaction_fails(tmp_path, desk_clock, ending):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️","text":"nice!"}')
+    (fake / "react-unsure").touch()
+    bridge = start(1)
+    try:
+        receive("social", "great news!")
+        desk_clock()
+        wait_for(lambda: "reaction timed out" in text(err), "the reaction retry")
+        assert text(fake / "sent").splitlines().count("send nice!") == 1
+        bridge.terminate()
+        bridge.wait(10)
+        (fake / "react-unsure").unlink()
+        if ending == "expired":
+            publish_json(tmp_path / "clock", int((tmp_path / "clock").read_text()) + 121_000)
+        bridge = start(2)
+        receipt = state / ("outbox-dead" if ending == "expired" else "outbox-done")
+        wait_for(lambda: list(receipt.glob("*.json")), "the reaction receipt after restart")
+        assert text(fake / "sent").splitlines().count("send nice!") == 1
+        assert text(notes) == ""
+        assert [r["text"] for r in records() if r["kind"] == "desk"].count("nice!") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -159,7 +159,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
-type DeskResult = { answer: { answer: string } | { react: string }; target: Routing; complete: boolean };
+type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing; complete: boolean };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -502,9 +502,9 @@ function finishDeskDelivery(o: Out) {
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
-  if (o.react) return deliverReaction(o, save);
   if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
+  const unsent = (o.done ?? 0) < parts.length;
   for (let i = o.done ?? 0; i < parts.length; i++) {
     const part = parts[i]!;
     if (i > 0 && typeof part === "string") {
@@ -516,8 +516,15 @@ async function deliver(o: Out, save: (o: Out) => void) {
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
-  if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
+  const text = deliveredText(o, unsent);
+  if (text !== undefined) remember(kind, text);
+  if (o.react) return deliverReaction(o, save);
   if (o.image) rmSync(o.image.path, { force: true });
+}
+
+function deliveredText(o: Out, unsent: boolean) {
+  if (!unsent || o.silent) return;
+  return [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n");
 }
 
 async function deliverReaction(o: Out, save: (o: Out) => void) {
@@ -716,7 +723,8 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   if (complete) deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: complete ? "desk" : "handoff",
     out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
-      ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id } : { react: answer.react }),
+      ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id }
+        : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
   flushRoutes();
 }
@@ -740,6 +748,7 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const target = pending[(answer.target ?? pending.length) - 1];
   if (!target) return;
   const complete = "answer" in answer || socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1]);
+  if ("react" in answer && !complete) return;
   return { answer, target, complete };
 }
 
