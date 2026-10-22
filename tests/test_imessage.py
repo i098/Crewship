@@ -1682,7 +1682,7 @@ function message(m) {
       if (existsSync(`${dir}/react-unsure`)) throw Object.assign(new Error("reaction timed out"), { grpcCode: 4 });
     },
     async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
-    async read() {},
+    async read() { appendFileSync(`${dir}/read`, `${m.id}\\n`); },
   };
 }
 async function* messages() {

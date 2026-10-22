@@ -25,6 +25,52 @@ pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl"
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
 
 
+@pytest.fixture
+def desk_clock(tmp_path, monkeypatch):
+    """Control quiet periods and reaction ages; keep real retry timers and disk writes."""
+    clock = tmp_path / "clock"
+    clock.write_text(str(int(time.time() * 1000)))
+    preload = tmp_path / "clock.ts"
+    preload.write_text("""
+import { readFileSync, writeFileSync } from "node:fs";
+if (process.env.STATE_DIRECTORY) {
+  const file = process.env.FM_TEST_CLOCK;
+  Date.now = () => Number(readFileSync(file, "utf8"));
+  Math.random = () => 0.5;
+  const timers = new Map();
+  const schedule = globalThis.setTimeout;
+  const cancel = globalThis.clearTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (ms !== Number(process.env.FM_IMESSAGE_TEST_QUIET_MS)) return schedule(fn, ms, ...args);
+    const timer = { at: Date.now() + ms, run: () => fn(...args) };
+    timers.set(timer, timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => { if (!timers.delete(timer)) cancel(timer); };
+  let seen;
+  setInterval(() => {
+    const now = Date.now();
+    if (seen === now) return;
+    seen = now;
+    for (const [key, timer] of timers) if (timer.at <= now) {
+      timers.delete(key);
+      timer.run();
+    }
+    writeFileSync(`${file}-seen`, String(now));
+  }, 5).unref();
+}
+""")
+    monkeypatch.setenv("FM_TEST_CLOCK", str(clock))
+    monkeypatch.setenv("BUN_OPTIONS", f"--preload={preload}")
+
+    def advance(ms=TEST_QUIET_MS):
+        now = int(clock.read_text()) + ms
+        publish_json(clock, now)
+        wait_for(lambda: read_text(tmp_path / "clock-seen") == str(now), "the controlled clock tick")
+
+    return advance
+
+
 def basic_rig(tmp_path, test_mode=True):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path, test_mode)
     (fake / "status").write_text("The build is paused.")
@@ -62,10 +108,16 @@ def basic_rig(tmp_path, test_mode=True):
     )
 
     def receive(mid, message, **fields):
+        read_count = text(fake / "read").splitlines().count(mid)
         publish_json(fake / "inbound" / f"{mid}.json", {
             "id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": message, **fields,
         })
         wait_for(lambda: f'"photon-{mid}"' in text(state / "routing.jsonl"), "durable inbound ownership")
+        if os.environ.get("FM_TEST_CLOCK"):
+            if read_count:
+                wait_for(lambda: not (fake / "inbound" / f"{mid}.json").exists(), "the duplicate input")
+            else:
+                wait_for(lambda: text(fake / "read").splitlines().count(mid) > read_count, "the completed inbound handling")
 
     def records():
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
@@ -98,13 +150,15 @@ def transport_desk_rig(tmp_path, **env):
                 "id": mid, "space": space, "sender": "+10000000000", "text": message,
             })
         else:
-            rig.relay_message(mid, message, int(time.time() * 1000), chats=[{"guid": space}])
+            rig.relay_message(mid, message, int((tmp_path / "clock").read_text()), chats=[{"guid": space}])
             subprocess.run([
                 "curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": mid}}),
                 f"http://127.0.0.1:{rig.hook_port}/bluebubbles",
             ], check=True, capture_output=True)
         wait_for(lambda: f'"requestId":"{transport}-{mid}"' in read_text(rig.state / "routing.jsonl"),
                  "the durable request")
+        latest = "latest" if transport == "photon" else "latest-bluebubbles"
+        wait_for(lambda: f"\n{mid}\n" in read_text(rig.state / latest), "the completed inbound handling")
 
     return rig, receive
 
@@ -113,7 +167,7 @@ def transport_desk_rig(tmp_path, **env):
     ("photon", "definite"), ("photon", "uncertain"),
     ("bluebubbles", "definite"), ("bluebubbles", "uncertain"),
 ])
-def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, transport, failure):
+def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, desk_clock, transport, failure):
     rig, receive = transport_desk_rig(tmp_path)
     other = "bluebubbles" if transport == "photon" else "photon"
     try:
@@ -128,6 +182,7 @@ def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, tran
         else:
             rig.relay_mode("last-down" if failure == "definite" else "send-down")
         receive(transport, "private", "What is the build status?")
+        desk_clock()
         wait_for(lambda: rig.outbox() and "outbox item 1 failed" in read_text(rig.err), "the retained answer")
         assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
         assert f"{transport}-private " not in read_text(rig.notes)
@@ -152,13 +207,14 @@ def test_desk_answer_stays_in_its_chat_during_failure_and_restart(tmp_path, tran
         rig.close()
 
 
-def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(tmp_path):
+def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(tmp_path, desk_clock):
     rig, receive = transport_desk_rig(tmp_path)
     (rig.fake / "no-private-api").touch()
     (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     try:
         rig.start()
         receive("bluebubbles", "thanks", "thanks!")
+        desk_clock()
         wait_for(lambda: "bluebubbles-thanks " in read_text(rig.notes), "the unsupported-reaction handoff")
         assert read_text(rig.fake / "relay-sent") == ""
         records = [json.loads(line) for p in (rig.state / "memory/main").glob("*.jsonl")
@@ -168,7 +224,7 @@ def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(
         assert len(dead) == 1 and not dead[0].get("maybe")
         rig.stop()
         rig.start()
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert read_text(rig.notes).count("bluebubbles-thanks ") == 1
         assert read_text(rig.fake / "relay-sent") == ""
     finally:
@@ -176,7 +232,7 @@ def test_unsupported_bluebubbles_social_reaction_hands_off_without_false_memory(
 
 
 @pytest.mark.parametrize("transport", ["photon", "bluebubbles"])
-def test_uncertain_social_reaction_survives_refusal_and_dead_letter_restart(tmp_path, transport):
+def test_uncertain_social_reaction_survives_refusal_and_dead_letter_restart(tmp_path, desk_clock, transport):
     rig, receive = transport_desk_rig(tmp_path, FM_IMESSAGE_REACT_MAX_MS="2000")
     (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     if transport == "photon":
@@ -186,6 +242,7 @@ def test_uncertain_social_reaction_survives_refusal_and_dead_letter_restart(tmp_
     try:
         rig.start()
         receive(transport, "thanks", "thanks!")
+        desk_clock()
         sent = rig.fake / ("sent" if transport == "photon" else "relay-sent")
         wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe") and "react thanks" in read_text(sent),
                  "the durable uncertain reaction")
@@ -204,13 +261,13 @@ def test_uncertain_social_reaction_survives_refusal_and_dead_letter_restart(tmp_
         assert f"react thanks {'👍' if transport == 'photon' else 'like'}" in delivered
         rig.stop()
         rig.start()
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert f"{transport}-thanks " not in read_text(rig.notes)
     finally:
         rig.close()
 
 
-def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypatch):
+def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypatch, desk_clock):
     monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "200")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
@@ -218,6 +275,9 @@ def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypat
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        desk_clock()
+        wait_for(lambda: "reaction timed out" in text(err), "the uncertain mutation")
+        desk_clock(201)
         wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the expired uncertain reaction")
         dead = json.loads(next((state / "outbox-dead").glob("*.json")).read_text())
         assert dead["maybe"] == {"photon": "iMessage;-;+10000000000"}
@@ -230,7 +290,7 @@ def test_uncertain_social_reaction_expires_without_a_handoff(tmp_path, monkeypat
 
 @pytest.mark.parametrize("failure", ["missing", "timeout"])
 @pytest.mark.parametrize("prior_uncertain", [False, True])
-def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_path, monkeypatch, failure, prior_uncertain):
+def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_path, monkeypatch, desk_clock, failure, prior_uncertain):
     monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "2000")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
@@ -239,6 +299,7 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        desk_clock()
         if prior_uncertain:
             wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
             failure_flag.touch()
@@ -250,6 +311,7 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
             queued = json.loads(next((state / "outbox").glob("*.json")).read_text())
             assert bool(queued.get("maybe")) == prior_uncertain
         bridge = start(2)
+        desk_clock(2001)
         wait_for(lambda: list((state / "outbox-dead").glob("*.json")), "the failed-reaction receipt")
         dead = json.loads(next((state / "outbox-dead").glob("*.json")).read_text())
         assert bool(dead.get("maybe")) == prior_uncertain
@@ -262,7 +324,7 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
         bridge.terminate()
         bridge.wait(10)
         bridge = start(3)
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(notes).count("photon-thanks ") == int(not prior_uncertain)
         assert not any(r["kind"] == "desk" for r in records())
     finally:
@@ -271,13 +333,14 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
 
 
 @pytest.mark.parametrize("prior_uncertain", [False, True])
-def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tmp_path, prior_uncertain):
+def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tmp_path, desk_clock, prior_uncertain):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     (fake / ("react-unsure" if prior_uncertain else "lookup-stop")).touch()
     bridge = start(1)
     try:
         receive("lost", "thanks!")
+        desk_clock()
         if prior_uncertain:
             wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
             (fake / "lookup-stop").touch()
@@ -302,7 +365,7 @@ def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tm
 
 
 @pytest.mark.parametrize("prior_uncertain", [False, True])
-def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_uncertainty(tmp_path, prior_uncertain):
+def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_uncertainty(tmp_path, desk_clock, prior_uncertain):
     rig, receive = transport_desk_rig(tmp_path)
     (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     (tmp_path / "bin/omp").write_text(
@@ -317,6 +380,7 @@ def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_unc
     try:
         rig.start()
         receive("bluebubbles", "thanks", "thanks!")
+        desk_clock()
         if prior_uncertain:
             wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe")
                      and "react thanks like" in read_text(rig.fake / "relay-sent"), "the uncertain reaction")
@@ -324,6 +388,7 @@ def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_unc
         (rig.fake / "model-hold").unlink(missing_ok=True)
         rig.relay_mode("hold-health")
         rig.start()
+        desk_clock()
         wait_for(lambda: (rig.fake / "health-waiting").exists()
                  and '"route":"done"' in read_text(rig.state / "routing.jsonl"), "the queued reaction during a held health check")
         rig.bridge.kill()
@@ -345,13 +410,14 @@ def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_unc
         rig.close()
 
 
-def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path):
+def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     (fake / "lookup-timeout").touch()
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        desk_clock()
         wait_for(lambda: "lookup timed out" in text(err), "the failed lookup")
         bridge.terminate()
         bridge.wait(10)
@@ -913,7 +979,7 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         bridge.wait(10)
 
 
-def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restart(tmp_path):
+def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restart(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️","target":1}')
     bridge = start(1)
@@ -922,6 +988,7 @@ def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restar
         receive("ack", "got it")
         receive("emoji", "🙌")
         (fake / "outage").touch()
+        desk_clock()
         wait_for(lambda: list((state / "outbox").glob("*.json")), "the saved social reaction")
         wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the completed social routing")
         assert text(notes) == ""
@@ -932,7 +999,7 @@ def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restar
         wait_for(lambda: text(fake / "sent"), "the recovered reaction")
         assert text(fake / "sent").splitlines() == ["react thanks ❤️"]
         receive("thanks", "thanks!")
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(fake / "sent").splitlines() == ["react thanks ❤️"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == ["thanks!", "got it", "🙌"]
@@ -957,7 +1024,7 @@ def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restar
     (["thanks", "What is the build status?"], None),
     (["thanks, please check the account"], None),
 ])
-def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, messages, context):
+def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, desk_clock, messages, context):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     bridge = start(1)
@@ -968,6 +1035,7 @@ def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, m
             wait_for(lambda: text(fake / "sent"), "the prior supervisor message")
         for i, message in enumerate(messages):
             receive(f"turn{i}", message)
+        desk_clock()
         wait_for(lambda: all(f"photon-turn{i} " in text(notes) for i in range(len(messages))), "the full handoff")
         assert [r["text"] for r in records() if r["kind"] == "owner"] == (["A question"] if context else []) + messages
         assert not any(line.startswith(("send ", "reply ")) for line in text(fake / "sent").splitlines()[int(bool(context)):])
@@ -976,7 +1044,7 @@ def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, m
         bridge.wait(10)
 
 
-def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, monkeypatch):
+def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, monkeypatch, desk_clock):
     monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "50")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
@@ -985,6 +1053,9 @@ def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, mon
         receive("thanks", "thanks")
         receive("ack", "got it")
         (fake / "outage").touch()
+        desk_clock()
+        wait_for(lambda: "outbox item 1 failed" in text(err), "the failed reaction attempt")
+        desk_clock(51)
         wait_for(lambda: all(f"photon-{mid} " in text(notes) for mid in ("thanks", "ack")), "the failed-reaction handoff")
         assert text(fake / "sent") == ""
         assert "thanks" in text(notes) and "got it" in text(notes)
@@ -999,7 +1070,7 @@ def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, mon
     (2, "reply burst2 The build is paused."),
     (3, "send The build is paused."),
 ])
-def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbles(tmp_path, target, expected):
+def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbles(tmp_path, desk_clock, target, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     answer = json.loads((fake / "answer").read_text())
     (fake / "answer").write_text(json.dumps({**answer, "target": target}))
@@ -1008,6 +1079,7 @@ def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbl
         receive("burst1", "What is the build status?")
         receive("burst2", "Is the build paused?")
         receive("burst3", "Paused or running?")
+        desk_clock()
         wait_for(lambda: text(fake / "sent"), "the selected burst answer")
         assert text(fake / "sent").splitlines() == [expected]
         assert text(notes) == ""
@@ -1018,13 +1090,14 @@ def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbl
 
 
 @pytest.mark.parametrize("target", [0, -1, 4, 1.5, "1"])
-def test_invalid_burst_target_hands_off_without_sending(tmp_path, target):
+def test_invalid_burst_target_hands_off_without_sending(tmp_path, desk_clock, target):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     answer = json.loads((fake / "answer").read_text())
     (fake / "answer").write_text(json.dumps({**answer, "target": target}))
     bridge = start(1)
     try:
         receive("target", "What is the build status?")
+        desk_clock()
         wait_for(lambda: "photon-target " in text(notes), "the invalid-target handoff")
         assert text(fake / "sent") == ""
     finally:
@@ -1052,7 +1125,7 @@ def test_plain_reply_effect_and_group_contents_can_receive_a_direct_answer(tmp_p
 
 @pytest.mark.parametrize("wrapper", ["reply", "effect", "group", "markdown"])
 @pytest.mark.parametrize("restart", [False, True])
-def test_threaded_social_text_reacts_without_handoff_and_keeps_metadata(tmp_path, wrapper, restart):
+def test_threaded_social_text_reacts_without_handoff_and_keeps_metadata(tmp_path, desk_clock, wrapper, restart):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
     inner = {"type": "markdown", "markdown": "thanks!"} if wrapper == "markdown" else {"type": "text", "text": "thanks!"}
@@ -1071,6 +1144,7 @@ def test_threaded_social_text_reacts_without_handoff_and_keeps_metadata(tmp_path
             bridge.terminate()
             bridge.wait(10)
             bridge = start(2)
+        desk_clock()
         wait_for(lambda: text(fake / "sent"), "the threaded social reaction")
         assert text(fake / "sent").splitlines() == ["react threaded ❤️"]
         assert text(notes) == ""
