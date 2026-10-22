@@ -297,7 +297,8 @@ See [Project databases](project-databases.md) for existing-host management and s
 The `agents` profile caps Opus 5.5 at `high` effort in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
 Other models and lower effort levels remain unchanged.
 The extension requires both `FM_OMP_HARNESS=omp` and `OMP_SKIP_SETUP=1`, so primary sessions remain unchanged.
-It caps the provider payload after `auto` resolves; the status line can still show the requested level.
+It caps request-level and message-level provider effort after `auto` resolves, including effort changes during a session.
+The status line can still show the requested level.
 The gate wrapper caps explicit `xhigh`, `max`, and `auto` requests, including model suffixes, and selects `high` when effort is absent.
 The `acp:omp` fallback does not use the wrapper.
 
