@@ -46,8 +46,10 @@ Every decision is one line in `~/.local/state/crewship/slack-relay/log.jsonl`: t
 Set `"mention_only": true` to drop untagged messages before the model call, including DMs and thread replies.
 A tag must use `<@USER_ID>` or `<@USER_ID|label>` with that workspace's `self` ID.
 This setting defaults to `false`; enabling it clears all previously queued lines.
+Set `"mention_only": "direct"` for one-to-one DMs and explicit mentions; group DMs still need a tag. Switching clears queued lines.
 
 `self` is required: the operator's own user id in each workspace (his messages are skipped). Find it as the user id that is the author of one of his own messages in the slk cache. A workspace without `self` is not relayed. `workspaces` gives the model a display name for each workspace. Optional keys and defaults: `db` (`~/.local/share/slk/cache.db`), `model`, `notify` (`["fm-imessage", "--"]`), `interval` 15, `window` 60, `lookback` 21600, `max_batch` 150, `max_chars` 120000, `text_chars` 700, `max_lines` 8.
+Set `dbs` to a list of cache paths to read multiple slk profiles instead of `db`; each cache stays read-only, with shared message deduplication.
 
 ## Install (opt-in)
 

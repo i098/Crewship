@@ -166,7 +166,7 @@ def test_thread_and_mention_context_reaches_the_model_and_a_skipped_message_fall
     env.db.execute("insert into messages (ts, channel_id, workspace_id, user_id, text) values ('40.0','C1',?,?,'my root')", (WS, ME))
     env.db.commit()
     (env.stub / "omp.mode").write_text("skip")
-    found = sr.candidates(sr.open_cache(env.cfg), env.cfg, 100, set())
+    found = sr.cached_candidates(env.cfg, 100, set())
     flags = {m["ts"]: (m["view"]["in_his_thread"], m["view"]["mentions_him"]) for m in found}
     assert flags == {"101.1": (True, False), "101.2": (False, True), "101.3": (False, False),
                      "101.4": (False, False), "101.5": (True, False)}
@@ -194,7 +194,7 @@ def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env):
 
 
 def test_the_cache_is_opened_read_only(env):
-    db = sr.open_cache(env.cfg)
+    db = sr.open_cache(env.cfg["db"])
     with pytest.raises(sqlite3.OperationalError):
         db.execute("delete from messages")
 
@@ -242,7 +242,7 @@ def test_mention_only_drops_untagged_before_the_model(env, channel, thread, text
 def test_mention_only_rejects_a_forced_keep_or_missing_verdict(env, verdict):
     env.cfg["mention_only"] = True
     env.add("101.1", "D1", BOB, "KEEP untagged")
-    db = sr.open_cache(env.cfg)
+    db = sr.open_cache(env.cfg["db"])
     try:
         message = sr.candidates(db, env.cfg, 100, set())[0]
     finally:
@@ -281,3 +281,123 @@ def test_dry_run_reads_cache_without_models_notifications_or_state_writes(env, c
     assert json.loads(capsys.readouterr().out) == {"tagged": 1, "untagged": 1, "kept": 1, "dropped": 1}
     assert env.calls() == 0 and env.texts() == [] and env.log() == []
     assert not sr.state_dir().exists()
+
+
+@pytest.mark.parametrize("channel_type", ["dm", "group_dm", "mpim", "channel", "private"])
+@pytest.mark.parametrize("tagged", [False, True])
+def test_direct_mode_filters_before_the_model(env, channel_type, tagged):
+    env.cfg["mention_only"] = "direct"
+    env.db.execute("update channels set type=? where id='C1'", (channel_type,))
+    env.run(100)
+    text = f"<@{ME}> KEEP review" if tagged else "KEEP review"
+    env.add("101.1", "C1", BOB, text)
+    env.run(110)
+    allowed = tagged or channel_type == "dm"
+    assert env.calls() == int(allowed)
+    where = {"dm": "DM", "mpim": "group", "group_dm": "group"}.get(channel_type, "#dev")
+    assert env.texts() == ([f"Bob, {where}: {'@Me ' if tagged else ''}KEEP review"] if allowed else [])
+    assert env.log()[0]["decision"] == ("kept" if allowed else "dropped")
+    if not allowed:
+        assert env.log()[0]["reason"] == "not tagged or DM"
+
+
+@pytest.mark.parametrize("verdict", [None, {"keep": True, "reason": "keep everything"}])
+def test_direct_mode_blocks_untagged_thread_even_with_forced_keep(env, verdict):
+    env.cfg["mention_only"] = "direct"
+    env.db.execute("insert into thread_subscriptions values (?,?,?,1)", (WS, "C1", "50.0"))
+    env.add("101.1", "C1", BOB, "KEEP thread", thread_ts="50.0")
+    with sr.open_cache(env.cfg["db"]) as db:
+        message = sr.candidates(db, env.cfg, 100, set())[0]
+    assert sr.decide(env.cfg, message, verdict) == (False, "not tagged or DM", "")
+    env.run(100)
+    env.run(110)
+    assert env.calls() == 0 and env.texts() == []
+    assert env.log()[0]["reason"] == "not tagged or DM"
+
+
+@pytest.mark.parametrize("previous", [False, True])
+def test_switching_to_direct_discards_pending_without_replaying_dropped_messages(env, previous):
+    env.cfg["mention_only"] = previous
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"<@{ME}> KEEP first")
+    env.run(110)
+    env.add("120.1", "C1", BOB, f"<@{ME}> KEEP queued")
+    env.run(130)
+    if previous:
+        env.add("135.1", "D1", BOB, "KEEP previously dropped")
+        env.run(140)
+    env.cfg["mention_only"] = "direct"
+    env.add("150.1", "D1", BOB, "KEEP new DM")
+    env.run(171)
+    env.run(240)
+    assert env.texts() == ["Bob, #dev: @Me KEEP first", "Bob, DM: KEEP new DM"]
+    assert len(env.log()) == (4 if previous else 3)
+
+
+def test_direct_mode_preserves_dedup_and_burst_limits(env):
+    env.cfg.update(mention_only="direct", max_lines=2)
+    env.run(100)
+    for i in range(5):
+        env.add(f"101.{i}", "D1", BOB, f"KEEP DM {i}")
+    env.run(110)
+    env.run(130)
+    assert env.texts() == ["Bob, DM: KEEP DM 0\nBob, DM: KEEP DM 1"]
+    env.run(171)
+    env.run(232)
+    assert env.texts() == ["Bob, DM: KEEP DM 0\nBob, DM: KEEP DM 1",
+                           "Bob, DM: KEEP DM 2\nBob, DM: KEEP DM 3", "Bob, DM: KEEP DM 4"]
+    assert env.calls() == 1 and len(env.log()) == 5
+
+
+@pytest.fixture
+def two_caches(env, tmp_path):
+    env.add("101.1", "D1", BOB, "KEEP first cache")
+    path = tmp_path / "second.db"
+    with sqlite3.connect(path) as db:
+        env.db.backup(db)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("insert into workspaces values ('T2', 'Second')")
+        db.executemany("insert into users values (?, 'T2', ?, ?, 0)", [
+            ("UME2", "me2", "Me Two"), ("UBOB2", "bob2", "Bob Two")])
+        db.execute("insert into channels values ('D2', 'T2', '', 'dm')")
+        db.execute("insert into channels values ('C2', 'T2', 'second', 'channel')")
+        db.executemany("insert into messages (ts, channel_id, workspace_id, user_id, text) values (?, ?, 'T2', ?, ?)", [
+            ("101.1", "D2", "UBOB2", "KEEP second cache"),
+            ("101.2", "D2", "UME2", "KEEP own message"),
+            ("101.3", "C2", "UBOB2", f"<@{ME}> KEEP wrong workspace tag"),
+            ("101.4", "C2", "UBOB2", "<@UME2> KEEP second mention")])
+        db.commit()
+        env.cfg.update(dbs=[env.cfg["db"], str(path)], mention_only="direct")
+        env.cfg["self"]["T2"] = "UME2"
+        yield env
+
+
+def test_two_caches_keep_workspace_context_and_deduplicate(two_caches):
+    env = two_caches
+    env.run(100)
+    env.run(110)
+    env.run(180)
+    assert env.texts() == ["Bob, DM: KEEP first cache\nBob Two, DM: KEEP second cache\n"
+                           "Bob Two, #second: @Me Two KEEP second mention"]
+    assert {r["key"] for r in env.log()} == {
+        "T1/D1/101.1", "T2/D2/101.1", "T2/C2/101.3", "T2/C2/101.4"}
+    assert len(env.log()) == 4 and env.calls() == 1
+    views = json.loads((env.stub / "omp.views").read_text())
+    assert [v["workspace"] for v in views] == ["Acme", "Second", "Second"]
+    for path in env.cfg["dbs"]:
+        with sr.open_cache(path) as db:
+            with pytest.raises(sqlite3.OperationalError):
+                db.execute("delete from messages")
+
+
+def test_dry_run_counts_each_message_once_across_caches(two_caches, monkeypatch, capsys):
+    monkeypatch.setattr(sr.time, "time", lambda: 110)
+    sr.dry_run(two_caches.cfg)
+    assert json.loads(capsys.readouterr().out) == {"tagged": 1, "untagged": 3, "kept": 3, "dropped": 1}
+    assert two_caches.texts() == [] and two_caches.calls() == 0
+
+
+def test_replay_finds_a_message_in_the_second_cache(two_caches):
+    sr.replay(two_caches.cfg, "T2", "D2", "101.1")
+    assert two_caches.texts() == ["[test] Bob Two, DM: KEEP second cache"]
+    assert two_caches.log()[0]["key"] == "T2/D2/101.1"

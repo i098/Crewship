@@ -94,8 +94,8 @@ def key(m):
     return f"{m['workspace_id']}/{m['channel_id']}/{m['ts']}"
 
 
-def open_cache(cfg):
-    db = sqlite3.connect(f"file:{Path(cfg['db']).expanduser()}?mode=ro", uri=True, timeout=10)
+def open_cache(path):
+    db = sqlite3.connect(f"file:{Path(path).expanduser()}?mode=ro", uri=True, timeout=10)
     db.execute("PRAGMA query_only=1")
     db.row_factory = sqlite3.Row
     return db
@@ -158,6 +158,19 @@ def candidates(db, cfg, since, seen):
     return out
 
 
+def cached_candidates(cfg, since, seen):
+    found = []
+    for path in cfg.get("dbs") or [cfg["db"]]:
+        db = open_cache(path)
+        try:
+            batch = candidates(db, cfg, since, seen)
+        finally:
+            db.close()
+        found.extend(batch)
+        seen.update(key(m) for m in batch)
+    return sorted(found, key=lambda m: m["ts"])
+
+
 def verdicts(cfg, batch):
     """One omp call. Returns {id: verdict}; raises on a failed call or an unparsable answer."""
     views = [{"id": i, **m["view"]} for i, m in enumerate(batch)]
@@ -173,10 +186,19 @@ def verdicts(cfg, batch):
     return {int(v["id"]): v for v in found if isinstance(v, dict) and "id" in v}
 
 
+def drop_reason(cfg, m):
+    if cfg["mention_only"] and not m["view"]["mentions_him"]:
+        if cfg["mention_only"] == "direct":
+            return "" if m["view"]["type"] == "dm" else "not tagged or DM"
+        return "not tagged"
+    return ""
+
+
 def decide(cfg, m, v):
     """Return (keep, reason, line)."""
-    if cfg["mention_only"] and not m["view"]["mentions_him"]:
-        return False, "not tagged", ""
+    reason = drop_reason(cfg, m)
+    if reason:
+        return False, reason, ""
     if v is None:
         sure = m["view"]["type"] == "dm" or m["view"]["mentions_him"]
         return sure and not m["view"]["bot"], "no verdict from the model", ""
@@ -187,9 +209,10 @@ def process(cfg, batch, st, test=False):
     """Filter one batch; log every message; queue the kept lines."""
     eligible = []
     for m in batch:
-        if cfg["mention_only"] and not m["view"]["mentions_him"]:
+        reason = drop_reason(cfg, m)
+        if reason:
             write_log(key=key(m), ws=m["workspace_id"], channel=m["channel_id"], ts=m["ts"],
-                      user=m["view"]["from"], decision="dropped", reason="not tagged", **({"test": True} if test else {}))
+                      user=m["view"]["from"], decision="dropped", reason=reason, **({"test": True} if test else {}))
         else:
             eligible.append(m)
     got = verdicts(cfg, eligible) if eligible else {}
@@ -215,16 +238,12 @@ def flush(cfg, st, now):
 
 
 def cycle(cfg, st, now):
-    if cfg["mention_only"] and not st.get("mention_only"):
+    if cfg["mention_only"] and cfg["mention_only"] != st.get("mention_only"):
         st["pending"] = []  # Old queued lines have no mention metadata.
     st["mention_only"] = cfg["mention_only"]
-    db = open_cache(cfg)
-    try:
-        seen = {r["key"] for r in read_log() if not r.get("test")}
-        st.setdefault("since", now)
-        found = candidates(db, cfg, max(st["since"], now - cfg["lookback"]), seen)
-    finally:
-        db.close()
+    seen = {r["key"] for r in read_log() if not r.get("test")}
+    st.setdefault("since", now)
+    found = cached_candidates(cfg, max(st["since"], now - cfg["lookback"]), seen)
     while found:
         batch, size = [], 0
         for m in found:
@@ -241,11 +260,7 @@ def cycle(cfg, st, now):
 
 def dry_run(cfg):
     """Count recent cached messages with the fallback filter; do not call the model, notify, or write state."""
-    db = open_cache(cfg)
-    try:
-        batch = candidates(db, cfg, time.time() - cfg["lookback"], set())
-    finally:
-        db.close()
+    batch = cached_candidates(cfg, time.time() - cfg["lookback"], set())
     counts = {"tagged": 0, "untagged": 0, "kept": 0, "dropped": 0}
     for m in batch:
         counts["tagged" if m["view"]["mentions_him"] else "untagged"] += 1
@@ -255,16 +270,10 @@ def dry_run(cfg):
 
 
 def replay(cfg, workspace, channel, ts):
-    db = open_cache(cfg)
-    row = db.execute("select * from messages where workspace_id=? and channel_id=? and ts=?", (workspace, channel, ts)).fetchone()
-    if not row:
-        sys.exit("message not in the slk cache")
-    since = float(ts) - 1
-    seen = set()
-    batch = [m for m in candidates(db, cfg, since, seen) if m["ts"] == ts and m["channel_id"] == channel]
-    db.close()
+    batch = [m for m in cached_candidates(cfg, float(ts) - 1, set())
+             if m["workspace_id"] == workspace and m["channel_id"] == channel and m["ts"] == ts]
     if not batch:
-        sys.exit("message is the operator's own, deleted or a skipped kind")
+        sys.exit("message not in the slk caches, or is own, deleted or a skipped kind")
     st = {"sent_at": 0}
     process(cfg, batch, st, test=True)
     print(f"pending: {st.get('pending', [])}")
