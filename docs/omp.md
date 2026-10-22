@@ -66,7 +66,12 @@ Stored credentials live in `~/.omp/agent/agent.db`. An environment variable such
 
 ## Model access
 
-omp talks straight to the provider APIs. `blueprint/config/omp.yml` maps every model role to a provider-prefixed id (such as `anthropic/claude-sonnet-5`), and `retry.fallbackChains` uses provider-prefixed ids too. A fresh host needs no router, gateway, or proxy, and binds no extra port. Account rotation is built into omp, so more than one account is not a reason to add a gateway. Bringing back a router or gateway is an explicit operator decision; the header of `blueprint/config/omp.yml` records this rule.
+omp talks straight to the provider APIs.
+`blueprint/config/omp.yml` maps every model role to a provider-prefixed id (such as `anthropic/claude-sonnet-5-5`).
+`retry.fallbackChains` uses provider-prefixed ids too.
+A fresh host needs no router, gateway, or proxy, and binds no extra port.
+Account rotation is built into omp, so more than one account is not a reason to add a gateway.
+Bringing back a router or gateway is an explicit operator decision; the header of `blueprint/config/omp.yml` records this rule.
 
 ## Model roles
 
