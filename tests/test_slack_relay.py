@@ -497,3 +497,53 @@ def test_replay_finds_a_message_in_the_second_cache(two_caches):
     sr.replay(two_caches.cfg, "T2", "D2", "101.1")
     assert two_caches.texts() == ["[test] Bob Two, DM: KEEP second cache"]
     assert two_caches.log()[0]["key"] == "T2/D2/101.1"
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("mode", ["ok", "empty"])
+@pytest.mark.parametrize("mention_only,channel,mention", [
+    (False, "D1", ""),
+    (True, "C1", f"<@{ME}> "),
+    ("direct", "D1", ""),
+    ("direct", "C1", f"<@{ME}> "),
+    ("direct", "C1", "<!here> "),
+])
+def test_notifications_keep_one_line_without_links(env, command, mode, mention_only, channel, mention):
+    env.cfg["mention_only"] = mention_only
+    env.cfg["workspaces"][WS].update(name="Acme\nOperations", broadcasts=True)
+    env.db.execute("update users set display_name='Bob\nBuilder' where id=?", (BOB,))
+    env.db.execute("update channels set name='dev\nchat' where id='C1'")
+    env.run(100)
+    text = mention + (
+        "KEEP a\nb\rc\u2028d\t&lt;T&gt; &amp;lt;T&amp;gt; "
+        "<https://acme.slack.com/a|thread> https://acme.slack.com/b slack://channel?id=C1"
+    )
+    env.add("101.1", channel, BOB, text)
+    (env.stub / "omp.mode").write_text(mode)
+
+    workspace = "Acme Operations: " if mention_only == "direct" else ""
+    where = "DM" if channel == "D1" else "#dev chat"
+    tag = "@here " if mention == "<!here> " else "@Me " if mention else ""
+    expected = f"{workspace}Bob Builder, {where}: {tag}KEEP a b c d <T> &lt;T&gt; thread"
+    if command == "replay":
+        sr.replay(env.cfg, WS, channel, "101.1")
+        expected = "[test] " + expected
+    else:
+        env.st["sent_at"] = 100
+        env.run(110)
+        assert env.st["pending"] == [expected]
+        env.run(161)
+
+    assert env.texts() == [expected]
+
+
+def test_model_link_labels_do_not_strip_literal_brackets(env, monkeypatch):
+    env.run(100)
+    env.add("101.1", "D1", BOB, "KEEP review")
+    monkeypatch.setattr(sr, "verdicts", lambda cfg, batch: {
+        0: {"keep": True, "line": "Bob, DM: <T> &lt;T&gt;\n<https://acme.slack.com/a|thread> <slack://open>"}
+    })
+
+    env.run(110)
+
+    assert env.texts() == ["Bob, DM: <T> &lt;T&gt; thread"]

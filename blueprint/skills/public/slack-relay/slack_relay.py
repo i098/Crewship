@@ -235,6 +235,9 @@ def process(cfg, batch, st, test=False):
             line = line or f"{v['from']}, {v['channel']}: {v['text'][:160]}"
             if cfg["mention_only"] == "direct" and cfg["workspaces"].get(m["workspace_id"], {}).get("broadcasts", False):
                 line = f"{v['workspace']}: {line}"
+            line = re.sub(r"<(?:https?://|slack://)[^>|]*(?:\|([^>]*))?>",
+                          lambda match: match[1] or "", line, flags=re.I)
+            line = " ".join(re.sub(r"(?:https?://|slack://)[^\s<>]+", "", line, flags=re.I).split())
             st.setdefault("pending", []).append(f"{'[test] ' if test else ''}{line}")
 
 
