@@ -113,6 +113,8 @@ Read-only preparation does not add delivery uncertainty.
 It does not clear uncertainty from an earlier reaction attempt.
 For a combined social response, the service saves text delivery before attempting the reaction.
 Reaction retries and restarts do not repeat the text or hand it to Firstmate after delivery.
+Text deliveries use a stable outbox identity in memory, so restart recovery records each delivered reply once.
+This also recovers a reply when the bridge stops after saving delivery progress but before recording memory.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.

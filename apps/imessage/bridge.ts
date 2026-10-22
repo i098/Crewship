@@ -159,7 +159,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
-type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing; complete: boolean };
+type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -504,26 +504,30 @@ async function deliver(o: Out, save: (o: Out) => void) {
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
-  const unsent = (o.done ?? 0) < parts.length;
+  if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
   for (let i = o.done ?? 0; i < parts.length; i++) {
     const part = parts[i]!;
     if (i > 0 && typeof part === "string") {
-      if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, true);
+      deliveryTyping(kind, true);
       await Bun.sleep(typingPause(part));
     }
-    if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
+    deliveryTyping(kind, false);
     await sendBubble(o, i, part, save);
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
-  const text = deliveredText(o, unsent);
-  if (text !== undefined) remember(kind, text);
+  const text = deliveredText(o);
+  if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
   if (o.react) return deliverReaction(o, save);
   if (o.image) rmSync(o.image.path, { force: true });
 }
 
-function deliveredText(o: Out, unsent: boolean) {
-  if (!unsent || o.silent) return;
+function deliveryTyping(kind: Kind, on: boolean) {
+  if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, on);
+}
+
+function deliveredText(o: Out) {
+  if (o.silent || (!o.image && !o.bubbles?.length)) return;
   return [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n");
 }
 
@@ -645,9 +649,12 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
 }
 
 // A memory error never stops a send, a tapback or the inbox note: it is logged.
-function remember(kind: Kind, text: string): number | undefined {
+function remember(kind: Kind, text: string, requestId?: string): number | undefined {
+  if (requestId && memoryByRequest.has(requestId)) return memoryByRequest.get(requestId);
   try {
-    return memory.append(kind, text);
+    const id = memory.append(kind, text, requestId);
+    if (requestId) memoryByRequest.set(requestId, id);
+    return id;
   } catch (e) {
     log("memory")(e);
   }
@@ -708,7 +715,7 @@ async function runDesk(current: () => boolean) {
     if (result === undefined) handoffPending();
     else {
       commitDeskAnswer(pending, result);
-      queued = result.complete;
+      queued = true;
     }
     const at = result?.target.ref ?? pending.at(-1)!.ref;
     appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
@@ -718,11 +725,11 @@ async function runDesk(current: () => boolean) {
 }
 
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
-  const { answer, target, complete } = result;
+  const { answer, target } = result;
   const ids = pending.map((r) => r.requestId);
-  if (complete) deskTypingRequestId = target.requestId;
-  recordRoute({ ids, route: complete ? "desk" : "handoff",
-    out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
+  deskTypingRequestId = target.requestId;
+  recordRoute({ ids, route: "desk",
+    out: { ...target.ref, requestId: target.requestId, requests: ids,
       ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
@@ -747,9 +754,8 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (!answer) return;
   const target = pending[(answer.target ?? pending.length) - 1];
   if (!target) return;
-  const complete = "answer" in answer || socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1]);
-  if ("react" in answer && !complete) return;
-  return { answer, target, complete };
+  if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
+  return { answer, target };
 }
 
 function applyRoute(event: RouteEvent) {

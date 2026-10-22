@@ -1430,6 +1430,59 @@ def test_social_text_is_not_repeated_or_handed_off_when_its_reaction_fails(tmp_p
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("crash", ["before", "after"])
+@pytest.mark.parametrize("response", ["social", "desk", "supervisor"])
+def test_delivered_text_memory_survives_a_crash_without_duplicates(tmp_path, monkeypatch, desk_clock, crash, response):
+    preload = tmp_path / "memory-crash.ts"
+    preload.write_text("""
+import { existsSync } from "node:fs";
+import { Memory } from "./app/memory.ts";
+const append = Memory.prototype.append;
+Memory.prototype.append = function(kind, ...args) {
+  if (kind !== "owner" && existsSync(`${process.env.FAKE_DIR}/memory-crash`)) {
+    if (CRASH === "before") process.exit(86);
+    append.call(this, kind, ...args);
+    process.exit(86);
+  }
+  return append.call(this, kind, ...args);
+};
+""".replace("CRASH", json.dumps(crash)))
+    monkeypatch.setenv("BUN_OPTIONS", f"{os.environ['BUN_OPTIONS']} --preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    reply = "nice!" if response == "social" else "The build is paused."
+    kind = "supervisor" if response == "supervisor" else "desk"
+    if response == "social":
+        (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️","text":"nice!"}')
+    marker = fake / "memory-crash"
+    marker.touch()
+    bridge = start(1)
+    try:
+        receive("question", "great news!" if response == "social" else "What is the build status?")
+        if response == "supervisor":
+            cli(reply)
+        else:
+            desk_clock()
+        assert bridge.wait(10) == 86
+        pending, = (state / "outbox").glob("*.json")
+        item = json.loads(pending.read_text())
+        assert item["done"] == len(item["bubbles"]) == 1
+        assert text(fake / "sent").splitlines() == [f"send {reply}"]
+        assert [r["text"] for r in records() if r["kind"] == kind] == ([reply] if crash == "after" else [])
+        original_notes = text(notes)
+        marker.unlink()
+        bridge = start(2)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the recovered delivery")
+        expected = [f"send {reply}"] + (["react question ❤️"] if response == "social" else [])
+        assert text(fake / "sent").splitlines() == expected
+        delivered, = [r for r in records() if r["kind"] == kind and r["text"] == reply]
+        assert delivered["requestId"] == f"outbox-text-{item['guid']}"
+        assert text(notes) == original_notes
+    finally:
+        if bridge.poll() is None:
+            bridge.terminate()
+            bridge.wait(10)
+
+
 def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, monkeypatch, desk_clock):
     monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "50")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
