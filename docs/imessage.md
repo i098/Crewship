@@ -68,7 +68,6 @@ The BlueBubbles line does not report edits: an edit there files no note.
 
 The runner keeps its 45-second timeout.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
-A failed direct attempt produces no desk answer; Firstmate receives the pending requests instead.
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
 Both desks accept text only from one complete JSON object whose `kind` or `decision` is `reply`.
@@ -100,7 +99,7 @@ Keep the journal, receipts, memory, downloads, and pending outbox together durin
 
 The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
 
-The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, the newest of them is his latest text again, so replies, tapbacks, and typing still go to the right text. A file from before the time was kept counts as the oldest.
+The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, typing and command tapbacks target the newest saved text. A file from before the time was kept counts as the oldest.
 The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
 
 ## Upstream outages
@@ -144,7 +143,7 @@ The log shows each try.
 
 The desk remembers the whole conversation, after the design in [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449). The code is `apps/imessage/memory.ts`.
 
-- **The log.** The service records owner texts, Firstmate texts and tapbacks, and direct desk answers.
+- **The log.** The service records owner texts, Firstmate texts and tapbacks, and desk texts and tapbacks.
   The records are in `~/.local/state/fm-imessage/memory/main/YYYY-MM-DD.jsonl`.
   The service never edits or deletes a record.
   Inbound records also keep their stable request id, so a repaired memory write does not repeat after another restart.
@@ -199,7 +198,7 @@ At start, the service skips a memory log line that does not parse.
 
 ## Instagram front desk
 
-The Instagram desk uses the [shared reply contract](#what-it-does).
+The Instagram desk uses the same [decision parser](../apps/imessage/desk.ts), not the iMessage routing rules.
 `instagram-desk.service` runs `apps/imessage/instagram-desk.ts` and reuses the memory, runner, input budget, and timing helpers.
 Its channel-specific prompt does not use iMessage direct routing.
 It has no Instagram client.
@@ -323,7 +322,7 @@ The bridge uses these routing rules with one or both transports:
   An outage on that transport holds the send in the queue; it does not move the text to another line.
   An explicit threaded reply tries its target's transport first.
   Only a provably unsent reply can use another transport.
-  Desk answers are not eligible for this fallback; they remain on the selected message's transport and chat.
+  See [What it does](#what-it-does) for desk-answer routing.
   A timeout or an unreadable answer saves the possible transport and chat in `maybe`, with the attempt time.
   The outbox retries the item or reports a final error through its existing dead-letter path.
 - **A retry after an unsure send.** BlueBubbles searches the original chat for the text.
@@ -334,8 +333,8 @@ The bridge uses these routing rules with one or both transports:
   A saved transport that is no longer configured is ignored.
 - **Where a fallback text arrives.** A fallback send goes into the owner's latest conversation on that transport. Before he texts the BlueBubbles line, it goes to a new chat with his number from the line's Apple Account. Photon can only answer in a conversation that he started.
 - **Replies, typing, and tapbacks.** See [Commands](#commands) for reply behavior.
-  A read-only failure can use a fallback because no send has happened yet.
-  Typing bubbles and tapbacks target the latest text across transports, including after a restart.
+  A command's read-only failure can use a fallback because no send has happened yet.
+  Typing bubbles and command tapbacks target the latest text across transports, including after a restart.
   See [What it does](#what-it-does) for direct desk answers.
   A typing error never fails a send.
   A tapback and typing are best effort and never block the outbox.
@@ -363,7 +362,7 @@ The bridge uses these routing rules with one or both transports:
 - **Private API.** Each health check reads the relay's `private_api` flag.
   When it is off, the bridge sends no typing or tapback request to that relay and sends replies there as plain messages.
   Typing and tapbacks use the next healthy relay with the Private API on, or send no request if none supports them.
-  An unsupported tapback reports failure rather than success; a social reaction then uses the failed-delivery handoff.
+  An unsupported tapback reports failure; see [delivery recovery](#what-it-does).
   Unsupported typing remains silent.
   The bridge logs one line per relay when it first finds the Private API off or when the flag changes.
 - **Sends.** Text sends and read receipts go to the first healthy relay, then to the next one if it fails.
@@ -374,7 +373,7 @@ The bridge uses these routing rules with one or both transports:
   Older history on a relay does not count; tapbacks and other chats do not count.
   A later bubble on any relay permits threading, even when the first relay has old history.
   Thread support follows the Private API rule above.
-  A failed history read can use the transport fallback if no relay proves separation.
+  A failed history read follows the [transport fallback rules](#choose-the-transports) if no relay proves separation.
 - **No double sends.** Each outbox item keeps a client GUID, and each bubble sends with its own one (BlueBubbles `tempGuid`). If a relay may have sent a text but did not answer (a timeout, a server error, or an answer that cannot be read), the bridge asks the relays whether the text is in the chat before it sends that bubble again, on any relay or transport (see above). It looks for the same text from the line in the last minute or so. The relay that may have sent is asked first, even when its health check says it is down. Known limits: when that relay cannot answer, another relay can still send the text a second time; a text that reaches the other Macs through iCloud late can be sent twice; a text identical to one sent in the same minute counts as sent; and a text that may be out on Photon cannot be checked, so Photon sends it again (at least once).
 - **Inbound.** Every relay posts its webhook.
   A webhook carries only the message GUID that the bridge acts on.

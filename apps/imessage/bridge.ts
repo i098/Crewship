@@ -145,8 +145,9 @@ type Ref = { line?: string; space: string; id: string };
 // One outbox item for his text `id`: a tapback, or bubbles (`done` of them sent so far), the first one threaded to
 // his text `reply` when set. A photo, when `image` is set, is bubble 0 and the text bubbles follow it. `kind` is whose
 // memory line it makes (Firstmate's unless "desk"); `silent` makes none.
-// `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued. `maybe` maps each transport
-// where bubble `done` may already be out to the conversation it was sent into, and `since` is when that try started.
+// `guid` is the client GUID of its sends (BlueBubbles tempGuid). `at` is when it was queued.
+// `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
+// `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
@@ -303,7 +304,7 @@ const refOn = (name: string, space: string, id: string): Ref => (name === "photo
 // Each transport's latest text, kept so a restart can still reach him: space, id and time, one per line.
 // Photon keeps the file name it always had. A file without the time (the older format) counts as the oldest.
 const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATEST_FILE}-${name}`);
-let latest: LineMessage | undefined; // his latest text on any transport: typing and tapbacks go there
+let latest: LineMessage | undefined; // his latest text on any transport: typing and command tapbacks go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
@@ -581,10 +582,10 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
   }
 }
 
-// The transports to try for bubble `i`, in order. Plain sends stay on their queued chat's transport, including
-// --no-thread replies and desk responses. An uncertain attempt (`retry`) may use any transport: `routes` keeps it in
-// its original chat, even when a newer inbound text changes line.latest. A photo whose chat's transport cannot send
-// it goes to any transport that can.
+// Desk responses stay on their queued chat's transport, even during retries.
+// Other plain sends, including --no-thread replies, stay there unless retrying an uncertain attempt.
+// `routes` preserves each uncertain attempt's chat even when a newer inbound text changes line.latest.
+// A photo can use another transport when its queued transport cannot send images.
 function candidates(o: Out, i: number, retry: boolean): Line[] {
   const photo = o.image !== undefined && i === 0;
   const pool = photo ? lines.filter((line) => line.sendImage) : lines;
