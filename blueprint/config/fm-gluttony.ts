@@ -5,8 +5,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { findScopedSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
+import { findScopedSettings, type Settings as HostSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgRetryFallbackChains, cfgTierOpenai } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 interface Ctx {
 	agent: { kind: "main" | "sub" };
@@ -42,9 +42,6 @@ interface ModeSessionManager {
 	buildSessionContext(): { mode?: string };
 	appendModeChange(mode: string): void;
 	getSessionId(): string;
-}
-interface HostSettings {
-	overlay(overrides: Record<string, unknown>): HostSettings;
 }
 interface SpawnToolProto {
 	session: { settings: HostSettings; sessionManager?: { getSessionId?(): string } };
@@ -162,6 +159,10 @@ function allowedPattern(tiers: Tiers, cli: Cli, pattern: string, fallback = fals
 	return allowedModel && tier.levels.includes(level);
 }
 
+function boundSettings(settings: HostSettings, pattern: string): void {
+	if (/^openai(?:-codex)?\/gpt-6\.1-sol:/.test(pattern)) cfgTierOpenai.override(settings, "ultrafast");
+}
+
 function retryPattern(tiers: Tiers, primary: string): string {
 	const haiku = "anthropic/claude-haiku-5-5";
 	if (!tiers.fast.models.includes(haiku)) return primary;
@@ -220,6 +221,7 @@ export default function (pi: GluttonyApi) {
 			const settings = findScopedSettings();
 			if (settings) {
 				const primary = `${model}:${pi.getThinkingLevel()}`;
+				boundSettings(settings, primary);
 				const chains = cfgRetryFallbackChains.get(settings);
 				cfgRetryFallbackChains.override(settings, Object.fromEntries(
 					Object.entries(chains).map(([key, chain]) => [key, boundedChain(tiers, cli, primary, chain)]),
@@ -280,6 +282,7 @@ function patchSpawn(host: HostModule | undefined): SpawnPatch | undefined {
 			modelRoles: { [ROLE[params.cli]]: pattern },
 			"task.agentModelOverrides": { [AGENT[params.cli]]: pattern },
 		});
+		boundSettings(settings, pattern);
 		const tool = Object.assign(Object.create(Object.getPrototypeOf(this)), this, {
 			session: { ...this.session, settings, getActiveModelString: () => pattern },
 		});

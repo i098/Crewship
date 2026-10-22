@@ -124,7 +124,7 @@ The extension adds this requirement to the director's brief.
 | Session provider | Fast workers | Good workers |
 | --- | --- | --- |
 | Anthropic | `inception/mercury-3` (default, high) or `anthropic/claude-haiku-5-5`; medium, high, xhigh, or max | `anthropic/claude-sonnet-5-5` (default, medium); medium, high, xhigh, or max |
-| `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium, ultrafast tier |
+| `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium, session-local ultrafast tier |
 
 Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
 Saved worker models take precedence over saved role aliases.
@@ -139,7 +139,9 @@ Perform the edits, status appends, and commit for this task.
 
 The extension strips this line and rejects models or levels outside the selected worker tier.
 Without the line, it uses the defaults above.
-The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies the required `enabledModels` entries and `tier.openai: ultrafast`.
+The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies the required `enabledModels` entries, but does not set `tier.openai: ultrafast`.
+The extension sets this tier only in Sol worker settings, including task/eval subagents and restored workers.
+It leaves the director and shared tier defaults unchanged.
 Enable `inception/mercury-3`, `anthropic/claude-haiku-5-5`, and `anthropic/claude-sonnet-5-5`.
 Enable both `openai-codex/` and `openai/` forms of `gpt-6-luna` and `gpt-6.1-sol`.
 This extension does not change the shared configuration or install credentials.
