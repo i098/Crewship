@@ -7,12 +7,14 @@ The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small
 For each message from the owner, the service does these steps:
 
 1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names the text that it replies to. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
-2. It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
+2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
+   It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
 3. It marks the text as read.
-4. It waits 3 seconds of silence to combine a burst and reads `fm-inbox.sh status` during that wait.
+4. It waits 3 seconds of silence to combine a burst.
    Each new text cancels a running draft, starts the wait again, and starts a fresh status read.
-   The desk uses that status result after the wait, so the snapshot can lag by up to 3 seconds.
+   The desk uses that status result after the wait without reading it again.
+   Slow message persistence can make the status snapshot more than 3 seconds old.
    Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
    A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
 5. The desk model classifies the whole pending burst.
