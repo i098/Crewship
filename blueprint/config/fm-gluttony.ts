@@ -120,7 +120,6 @@ export default function (pi: GluttonyApi) {
 	if (env.FM_OMP_HARNESS !== "omp" || env.OMP_SKIP_SETUP !== "1" || !env.FM_TASK_ID || !env.FM_TASK_INBOX) return;
 	const home = path.dirname(path.dirname(env.FM_TASK_INBOX));
 	let tiers: Tiers | undefined;
-	const picked = new Map<string, string>();
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.agent.kind !== "main" || !ctx.hasUI || !fs.existsSync(path.join(home, "config", "gluttony"))) return;
 		const sm = ctx.sessionManager as ModeSessionManager;
@@ -137,7 +136,7 @@ export default function (pi: GluttonyApi) {
 				subagent: `${good.model}:${good.level}`,
 			});
 		}
-		patchSpawn(pi.pi, picked);
+		patchSpawn(pi.pi);
 	});
 	pi.on("before_agent_start", (event, ctx) =>
 		tiers && ctx.agent.kind === "main" ? { systemPrompt: [...event.systemPrompt, gluttonLine(tiers)] } : undefined,
@@ -153,10 +152,11 @@ export default function (pi: GluttonyApi) {
 }
 
 const PATCHED = Symbol.for("fm-gluttony.spawn-patched");
+const picked = new Map<string, string>();
 let spawnQueue: Promise<unknown> = Promise.resolve();
 
 /** Serialize role changes so concurrent spawns cannot read another worker's model choice. */
-function patchSpawn(host: HostModule | undefined, picked: Map<string, string>) {
+function patchSpawn(host: HostModule | undefined) {
 	const proto = host?.VibeSpawnTool?.prototype as (SpawnToolProto & { [PATCHED]?: true }) | undefined;
 	const settings = host?.Settings?.instance;
 	if (!proto || !settings || proto[PATCHED]) return;

@@ -140,6 +140,7 @@ The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies 
 Enable `inception/mercury-3`, `anthropic/claude-haiku-5-5`, and `anthropic/claude-sonnet-5-5`.
 Enable both `openai-codex/` and `openai/` forms of `gpt-6-luna` and `gpt-6.1-sol`.
 This extension does not change the shared configuration or install credentials.
+Keep the `smol` and `task` model roles configured; Crewship seeds both.
 
 The extension depends on omp 18.12.1 internals: `pi.pi.Settings`, `pi.pi.VibeSpawnTool`, and session mode reconciliation.
 Re-check these APIs after `omp update`.

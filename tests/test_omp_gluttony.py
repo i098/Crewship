@@ -173,6 +173,15 @@ console.log(JSON.stringify({seen, roles, outcomes: outcomes.map(o => o.status)})
     }
 
 
+def test_reloaded_extension_keeps_worker_model_choices(installed, tmp_path):
+    assert run(installed, tmp_path, """
+ext(api); start();
+ext(api); start();
+await spawn('new-session', 'fast', '@model anthropic/claude-haiku-5-5 medium\\nWork');
+console.log(JSON.stringify(seen));
+""") == [["new-session", "anthropic/claude-haiku-5-5:medium", "Work"]]
+
+
 @pytest.mark.parametrize("provider", ["openai-codex", "openai"])
 def test_codex_subagent_roles_use_the_same_provider(installed, tmp_path, provider):
     assert run(installed, tmp_path, """
