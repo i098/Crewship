@@ -90,8 +90,9 @@ const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
 const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
 const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL);
-// Three seconds of silence close the owner's burst before classification. Only the test suite may shorten them.
-const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 3000;
+// Only the test suite may override the short quiet period and the burst cap.
+const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 350;
+const MAX_WAIT_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_MAX_WAIT_MS ? Number(env.FM_IMESSAGE_TEST_MAX_WAIT_MS) : 2000;
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -139,7 +140,7 @@ for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(me
 const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((e) => {
   log("desk failed")(e);
   handoffPending();
-}));
+}), undefined, MAX_WAIT_MS);
 let deskRun: Bun.Subprocess | undefined;
 let stopDeskTyping: (() => void) | undefined;
 let deskTypingRequestId: string | undefined;
