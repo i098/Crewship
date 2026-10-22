@@ -21,7 +21,9 @@ Two exceptions move state between the operator's own hosts:
 - Shared fleet credentials in `super.env`: a new host fetches them from Cloudflare Secrets Store with `scripts/fetch-secrets.sh`. See [Shared credentials](secrets.md).
 - Each Firstmate home's `data/` and `config/`: they move host to host over SSH (`rsync -a`, owner-only), never through Git, a registry, or an image, and only for the cutover and rollback syncs of [Moving the agents to a new host](agent-host-move.md).
 
-Keep local credential files outside the checkout, in owner-only directories with mode `0700`; files should have mode `0600`. Services should use `EnvironmentFile=` or Docker secrets. Do not put tokens into shell command arguments or public URLs.
+Keep local credential files outside the checkout, in owner-only directories with mode `0700`; files should have mode `0600`.
+Services should use `EnvironmentFile=` or Docker secrets, except for [iMessage credential loading](imessage.md#enable-it).
+Do not put tokens into shell command arguments or public URLs.
 
 The persistent desktop browser uses exactly one profile, `~/.vnc-chrome-profile`. Never clone, trim, archive into Git, or replace it. Log in on the destination device. The browser pruner excludes persistent profiles, attached browsers, and headed browsers.
 

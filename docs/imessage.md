@@ -222,8 +222,7 @@ Skip this section when `transports` is `[bluebubbles]`.
 
    Edit `super.env` on the primary VPS, push it, and fetch it on the host, as [Shared credentials](secrets.md) describes. On a host without the shared store, add the lines to `~/super.env` directly and keep the file at mode `600`. A later fetch replaces that file.
 
-The unit uses the POSIX shell `/bin/sh` to source `~/super.env` and export its assignments before the bridge starts.
-The credentials never go into the repository, the unit, or `.local/host.yml`.
+See [Enable it](#enable-it) for credential loading and shell requirements.
 
 ## Use self-hosted BlueBubbles relays
 
@@ -370,6 +369,12 @@ The bridge uses these routing rules with one or both transports:
 - **Location.** `fm-location` works only with Photon.
 
 ## Enable it
+
+The iMessage bridge and optional card tunnel use `/bin/sh` to source `~/super.env` and export its assignments before starting.
+Use POSIX shell assignments, including `export KEY=value`, and quote values that contain spaces.
+Neither service passes this file to systemd's `EnvironmentFile` parser.
+Only source trusted content: shell commands in this file run as the service user.
+The credentials never go into the repository, the unit, or `.local/host.yml`.
 
 Add this block to `.local/host.yml`, then run `./ship.sh launch`. The `firstmate` profile must be on.
 
