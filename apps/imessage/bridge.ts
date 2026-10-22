@@ -29,7 +29,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, spawnDesk, typingPause } from "./desk.ts";
+import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -491,7 +491,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
     const line = lineOf(o);
     if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
     await line.react(o, o.react);
-    remember(kind, `tapback ${o.react} on his last text`);
+    remember(kind, `tapback ${o.react} on message ${o.id}`);
     return;
   }
   if (o.card) return deliverCard(o, kind);
@@ -634,19 +634,23 @@ async function runDesk(current: () => boolean) {
   const pending = pendingRoutes();
   if (!pending.length) return;
   if (pending.some((r) => r.firstmate) || !DESK_VETTED) return handoffPending();
-  const at = pending.at(-1)!.ref;
-  const target = latest;
-  typing(target?.space, true);
-  const answer = await draftBasic(pending, current);
-  typing(target?.space, false);
+  const typingTarget = latest;
+  typing(typingTarget?.space, true);
+  const result = await draftBasic(pending, current);
+  typing(typingTarget?.space, false);
   if (stopping || !current()) return;
-  if (answer === undefined) handoffPending();
+  if (result === undefined) handoffPending();
   else {
-    recordRoute({ ids: pending.map((r) => r.requestId), route: typeof answer === "string" ? "desk" : "handoff",
-      out: { ...at, requestId: pending.at(-1)!.requestId, ...(typeof answer === "string" ? { requests: pending.map((r) => r.requestId), bubbles: [answer] } : answer), kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+    const { answer, target, complete } = result;
+    const ids = pending.map((r) => r.requestId);
+    recordRoute({ ids, route: complete ? "desk" : "handoff",
+      out: { ...target.ref, requestId: target.requestId, ...(complete ? { requests: ids } : {}),
+        ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id } : { react: answer.react }),
+        kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
     flushRoutes();
   }
-  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${answer === undefined ? "handoff" : typeof answer === "string" ? "basic" : `react ${answer.react}`}\n`, { mode: 0o600 });
+  const at = result?.target.ref ?? pending.at(-1)!.ref;
+  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
 }
 
 async function draftBasic(pending: Routing[], current: () => boolean) {
@@ -654,7 +658,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (!result || stopping || !current()) return;
   const { status, statusOk } = result;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
-  const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
+  const latestText = pending.map((r, i) => `owner ${i + 1}: ${r.text}`).join("\n");
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER);
   if (!statusOk || !prompt.includes(latestText)) return;
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
@@ -663,7 +667,12 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
-  return basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
+  const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
+  if (!answer) return;
+  const target = pending[(answer.target ?? pending.length) - 1];
+  if (!target) return;
+  const complete = "answer" in answer || socialOnly(pending.map((r) => r.text), memory.msgs[from - 1]);
+  return { answer, target, complete };
 }
 
 function applyRoute(event: RouteEvent) {

@@ -2016,7 +2016,7 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
-    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send claude-haiku-5-5", "send five"]
+    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "reply m4 claude-haiku-5-5", "send five"]
     assert text(fake / "sent").splitlines() == sent
     assert "typing UNAVAILABLE" in text(fake / "calls")
     saved = state / "attachments/m2-photo.jpg"

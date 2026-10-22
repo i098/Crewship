@@ -33,11 +33,21 @@ For each message from the owner, the service does these steps:
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
+   The desk answers a burst once and selects the message that needs the answer, including an earlier question.
+   Later corrections and follow-ups guide that selection.
+   A purely social burst can receive one reaction and finish without a Firstmate note or wake.
+   Every message must contain only a supported acknowledgement, thanks, laughter, or emoji.
+   An answer to a prior question or approval request cannot use this shortcut.
+   Only a small set of thanks, laughter, and celebration emoji can close a social turn.
+   Thumbs-up, check marks, objections, and stop or question symbols still go to Firstmate.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
    Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
-   It targets the last received request in the pending burst.
+   A reply or reaction can set `target` to the message's 1-based position in the pending burst.
+   Without `target`, the service selects the last pending message; an invalid target causes a handoff.
+   The service threads a text only when another bubble separates the selected message from its answer.
+   It checks separation at delivery, using the same rule as `fm-imessage --reply`.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
@@ -69,13 +79,14 @@ The parser validates the complete emoji; quotes, braces, and extra characters ca
 Repeated matching decision fields produce one action, while conflicts produce no visible response.
 All other output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
 Each rejected draft records one short outcome without raw model text.
-A suppressed draft or reaction retains the existing single request filing, without an extra operator request.
+Suppressed drafts and non-social reactions retain the existing single request filing, without an extra operator request.
+Social reactions retain all original messages and the completion decision in the routing journal, without filing a request.
 Photon, BlueBubbles, and the Instagram desk share this parser.
 
 The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
-If the transport definitely refuses a direct answer, the saved burst ids cause one stable-id Firstmate handoff.
+If the transport definitely refuses a direct answer or a social reaction expires, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send never causes this fallback because a desk answer might already exist.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.

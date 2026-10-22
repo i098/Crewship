@@ -610,6 +610,125 @@ def test_basic_burst_sends_one_answer_and_replays_a_decision_without_requeueing(
         bridge.wait(10)
 
 
+def test_social_burst_completes_with_one_reaction_and_keeps_records_after_restart(tmp_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️","target":1}')
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        receive("ack", "got it")
+        receive("emoji", "🙌")
+        (fake / "outage").touch()
+        wait_for(lambda: list((state / "outbox").glob("*.json")), "the saved social reaction")
+        wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the completed social routing")
+        assert text(notes) == ""
+        bridge.terminate()
+        bridge.wait(10)
+        (fake / "outage").unlink()
+        bridge = start(2)
+        wait_for(lambda: text(fake / "sent"), "the recovered reaction")
+        assert text(fake / "sent").splitlines() == ["react thanks ❤️"]
+        receive("thanks", "thanks!")
+        time.sleep(PAST_QUIET)
+        assert text(fake / "sent").splitlines() == ["react thanks ❤️"]
+        assert text(notes) == ""
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == ["thanks!", "got it", "🙌"]
+        received = [e["received"] for e in map(json.loads, text(state / "routing.jsonl").splitlines()) if "received" in e]
+        assert [r["text"] for r in received] == ["thanks!", "got it", "🙌"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("messages,context", [
+    (["ok"], "Shall I deploy the build?"),
+    (["yes"], "Shall I deploy the build?"),
+    (["👍"], "Shall I deploy the build?"),
+    (["🛑"], "Build failed on main."),
+    (["❓"], "Build failed on main."),
+    (["✅"], "The change is ready."),
+    (["👍"], "The change is ready."),
+    (["got it"], "Tests pass. Say the word and I'll merge."),
+    (["🙏"], "Let me know when to deploy."),
+    (["thanks", "Run tests"], None),
+    (["thanks", "What is the build status?"], None),
+    (["thanks, please check the account"], None),
+])
+def test_approval_and_mixed_bursts_keep_handing_off_after_a_reaction(tmp_path, messages, context):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    bridge = start(1)
+    try:
+        if context:
+            receive("context", "A question")
+            cli(context)
+            wait_for(lambda: text(fake / "sent"), "the prior supervisor message")
+        for i, message in enumerate(messages):
+            receive(f"turn{i}", message)
+        wait_for(lambda: all(f"photon-turn{i} " in text(notes) for i in range(len(messages))), "the full handoff")
+        assert [r["text"] for r in records() if r["kind"] == "owner"] == (["A question"] if context else []) + messages
+        assert not any(line.startswith(("send ", "reply ")) for line in text(fake / "sent").splitlines()[int(bool(context)):])
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, monkeypatch):
+    monkeypatch.setenv("FM_IMESSAGE_REACT_MAX_MS", "50")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks")
+        receive("ack", "got it")
+        (fake / "outage").touch()
+        wait_for(lambda: all(f"photon-{mid} " in text(notes) for mid in ("thanks", "ack")), "the failed-reaction handoff")
+        assert text(fake / "sent") == ""
+        assert "thanks" in text(notes) and "got it" in text(notes)
+        assert text(notes).count("photon-thanks ") == text(notes).count("photon-ack ") == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("target,expected", [
+    (1, "reply burst1 The build is paused."),
+    (2, "reply burst2 The build is paused."),
+    (3, "send The build is paused."),
+])
+def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbles(tmp_path, target, expected):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    answer = json.loads((fake / "answer").read_text())
+    (fake / "answer").write_text(json.dumps({**answer, "target": target}))
+    bridge = start(1)
+    try:
+        receive("burst1", "What is the build status?")
+        receive("burst2", "Is the build paused?")
+        receive("burst3", "Paused or running?")
+        wait_for(lambda: text(fake / "sent"), "the selected burst answer")
+        assert text(fake / "sent").splitlines() == [expected]
+        assert text(notes) == ""
+        assert len([r for r in records() if r["kind"] == "owner"]) == 3
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("target", [0, -1, 4, 1.5, "1"])
+def test_invalid_burst_target_hands_off_without_sending(tmp_path, target):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    answer = json.loads((fake / "answer").read_text())
+    (fake / "answer").write_text(json.dumps({**answer, "target": target}))
+    bridge = start(1)
+    try:
+        receive("target", "What is the build status?")
+        wait_for(lambda: "photon-target " in text(notes), "the invalid-target handoff")
+        assert text(fake / "sent") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("content", [
     {"type": "reply", "target": {"content": {"type": "text", "text": "the build"}}, "content": {"type": "text", "text": "What is its status?"}},
     {"type": "effect", "content": {"type": "text", "text": "What is the build status?"}},
