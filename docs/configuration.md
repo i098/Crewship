@@ -237,7 +237,7 @@ Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple
 Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
 Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
 Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
-Fable is not a spawn choice; see [Default config](default-config.md) for the unchanged automatic fallback chain.
+Fable is not a spawn choice; see [Default config](default-config.md) for the automatic fallback chain.
 Provider credentials are not included in the dispatch file.
 
 Each apply normally updates the seeded Firstmate settings.
@@ -303,6 +303,22 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).
 
 See [Project databases](project-databases.md) for existing-host management and safe removal.
+
+### Omp model defaults
+
+New `agents` hosts receive the restricted `enabledModels` list from the [shipped omp configuration](../blueprint/config/omp.yml).
+The list includes Anthropic models, GPT models through `openai` and `openai-codex`, and Mercury 3 through Inception.
+Edit `enabledModels` in `~/.omp/agent/config.yml` to change this list, or remove the key to use omp's full model list.
+Apply preserves existing model choices in this file; see [omp configuration](omp.md#what-the-recipe-sets-up) for the status-line exceptions.
+
+The Inception provider uses `https://api.inceptionlabs.ai/v1` and reads `INCEPTION_API_KEY` from the omp process environment.
+Set that variable before starting omp; Crewship never installs its value.
+Without the variable, Mercury requests cannot authenticate; other providers remain available.
+Edit the `inception` provider in `~/.omp/agent/models.yml` to override its endpoint, credential command, or model list.
+Apply seeds Inception only when no `models.yml`, `models.yaml`, or `models.json` file exists.
+Existing model files keep their Inception settings unchanged, including missing fields or a removed provider.
+Apply still merges the shipped Codex context-window overrides; those keys replace existing values without changing other model settings.
+Disable `profiles.agents` to skip agent configuration on a new host.
 
 ## Data disk
 
