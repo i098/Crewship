@@ -153,6 +153,9 @@
       - python3
       - "{{ crewship_path_checker }}"
       - "{{ crewship_home_layout_paths | to_json }}"
+      - --owned-by
+      - "{{ crewship_cfg.user }}"
+      - "{{ crewship_group }}"
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
   register: crewship_home_layout_stat
@@ -170,7 +173,9 @@
   become_user: "{{ crewship_cfg.user }}"
   environment: "{{ crewship_user_env }}"
   check_mode: "{{ ansible_check_mode and item in (crewship_home_layout_stat.stdout | from_json).existing }}"
-  loop: "{{ crewship_home_layout_paths }}"
+  loop: >-
+    {{ crewship_home_layout_paths
+       | reject('in', (crewship_home_layout_stat.stdout | from_json).owned_directories) | list }}
   when: crewship_account_ready | bool
 
 - name: Require a mounted data filesystem before creating bulk directories

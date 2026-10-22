@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,26 @@ def test_directory_details_do_not_follow_links(tmp_path):
     }
     assert linked_directory.readlink() == directory
     assert dangling.readlink() == tmp_path / "absent-target"
+    assert file.read_text() == "keep"
+
+
+@pytest.mark.parametrize("uid_offset,gid_offset", [(0, 0), (1, 0), (0, 1)])
+def test_owned_directories_require_matching_ids_and_do_not_follow_links(tmp_path, uid_offset, gid_offset):
+    directory = tmp_path / "directory"
+    directory.mkdir(mode=0o710)
+    linked = tmp_path / "linked"
+    linked.symlink_to(directory, target_is_directory=True)
+    file = tmp_path / "file"
+    file.write_text("keep")
+    paths = [str(path) for path in (directory, linked, file, tmp_path / "missing")]
+
+    result = checker.classify_paths(
+        paths, ownership=(os.getuid() + uid_offset, os.getgid() + gid_offset),
+    )
+
+    assert result["owned_directories"] == ([] if uid_offset or gid_offset else [str(directory)])
+    assert directory.stat().st_mode & 0o777 == 0o710
+    assert linked.readlink() == directory
     assert file.read_text() == "keep"
 
 
