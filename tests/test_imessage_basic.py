@@ -27,13 +27,18 @@ PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode 
 
 @pytest.fixture
 def desk_clock(tmp_path, monkeypatch):
-    """Control quiet periods and reaction ages; keep real retry timers and disk writes."""
+    """Control quiet periods, typing refreshes, and reaction ages; keep real retry timers and disk writes."""
     clock = tmp_path / "clock"
     clock.write_text(str(int(time.time() * 1000)))
     preload = tmp_path / "clock.ts"
     preload.write_text("""
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 if (process.env.STATE_DIRECTORY) {
+  const spawn = Bun.spawn;
+  Bun.spawn = (cmd, ...args) => {
+    if (cmd[0] === "omp" && existsSync(`${process.env.FAKE_DIR}/spawn-error`)) throw new Error("test spawn failure");
+    return spawn(cmd, ...args);
+  };
   const file = process.env.FM_TEST_CLOCK;
   Date.now = () => Number(readFileSync(file, "utf8"));
   Math.random = () => 0.5;
@@ -47,13 +52,23 @@ if (process.env.STATE_DIRECTORY) {
     return timer;
   };
   globalThis.clearTimeout = (timer) => { if (!timers.delete(timer)) cancel(timer); };
+  const interval = globalThis.setInterval;
+  const clearInterval = globalThis.clearInterval;
+  globalThis.setInterval = (fn, ms, ...args) => {
+    if (ms !== 4000) return interval(fn, ms, ...args);
+    const timer = { at: Date.now() + ms, repeat: ms, run: () => fn(...args) };
+    timers.set(timer, timer);
+    return timer;
+  };
+  globalThis.clearInterval = (timer) => { if (!timers.delete(timer)) clearInterval(timer); };
   let seen;
   setInterval(() => {
     const now = Date.now();
     if (seen === now) return;
     seen = now;
     for (const [key, timer] of timers) if (timer.at <= now) {
-      timers.delete(key);
+      if (timer.repeat) timer.at = now + timer.repeat;
+      else timers.delete(key);
       timer.run();
     }
     writeFileSync(`${file}-seen`, String(now));
@@ -123,6 +138,128 @@ def basic_rig(tmp_path, test_mode=True):
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
 
     return fake, state, notes, err, start, receive, cli, text, records
+
+
+@pytest.mark.parametrize("exit_path", [
+    "answer", "reaction", "skip", "handoff", "error", "spawn-error", "cancel", "cancel-status",
+    "send", "react", "typing", "shutdown",
+])
+def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, exit_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "model-hold").touch()
+    if exit_path in ("spawn-error", "cancel-status"):
+        (fake / "status-hold").touch()
+    if exit_path == "reaction":
+        (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
+    elif exit_path in ("skip", "handoff"):
+        (fake / "answer").write_text(json.dumps({"kind": exit_path}))
+    elif exit_path == "error":
+        (fake / "model-fail").touch()
+
+    def events():
+        return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
+
+    bridge = start(1)
+    try:
+        receive("question", "thanks!" if exit_path == "reaction" else "What is the build status?")
+        desk_clock()
+        if exit_path in ("spawn-error", "cancel-status"):
+            wait_for(lambda: events(), "typing while status is pending")
+        else:
+            wait_for(lambda: (fake / "model-started").exists(), "the held desk call")
+        assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}]
+        desk_clock(4000)
+        assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}] * 2
+        if exit_path in ("cancel", "cancel-status"):
+            receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
+        elif exit_path == "spawn-error":
+            (fake / "spawn-error").touch()
+            (fake / "status-hold").unlink()
+        elif exit_path == "send":
+            cli("The build is paused.")
+        elif exit_path in ("react", "typing"):
+            cli(f"--{exit_path}", *(["❤️"] if exit_path == "react" else []))
+        elif exit_path == "shutdown":
+            bridge.terminate()
+            bridge.wait(10)
+        else:
+            (fake / "model-hold").unlink()
+        wait_for(lambda: any(not row["on"] for row in events()), "typing stopped")
+        if exit_path in ("answer", "reaction"):
+            wait_for(lambda: text(fake / "sent"), "the desk response")
+        elif exit_path in ("skip", "handoff", "error", "spawn-error"):
+            wait_for(lambda: "photon-question " in text(notes), "the desk handoff")
+        if exit_path != "shutdown":
+            desk_clock(0)
+            before = events()
+            desk_clock(8000)
+            assert events() == before
+        assert all(row["chat"] == "iMessage;-;+10000000000" for row in events())
+        assert not events()[-1]["on"] or exit_path == "typing"
+    finally:
+        if bridge.poll() is None:
+            bridge.terminate()
+            bridge.wait(10)
+
+
+def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    answer = json.loads((fake / "answer").read_text())
+    (fake / "answer").write_text(json.dumps({**answer, "target": 1}))
+    (fake / "typing-down").unlink()
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        receive("elsewhere", "And now?", space="iMessage;-;+10000000001")
+        desk_clock()
+        wait_for(lambda: text(fake / "sent"), "the selected chat response")
+        assert text(fake / "send-targets") == "iMessage;-;+10000000000\n"
+        assert text(fake / "typing-events") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("exit_path", ["answer", "cancel", "shutdown"])
+def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "model-hold").touch()
+
+    def events():
+        return [json.loads(row)["on"] for row in text(fake / "typing-events").splitlines()]
+
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: (fake / "model-started").exists(), "the held model call")
+        assert events() == [True]
+        (fake / "typing-hold").touch()
+        desk_clock(4000)
+        wait_for(lambda: (fake / "typing-waiting").exists(), "the pending typing refresh")
+        desk_clock(4000)
+        if exit_path == "answer":
+            (fake / "model-hold").unlink()
+            wait_for(lambda: text(fake / "sent"), "the response without waiting for typing")
+        elif exit_path == "cancel":
+            receive("new-chat", "Deploy the build", space="iMessage;-;+10000000001")
+        else:
+            bridge.terminate()
+        (fake / "typing-hold").unlink()
+        if exit_path == "shutdown":
+            bridge.wait(10)
+        wait_for(lambda: events()[-1] is False, "the final stop after the pending refresh")
+        assert events() == [True, True, False]
+        if exit_path != "shutdown":
+            desk_clock(8000)
+            assert events() == [True, True, False]
+    finally:
+        (fake / "typing-hold").unlink(missing_ok=True)
+        if bridge.poll() is None:
+            bridge.terminate()
+            bridge.wait(10)
 
 
 def transport_desk_rig(tmp_path, **env):

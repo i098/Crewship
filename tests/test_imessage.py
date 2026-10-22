@@ -1629,7 +1629,12 @@ function call(op) {
     throw unavailable();
   }
 }
-async function typing() {
+async function typing(chat, on) {
+  if (on && existsSync(`${dir}/typing-hold`)) {
+    writeFileSync(`${dir}/typing-waiting`, "");
+    while (existsSync(`${dir}/typing-hold`)) await Bun.sleep(5);
+  }
+  appendFileSync(`${dir}/typing-events`, JSON.stringify({ chat, on }) + "\\n");
   appendFileSync(`${dir}/calls`, "typing UNAVAILABLE\\n");
   if (existsSync(`${dir}/typing-down`)) throw unavailable();
 }
@@ -1649,8 +1654,8 @@ const load = (id) => message(JSON.parse(readFileSync(`${dir}/messages/${id}.json
 function space(id) {
   return {
     id,
-    startTyping: typing,
-    stopTyping: typing,
+    startTyping: () => typing(id, true),
+    stopTyping: () => typing(id, false),
     async send(content) {
       call("send");
       if (content.type === "app" && existsSync(`${dir}/card-refused`)) throw Object.assign(new Error("app cards are not on this plan"), { grpcCode: 7 });

@@ -46,10 +46,11 @@ function track<T extends Bun.Subprocess>(proc: T): T {
 
 async function stop() {
   if (stopping) return;
+  stopDeskTyping?.();
   stopping = true;
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
-  await Promise.race([Promise.all(running.map((proc) => proc.exited)), Bun.sleep(2000)]);
+  await Promise.race([Promise.all([deskTypingPending, ...running.map((proc) => proc.exited)]), Bun.sleep(2000)]);
   for (const proc of children) proc.kill("SIGKILL");
   // Reap killed children, but do not let a stuck child hold the bridge open.
   await Promise.race([Promise.all([...children].map((proc) => proc.exited)), Bun.sleep(500)]);
@@ -133,10 +134,11 @@ const memoryByRequest = new Map<string, number>();
 for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((e) => {
   log("desk failed")(e);
-  typing(latest?.space, false);
   handoffPending();
 }));
 let deskRun: Bun.Subprocess | undefined;
+let stopDeskTyping: (() => void) | undefined;
+let deskTypingPending: Promise<unknown> = Promise.resolve();
 let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
@@ -358,10 +360,10 @@ if (pendingRoutes().length) {
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
+  stopDeskTyping?.();
   if (!deskRun) return;
   deskRun.kill();
   deskRun = undefined;
-  if (latest) typing(latest.space, false);
 }
 
 Bun.serve({
@@ -497,10 +499,10 @@ async function deliver(o: Out, save: (o: Out) => void) {
   for (let i = o.done ?? 0; i < parts.length; i++) {
     const part = parts[i]!;
     if (i > 0 && typeof part === "string") {
-      if (latest) typing(latest.space, true);
+      if (latest && kind !== "desk") typing(latest.space, true);
       await Bun.sleep(typingPause(part));
     }
-    if (latest) typing(latest.space, false);
+    if (latest && kind !== "desk") typing(latest.space, false);
     await sendBubble(o, i, part, save);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
@@ -649,10 +651,31 @@ async function runDesk(current: () => boolean) {
   const pending = pendingRoutes();
   if (!pending.length) return;
   if (pending.some((r) => r.firstmate) || !DESK_VETTED) return handoffPending();
-  const typingTarget = latest;
-  typing(typingTarget?.space, true);
-  const result = await draftBasic(pending, current);
-  typing(typingTarget?.space, false);
+  const space = pending.every(({ ref }) => ref.space === latestRef?.space
+    && (ref.line ?? "photon") === (latestRef?.line ?? "photon")) ? latest?.space : undefined;
+  let active = true;
+  let refreshing = false;
+  const refresh = () => {
+    if (!active || refreshing || !space) return;
+    refreshing = true;
+    deskTypingPending = deskTypingPending.then(async () => {
+      if (active && !stopping && current()) await space.startTyping();
+    }).catch(log("start typing")).finally(() => { refreshing = false; });
+  };
+  const timer = setInterval(() => {
+    if (stopping || !current()) finishTyping();
+    else refresh();
+  }, 4000);
+  const finishTyping = () => {
+    if (!active) return;
+    active = false;
+    clearInterval(timer);
+    if (stopDeskTyping === finishTyping) stopDeskTyping = undefined;
+    deskTypingPending = deskTypingPending.then(() => space?.stopTyping()).catch(log("stop typing"));
+  };
+  stopDeskTyping = finishTyping;
+  refresh();
+  const result = await draftBasic(pending, current).finally(finishTyping);
   if (stopping || !current()) return;
   if (result === undefined) handoffPending();
   else {

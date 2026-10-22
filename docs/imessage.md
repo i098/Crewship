@@ -27,6 +27,10 @@ For each message from the owner, the service does these steps:
    Its only tool is `zoom`.
    It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
+   The desk refreshes typing every four seconds while the call runs.
+   It stops typing when the call finishes, the turn is cancelled, or the service stops.
+   Typing requests run in order, and shutdown allows two seconds for pending typing cleanup.
+   A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. A clear basic question can receive one direct answer without a Firstmate note or wake.
    The answer must quote complete source lines from supplied status or prior supervisor or desk records.
