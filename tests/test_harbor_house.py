@@ -120,6 +120,9 @@ function removeEventListener() {}
 const window = {};
 """
     check = r"""
+preferences.graphics = "low";
+applyPreferences();
+measure();
 Object.assign(me, {x: -5, z: 20.6, yaw: 0});
 keys.add('f');
 for (let i = 0; i < 4; i++) step(0.02);
@@ -166,6 +169,8 @@ assert.equal(interior, null, 'the touch stick must exit through the door');
 assert.equal(me.yaw, Math.PI);
 assert(me.z < 20.75 && me.z > 19.8, 'exit must land just outside the door');
 assert(!blocked(me.x, me.z, floorAt(me.x, me.z)));
+preferences.graphics = "auto";
+applyPreferences();
 Object.assign(me, {x: -5, z: 20.6, yaw: 0});
 stick.y = 1;
 for (let i = 0; i < 4; i++) step(0.02);
@@ -354,7 +359,8 @@ const document = {getElementById: () => element, querySelectorAll: () => [],
   documentElement: {}, addEventListener() {}, fonts: {load: () => Promise.resolve(), ready: Promise.resolve()}};
 const matchMedia = () => ({matches: false, addEventListener() {}});
 const getComputedStyle = () => ({getPropertyValue: () => 'monospace'});
-const devicePixelRatio = 1, innerWidth = 1200;
+const devicePixelRatio = 1;
+let innerWidth = 1200;
 const performance = {now: () => 0};
 const IntersectionObserver = class {observe() {}}, ResizeObserver = class {observe() {}};
 function requestAnimationFrame() {}
@@ -379,6 +385,58 @@ def run_rendered(check, timeout):
         check=True,
         timeout=timeout,
     )
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+def test_low_graphics_enlarges_glyphs_through_doors_and_hatches():
+    check = r"""
+Object.assign(element, {clientWidth: 3840, clientHeight: 2160});
+innerWidth = 3840;
+context.measureText = () => ({width: parseFloat(context.font) * 0.6});
+const glyphSize = () => { measure(); return [cellW, cellH]; };
+for (const touch of [false, true]) {
+  touchFirst.matches = touch;
+  preferences.graphics = "high";
+  applyPreferences();
+  const high = glyphSize();
+  assert(shadows, 'High must keep shadows');
+  preferences.graphics = "auto";
+  applyPreferences();
+  assert.deepEqual(glyphSize(), high, 'Auto must retain the base glyph size');
+  for (let i = 0; i < 42; i++) adaptResolution(25, true);
+  const automatic = glyphSize();
+  if (touch) assert(automatic[1] >= high[1] && !shadows, 'Auto must adapt on phones');
+  else assert.deepEqual(automatic, high, 'Auto must keep desktop detail');
+  preferences.graphics = "low";
+  applyPreferences();
+  const low = glyphSize();
+  assert(low[0] > high[0] && low[1] > high[1], 'Low must enlarge glyphs at 3840x2160');
+  assert(!shadows, 'Low must disable shadows');
+  for (let i = 0; i < 100; i++) adaptResolution(2, false);
+  assert.deepEqual(glyphSize(), low, 'Low must not adapt back to smaller glyphs');
+  for (const room of [HOUSE, CABIN]) {
+    interior = null;
+    const [x, z, direction] = room.door;
+    Object.assign(me, {x, z: z - direction * 0.1});
+    assert(crossDoor(x, z + direction * 0.1), 'The door must open');
+    assert.equal(interior, room);
+    assert.deepEqual(glyphSize(), low, 'Low must survive door entry');
+    Object.assign(me, {x: 0, z: 0.4});
+    assert(crossDoor(0, 0.3), 'The door must allow exit');
+    assert.equal(interior, null);
+    assert.deepEqual(glyphSize(), low, 'Low must survive door exit');
+  }
+  const [x0, x1, z0, z1] = HATCH;
+  const x = (x0 + x1) / 2, z = (z0 + z1) / 2;
+  assert(crossHatch(x, z), 'The hatch must open');
+  assert.equal(interior, GUN_DECK);
+  assert.deepEqual(glyphSize(), low, 'Low must survive hatch entry');
+  assert(crossHatch(x, z), 'The hatch must allow exit');
+  assert.equal(interior, null);
+  assert.deepEqual(glyphSize(), low, 'Low must survive hatch exit');
+}
+"""
+    run_rendered(check, 10)
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs node")
