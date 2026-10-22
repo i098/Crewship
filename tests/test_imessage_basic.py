@@ -323,6 +323,77 @@ def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waitin
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("threaded", [False, True])
+@pytest.mark.parametrize("code", ["EIO", "ENOSPC"])
+def test_desk_stops_typing_when_accepted_reply_progress_cannot_be_saved(
+    tmp_path, desk_clock, monkeypatch, threaded, code,
+):
+    preload = tmp_path / "progress-failure.ts"
+    preload.write_text("""
+import * as fs from "node:fs";
+import { mock } from "bun:test";
+const real = { ...fs };
+const fault = `${process.env.FAKE_DIR}/progress-failure`;
+mock.module("node:fs", () => ({
+  ...real,
+  writeSync(fd, data, ...args) {
+    const item = typeof data === "string" && data.startsWith("{") ? JSON.parse(data) : undefined;
+    if (item?.kind === "desk" && item.done === 1 && real.existsSync(fault)) {
+      throw Object.assign(new Error("injected delivery progress failure"), {
+        code: real.readFileSync(fault, "utf8"),
+      });
+    }
+    return real.writeSync(fd, data, ...args);
+  },
+}));
+""")
+    monkeypatch.setenv("BUN_OPTIONS", f"{os.environ['BUN_OPTIONS']} --preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "model-hold").touch()
+    fault = fake / "progress-failure"
+    fault.write_text(code)
+
+    def events():
+        return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
+
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        if threaded:
+            next(fake.glob("last-*")).write_text("an intervening message")
+        desk_clock()
+        wait_for(lambda: (fake / "model-started").exists(), "the held desk model")
+        (fake / "model-hold").unlink()
+        wait_for(lambda: "injected delivery progress failure" in text(err), "the progress write failure")
+        delivered = [json.loads(row) for row in text(fake / "delivery-events").splitlines()][0]
+        assert delivered["line"] == (
+            "reply question The build is paused." if threaded else "send The build is paused."
+        )
+        assert delivered["typing"] is True
+        pending = json.loads(next((state / "outbox").glob("*.json")).read_text())
+        assert pending["requestId"] == "photon-question"
+        assert pending.get("done", 0) == 0
+        assert not list((state / "outbox-done").glob("*.json"))
+        desk_clock(8000)
+        assert events() == [
+            {"chat": "iMessage;-;+10000000000", "on": True},
+            {"chat": "iMessage;-;+10000000000", "on": False},
+        ]
+        fault.unlink()
+        wait_for(lambda: list((state / "outbox-done").glob("*.json")), "the recovered delivery receipt")
+        completed = json.loads(next((state / "outbox-done").glob("*.json")).read_text())
+        assert completed["requestId"] == pending["requestId"]
+        assert completed["guid"] == pending["guid"]
+        assert completed["done"] == 1
+        assert not list((state / "outbox").glob("*.json"))
+        desk_clock(8000)
+        assert events()[-1]["on"] is False
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("response,ending", [
     ("answer", "dead"), ("reaction", "dead"), ("reaction", "expired"),
     ("answer", "cancel"), ("reaction", "cancel"),

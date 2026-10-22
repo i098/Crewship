@@ -496,16 +496,11 @@ function put(item: Out) {
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
 }
 
-async function deliver(o: Out, save: (o: Out) => void) {
-  await deliverOut(o, save);
-  finishDeskDelivery(o);
-}
-
 function finishDeskDelivery(o: Out) {
   if (o.requestId && o.requestId === deskTypingRequestId) stopDeskTyping?.();
 }
 
-async function deliverOut(o: Out, save: (o: Out) => void) {
+async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.react) return deliverReaction(o, save);
@@ -519,6 +514,7 @@ async function deliverOut(o: Out, save: (o: Out) => void) {
     }
     if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
+    finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
   if (!o.silent) remember(kind, [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n"));
@@ -537,6 +533,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
     if (notSent(e)) save(o);
     throw e;
   }
+  finishDeskDelivery(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
