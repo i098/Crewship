@@ -10,7 +10,16 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from test_imessage import ROOT, TEST_QUIET_MS, FallbackRig, bun, fake_bridge, publish_json, read_text, wait_for
+from test_imessage import (
+    ROOT,
+    TEST_QUIET_MS,
+    FallbackRig,
+    bun,
+    fake_bridge,
+    publish_json,
+    read_text,
+    wait_for,
+)
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
