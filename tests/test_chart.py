@@ -155,6 +155,9 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
     (sources / "agent.conf").write_text("managed agent settings\n")
     (sources / "config/settings.conf").write_text("managed Firstmate settings\n")
     (sources / "config/nested/managed.conf").write_text("managed nested settings\n")
+    (sources / "config/crew-dispatch.json").write_bytes(
+        (ROOT / "blueprint/config/crew-dispatch.json").read_bytes()
+    )
     home = tmp_path / "home"
     existing = home / "preferences/existing.conf"
     existing.parent.mkdir(parents=True)
@@ -187,7 +190,7 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
             for path in (existing, missing)
         ],
         "crewship_firstmate_dir": str(home / "firstmate"),
-        "crewship_firstmate_config_names": ["settings.conf", "nested"],
+        "crewship_firstmate_config_names": ["settings.conf", "nested", "crew-dispatch.json"],
         "crewship_firstmate_config_first_write": first_write,
         "crewship_fm_git": {"stat": {"exists": True}},
         "ansible_become": False,
@@ -209,6 +212,11 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
     assert (destination / "settings.conf").read_text() == expected
     assert (destination / "nested/operator.conf").read_text() == "operator nested settings\n"
     assert (destination / "nested/managed.conf").exists() is not first_write
+    dispatch = json.loads((destination / "crew-dispatch.json").read_text())
+    choices = {choice["model"]: choice for rule in dispatch["rules"] for choice in rule["use"]}
+    assert choices["inception/mercury-3"]["effort"] == "high"
+    assert choices["anthropic/claude-opus-5-5"]["effort"] == "high"
+    assert all("fable" not in model for model in choices)
 
 
 @pytest.mark.parametrize("enabled,options", [

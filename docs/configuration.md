@@ -218,6 +218,28 @@ crewship:
 
 The Firstmate checkout tracks the default branch of upstream Firstmate, not a sha. Every apply fetches `origin/main` and puts `main` at that revision plus the [Firstmate patch layer](dependencies.md#firstmate-patch-layer), so tracking it is how a host stays current. Do not re-pin it to a sha. Each run resolves `origin/main` once and reports the sha it installed. To track a fork, set `firstmate.url` in `.local/host.yml`. The URL applies to a fresh clone; verification fails when an existing checkout's `origin` is a different URL, and provisioning never changes it for you. To switch an existing checkout, run `git -C <workspace>/firstmate remote set-url origin <url>` and `git -C <workspace>/firstmate fetch origin`, reconcile any local commits on `main` with `origin/main` by hand, then run `./ship.sh launch`.
 
+### Firstmate dispatch defaults
+
+The `firstmate` profile copies `blueprint/config/crew-dispatch.json` to `<workspace>/firstmate/config/crew-dispatch.json`.
+Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple coding.
+Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
+Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
+Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
+Fable is not a spawn choice; see [Default config](default-config.md) for the unchanged automatic fallback chain.
+Provider credentials are not included in the dispatch file.
+
+Each apply normally updates the seeded Firstmate settings.
+To keep local settings, use the existing Ansible override on each apply instead of `./ship.sh launch`:
+
+```bash
+uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/site.yml \
+  -e @.local/host.yml -e crewship_firstmate_config_first_write=true
+```
+
+Then edit `<workspace>/firstmate/config/crew-dispatch.json` to change a model or effort.
+This option preserves existing entries in `crewship_firstmate_config_names` and copies only absent entries, including whole directories.
+To skip Firstmate provisioning entirely, set `crewship.profiles.firstmate: false` in `.local/host.yml`.
+
 ## New-host questions
 
 After a successful `./ship.sh launch` with the `firstmate` profile on, once omp has a provider login, Crewship starts omp in the Firstmate checkout with an opening prompt. Firstmate then asks the move decisions for this host one question at a time: which secondmate homes, services, tools, and unpushed work to bring over.
@@ -247,7 +269,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 
 | Profile | Default | What it installs |
 | --- | --- | --- |
-| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
+| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; the [spawned Opus effort cap](#spawned-opus-effort-cap); `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
 | `public_skills` | off; absent keeps them on a host that has them | The skills and rules that ship with Crewship, in `~/.omp/agent/skills/`, `~/.claude/skills/` and `~/.omp/agent/rules/`. `false` or absent on a new host installs none; `true` installs and updates them; turning it off later deletes nothing. See [Skills](omp.md#skills). Private skills always install. |
 | `agent_instructions` | off; absent keeps them on a host that has them | The [global instructions](omp.md#global-instructions): `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.omp/agent/AGENTS.md` as one import line. `instructions_mode` (`skip`, `overwrite` or `append`, default `append`) says what happens to a file that exists. The installer checklist asks it when one does. |
 | `development` | off | Rust toolchain (stable), build essentials. |
@@ -275,7 +297,8 @@ See [Project databases](project-databases.md) for existing-host management and s
 The `agents` profile caps Opus 5.5 at `high` effort in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
 Other models and lower effort levels remain unchanged.
 The extension requires both `FM_OMP_HARNESS=omp` and `OMP_SKIP_SETUP=1`, so primary sessions remain unchanged.
-It caps the provider payload after `auto` resolves; the status line can still show the requested level.
+It caps request-level and message-level provider effort after `auto` resolves, including effort changes during a session.
+The status line can still show the requested level.
 The gate wrapper caps explicit `xhigh`, `max`, and `auto` requests, including model suffixes, and selects `high` when effort is absent.
 The `acp:omp` fallback does not use the wrapper.
 

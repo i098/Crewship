@@ -1654,13 +1654,13 @@ def publish_json(path, record):
     pending.replace(path)
 
 
-TEST_QUIET_MS = 2000  # the bridge's quiet period in test mode; production always waits eight seconds
+TEST_QUIET_MS = 2000  # the bridge's quiet period in test mode; production waits three seconds
 
 
 def fake_bridge(tmp_path, test_mode=True):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
-    FM_IMESSAGE_TEST_QUIET_MS and waits its real eight seconds."""
+    FM_IMESSAGE_TEST_QUIET_MS and waits its real three seconds."""
     app, fake, state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
     shutil.copytree(ROOT / "apps/imessage", app, ignore=shutil.ignore_patterns("fm-*"))
     pkg = app / "node_modules/spectrum-ts"

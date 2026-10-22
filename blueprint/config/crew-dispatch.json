@@ -1,5 +1,5 @@
 {
-  "_comment": "Select models by task difficulty; the spawning home chooses the effort, and omp connects directly to each provider. Codex models draw on a separate quota pool from Anthropic, so use them when the Anthropic weekly quota is tight (omp usage).",
+  "_comment": "Select models by task difficulty. Use Fable only as an automatic Opus fallback, never as a spawn choice. Mercury coding and Opus profiles use high effort; the spawning home chooses effort for other tiers. omp connects directly to each provider. Codex models use a separate quota pool from Anthropic.",
   "rules": [
     {
       "when": "Mechanical or small, well-specified work: typo and copy fixes, renames, docs-only edits, config or version bumps, moving files, formatting, data collection, simple scripted checks, or a narrow one-file change with an obvious fix.",
@@ -18,6 +18,18 @@
       "why": "Cheapest models; usually low thinking."
     },
     {
+      "when": "Simple coding tasks: small, well-specified code edits, single-file changes, quick scripts, boilerplate, straightforward tests, where a fast cheap model is enough (not mechanical-only work and not anything with a large blast radius).",
+      "use": [
+        {
+          "harness": "omp",
+          "model": "inception/mercury-3",
+          "provider": "inception",
+          "effort": "high"
+        }
+      ],
+      "why": "Mercury 3 handles simple coding at high thinking."
+    },
+    {
       "when": "Ordinary engineering: a normal feature, bug fix with a known or quickly findable cause, UI change, tests, refactors in one area, PR follow-ups and review fixes, release chores, or a routine investigation or scout report.",
       "use": [
         {
@@ -34,10 +46,11 @@
         {
           "harness": "omp",
           "model": "anthropic/claude-opus-5-5",
-          "provider": "claude"
+          "provider": "claude",
+          "effort": "high"
         }
       ],
-      "why": "Opus 5.5 is reserved for hard tasks; high or xhigh thinking."
+      "why": "Opus 5.5 is reserved for hard tasks; effort high at most."
     }
   ],
   "default": [

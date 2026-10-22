@@ -29,6 +29,7 @@ With the `agents` profile on, `./ship.sh launch`:
 8. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
 9. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex, when `profiles.agent_instructions` is on. See [Global instructions](#global-instructions).
 10. Installs the omp rules in [`blueprint/rules/`](../blueprint/rules/) to omp's global rules folder. See [Rules](#rules).
+11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
@@ -216,6 +217,7 @@ Every apply:
 
 1. Installs [`blueprint/config/omp-as-pi/`](../blueprint/config/omp-as-pi/) to `~/.no-mistakes/omp-as-pi/`.
    The wrapper maps `--session` to `--resume` and neutralizes context files with the pinned gate overlay.
+   It also applies the [spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
    It refuses unsupported arguments with exit 64 and logs the refusal to `~/.no-mistakes/omp-as-pi/refusals.log`.
    Pi-only runs fail on refusal instead of changing the selected gate model through ACP.
 2. Checks the pi adapter of the no-mistakes release it installs. no-mistakes installs at its newest non-draft release, prereleases included, but the wrapper only translates the arguments the adapter it was proven against builds. `check-adapter.sh v<version>` fetches that release's four adapter sources (`pi.go`, `pi_profile.go`, `fallback.go`, `ompgate.go`) and compares them with the sha256 pins in `check-adapter.sh`, the only place the pins live. It exits 0 when every pin matches, 1 when a source differs from its pin or is gone from the tag (HTTP 404), and 2 when it proves nothing: a network error, a timeout, or any other HTTP status.

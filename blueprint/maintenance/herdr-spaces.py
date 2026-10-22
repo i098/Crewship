@@ -23,8 +23,8 @@ workspace tokens under the source `crewship:spaces`:
 
 Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
-~/.cache/crewship/herdr-spaces.json. Failed usage refreshes show unknown;
-other failed sources keep their previous value. The script always exits 0.
+~/.cache/crewship/herdr-spaces.json. Failed usage refreshes keep the last
+percentages, marked stale after one hour. The script always exits 0.
 
 Herdr's mobile layout ignores sidebar rows, so the same data also goes where
 it shows. A home's agent pane (one with a `who` token) gets its session topic
@@ -175,10 +175,10 @@ def usage_left(reports: list[dict]) -> int | None:
 def usage_row(cache: dict) -> str:
     now = time.time()
     hit = cache.get("usage", {})
-    if "pct" not in hit or now - hit["at"] >= USAGE_TTL:
+    if "pct" not in hit or now - hit.get("checked_at", hit["at"]) >= USAGE_TTL:
         left = dict.fromkeys(("anthropic", "openai-codex"))
         try:
-            report = json.loads(run("omp", "usage", "--json", timeout=20))
+            report = json.loads(run("omp", "usage", "--json", timeout=60))
             for provider in left:
                 if not any(
                     a.get("provider") == provider for a in report.get("accountsWithoutUsage", [])
@@ -188,7 +188,12 @@ def usage_row(cache: dict) -> str:
                     )
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
             print("herdr-spaces: omp usage unavailable", file=sys.stderr)
-        hit = cache["usage"] = {"at": now, "pct": left}
+            if "pct" not in hit:
+                hit = {"at": now, "pct": left}
+        else:
+            hit = {"at": now, "pct": left}
+        hit["checked_at"] = now
+        cache["usage"] = hit
     halves = []
     for provider, icon in (("anthropic", CLAUDE), ("openai-codex", OPENAI)):
         if hit["pct"][provider] is None:
@@ -199,7 +204,8 @@ def usage_row(cache: dict) -> str:
             percent = f"{value}%".rjust(4)
             bar = "▰" * filled + "▱" * (4 - filled)
         halves.append(f"{icon} {bar} {percent}")
-    return "7d left " + "  ".join(halves)
+    stale = now - hit["at"] > 3600 and any(v is not None for v in hit["pct"].values())
+    return "7d stale " + " ".join(halves) if stale else "7d left " + "  ".join(halves)
 
 
 def queue(home: Path, saved: dict) -> int:

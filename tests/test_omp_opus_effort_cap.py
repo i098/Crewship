@@ -23,9 +23,26 @@ pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
     ({"FM_OMP_HARNESS": ""}, "claude-opus-5-5", "max", "max"),
     ({"FM_OPUS_EFFORT_UNCAPPED": "1"}, "claude-opus-5-5", "max", "max"),
 ])
-def test_provider_effort_cap(environment, model, effort, expected):
+@pytest.mark.parametrize("location", ["request", "message", "both"])
+def test_provider_effort_cap(environment, model, effort, expected, location):
     extension = json.dumps(str(ROOT / "blueprint/config/omp-opus-effort-cap.ts"))
-    payload = {"model": model, "messages": [], "output_config": {"effort": effort, "format": "json"}}
+    message = {"role": "system", "content": []}
+    expected_message = dict(message)
+    if location in ("message", "both"):
+        message["output_config"] = {"effort": effort, "format": "json"}
+        expected_message["output_config"] = {"effort": expected, "format": "json"}
+    messages = [
+        message,
+        {"role": "assistant", "content": "OK", "output_config": {"effort": "low"}},
+    ]
+    payload = {
+        "model": model,
+        "messages": messages,
+        "output_config": {
+            "effort": effort if location in ("request", "both") else "medium",
+            "format": "json",
+        },
+    }
     code = f"""
 import extension from {extension};
 let handler;
@@ -40,5 +57,12 @@ console.log(JSON.stringify({{result, original: payload}}));
              "FM_OPUS_EFFORT_UNCAPPED": "", **environment},
     )
     observed = json.loads(result.stdout)
-    assert observed["result"] == {**payload, "output_config": {"effort": expected, "format": "json"}}
+    assert observed["result"] == {
+        **payload,
+        "messages": [expected_message, messages[1]],
+        "output_config": {
+            "effort": expected if location in ("request", "both") else "medium",
+            "format": "json",
+        },
+    }
     assert observed["original"] == payload

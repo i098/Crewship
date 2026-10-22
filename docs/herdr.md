@@ -55,7 +55,7 @@ The row has 32 terminal columns and fits at sidebar widths 46 and 38.
 
 If an account has no seven-day window or an unknown one, that provider shows `░░?░   ?%`.
 An account listed under `accountsWithoutUsage` also makes its provider unknown.
-A failed command or an absent provider shows unknown, never zero usage.
+An absent provider shows unknown, never zero usage. Providers other than `anthropic` and `openai-codex` are ignored.
 The reporter reads only the usage command's output; it does not open or change credential stores.
 
 The marks are the `cod-claude` (U+EC82) and `cod-openai` (U+EC81) glyphs of Nerd Fonts (the Hack Nerd Font 3.5.0 file already contains both), which come from the Codicons [`claude.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/claude.svg) and [`openai.svg`](https://github.com/microsoft/vscode-codicons/blob/main/src/icons/openai.svg) sources.
@@ -91,10 +91,11 @@ The other mobile fields follow the existing mechanism (see [On a phone](#on-a-ph
 | CPU, RAM, counts, watcher, machine | every run (1 s) | One pass over `/proc` and file reads. CPU needs two runs, so it appears from the second run on. |
 | Queue | when the backlog changes, else every minute | One `fm-tasks-axi.sh ready` per home, most of a run's cost when it runs. |
 | Disk | every 15 minutes | One `du` over each home and its pools. On a host with large pools this run can take a minute; the other values wait for it. |
-| Provider usage | every 3 minutes | One `omp usage --json` call with a 20-second timeout. The reporter also caches failures for 3 minutes. `omp` itself reuses each account's report for 5 minutes ±25%, so with healthy fetches the cache lifetimes add up to about 9 minutes 16 seconds, plus run time. A failed `omp` fetch can return an older last good report. |
+| Provider usage | every 3 minutes | One `omp usage --json` call with a 60-second timeout. Failed refreshes keep the cached percentages and delay the next attempt for 3 minutes. `omp` itself reuses each account's report for 5 minutes ±25%, so with healthy fetches the cache lifetimes add up to about 9 minutes 16 seconds, plus run time. A failed `omp` fetch can return an older last good report. |
 
 The caches live in `~/.cache/crewship/herdr-spaces.json`.
-A failed usage refresh replaces the provider percentages with unknown; other failed sources keep their previous values.
+A failed usage refresh keeps the last percentages. After one hour without a successful refresh, the label changes to `7d stale`.
+Without cached percentages, a failed refresh shows unknown. Other failed sources also keep their previous values.
 A failed run never fails the unit: errors go to the journal (`journalctl --user -u herdr-spaces.service`).
 Herdr drops workspace tokens when its server restarts; the next run reports them again.
 

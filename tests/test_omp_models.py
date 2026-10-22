@@ -228,6 +228,7 @@ def test_shipped_model_configuration_schema():
     for tier in [dispatch["default"], *(rule["use"] for rule in dispatch["rules"])]:
         assert isinstance(tier, list)
         for model in tier:
-            assert set(model) == {"harness", "model", "provider"}
+            assert {"harness", "model", "provider"} <= set(model)
+            assert set(model) <= {"harness", "model", "provider", "effort"}
             assert model["harness"] == "omp"
-            assert model["provider"] in {"claude", "codex"}
+            assert model["provider"] in {"claude", "codex", "inception"}
