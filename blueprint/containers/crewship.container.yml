@@ -2,7 +2,7 @@
 #
 # Validated by `./ship.sh inspect --config blueprint/containers/crewship.container.yml`
 # against blueprint/schemas/crewship.schema.json, then consumed by `./ship.sh launch` during
-# the Dockerfile `worker` stage. It differs from blueprint/config/default.yml only where a
+# image provisioning in Dockerfile. It differs from blueprint/config/default.yml only where a
 # container genuinely cannot host a native capability:
 #
 #   start_services: false  no systemd/D-Bus inside an ordinary container, so unit
@@ -18,7 +18,7 @@
 #   profiles.gateway       the password gateway and its tunnel are user services,
 #                          and the image has no user manager to run them.
 #   profiles.firstmate     the Firstmate checkout belongs in the workspace, which
-#                          compose and the devcontainer mount as a volume/bind,
+#                          compose and the devcontainer mount at runtime,
 #                          so baking a clone into the image would be shadowed.
 #   browser_prune.enabled  the pruner needs host PID visibility and live browser
 #                          process groups; it is native-only.

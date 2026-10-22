@@ -4,7 +4,7 @@
 #   docker compose --profile worker --profile data up -d   # + example backing services
 #
 # Everything here is opt-in through profiles: nothing starts with a bare
-# `docker compose up`. The worker is the same image the devcontainer and CI use.
+# `docker compose up`. See docs/agents/architecture.md#docker-worker for image targets.
 #
 # Security boundary (see docs/security.md):
 #   * no privileged containers, no host PID/IPC/network namespaces
