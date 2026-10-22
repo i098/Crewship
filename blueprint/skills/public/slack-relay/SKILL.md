@@ -53,6 +53,10 @@ Set `"mention_only": "direct"` to notify for every eligible one-to-one DM and ex
 This guarantee also covers bot messages that pass the filter and messages sent through `replay`.
 Switching to `true` or `"direct"` clears queued lines.
 Changing modes does not automatically replay logged messages.
+Set `"broadcasts": true` inside a workspace's `workspaces` entry to also keep `<!everyone>`, `<!channel>`, and `<!here>` in direct mode.
+This option defaults to `false` and has no effect in Boolean modes or other workspaces.
+Notifications for an enabled workspace include its name before the sender and channel.
+Enabling broadcasts does not replay logged messages or change deduplication, the delivery window, or line limits.
 
 `self` is required: the operator's own user id in each workspace (his messages are skipped). Find it as the user id that is the author of one of his own messages in the slk cache. A workspace without `self` is not relayed. `workspaces` gives the model a display name for each workspace. Optional keys and defaults: `db` (`~/.local/share/slk/cache.db`), `model`, `notify` (`["fm-imessage", "--"]`), `interval` 15, `window` 60, `lookback` 21600, `max_batch` 150, `max_chars` 120000, `text_chars` 700, `max_lines` 8.
 Set `dbs` to a list of cache paths to read multiple slk profiles instead of `db`; each cache stays read-only, with shared message deduplication.

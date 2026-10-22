@@ -440,6 +440,59 @@ def test_dry_run_counts_each_message_once_across_caches(two_caches, monkeypatch,
     assert two_caches.texts() == [] and two_caches.calls() == 0
 
 
+@pytest.mark.parametrize("mention", ["<!everyone>", "<!channel>", "<!here>"])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("workspace", [WS, "T2"])
+def test_broadcasts_require_workspace_opt_in(env, mention, enabled, workspace):
+    env.cfg["mention_only"] = "direct"
+    env.cfg["workspaces"][workspace] = {"name": "Workspace", "broadcasts": enabled}
+    (env.stub / "omp.mode").write_text("empty")
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"{mention} announcement")
+    env.run(110)
+    env.run(180)
+    allowed = enabled and workspace == WS
+    assert env.texts() == ([f"Workspace: Bob, #dev: @{mention[2:-1]} announcement"] if allowed else [])
+    assert [row["decision"] for row in env.log()] == ["kept" if allowed else "dropped"]
+
+
+@pytest.mark.parametrize("mode", [False, True])
+def test_broadcast_opt_in_does_not_change_boolean_modes(env, mode):
+    env.cfg["mention_only"] = mode
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    env.run(100)
+    env.add("101.1", "C1", BOB, "<!here> announcement")
+    env.run(110)
+    assert env.texts() == []
+
+
+def test_enabling_broadcasts_does_not_replay_dropped_messages(env):
+    env.cfg["mention_only"] = "direct"
+    env.run(100)
+    env.add("101.1", "C1", BOB, "<!here> old announcement")
+    env.run(110)
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    env.add("120.1", "C1", BOB, "<!here> new announcement")
+    env.run(130)
+    env.run(200)
+    assert env.texts() == ["Acme: Bob, #dev: @here new announcement"]
+    assert [row["decision"] for row in env.log()] == ["dropped", "kept"]
+
+
+@pytest.mark.parametrize("channel,text,expected", [
+    ("D1", "hello", "DM: hello"),
+    ("C1", f"<@{ME}> hello", "#dev: @Me hello"),
+])
+def test_broadcast_workspace_keeps_context_for_direct_messages(env, channel, text, expected):
+    env.cfg["mention_only"] = "direct"
+    env.cfg["workspaces"][WS]["broadcasts"] = True
+    (env.stub / "omp.mode").write_text("error")
+    env.run(100)
+    env.add("101.1", channel, BOB, text)
+    env.run(110)
+    assert env.texts() == [f"Acme: Bob, {expected}"]
+
+
 def test_replay_finds_a_message_in_the_second_cache(two_caches):
     sr.replay(two_caches.cfg, "T2", "D2", "101.1")
     assert two_caches.texts() == ["[test] Bob Two, DM: KEEP second cache"]

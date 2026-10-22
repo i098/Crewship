@@ -104,6 +104,7 @@ def open_cache(path):
 def clean(text, names):
     """Slack markup to plain text: <@U1> to @name, <url|label> to label, entities decoded."""
     text = re.sub(r"<@(\w+)(\|[^>]*)?>", lambda m: "@" + names.get(m.group(1), m.group(1)), text)
+    text = re.sub(r"<!(everyone|channel|here)>", r"@\1", text)
     text = re.sub(r"<#\w+\|([^>]*)>", r"#\1", text)
     text = re.sub(r"<(?:[^|>]*\|)?([^>]*)>", r"\1", text)
     return html.unescape(text).strip()
@@ -189,7 +190,9 @@ def verdicts(cfg, batch):
 def drop_reason(cfg, m):
     if cfg["mention_only"] and not m["view"]["mentions_him"]:
         if cfg["mention_only"] == "direct":
-            return "" if m["view"]["type"] == "dm" else "not tagged or DM"
+            broadcast = cfg["workspaces"].get(m["workspace_id"], {}).get("broadcasts", False)
+            allowed = m["view"]["type"] == "dm" or (broadcast and re.search(r"<!(?:everyone|channel|here)>", m["text"]))
+            return "" if allowed else "not tagged or DM"
         return "not tagged"
     return ""
 
@@ -200,7 +203,7 @@ def decide(cfg, m, v):
     if reason:
         return False, reason, ""
     if cfg["mention_only"] == "direct":
-        return True, "direct mention or DM", str((v or {}).get("line") or "").strip()[:240]
+        return True, "direct mention, DM or broadcast", str((v or {}).get("line") or "").strip()[:240]
     if v is None:
         sure = m["view"]["type"] == "dm" or m["view"]["mentions_him"]
         return sure and not m["view"]["bot"], "no verdict from the model", ""
@@ -230,6 +233,8 @@ def process(cfg, batch, st, test=False):
                   decision="kept" if keep else "dropped", reason=reason, **({"test": True} if test else {}))
         if keep:
             line = line or f"{v['from']}, {v['channel']}: {v['text'][:160]}"
+            if cfg["mention_only"] == "direct" and cfg["workspaces"].get(m["workspace_id"], {}).get("broadcasts", False):
+                line = f"{v['workspace']}: {line}"
             st.setdefault("pending", []).append(f"{'[test] ' if test else ''}{line}")
 
 
