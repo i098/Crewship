@@ -5,16 +5,26 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { findScopedSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 interface Ctx {
 	agent: { kind: "main" | "sub" };
 	hasUI: boolean;
-	sessionManager: unknown;
-	model?: { provider?: string };
+	sessionManager: ModeSessionManager;
+	model?: { provider?: string; id?: string };
+	modelRegistry: ModelRegistry;
 }
 interface GluttonyApi {
 	pi?: HostModule;
+	getThinkingLevel(): string | undefined;
+	setThinkingLevel(level: string): void;
 	on(event: "session_start", handler: (event: unknown, ctx: Ctx) => unknown): void;
+	on(
+		event: "before_subagent_spawn",
+		handler: (event: { agent: string; modelRole?: string; patterns: string[] }, ctx: Ctx) =>
+			Promise<{ model?: string; block?: boolean; reason?: string } | undefined>,
+	): void;
 	on(
 		event: "before_agent_start",
 		handler: (event: { systemPrompt: string[] }, ctx: Ctx) => { systemPrompt: string[] } | undefined,
@@ -25,23 +35,42 @@ interface GluttonyApi {
 			toolName: string;
 			toolCallId: string;
 			input: { cli?: string; prompt?: string };
-		}) => { block?: boolean; reason?: string; input?: Record<string, unknown> } | undefined,
+		}, ctx: Ctx) => Promise<{ block?: boolean; reason?: string; input?: Record<string, unknown> } | undefined>,
 	): void;
 }
 interface ModeSessionManager {
 	buildSessionContext(): { mode?: string };
 	appendModeChange(mode: string): void;
+	getSessionId(): string;
 }
 interface HostSettings {
-	getModelRole(role: string): string | undefined;
-	overrideModelRoles(roles: Record<string, string>): void;
+	overlay(overrides: Record<string, unknown>): HostSettings;
 }
 interface SpawnToolProto {
+	session: { settings: HostSettings; sessionManager?: { getSessionId?(): string } };
 	execute(toolCallId: string, params: { cli: Cli }, ...rest: unknown[]): Promise<unknown>;
 }
 interface HostModule {
-	Settings?: { instance?: HostSettings };
+	Settings?: { prototype: HostSettings };
 	VibeSpawnTool?: { prototype: SpawnToolProto };
+	SessionManager?: { prototype: { getEntries(): SessionEntry[] } };
+}
+
+interface ModelRef {
+	provider: string;
+	id: string;
+}
+interface ModelRegistry {
+	find(provider: string, id: string): ModelRef | undefined;
+	getApiKey(model: ModelRef, sessionId?: string): Promise<string | undefined>;
+}
+
+interface SessionEntry {
+	type: string;
+	agent?: string;
+	modelRole?: string;
+	resolvedModel?: string;
+	retryFallback?: { primary: string; chain: string[] };
 }
 
 type Cli = "fast" | "good";
@@ -55,6 +84,7 @@ type Tiers = Record<Cli, Tier>;
 
 const ABOVE_MEDIUM = ["medium", "high", "xhigh", "max"];
 const ROLE: Record<Cli, string> = { fast: "smol", good: "task" };
+const AGENT: Record<Cli, string> = { fast: "sonic", good: "task" };
 const DIRECTIVE = /^@model[ \t]+(\S+)(?:[ \t]+(\S+))?[ \t]*(?:\r?\n|$)/;
 
 function anthropicTiers(): Tiers {
@@ -109,10 +139,66 @@ function choose(tiers: Tiers, cli: Cli, prompt: string): { prompt: string; patte
 	const match = DIRECTIVE.exec(prompt);
 	const model = match?.[1] ?? tier.model;
 	const level = match?.[2] ?? tier.level;
-	if (!tier.models.includes(model) || !tier.levels.includes(level)) {
+	const pattern = `${model}:${level}`;
+	if (!allowedPattern(tiers, cli, pattern)) {
 		return { error: `vibe_spawn ${cli} worker: "${model} ${level}" is not allowed. Allowed: ${choices(tiers)}.` };
 	}
-	return { prompt: match ? prompt.slice(match[0].length) : prompt, pattern: `${model}:${level}` };
+	return { prompt: match ? prompt.slice(match[0].length) : prompt, pattern };
+}
+
+function bounded(tiers: Tiers, cli: Cli, pattern?: string): string {
+	const tier = tiers[cli];
+	const patternWithLevel = pattern?.includes(":") ? pattern : `${pattern}:${tier.level}`;
+	return allowedPattern(tiers, cli, patternWithLevel)
+		? patternWithLevel
+		: `${tier.model}:${tier.level}`;
+}
+
+function allowedPattern(tiers: Tiers, cli: Cli, pattern: string, fallback = false): boolean {
+	const [model, level] = pattern.split(":");
+	const tier = tiers[cli];
+	const allowedModel = tier.models.includes(model) ||
+		(fallback && model === "anthropic/claude-haiku-5-5" && tiers.fast.models.includes(model));
+	return allowedModel && tier.levels.includes(level);
+}
+
+function retryPattern(tiers: Tiers, primary: string): string {
+	const haiku = "anthropic/claude-haiku-5-5";
+	if (!tiers.fast.models.includes(haiku)) return primary;
+	const level = primary.split(":")[1];
+	return `${haiku}:${ABOVE_MEDIUM.includes(level) ? level : "medium"}`;
+}
+
+function boundedChain(tiers: Tiers, cli: Cli, primary: string, chain: string[]): string[] {
+	const fallback = retryPattern(tiers, primary);
+	return [...new Set(chain.map(pattern => allowedPattern(tiers, cli, pattern, true) ? pattern : fallback))];
+}
+
+async function authenticatedPattern(tiers: Tiers, cli: Cli, pattern: string, ctx: Ctx): Promise<string | undefined> {
+	const fallback = retryPattern(tiers, pattern);
+	const candidates = pattern === fallback ? [pattern] : [pattern, fallback];
+	for (const candidate of candidates) {
+		if (!allowedPattern(tiers, cli, candidate, true)) continue;
+		const [selector] = candidate.split(":");
+		const [provider, id] = selector.split("/");
+		const model = ctx.modelRegistry.find(provider, id);
+		if (model && (await ctx.modelRegistry.getApiKey(model, ctx.sessionManager.getSessionId()))?.trim()) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+async function availableModels(tiers: Tiers, ctx: Ctx): Promise<Set<string>> {
+	const available = new Set<string>();
+	for (const selector of new Set(Object.values(tiers).flatMap(tier => tier.models))) {
+		const [provider, id] = selector.split("/");
+		const model = ctx.modelRegistry.find(provider, id);
+		if (model && (await ctx.modelRegistry.getApiKey(model, ctx.sessionManager.getSessionId()))?.trim()) {
+			available.add(selector);
+		}
+	}
+	return available;
 }
 
 export default function (pi: GluttonyApi) {
@@ -120,64 +206,128 @@ export default function (pi: GluttonyApi) {
 	if (env.FM_OMP_HARNESS !== "omp" || env.OMP_SKIP_SETUP !== "1" || !env.FM_TASK_ID || !env.FM_TASK_INBOX) return;
 	const home = path.dirname(path.dirname(env.FM_TASK_INBOX));
 	let tiers: Tiers | undefined;
-	pi.on("session_start", (_event, ctx) => {
-		if (ctx.agent.kind !== "main" || !ctx.hasUI || !fs.existsSync(path.join(home, "config", "gluttony"))) return;
-		const sm = ctx.sessionManager as ModeSessionManager;
-		if (sm.buildSessionContext().mode !== "vibe") sm.appendModeChange("vibe");
+	let sessionId: string | undefined;
+	let patch: SpawnPatch | undefined;
+	pi.on("session_start", async (_event, ctx) => {
+		if (!fs.existsSync(path.join(home, "config", "gluttony"))) return;
+		if (ctx.agent.kind === "main" && !ctx.hasUI) return;
 		const provider = ctx.model?.provider ?? "";
-		const codex = provider === "openai-codex" || provider === "openai";
-		tiers = codex ? codexTiers(provider) : anthropicTiers();
-		const settings = pi.pi?.Settings?.instance;
-		if (codex && settings) {
-			const { fast, good } = tiers;
-			settings.overrideModelRoles({
-				smol: `${fast.model}:${fast.level}`,
-				task: `${good.model}:${good.level}`,
-				subagent: `${good.model}:${good.level}`,
-			});
+		tiers = provider === "openai-codex" || provider === "openai" ? codexTiers(provider) : anthropicTiers();
+		if (ctx.agent.kind === "sub") {
+			const model = `${provider}/${ctx.model?.id}`;
+			const cli = tiers.fast.models.includes(model) ? "fast" : "good";
+			if (!tiers[cli].levels.includes(pi.getThinkingLevel() ?? "")) pi.setThinkingLevel(tiers[cli].level);
+			const settings = findScopedSettings();
+			if (settings) {
+				const primary = `${model}:${pi.getThinkingLevel()}`;
+				const chains = cfgRetryFallbackChains.get(settings);
+				cfgRetryFallbackChains.override(settings, Object.fromEntries(
+					Object.entries(chains).map(([key, chain]) => [key, boundedChain(tiers, cli, primary, chain)]),
+				));
+			}
+			return;
 		}
-		patchSpawn(pi.pi);
+		const sm = ctx.sessionManager;
+		if (sm.buildSessionContext().mode !== "vibe") sm.appendModeChange("vibe");
+		sessionId = sm.getSessionId();
+		patch = patchSpawn(pi.pi);
+		patchRestore(pi.pi, home, tiers, await availableModels(tiers, ctx));
+	});
+	pi.on("before_subagent_spawn", async (event, ctx) => {
+		if (!tiers) return undefined;
+		const cli = event.modelRole === "smol" || event.agent === "sonic" ? "fast" : "good";
+		const pattern = await authenticatedPattern(tiers, cli, bounded(tiers, cli, event.patterns[0]), ctx);
+		return pattern
+			? { model: pattern }
+			: { block: true, reason: "Gluttony: no allowed subagent model has a usable credential." };
 	});
 	pi.on("before_agent_start", (event, ctx) =>
 		tiers && ctx.agent.kind === "main" ? { systemPrompt: [...event.systemPrompt, gluttonLine(tiers)] } : undefined,
 	);
-	pi.on("tool_call", event => {
-		if (!tiers || event.toolName !== "vibe_spawn") return undefined;
+	pi.on("tool_call", async (event, ctx) => {
+		if (!tiers || !sessionId || event.toolName !== "vibe_spawn") return undefined;
 		const cli: Cli = event.input.cli === "good" ? "good" : "fast";
 		const result = choose(tiers, cli, event.input.prompt ?? "");
 		if ("error" in result) return { block: true, reason: result.error };
-		picked.set(event.toolCallId, result.pattern);
+		const pattern = await authenticatedPattern(tiers, cli, result.pattern, ctx);
+		if (!pattern) return { block: true, reason: "Gluttony: no allowed worker model has a usable credential." };
+		patch?.picked.set(`${sessionId}:${event.toolCallId}`, pattern);
 		return { input: { ...event.input, prompt: result.prompt } };
 	});
 }
 
 const PATCHED = Symbol.for("fm-gluttony.spawn-patched");
-const picked = new Map<string, string>();
-let spawnQueue: Promise<unknown> = Promise.resolve();
+const RESTORE_PATCHED = Symbol.for("fm-gluttony.restore-patched");
+interface SpawnPatch {
+	picked: Map<string, string>;
+}
 
-/** Serialize role changes so concurrent spawns cannot read another worker's model choice. */
-function patchSpawn(host: HostModule | undefined) {
-	const proto = host?.VibeSpawnTool?.prototype as (SpawnToolProto & { [PATCHED]?: true }) | undefined;
-	const settings = host?.Settings?.instance;
-	if (!proto || !settings || proto[PATCHED]) return;
-	proto[PATCHED] = true;
+function patchSpawn(host: HostModule | undefined): SpawnPatch | undefined {
+	const proto = host?.VibeSpawnTool?.prototype as (SpawnToolProto & { [PATCHED]?: SpawnPatch }) | undefined;
+	if (!proto || !host?.Settings?.prototype?.overlay) return;
+	if (proto[PATCHED]) return proto[PATCHED];
+	const state: SpawnPatch = { picked: new Map() };
+	proto[PATCHED] = state;
 	const original = proto.execute;
-	proto.execute = function (this: SpawnToolProto, toolCallId, params, ...rest) {
-		const pattern = picked.get(toolCallId);
-		picked.delete(toolCallId);
-		const run = async () => {
-			if (!pattern) return original.call(this, toolCallId, params, ...rest);
-			const role = ROLE[params.cli];
-			const previous = settings.getModelRole(role);
-			settings.overrideModelRoles({ [role]: pattern });
-			try {
-				return await original.call(this, toolCallId, params, ...rest);
-			} finally {
-				if (previous) settings.overrideModelRoles({ [role]: previous });
-			}
-		};
-		const result = spawnQueue.then(run, run);
-		spawnQueue = result.catch(() => undefined);
-		return result;
+	proto.execute = function (toolCallId, params, ...rest) {
+		const sessionId = this.session.sessionManager?.getSessionId?.();
+		if (!sessionId) return original.call(this, toolCallId, params, ...rest);
+		const key = `${sessionId}:${toolCallId}`;
+		const pattern = state.picked.get(key);
+		state.picked.delete(key);
+		if (!pattern) return original.call(this, toolCallId, params, ...rest);
+		const settings = this.session.settings.overlay({
+			modelRoles: { [ROLE[params.cli]]: pattern },
+			"task.agentModelOverrides": { [AGENT[params.cli]]: pattern },
+		});
+		const tool = Object.assign(Object.create(Object.getPrototypeOf(this)), this, {
+			session: { ...this.session, settings, getActiveModelString: () => pattern },
+		});
+		return original.call(tool, toolCallId, params, ...rest);
+	};
+	return state;
+}
+
+interface RestoreBounds {
+	tiers: Tiers;
+	available: Set<string>;
+}
+
+function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, available: Set<string>): void {
+	const proto = host?.SessionManager?.prototype as
+		({ getEntries(): SessionEntry[]; [RESTORE_PATCHED]?: Map<string, RestoreBounds> }) | undefined;
+	if (!proto) return;
+	if (proto[RESTORE_PATCHED]) {
+		proto[RESTORE_PATCHED].set(home, { tiers, available });
+		return;
+	}
+	const homes = new Map([[home, { tiers, available }]]);
+	proto[RESTORE_PATCHED] = homes;
+	const original = proto.getEntries;
+	proto.getEntries = function () {
+		const entries = original.call(this);
+		const inbox = process.env.FM_TASK_INBOX;
+		const active = inbox && homes.get(path.dirname(path.dirname(inbox)));
+		if (!active) return entries;
+		return entries.map(entry => {
+			if (entry.type !== "session_init") return entry;
+			const cli = entry.modelRole === "smol" || entry.agent === "sonic" ? "fast" : "good";
+			const selected = entry.resolvedModel && allowedPattern(active.tiers, cli, entry.resolvedModel, true)
+				? entry.resolvedModel
+				: bounded(active.tiers, cli, entry.resolvedModel);
+			const primary = [selected, retryPattern(active.tiers, selected)].find(
+				pattern => allowedPattern(active.tiers, cli, pattern, true) && active.available.has(pattern.split(":")[0]),
+			);
+			if (!primary) throw new Error("Gluttony: no allowed restored worker model has a usable credential.");
+			const chain = boundedChain(active.tiers, cli, primary, entry.retryFallback?.chain ?? []);
+			return {
+				...entry,
+				modelRole: undefined,
+				resolvedModel: primary,
+				retryFallback: entry.retryFallback
+					? { primary, chain: chain.filter(pattern => pattern !== primary) }
+					: undefined,
+			};
+		});
 	};
 }

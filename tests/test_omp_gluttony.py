@@ -2,6 +2,7 @@ import getpass
 import grp
 import json
 import os
+import resource
 import shutil
 import subprocess
 import sys
@@ -39,54 +40,111 @@ def installed(tmp_path_factory):
         )
         assert result.returncode == 0, result.stdout + result.stderr
     assert "changed=0" in result.stdout
+    package = home / "node_modules/@oh-my-pi/pi-coding-agent"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text(json.dumps({
+        "type": "module",
+        "exports": {"./config/settings": "./config.js", "./session/settings": "./session.js"},
+    }))
+    (package / "config.js").write_text(
+        "export const findScopedSettings = () => globalThis.gluttonSettings;\n"
+    )
+    (package / "session.js").write_text(
+        "export const cfgRetryFallbackChains = {"
+        "get: scope => scope.chains, override: (scope, value) => scope.chains = value};\n"
+    )
     return home / ".omp/agent/extensions/fm-gluttony.ts"
+
+
+def limit_bun_files():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
 
 
 def run(installed, home, code, *, enabled=True, env=None, context=None):
     if not shutil.which("bun"):
         pytest.skip("needs bun")
     (home / "config").mkdir()
+    (home / "tmp").mkdir()
     if enabled:
         (home / "config/gluttony").touch()
     script = f"""
-import ext from {json.dumps(str(installed))};
 import * as fs from 'node:fs';
 const handlers = {{}};
 const roles = {{smol: 'original-fast', task: 'original-good', subagent: 'original-sub'}};
 const seen = [];
+class Settings {{
+  constructor(roles, overrides = {{}}, chains = {{}}) {{
+    this.roles = roles;
+    this.overrides = overrides;
+    this.chains = chains;
+  }}
+  overlay(values) {{
+    return new Settings({{...this.roles, ...values.modelRoles}},
+      {{...this.overrides, ...values['task.agentModelOverrides']}}, {{...this.chains}});
+  }}
+}}
+const settings = new Settings(roles);
+class SessionManager {{
+  constructor(entries = []) {{ this.entries = entries; }}
+  getSessionId() {{ return 'session-one'; }}
+  getEntries() {{ return this.entries; }}
+  buildSessionContext() {{ return {{mode}}; }}
+  appendModeChange(value) {{ mode = value; }}
+}}
+const sessionManager = new SessionManager();
 class Spawn {{
+  constructor(session = {{settings, sessionManager}}) {{ this.session = session; }}
   async execute(id, params) {{
     await new Promise(resolve => setTimeout(resolve, 1));
-    seen.push([id, roles[params.cli === 'good' ? 'task' : 'smol'], params.prompt]);
+    const agent = params.cli === 'good' ? 'task' : 'sonic';
+    const role = params.cli === 'good' ? 'task' : 'smol';
+    seen.push([id, this.session.settings.overrides[agent] ??
+      this.session.settings.roles[role], params.prompt]);
     if (id === 'fail') throw new Error('spawn failed');
     return id;
   }}
 }}
-const host = {{
-  Settings: {{instance: {{getModelRole: r => roles[r], overrideModelRoles: r => Object.assign(roles, r)}}}},
-  VibeSpawnTool: Spawn,
+const host = {{Settings, VibeSpawnTool: Spawn, SessionManager}};
+let thinkingLevel = 'medium';
+let defaultCredential = 'test-token';
+const credentials = new Map();
+const modelRegistry = {{
+  find: (provider, id) => ({{provider, id}}),
+  getApiKey: async model => {{
+    const key = `${{model.provider}}/${{model.id}}`;
+    return credentials.has(key) ? credentials.get(key) : defaultCredential;
+  }},
 }};
-const api = {{on: (e, f) => handlers[e] = f, pi: host}};
+const api = {{on: (e, f) => handlers[e] = f, pi: host,
+  getThinkingLevel: () => thinkingLevel, setThinkingLevel: value => thinkingLevel = value}};
 let mode = 'normal';
 const ctx = {{
   agent: {{kind: 'main'}}, hasUI: true, model: {{provider: 'anthropic'}},
-  sessionManager: {{buildSessionContext: () => ({{mode}}), appendModeChange: m => mode = m}},
+  sessionManager,
+  modelRegistry,
   ...{json.dumps(context or {})},
 }};
 const start = () => handlers.session_start?.({{}}, ctx);
-const pick = (id, cli, prompt) => handlers.tool_call?.({{
+const pick = async (id, cli, prompt) => handlers.tool_call?.({{
   toolName: 'vibe_spawn', toolCallId: id, input: {{cli, prompt}},
-}});
+}}, ctx);
 const spawn = async (id, cli, prompt) => {{
-  const result = pick(id, cli, prompt);
+  const result = await pick(id, cli, prompt);
   if (result?.block) return result;
   return new Spawn().execute(id, result?.input ?? {{cli, prompt}});
 }};
+Object.defineProperty(globalThis, 'gluttonSettings', {{get: () => activeSettings}});
+let activeSettings = settings;
+const {{default: ext}} = await import({json.dumps(str(installed))});
 {code}
 """
     result = subprocess.run(
-        ["bun", "-e", script], capture_output=True, text=True,
+        ["bun", "--no-install", "-e", script], capture_output=True, text=True,
+        timeout=20, preexec_fn=limit_bun_files,
         env={"PATH": os.environ["PATH"], "HOME": str(home), "FM_OMP_HARNESS": "omp",
+             "TMPDIR": str(home / "tmp"), "BUN_INSTALL_CACHE_DIR": str(home / "tmp/bun-cache"),
+             "BUN_RUNTIME_TRANSPILER_CACHE_PATH": "0",
              "OMP_SKIP_SETUP": "1", "FM_TASK_ID": "sample",
              "FM_TASK_INBOX": str(home / "state/sample.inbox"), **(env or {})},
     )
@@ -111,16 +169,16 @@ def test_installs_without_enabling(installed):
 ])
 def test_only_opted_in_interactive_crews_enter_vibe(installed, tmp_path, env, context, enabled):
     assert run(installed, tmp_path, """
-ext(api); start();
-console.log(JSON.stringify([mode, pick('one', 'good', '@model invalid high')]));
+ext(api); await start();
+console.log(JSON.stringify([mode, await pick('one', 'good', '@model invalid high')]));
 """, env=env, context=context, enabled=enabled) == ["normal", None]
 
 
 def test_switch_is_read_at_start_not_each_turn(installed, tmp_path):
     assert run(installed, tmp_path, """
-ext(api); start();
+ext(api); await start();
 fs.unlinkSync(process.env.FM_TASK_INBOX.replace('state/sample.inbox', 'config/gluttony'));
-console.log(JSON.stringify([mode, pick('one', 'good', '@model invalid high').block]));
+console.log(JSON.stringify([mode, (await pick('one', 'good', '@model invalid high')).block]));
 """) == ["vibe", True]
 
 
@@ -133,7 +191,7 @@ console.log(JSON.stringify([mode, pick('one', 'good', '@model invalid high').blo
 ])
 def test_applies_valid_choice_and_strips_directive(installed, tmp_path, provider, cli, prompt, expected):
     result = run(installed, tmp_path, f"""
-ext(api); start();
+ext(api); await start();
 await spawn('one', {json.dumps(cli)}, {json.dumps(prompt)});
 console.log(JSON.stringify(seen));
 """, context={"model": {"provider": provider}})
@@ -143,22 +201,24 @@ console.log(JSON.stringify(seen));
 @pytest.mark.parametrize("provider,cli,choice", [
     ("anthropic", "fast", "anthropic/claude-haiku-5-5 low"),
     ("anthropic", "good", "inception/mercury-3 high"),
+    ("anthropic", "good", "anthropic/claude-opus-5-5 medium"),
+    ("anthropic", "fast", "anthropic/claude-opus-5-5 high"),
     ("openai-codex", "fast", "openai-codex/gpt-6-luna max"),
     ("openai-codex", "good", "openai-codex/gpt-6.1-sol high"),
     ("openai-codex", "good", "openai/gpt-6.1-sol medium"),
 ])
 def test_rejects_out_of_set_choices(installed, tmp_path, provider, cli, choice):
     result = run(installed, tmp_path, f"""
-ext(api); start();
-console.log(JSON.stringify(pick('one', {json.dumps(cli)}, {json.dumps('@model ' + choice + chr(10) + 'Work')})));
+ext(api); await start();
+console.log(JSON.stringify(await pick('one', {json.dumps(cli)}, {json.dumps('@model ' + choice + chr(10) + 'Work')})));
 """, context={"model": {"provider": provider}})
     assert result["block"] is True
     assert "Allowed:" in result["reason"]
 
 
-def test_concurrent_spawns_restore_roles_after_failure(installed, tmp_path):
+def test_concurrent_spawns_leave_host_roles_unchanged_after_failure(installed, tmp_path):
     result = run(installed, tmp_path, """
-ext(api); start();
+ext(api); await start();
 const outcomes = await Promise.allSettled([
   spawn('fail', 'fast', '@model anthropic/claude-haiku-5-5 medium\\nFirst'),
   spawn('two', 'fast', '@model inception/mercury-3 high\\nSecond'),
@@ -174,28 +234,268 @@ console.log(JSON.stringify({seen, roles, outcomes: outcomes.map(o => o.status)})
 
 
 def test_reloaded_extension_keeps_worker_model_choices(installed, tmp_path):
-    assert run(installed, tmp_path, """
-ext(api); start();
-ext(api); start();
+    assert run(installed, tmp_path, f"""
+ext(api); await start();
+const reloadPath = {json.dumps(str(installed.with_name("reloaded.ts")))};
+fs.copyFileSync({json.dumps(str(installed))}, reloadPath);
+(await import(reloadPath)).default(api); await start();
 await spawn('new-session', 'fast', '@model anthropic/claude-haiku-5-5 medium\\nWork');
 console.log(JSON.stringify(seen));
 """) == [["new-session", "anthropic/claude-haiku-5-5:medium", "Work"]]
 
 
-@pytest.mark.parametrize("provider", ["openai-codex", "openai"])
-def test_codex_subagent_roles_use_the_same_provider(installed, tmp_path, provider):
+@pytest.mark.parametrize("provider", ["anthropic", "openai-codex", "openai"])
+@pytest.mark.parametrize("invocation", ["task", "eval"])
+@pytest.mark.parametrize("agent,role", [("task", "task"), ("sonic", "smol")])
+def test_subagents_bound_overrides_after_role_resolution(
+    installed, tmp_path, provider, invocation, agent, role,
+):
+    result = run(installed, tmp_path, f"""
+ext(api); await start();
+const result = await handlers.before_subagent_spawn({{
+  agent: {json.dumps(agent)}, invocationKind: {json.dumps(invocation)},
+  modelRole: {json.dumps(role)}, patterns: ['anthropic/claude-opus-5-5:auto'],
+}}, ctx);
+console.log(JSON.stringify(result));
+""", context={"agent": {"kind": "sub"},
+             "model": {"provider": provider, "id": "claude-sonnet-5-5"}, "hasUI": False})
+    expected = (
+        ("inception/mercury-3:high" if agent == "sonic" else "anthropic/claude-sonnet-5-5:medium")
+        if provider == "anthropic" else
+        f"{provider}/{'gpt-6-luna:high' if agent == 'sonic' else 'gpt-6.1-sol:medium'}"
+    )
+    assert result == {"model": expected}
+
+
+def test_worker_choice_beats_opus_agent_override(installed, tmp_path):
     assert run(installed, tmp_path, """
-ext(api); start(); console.log(JSON.stringify(roles));
-""", context={"model": {"provider": provider}}) == {
-        "smol": f"{provider}/gpt-6-luna:high",
-        "task": f"{provider}/gpt-6.1-sol:medium",
-        "subagent": f"{provider}/gpt-6.1-sol:medium",
-    }
+settings.overrides.sonic = 'anthropic/claude-opus-5-5:max';
+ext(api); await start();
+await spawn('selected', 'fast', '@model anthropic/claude-haiku-5-5 medium\\nWork');
+console.log(JSON.stringify([seen, settings.overrides]));
+""") == [
+        [["selected", "anthropic/claude-haiku-5-5:medium", "Work"]],
+        {"sonic": "anthropic/claude-opus-5-5:max"},
+    ]
+
+
+@pytest.mark.parametrize("provider,agent,role,saved,expected", [
+    ("anthropic", "sonic", "smol", "anthropic/claude-haiku-5-5:max",
+     "anthropic/claude-haiku-5-5:max"),
+    ("anthropic", "task", "task", "anthropic/claude-sonnet-5-5:high",
+     "anthropic/claude-sonnet-5-5:high"),
+    ("anthropic", "task", "task", "anthropic/claude-haiku-5-5:high",
+     "anthropic/claude-haiku-5-5:high"),
+    ("anthropic", "task", "task", "anthropic/claude-opus-5-5:auto",
+     "anthropic/claude-sonnet-5-5:medium"),
+    ("openai-codex", "sonic", "smol", "openai-codex/gpt-6-luna:xhigh",
+     "openai-codex/gpt-6-luna:xhigh"),
+    ("openai", "task", "task", "openai/gpt-6.1-sol:high",
+     "openai/gpt-6.1-sol:medium"),
+])
+def test_cold_restore_prefers_bounded_concrete_model(
+    installed, tmp_path, provider, agent, role, saved, expected,
+):
+    result = run(installed, tmp_path, f"""
+ext(api); await start();
+const saved = {{
+  type: 'session_init', agent: {json.dumps(agent)},
+  modelRole: {json.dumps(role)}, resolvedModel: {json.dumps(saved)},
+}};
+const reopened = new SessionManager([saved]);
+const init = reopened.getEntries()[0];
+const restored = init.modelRole ? roles[init.modelRole] : init.resolvedModel;
+console.log(JSON.stringify([restored, saved.resolvedModel, saved.modelRole]));
+""", context={"model": {"provider": provider}})
+    assert result == [expected, saved, role]
+
+
+def test_other_home_keeps_host_spawn_and_restore_defaults(installed, tmp_path):
+    assert run(installed, tmp_path, """
+ext(api); await start();
+process.env.FM_TASK_INBOX = process.env.FM_TASK_INBOX.replace('state/', 'other/state/');
+ext(api); await start();
+await spawn('other-home', 'good', 'Work');
+const saved = {type: 'session_init', agent: 'task', modelRole: 'task',
+  resolvedModel: 'anthropic/claude-sonnet-5-5:medium'};
+const init = new SessionManager([saved]).getEntries()[0];
+console.log(JSON.stringify([seen, init.modelRole]));
+""") == [[["other-home", "original-good", "Work"]], "task"]
+
+
+def test_subagent_keeps_valid_high_effort_choice(installed, tmp_path):
+    assert run(installed, tmp_path, """
+ext(api); await start();
+const result = await handlers.before_subagent_spawn({
+  agent: 'task', modelRole: 'task', patterns: ['anthropic/claude-sonnet-5-5:max'],
+}, ctx);
+console.log(JSON.stringify(result));
+""", context={"agent": {"kind": "sub"}}) == {"model": "anthropic/claude-sonnet-5-5:max"}
+
+
+@pytest.mark.parametrize("provider,model,level,expected", [
+    ("anthropic", "claude-haiku-5-5", "low", "high"),
+    ("anthropic", "claude-sonnet-5-5", "low", "medium"),
+    ("anthropic", "claude-sonnet-5-5", "max", "max"),
+    ("openai-codex", "gpt-6-luna", "max", "high"),
+    ("openai", "gpt-6.1-sol", "high", "medium"),
+])
+def test_subagent_bounds_effort_after_host_resolution(
+    installed, tmp_path, provider, model, level, expected,
+):
+    assert run(installed, tmp_path, f"""
+thinkingLevel = {json.dumps(level)};
+ext(api); await start();
+console.log(JSON.stringify([mode, thinkingLevel]));
+""", context={"agent": {"kind": "sub"}, "hasUI": False,
+              "model": {"provider": provider, "id": model}}) == ["normal", expected]
+
+
+@pytest.mark.parametrize("manager", ["undefined", "{}", "{getSessionId: () => ''}"])
+def test_missing_spawn_identity_keeps_host_defaults(installed, tmp_path, manager):
+    assert run(installed, tmp_path, f"""
+ext(api); await start();
+await new Spawn({{settings, sessionManager: {manager}}}).execute('unscoped', {{
+  cli: 'good', prompt: 'Work',
+}});
+console.log(JSON.stringify(seen));
+""") == [["unscoped", "original-good", "Work"]]
+
+
+@pytest.mark.parametrize("cli,prompt,primary", [
+    ("fast", "Work", "inception/mercury-3"),
+    ("good", "Work", "anthropic/claude-sonnet-5-5"),
+])
+def test_missing_primary_credential_uses_haiku_not_opus(installed, tmp_path, cli, prompt, primary):
+    result = run(installed, tmp_path, f"""
+credentials.set({json.dumps(primary)}, undefined);
+credentials.set('anthropic/claude-opus-5-5', 'director-token');
+ext(api); await start();
+await spawn('fallback', {json.dumps(cli)}, {json.dumps(prompt)});
+console.log(JSON.stringify(seen));
+""", context={"model": {"provider": "anthropic", "id": "claude-opus-5-5"}})
+    level = "high" if cli == "fast" else "medium"
+    assert result == [["fallback", f"anthropic/claude-haiku-5-5:{level}", "Work"]]
+
+
+def test_missing_all_allowed_credentials_blocks_spawn(installed, tmp_path):
+    result = run(installed, tmp_path, """
+defaultCredential = undefined;
+credentials.set('anthropic/claude-opus-5-5', 'director-token');
+ext(api); await start();
+const result = await spawn('blocked', 'fast', 'Work');
+console.log(JSON.stringify([result, seen]));
+""")
+    assert result == [
+        {"block": True, "reason": "Gluttony: no allowed worker model has a usable credential."},
+        [],
+    ]
+
+
+def test_cold_restore_rewrites_retry_primary_and_chain(installed, tmp_path):
+    result = run(installed, tmp_path, """
+ext(api); await start();
+const saved = {
+  type: 'session_init', agent: 'task', modelRole: 'task',
+  resolvedModel: 'anthropic/claude-sonnet-5-5:high',
+  retryFallback: {primary: 'anthropic/claude-opus-5-5:max',
+    chain: ['anthropic/claude-opus-5-5:auto', 'anthropic/claude-haiku-5-5:low',
+      'anthropic/claude-sonnet-5-5:high']},
+};
+const restored = new SessionManager([saved]).getEntries()[0];
+const attempts = [restored.retryFallback.primary, ...restored.retryFallback.chain];
+console.log(JSON.stringify([attempts, saved.retryFallback.primary]));
+""")
+    assert result == [
+        ["anthropic/claude-sonnet-5-5:high", "anthropic/claude-haiku-5-5:high"],
+        "anthropic/claude-opus-5-5:max",
+    ]
+
+
+def test_restored_mercury_without_a_key_uses_haiku(installed, tmp_path):
+    assert run(installed, tmp_path, """
+credentials.set('inception/mercury-3', undefined);
+ext(api); await start();
+const saved = {type: 'session_init', agent: 'sonic', modelRole: 'smol',
+  resolvedModel: 'inception/mercury-3:high'};
+console.log(JSON.stringify(new SessionManager([saved]).getEntries()[0].resolvedModel));
+""") == "anthropic/claude-haiku-5-5:high"
+
+
+def test_restore_without_an_allowed_key_fails(installed, tmp_path):
+    assert run(installed, tmp_path, """
+defaultCredential = undefined;
+credentials.set('anthropic/claude-opus-5-5', 'director-token');
+ext(api); await start();
+try {
+  new SessionManager([{type: 'session_init', agent: 'sonic',
+    resolvedModel: 'inception/mercury-3:high'}]).getEntries();
+} catch (error) {
+  console.log(JSON.stringify(error.message));
+}
+""") == "Gluttony: no allowed restored worker model has a usable credential."
+
+
+@pytest.mark.parametrize("provider,primary,retry,expected", [
+    ("openai-codex", "openai-codex/gpt-6-luna:high", "openai-codex/gpt-6.1-sol:medium", []),
+    ("anthropic", "inception/mercury-3:high", "anthropic/claude-sonnet-5-5:medium",
+     ["anthropic/claude-haiku-5-5:high"]),
+])
+def test_restored_fast_worker_cannot_retry_on_good_models(
+    installed, tmp_path, provider, primary, retry, expected,
+):
+    assert run(installed, tmp_path, f"""
+ext(api); await start();
+const saved = {{type: 'session_init', agent: 'sonic', modelRole: 'smol',
+  resolvedModel: {json.dumps(primary)},
+  retryFallback: {{primary: {json.dumps(primary)}, chain: [{json.dumps(retry)}]}}}};
+console.log(JSON.stringify(new SessionManager([saved]).getEntries()[0].retryFallback.chain));
+""", context={"model": {"provider": provider}}) == expected
+
+
+@pytest.mark.parametrize("has_haiku", [True, False])
+def test_ordinary_subagent_authentication_stays_in_set(installed, tmp_path, has_haiku):
+    result = run(installed, tmp_path, f"""
+defaultCredential = undefined;
+credentials.set('anthropic/claude-opus-5-5', 'director-token');
+credentials.set('anthropic/claude-haiku-5-5', {'"test-token"' if has_haiku else 'undefined'});
+ext(api); await start();
+const result = await handlers.before_subagent_spawn({{
+  agent: 'sonic', patterns: ['anthropic/claude-opus-5-5:auto'],
+}}, ctx);
+console.log(JSON.stringify(result));
+""", context={"agent": {"kind": "sub"}})
+    assert result == (
+        {"model": "anthropic/claude-haiku-5-5:high"} if has_haiku else
+        {"block": True, "reason": "Gluttony: no allowed subagent model has a usable credential."}
+    )
+
+
+@pytest.mark.parametrize("key", [
+    "default", "task", "smol", "subagent:worker",
+    "anthropic/claude-sonnet-5-5:high", "anthropic/*",
+])
+def test_live_subagent_bounds_every_retry_chain_without_changing_parent(installed, tmp_path, key):
+    result = run(installed, tmp_path, f"""
+settings.chains = {{
+  [{json.dumps(key)}]: ['anthropic/claude-opus-5-5:max', 'anthropic/claude-haiku-5-5:high'],
+}};
+activeSettings = settings.overlay({{}});
+thinkingLevel = 'high';
+ext(api); await start();
+console.log(JSON.stringify([activeSettings.chains[{json.dumps(key)}],
+  settings.chains[{json.dumps(key)}]]));
+""", context={"agent": {"kind": "sub"},
+              "model": {"provider": "anthropic", "id": "claude-sonnet-5-5"}})
+    assert result == [
+        ["anthropic/claude-haiku-5-5:high"],
+        ["anthropic/claude-opus-5-5:max", "anthropic/claude-haiku-5-5:high"],
+    ]
 
 
 def test_missing_private_api_still_enters_vibe(installed, tmp_path):
     assert run(installed, tmp_path, """
 delete api.pi;
-ext(api); start();
+ext(api); await start();
 console.log(JSON.stringify([mode, roles]));
 """) == ["vibe", {"smol": "original-fast", "task": "original-good", "subagent": "original-sub"}]

@@ -126,7 +126,10 @@ The extension adds this requirement to the director's brief.
 | Anthropic | `inception/mercury-3` (default, high) or `anthropic/claude-haiku-5-5`; medium, high, xhigh, or max | `anthropic/claude-sonnet-5-5` (default, medium); medium, high, xhigh, or max |
 | `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium, ultrafast tier |
 
-Codex sessions also use this pair for their ordinary subagents.
+Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
+Saved worker models take precedence over saved role aliases.
+Missing Anthropic credentials use Haiku 5.5 within the approved fallback set.
+A spawn or restore fails with a clear message when no allowed model has a usable credential.
 Choose a worker's model on the first line of its `vibe_spawn` prompt:
 
 ```text
@@ -140,9 +143,8 @@ The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies 
 Enable `inception/mercury-3`, `anthropic/claude-haiku-5-5`, and `anthropic/claude-sonnet-5-5`.
 Enable both `openai-codex/` and `openai/` forms of `gpt-6-luna` and `gpt-6.1-sol`.
 This extension does not change the shared configuration or install credentials.
-Keep the `smol` and `task` model roles configured; Crewship seeds both.
 
-The extension depends on omp 18.12.1 internals: `pi.pi.Settings`, `pi.pi.VibeSpawnTool`, and session mode reconciliation.
+The extension depends on omp 18.12.1 internals: `pi.pi.Settings`, `pi.pi.VibeSpawnTool`, `pi.pi.SessionManager`, scoped settings, retry settings, and session mode reconciliation.
 Re-check these APIs after `omp update`.
 Without the private worker APIs, the director still enters vibe mode, but workers keep the host's default models.
 Known caveat: direct `openai/gpt-6-luna` calls reject `tier.openai: ultrafast` with `Invalid service_tier argument`.
