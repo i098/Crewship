@@ -102,7 +102,7 @@ export class InstagramDesk {
     const status = await new Response(Bun.spawn(this.o.statusCmd, { env: this.o.env, stdout: "pipe", stderr: "ignore" }).stdout).text();
     if (!current()) return;
     const from = this.burstFrom ?? this.memory.msgs.length;
-    const { prompt, spent } = deskInput(this.system, this.memory.render(from), status, this.memory.msgs.slice(from).map((m) => `${m.kind}: ${m.text}`).join("\n"));
+    const { prompt, spent } = deskInput(this.system, this.memory.render(from), status, this.memory.msgs.slice(from).map((m) => `${m.kind}: ${m.text}`).join("\n"), "omp", this.memory.recent(from));
     const proc = spawnDesk({ model: this.o.model, system: this.system, prompt, spent, memoryDir: `${this.o.dir}/memory`, cwd: `${this.o.dir}/desk`, env: this.o.env });
     this.run = proc;
     const { ok, drafted } = await readDesk(proc);

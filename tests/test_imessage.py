@@ -525,13 +525,44 @@ console.log(JSON.stringify({{ sizes, LIMIT }}));
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("text", ["original wording", "界😀" * 500, "\x00\\\"\n" * 500])
+def test_recent_originals_keep_the_newest_messages_before_the_burst(tmp_path, text):
+    result = bun(f"""
+import {{ Memory, UNBUILT }} from {MEMORY};
+const memory = new Memory({json.dumps(str(tmp_path))}, () => ({{
+  say: () => new Promise(() => {{}}), end() {{}},
+}}));
+for (let i = 0; i < 15; i++) memory.append(
+  ["owner", "supervisor", "desk"][i % 3], {json.dumps(text)}, `private-request-${{i}}`);
+memory.append("owner", "correction: use the later value");
+memory.append("owner", "pending question");
+const raw = memory.recent(16), rows = raw.split("\\n").map(JSON.parse);
+console.log(JSON.stringify({{ raw, rows, view: memory.render(16), UNBUILT }}));
+""")
+    rows = result["rows"]
+    assert 1 <= len(rows) <= 12
+    assert [row["i"] for row in rows] == list(range(16 - len(rows), 16))
+    assert rows[-1] == {"i": 15, "kind": "owner", "text": "correction: use the later value"}
+    assert all(set(row) == {"i", "kind", "text"} for row in rows)
+    assert all(row["kind"] == ["owner", "supervisor", "desk"][row["i"] % 3] for row in rows[:-1])
+    assert len(result["raw"].encode()) <= 6000
+    assert "pending question" not in result["raw"] and "private-request" not in result["raw"]
+    if text == "original wording":
+        assert len(rows) == 12 and all(row["text"] == text for row in rows[:-1])
+    else:
+        assert result["UNBUILT"] in result["view"]
+        assert all("[..." in row["text"] and "\ufffd" not in row["text"] for row in rows[:-1])
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_desk_call_stays_under_the_ceiling():
     """A desk prompt with huge status and texts, plus every zoom result, never passes CEILING bytes."""
     result = bun(f"""
 import {{ deskInput }} from {DESK};
 import {{ Budget, CEILING, LIMIT_REACHED, OVERHEAD, ZOOM_MAX, ZOOM_RESERVE }} from {MEMORY};
 const system = "s".repeat(3000), view = "v".repeat(400000); // a view grown past VIEW_MAX by a compaction outage
-const {{ prompt, spent }} = deskInput(system, view, "q".repeat(500000), "HEAD" + "m".repeat(1000000) + "TAIL");
+const recent = Array.from({{ length: 12 }}, (_, i) => JSON.stringify({{ i, kind: "supervisor", text: "r".repeat(450) }})).join("\\n");
+const {{ prompt, spent }} = deskInput(system, view, "q".repeat(500000), "HEAD" + "m".repeat(1000000) + "TAIL", "omp", recent);
 const budget = new Budget(spent);
 const results = [], requests = [spent];
 for (let k = 0; k < 100; k++) {{
@@ -543,11 +574,12 @@ for (let k = 0; k < 100; k++) {{
 console.log(JSON.stringify({{
   first: spent, own: OVERHEAD + Buffer.byteLength(system + prompt), keepsEnds: prompt.includes("HEAD") && prompt.includes("TAIL"),
   maxRequest: Math.max(...requests), zoomSizes: results.map((r) => Buffer.byteLength(r)), zoomEnds: results[0].startsWith("ZOOMHEAD") && results[0].endsWith("ZOOMTAIL"),
-  refused: results.includes(LIMIT_REACHED), CEILING, ZOOM_MAX, ZOOM_RESERVE,
+  refused: results.includes(LIMIT_REACHED), recent: prompt.includes(`<recent>\\n${{recent}}\\n</recent>`), CEILING, ZOOM_MAX, ZOOM_RESERVE,
 }}));
 """)
     assert result["first"] == result["own"] <= result["CEILING"] - result["ZOOM_RESERVE"]
     assert result["keepsEnds"] and result["zoomEnds"]
+    assert result["recent"]
     assert result["maxRequest"] <= result["CEILING"]
     assert all(size <= result["ZOOM_MAX"] for size in result["zoomSizes"])
     assert result["refused"]
