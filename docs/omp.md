@@ -124,7 +124,7 @@ The extension adds this requirement to the director's brief.
 | Session provider | Fast workers | Good workers |
 | --- | --- | --- |
 | Anthropic | `inception/mercury-3` (default, high) or `anthropic/claude-haiku-5-5`; medium, high, xhigh, or max | `anthropic/claude-sonnet-5-5` (default, medium); medium, high, xhigh, or max |
-| `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium, session-local ultrafast tier |
+| `openai-codex` or `openai` | Same provider, `gpt-6-luna` (default, high); low through xhigh | Same provider, `gpt-6.1-sol` (default, medium); low or medium; session-local `priority` for `openai-codex`, `ultrafast` for `openai` |
 
 Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
 Saved worker models take precedence over saved role aliases.
@@ -140,7 +140,10 @@ Perform the edits, status appends, and commit for this task.
 The extension strips this line and rejects models or levels outside the selected worker tier.
 Without the line, it uses the defaults above.
 The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies the required `enabledModels` entries, but does not set `tier.openai: ultrafast`.
-The extension sets this tier only in Sol worker settings, including task/eval subagents and restored workers.
+The extension sets `priority` for native `openai-codex` Sol workers and `ultrafast` for direct `openai` Sol workers.
+These session-local settings also apply to task/eval subagents and restored workers.
+Native `openai-codex` supports only `priority` in omp 18.12.1; unsupported tiers are omitted from requests.
+Re-check this tier limit after `omp update`.
 It leaves the director and shared tier defaults unchanged.
 Enable `inception/mercury-3`, `anthropic/claude-haiku-5-5`, and `anthropic/claude-sonnet-5-5`.
 Enable both `openai-codex/` and `openai/` forms of `gpt-6-luna` and `gpt-6.1-sol`.

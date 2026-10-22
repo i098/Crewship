@@ -507,27 +507,36 @@ console.log(JSON.stringify([mode, roles]));
 """) == ["vibe", {"smol": "original-fast", "task": "original-good", "subagent": "original-sub"}]
 
 
-@pytest.mark.parametrize("provider", ["openai-codex", "openai"])
-def test_sol_dispatch_uses_ultrafast_without_changing_director(installed, tmp_path, provider):
-    assert run(installed, tmp_path, """
+@pytest.mark.parametrize("parent_tier", ["priority", "ultrafast"])
+@pytest.mark.parametrize("provider,expected", [
+    ("openai-codex", "priority"),
+    ("openai", "ultrafast"),
+])
+def test_sol_dispatch_uses_supported_tier_without_changing_director(
+    installed, tmp_path, provider, expected, parent_tier,
+):
+    assert run(installed, tmp_path, f"""
+settings.openaiTier = {json.dumps(parent_tier)};
 ext(api); await start();
 await Promise.all([spawn('good', 'good', 'Work'), spawn('fast', 'fast', 'Work')]);
 console.log(JSON.stringify([seenTiers, settings.openaiTier]));
-""", context={"model": {"provider": provider}}) == [["ultrafast", "priority"], "priority"]
+""", context={"model": {"provider": provider}}) == [[expected, parent_tier], parent_tier]
 
 
+@pytest.mark.parametrize("parent_tier", ["priority", "ultrafast"])
 @pytest.mark.parametrize("invocation", ["task", "eval", "restore"])
 @pytest.mark.parametrize("provider,model,expected", [
-    ("openai-codex", "gpt-6.1-sol", "ultrafast"),
+    ("openai-codex", "gpt-6.1-sol", "priority"),
     ("openai", "gpt-6.1-sol", "ultrafast"),
     ("openai-codex", "gpt-6-luna", "priority"),
     ("openai", "gpt-6-luna", "priority"),
     ("anthropic", "claude-sonnet-5-5", "priority"),
 ])
 def test_worker_start_bounds_tier_without_changing_parent(
-    installed, tmp_path, provider, invocation, model, expected,
+    installed, tmp_path, provider, invocation, model, expected, parent_tier,
 ):
     assert run(installed, tmp_path, f"""
+settings.openaiTier = {json.dumps(parent_tier)};
 ext(api); await start();
 const model = {json.dumps(f"{provider}/{model}:medium")};
 const role = {json.dumps("smol" if model == "gpt-6-luna" else "task")};
@@ -550,7 +559,9 @@ thinkingLevel = level;
 activeSettings = settings.overlay({{}});
 await start();
 console.log(JSON.stringify([activeSettings.openaiTier, settings.openaiTier]));
-""", context={"model": {"provider": provider}}) == [expected, "priority"]
+""", context={"model": {"provider": provider}}) == [
+        expected if model == "gpt-6.1-sol" else parent_tier, parent_tier,
+    ]
 
 
 def test_disabled_gluttony_keeps_sol_tier(installed, tmp_path):

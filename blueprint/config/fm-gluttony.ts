@@ -160,7 +160,8 @@ function allowedPattern(tiers: Tiers, cli: Cli, pattern: string, fallback = fals
 }
 
 function boundSettings(settings: HostSettings, pattern: string): void {
-	if (/^openai(?:-codex)?\/gpt-6\.1-sol:/.test(pattern)) cfgTierOpenai.override(settings, "ultrafast");
+	if (pattern.startsWith("openai-codex/gpt-6.1-sol:")) cfgTierOpenai.override(settings, "priority");
+	else if (pattern.startsWith("openai/gpt-6.1-sol:")) cfgTierOpenai.override(settings, "ultrafast");
 }
 
 function retryPattern(tiers: Tiers, primary: string): string {
