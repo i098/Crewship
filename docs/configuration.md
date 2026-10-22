@@ -218,6 +218,26 @@ crewship:
 
 The Firstmate checkout tracks the default branch of upstream Firstmate, not a sha. Every apply fetches `origin/main` and puts `main` at that revision plus the [Firstmate patch layer](dependencies.md#firstmate-patch-layer), so tracking it is how a host stays current. Do not re-pin it to a sha. Each run resolves `origin/main` once and reports the sha it installed. To track a fork, set `firstmate.url` in `.local/host.yml`. The URL applies to a fresh clone; verification fails when an existing checkout's `origin` is a different URL, and provisioning never changes it for you. To switch an existing checkout, run `git -C <workspace>/firstmate remote set-url origin <url>` and `git -C <workspace>/firstmate fetch origin`, reconcile any local commits on `main` with `origin/main` by hand, then run `./ship.sh launch`.
 
+### Firstmate dispatch defaults
+
+The `firstmate` profile copies `blueprint/config/crew-dispatch.json` to `<workspace>/firstmate/config/crew-dispatch.json`.
+The profile selects Haiku or Luna for mechanical work, Mercury 3 for simple coding, Sonnet for ordinary engineering, and Opus for hard work.
+Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
+Fable is not a spawn choice; the existing automatic Opus fallback remains unchanged.
+Provider credentials are not included in the dispatch file.
+
+Each apply normally updates the seeded Firstmate settings.
+To keep local settings, use the existing Ansible override on each apply instead of `./ship.sh launch`:
+
+```bash
+uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/site.yml \
+  -e @.local/host.yml -e crewship_firstmate_config_first_write=true
+```
+
+Then edit `<workspace>/firstmate/config/crew-dispatch.json` to change a model or effort.
+This option preserves all existing seeded Firstmate settings and still creates missing files.
+To skip Firstmate provisioning entirely, set `crewship.profiles.firstmate: false` in `.local/host.yml`.
+
 ## New-host questions
 
 After a successful `./ship.sh launch` with the `firstmate` profile on, once omp has a provider login, Crewship starts omp in the Firstmate checkout with an opening prompt. Firstmate then asks the move decisions for this host one question at a time: which secondmate homes, services, tools, and unpushed work to bring over.
