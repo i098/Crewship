@@ -205,6 +205,12 @@ crewship:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
 ```
 
+The iMessage bridge and optional card tunnel source `~/super.env` with `/bin/sh` before starting.
+Use POSIX shell assignments, including `export KEY=value`, and quote values that contain spaces.
+Both services export these assignments without passing the file to systemd's `EnvironmentFile` parser.
+Only source trusted content: shell commands in this file run as the service user.
+Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the card tunnel off.
+
 `inspect` also enforces these rules:
 
 - `user` is not `root`, and `workspace` is inside `home`.

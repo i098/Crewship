@@ -41,13 +41,12 @@ Environment=INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log }}
 Environment="INSTAGRAM_DM_NOTIFY={{ crewship_instagram_dm_notify }}"
 EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
 {% endif %}
-EnvironmentFile=%h/super.env
 # ~/.local/state/fm-imessage: the latest text, attachments, the outbox, the downloads to retry, the desk's memory
 # and its empty cwd.
 StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
-ExecStart={{ crewship_local_bin }}/bun bridge.ts
+ExecStart=/bin/sh -c 'set -a; . "$$HOME/super.env"; set +a; exec "{{ crewship_local_bin }}/bun" bridge.ts'
 KillMode=mixed
 TimeoutStopSec=10
 Restart=always
