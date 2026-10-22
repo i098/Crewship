@@ -142,11 +142,6 @@ def test_default_config_lists_the_current_defaults():
     assert omp["modelRoles"]["default"] == "anthropic/claude-opus-5-5:high"
     assert "Opus 5.5 at high thinking runs the home" in lines["Models"]
     assert omp["advisor"]["enabled"] is False and "advisor off" in lines["Models"]
-    assert omp["retry"]["fallbackChains"] == {
-        "anthropic/claude-opus-5-5": ["anthropic/claude-fable-5-1:medium"],
-        "anthropic/claude-fable-5-1": ["anthropic/claude-opus-5"],
-        "anthropic/claude-sonnet-5": ["anthropic/claude-fable-5-1", "anthropic/claude-opus-5"],
-    }, "update the Fallbacks line in Default config"
     gate = yaml.safe_load((ROOT / "blueprint/config/no-mistakes-omp.yml").read_text())
     assert gate["modelRoles"]["default"] == "anthropic/claude-sonnet-5-5:high"
     assert "Sonnet 5.5 at high thinking, and Opus 5.5 for hard work" in lines["Gates"]

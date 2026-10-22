@@ -9,15 +9,15 @@ With the `agents` profile on, `./ship.sh launch`:
 1. Installs the latest published omp and its plugins.
    See [Dependencies](dependencies.md#latest-releases) for sources and update behavior.
 2. Copies [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) to `~/.omp/agent/config.yml` (directory `0700`, file `0600`), and [`blueprint/config/omp-lsp.json`](../blueprint/config/omp-lsp.json) to `~/.omp/agent/lsp.json`, which disables the markdown language server (marksman): it costs each session about 90 MB, and markdown diagnostics add nothing to agent work.
-   Every apply also merges [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) into `~/.omp/agent/models.yml`, preserving user providers and unshipped model keys.
-   Shipped override keys take precedence over existing values.
-   It reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
+   Each apply merges model settings into `~/.omp/agent/models.yml`.
+   See [Omp model defaults](configuration.md#omp-model-defaults) for the model list, Inception credentials, and the apply merge policy.
+   The model merge reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
    The installed Bun parser preserves YAML 1.2 scalar types and reads legacy JSONC comments and trailing commas.
    When an existing model file needs parsing, missing Bun makes check mode report the installation prerequisite and skip the dependent merge.
    Normal apply fails if that parser is unavailable.
    When the merge changes the configuration or creates `models.yml`, it writes JSON, a YAML 1.2 subset, to preserve scalar types.
    It leaves the other source files unchanged.
-   See [Default config](default-config.md) for the Codex context windows.
+   See [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) for the Codex context windows.
    omp limits the effective window to the provider's supported input window.
    The config seed enables `extendedContext: true`; existing hosts must enable it in their own config.
 3. Installs the extension `~/.omp/agent/extensions/crewship-herdr-sidebar.ts`, which feeds the Herdr Agent sidebar the session topic, the pane's short name, and the pull request line (pull request, issue and diff size). Every apply rewrites it. See [Herdr sidebar](herdr.md).
@@ -29,10 +29,10 @@ With the `agents` profile on, `./ship.sh launch`:
 8. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
 9. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex, when `profiles.agent_instructions` is on. See [Global instructions](#global-instructions).
 10. Installs the omp rules in [`blueprint/rules/`](../blueprint/rules/) to omp's global rules folder. See [Rules](#rules).
+11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
-Model overrides follow the merge policy above.
 See [Updating an existing host](#updating-an-existing-host).
 
 No credentials are installed. You sign in on each host.
@@ -67,7 +67,12 @@ Stored credentials live in `~/.omp/agent/agent.db`. An environment variable such
 
 ## Model access
 
-omp talks straight to the provider APIs. `blueprint/config/omp.yml` maps every model role to a provider-prefixed id (such as `anthropic/claude-sonnet-5`), and `retry.fallbackChains` uses provider-prefixed ids too. A fresh host needs no router, gateway, or proxy, and binds no extra port. Account rotation is built into omp, so more than one account is not a reason to add a gateway. Bringing back a router or gateway is an explicit operator decision; the header of `blueprint/config/omp.yml` records this rule.
+omp talks straight to the provider APIs.
+`blueprint/config/omp.yml` maps every model role to a provider-prefixed id (such as `anthropic/claude-sonnet-5-5`).
+`retry.fallbackChains` uses provider-prefixed ids too.
+A fresh host needs no router, gateway, or proxy, and binds no extra port.
+Account rotation is built into omp, so more than one account is not a reason to add a gateway.
+Bringing back a router or gateway is an explicit operator decision; the header of `blueprint/config/omp.yml` records this rule.
 
 ## Model roles
 
@@ -81,7 +86,7 @@ Each key under `modelRoles` picks the model for one kind of work. A role value i
 | `plan`, `commit`, `tiny`, `vision`, `memory` | Planning, commit messages, small helper calls, image input, and memory. |
 | `advisor` | The advisor model. See [Advisor](#advisor). |
 
-`blueprint/config/omp.yml` also defines custom roles (`designer`, `subagent`, `Kimi`). The current model for each role is in [`blueprint/config/omp.yml`](../blueprint/config/omp.yml).
+`blueprint/config/omp.yml` also defines custom roles (`designer`, `subagent`). The current model for each role is in [`blueprint/config/omp.yml`](../blueprint/config/omp.yml).
 
 `retry.fallbackChains` lists, for a model id or role, the models to try when it keeps failing (rate limits, quota, outages). `retry.maxDelayMs` caps the retry backoff; a provider-stated wait longer than that fails fast instead of sleeping.
 
@@ -216,6 +221,7 @@ Every apply:
 
 1. Installs [`blueprint/config/omp-as-pi/`](../blueprint/config/omp-as-pi/) to `~/.no-mistakes/omp-as-pi/`.
    The wrapper maps `--session` to `--resume` and neutralizes context files with the pinned gate overlay.
+   It also applies the [spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
    It refuses unsupported arguments with exit 64 and logs the refusal to `~/.no-mistakes/omp-as-pi/refusals.log`.
    Pi-only runs fail on refusal instead of changing the selected gate model through ACP.
 2. Checks the pi adapter of the no-mistakes release it installs. no-mistakes installs at its newest non-draft release, prereleases included, but the wrapper only translates the arguments the adapter it was proven against builds. `check-adapter.sh v<version>` fetches that release's four adapter sources (`pi.go`, `pi_profile.go`, `fallback.go`, `ompgate.go`) and compares them with the sha256 pins in `check-adapter.sh`, the only place the pins live. It exits 0 when every pin matches, 1 when a source differs from its pin or is gone from the tag (HTTP 404), and 2 when it proves nothing: a network error, a timeout, or any other HTTP status.

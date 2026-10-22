@@ -69,6 +69,11 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
                 "X-Url": "https://example.com/path//keep?value=/*literal*/",
             },
         },
+        "inception": {
+            "apiKey": "!printenv CUSTOM_INCEPTION_KEY",
+            "baseUrl": "https://inception.example.com/v1",
+            "models": [{"id": "custom-model"}],
+        },
         "openai-codex": {
             "models": [{"id": "user-model"}],
             "modelOverrides": {
@@ -101,11 +106,14 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
     for model, values in shipped["providers"]["openai-codex"]["modelOverrides"].items():
         assert overrides[model].items() >= values.items()
     if sources:
+        assert merged["providers"]["inception"] == custom["providers"]["inception"]
         assert merged["providers"]["source"] == {"baseUrl": f"https://{sources[0]}.example.com"}
         assert merged["providers"]["private-provider"] == custom["providers"]["private-provider"]
         assert merged["providers"]["openai-codex"]["models"] == [{"id": "user-model"}]
         assert overrides["user-model"] == {"contextWindow": 64000}
         assert overrides["gpt-6.1-sol"]["maxTokens"] == 8192
+    else:
+        assert merged["providers"]["inception"] == shipped["providers"]["inception"]
     assert target.stat().st_mode & 0o777 == 0o600
     written = target.read_bytes()
     assert merge_models(tmp_path) == 0
@@ -113,6 +121,31 @@ def test_model_merge_keeps_user_entries_and_is_idempotent(tmp_path, sources):
     assert read_models(target) == merged
     assert all(source.read_bytes() == content for source, content in originals.items()
                if source != target)
+
+
+@pytest.mark.parametrize("extension", ["yml", "yaml", "json"])
+@pytest.mark.parametrize("inception", [None, {}, {"models": []}])
+def test_model_merge_does_not_restore_inception_choices(tmp_path, extension, inception):
+    target = tmp_path / ".omp/agent/models.yml"
+    target.parent.mkdir(parents=True)
+    source = target.with_suffix(f".{extension}")
+    providers = {} if inception is None else {"inception": inception}
+    source.write_text(json.dumps({"providers": providers}))
+    original = source.read_bytes()
+
+    assert merge_models(tmp_path, check=True) == 1
+    assert source.read_bytes() == original
+    assert merge_models(tmp_path) == 1
+    merged = read_models(target)
+    if inception is None:
+        assert "inception" not in merged["providers"]
+    else:
+        assert merged["providers"]["inception"] == inception
+    written = target.read_bytes()
+    assert merge_models(tmp_path) == 0
+    assert target.read_bytes() == written
+    if source != target:
+        assert source.read_bytes() == original
 
 
 @pytest.mark.parametrize("extension", ["yaml", "json"])
@@ -210,8 +243,30 @@ def test_shipped_model_configuration_schema():
     validate(yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text()), {
         "type": "object", "required": ["providers"], "additionalProperties": False,
         "properties": {"providers": {
-            "type": "object", "required": ["openai-codex"], "additionalProperties": False,
-            "properties": {"openai-codex": {
+            "type": "object", "required": ["openai-codex", "inception"], "additionalProperties": False,
+            "properties": {
+                "inception": {
+                    "type": "object",
+                    "required": ["baseUrl", "api", "apiKey", "models"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "baseUrl": {"type": "string", "format": "uri"},
+                        "api": {"const": "openai-completions"},
+                        "apiKey": {"const": "!printenv INCEPTION_API_KEY"},
+                        "models": {"type": "array", "minItems": 1, "items": {
+                            "type": "object",
+                            "required": ["id", "name", "reasoning", "input", "contextWindow", "maxTokens"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "id": {"type": "string"}, "name": {"type": "string"},
+                                "reasoning": {"type": "boolean"},
+                                "input": {"type": "array", "items": {"enum": ["text", "image"]}},
+                                "contextWindow": window, "maxTokens": window,
+                            },
+                        }},
+                    },
+                },
+                "openai-codex": {
                 "type": "object", "required": ["modelOverrides"], "additionalProperties": False,
                 "properties": {"modelOverrides": {
                     "type": "object", "minProperties": 1,
@@ -232,3 +287,12 @@ def test_shipped_model_configuration_schema():
             assert set(model) <= {"harness", "model", "provider", "effort"}
             assert model["harness"] == "omp"
             assert model["provider"] in {"claude", "codex", "inception"}
+
+
+def test_default_role_and_fallback_models_are_enabled():
+    config = yaml.safe_load((ROOT / "blueprint/config/omp.yml").read_text())
+    enabled = set(config["enabledModels"])
+    selected = list(config["modelRoles"].values())
+    for model, fallbacks in config["retry"]["fallbackChains"].items():
+        selected.extend([model, *fallbacks])
+    assert {model.split(":")[0] for model in selected} <= enabled

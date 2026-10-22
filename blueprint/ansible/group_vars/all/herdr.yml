@@ -13,6 +13,7 @@ crewship_omp_sidebar_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/c
 crewship_omp_status_icons_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/aa-mode-icons.ts"
 # Blocks pkill/killall/kill-by-pgrep in every omp session (docs/omp.md).
 crewship_omp_no_pattern_kill_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-no-pattern-kill.ts"
+crewship_omp_opus_effort_cap_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-opus-effort-cap.ts"
 # The sentrux/fallow quality gate at the end of every omp agent turn (docs/omp.md#quality-gate).
 crewship_omp_quality_gate_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/crewship-quality-gate.ts"
 # Herdr's own omp state extension; `herdr integration install omp` writes it (docs/herdr.md).

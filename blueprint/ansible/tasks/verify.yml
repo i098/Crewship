@@ -55,7 +55,7 @@
                 if (crewship_nvim_seed | default(false) | bool) else [])
              + ([crewship_chrome_devtools_mcp_path, crewship_omp_sidebar_extension,
                  crewship_omp_status_icons_extension, crewship_omp_no_pattern_kill_extension,
-                 crewship_omp_quality_gate_extension,
+                 crewship_omp_quality_gate_extension, crewship_omp_opus_effort_cap_extension,
                  crewship_omp_as_pi_dir ~ '/omp-as-pi', crewship_no_mistakes_omp_overlay,
                  crewship_user_units ~ '/no-mistakes-daemon-.service.d/crewship.conf']
                 if (crewship_cfg.profiles.agents | bool) else [])

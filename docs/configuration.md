@@ -237,7 +237,7 @@ Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple
 Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
 Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
 Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
-Fable is not a spawn choice; see [Default config](default-config.md) for the unchanged automatic fallback chain.
+Fable is not a spawn choice; see [Default config](default-config.md) for the automatic fallback chain.
 Provider credentials are not included in the dispatch file.
 
 Each apply normally updates the seeded Firstmate settings.
@@ -281,7 +281,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 
 | Profile | Default | What it installs |
 | --- | --- | --- |
-| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
+| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; the [spawned Opus effort cap](#spawned-opus-effort-cap); `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
 | `public_skills` | off; absent keeps them on a host that has them | The skills and rules that ship with Crewship, in `~/.omp/agent/skills/`, `~/.claude/skills/` and `~/.omp/agent/rules/`. `false` or absent on a new host installs none; `true` installs and updates them; turning it off later deletes nothing. See [Skills](omp.md#skills). Private skills always install. |
 | `agent_instructions` | off; absent keeps them on a host that has them | The [global instructions](omp.md#global-instructions): `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.omp/agent/AGENTS.md` as one import line. `instructions_mode` (`skip`, `overwrite` or `append`, default `append`) says what happens to a file that exists. The installer checklist asks it when one does. |
 | `development` | off | Rust toolchain (stable), build essentials. |
@@ -303,6 +303,38 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).
 
 See [Project databases](project-databases.md) for existing-host management and safe removal.
+
+### Spawned Opus effort cap
+
+The `agents` profile caps Opus 5.5 at `high` effort in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
+Other models and lower effort levels remain unchanged.
+The extension requires both `FM_OMP_HARNESS=omp` and `OMP_SKIP_SETUP=1`, so primary sessions remain unchanged.
+It caps request-level and message-level provider effort after `auto` resolves, including effort changes during a session.
+The status line can still show the requested level.
+The gate wrapper caps explicit `xhigh`, `max`, and `auto` requests, including model suffixes, and selects `high` when effort is absent.
+The `acp:omp` fallback does not use the wrapper.
+
+Set `FM_OPUS_EFFORT_UNCAPPED=1` in the spawned omp process environment to disable the cap for that process.
+For no-mistakes gates, set this variable in the daemon environment before starting the daemon.
+A shell export does not change an existing daemon or tmux pane.
+Wait until no pipeline runs remain before restarting the daemon.
+Crewship installs both guards on every apply; it does not restart the daemon.
+
+### Omp model defaults
+
+New `agents` hosts receive the restricted `enabledModels` list from the [shipped omp configuration](../blueprint/config/omp.yml).
+The list includes Anthropic models, GPT models through `openai` and `openai-codex`, and Mercury 3 through Inception.
+Edit `enabledModels` in `~/.omp/agent/config.yml` to change this list, or remove the key to use omp's full model list.
+Apply preserves existing model choices in this file; see [omp configuration](omp.md#what-the-recipe-sets-up) for the status-line exceptions.
+
+The Inception provider uses `https://api.inceptionlabs.ai/v1` and reads `INCEPTION_API_KEY` from the omp process environment.
+Set that variable before starting omp; Crewship never installs its value.
+Without the variable, Mercury requests cannot authenticate; other providers remain available.
+Edit the `inception` provider in `~/.omp/agent/models.yml` to override its endpoint, credential command, or model list.
+Apply seeds Inception only when no `models.yml`, `models.yaml`, or `models.json` file exists.
+Existing model files keep their Inception settings unchanged, including missing fields or a removed provider.
+Apply still merges the shipped Codex context-window overrides; those keys replace existing values without changing other model settings.
+Disable `profiles.agents` to skip agent configuration on a new host.
 
 ## Data disk
 
