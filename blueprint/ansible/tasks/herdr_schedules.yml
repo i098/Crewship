@@ -53,39 +53,14 @@
       register: crewship_schedules_tab
       when: crewship_schedules_tabs | length == 0
 
-    - name: List the machine panes
+    - name: Show the manual start command for an existing schedules tab
+      ansible.builtin.debug:
+        msg: run crewship schedules in the schedules tab
+      when: crewship_schedules_tabs | length > 0
+
+    - name: Run the schedule viewer in the new schedules tab
       ansible.builtin.command:
-        argv: ["{{ crewship_herdr_bin }}", pane, list, --workspace, "{{ crewship_machine_workspace }}"]
-      register: crewship_machine_panes
-      changed_when: false
-
-    - name: Find the schedules pane
-      ansible.builtin.set_fact:
-        crewship_schedules_panes: >-
-          {{ (crewship_machine_panes.stdout | from_json).result.panes
-             | selectattr('tab_id', 'equalto',
-                 crewship_schedules_tabs[0].tab_id if crewship_schedules_tabs | length > 0
-                 else (crewship_schedules_tab.stdout | from_json).result.tab.tab_id) | list }}
-
-    - name: Start the viewer without interrupting another command
-      when: crewship_schedules_panes | length == 1
-      block:
-        - name: Inspect the schedules pane process
-          ansible.builtin.command:
-            argv: ["{{ crewship_herdr_bin }}", pane, process-info,
-                   --pane, "{{ crewship_schedules_panes[0].pane_id }}"]
-          register: crewship_schedules_process
-          changed_when: false
-
-        - name: Run the schedule viewer in an idle shell
-          vars:
-            process: "{{ (crewship_schedules_process.stdout | from_json).result.process_info }}"
-          when:
-            - process.foreground_processes | length == 1
-            - process.foreground_process_group_id == process.shell_pid
-            - process.foreground_processes[0].pid == process.shell_pid
-            - process.foreground_processes[0].name in ['sh', 'bash', 'dash', 'zsh', 'fish', 'ksh']
-          ansible.builtin.command:
-            argv: ["{{ crewship_herdr_bin }}", pane, run, "{{ crewship_schedules_panes[0].pane_id }}",
-                   "{{ (crewship_local_bin ~ '/crewship') | quote }} schedules"]
-
+        argv: ["{{ crewship_herdr_bin }}", pane, run,
+               "{{ (crewship_schedules_tab.stdout | from_json).result.root_pane.pane_id }}",
+               "{{ (crewship_local_bin ~ '/crewship') | quote }} schedules"]
+      when: crewship_schedules_tabs | length == 0

@@ -63,9 +63,10 @@ Herdr's sidebar draws text cells only, so the terminal font on the machine that 
 
 ### The machine entry
 
-With services enabled, `launch` creates the `machine` workspace when absent and opens a `schedules` tab running `crewship schedules`.
+With services enabled, `launch` creates the `machine` workspace when absent and starts `crewship schedules` only in a newly created `schedules` tab.
 It preserves existing tabs and does not change the focused workspace or tab.
-If Herdr restores the schedules tab as a shell, `launch` resumes the viewer without interrupting another foreground command.
+It never sends input to an existing tab or pane.
+If the schedules tab exists, `launch` leaves it unchanged and prints: `run crewship schedules in the schedules tab`.
 Set `crewship.herdr.schedules_tab: false` to skip this setup.
 See [Schedule viewer](configuration.md#schedule-viewer) for controls and deferred setup.
 
