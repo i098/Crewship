@@ -14,6 +14,104 @@ import yaml
 ROOT = Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize("subject,blocked", [
+    ("/CN=emSign Root CA - G1/O=eMudhra Technologies Limited", True),
+    ("/CN=Replacement Root/O=eMudhra Inc", True),
+    ("/CN=Test Root/O=Test CA", False),
+])
+def test_chart_checks_ca_trust_without_updating_packages(tmp_path, subject, blocked):
+    bundle = tmp_path / "ca.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+         "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(bundle),
+         "-subj", subject, "-days", "1", "-addext", "basicConstraints=critical,CA:TRUE"],
+        check=True, capture_output=True,
+    )
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/preflight.yml").read_text())
+    start = next(i for i, task in enumerate(tasks)
+                 if task["name"] == "Distrust the compromised emSign roots")
+    end = next(i for i, task in enumerate(tasks)
+               if task["name"] == "Resolve the latest tool releases")
+    playbook = tmp_path / "trust.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "environment": {"SSL_CERT_FILE": str(bundle), "SSL_CERT_DIR": str(empty)},
+        "vars": {"crewship_installer": str(ROOT / "scripts/provisions.py"),
+                 "crewship_cfg": {"home": str(tmp_path)}},
+        "tasks": tasks[start:end],
+    }]))
+    before = bundle.read_bytes()
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+         str(playbook), "--check"],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    assert (result.returncode != 0) == blocked, output
+    assert bundle.read_bytes() == before
+    assert "changed=0" in output
+    if blocked:
+        assert "system CA bundle still trusts compromised eMudhra/emSign roots" in output
+    else:
+        assert "failed=0" in output
+
+
+def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path):
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/preflight.yml").read_text())
+    start = next(i for i, task in enumerate(tasks)
+                 if task["name"] == "Distrust the compromised emSign roots")
+    end = next(i for i, task in enumerate(tasks)
+               if task["name"] == "Refresh signed apt metadata before updating CA trust")
+    tasks = tasks[start:end]
+    root = tmp_path / "roots"
+    (root / "mozilla").mkdir(parents=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    store = tmp_path / "store"
+    store.mkdir()
+    blocked = tasks[0]["loop"]
+    names = [*blocked, "mozilla/Unrelated_Root.crt"]
+    for name in names:
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+             "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(root / name),
+             "-subj", "/CN=" + Path(name).stem, "-days", "1",
+             "-addext", "basicConstraints=critical,CA:TRUE"],
+            check=True, capture_output=True,
+        )
+    config = tmp_path / "ca-certificates.conf"
+    config.write_text("\n".join(names) + "\n")
+    updater = [
+        "update-ca-certificates", "--fresh", "--certsconf", str(config),
+        "--certsdir", str(root), "--localcertsdir", str(empty),
+        "--etccertsdir", str(store), "--hooksdir", str(empty),
+    ]
+    subprocess.run(updater, check=True, capture_output=True)
+    tasks[0]["ansible.builtin.lineinfile"]["path"] = str(config)
+    tasks[1]["ansible.builtin.command"]["argv"] = updater
+    for task in tasks:
+        task["become"] = False
+    playbook = tmp_path / "distrust.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "environment": {"SSL_CERT_FILE": str(store / "ca-certificates.crt"),
+                        "SSL_CERT_DIR": str(empty)},
+        "vars": {"crewship_installer": str(ROOT / "scripts/provisions.py"),
+                 "crewship_cfg": {"home": str(tmp_path)}},
+        "tasks": tasks,
+    }]))
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook)]
+    first = subprocess.run(command, capture_output=True, text=True)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert config.read_text().splitlines() == [*("!" + name for name in blocked), names[-1]]
+    second = subprocess.run(command, capture_output=True, text=True)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "changed=0" in second.stdout
+
+
 def redirect_system_paths(tasks, root):
     for task in tasks:
         for module, key in (("ansible.builtin.file", "path"), ("ansible.builtin.copy", "dest")):

@@ -26,6 +26,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -41,6 +42,7 @@ from pathlib import Path, PurePosixPath
 from threading import Lock
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
+NODE_SECURITY_MINIMUMS = {22: (22, 23, 4), 24: (24, 22, 1), 26: (26, 12, 1)}
 FORGEJO_RELEASES = (
     "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases?draft=false&pre-release=false"
 )
@@ -299,6 +301,36 @@ def latest_release(repo, tool, prerelease):
         return release_from_pages(repo, tool, prerelease)
 
 
+def require_secure_node(version):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version)
+    if not match:
+        raise ValueError(f"node {version!r} is not a stable release; security minimum required")
+    installed = tuple(map(int, match.groups()))
+    minimum = NODE_SECURITY_MINIMUMS.get(installed[0])
+    if minimum is None:
+        if installed[0] > max(NODE_SECURITY_MINIMUMS):
+            return
+        raise ValueError(f"node {version} has no supported security minimum; use Node 22, 24, or 26+")
+    if installed < minimum:
+        floor = ".".join(map(str, minimum))
+        raise ValueError(f"node {version} is below security minimum {floor}")
+
+
+def check_ca_bundle():
+    blocked = [
+        str(certificate["subject"])
+        for certificate in ssl.create_default_context().get_ca_certs()
+        if re.search(r"emsign|emudhra", str(certificate["subject"]), re.I)
+    ]
+    if blocked:
+        raise ValueError(
+            "system CA bundle still trusts compromised eMudhra/emSign roots: "
+            + "; ".join(blocked)
+            + ". Update ca-certificates and remove or distrust these roots before release lookups."
+        )
+    print(json.dumps({"changed": False, "ca_trust": "no eMudhra/emSign roots"}))
+
+
 def verified(tool, version, key, name, url, checksum, binaries):
     """A lock-shaped spec, only when the publisher lists a SHA-256 for the asset."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
@@ -357,6 +389,7 @@ def resolve_release_group(key, names):
     if "node" in names:
         releases = json.loads(fetch("https://nodejs.org/dist/index.json", "node release"))
         tag = max((r["version"] for r in releases), key=lambda v: tuple(map(int, v[1:].split("."))))
+        require_secure_node(tag)
         name = f"node-{tag}-linux-{ARCH[key]['node']}.tar.xz"
         sums = fetch(f"https://nodejs.org/dist/{tag}/SHASUMS256.txt", "node checksums").decode()
         match = re.search(rf"^([0-9a-f]{{64}})  {re.escape(name)}$", sums, re.M)
@@ -530,6 +563,14 @@ def install_gh_guard(home, real_binary, name="gh"):
     return link_binary(home, name, wrapper) or changed
 
 
+def verified_binaries(name, version, directory, patterns):
+    paths = binaries_in(directory, patterns)
+    if name == "node":
+        require_secure_node(version)
+        require_secure_node(subprocess.check_output([paths["node"], "--version"], text=True).strip())
+    return paths
+
+
 def install_asset(home, name, spec, key):
     version = spec["version"]
     if (
@@ -573,7 +614,7 @@ def install_asset(home, name, spec, key):
             )
             unpacked.rename(final)
         changed = True
-    for binary, path in binaries_in(final, asset["binaries"]).items():
+    for binary, path in verified_binaries(name, version, final, asset["binaries"]).items():
         if binary == "gh":
             changed = install_gh_guard(home, path) or changed
         else:
@@ -877,6 +918,7 @@ def main():
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
+    parser.add_argument("--check-ca", action="store_true", help="reject compromised system CA roots")
     parser.add_argument("--development", action="store_true")
     parser.add_argument(
         "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
@@ -897,6 +939,8 @@ def main():
         "--resolved", type=json.loads, help="--resolve output to install instead of resolving"
     )
     args = parser.parse_args()
+    if args.check_ca:
+        return check_ca_bundle()
     key = platform_key()
     names = args.tools.split(",") + (AGENT_TOOLS if args.npm else [])
     if "sentrux" in names:

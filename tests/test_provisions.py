@@ -61,6 +61,51 @@ def test_verified_install_runs_and_second_install_changes_nothing(tmp_path, monk
     assert not installer.install_asset(tmp_path, "tool", spec, "linux-x86_64")
 
 
+@pytest.mark.parametrize(("version", "floor", "passes"), [
+    ("22.23.3", "22.23.4", False), ("22.23.4", "22.23.4", True),
+    ("24.22.0", "24.22.1", False), ("24.22.1", "24.22.1", True),
+    ("26.12.0", "26.12.1", False), ("26.12.1", "26.12.1", True),
+    ("26.13.0", "26.12.1", True), ("30.1.0", None, True),
+])
+def test_node_resolution_enforces_its_major_security_floor(monkeypatch, version, floor, passes):
+    def fetch(url, source):
+        if url.endswith("index.json"):
+            return json.dumps([{"version": "v" + version}]).encode()
+        return ("a" * 64 + f"  node-v{version}-linux-x64.tar.xz\n").encode()
+
+    monkeypatch.setattr(installer, "fetch", fetch)
+    if passes:
+        assert installer.resolve_latest("linux-x86_64", {"node"})["node"]["version"] == version
+    else:
+        with pytest.raises(ValueError, match=rf"node v{version} is below security minimum {floor}"):
+            installer.resolve_latest("linux-x86_64", {"node"})
+
+
+@pytest.mark.parametrize("version", ["20.99.0", "23.99.0", "26.12.1-rc.1", "invalid"])
+def test_node_security_floor_rejects_unsupported_or_unstable_versions(version):
+    with pytest.raises(ValueError, match="node.*security minimum"):
+        installer.require_secure_node(version)
+
+
+@pytest.mark.parametrize(("version", "passes"), [
+    ("22.23.3", False), ("22.23.4", True),
+    ("24.22.0", False), ("24.22.1", True),
+    ("26.12.0", False), ("26.12.1", True),
+])
+def test_node_install_checks_the_executable_version(tmp_path, monkeypatch, version, passes):
+    payload = f"#!/bin/sh\nprintf 'v{version}\\n'\n".encode()
+    spec = asset(payload)
+    spec["version"] = "26.12.1"
+    spec["assets"]["linux-x86_64"]["binaries"] = {"node": "node"}
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(payload))
+    if passes:
+        assert installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    else:
+        with pytest.raises(ValueError, match="node.*below security minimum"):
+            installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+        assert not (tmp_path / ".local/bin/node").exists()
+
+
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_native_installs_overlap_and_keep_checksum_failures_fatal(tmp_path, monkeypatch, capsys, corrupt):
     key = "linux-x86_64"

@@ -86,6 +86,63 @@
       stops rather than degrading silently.
     quiet: true
 
+# GHSA-6q48-6c7w-9gw2 removes emSign roots after intermediate key compromise.
+- name: Distrust the compromised emSign roots
+  ansible.builtin.lineinfile:
+    path: /etc/ca-certificates.conf
+    regexp: "^!?{{ item | regex_escape }}$"
+    line: "!{{ item }}"
+    create: true
+    mode: "0644"
+  loop:
+    - mozilla/emSign_ECC_Root_CA_-_C3.crt
+    - mozilla/emSign_ECC_Root_CA_-_G3.crt
+    - mozilla/emSign_Root_CA_-_C1.crt
+    - mozilla/emSign_Root_CA_-_G1.crt
+  become: true
+  register: crewship_ca_distrust
+  when: not ansible_check_mode
+
+- name: Rebuild system CA trust after distrusting emSign
+  ansible.builtin.command:
+    argv: [update-ca-certificates, --fresh]
+  become: true
+  when:
+    - not ansible_check_mode
+    - crewship_ca_distrust is changed
+
+- name: Reject compromised CA roots before network access
+  ansible.builtin.command:
+    argv: [python3, "{{ crewship_installer }}", --home, "{{ crewship_cfg.home }}", --check-ca]
+  changed_when: false
+  check_mode: false
+
+- name: Refresh signed apt metadata before updating CA trust
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Update system CA trust before release lookups
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: latest
+  become: true
+  when: not ansible_check_mode
+
+- name: Report the CA trust update in check mode
+  ansible.builtin.debug:
+    msg: "check mode: would update ca-certificates before release lookups; current trust must already be safe."
+  when: ansible_check_mode
+
+- name: Reject compromised CA roots before release lookups
+  ansible.builtin.command:
+    argv: [python3, "{{ crewship_installer }}", --home, "{{ crewship_cfg.home }}", --check-ca]
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
 # Resolved once per run, in plan too, so a release landing mid-run cannot
 # split what is installed from what the unit runs and verify asserts. Only the
 # releases this host installs are resolved (crewship_installer_selection and
