@@ -89,8 +89,8 @@ const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
 const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
 const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL);
-// Eight seconds of silence close the owner's burst before classification. Only the test suite may shorten them.
-const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 8000;
+// Three seconds of silence close the owner's burst before classification. Only the test suite may shorten them.
+const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 3000;
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -137,6 +137,7 @@ const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((
   handoffPending();
 }));
 let deskRun: Bun.Subprocess | undefined;
+let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
 // were transports has no `line` and is Photon's.
@@ -343,7 +344,7 @@ if (existsSync(ROUTING_LOG)) {
 }
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
-if (pendingRoutes().length) desk.inboundText();
+if (pendingRoutes().length) startDeskWait();
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
@@ -614,6 +615,17 @@ function remember(kind: Kind, text: string): number | undefined {
   }
 }
 
+function startDeskWait() {
+  if (DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
+  desk.inboundText();
+}
+
+async function readInboxStatus() {
+  const inbox = track(Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
+  const status = await new Response(inbox.stdout).text();
+  return { status, statusOk: await inbox.exited === 0 };
+}
+
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
@@ -636,10 +648,9 @@ async function runDesk(current: () => boolean) {
 }
 
 async function draftBasic(pending: Routing[], current: () => boolean) {
-  const inbox = track(Bun.spawn([INBOX, "status"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
-  const status = await new Response(inbox.stdout).text();
-  const statusOk = await inbox.exited === 0;
-  if (stopping || !current()) return;
+  const result = await inboxStatus;
+  if (!result || stopping || !current()) return;
+  const { status, statusOk } = result;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
   const latestText = pending.map((r) => `owner: ${r.text}`).join("\n");
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER);
@@ -799,7 +810,7 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) 
   ensureRemembered(received);
   flushRoutes();
   cancelDesk();
-  desk.inboundText();
+  startDeskWait();
 }
 
 function plainText(content: LineMessage["content"]): boolean {

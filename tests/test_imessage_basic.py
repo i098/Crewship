@@ -40,8 +40,10 @@ def basic_rig(tmp_path, test_mode=True):
         "if sys.argv[1] == 'status':\n"
         "    if (p / 'status-fail').exists(): sys.exit(1)\n"
         "    (p / 'status-started').touch()\n"
+        "    status = (p / 'status').read_text()\n"
+        "    with (p / 'status-calls').open('a') as f: f.write(status + '\\n')\n"
         "    while (p / 'status-hold').exists(): time.sleep(0.02)\n"
-        "    print((p / 'status').read_text())\n"
+        "    print(status)\n"
         "else:\n"
         "    if (p / 'inbox-fail').exists(): sys.exit(1)\n"
         "    key = sys.argv[sys.argv.index('--request-id') + 1]\n"
@@ -60,6 +62,32 @@ def basic_rig(tmp_path, test_mode=True):
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
 
     return fake, state, notes, err, start, receive, cli, text, records
+
+
+def test_status_starts_during_quiet_and_refreshes_for_the_latest_text(tmp_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("first", "What is the build status?")
+        wait_for(lambda: text(fake / "status-calls"), "status during the quiet period", timeout=1)
+        assert text(fake / "model-calls") == ""
+        (fake / "status").write_text("The build is running.")
+        (fake / "answer").write_text(json.dumps({
+            "kind": "reply", "answer": "The build is running.",
+            "evidence": [{"source": "status", "quote": "The build is running."}],
+        }))
+        receive("second", "Is the build running?")
+        wait_for(lambda: len(text(fake / "status-calls").splitlines()) == 2, "fresh status during the new wait", timeout=1)
+        (fake / "status").write_text("The build failed.")
+        assert text(fake / "model-calls") == ""
+        wait_for(lambda: text(fake / "sent"), "the answer from the prefetched status")
+        assert text(fake / "sent").splitlines() == ["send The build is running."]
+        assert len(text(fake / "status-calls").splitlines()) == 2
+        assert len(text(fake / "model-calls").splitlines()) == 1
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 @pytest.mark.parametrize("recover", [False, True])
@@ -385,7 +413,7 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
     for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3", "FM_IMESSAGE_DESK_REASONING": "low",
                         "INCEPTION_API_KEY": "test-inception-key", "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
         monkeypatch.setenv(name, value)
-    # The answer mode runs without test mode, so it proves the real eight-second trigger and ignores the override.
+    # The answer mode ignores the test override and uses the production quiet period.
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path, test_mode=mode != "answer")
     bridge = start(1)
     try:
@@ -407,7 +435,9 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         if mode != "answer":
             assert text(fake / "sent") == ""
         first = requests[0]
-        assert first["at"] - published >= (8 if mode == "answer" else TEST_QUIET_MS / 1000)  # the desk runs only after the quiet period
+        assert first["at"] - published >= (3 if mode == "answer" else TEST_QUIET_MS / 1000)
+        if mode == "answer":
+            assert first["at"] - published < 6
         assert first["auth"] == "Bearer test-inception-key"
         assert (first["body"]["model"], first["body"]["reasoning_effort"]) == ("mercury-3", "low")
         assert [t["function"]["name"] for t in first["body"]["tools"]] == ["zoom"]

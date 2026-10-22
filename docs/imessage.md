@@ -10,8 +10,9 @@ For each message from the owner, the service does these steps:
 2. It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
 3. It marks the text as read.
-4. It waits 8 seconds of silence to combine a burst.
-   Each new text cancels a running draft and starts the wait again.
+4. It waits 3 seconds of silence to combine a burst and reads `fm-inbox.sh status` during that wait.
+   Each new text cancels a running draft, starts the wait again, and starts a fresh status read.
+   The desk uses that status result after the wait, so the snapshot can lag by up to 3 seconds.
    Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
    A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
 5. The desk model classifies the whole pending burst.
