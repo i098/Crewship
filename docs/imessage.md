@@ -92,8 +92,9 @@ Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering t
 If a direct answer or social reaction is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
-The outbox saves a reaction's possible delivery immediately before sending, after any Photon lookup, and retains it across retries and restarts.
-A failed Photon lookup is not a reaction attempt and does not add uncertainty.
+The outbox saves possible reaction delivery after all lookups, health checks, and capability checks, immediately before the mutation.
+It retains that state across retries and restarts.
+Read-only preparation does not add delivery uncertainty.
 It does not clear uncertainty from an earlier reaction attempt.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 

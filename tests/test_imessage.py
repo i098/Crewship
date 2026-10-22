@@ -2112,7 +2112,13 @@ const history = () => {
 const server = Bun.serve({ port: 0, async fetch(req) {
   const u = new URL(req.url), path = u.pathname.replace("/api/v1/", "");
   if (u.searchParams.get("password") !== "pw-test") return new Response("no", { status: 401 });
-  if (path === "server/info") return Response.json({ data: { private_api: !existsSync(`${dir}/no-private-api`), helper_connected: true } });
+  if (path === "server/info") {
+    while (mode() === "hold-health") {
+      writeFileSync(`${dir}/health-waiting`, "");
+      await Bun.sleep(20);
+    }
+    return Response.json({ data: { private_api: !existsSync(`${dir}/no-private-api`), helper_connected: true } });
+  }
   if (path === "message/text") {
     const b = await req.json();
     appendFileSync(`${dir}/relay-payloads`, `${JSON.stringify(b)}\\n`);

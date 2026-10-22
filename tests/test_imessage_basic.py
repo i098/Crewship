@@ -292,6 +292,50 @@ def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tm
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("prior_uncertain", [False, True])
+def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_uncertainty(tmp_path, prior_uncertain):
+    rig, receive = transport_desk_rig(tmp_path)
+    (rig.fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
+    (tmp_path / "bin/omp").write_text(
+        '#!/bin/sh\ncat >/dev/null\n'
+        'while [ -e "$FAKE_DIR/model-hold" ]; do sleep 0.02; done\n'
+        'cat "$FAKE_DIR/answer"\n'
+    )
+    if prior_uncertain:
+        rig.relay_mode("react-garbled")
+    else:
+        (rig.fake / "model-hold").touch()
+    try:
+        rig.start()
+        receive("bluebubbles", "thanks", "thanks!")
+        if prior_uncertain:
+            wait_for(lambda: rig.outbox() and rig.outbox()[0].get("maybe")
+                     and "react thanks like" in read_text(rig.fake / "relay-sent"), "the uncertain reaction")
+        rig.stop()
+        (rig.fake / "model-hold").unlink(missing_ok=True)
+        rig.relay_mode("hold-health")
+        rig.start()
+        wait_for(lambda: (rig.fake / "health-waiting").exists()
+                 and '"route":"done"' in read_text(rig.state / "routing.jsonl"), "the queued reaction during a held health check")
+        rig.bridge.kill()
+        rig.bridge.wait(10)
+        rig.bridge = None
+        assert bool(rig.outbox()[0].get("maybe")) == prior_uncertain
+        (rig.fake / "no-private-api").touch()
+        rig.relay_mode("")
+        rig.start()
+        wait_for(lambda: list((rig.state / "outbox-dead").glob("*.json")), "the failed-reaction receipt")
+        if prior_uncertain:
+            assert read_text(rig.notes) == ""
+            assert "react thanks like" in read_text(rig.fake / "relay-sent")
+        else:
+            wait_for(lambda: "bluebubbles-thanks " in read_text(rig.notes), "the unsent-reaction handoff")
+            assert read_text(rig.notes).count("bluebubbles-thanks ") == 1
+            assert read_text(rig.fake / "relay-sent") == ""
+    finally:
+        rig.close()
+
+
 def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')

@@ -199,10 +199,7 @@ async function startLine(name: string): Promise<Line> {
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
-      react: (ref, emoji, beforeSend) => {
-        beforeSend();
-        return bb.react(ref.space, ref.id, emoji);
-      },
+      react: (ref, emoji, beforeSend) => bb.react(ref.space, ref.id, emoji, beforeSend),
       home: `iMessage;-;${OWNER}`,
     };
   }

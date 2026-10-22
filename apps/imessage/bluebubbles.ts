@@ -227,14 +227,17 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
 
   // Put a tapback on a message. BlueBubbles has six; any other emoji fails with the list, as a permanent error so
   // the outbox moves it to the dead-letter folder instead of holding the queue.
-  async react(chat: string, guid: string, emoji: string) {
+  async react(chat: string, guid: string, emoji: string, beforeSend?: () => void) {
     const reaction = TAPBACKS[emoji.trim()];
     if (!reaction) throw Object.assign(new Error(`no BlueBubbles tapback for ${emoji}; use one of ❤️ 👍 👎 😂 ‼️ ❓`), { permanent: true, maybeSent: false });
     const healthy = await this.healthy();
     if (healthy.length && !healthy.some((r) => this.privateApi.get(r)?.enabled)) {
       throw new RelayError("no healthy relay supports the Private API", false, healthy.length === this.relays.length ? 400 : 503);
     }
-    await this.first((r) => this.call(r, "POST", "message/react", undefined, { chatGuid: chat, selectedMessageGuid: guid, reaction, partIndex: 0 }), true, healthy);
+    await this.first((r) => {
+      beforeSend?.();
+      return this.call(r, "POST", "message/react", undefined, { chatGuid: chat, selectedMessageGuid: guid, reaction, partIndex: 0 });
+    }, true, healthy);
   }
 
   // Download an attachment from whichever relay has it. The bridge's download queue retries a failure.
