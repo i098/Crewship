@@ -20,6 +20,7 @@ import argparse
 import fcntl
 import hashlib
 import html
+import http.client
 import json
 import os
 import platform
@@ -209,22 +210,47 @@ def fetch_page(url, what):
                 urllib.request.Request(url, headers=headers), timeout=60
             ) as response:
                 return response.geturl(), response.read()
-        except OSError as error:
+        except (OSError, http.client.IncompleteRead) as error:
             # Connection resets, TLS EOFs, timeouts and 5xx are transient; a 4xx is final.
             status = getattr(error, "code", 500)
-            if status < 500 or attempt == DOWNLOAD_ATTEMPTS:
+            if (
+                isinstance(error, http.client.IncompleteRead)
+                or status < 500
+                or attempt == DOWNLOAD_ATTEMPTS
+            ):
                 if isinstance(error, urllib.error.HTTPError):
                     failure = RateLimited if github and status in (403, 429) else ValueError
                     raise failure(
-                        f"cannot resolve the latest {what} (HTTP {error.code}); "
-                        "if rate limited, set GITHUB_TOKEN and re-run"
+                        f"cannot resolve the latest {what} from {url} after {attempt} attempt(s) "
+                        f"(HTTP {error.code}); if rate limited, set GITHUB_TOKEN and re-run"
                     ) from None
-                raise
+                raise ValueError(
+                    f"cannot resolve the latest {what} from {url} after {attempt} attempt(s): {error}"
+                ) from error
             time.sleep(attempt)
 
 
 def fetch(url, what):
     return fetch_page(url, what)[1]
+
+
+def npm_latest(package):
+    registry = f"https://registry.npmjs.org/{package}"
+    for attempt, url in enumerate((registry + "/latest", registry), 1):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url), timeout=10) as response:
+                metadata = json.load(response)
+            if attempt == 2:
+                metadata = metadata["versions"][metadata["dist-tags"]["latest"]]
+            return metadata["version"]
+        except (OSError, http.client.IncompleteRead, json.JSONDecodeError, KeyError) as error:
+            timeout = isinstance(getattr(error, "reason", error), TimeoutError)
+            if attempt == 1 and (timeout or 500 <= getattr(error, "code", 0) < 600):
+                continue
+            raise ValueError(
+                f"cannot resolve the latest {package} version from {url} "
+                f"after {attempt} attempt(s): {error}"
+            ) from error
 
 
 def release_from_pages(repo, tool, prerelease):
@@ -374,13 +400,11 @@ def resolve_release_group(key, names):
         )
     for tool, package in NPM_LATEST.items():
         if tool in names:
-            registry = fetch(f"https://registry.npmjs.org/{package}/latest", f"{tool} version")
-            latest[tool] = json.loads(registry)["version"]
+            latest[tool] = npm_latest(package)
     # Installed by Ansible itself for the iMessage bridge.
     for package in ("spectrum-ts",):
         if package in names:
-            registry = fetch(f"https://registry.npmjs.org/{package}/latest", f"{package} version")
-            latest[package] = json.loads(registry)["version"]
+            latest[package] = npm_latest(package)
     if "psutil" in names:
         # The Chrome pruner's runtime, installed by Ansible with uv --require-hashes.
         pypi = json.loads(fetch("https://pypi.org/pypi/psutil/json", "psutil release"))

@@ -13,8 +13,10 @@ import sys
 import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from http.client import IncompleteRead
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Event, Thread
 
 import pytest
 import yaml
@@ -280,6 +282,171 @@ def test_fetch_retries_a_tls_eof_and_keeps_a_client_error_final(monkeypatch):
     with pytest.raises(ValueError, match="HTTP 403"):
         installer.fetch("https://api.github.com/repos/x/y/releases/latest", "x release")
     assert replies == []
+
+    replies[:] = [installer.urllib.error.URLError("reset") for _ in range(3)]
+    url = "https://nodejs.org/dist/index.json"
+    with pytest.raises(ValueError) as failure:
+        installer.fetch(url, "node release")
+    assert url in str(failure.value)
+    assert "after 3 attempt(s)" in str(failure.value)
+    assert replies == []
+
+
+@pytest.mark.parametrize(
+    ("tool", "package"),
+    [("acpx", "acpx"), ("omp", "@oh-my-pi/pi-coding-agent"), ("spectrum-ts", "spectrum-ts")],
+)
+@pytest.mark.parametrize(
+    ("latest_status", "fallback_stalls"),
+    [(None, False), (None, True), (504, False), (404, False), (200, False)],
+)
+def test_npm_lookup_bounds_stalls_and_uses_the_latest_tag(
+    monkeypatch, tool, package, latest_status, fallback_stalls
+):
+    stopped = Event()
+    seen = []
+    timeouts = []
+    base = f"https://registry.npmjs.org/{package}"
+
+    class Registry(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            latest = self.path.endswith("/latest")
+            status = latest_status if latest else None if fallback_stalls else 200
+            if status is None:
+                stopped.wait(5)
+                return
+            self.send_response(status)
+            self.end_headers()
+            body = {"version": "1.0.0"} if latest else {
+                "dist-tags": {"latest": "2.0.0"},
+                "versions": {"2.0.0": {"version": "2.0.0"}, "3.0.0": {"version": "3.0.0"}},
+            }
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *args):
+            pass
+
+    real_urlopen = installer.urllib.request.urlopen
+    with ThreadingHTTPServer(("127.0.0.1", 0), Registry) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def local_urlopen(request, *, timeout):
+            assert request.full_url in (base, base + "/latest")
+            timeouts.append(timeout)
+            return real_urlopen(
+                f"http://127.0.0.1:{server.server_port}" + request.full_url.removeprefix(
+                    "https://registry.npmjs.org"
+                ),
+                timeout=min(timeout, 0.1),
+            )
+
+        monkeypatch.setattr(installer.urllib.request, "urlopen", local_urlopen)
+        monkeypatch.setattr(installer.time, "sleep", lambda seconds: None)
+        started = installer.time.monotonic()
+        try:
+            if fallback_stalls or latest_status == 404:
+                with pytest.raises(ValueError) as failure:
+                    installer.resolve_latest("linux-x86_64", {tool})
+                final_url = base if fallback_stalls else base + "/latest"
+                assert final_url in str(failure.value)
+                assert f"after {2 if fallback_stalls else 1} attempt" in str(failure.value)
+            else:
+                version = "1.0.0" if latest_status == 200 else "2.0.0"
+                assert installer.resolve_latest("linux-x86_64", {tool}) == {tool: version}
+            assert installer.time.monotonic() - started < 2
+            assert all(timeout <= 10 for timeout in timeouts)
+            paths = [f"/{package}/latest"]
+            if latest_status not in (200, 404):
+                paths.append(f"/{package}")
+            assert seen == paths
+        finally:
+            stopped.set()
+            server.shutdown()
+            thread.join()
+
+
+@pytest.mark.parametrize(
+    ("source", "fallback"),
+    [("fetch_page", False), ("fetch", False), ("npm", False), ("npm", True)],
+)
+def test_incomplete_metadata_read_reports_context_without_retry(monkeypatch, source, fallback):
+    base = "https://registry.npmjs.org/acpx"
+    seen = []
+
+    class Registry(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            if fallback and self.path.endswith("/latest"):
+                self.send_response(504)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"version": "1.0.0"}')
+
+        def log_message(self, *args):
+            pass
+
+    real_urlopen = installer.urllib.request.urlopen
+    with ThreadingHTTPServer(("127.0.0.1", 0), Registry) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def local_urlopen(request, *, timeout):
+            path = installer.urllib.parse.urlsplit(request.full_url).path
+            return real_urlopen(f"http://127.0.0.1:{server.server_port}{path}", timeout=timeout)
+
+        monkeypatch.setattr(installer.urllib.request, "urlopen", local_urlopen)
+        try:
+            with pytest.raises(ValueError) as failure:
+                if source == "npm":
+                    installer.resolve_latest("linux-x86_64", {"acpx"})
+                else:
+                    getattr(installer, source)(base + "/latest", "test release")
+            final_url = base if fallback else base + "/latest"
+            assert final_url in str(failure.value)
+            assert f"after {2 if fallback else 1} attempt(s)" in str(failure.value)
+            assert isinstance(failure.value.__cause__, IncompleteRead)
+            assert seen == (["/acpx/latest", "/acpx"] if fallback else ["/acpx/latest"])
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+@pytest.mark.parametrize(
+    ("fallback", "body", "cause"),
+    [
+        (False, b'{"version":', json.JSONDecodeError),
+        (True, b'{"dist-tags":', json.JSONDecodeError),
+        (False, b"{}", KeyError),
+        (True, b"{}", KeyError),
+        (True, b'{"versions": {}}', KeyError),
+        (True, b'{"versions": {}, "dist-tags": {}}', KeyError),
+        (True, b'{"versions": {}, "dist-tags": {"latest": "2.0.0"}}', KeyError),
+        (True, b'{"versions": {"2.0.0": {}}, "dist-tags": {"latest": "2.0.0"}}', KeyError),
+    ],
+)
+def test_invalid_npm_metadata_reports_context_without_retry(monkeypatch, fallback, body, cause):
+    base = "https://registry.npmjs.org/acpx"
+    seen = []
+
+    def urlopen(request, *, timeout):
+        seen.append(request.full_url)
+        if fallback and request.full_url.endswith("/latest"):
+            raise http_error(504)
+        return Download(body)
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
+    with pytest.raises(ValueError) as failure:
+        installer.resolve_latest("linux-x86_64", {"acpx"})
+    final_url = base if fallback else base + "/latest"
+    assert final_url in str(failure.value)
+    assert f"after {2 if fallback else 1} attempt(s)" in str(failure.value)
+    assert isinstance(failure.value.__cause__, cause)
+    assert seen == ([base + "/latest", base] if fallback else [base + "/latest"])
 
 
 # What each fake GitHub release publishes for linux-x86_64: tag and asset name.
