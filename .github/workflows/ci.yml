@@ -145,9 +145,12 @@ jobs:
 
       # tests/test_configuration.py runs koncreet.yml under fakeroot when not root.
       - name: Install fakeroot
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends fakeroot
+          if ! command -v fakeroot >/dev/null 2>&1; then
+            sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+            sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install --yes --no-install-recommends fakeroot
+          fi
 
       # pytest-xdist: -n auto is one worker per CPU of the runner, and worksteal lets an idle
       # worker take the tail of a busy one's queue, so the long node tests do not set the finish.
