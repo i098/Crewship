@@ -1,7 +1,7 @@
 {
   // Dev Container for the Crewship worker image.
   //
-  // Same Dockerfile target as compose and CI: an isolated non-root container with
+  // Same provisioned filesystem as compose and CI: an isolated non-root container with
   // the latest, checksum-verified agent/development toolchain (the three omp
   // marketplace plugins are the one unverified exception) already converged by
   // `./ship.sh launch --config blueprint/containers/crewship.container.yml`.
@@ -13,7 +13,8 @@
   "build": {
     "context": "..",
     "dockerfile": "../Dockerfile",
-    "target": "worker",
+    // Dev Containers inspects the base image; scratch cannot be pulled.
+    "target": "builder",
     "args": {
       "CREWSHIP_USER": "coder",
       "CREWSHIP_UID": "1000",
