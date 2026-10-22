@@ -1035,6 +1035,47 @@ def test_unknown_or_missing_weekly_window_withholds_the_provider():
     assert spaces.usage_left([usage_account("anthropic", 0.2), short_only]) is None
 
 
+@pytest.mark.parametrize("age", [200, 3600, 3601])
+@pytest.mark.parametrize(
+    "error",
+    [subprocess.TimeoutExpired("omp", 60), subprocess.CalledProcessError(1, "omp")],
+)
+def test_failed_usage_refresh_keeps_last_good_percentages(monkeypatch, age, error):
+    now = 1000 + age
+    monkeypatch.setattr(spaces.time, "time", lambda: now)
+    cache = {"usage": {"at": 1000, "pct": {"anthropic": 15, "openai-codex": 0}}}
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(args)
+        raise error
+
+    monkeypatch.setattr(spaces, "run", fail)
+    expected = f"7d left {spaces.CLAUDE} ▰▱▱▱  15%  {spaces.OPENAI} ▱▱▱▱   0%"
+    if age > 3600:
+        expected = expected.replace("7d left ", "7d stale ").replace("%  ", "% ")
+    assert spaces.usage_row(cache) == expected
+    assert cache["usage"]["at"] == 1000
+    spaces.usage_row(cache)
+    assert len(calls) == 1
+
+    now += spaces.USAGE_TTL
+    report = {"reports": [usage_account("anthropic", 0.5), usage_account("openai-codex", 0.2)]}
+    monkeypatch.setattr(spaces, "run", lambda *a, **kw: json.dumps(report))
+    assert spaces.usage_row(cache) == (
+        f"7d left {spaces.CLAUDE} ▰▰▱▱  50%  {spaces.OPENAI} ▰▰▰▱  80%"
+    )
+
+
+@pytest.mark.parametrize("section", ["reports", "accountsWithoutUsage"])
+def test_usage_row_ignores_unknown_providers(monkeypatch, section):
+    report = {"reports": [usage_account("anthropic", 0.85), usage_account("openai-codex", 1)]}
+    monkeypatch.setattr(spaces, "run", lambda *a, **kw: json.dumps(report))
+    expected = spaces.usage_row({})
+    report.setdefault(section, []).append({"provider": "inception"})
+    assert spaces.usage_row({}) == expected
+
+
 def test_workspace_counts_exclude_idle_blocked_shells_and_other_workspaces(fixture, tmp_path):
     home, run = fixture
     panes = [
@@ -1054,7 +1095,7 @@ def test_workspace_counts_exclude_idle_blocked_shells_and_other_workspaces(fixtu
     assert reported["w1"]["host"].endswith("◉ 2/5")
 
 
-def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tmp_path):
+def test_usage_refresh_is_bounded_and_failure_keeps_old_percentages(fixture, tmp_path):
     _, run = fixture
     rows = [
         usage_account("anthropic", 0.25),
@@ -1072,9 +1113,9 @@ def test_usage_refresh_is_bounded_and_failure_clears_old_percentages(fixture, tm
     assert run()["w1"]["usage"] == expected
     path = tmp_path / "cache/crewship/herdr-spaces.json"
     cache = json.loads(path.read_text())
-    cache["usage"]["at"] -= spaces.USAGE_TTL
+    cache["usage"]["checked_at"] -= spaces.USAGE_TTL
     path.write_text(json.dumps(cache))
-    assert run()["w1"]["usage"] == "7d left \uec82 ░░?░   ?%  \uec81 ░░?░   ?%"
+    assert run()["w1"]["usage"] == expected
 
 
 def test_unreported_account_preserves_unknown_provider_usage(fixture, tmp_path):
