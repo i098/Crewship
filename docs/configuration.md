@@ -21,7 +21,8 @@
 | `scripts/fetch-secrets.sh` | `scripts/fetch-super-env.sh` | Pulls `super.env` from the fleet-secrets Worker into `~/super.env`. With `NAME`, prints that one readable secret instead. |
 
 The home layout includes the Crewship CLI and schedule directories.
-On a fresh checkout, `chart` creates these directories and previews the command link without writing its target files.
+For an existing target account, `chart` creates these directories when missing and previews the command link without writing its target files.
+If the target account is absent, `chart` reports the account work and skips steps that need that account.
 
 For absent Herdr, Herdr Spaces, Chrome pruner, and stall nudge units, `chart` skips service starts and notified restarts.
 Errors from installed units remain visible.
