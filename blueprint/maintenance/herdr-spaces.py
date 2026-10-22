@@ -25,6 +25,8 @@ Zero decision and queue counts are cleared. Disk is cached 15 minutes,
 provider usage three minutes, and the queue count as above, in
 ~/.cache/crewship/herdr-spaces.json. Failed usage refreshes keep the last
 percentages, marked stale after one hour. The script always exits 0.
+One due home gets up to 30 seconds for its disk refresh per run. Deferred
+homes keep their cached disk values until a later run can refresh them.
 
 Herdr's mobile layout ignores sidebar rows, so the same data also goes where
 it shows. A home's agent pane (one with a `who` token) gets its session topic
@@ -50,6 +52,7 @@ HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "crewship"
 TOKENS = ("short", "decisions", "crew", "queue", "res", "alert", "host", "machine", "usage")
 DISK_TTL = 15 * 60
+DISK_BUDGET = 30  # seconds of disk discovery and measurement per run
 QUEUE_TTL = 60  # "ready" also moves with date gates, so recount at least once a minute
 TAB_TTL = 30  # seconds between looks at the machine tab: its shares move every second
 USAGE_TTL = 3 * 60
@@ -234,24 +237,34 @@ def watcher_silent(home: Path) -> bool:
     return rc == 0
 
 
-def disk_paths(home: Path, other_homes: set[Path]) -> list[Path]:
+def disk_paths(home: Path, other_homes: set[Path], deadline: float) -> list[Path]:
     """The home plus its projects' worktree pools, as treehouse reports them."""
     paths = [home]
     for project in sorted((home / "projects").glob("*/")):
         try:
-            pool = json.loads(run("treehouse", "status", "--json", cwd=project))
+            pool = json.loads(
+                run(
+                    "treehouse",
+                    "status",
+                    "--json",
+                    cwd=project,
+                    timeout=min(20, deadline - time.monotonic()),
+                )
+            )
+        except subprocess.TimeoutExpired:
+            raise
         except (OSError, subprocess.SubprocessError, ValueError):
             continue
         paths += [Path(w["path"]) for w in pool if Path(w["path"]) not in other_homes]
     return paths
 
 
-def disk_bytes(paths: list[Path]) -> int:
+def disk_bytes(paths: list[Path], deadline: float) -> int:
     out = subprocess.run(
         ["du", "-sxbc", "--", *map(str, paths)],
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=deadline - time.monotonic(),
     ).stdout
     return int(out.splitlines()[-1].split()[0])
 
@@ -363,6 +376,7 @@ def main() -> None:
     prev_cpu = cache.get("cpu", {})
     dt = now - cache.get("cpu_at", now)
     disk_cache = cache.setdefault("disk", {})
+    disk_budget = DISK_BUDGET
     cached_folds, folds = cache.get("folds", {}), {}
     live_ids = {ws["workspace_id"] for ws in workspaces}
 
@@ -373,6 +387,7 @@ def main() -> None:
         tmp.replace(cache_file)
 
     def res(wid: str, home: Path | None) -> str:
+        nonlocal disk_budget
         rows = procs.get(wid, [])
         parts = []
         before = prev_cpu.get(wid)
@@ -383,16 +398,18 @@ def main() -> None:
         parts.append(f"▤ {pct(sum(r for _, _, r in rows), meminfo()[0])}")
         if home:
             hit = disk_cache.get(str(home))
-            if not hit or now - hit["at"] >= DISK_TTL:
+            if disk_budget > 0 and (not hit or now - hit["at"] >= DISK_TTL):
                 others = set(homes.values()) - {home}
+                deadline = time.monotonic() + disk_budget
+                disk_budget = 0
                 try:
-                    size = disk_bytes(disk_paths(home, others))
+                    size = disk_bytes(disk_paths(home, others, deadline), deadline)
                 except (OSError, subprocess.SubprocessError, ValueError, IndexError) as err:
                     print(f"{home}: disk: {err}", file=sys.stderr)
                     size = hit and hit["bytes"]
                 hit = disk_cache[str(home)] = {"at": now, "bytes": size}
                 save()
-            if hit["bytes"] is not None:
+            if hit and hit["bytes"] is not None:
                 parts.append(f"⛁ {pct(hit['bytes'], fs_size(home))}")
         return "  ".join(parts)
 

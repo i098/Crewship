@@ -85,13 +85,16 @@ The other mobile fields follow the existing mechanism (see [On a phone](#on-a-ph
 | Source | Refresh | Cost |
 | --- | --- | --- |
 | CPU, RAM, counts, watcher, machine | every run (1 s) | One pass over `/proc` and file reads. CPU needs two runs, so it appears from the second run on. |
-| Queue | when the backlog changes, else every minute | One `fm-tasks-axi.sh ready` per home, most of a run's cost when it runs. |
-| Disk | every 15 minutes | One `du` over each home and its pools. On a host with large pools this run can take a minute; the other values wait for it. |
+| Queue | when the backlog changes, else every minute | One `fm-tasks-axi.sh ready` per home. |
+| Disk | every 15 minutes | `treehouse status --json` finds each home's pools; `du` measures the home and those pools. One due home gets up to 30 seconds per run. |
 | Provider usage | every 3 minutes | One `omp usage --json` call with a 60-second timeout. Failed refreshes keep the cached percentages and delay the next attempt for 3 minutes. `omp` itself reuses each account's report for 5 minutes ±25%, so with healthy fetches the cache lifetimes add up to about 9 minutes 16 seconds, plus run time. A failed `omp` fetch can return an older last good report. |
 
 The caches live in `~/.cache/crewship/herdr-spaces.json`.
 A failed usage refresh keeps the last percentages. After one hour without a successful refresh, the label changes to `7d stale`.
 Without cached percentages, a failed refresh shows unknown. Other failed sources also keep their previous values.
+The other homes keep their cached disk values and retry on the next run.
+A disk timeout keeps the home's last good size and delays its next attempt for 15 minutes.
+A pool lookup timeout never replaces the cached size with a partial total.
 A failed run never fails the unit: errors go to the journal (`journalctl --user -u herdr-spaces.service`).
 Herdr drops workspace tokens when its server restarts; the next run reports them again.
 
