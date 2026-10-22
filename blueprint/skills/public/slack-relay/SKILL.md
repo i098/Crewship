@@ -24,9 +24,12 @@ Each `omp -p` call handles at most 150 messages and 120 000 characters, with `an
 This stays far under 100k tokens.
 
 - By default, keep: DMs to him, @mentions, threads he is in, decisions, deadlines, asks of him, incidents, and teammates about his work.
-- Drop: chatter, bots, announcements.
-- For a missing verdict, the fallback keeps only non-bot DMs or mentions that pass the configured filter.
+- In Boolean modes, drop: chatter, bots, announcements.
+- In Boolean modes, a missing verdict keeps only non-bot DMs or mentions that pass the configured filter.
   A failed or unparsable call leaves eligible messages unseen for a retry, with a backoff up to 5 min.
+- In direct mode, keep every eligible DM or mention, regardless of the model's verdict.
+  The model can shorten the line but cannot reject the message.
+  A failed call or a missing line uses the plain sender, channel, and message text.
 
 Every decision is one line in `~/.local/state/crewship/slack-relay/log.jsonl`: time, key, workspace, channel, ts, sender, `kept` or `dropped`, and the reason. To see why a text did or did not come, read that file.
 
@@ -46,7 +49,9 @@ Every decision is one line in `~/.local/state/crewship/slack-relay/log.jsonl`: t
 Set `"mention_only": true` to drop untagged messages before the model call, including DMs and thread replies.
 A tag must use `<@USER_ID>` or `<@USER_ID|label>` with that workspace's `self` ID.
 This setting defaults to `false`; enabling it clears all previously queued lines.
-Set `"mention_only": "direct"` for one-to-one DMs and explicit mentions; group DMs still need a tag. Switching clears queued lines.
+Set `"mention_only": "direct"` to notify for every eligible one-to-one DM and explicit mention; group DMs still need a tag.
+This guarantee also covers bot messages that pass the filter and messages sent through `replay`.
+Switching clears queued lines.
 
 `self` is required: the operator's own user id in each workspace (his messages are skipped). Find it as the user id that is the author of one of his own messages in the slk cache. A workspace without `self` is not relayed. `workspaces` gives the model a display name for each workspace. Optional keys and defaults: `db` (`~/.local/share/slk/cache.db`), `model`, `notify` (`["fm-imessage", "--"]`), `interval` 15, `window` 60, `lookback` 21600, `max_batch` 150, `max_chars` 120000, `text_chars` 700, `max_lines` 8.
 Set `dbs` to a list of cache paths to read multiple slk profiles instead of `db`; each cache stays read-only, with shared message deduplication.

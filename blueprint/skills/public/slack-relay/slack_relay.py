@@ -199,6 +199,8 @@ def decide(cfg, m, v):
     reason = drop_reason(cfg, m)
     if reason:
         return False, reason, ""
+    if cfg["mention_only"] == "direct":
+        return True, "direct mention or DM", str((v or {}).get("line") or "").strip()[:240]
     if v is None:
         sure = m["view"]["type"] == "dm" or m["view"]["mentions_him"]
         return sure and not m["view"]["bot"], "no verdict from the model", ""
@@ -215,7 +217,12 @@ def process(cfg, batch, st, test=False):
                       user=m["view"]["from"], decision="dropped", reason=reason, **({"test": True} if test else {}))
         else:
             eligible.append(m)
-    got = verdicts(cfg, eligible) if eligible else {}
+    try:
+        got = verdicts(cfg, eligible) if eligible else {}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        if cfg["mention_only"] != "direct":
+            raise
+        got = {}
     for i, m in enumerate(eligible):
         keep, reason, line = decide(cfg, m, got.get(i))
         v = m["view"]

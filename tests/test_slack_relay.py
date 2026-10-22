@@ -32,8 +32,15 @@ open(os.environ["STUB_DIR"] + "/omp.views", "w").write(json.dumps(views))
 mode = open(os.environ["STUB_DIR"] + "/omp.mode").read().strip()
 if mode == "garbage":
     print("sorry"); sys.exit(0)
+if mode == "error":
+    sys.exit(1)
 out = [{"id": v["id"], "keep": "KEEP" in v["text"], "reason": "stub", "line": f"{v['from']}, {v['channel']}: {v['text']}"}
        for v in views if not (mode == "skip" and "SKIP" in v["text"])]
+if mode == "empty":
+    out = []
+if mode in ("no-line", "blank-line"):
+    for v in out:
+        v["line"] = None if mode == "no-line" else "   "
 print("Here you go:\\n" + json.dumps(out))
 """
 NOTIFY = """#!/bin/sh
@@ -181,9 +188,11 @@ def test_thread_and_mention_context_reaches_the_model_and_a_skipped_message_fall
     assert "http" not in "".join(env.texts()) and "slack://" not in "".join(env.texts())
 
 
-def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env):
+@pytest.mark.parametrize("mention_only", [False, True])
+def test_an_unparsable_answer_logs_nothing_and_the_message_is_retried(env, mention_only):
+    env.cfg["mention_only"] = mention_only
     env.run(100)
-    env.add("101.1", "D1", BOB, "KEEP retry me")
+    env.add("101.1", "D1", BOB, f"<@{ME}> KEEP retry me")
     (env.stub / "omp.mode").write_text("garbage")
     with pytest.raises(ValueError):
         env.run(110)
@@ -219,6 +228,16 @@ def test_mention_only_keeps_explicit_mentions(env, mention):
     env.run(110)
     assert env.texts() == ["Bob, #dev: @Me KEEP review"]
     assert env.log()[0]["decision"] == "kept"
+
+
+@pytest.mark.parametrize("mention_only", [False, True])
+def test_boolean_modes_keep_the_model_veto(env, mention_only):
+    env.cfg["mention_only"] = mention_only
+    env.run(100)
+    env.add("101.1", "C1", BOB, f"<@{ME}> hello")
+    env.run(110)
+    assert env.texts() == []
+    assert env.log()[0]["decision"] == "dropped"
 
 
 @pytest.mark.parametrize("channel,thread", [("D1", ""), ("C1", "50.0")])
@@ -289,16 +308,40 @@ def test_direct_mode_filters_before_the_model(env, channel_type, tagged):
     env.cfg["mention_only"] = "direct"
     env.db.execute("update channels set type=? where id='C1'", (channel_type,))
     env.run(100)
-    text = f"<@{ME}> KEEP review" if tagged else "KEEP review"
+    text = f"<@{ME}> hello" if tagged else "hello"
     env.add("101.1", "C1", BOB, text)
     env.run(110)
     allowed = tagged or channel_type == "dm"
     assert env.calls() == int(allowed)
     where = {"dm": "DM", "mpim": "group", "group_dm": "group"}.get(channel_type, "#dev")
-    assert env.texts() == ([f"Bob, {where}: {'@Me ' if tagged else ''}KEEP review"] if allowed else [])
+    assert env.texts() == ([f"Bob, {where}: {'@Me ' if tagged else ''}hello"] if allowed else [])
     assert env.log()[0]["decision"] == ("kept" if allowed else "dropped")
     if not allowed:
         assert env.log()[0]["reason"] == "not tagged or DM"
+
+
+@pytest.mark.parametrize("command", ["once", "replay"])
+@pytest.mark.parametrize("mode", ["ok", "no-line", "blank-line", "empty", "garbage", "error"])
+@pytest.mark.parametrize("channel,text,where", [("D1", "hello", "DM"), ("C1", f"<@{ME}> hello", "#dev")])
+@pytest.mark.parametrize("sender,name", [(BOB, "Bob"), (BOT, "CI")])
+def test_direct_mode_delivers_despite_model_rejection_or_failure(
+    env, tmp_path, monkeypatch, command, mode, channel, text, where, sender, name
+):
+    env.cfg["mention_only"] = "direct"
+    (tmp_path / "config.json").write_text(json.dumps(env.cfg))
+    env.run(100)
+    env.add("101.1", channel, sender, text)
+    (env.stub / "omp.mode").write_text(mode)
+    args = ["slack_relay.py", command]
+    if command == "replay":
+        args.extend([WS, channel, "101.1"])
+    monkeypatch.setattr(sys, "argv", args)
+    monkeypatch.setattr(sr.time, "time", lambda: 110)
+    sr.main()
+    prefix = "[test] " if command == "replay" else ""
+    message = "@Me hello" if channel == "C1" else "hello"
+    assert env.texts() == [f"{prefix}{name}, {where}: {message}"]
+    assert [row["decision"] for row in env.log()] == ["kept"]
 
 
 @pytest.mark.parametrize("verdict", [None, {"keep": True, "reason": "keep everything"}])
