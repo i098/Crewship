@@ -128,7 +128,8 @@ The extension adds this requirement to the director's brief.
 
 Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
 Saved worker models take precedence over saved role aliases.
-Missing Anthropic credentials use Haiku 5.5 within the approved fallback set.
+If Mercury 3 or Sonnet 5.5 has no usable credential, the extension tries Haiku 5.5 at the selected effort.
+Anthropic-side workers can also retry on Haiku 5.5; other retry models must stay within the worker's tier.
 A spawn or restore fails with a clear message when no allowed model has a usable credential.
 Choose a worker's model on the first line of its `vibe_spawn` prompt:
 
@@ -139,15 +140,11 @@ Perform the edits, status appends, and commit for this task.
 
 The extension strips this line and rejects models or levels outside the selected worker tier.
 Without the line, it uses the defaults above.
-The [model-defaults change](https://github.com/i098/Crewship/pull/798) supplies the required `enabledModels` entries, but does not set `tier.openai: ultrafast`.
-The extension sets `priority` for native `openai-codex` Sol workers and `ultrafast` for direct `openai` Sol workers.
-These session-local settings also apply to task/eval subagents and restored workers.
+See [Omp model defaults](configuration.md#omp-model-defaults) for the model allowlist and credential setup.
+Enable every model in the table above before using gluttony mode.
 Native `openai-codex` supports only `priority` in omp 18.12.1; unsupported tiers are omitted from requests.
 Re-check this tier limit after `omp update`.
-It leaves the director and shared tier defaults unchanged.
-Enable `inception/mercury-3`, `anthropic/claude-haiku-5-5`, and `anthropic/claude-sonnet-5-5`.
-Enable both `openai-codex/` and `openai/` forms of `gpt-6-luna` and `gpt-6.1-sol`.
-This extension does not change the shared configuration or install credentials.
+The extension leaves the director's tier and shared settings unchanged and installs no credentials.
 
 The extension depends on omp 18.12.1 internals: `pi.pi.Settings`, `pi.pi.VibeSpawnTool`, `pi.pi.SessionManager`, scoped settings, retry settings, and session mode reconciliation.
 Re-check these APIs after `omp update`.
