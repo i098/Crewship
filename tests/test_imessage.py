@@ -2169,6 +2169,195 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     logs = text(err)
     assert "UNAVAILABLE" in logs and not re.search(r"^\s+at ", logs, re.M), logs
 
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("answer", ["reply", "tapback", "tapback-text"])
+@pytest.mark.parametrize("burst, fail_note", [(1, False), (2, True)])
+def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path, answer, burst, fail_note):
+    """While $STATE/muted exists, nothing outgoing is queued; unmuting resumes; inbound texts still arrive."""
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    (fake / "desk-on").touch()
+    (tmp_path / "bin/fm-inbox").write_text(
+        f'#!/bin/bash\n[ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ] || exit 1\n'
+        f'printf "%s\\n" "$*" >> {notes}\n'
+    )
+    bridge = start(1)
+    try:
+        def outbox():
+            return list((state / "outbox").glob("*.json"))
+
+        def sent():
+            return text(fake / "sent").splitlines()
+
+        # Warm up: his first text establishes a chat, and the desk answers while unmuted.
+        inbound("m1", wait_note=False, text="you there")
+        wait_for(lambda: sent() == ["send claude-haiku-5-5"], "the desk reply while unmuted")
+        wait_for(lambda: outbox() == [], "the warmup item dequeued")
+        wait_for(lambda: text(fake / "typing-events").splitlines()
+                 and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"],
+                 "typing stopped after the warmup")
+        typing_before = len(text(fake / "typing-events").splitlines())
+        if answer != "reply":
+            result = {"kind": "tapback", "emoji": "❤️"}
+            if answer == "tapback-text":
+                result["text"] = "thanks"
+            (tmp_path / "bin/omp").write_text(
+                f"#!/bin/bash\ncat >/dev/null\necho '{json.dumps(result)}'\n"
+            )
+        assert outbox() == []
+        # Mute: nothing outgoing is queued, for a Firstmate send, a reaction, and a desk answer.
+        (state / "muted").touch()
+        assert "nothing queued: muted" in cli("hello from firstmate", fails=True)
+        assert "nothing queued: muted" in cli("--react", "👍", fails=True)
+        if fail_note:
+            (fake / "inbox-fail").touch()
+        for i in range(2, 2 + burst):
+            inbound(f"m{i}", wait_note=False, text="What desk model answers?" if answer == "reply" else "thanks")
+        wait_for(lambda: f"m{1 + burst} {'basic' if answer == 'reply' else 'react ❤️'}" in text(state / "desk.log"),
+                 "the muted desk turn ran")
+        wait_for(lambda: len(text(fake / "typing-events").splitlines()) >= typing_before + 2
+                 and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"],
+                 "typing stopped after the muted desk turn")
+        typing_after = text(fake / "typing-events")
+        time.sleep(4.2)
+        assert text(fake / "typing-events") == typing_after
+        assert outbox() == [] and sent() == ["send claude-haiku-5-5"]
+        # Inbound is still recorded while muted: the owner text reaches desk memory.
+        source = [json.loads(line) for path in (state / "memory/main").glob("*.jsonl") for line in path.read_text().splitlines()]
+        assert any(record["text"] == ("What desk model answers?" if answer == "reply" else "thanks") for record in source)
+        if fail_note:
+            assert not any(f"photon-m{i} " in text(notes) for i in range(2, 2 + burst))
+            routes = [json.loads(line) for line in text(state / "routing.jsonl").splitlines()]
+            for i in range(2, 2 + burst):
+                assert any(event.get("route") == "handoff" and f"photon-m{i}" in event["ids"] for event in routes)
+        else:
+            wait_for(lambda: "photon-m2 " in text(notes), "the accepted muted note")
+        bridge.terminate()
+        bridge.wait(10)
+        if fail_note:
+            (fake / "inbox-fail").unlink()
+        bridge = start(2)
+        wait_for(lambda: all(f"photon-m{i} " in text(notes) for i in range(2, 2 + burst)),
+                 "all muted notes after restart")
+        cli("--typing", fails=True)
+        for i in range(2, 2 + burst):
+            assert sum(f"photon-m{i} " in line for line in text(notes).splitlines()) == 1
+        assert outbox() == [] and sent() == ["send claude-haiku-5-5"]
+        # Unmute: sends are queued again.
+        (state / "muted").unlink()
+        cli("after unmute")
+        wait_for(lambda: sent() == ["send claude-haiku-5-5", "send after unmute"], "the send after unmute")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("path, mute_after_storage", [
+    ("/send", False), ("/react", False), ("/image", False), ("/card", False),
+    ("/image", True), ("/card", True),
+])
+def test_bridge_rejects_commands_muted_while_reading_body(tmp_path, path, mute_after_storage):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    if mute_after_storage:
+        (tmp_path / "app/bunfig.toml").write_text('preload = ["./mute-after-storage.ts"]\n')
+        (tmp_path / "app/mute-after-storage.ts").write_text(f"""
+import {{ mock }} from "bun:test";
+const real = {{ ...await import("node:fs") }};
+const state = {json.dumps(str(state))};
+let imageFd;
+let didMute = false;
+const mute = () => {{
+  if (!didMute) real.writeFileSync(`${{state}}/muted`, "");
+  didMute = true;
+}};
+mock.module("node:fs", () => ({{
+  ...real,
+  openSync(path, ...args) {{
+    const fd = real.openSync(path, ...args);
+    if (String(path).startsWith(`${{state}}/outgoing/`)) imageFd = fd;
+    return fd;
+  }},
+  fsyncSync(fd) {{
+    real.fsyncSync(fd);
+    if (fd === imageFd) mute();
+  }},
+  renameSync(from, to) {{
+    real.renameSync(from, to);
+    if (String(to).startsWith(`${{state}}/cards/`)) mute();
+  }},
+}}));
+""")
+    bridge = start(1)
+    connection = None
+    try:
+        inbound("m1", text="hello")
+        port = int(re.search(r"listening on 127.0.0.1:(\d+)", text(tmp_path / "out"))[1])
+        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+        body = b"hello"
+        content_type = "text/plain"
+        if path == "/card":
+            body = json.dumps({"kind": "choice", "key": "mute", "title": "Pick", "options": ["a", "b"]}).encode()
+        elif path == "/image":
+            content_type = "multipart/form-data; boundary=mute-test"
+            body = (b'--mute-test\r\nContent-Disposition: form-data; name="image"; filename="a.png"\r\n'
+                    b"Content-Type: image/png\r\n\r\n" + png(2, 2) + b"\r\n--mute-test--\r\n")
+        before = text(state / "routing.jsonl").count('"deskCancelled":true')
+        connection.putrequest("POST", path)
+        connection.putheader("X-Firstmate", "1")
+        connection.putheader("Content-Type", content_type)
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders(body[:1])
+        wait_for(lambda: text(state / "routing.jsonl").count('"deskCancelled":true') > before,
+                 "the command waiting for its body")
+        if not mute_after_storage:
+            (state / "muted").touch()
+        connection.send(body[1:])
+        response = connection.getresponse()
+        assert response.status == 503
+        assert response.read() == b"nothing queued: muted\n"
+        assert list((state / "outbox").glob("*.json")) == []
+        assert text(fake / "sent") == ""
+        assert list((state / "outgoing").iterdir()) == []
+        assert list((state / "cards").iterdir()) == []
+        (state / "muted").unlink()
+        connection.request("POST", path, body=body, headers={
+            "X-Firstmate": "1", "Content-Type": content_type,
+        })
+        accepted = connection.getresponse()
+        assert accepted.status == 200
+        assert accepted.read().startswith(b"queued ")
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 1, "the command after unmuting")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the sent item removed")
+        assert list((state / "outgoing").iterdir()) == []
+        assert len(list((state / "cards").glob("*.json"))) == (1 if path == "/card" else 0)
+    finally:
+        if connection:
+            connection.close()
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("args", [("--typing",), ("--react", "👍")])
+def test_bridge_rejects_actions_without_an_owner_message(tmp_path, args):
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        assert "no text from the owner yet" in cli(*args, fails=True)
+        assert list((state / "outbox").glob("*.json")) == []
+        assert text(fake / "typing-events") == ""
+        assert text(fake / "sent") == ""
+        inbound("m1", text="hello")
+        assert cli(*args).startswith("typing" if args[0] == "--typing" else "queued tapback")
+        if args[0] == "--typing":
+            wait_for(lambda: any(json.loads(line)["on"] for line in text(fake / "typing-events").splitlines()),
+                     "typing in the owner's chat")
+        else:
+            wait_for(lambda: "react m1 👍" in text(fake / "sent"), "the targeted reaction")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_bridge_files_his_edits_as_new_notes(tmp_path):

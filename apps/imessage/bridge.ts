@@ -108,6 +108,8 @@ const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every 
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
 const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
+// See docs/imessage.md#mute for the mute contract.
+const muted = () => existsSync(`${STATE}/muted`);
 const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
 const IG_MISSING = ["INSTAGRAM_GRAPH_APP_SECRET", "INSTAGRAM_GRAPH_VERIFY_TOKEN"].filter((name) => !env[name]);
 if (env.INSTAGRAM_DM_BACKEND === "graph" && IG_MISSING.length) console.error(`fm-imessage: the Instagram webhook is off: set ${IG_MISSING.join(" and ")}`);
@@ -398,6 +400,7 @@ Bun.serve({
       }
     }
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
+    if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
@@ -425,6 +428,7 @@ Bun.serve({
       // Like a proactive text, a card goes to his latest direct chat. Only Photon can send an app bubble.
       const chat = proactiveRef;
       if (!chat || !lineOf(chat) || (card.app && !lineOf(chat)!.sendCard)) return new Response(`nothing queued: ${card.app ? "an app card needs his latest direct chat on the photon transport" : "no direct chat with him yet"}\n`, { status: 503 });
+      if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
       return queue({ ...chat, card: cards.add(card, chat).token }, `card ${card.key}`);
     }
     // /image is a multipart form: the file `image` and the optional text `caption`, sent as bubbles after the photo.
@@ -440,6 +444,7 @@ Bun.serve({
     // A threaded reply goes out on the transport and in the conversation of the text it replies to.
     const destination = target ?? proactiveRef;
     if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
+    if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
     return queue({ ...destination, image, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
@@ -482,8 +487,11 @@ if (latestRef) {
 
 // Puts one item in the outbox and answers once the item is on disk.
 function queue(item: Out, what: string) {
-  if (stopping) return new Response("stopping\n", { status: 503 });
-  put(item);
+  if (!put(item)) {
+    if (item.image) rmSync(item.image.path, { force: true });
+    if (item.card) rmSync(`${STATE}/cards/${item.card}.json`, { force: true });
+    return new Response(stopping ? "stopping\n" : "nothing queued: muted\n", { status: 503 });
+  }
   return new Response(`queued ${what}; the bridge sends in order and retries while the upstream fails\n`);
 }
 
@@ -502,8 +510,10 @@ function stage(photo: PreparedImage): Picture {
 
 // Puts one item in the outbox with a client GUID of its own.
 function put(item: Out) {
-  if (stopping) return;
+  if (stopping) return false;
+  if (muted()) return false;
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
+  return true;
 }
 
 function finishDeskDelivery(o: Out) {
@@ -874,6 +884,10 @@ function flushRoutes() {
   let failed = false;
   for (const item of routing.values()) {
     try {
+      if (item.route === "desk" && muted()) {
+        if (item.out) finishDeskDelivery(item.out);
+        recordRoute({ ids: [item.requestId], route: "handoff" });
+      }
       if (item.route === "handoff") {
         if (!fileNote(item.requestId, item.text)) throw new Error("the inbox note failed; routing retains the request");
       } else if (item.route !== "desk") continue;
