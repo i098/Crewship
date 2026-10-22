@@ -262,6 +262,14 @@ export class Memory {
     return this.view.filter((x) => last(x) < end).map((x) => render(this.nodes, x)).join("\n");
   }
 
+  // Recent originals exclude the pending burst and expose no private record fields.
+  recent(end = this.msgs.length): string {
+    const rows = this.msgs.slice(Math.max(0, end - 12), end)
+      .map(({ i, kind, text }) => JSON.stringify({ i, kind, text: clip(text, 500) }));
+    while (bytes(rows.join("\n")) > 6_000) rows.shift();
+    return rows.join("\n");
+  }
+
   // Runnable or running builds, excluding work held by the outage cooldown.
   get pending() {
     return (Date.now() >= this.retry.nextAllowed ? this.queue.length : 0) + this.running;

@@ -870,9 +870,15 @@ import {{ LIMIT_REACHED }} from {json.dumps(str(ROOT / "apps/imessage/memory.ts"
 const system = deskPrompt("the owner", "mercury-3", "");
 const view = Array.from({{ length: 2000 }}, (_, i) => `${{i}}+1|the owner wrote about the trip and the build plan`).join("\\n");
 const ask = {json.dumps(latest)} === "short" ? "What did I say?" : "HEAD" + 'he "asked"\\n'.repeat(20000) + "TAIL";
-const {{ prompt }} = deskInput(system, view, "The build is paused.", ask, "inception");
+const recent = Array.from({{ length: 12 }}, (_, i) => JSON.stringify({{ i, kind: "supervisor", text: '"\\\\\\n'.repeat(100) }})).join("\\n");
+const {{ prompt }} = deskInput(system, view, "The build is paused.", ask, "inception", recent);
 console.log(JSON.stringify({{ system, prompt, LIMIT_REACHED, INCEPTION_MAX }}));
 """)
+    raw = made["prompt"].split("<recent>\n", 1)[1].split("\n</recent>", 1)[0]
+    rows = [json.loads(line) for line in raw.splitlines()]
+    assert 0 < len(rows) < 12
+    assert [row["i"] for row in rows] == list(range(12 - len(rows), 12))
+    assert len(json.dumps(raw, ensure_ascii=False)[1:-1].encode()) <= 6000
     sizes, results = [], []
 
     class Server(BaseHTTPRequestHandler):

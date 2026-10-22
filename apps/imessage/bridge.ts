@@ -674,7 +674,7 @@ async function draftBasic(pending: Routing[], current: () => boolean) {
   const { status, statusOk } = result;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
   const latestText = pending.map((r, i) => `owner ${i + 1}: ${r.text}`).join("\n");
-  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER);
+  const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER, memory.recent(from));
   if (!statusOk || !prompt.includes(latestText)) return;
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
   deskRun = proc;
