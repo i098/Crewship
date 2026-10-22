@@ -726,6 +726,65 @@ def test_reporter_waits_out_a_failed_disk_measurement(fixture, tmp_path):
     assert len(calls.read_text().splitlines()) == 1
 
 
+@pytest.mark.parametrize("slow_command", ["treehouse", "du"])
+def test_disk_refresh_budget_keeps_last_good_values_and_reports_later_homes(
+    fixture, tmp_path, monkeypatch, slow_command
+):
+    home, run = fixture
+    before = run()
+    other = tmp_path / "other"
+    shutil.copytree(home, other)
+    panes_file = tmp_path / "panes.json"
+    panes = json.loads(panes_file.read_text())
+    for pane in panes:
+        if pane["workspace_id"] == "w4":
+            pane["cwd"] = str(other)
+    panes_file.write_text(json.dumps(panes))
+    for directory in (home, other):
+        (directory / "projects/pool").mkdir(parents=True, exist_ok=True)
+
+    cache_file = spaces.CACHE / "herdr-spaces.json"
+    cache = json.loads(cache_file.read_text())
+    saved_bytes = cache["disk"][str(home)]["bytes"]
+    cache["disk"] = {str(h): {"at": 0, "bytes": saved_bytes} for h in (home, other)}
+    cache_file.write_text(json.dumps(cache))
+    clock = [0]
+    monkeypatch.setattr(spaces.time, "monotonic", lambda: clock[0])
+    real_run = subprocess.run
+
+    def slow_run(args, **kwargs):
+        if args[0] == slow_command:
+            clock[0] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(spaces.subprocess, "run", slow_run)
+    reported = run(spaces.main)
+    assert clock[0] <= 30
+    assert reported["w1"]["res"].split("⛁")[-1] == before["w1"]["res"].split("⛁")[-1]
+    assert reported["w4"]["decisions"] == "⚑ 2"
+    assert reported["w4"]["queue"] == "◷ 4"
+    saved = json.loads(cache_file.read_text())
+    assert all(hit["bytes"] == saved_bytes for hit in saved["disk"].values())
+    assert saved["disk"][str(other)]["at"] == 0
+    run(spaces.main)
+    retried = json.loads(cache_file.read_text())
+    assert retried["disk"][str(other)]["at"] > 0
+
+
+def test_deferred_cold_disk_refresh_runs_on_the_next_tick(fixture, monkeypatch):
+    _, run = fixture
+    monkeypatch.setattr(spaces, "DISK_BUDGET", 0)
+    deferred = run(spaces.main)
+    assert "⛁" not in deferred["w1"]["res"]
+    assert deferred["w4"]["decisions"] == "⚑ 2"
+
+    monkeypatch.setattr(spaces, "DISK_BUDGET", 30)
+    refreshed = run(spaces.main)
+    assert "⛁" in refreshed["w1"]["res"]
+    assert refreshed["w4"]["decisions"] == "⚑ 2"
+
+
 def worker_log(tmp_path, origin_head=True, commit=True, setup=None, live=""):
     """A worker pane with no pull request: its `report-metadata` calls in order,
     and the `--- <name>` lines that `live` marks. `live` is JS run after session
