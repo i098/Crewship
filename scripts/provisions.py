@@ -317,9 +317,17 @@ def require_secure_node(version):
 
 
 def check_ca_bundle():
+    context = ssl.create_default_context()
+    paths = ssl.get_default_verify_paths()
+    for directory in os.environ.get(paths.openssl_capath_env, paths.openssl_capath).split(os.pathsep):
+        if not directory or not Path(directory).is_dir():
+            continue
+        for certificate in Path(directory).iterdir():
+            if re.fullmatch(r"[0-9a-f]{8}\.\d+", certificate.name) and certificate.is_file():
+                context.load_verify_locations(cafile=str(certificate))
     blocked = [
         str(certificate["subject"])
-        for certificate in ssl.create_default_context().get_ca_certs()
+        for certificate in context.get_ca_certs()
         if re.search(r"emsign|emudhra", str(certificate["subject"]), re.I)
     ]
     if blocked:
@@ -646,7 +654,7 @@ def secure_python(python, uv, environment):
     probe = (
         "import importlib.metadata as m, json, sys; "
         "assert sys.prefix != sys.base_prefix, 'refusing to modify system Python'; "
-        "print(json.dumps({d.metadata['Name'].lower(): d.version for d in m.distributions() "
+        "print(json.dumps({d.metadata['Name'].lower(): m.version(d.metadata['Name']) for d in m.distributions() "
         "if d.metadata['Name'].lower() in ('pip', 'certifi')}))"
     )
     before = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
@@ -871,7 +879,8 @@ def fdu_install(home, environment):
 
     before = version()
     command(
-        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build", "fdu"],
+        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build",
+         "--resolution", "highest", "fdu"],
         {**environment, "UV_TOOL_BIN_DIR": str(home / ".local/bin")},
     )
     tool_dir = subprocess.check_output(

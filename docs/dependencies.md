@@ -14,7 +14,7 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 ### CA trust and security minimums
 
 `launch` first disables the four Mozilla emSign entries in `/etc/ca-certificates.conf` and rebuilds the system CA store.
-It verifies that the compromised roots are absent before Ansible's first network lookup.
+It checks the CA bundle and hashed certificate directories before Ansible's first network lookup.
 It then refreshes signed APT metadata, upgrades `ca-certificates` to the latest available package, and checks trust again.
 The disabled roots are emSign Root CA - C1 and G1, and emSign ECC Root CA - C3 and G3.
 An interrupted rebuild is retried when the effective trust store is still unsafe, even if all four configuration entries already match.
@@ -34,6 +34,7 @@ The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
 `onboard.sh` handles the repository environment; the normal `ship.sh` command path does not run the package updater.
 It does not run the environment's pip to update packages.
+The fdu installer selects the newest available releases even when `UV_RESOLUTION` requests older versions.
 `uv pip` is a uv command, not a Python pip installation.
 The optional desktop packages bring Ubuntu's `python3-certifi` through `websockify` and `requests`.
 Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.

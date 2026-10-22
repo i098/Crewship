@@ -130,6 +130,51 @@ def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path, interru
     assert "changed=0" in second.stdout
 
 
+@pytest.mark.parametrize("default_path", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_ca_guard_checks_directory_roots(tmp_path, default_path, blocked):
+    store = tmp_path / "store"
+    store.mkdir()
+    root = store / "root.pem"
+    subject = "/CN=emSign Root CA - G1" if blocked else "/CN=Unrelated Root"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+         "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(root),
+         "-subj", subject, "-days", "1", "-addext", "basicConstraints=critical,CA:TRUE"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(["openssl", "rehash", str(store)], check=True, capture_output=True)
+    subprocess.run(
+        ["openssl", "verify", "-no-CAfile", "-no-CAstore", "-CApath", str(store), str(root)],
+        check=True, capture_output=True,
+    )
+    environment = {**os.environ, "SSL_CERT_FILE": str(tmp_path / "absent.pem")}
+    if default_path:
+        environment.pop("SSL_CERT_DIR", None)
+    else:
+        environment["SSL_CERT_DIR"] = str(store)
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import runpy, ssl, sys; "
+         "paths = ssl.get_default_verify_paths()._replace("
+         "capath=sys.argv[1], openssl_capath=sys.argv[1]); "
+         "ssl.get_default_verify_paths = lambda: paths; "
+         "context = ssl.create_default_context(); "
+         "context.load_verify_locations(capath=sys.argv[1]); "
+         "assert not context.get_ca_certs(); "
+         "ssl.create_default_context = lambda: context; "
+         "sys.argv = [sys.argv[2], '--home', sys.argv[1], '--check-ca']; "
+         "runpy.run_path(sys.argv[0], run_name='__main__')",
+         str(store), str(ROOT / "scripts/provisions.py")],
+        env=environment, capture_output=True, text=True,
+    )
+    assert (result.returncode != 0) == blocked, result.stdout + result.stderr
+    if blocked:
+        assert "still trusts compromised" in result.stderr
+    else:
+        assert json.loads(result.stdout)["changed"] is False
+
+
 def redirect_system_paths(tasks, root):
     for task in tasks:
         for module, key in (("ansible.builtin.file", "path"), ("ansible.builtin.copy", "dest")):

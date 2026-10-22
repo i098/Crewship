@@ -193,6 +193,31 @@ def test_python_security_updates_only_present_packages(tmp_path, python_security
     assert not installer.secure_python(python, uv, environment)
 
 
+def test_python_security_reports_upgrade_with_inherited_metadata(tmp_path, python_security_index):
+    uv, environment, wheels = python_security_index
+    inherited = tmp_path / "inherited"
+    subprocess.run(
+        [uv, "pip", "install", "--target", inherited, wheels / "certifi-2026.10.18-py3-none-any.whl"],
+        env=environment, check=True, capture_output=True,
+    )
+    python = tmp_path / "venv/bin/python"
+    subprocess.run(
+        [uv, "venv", "--system-site-packages", "--python", sys.executable, python.parent.parent],
+        env=environment, check=True, capture_output=True,
+    )
+    site = subprocess.check_output(
+        [python, "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        env=environment, text=True,
+    ).strip()
+    (Path(site) / "inherited.pth").write_text(str(inherited) + "\n")
+    assert installer.secure_python(python, uv, environment)
+    assert subprocess.check_output(
+        [python, "-I", "-c", "import importlib.metadata as m; print(m.version('certifi'))"],
+        env=environment, text=True,
+    ).strip() == "2026.11.1"
+    assert not installer.secure_python(python, uv, environment)
+
+
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_native_installs_overlap_and_keep_checksum_failures_fatal(tmp_path, monkeypatch, capsys, corrupt):
     key = "linux-x86_64"
@@ -1416,10 +1441,12 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     assert "error: network down" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("resolution", ["highest", "lowest"])
 def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(
-    tmp_path, python_security_index,
+    tmp_path, python_security_index, resolution,
 ):
     uv, environment, wheels = python_security_index
+    environment["UV_RESOLUTION"] = resolution
     bin_dir = tmp_path / ".local/bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "uv").symlink_to(uv)
