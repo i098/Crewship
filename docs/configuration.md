@@ -77,6 +77,15 @@ The viewer uses OpenTUI's native TypeScript API on Bun and a Python standard-lib
 It never runs a job, writes a schedule, starts a service, or sends a model request.
 Press `r` to refresh; the viewer does not poll while open.
 
+With services enabled, `launch` creates a missing `schedules` tab in the Herdr `machine` workspace and starts the viewer there.
+It creates the workspace when absent and preserves custom tabs and focus.
+It never sends input to an existing tab or pane, including after a restart.
+If the schedules tab exists, `launch` leaves it unchanged and prints: `run crewship schedules in the schedules tab`.
+Set `crewship.herdr.schedules_tab: false` to skip this setup; existing tabs stay open.
+With `start_services: false`, run `launch` with services enabled after boot to open the tab.
+The installer already links `~/.local/bin/crewship` to the installed CLI.
+Ensure `~/.local/bin` is on your shell's `PATH` when running the command outside Herdr.
+
 Use arrows or `j`/`k` to select a row, and Enter to open or close its details.
 Press `/` to enter search; press Enter or Escape to leave search entry.
 Outside search entry, press `s` to cycle sources, `o` to cycle owners, and Escape to clear all filters.

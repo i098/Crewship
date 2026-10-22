@@ -1,0 +1,66 @@
+---
+- name: Open the default schedules tab
+  when:
+    - crewship_cfg.herdr.schedules_tab | default(true) | bool
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+  block:
+    - name: Wait for the Herdr workspace API
+      ansible.builtin.command:
+        argv: ["{{ crewship_herdr_bin }}", workspace, list]
+      register: crewship_workspaces
+      changed_when: false
+      until: crewship_workspaces.rc == 0
+      retries: 10
+      delay: 1
+
+    - name: Find the machine workspace
+      ansible.builtin.set_fact:
+        crewship_machine_workspaces: >-
+          {{ (crewship_workspaces.stdout | from_json).result.workspaces
+             | selectattr('label', 'equalto', 'machine') | list }}
+
+    - name: Create the machine workspace
+      ansible.builtin.command:
+        argv: ["{{ crewship_herdr_bin }}", workspace, create, --cwd, "{{ crewship_cfg.home }}",
+               --label, machine, --no-focus]
+      register: crewship_machine_created
+      when: crewship_machine_workspaces | length == 0
+
+    - name: Select the machine workspace
+      ansible.builtin.set_fact:
+        crewship_machine_workspace: >-
+          {{ crewship_machine_workspaces[0].workspace_id
+             if crewship_machine_workspaces | length > 0
+             else (crewship_machine_created.stdout | from_json).result.workspace.workspace_id }}
+
+    - name: List the machine tabs
+      ansible.builtin.command:
+        argv: ["{{ crewship_herdr_bin }}", tab, list, --workspace, "{{ crewship_machine_workspace }}"]
+      register: crewship_machine_tabs
+      changed_when: false
+
+    - name: Find the schedules tab
+      ansible.builtin.set_fact:
+        crewship_schedules_tabs: >-
+          {{ (crewship_machine_tabs.stdout | from_json).result.tabs
+             | selectattr('label', 'equalto', 'schedules') | list }}
+
+    - name: Create the schedules tab
+      ansible.builtin.command:
+        argv: ["{{ crewship_herdr_bin }}", tab, create, --workspace, "{{ crewship_machine_workspace }}",
+               --cwd, "{{ crewship_cfg.home }}", --label, schedules, --no-focus]
+      register: crewship_schedules_tab
+      when: crewship_schedules_tabs | length == 0
+
+    - name: Show the manual start command for an existing schedules tab
+      ansible.builtin.debug:
+        msg: run crewship schedules in the schedules tab
+      when: crewship_schedules_tabs | length > 0
+
+    - name: Run the schedule viewer in the new schedules tab
+      ansible.builtin.command:
+        argv: ["{{ crewship_herdr_bin }}", pane, run,
+               "{{ (crewship_schedules_tab.stdout | from_json).result.root_pane.pane_id }}",
+               "{{ (crewship_local_bin ~ '/crewship') | quote }} schedules"]
+      when: crewship_schedules_tabs | length == 0
