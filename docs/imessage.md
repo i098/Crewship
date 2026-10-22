@@ -44,9 +44,11 @@ For each message from the owner, the service does these steps:
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
    After those checks, one voice pass rewrites only the wording in the owner's short, blunt chat style.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
-   The service rejects changed tokens or links, empty replies, failed calls, and replies over 110% of the draft's length.
-   It requires the original tokens in order and with the same case, including names, identifiers, paths, versions, numbers, units, and comparison operators.
-   Only whitespace and ordinary sentence punctuation may change; links must match exactly.
+   The service rejects changed protected tokens or polarity, empty replies, failed calls, and replies over 110% of the draft's length.
+   Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
+   Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
+   Polarity words must keep the same counts and immediately adjacent punctuation.
+   These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
    A rejected rewrite sends the original checked draft.
    Blank lines separate bubbles; lists stay in one bubble.
    Reactions do not use the voice pass.

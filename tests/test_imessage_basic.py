@@ -188,8 +188,6 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
 @pytest.mark.parametrize("draft,rewrite", [
     ("The build is not ready.", "the build is ready"),
     ("The build is paused.", "I fixed the build."),
-    ("The build is paused.", "The build is running."),
-    ("Firstmate is not the desk.", "The desk is not Firstmate."),
     ("The fee is $12.", "The fee is 12."),
     ("The failing test is test_login.", "The failing test is test-login."),
     ("The failing test is test_login.", "The failing test is Test_login."),
@@ -204,6 +202,20 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
     ("The path is /tmp/test_login.", "The path is /tmp/test_login"),
     ("The config is .env.", "The config is env."),
     ("The identifier is foo.bar.", "The identifier is foo bar."),
+    ("No, tests failed.", "No tests failed."),
+    ("Yes, tests passed.", "Yes tests passed."),
+    ("No, no tests failed.", "No, tests failed."),
+    ("Tests failed.", "Tests failed"),
+    ("The build isn't ready.", "The build is ready."),
+    ("The build can't run.", "The build won't run."),
+    ("The build won't run.", "The build can run."),
+    ("Nothing is broken.", "Everything is ready."),
+    ("The build never passed.", "The build passed."),
+    ("None passed; nothing is fixed.", "All passed; everything is fixed."),
+    ("The job is done.", "The job is pending."),
+    ("The build is blocked.", "The build is ready."),
+    ("The test is broken.", "The test is passing."),
+    ("The tests failed.", "The tests passed."),
 ])
 def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -218,6 +230,32 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
         desk_clock()
         wait_for(lambda: text(fake / "sent"), "the checked draft after unsafe rewriting")
         assert text(fake / "sent") == f"send {draft}\n"
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("draft,rewrite", [
+    ("The build is paused.", "The build's paused."),
+    ("The build is paused.", "Paused: the build."),
+    ("There are 5 jobs ready.", "5 jobs are ready."),
+    ("The build is blocked.", "Blocked."),
+    ("The build isn’t ready.", "The build isn't ready."),
+])
+def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draft, rewrite):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "status").write_text(draft)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "answer": draft, "evidence": [{"source": "status", "quote": draft}],
+    }))
+    (fake / "voice-answer").write_text(rewrite)
+    bridge = start(1)
+    try:
+        receive("question", "What does the status say?")
+        desk_clock()
+        wait_for(lambda: text(fake / "sent"), "the rewritten answer")
+        assert text(fake / "sent") == f"send {rewrite}\n"
         assert text(notes) == ""
     finally:
         bridge.terminate()
