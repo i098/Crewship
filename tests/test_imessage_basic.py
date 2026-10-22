@@ -90,6 +90,41 @@ def test_status_starts_during_quiet_and_refreshes_for_the_latest_text(tmp_path):
         bridge.wait(10)
 
 
+def test_status_starts_before_slow_inbound_persistence(tmp_path, monkeypatch):
+    preload = tmp_path / "slow-sync.ts"
+    preload.write_text("""
+import { mock } from "bun:test";
+import * as fs from "node:fs";
+const sync = fs.fsyncSync;
+let delayed = false;
+mock.module("node:fs", () => ({
+  ...fs,
+  fsyncSync(fd) {
+    const journal = `${process.env.STATE_DIRECTORY}/routing.jsonl`;
+    if (!delayed && fs.existsSync(journal) && fs.readFileSync(journal, "utf8").includes('"received"')) {
+      delayed = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000);
+    }
+    return sync(fd);
+  },
+}));
+""")
+    monkeypatch.setenv("BUN_OPTIONS", f"--preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path, test_mode=False)
+    bridge = start(1)
+    try:
+        publish_json(fake / "inbound/slow.json", {
+            "id": "slow", "space": "iMessage;-;+10000000000",
+            "sender": "+10000000000", "text": "What is the build status?",
+        })
+        wait_for(lambda: text(fake / "status-calls"), "status before the slow sync completes", timeout=2)
+        wait_for(lambda: text(fake / "sent"), "the answer after durable ownership")
+        assert text(fake / "sent") == "send The build is paused.\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("recover", [False, True])
 @pytest.mark.parametrize("message,fact", [
     ("What is the build status?", "The build is paused."),

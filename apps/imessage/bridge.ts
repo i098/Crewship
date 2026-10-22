@@ -344,7 +344,10 @@ if (existsSync(ROUTING_LOG)) {
 }
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
-if (pendingRoutes().length) startDeskWait();
+if (pendingRoutes().length) {
+  prefetchInboxStatus();
+  desk.inboundText();
+}
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
@@ -615,9 +618,8 @@ function remember(kind: Kind, text: string): number | undefined {
   }
 }
 
-function startDeskWait() {
+function prefetchInboxStatus() {
   if (DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
-  desk.inboundText();
 }
 
 async function readInboxStatus() {
@@ -806,11 +808,12 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean) 
   // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
   firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(text);
   const received = { requestId, text, ref, memoryId: memory.msgs.length, firstmate };
+  prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);
   flushRoutes();
   cancelDesk();
-  startDeskWait();
+  desk.inboundText();
 }
 
 function plainText(content: LineMessage["content"]): boolean {
