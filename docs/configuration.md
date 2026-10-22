@@ -281,7 +281,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 
 | Profile | Default | What it installs |
 | --- | --- | --- |
-| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
+| `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; the [spawned Opus effort cap](#spawned-opus-effort-cap); `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
 | `public_skills` | off; absent keeps them on a host that has them | The skills and rules that ship with Crewship, in `~/.omp/agent/skills/`, `~/.claude/skills/` and `~/.omp/agent/rules/`. `false` or absent on a new host installs none; `true` installs and updates them; turning it off later deletes nothing. See [Skills](omp.md#skills). Private skills always install. |
 | `agent_instructions` | off; absent keeps them on a host that has them | The [global instructions](omp.md#global-instructions): `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.omp/agent/AGENTS.md` as one import line. `instructions_mode` (`skip`, `overwrite` or `append`, default `append`) says what happens to a file that exists. The installer checklist asks it when one does. |
 | `development` | off | Rust toolchain (stable), build essentials. |
@@ -303,6 +303,22 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 The latest Herdr release is always installed, with the captured UI preferences, the [Spaces and Agents sidebar layouts](herdr.md) with the reporter timer that feeds Spaces, and one canonical, versioned user-service executable. What each profile installs, and where it comes from, is in [Dependencies](dependencies.md).
 
 See [Project databases](project-databases.md) for existing-host management and safe removal.
+
+### Spawned Opus effort cap
+
+The `agents` profile caps Opus 5.5 at `high` effort in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
+Other models and lower effort levels remain unchanged.
+The extension requires both `FM_OMP_HARNESS=omp` and `OMP_SKIP_SETUP=1`, so primary sessions remain unchanged.
+It caps request-level and message-level provider effort after `auto` resolves, including effort changes during a session.
+The status line can still show the requested level.
+The gate wrapper caps explicit `xhigh`, `max`, and `auto` requests, including model suffixes, and selects `high` when effort is absent.
+The `acp:omp` fallback does not use the wrapper.
+
+Set `FM_OPUS_EFFORT_UNCAPPED=1` in the spawned omp process environment to disable the cap for that process.
+For no-mistakes gates, set this variable in the daemon environment before starting the daemon.
+A shell export does not change an existing daemon or tmux pane.
+Wait until no pipeline runs remain before restarting the daemon.
+Crewship installs both guards on every apply; it does not restart the daemon.
 
 ### Omp model defaults
 

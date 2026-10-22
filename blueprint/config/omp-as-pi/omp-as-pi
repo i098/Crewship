@@ -108,6 +108,26 @@ done
 [ "$mode" = json ] || die "expected '--mode json' from the pi adapter, got '${mode:-<none>}'"
 [ "$sessions" -le 1 ] || die "conflicting session flags"
 
+# Gate sessions disable extensions, so cap their effort here instead.
+# FM_OPUS_EFFORT_UNCAPPED=1 in the daemon environment disables this cap.
+if [ "${FM_OPUS_EFFORT_UNCAPPED:-}" != 1 ]; then
+	mi=-1
+	ti=-1
+	for i in "${!out[@]}"; do
+		case "${out[i]}" in --model) mi=$((i + 1)) ;; --thinking) ti=$((i + 1)) ;; esac
+	done
+	if [ "$mi" -ge 0 ] && [[ ${out[mi]} == *claude-opus-5-5* ]]; then
+		out[mi]=${out[mi]/%:xhigh/:high}
+		out[mi]=${out[mi]/%:max/:high}
+		out[mi]=${out[mi]/%:auto/:high}
+		if [ "$ti" -ge 0 ]; then
+			case "${out[ti]}" in xhigh | max | auto) out[ti]=high ;; esac
+		elif [[ ${out[mi]##*/} != *:* ]]; then
+			out+=(--thinking high)
+		fi
+	fi
+fi
+
 preflight
 pre=()
 if [ "$neutralize" = 1 ]; then
