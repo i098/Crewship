@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report path existence and optional directory types without following symlinks."""
+"""Report path existence and optional directory types or ownership without following symlinks."""
 
 import argparse
 import grp

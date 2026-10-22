@@ -1,10 +1,9 @@
 ---
 # Target account, home layout and (optionally) the user manager.
 #
-# Conservative by design: an account that already exists is never re-homed,
-# re-shelled, re-grouped or given new privileges. Modes of pre-existing
-# standard directories are left alone - `mode` is only set where this playbook
-# owns the directory outright.
+# An existing account keeps its home, shell and primary group.
+# Modes of pre-existing standard directories are left alone - `mode` is only
+# set where this playbook owns the directory outright.
 
 - name: Reject unsafe home paths before privileged account operations
   ansible.builtin.command:
