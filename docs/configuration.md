@@ -78,7 +78,9 @@ It never runs a job, writes a schedule, starts a service, or sends a model reque
 Press `r` to refresh; the viewer does not poll while open.
 
 With services enabled, `launch` opens a `schedules` tab in the Herdr `machine` workspace.
-It creates the workspace when absent and leaves existing tabs and focus unchanged.
+It creates the workspace when absent and preserves custom tabs and focus.
+After a restart, `launch` resumes the viewer in its existing tab if that tab has one idle shell pane.
+It never interrupts another foreground command or changes a split tab.
 Set `crewship.herdr.schedules_tab: false` to skip this setup; existing tabs stay open.
 With `start_services: false`, run `launch` with services enabled after boot to open the tab.
 The installer already links `~/.local/bin/crewship` to the installed CLI.

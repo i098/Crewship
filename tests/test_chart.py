@@ -374,17 +374,21 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
             assert (browsers / binary).resolve() == release / binary
 
 
-@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check"])
+@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "restart", "occupied"])
 def test_default_schedules_tab_preserves_existing_layout(tmp_path, mode):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
     local_bin.mkdir(parents=True)
     (home / ".local/share/crewship/cli").mkdir(parents=True)
     state = tmp_path / "herdr.json"
-    initial = {"workspaces": [{"workspace_id": "w9", "label": "other"}], "tabs": [], "runs": []}
+    initial = {"workspaces": [{"workspace_id": "w9", "label": "other"}],
+               "tabs": [], "runs": [], "running": mode == "occupied"}
     if mode == "existing":
         initial["workspaces"].append({"workspace_id": "w1", "label": "machine"})
         initial["tabs"].append({"tab_id": "w1:t1", "label": "custom"})
+    if mode == "occupied":
+        initial["workspaces"].append({"workspace_id": "w1", "label": "machine"})
+        initial["tabs"].append({"tab_id": "w1:t2", "label": "schedules"})
     state.write_text(json.dumps(initial))
     herdr = tmp_path / "herdr"
     herdr.write_text(f"""#!{sys.executable}
@@ -407,11 +411,18 @@ elif a[:2] == ["tab", "create"]:
     assert "--no-focus" in a
     tab = {{"tab_id": "w1:t2", "label": a[a.index("--label") + 1]}}
     s["tabs"].append(tab)
-    result = {{"root_pane": {{"pane_id": "w1:p2"}}}}
+    result = {{"tab": tab, "root_pane": {{"pane_id": "w1:p2"}}}}
+elif a[:2] == ["pane", "list"]:
+    result = {{"panes": [{{"pane_id": "w1:p2", "tab_id": "w1:t2"}}]}}
+elif a[:2] == ["pane", "process-info"]:
+    pid = 2 if s["running"] else 1
+    result = {{"process_info": {{"shell_pid": 1, "foreground_process_group_id": pid,
+              "foreground_processes": [{{"pid": pid, "name": "bun" if s["running"] else "sh"}}]}}}}
 elif a[:2] == ["pane", "run"]:
     assert a[2] == "w1:p2"
     subprocess.run(a[3], shell=True, check=True)
     s["runs"].append(a[3])
+    s["running"] = True
     result = {{}}
 else:
     raise AssertionError(a)
@@ -453,11 +464,15 @@ print(json.dumps({{"result": result}}))
     }
     command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
                str(playbook), "-e", json.dumps(variables), *(["--check"] if mode == "check" else [])]
-    for _ in range(2):
+    for attempt in range(2):
         result = subprocess.run(command, capture_output=True, text=True)
         assert result.returncode == 0, result.stdout + result.stderr
+        if mode == "restart" and attempt == 0:
+            restored = json.loads(state.read_text())
+            restored["running"] = False
+            state.write_text(json.dumps(restored))
     actual = json.loads(state.read_text())
-    if mode in ("disabled", "deferred", "check"):
+    if mode in ("disabled", "deferred", "check", "occupied"):
         assert actual == initial
         assert not viewer_call.exists()
     else:
@@ -465,6 +480,7 @@ print(json.dumps({{"result": result}}))
             {"workspace_id": "w9", "label": "other"}, {"workspace_id": "w1", "label": "machine"},
         ]
         assert actual["tabs"] == initial["tabs"] + [{"tab_id": "w1:t2", "label": "schedules"}]
-        assert len(actual["runs"]) == 1
+        assert len(actual["runs"]) == (2 if mode == "restart" else 1)
         assert json.loads(viewer_call.read_text()) == [str(home / ".local/share/crewship/schedules/main.ts")]
-        assert "changed=0" in result.stdout
+        if mode != "restart":
+            assert "changed=0" in result.stdout
