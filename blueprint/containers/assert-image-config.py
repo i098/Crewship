@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refuse to provision an image with a configuration that describes another machine.
 
-Run during image provisioning in Dockerfile, as the image account, after
+Run inside the Dockerfile `worker` stage, as the image account, after
 `./ship.sh inspect` has accepted the document against blueprint/schemas/crewship.schema.json:
 
     uv run --project . --locked python blueprint/containers/assert-image-config.py CONFIG
@@ -25,7 +25,8 @@ import yaml
 # stack and a node identity, or an X server. blueprint/containers/crewship.container.yml
 # documents why each one is false.
 HOST_ONLY_PROFILES = ("docker", "tailscale", "desktop", "gateway")
-# See blueprint/containers/crewship.container.yml for workspace mount constraints.
+# The workspace is a named volume (compose) or a bind (devcontainer) at runtime,
+# so anything baked into it - a Firstmate clone above all - is shadowed.
 VOLUME_SHADOWED_PROFILES = ("firstmate",)
 DISABLED_FLAGS = ("start_services", "enable_linger")
 
