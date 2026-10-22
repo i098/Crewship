@@ -29,7 +29,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause } from "./desk.ts";
+import { basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause, voiceAnswer, VOICE_PROMPT } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -142,6 +142,9 @@ const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((
   handoffPending();
 }), undefined, MAX_WAIT_MS);
 let deskRun: Bun.Subprocess | undefined;
+let deskGeneration = 0;
+const deskSession = crypto.randomUUID();
+const deskCancelled = Object.assign(new Error("desk response cancelled"), { permanent: true, maybeSent: false });
 let stopDeskTyping: (() => void) | undefined;
 let deskTypingRequestId: string | undefined;
 let deskTypingPending: Promise<unknown> = Promise.resolve();
@@ -157,11 +160,11 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[] };
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out } | { deskCancelled: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 let routingRetry: NodeJS.Timeout | undefined;
@@ -174,7 +177,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
-  send(space: string, text: string, reply?: string, guid?: string): Promise<unknown>;
+  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<unknown>;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
@@ -205,7 +208,7 @@ async function startLine(name: string): Promise<Line> {
       messages: bb,
       find: (ref) => bb.message(ref.id),
       separated: (space, id) => bb.separated(space, id),
-      send: (space, text, reply, guid) => bb.send(space, text, reply, guid),
+      send: (space, text, reply, guid, beforeSend) => bb.send(space, text, reply, guid, beforeSend),
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
@@ -254,9 +257,15 @@ async function startLine(name: string): Promise<Line> {
       const last = (await photon.chats.get(space)).lastMessage?.guid;
       return !!last && last !== id;
     },
-    async send(space, text, reply) {
+    async send(space, text, reply, _guid, beforeSend) {
       const thread = await threadOf(space, reply);
-      return thread ? thread.reply(text) : (await imessage(app).space.get(space)).send(text);
+      if (thread) {
+        beforeSend?.();
+        return thread.reply(text);
+      }
+      const chat = await imessage(app).space.get(space);
+      beforeSend?.();
+      return chat.send(text);
     },
     async sendImage(space, picture, reply) {
       const content = attachment(picture.path, { name: picture.name, mimeType: picture.mimeType });
@@ -334,12 +343,6 @@ for (const name of TRANSPORTS) {
     if (directChat.test(space) && at > proactiveAt) [proactiveRef, proactiveAt] = [ref, at];
   }
 }
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId);
-const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
-  if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
-    console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
-  }
-});
 
 // Replay routing before a transport can release ownership. A torn final line was never acknowledged.
 if (existsSync(ROUTING_LOG)) {
@@ -358,6 +361,12 @@ if (existsSync(ROUTING_LOG)) {
   if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
   else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
 }
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId);
+const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
+  if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
+    console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
+  }
+});
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
 if (pendingRoutes().length) {
@@ -392,6 +401,7 @@ Bun.serve({
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
     // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
+    recordRoute({ deskCancelled: true });
     desk.firstmateActive();
     handoffPending();
     cancelDesk();
@@ -500,10 +510,19 @@ function finishDeskDelivery(o: Out) {
   if (o.requestId && o.requestId === deskTypingRequestId) stopDeskTyping?.();
 }
 
+function hasRestoredUnsentText(o: Out): boolean {
+  return !!o.bubbles && (o.done ?? 0) < o.bubbles.length && o.deskSession !== deskSession;
+}
+
+function checkDeskDelivery(o: Out) {
+  if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
+}
+
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
+  const update = (next: Out) => { save(next); o = next; };
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
   for (let i = o.done ?? 0; i < parts.length; i++) {
@@ -512,8 +531,10 @@ async function deliver(o: Out, save: (o: Out) => void) {
       deliveryTyping(kind, true);
       await Bun.sleep(typingPause(part));
     }
-    deliveryTyping(kind, false);
-    await sendBubble(o, i, part, save);
+    if (!await sendCurrentBubble(o, i, part, update)) {
+      lostDeskAnswer(o);
+      break;
+    }
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
@@ -523,13 +544,25 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (o.image) rmSync(o.image.path, { force: true });
 }
 
+async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
+  try {
+    if (o.deskSession !== deskSession) checkDeskDelivery(o);
+    if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
+    await sendBubble(o, i, part, save);
+    return true;
+  } catch (e) {
+    if (e !== deskCancelled) throw e;
+    return false;
+  }
+}
+
 function deliveryTyping(kind: Kind, on: boolean) {
   if (latest && kind !== "desk" && !stopDeskTyping) typing(latest.space, on);
 }
 
 function deliveredText(o: Out) {
-  if (o.silent || (!o.image && !o.bubbles?.length)) return;
-  return [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].join("\n\n");
+  if (o.silent || !o.done) return;
+  return [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].slice(0, o.done).join("\n\n");
 }
 
 async function deliverReaction(o: Out, save: (o: Out) => void) {
@@ -539,7 +572,10 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
   const line = lineOf(o);
   if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
   try {
-    await line.react(o, o.react!, () => save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } }));
+    await line.react(o, o.react!, () => {
+      checkDeskDelivery(o);
+      save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
+    });
   } catch (e) {
     if (notSent(e)) save(o);
     throw e;
@@ -595,8 +631,17 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     }
     // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
     if (!line.sent || typeof bubble !== "string") maybe[name] = space;
-    else if (await line.sent(space, bubble, o.since ?? 0)) return;
+    else {
+      try {
+        if (await line.sent(space, bubble, o.since ?? 0)) return;
+      } catch (e) {
+        checkDeskDelivery(o);
+        throw e;
+      }
+    }
   }
+  if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
+  checkDeskDelivery(o);
   const since = o.since ?? Date.now();
   try {
     const via = await failover(routes(o, i, maybe), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
@@ -639,7 +684,8 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
       const thread = separated ? reply : undefined;
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
-        if (typeof bubble === "string") await line.send(space, bubble, thread, guid);
+        checkDeskDelivery(o);
+        if (typeof bubble === "string") await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
         else await line.sendImage!(space, bubble, thread);
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
@@ -728,12 +774,13 @@ async function runDesk(current: () => boolean) {
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   const { answer, target } = result;
   const ids = pending.map((r) => r.requestId);
+  const guid = crypto.randomUUID();
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
-      ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id }
+      ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
-      kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
+      kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
   flushRoutes();
 }
 
@@ -756,12 +803,31 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const target = pending[(answer.target ?? pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
+  if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
   return { answer, target };
 }
 
+async function rewriteVoice(draft: string): Promise<string> {
+  let proc: DeskProc | undefined;
+  try {
+    proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
+      system: VOICE_PROMPT, prompt: JSON.stringify({ draft }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+    deskRun = proc;
+    const { ok, drafted } = await readDesk(proc);
+    return voiceAnswer(draft, ok, drafted);
+  } catch {
+    return draft;
+  } finally {
+    if (deskRun === proc) deskRun = undefined;
+  }
+}
+
 function applyRoute(event: RouteEvent) {
-  if ("received" in event) routing.set(event.received.requestId, { ...event.received, route: "pending" });
-  else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out });
+  if ("deskCancelled" in event) deskGeneration++;
+  else if ("received" in event) {
+    deskGeneration++;
+    routing.set(event.received.requestId, { ...event.received, route: "pending" });
+  } else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out });
 }
 
 function recordRoute(event: RouteEvent) {
@@ -786,7 +852,7 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
-  if (!item.requests?.length || item.done || Object.keys(item.maybe ?? {}).length) return;
+  if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
 }

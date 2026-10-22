@@ -25,7 +25,7 @@ For each message from the owner, the service does these steps:
    With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
    It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
-   A failed Inception call goes to Firstmate; it never falls back to another provider.
+   A failed Inception classification call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
@@ -42,6 +42,18 @@ For each message from the owner, the service does these steps:
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
+   After those checks, one voice pass rewrites only the wording in the owner's short, blunt chat style.
+   The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
+   The prompt treats the draft as untrusted data, not instructions.
+   The service rejects changed protected tokens or polarity, empty replies, failed calls, and Markdown fences.
+   It also rejects replies longer than 110% of the draft's length, rounded up to the next whole character.
+   Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
+   Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
+   Polarity words must keep the same counts and immediately adjacent punctuation.
+   These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
+   A rejected rewrite sends the original checked draft.
+   Blank lines separate bubbles; lists stay in one bubble.
+   Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
    Later corrections and follow-ups guide that selection.
    A purely social burst can receive one reaction and finish without a Firstmate note or wake.
@@ -55,18 +67,28 @@ For each message from the owner, the service does these steps:
    A social reaction may include one short text from a fixed list of safe acknowledgements.
    The text cannot contain facts or work claims; an invalid text sends the whole burst to Firstmate.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
-   Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
+   Failed classification calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
    A reply or reaction can set `target` to the message's 1-based position in the pending burst.
    Without `target`, the service selects the last pending message; an invalid target causes a handoff.
    The service threads a text only when another bubble separates the selected message from its answer.
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
-   Desk answers stay on the selected message's transport and chat, including during retries and after restarts.
+   Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
    A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
+   A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
+   The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
+   Startup drops restored desk text that has unsent bubbles and hands its requests to Firstmate, without waiting for inbound catch-up.
+   Firstmate and service sends keep their durable recovery.
+   Each transport checks cancellation after preparation and immediately before sending.
+   Cancellation does not remove uncertain delivery records.
+   For a live desk answer with an uncertain send, the service checks available transport history before cancellation.
+   It keeps unresolved evidence in the completion receipt.
+   Unavailable history cannot block later supervisor sends after cancellation.
+   A history check that disproves delivery clears the uncertainty before the service decides whether to hand off.
 
 Neither transport reports typing events from the owner, so only a new text starts the wait again.
 
@@ -79,13 +101,17 @@ spectrum-ts does not pass edits on, so the service reads them from its own event
 An edit that the owner makes while that stream is down is lost.
 The BlueBubbles line does not report edits: an edit there files no note.
 
-The runner keeps its 45-second timeout.
+The classification runner keeps its 45-second timeout.
+The voice pass uses the same desk model, no tools, and a separate five-second timeout.
+It disables omp reasoning and uses Inception's `instant` reasoning level.
+New messages and Firstmate activity cancel this pass through the same path as classification.
+The voice call receives only the checked draft, not chat history or fleet status.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
-For a standalone text, both desks accept only one complete JSON object whose `kind` or `decision` is `reply`.
+For a standalone text, both desks accept classification answers only from one complete JSON object whose `kind` or `decision` is `reply`.
 The `answer` must be a non-empty string with no directive.
-iMessage also checks the existing source evidence before sending that answer.
+iMessage checks the existing source evidence before passing that answer to the voice call.
 An action can occupy the whole trimmed output, any JSON `kind` or `decision` field, or the final line after prose.
 Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, and `HANDOFF`.
 A JSON tapback uses `{"kind":"tapback","emoji":"👍"}`.
@@ -97,7 +123,7 @@ Only a verified social burst can use this text, which shares the reaction's targ
 The Instagram desk ignores this optional text.
 The parser validates the complete emoji; quotes, braces, and extra characters cannot become part of it.
 Repeated matching decision fields produce one action, while conflicts produce no visible response.
-All other output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
+All other classification output, including plain prose, mixed prose and JSON, and malformed JSON, produces no visible response.
 Each rejected draft records one short outcome without raw model text.
 Suppressed drafts and rejected non-social reactions retain the existing single request filing, without an extra operator request.
 Social reactions retain all original messages and the completion decision in the routing journal, without filing a request.
@@ -108,7 +134,7 @@ Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
 If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
-A prior uncertain send or reaction blocks this fallback because a desk response might already exist.
+A prior uncertain send or reaction blocks this failure handoff, except when startup drops restored desk text as described above.
 The outbox saves possible reaction delivery after all lookups, health checks, and capability checks, immediately before the mutation.
 It retains that state across retries and restarts.
 Read-only preparation does not add delivery uncertainty.
@@ -126,7 +152,9 @@ The service replaces latest-message files atomically, including the direct-chat 
 
 ## Upstream outages
 
-The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503. The service keeps every message through such an outage. The code is `apps/imessage/outbox.ts`.
+The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503.
+The queue code is `apps/imessage/outbox.ts`.
+Desk cancellation and restart exceptions follow the [routing recovery contract](#what-it-does).
 
 - **The outbox.** Each send and tapback enters the private `outbox/` directory as one file before delivery.
   This includes Firstmate answers and direct desk answers.
@@ -134,7 +162,7 @@ The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE`
   The service acknowledges the enqueue only after both syncs succeed.
   A failed directory sync can leave a renamed packet on disk.
   A keyed retry syncs the directory without adding another packet.
-  During a transient outage, a desk answer stays queued without a supervisor handoff.
+  During a transient outage, an active desk answer stays queued without a supervisor handoff.
 - **Delivery.** One loop sends the oldest file.
   It archives keyed direct answers in `outbox-done/` and deletes other completed items.
   A failed send retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
@@ -143,13 +171,14 @@ The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE`
   Delivery is at least once: a lost answer or a stop before saving progress can cause a duplicate bubble.
   If the reply target is gone, the service sends without a thread.
 - **Downloads.** If an attachment download fails, the note says that the attachment could not be saved yet. The service records the message id in `~/.local/state/fm-imessage/downloads/` and tries the download again with the same waits. When the download works, the service files a second note with the saved path. If the download moves to the dead-letter folder (see below), the service files a second note with the message id that says the attachment is lost, so Firstmate stops waiting for a path.
-- **Restarts.** The outbox and the downloads are on disk, so they survive a restart of the service. At start, the service continues with the files that it finds.
+- **Restarts.** The outbox and downloads survive a service restart on disk.
+  Delivery follows the [routing recovery contract](#what-it-does), including its desk-text exception.
 - **Typing.** Typing bubbles are best effort. A typing error is logged and never fails or delays a send.
 - **Logs.** Each failed try writes one log line with the operation and the code, for example `outbox item 3 failed (try 4), next try in 6.2 s: UNAVAILABLE: ...`. A transient error never writes a stack trace.
 
-Only an item that is provably bad leaves the queue.
-This includes missing or expired messages and attachments (HTTP 404 or 410, gRPC `NOT_FOUND`).
-It includes invalid items (HTTP 400 or 422, gRPC `INVALID_ARGUMENT`) and files that do not parse.
+Permanent errors also move an item out of the queue.
+These errors include missing or expired messages and attachments (HTTP 404 or 410, gRPC `NOT_FOUND`).
+They include invalid items (HTTP 400 or 422, gRPC `INVALID_ARGUMENT`) and files that do not parse.
 The service moves the file to `~/.local/state/fm-imessage/outbox-dead/` (for a download: `downloads-dead/`).
 It writes one log line and continues with the next item.
 Nothing is dropped without a trace.

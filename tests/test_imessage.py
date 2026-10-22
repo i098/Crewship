@@ -1747,11 +1747,17 @@ function space(id) {
       if (content.type === "app" && existsSync(`${dir}/card-refused`)) throw Object.assign(new Error("app cards are not on this plan"), { grpcCode: 7 });
       sent(`send ${await shown(content)}`, id);
       appendFileSync(`${dir}/send-targets`, `${id}\\n`);
+      if (existsSync(`${dir}/send-accepted-hold`)) {
+        writeFileSync(`${dir}/send-accepted-waiting`, "");
+        while (existsSync(`${dir}/send-accepted-hold`)) await Bun.sleep(5);
+        throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
+      }
       if (content.type === "app") return { id: "c1", direction: "outbound", miniAppCardSession: { chatGuid: id, messageGuid: "c1", sessionId: "s1", targetMessageGuid: "c1" } };
     },
     async getMessage(mid) {
       call("getMessage");
       await holdLookup();
+      await holdLookup("lookup-reply-hold");
       if (existsSync(`${dir}/lookup-timeout`)) throw Object.assign(new Error("lookup timed out"), { grpcCode: 4 });
       if (existsSync(`${dir}/lookup-missing`)) return undefined;
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
@@ -1799,10 +1805,10 @@ async function* lineEvents() {
     await Bun.sleep(20);
   }
 }
-async function holdLookup() {
-  if (!existsSync(`${dir}/lookup-hold`)) return;
-  writeFileSync(`${dir}/lookup-waiting`, "");
-  while (existsSync(`${dir}/lookup-hold`)) await Bun.sleep(5);
+async function holdLookup(flag = "lookup-hold") {
+  if (!existsSync(`${dir}/${flag}`)) return;
+  writeFileSync(`${dir}/${flag.replace("-hold", "-waiting")}`, "");
+  while (existsSync(`${dir}/${flag}`)) await Bun.sleep(5);
 }
 const line = {
   messages: { subscribeEvents: lineEvents },
@@ -1818,7 +1824,10 @@ export const Spectrum = async () => {
   if (existsSync(`${dir}/spectrum-down`)) throw new Error("spectrum did not start");
   return { messages: messages(), __internal: { platforms: new Map([["imessage", { client: existsSync(`${dir}/raw-missing`) ? [] : [{ client: line }] }]]) } };
 };
-export const imessage = Object.assign(() => ({ space: { get: async (id) => space(id) } }), { config: () => ({}) });
+export const imessage = Object.assign(() => ({ space: { get: async (id) => {
+  await holdLookup("space-hold");
+  return space(id);
+} } }), { config: () => ({}) });
 export const attachment = (path, options) => ({ attachment: path, ...options });
 export const app = (url, options = {}) => ({ type: "app", url, ...options });
 export const edit = (content, target) => ({ type: "edit", content, target });
@@ -2250,6 +2259,11 @@ const server = Bun.serve({ port: 0, async fetch(req) {
     if (b.chatGuid) {
       if (mode() === "last-down") return new Response("history unavailable", { status: 503 });
       if (mode() === "last-404") return new Response("chat not found", { status: 404 });
+      if (existsSync(`${dir}/hold-health-after-query`)) {
+        writeFileSync(`${dir}/relay-mode`, "hold-health");
+        writeFileSync(`${dir}/health-query-waiting`, "");
+        while (existsSync(`${dir}/hold-health-after-query`)) await Bun.sleep(5);
+      }
       db.run("DELETE FROM message");
       for (const m of history()) for (const chat of m.chats) {
         db.query("INSERT INTO message VALUES (?, ?, ?, ?)").run(JSON.stringify(m), chat.guid, m.associatedMessageGuid ?? null, m.dateCreated);
