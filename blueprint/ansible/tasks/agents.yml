@@ -220,6 +220,16 @@
     remote_src: true
   become: true
 
+- name: Install the opt-in gluttony omp extension
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/fm-gluttony.ts"
+    dest: "{{ crewship_omp_gluttony_extension }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+
 # --- no-mistakes pipeline agent (docs/omp.md#no-mistakes-pipeline-agent) ----
 - name: Install omp-as-pi, the wrapper that runs omp as the no-mistakes pi agent
   ansible.builtin.copy:
