@@ -839,8 +839,12 @@ def omp_plugins(home, environment):
     marketplaces = home / ".omp/marketplaces.json"
     known = marketplaces.read_text() if marketplaces.is_file() else ""
     installed = None
+    node_env = environment.get("NODE_ENV") or "development"
     if not any(environment.get(key) for key in (
         "PI_CONFIG_DIR", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "XDG_DATA_HOME",
+    )) and not any((home / path).is_file() for path in (
+        ".env", ".env.local", f".env.{node_env}", f".env.{node_env}.local",
+        ".omp/.env", ".omp/agent/.env",
     )):
         try:
             registry = json.loads((home / ".omp/plugins/installed_plugins.json").read_text())

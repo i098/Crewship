@@ -83,7 +83,8 @@ Bun output stays in one labeled block per package, including command failures.
 - `agents` profile, omp plugins: ponytail ([DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)), i-have-adhd ([ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd)) and caveman ([JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)) from their GitHub marketplaces.
   Apply fetches each new marketplace once, refreshes existing marketplaces, and installs missing plugins.
   For the default version-2 plugin registry, apply reads installed IDs directly from `~/.omp/plugins/installed_plugins.json`.
-  It uses `omp plugin list --json` for custom paths, profiles, missing or unreadable files, and unsupported registry formats.
+  It uses `omp plugin list --json` for custom paths, profiles, supported dotenv files, and missing, unreadable, or unsupported registries.
+  The dotenv check covers the target home's `.env`, `.env.local`, mode-specific files, `.omp/.env`, and `.omp/agent/.env`.
   If no marketplace plugins were installed before apply, it skips `omp plugin upgrade`.
   Otherwise, it runs that command after installation.
   These plugins have no publisher checksums and track each author's default branch.
