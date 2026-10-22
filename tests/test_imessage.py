@@ -2182,8 +2182,12 @@ def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path, answer,
     )
     bridge = start(1)
     try:
-        outbox = lambda: list((state / "outbox").glob("*.json"))
-        sent = lambda: text(fake / "sent").splitlines()
+        def outbox():
+            return list((state / "outbox").glob("*.json"))
+
+        def sent():
+            return text(fake / "sent").splitlines()
+
         # Warm up: his first text establishes a chat, and the desk answers while unmuted.
         inbound("m1", wait_note=False, text="you there")
         wait_for(lambda: sent() == ["send claude-haiku-5-5"], "the desk reply while unmuted")

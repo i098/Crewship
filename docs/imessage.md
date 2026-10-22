@@ -36,7 +36,7 @@ For each message from the owner, the service does these steps:
    Supervisor typing starts after desk cleanup.
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
-6. A clear basic question can receive one direct answer without a Firstmate note or wake.
+6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
    The answer must quote complete source lines from supplied status or prior supervisor or desk records.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
@@ -56,7 +56,7 @@ For each message from the owner, the service does these steps:
    Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
    Later corrections and follow-ups guide that selection.
-   A purely social burst can receive one reaction and finish without a Firstmate note or wake.
+   When not [muted](#mute), a purely social burst can receive one reaction and finish without a Firstmate note or wake.
    Every message must contain only a supported acknowledgement, thanks, laughter, celebration, or emoji.
    An answer to a prior question or approval request cannot use this shortcut.
    Only a small set of thanks, laughter, and celebration emoji can close a social turn.
@@ -546,16 +546,21 @@ Plain Photon sends still use the public SDK.
 Explicit threaded replies can use a configured fallback because the bridge cannot check the latest bubble.
 
 `fm-imessage` exits 0 only when the message is on disk in the outbox, and prints that it is queued. It exits non-zero when it queues nothing. An unknown option queues nothing and exits with code 2.
+
 ## Mute
 
-To mute all outgoing messages, create `~/.local/state/fm-imessage/muted`.
+To block new outgoing items, create `~/.local/state/fm-imessage/muted`.
+`STATE_DIRECTORY` overrides the default state directory.
 While that file exists, the bridge queues no outgoing item.
-Firstmate sends, desk answers, cards, photos, voice memos, and tapbacks all stay out.
+Items already in the outbox can still send.
+Firstmate sends, desk answers, cards, photos, voice memos, and tapbacks all stay out of the queue.
 Inbound texts still arrive, and their notes still reach Firstmate.
-While the file exists, `fm-imessage` queues nothing and exits non-zero with `nothing queued: muted`.
+The bridge refuses send, reaction, card, photo, and typing commands with HTTP 503 and `nothing queued: muted`.
+`fm-imessage` exits non-zero for these refused commands.
 The bridge also refuses a command if mute starts while it reads the request.
 When mute blocks a desk answer or tapback, the bridge stops typing and hands every request to Firstmate.
 The bridge keeps each request until the inbox accepts its note, including across a restart.
+The desk can still show typing while it classifies inbound text.
 Refused photo and card commands leave no new files behind.
 Remove the file to resume sending.
 

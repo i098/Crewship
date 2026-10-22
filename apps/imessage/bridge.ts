@@ -108,7 +108,7 @@ const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every 
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
 const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
-// Mute: while $STATE/muted exists, nothing outgoing is queued (Firstmate, the desk, every service); inbound texts still arrive.
+// See docs/imessage.md#mute for the mute contract.
 const muted = () => existsSync(`${STATE}/muted`);
 const cards = CARD_URL ? new Cards(`${STATE}/cards`) : undefined; // one file per card, token as its name
 const IG_MISSING = ["INSTAGRAM_GRAPH_APP_SECRET", "INSTAGRAM_GRAPH_VERIFY_TOKEN"].filter((name) => !env[name]);
@@ -511,7 +511,6 @@ function stage(photo: PreparedImage): Picture {
 // Puts one item in the outbox with a client GUID of its own.
 function put(item: Out) {
   if (stopping) return false;
-  // Mute: while $STATE/muted exists, nothing outgoing is queued (Firstmate, the desk, every service); inbound texts still arrive.
   if (muted()) return false;
   outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
   return true;
