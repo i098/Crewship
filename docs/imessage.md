@@ -25,7 +25,7 @@ For each message from the owner, the service does these steps:
    It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
    A failed Inception call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
-   It reads the chat view, durable `fm-inbox.sh status` output, and pending messages.
+   Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. A clear basic question can receive one direct answer without a Firstmate note or wake.
