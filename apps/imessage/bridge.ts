@@ -312,7 +312,7 @@ const refOn = (name: string, space: string, id: string): Ref => (name === "photo
 // Each transport's latest text, kept so a restart can still reach him: space, id and time, one per line.
 // Photon keeps the file name it always had. A file without the time (the older format) counts as the oldest.
 const latestFile = (name: string) => (name === "photon" ? LATEST_FILE : `${LATEST_FILE}-${name}`);
-let latest: LineMessage | undefined; // his latest text on any transport: typing and command tapbacks go there
+let latest: LineMessage | undefined; // his latest text on any transport: command typing and tapbacks go there
 let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot be fetched after a restart
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
@@ -394,7 +394,6 @@ Bun.serve({
     desk.firstmateActive();
     handoffPending();
     cancelDesk();
-    // Typing shows only while Firstmate is really composing: /typing starts it, and every send clears it.
     if (url.pathname === "/typing") {
       typing(latest?.space, true);
       return new Response("typing\n");
