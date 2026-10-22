@@ -73,11 +73,13 @@ const frameDrawn = () => window.frames.push([cols, rows, cellW, cellH, cam.tanH,
 const renderScene = render;
 render = function() {
   renderScene();
-  if (!window.frames.length) {
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    window.firstFrameBlack = pixels.every((value, i) => i % 4 === 3 || value === 0);
+  if (exploring && introProgress < 1) {
+    if (!window.introClocks.length) {
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      window.firstFrameBlack = pixels.every((value, i) => i % 4 === 3 || value === 0);
+    }
+    window.introClocks.push(T);
   }
-  if (introProgress < 1) window.introClocks.push(T);
   frameDrawn();
 };
 const paintWorkerFrame = paintCast;
@@ -132,6 +134,10 @@ window.harborCheck = {
     document.querySelectorAll(selector)[n].focus();
     return this.focusState();
   },
+  mapBounds() {
+    return mapBox ? { x: padX + mapBox.oi * cellW, y: padY + mapBox.oj * cellH,
+      width: mapBox.w * cellW, height: mapBox.h * cellH, cellW, cellH } : null;
+  },
   bounds() {
     return {
       box: signBox,
@@ -141,8 +147,7 @@ window.harborCheck = {
       cellH, dpr: canvas.width / stage.clientWidth, ratio: devicePixelRatio,
       safe: [safe.top, safe.right, safe.bottom, safe.left], screenWidth: stage.clientWidth, screenHeight: stage.clientHeight,
       pad: pad.offsetParent ? pad.getBoundingClientRect().toJSON() : null,
-      map: mapBox ? { x: padX + mapBox.oi * cellW, y: padY + mapBox.oj * cellH,
-        width: mapBox.w * cellW, height: mapBox.h * cellH } : null,
+      map: this.mapBounds(),
       links: signLinks.map(({start, height, left = 1, width = signBox.w - 2, a}) => ({
         x: padX + (signBox.i + left + width / 2) * cellW,
         y: padY + (signBox.j + 1 + start + height / 2) * cellH,
@@ -179,6 +184,8 @@ if (name === "desktop") {
   await probe.close();
 }
 await page.goto("http://harbor.test/");
+await page.waitForFunction(() => !document.getElementById("explore").disabled);
+await page.click("#explore");
 try {
   await page.waitForFunction(() => window.frames?.length >= 30, null, { timeout: 30000 });
 } catch (e) {
@@ -189,8 +196,27 @@ if (!page.isClosed() && !errors.length) {
   if (!scene) errors.push("the scene fell back to the plain page");
   if (touch && longest !== 1) errors.push(`fillText drew ${longest} glyphs at once; touch devices must draw one at a time`);
   const { firstFrameBlack, introClocks } = await page.evaluate(() => ({ firstFrameBlack: window.firstFrameBlack, introClocks: window.introClocks }));
-  if (!firstFrameBlack) errors.push("the first intro frame was not fully black");
+  if (!firstFrameBlack) errors.push("the first intro frame after Explore was not fully black");
   if (introClocks.length < 2 || introClocks.at(-1) <= introClocks[0]) errors.push("the scene froze during the intro");
+}
+if (!page.isClosed() && !errors.length) {
+  for (const full of [false, true]) {
+    const map = await page.evaluate(() => window.harborCheck.mapBounds());
+    const button = await page.locator("#menu-open").boundingBox();
+    assert(button && (button.x >= map.x + map.width || button.x + button.width <= map.x ||
+      button.y >= map.y + map.height || button.y + button.height <= map.y), `${name}: Menu covers the map`);
+    const x = map.x + map.width - 1.5 * map.cellW, y = map.y + 0.5 * map.cellH;
+    assert(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.getElementById("scene"),
+      { x, y }), `${name}: map toggle is covered`);
+    if (touch) await page.touchscreen.tap(x, y);
+    else if (full) await page.keyboard.press("Escape");
+    else {
+      await page.keyboard.press("m");
+      await page.keyboard.press("m");
+    }
+    await page.waitForFunction((open) => document.getElementById("stage").classList.contains("mapping") === open, !full);
+    await page.waitForTimeout(100);
+  }
 }
 if (touch && !page.isClosed() && !errors.length) {
 await page.evaluate(() => window.harborCheck.place(-5, 20.6, 0));
@@ -257,6 +283,7 @@ if (!page.isClosed() && !errors.length) {
 await page.emulateMedia({ reducedMotion: "reduce" });
 const overlaps = (a, b) => b && a.x < b.x + b.width && a.x + a.width > b.x
   && a.y < b.y + b.height && a.y + a.height > b.y;
+const menuBounds = await page.locator("#menu-open").boundingBox();
 if (["desktop", "iphone15pro", "landscape"].includes(name)) {
   for (const id of ["how", "docsboard", "mailbox"]) {
     const views = [[0, 5.5, 0, 0], [-0.6, 5, 0.1, 0.08], [0.6, 8, -0.1, -0.08]];
@@ -315,11 +342,12 @@ for (const id of [null, ...await page.evaluate(() => window.harborCheck.ids)]) {
     assert.equal(link.hit, link.href, `${name}/${id}: link is not hit-testable`);
     assert(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.getElementById("scene"),
       { x: link.x, y: link.y }), `${name}/${id}: link tap point is covered by an HTML control`);
+    const hitBox = { x: link.left, y: link.top, width: link.right - link.left, height: link.height };
+    assert(!overlaps(hitBox, menuBounds), `${name}/${id}: link hit padding covers Menu`);
     const stacked = bounds.links.some((other) => other.y !== link.y);
     if (touch) assert(link.height >= (stacked ? 24 : 44), `${name}/${id}: touch link is too short`);
     if (touch) {
       assert(link.top >= top && link.bottom <= bounds.screenHeight - bottom, `${name}/${id}: link hit padding extends outside the safe area`);
-      const hitBox = { x: link.left, y: link.top, width: link.right - link.left, height: link.height };
       assert(!overlaps(hitBox, bounds.pad), `${name}/${id}: link hit padding covers the move pad`);
       if (!bounds.box.overlay) assert(!overlaps(hitBox, bounds.map), `${name}/${id}: link hit padding covers the map`);
     } else assert(link.top >= bounds.y && link.bottom <= bounds.y + bounds.height, `${id}: link region extends outside the frame`);

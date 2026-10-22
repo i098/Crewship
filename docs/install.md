@@ -33,6 +33,16 @@ It does not need Node.js, npm, pnpm, or Bun:
 curl -fsSL https://raw.githubusercontent.com/i098/Crewship/main/install.sh | bash
 ```
 
+The script on `main` selects and downloads a released installer.
+It follows GitHub's latest stable release, verifies `install.sh` against its `.sha256`, and runs that copy.
+It also compares the digest from GitHub's release API when the API is available.
+If the selected release has no installer asset, the bootstrap uses the installer from the verified, approved `i098/Crewship` release `v0.4.7`.
+That installer installs the requested tag and repository, not `v0.4.7`, from a checked archive.
+It verifies GitHub's source archive against the tag's commit when the requested release has no archive asset.
+It does not run the cloning installer inside old releases, and it does not use installer code from `main`.
+Changes to the full installer in `scripts/install.sh` do not reach stable users until an approved stable release includes them.
+The small download script itself still comes from `main`.
+
 If `curl` is missing, install it with `sudo apt-get update && sudo apt-get install -y curl`.
 
 Other server launchers need an existing runtime:
@@ -55,18 +65,21 @@ For stable releases, the pnpm launcher checks the registry and explains this pol
 It keeps the selected release and does not change your pnpm settings.
 The check does not run for `update`; a failed check does not stop installation.
 Check the release printed by the installer.
-Keep pnpm's safety policy; use the curl installer to select the latest Crewship release directly.
+Keep pnpm's safety policy; use the curl installer to select the latest stable Crewship release directly.
 See [Update](#update) for an existing installation.
 
 The installer:
 
 1. Finds and prints the selected Crewship release before the main package setup.
    `install.sh` follows the `https://github.com/<repo>/releases/latest` redirect unless [`CREWSHIP_REF`](#settings) selects a tag.
-   If needed, it first installs curl and CA certificates for the release lookup.
+   If needed, the download script first installs curl, CA certificates, and jq for the release checks.
    The npm launchers use their package version unless you pass `update`, which follows the same redirect.
 2. Installs the OS packages it needs.
 3. Downloads `crewship-<tag>.tar.gz` and `crewship-<tag>.tar.gz.sha256` from `https://github.com/<repo>/releases/download/<tag>/`. The tarball is a `git archive` of the tag (built by `scripts/build-release-artifact.sh` and attached to the draft release before it is published), so it has no `.git`. Releases are immutable, so a release made without the artifact never gets one. For such a release, the installer uses GitHub's source archive of the tag (`https://github.com/<repo>/archive/refs/tags/<tag>.tar.gz`, also without `.git`) and refuses it unless the commit in its header equals the commit of the tag (`git ls-remote`, no clone). It never runs `git clone`.
-4. Refuses to continue unless the SHA-256 of the tarball equals the `.sha256` file. It also compares the digest the GitHub API shows for the release asset. If the API does not answer (for example HTTP 403 or 429 at the 60 requests an hour limit; set `GH_TOKEN` or `GITHUB_TOKEN` to raise it), it prints a message and continues with the `.sha256` check alone.
+4. For a release asset, refuses to continue unless the tarball's SHA-256 equals the `.sha256` file.
+   It also compares the digest from GitHub's release API.
+   If the API does not answer, it prints a message and continues with the `.sha256` check alone.
+   Set `GH_TOKEN` or `GITHUB_TOKEN` to raise the API rate limit.
 5. Unpacks it to `~/.local/share/crewship/releases/<tag>` and points the symlink `~/Crewship` at it, so `cd ~/Crewship && ./ship.sh ...` works as before.
 6. Runs `onboard.sh`, `ship.sh dock` (first run only), `inspect`, and `launch`.
    In a terminal, `dock` shows a checklist of opt-in features.
@@ -79,11 +92,12 @@ Run `./ship.sh chart` from `~/Crewship` when you want to inspect a preview yours
 Follow the [`chart` contract](configuration.md#commands) for preview behavior and side effects.
 The apply still validates the configuration, verifies downloads, and checks its outputs.
 
-The installer shows short progress lines and keeps the full output in `~/.local/state/crewship-install/install-*.log`.
+The full installer shows short progress lines and keeps its output in `~/.local/state/crewship-install/install-*.log`.
 It prints the log path when it finishes or fails.
 Log files have mode `0600`; check them for private data before sharing them.
 Interactive setup questions stay visible.
 Ansible apply output stays visible when sudo needs a password.
+Bootstrap failures appear in the terminal before the full installer creates a log.
 
 During OS package setup, each `apt-get update` or `apt-get install` step waits up to ten minutes for package locks.
 If a lock does not clear, the installer stops with an error.
@@ -97,7 +111,9 @@ A failure at that stage leaves the current Crewship installation unchanged.
 
 Run update commands on the server that already has Crewship installed.
 
-Run `bunx crewship update` (or `npx crewship update`; it takes the newest release, whatever the version of the npm package), or run the installer again: `bunx crewship@latest`, or the `curl` line from the README. It fetches and verifies the next release the same way, then:
+Run `bunx crewship update` or `npx crewship update` to select the latest stable release, regardless of the npm package version.
+Alternatively, run `bunx crewship@latest` or the curl command under [Install](#install).
+The installer fetches and verifies the selected release, then:
 
 - copies the host's own files into it: `.local/` (including `host.yml`), `blueprint/skills/private/` and `blueprint/rules/private/`; a release from before the `blueprint/` folder kept the private files in `skills/private/` and `rules/private/`, and the installer moves them to the new place;
 - switches `~/Crewship` to the new release in one step (`mv -T` of a new symlink);
@@ -105,7 +121,23 @@ Run `bunx crewship update` (or `npx crewship update`; it takes the newest releas
 
 A host still on v0.4.0 gets a one-time migration before the re-apply: links in `~/.local/bin` into the old `~/.local/share/code-factory` tree are removed and the installer links the tools again under `crewship`; the old tree itself is left in place for the rename step of the re-apply, and the `fleet` keys v0.4.1 removed (`supabase_project_id`, `fixture_archive`, `worktree_pools`) are dropped from `.local/host.yml`, one line each, with the original kept as `host.yml.v0.4.0`. Comments in `host.yml` are not preserved in the rewritten file.
 
-If the selected release is already installed, the download is skipped. Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
+If the selected release is already installed, the full installer skips the release download.
+The bootstrap still downloads and verifies its installer.
+Edits to other files in a release directory are not carried across; put host settings in `.local/host.yml` or the private directories.
+
+## Prerelease opt-in
+
+The default installer and `update` follow GitHub's latest stable release, never a prerelease.
+To install the npm `next` channel, run `npx crewship@next` without `update`.
+To select an exact prerelease, run `npx crewship@0.4.8-rc.1`, or select the tag with the existing `CREWSHIP_REF` setting:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/i098/Crewship/v0.4.8-rc.1/install.sh | CREWSHIP_REF=v0.4.8-rc.1 bash
+```
+
+These are version examples; select an available prerelease tag.
+`npx crewship@next update` returns to the latest stable release.
+See [Release channels](../CONTRIBUTING.md#release-channels) for publication rules.
 
 ## Migrate a git install
 
@@ -124,4 +156,4 @@ The backup is never deleted: unpushed commits and edits to tracked files stay th
 ## Attach the artifact to a draft release
 
 Run release commands from a maintainer's repository checkout, not from the laptop setup guide.
-Part of the release steps in [CONTRIBUTING.md](../CONTRIBUTING.md#changelog-and-releases). Create the release as a draft, then run the `release-artifact` workflow by hand (Actions, `release-artifact`, Run workflow, with the tag, for example `v1.2.3`, as input) or `gh workflow run release-artifact.yml -f tag=v1.2.3`. It builds the artifact from the tag and uploads it with `--clobber`; it refuses a release that is already published, because immutable releases accept no new assets. It creates no release, tag or version. Publish the draft afterwards.
+Follow the [release steps](../CONTRIBUTING.md#release-steps) for draft creation, channel selection, artifact attachment, and publication.

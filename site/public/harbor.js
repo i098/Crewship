@@ -8,26 +8,35 @@ const stage = PAGE && document.getElementById("stage");
 const canvas = PAGE && document.getElementById("scene");
 const ctx = PAGE && canvas.getContext("2d");
 const card = PAGE && document.getElementById("card");
-// With JavaScript the scene fills the screen and the plain page stays for screen readers only.
+const menu = PAGE && document.getElementById("menu");
+const settings = PAGE && document.getElementById("settings");
+const preferences = { graphics: "auto", motion: "system" };
+let exploring = false, frameRequest = 0;
+function storageFailed() {
+  document.getElementById("save-status").textContent = "Settings apply for this visit but cannot be saved.";
+}
 if (PAGE) {
+  try {
+    const saved = JSON.parse(localStorage.getItem("harbor-settings"));
+    if (["auto", "low", "high"].includes(saved?.graphics)) preferences.graphics = saved.graphics;
+    if (["system", "reduce", "full"].includes(saved?.motion)) preferences.motion = saved.motion;
+  } catch (error) { if (!(error instanceof SyntaxError)) storageFailed(); }
   stage.hidden = false;
-  stage.focus({ preventScroll: true });
 }
 const pad = PAGE && document.getElementById("pad");
 const knob = PAGE && pad.firstElementChild;
 // A ray worker takes reduced motion from the page with each frame.
-const reduced = PAGE ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+const systemMotion = PAGE ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+const reduced = { matches: preferences.motion === "reduce" || (preferences.motion === "system" && systemMotion.matches) };
 const touchFirst = PAGE ? matchMedia("(pointer: coarse)") : { matches: false };
 // The intro keeps the camera and canvas at their final size. Ray workers only cast after it.
-let introStart = null, introProgress = reduced.matches || !PAGE ? 1 : 0;
-if (PAGE) stage.classList.toggle("loading", introProgress < 1);
+let introStart = null, introProgress = 1;
 function finishIntro() {
   introProgress = 1;
   stage.classList.remove("loading");
   dirty = true;
   for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) removeEventListener(event, finishIntro, true);
 }
-if (PAGE) for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) addEventListener(event, finishIntro, { capture: true, passive: true });
 
 // One-time hint that browser zoom changes the detail (measure() reads innerWidth and devicePixelRatio). Keyboards only:
 // a phone has no Cmd or Ctrl. It shows once, then a stored flag keeps it away; a click hides it, and CSS fades it after 14 s.
@@ -2683,9 +2692,10 @@ function measure() {
   // Reset the backing store only for a real size change, immediately before drawing; flooring keeps the cap.
   if (canvas.width !== Math.floor(w * dpr)) canvas.width = Math.floor(w * dpr);
   if (canvas.height !== Math.floor(h * dpr)) canvas.height = Math.floor(h * dpr);
-  // The 0.9 zoom holds up to FULL_AREA; a bigger stage gets bigger glyphs so the cell cap falls with the square root of its
-  // area (about 51000 cells at 3840 by 2160). A cell is about twice as tall as wide.
-  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale);
+  // Before the Low multiplier, the base grid grows glyphs above FULL_AREA.
+  // Its cell cap falls with the square root of stage area: about 51000 cells at 3840 by 2160.
+  // Each cell is about twice as tall as wide.
+  const px = Math.max(Math.sqrt(2 * w * h / (MAX_CELLS * Math.min(1, Math.sqrt(FULL_AREA / (w * h))))), ZOOM * Math.max(6.5, Math.min(11, innerWidth * 0.0068)) * scale) * (preferences.graphics === "low" ? COARSEST : 1);
   aspect = w / h;
   viewW = w; viewH = h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2748,6 +2758,7 @@ function view(tenths) {
 // dropped: they would compose an older moment over it.
 function render() {
   if (frames.some((f) => f.settled)) DG.fill(undefined);
+  for (const f of frames) for (const [, bmp] of f.bitmaps) bmp.close();
   frames.length = 0;
   view(performance.now() / 100);
   for (let j = 0; j < rows; j++) castRow(j, seenWorld, seenShip);
@@ -2971,16 +2982,18 @@ function label(at, span = 0) {
     right: Math.max(...shown.map((r) => r.right)), bottom: Math.max(...shown.map((r) => r.bottom)) } : null;
   const padLeft = controls ? Math.floor((controls.left - 12 - padX) / cellW) : i1;
   const padTop = controls ? Math.floor((controls.top - 12 - padY) / cellH) : j1;
+  const menuBounds = document.getElementById("menu-open").getBoundingClientRect();
+  const menuLeft = Math.floor((menuBounds.left - 12 - padX) / cellW), menuTop = Math.floor((menuBounds.top - 12 - padY) / cellH);
   const below = mapBox ? Math.max(j0, mapBox.oj + mapBox.h + 1) : j0;
   const side = Math.min(i1, mapBox ? mapBox.oi - 1 : i1, padLeft);
   const anchor = at && [Math.max(i0, Math.min(i1 - 1, at[0])), Math.max(j0, Math.min(j1 - 1, at[1]))];
   const areas = [
-    [i0, below, i1, Math.min(j1, padTop)],
-    [i0, below, Math.min(i1, padLeft), j1],
-    [i0, j0, side, j1]
+    [i0, below, i1, Math.min(j1, padTop, menuTop)],
+    [i0, below, Math.min(i1, padLeft, menuLeft), j1],
+    [i0, j0, Math.min(side, menuLeft), j1]
   ];
   if (span) {
-    const obstacles = [];
+    const obstacles = [[menuLeft, menuTop, Math.ceil((menuBounds.right + 12 - padX) / cellW), Math.ceil((menuBounds.bottom + 12 - padY) / cellH)]];
     if (mapBox) obstacles.push([mapBox.oi - 1, mapBox.oj - 1, mapBox.oi + mapBox.w + 1, mapBox.oj + mapBox.h + 1]);
     if (controls) obstacles.push([padLeft, padTop, Math.ceil((controls.right + 12 - padX) / cellW), Math.ceil((controls.bottom + 12 - padY) / cellH)]);
     signBox = signPlace(at, [[i0, j0, i1, j1]], span, obstacles);
@@ -2988,7 +3001,8 @@ function label(at, span = 0) {
   signBox ||= signPlace(anchor, areas);
   if (!signBox) {
     const clearLeft = controls ? Math.max(i0, Math.ceil((controls.right + 12 - padX) / cellW)) : i0;
-    signBox = signFit(anchor, clearLeft, j0, i1, j1, 3);
+    signBox = signFit(anchor, clearLeft, j0, i1, Math.min(j1, menuTop), 3)
+      || signFit(anchor, clearLeft, j0, Math.min(i1, menuLeft), j1, 3);
   }
   if (signBox && anchor && !signBox.seated) signLeader(...anchor);
 }
@@ -3063,7 +3077,7 @@ function minimap() {
   MAPCELLS = new Map();
   if (interior) { mapBox = null; return; }
   const left = Math.max(1, Math.ceil((safe.left - padX) / cellW)), right = Math.max(1, Math.ceil((safe.right - padX) / cellW));
-  const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom - padY) / cellH));
+  const top = Math.max(1, Math.ceil((safe.top - padY) / cellH)), bottom = Math.max(1, Math.ceil((safe.bottom + 72 - padY) / cellH));
   const full = mapMode === 2, w = full ? cols - left - right : Math.min(30, cols - left - right), h = full ? rows - top - bottom : Math.min(15, rows - top - bottom);
   mapBox = { oi: full ? left : cols - w - right, oj: top, w, h, iw: w - 2, ih: h - 3 };
   mapFrame();
@@ -3100,6 +3114,7 @@ function mapMarks() {
   if (mapInside(f)) mapPut(f[0] + 1, f[1] + 1, "O", "w");
   ORDER.forEach(mapPoint);
   if (mapMode === 2) mapLabels();
+  if (mapMode) mapPoint(ORDER[pick], pick);
   const p = toMap(me.x, me.z);
   if (mapInside(p)) mapPut(p[0] + 1, p[1] + 1, "^>v<"[Math.round(((me.yaw % 6.283) + 6.283) / 1.5708) % 4], "k");
 }
@@ -3409,6 +3424,7 @@ function autoStep(dt) {
 function setMap(mode) {
   mapMode = mode;
   if (mode && document.pointerLockElement) document.exitPointerLock();
+  if (mode) releaseInput();
   stage.classList.toggle("mapping", mode > 0);
 }
 // M picks on the map, M again fills the screen, M or Escape closes; arrows or the mouse choose, Enter goes.
@@ -4142,6 +4158,16 @@ if (PAGE) {
     KeyR: "u", KeyF: "d" };
   const open = () => { if (target) window.open(spots[target].href, "_blank", "noopener"); };
   stage.addEventListener("keydown", (e) => {
+    if (!exploring || menu.open || settings.open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (document.pointerLockElement) document.exitPointerLock();
+      else if (mapMode) { setMap(0); dirty = true; }
+      else openMenu();
+      return;
+    }
+    if (e.target.closest("a, button, input, select")) return;
     if (mapKey(e)) { e.preventDefault(); dirty = true; return; }
     if (e.key === "Enter" && target && !e.target.closest("a, button")) { e.preventDefault(); open(); return; }
     const k = KEYS[e.code];
@@ -4194,6 +4220,7 @@ if (PAGE) {
     dirty = true;
   });
   document.addEventListener("mousemove", (e) => {
+    if (!exploring || menu.open || settings.open) return;
     if (document.pointerLockElement === stage) look(e.movementX, e.movementY, 0.0022);
     else { hoverAim(e.clientX, e.clientY); hoverMap(e.clientX, e.clientY); }
   });
@@ -4249,12 +4276,10 @@ function step(dt) {
 }
 
 // ---- Sound -------------------------------------------------------------------------------
-// Positional ambient loops. Each loop plays from the emitter nearest to you, through an HRTF panner that fades it
-// with distance. Sound starts on the first click or tap (autoplay rules) unless the speaker button turned
-// it off on an earlier visit; the button's choice is stored. Positions update at most 20 times a second.
+// Positional ambient loops start only after Explore. Positions update at most 20 times a second.
 const soundButton = PAGE && document.getElementById("sound");
 let audio = null, soundOn = false, soundAt = 0, soundPref = null, SHORE = null, TREE_TOPS = null;
-try { soundPref = localStorage.getItem("harbor-sound"); } catch { /* blocked storage: sound starts on */ }
+if (PAGE) try { soundPref = localStorage.getItem("harbor-sound"); } catch { storageFailed(); }
 // Name, loop length in seconds, level, and the distance in metres where fading starts. Each file repeats the last
 // and first 0.25 s of its loop around it, so decoder padding cannot put a gap in the loop.
 const LOOPS = [["sea", 16, 0.8, 3], ["fountain", 8, 0.7, 2], ["wind", 12, 0.5, 3], ["creak", 16, 0.6, 3],
@@ -4303,24 +4328,95 @@ function startSound() {
 function setSound(on) {
   soundOn = on;
   soundButton.setAttribute("aria-pressed", on);
-  if (on && !audio) startSound();
-  // A muted or hidden page suspends the context, so it costs no CPU.
-  if (audio) (on && !document.hidden ? audio.ctx.resume() : audio.ctx.suspend()).catch(() => {});
+  if (on && exploring && !audio) startSound();
+  if (PAGE) document.getElementById("sound-choice").checked = on;
+  // A muted, hidden, or paused scene suspends the context.
+  if (audio) (on && exploring && !menu.open && !settings.open && !document.hidden ? audio.ctx.resume() : audio.ctx.suspend()).catch(() => {});
 }
-// Only a click or tap starts sound, so a keyboard user can reach the button without hearing it first.
-function firstGesture(e) {
-  if (e.target.closest?.("#sound")) return;
-  removeEventListener("pointerup", firstGesture, true);
-  if (soundPref !== "off") setSound(true);
+function savePreferences() {
+  try {
+    localStorage.setItem("harbor-settings", JSON.stringify(preferences));
+    localStorage.setItem("harbor-sound", soundOn ? "on" : "off");
+    document.getElementById("save-status").textContent = "";
+  } catch { storageFailed(); }
+}
+function applyPreferences() {
+  reduced.matches = preferences.motion === "reduce" || (preferences.motion === "system" && systemMotion.matches);
+  scale = 1;
+  shadows = preferences.graphics === "high" || (preferences.graphics === "auto" && !touchFirst.matches);
+  slow = fast = 0;
+  layoutDirty = dirty = true;
+}
+function releaseInput() {
+  keys.clear();
+  stick.x = stick.y = 0;
+  for (const id of [padId, lookId]) if (id !== null && stage.hasPointerCapture(id)) stage.releasePointerCapture(id);
+  padId = lookId = null;
+  knob.style.transform = "";
+  walkPath = [];
+  releaseDoorInput();
+}
+function openMenu() {
+  cancelAnimationFrame(frameRequest);
+  releaseInput();
+  if (exploring) { render(); dirty = layoutDirty; }
+  if (document.pointerLockElement) document.exitPointerLock();
+  stage.classList.add("menu-active");
+  menu.showModal();
+  setSound(soundOn);
 }
 if (PAGE) {
-  addEventListener("pointerup", firstGesture, true);
   soundButton.addEventListener("click", () => {
-    removeEventListener("pointerup", firstGesture, true);
     setSound(!soundOn);
-    try { localStorage.setItem("harbor-sound", soundOn ? "on" : "off"); } catch { /* not remembered */ }
+    savePreferences();
   });
   document.addEventListener("visibilitychange", () => audio && setSound(soundOn));
+  document.getElementById("menu-open").addEventListener("click", openMenu);
+  menu.addEventListener("cancel", (e) => e.preventDefault());
+  menu.addEventListener("close", () => {
+    if (!menu.open && stage.classList.contains("menu-active") && document.documentElement.classList.contains("js")) openMenu();
+  });
+  document.getElementById("settings-open").addEventListener("click", () => {
+    releaseInput();
+    settings.showModal();
+  });
+  settings.addEventListener("close", () => document.getElementById("settings-open").focus());
+  for (const key of ["graphics", "motion"]) {
+    const control = document.getElementById(key);
+    control.value = preferences[key];
+    control.addEventListener("change", () => {
+      preferences[key] = control.value;
+      applyPreferences();
+      savePreferences();
+    });
+  }
+  document.getElementById("sound-choice").addEventListener("change", (e) => {
+    setSound(e.target.checked);
+    savePreferences();
+  });
+  document.getElementById("settings-reset").addEventListener("click", () => {
+    preferences.graphics = document.getElementById("graphics").value = "auto";
+    preferences.motion = document.getElementById("motion").value = "system";
+    setSound(true);
+    applyPreferences();
+    savePreferences();
+  });
+  document.getElementById("explore").addEventListener("click", () => {
+    menu.close();
+    stage.classList.remove("menu-active");
+    releaseInput();
+    if (!exploring) {
+      exploring = true;
+      introProgress = reduced.matches ? 1 : 0;
+      stage.classList.toggle("loading", introProgress < 1);
+      for (const event of ["keydown", "pointerdown", "touchstart", "click", "wheel"]) addEventListener(event, finishIntro, { capture: true, passive: true });
+      startWorkers();
+    }
+    last = performance.now();
+    frameRequest = requestAnimationFrame(frame);
+    setSound(soundOn);
+    stage.focus({ preventScroll: true });
+  });
 }
 // Web Audio's z axis points the other way from the scene's.
 function place(node, [x, y, z], t) {
@@ -4356,18 +4452,23 @@ let refreshMs = Infinity, paintedLastFrame = false, probeMs = 0;
 const resize = PAGE && new ResizeObserver(() => {
   if (stage.clientWidth === viewW && stage.clientHeight === viewH) return;
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { layoutDirty = true; dirty = true; }, 120);
+  resizeTimer = setTimeout(() => {
+    layoutDirty = dirty = true;
+    if (!exploring || menu.open) { measure(); render(); layoutDirty = false; }
+  }, 120);
 });
 if (PAGE) {
   new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(stage);
-  reduced.addEventListener("change", () => { dirty = true; });
+  systemMotion.addEventListener("change", () => {
+    reduced.matches = preferences.motion === "reduce" || (preferences.motion === "system" && systemMotion.matches);
+    dirty = true;
+  });
 }
-// Adaptive resolution, a last resort for weak phones only: slow frames drop shadows, then grow glyphs, never past
-// COARSEST; detail returns when frames run short. Desktops always cast every cell with shadows.
+// Auto adapts weak phones; explicit quality choices keep their selected detail.
 // Leave time for canvas painting within a 60 Hz display period.
 const COARSEST = 1.5;
 function adaptResolution(ms, late) {
-  if (!touchFirst.matches) return;
+  if (!touchFirst.matches || preferences.graphics !== "auto") return;
   slow = ms > 10 || late ? slow + 1 : 0;
   fast = ms < 6 && !late ? fast + 1 : 0;
   if (slow > 20 && (shadows || scale < COARSEST)) {
@@ -4415,9 +4516,10 @@ function paintWorkerFrame() {
   return frames.length > 1 || (layoutDirty && frames.length > 0);
 }
 function frame(now) {
+  if (menu.open || settings.open) return;
   // Time waits while frames in hand hold the next one back.
   if (!paintWorkerFrame()) nextFrame(now);
-  requestAnimationFrame(frame);
+  frameRequest = requestAnimationFrame(frame);
 }
 function nextFrame(now) {
   const frameMs = now - last;
@@ -4494,6 +4596,7 @@ function startWorkers() {
 }
 function stopWorkers() {
   for (const w of rayWorkers) w.terminate();
+  for (const f of frames) for (const [, bmp] of f.bitmaps) bmp.close();
   rayWorkers.length = workerCount = frames.length = 0;
   dirty = true;
   DG?.fill(undefined); // a frame in hand may have composed rows that were never painted
@@ -4762,13 +4865,20 @@ if (PAGE) {
   GRASS = plantGrass();
   rebuildRoutes();
   // A font that fails to load does not stop the scene.
-  document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => {
+  document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => requestAnimationFrame(() => {
+    applyPreferences();
     measure();
     resize.observe(stage);
-    startWorkers();
-    last = performance.now();
-    requestAnimationFrame(frame);
-  });
+    moveOutside();
+    me.eye = floorAt(me.x, me.z) + 1.6;
+    render();
+    setSound(soundPref !== "off");
+    menu.close();
+    openMenu();
+    document.getElementById("explore").disabled = false;
+    document.getElementById("settings-open").disabled = false;
+    document.getElementById("explore").focus();
+  }));
 } else {
   onmessage = ({ data }) => (data.length === 3 ? castBand(...data) : data.length === 4 ? drawBand(...data) : takeMoment(data));
   postMessage({ ready: true, draws: typeof OffscreenCanvas === "function" });

@@ -1,8 +1,7 @@
 # Publishes the worker image to the GitHub Container Registry on each release.
 #
-# A published vX.Y.Z release builds the Dockerfile's worker target and pushes
-# ghcr.io/i098/crewship:X.Y.Z and :latest. The image's
-# org.opencontainers.image.source label links the package to this repository.
+# Each release pushes its exact version tag. Only stable releases also push
+# :latest. The org.opencontainers.image.source label links the package here.
 # The build job runs installers with a read-only token and hands the image to
 # the push job as an artifact; only the push job holds packages: write. The
 # push job runs in the `ghcr` environment, so Deployments lists each push.
@@ -36,16 +35,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || 'v0.0.0' }}
+          PRERELEASE: ${{ github.event.release.prerelease || false }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "::error title=release tag::$TAG is not vX.Y.Z"
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?)$ ]]; then
+            echo "::error title=release tag::$TAG is not vX.Y.Z or vX.Y.Z-rc.N"
+            exit 1
+          fi
+          version=${BASH_REMATCH[1]}
+          prerelease=false
+          [[ "$version" != *-* ]] || prerelease=true
+          if [[ "$prerelease" != "$PRERELEASE" ]]; then
+            echo "::error title=release channel::The tag and GitHub prerelease flag must match"
             exit 1
           fi
           image=ghcr.io/i098/crewship
           docker build --secret id=github_token,env=GITHUB_TOKEN --target worker \
-            --tag "$image:${BASH_REMATCH[1]}" --tag "$image:latest" .
-          docker save "$image:${BASH_REMATCH[1]}" "$image:latest" | gzip > worker-image.tar.gz
+            --tag "$image:$version" .
+          images=("$image:$version")
+          if [[ "$PRERELEASE" == false ]]; then
+            docker tag "$image:$version" "$image:latest"
+            images+=("$image:latest")
+          fi
+          docker save "${images[@]}" | gzip > worker-image.tar.gz
 
       - name: Upload worker image
         if: github.event_name == 'release'

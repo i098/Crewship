@@ -1,7 +1,3 @@
-# Builds site/ (the crewship.si landing page) from the repository and deploys it to
-# Cloudflare Workers static assets, on every push to main and on each published
-# release, so the page follows Crewship as it changes.
-#
 # Each run is a GitHub deployment in the crewship.si environment, with
 # https://crewship.si as its URL. The environment accepts only main and v* release tags and
 # holds the deploy token, which can edit the one crewship Worker. Never runs on
@@ -28,6 +24,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'release' || !github.event.release.prerelease
     name: deploy crewship.si
     runs-on: ubuntu-24.04
     timeout-minutes: 10

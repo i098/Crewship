@@ -6,7 +6,7 @@ It is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on
 There is no 3D engine, no WebGL and no model files.
 A ray caster sends one ray per character cell from your eye; objects are maths shapes (planes, cones, ellipsoids, tapered limbs, cloth, height fields), not meshes.
 The nearest hit is lit by the moon and lamps with shadow rays, then brightness picks a glyph and the material picks a colour.
-The cell count is the cost of a frame, so web workers cast and draw the rows on every core; desktops keep every cell and shadow, and only a slow phone drops shadow rays and then grows the glyphs, up to 1.5 times; see [how.html](public/how.html) for the diagram, the shapes and cell counts per screen.
+Web workers share the drawing work; see [how.html](public/how.html#frame-loop) for rendering costs and graphics detail.
 
 Each object shows an ASCII sign; see [Content from the repository](#content-from-the-repository) for sign placement.
 The sign uses the scene's character grid, font and colors, with clickable links.
@@ -15,10 +15,11 @@ See [how.html](public/how.html) for the renderer and controls.
 The off-screen HTML list and current sign keep links available to screen readers and keyboard users.
 An uncaught error or rejected promise in `harbor.js`, or a failure to load it, hides the scene and shows the plain page.
 Errors and rejected promises from other scripts or resources, such as browser add-ons, do not.
-JavaScript hides the plain page before the first paint; visitors without JavaScript still see it.
-The scene starts with a 1.2-second glyph-noise sweep that fades in from black without moving the camera.
-Any key, click, touch, or mouse wheel input skips the animation.
-Reduced-motion visitors get the scene immediately.
+The start menu shows a still Harbor view with Explore, GitHub, About, and Settings.
+Explore starts the existing scene and moves keyboard focus to the stage.
+The scene starts with a 1.2-second glyph-noise sweep.
+Reduced motion skips the sweep.
+Press a key, click, touch the screen, or use the mouse wheel to skip the sweep.
 Waves, the fountain, and boats keep moving during the intro.
 See [how.html](public/how.html) for the canvas limits and intro rendering details.
 
@@ -117,11 +118,37 @@ Without reduced motion, a missing clear route also stops the map walk without mo
 
 The harbor plays ambient sound that fades with distance: sea and surf at the nearest waterline or ship side, water at the fountain, wind in the nearest tree, creaking timbers along the ship, and gulls circling far over the bay.
 Inside the house and the ship's rooms, a fire or lantern crackles nearby and the outdoor sounds are muffled; the ship's rooms keep the creaking.
-Sound starts with the first click or tap, as browsers require, and the speaker button in the bottom-left corner turns it off or on.
-The page stores the button's choice in `localStorage`, so a visitor who turned sound off hears nothing on the next visit until they turn it on.
-Sound stops while the tab is hidden; reduced motion does not change it.
+Sound starts only after Explore, and the speaker button turns it off or on.
+The page stores the sound choice under `harbor-sound`.
+Sound stops while the tab is hidden or the menu is open; reduced motion does not change it.
 The loops are CC0 recordings in `public/audio/`, as AAC with an Opus copy for browsers without AAC; see [CREDITS.md](../CREDITS.md#sounds) for the sources.
 See [how.html](public/how.html) for the audio graph.
+
+Settings provides Auto, Low, and High graphics, plus System, Reduce, and Full motion.
+Auto keeps adaptive phone detail, and High keeps full detail.
+Low uses larger glyphs and disables shadows.
+Low stays active through house doors, cabin doors, and the ship's hatch.
+System follows the operating system's motion setting.
+Reduce stops idle scene animation; Full allows it.
+Close Settings with Escape or Back to return focus to the Settings button.
+The small `harbor-settings` record stores only graphics and motion values.
+If storage fails, changes apply for the visit and Settings shows a notice.
+The notice clears after a successful save.
+Reset restores Auto graphics, System motion, and sound on without clearing other storage.
+The Controls section lists the existing keyboard and touch controls.
+The scene Menu button pauses the view and releases movement input.
+Opening Menu renders the current view and discards older worker frames, including their bitmaps.
+Escape first releases pointer lock or closes the map; a later press opens the menu.
+The start menu remains available after Escape, including before the first user action.
+The scene Menu button stays clear of map controls, sign links, and the zoom hint.
+If the scene script fails, the plain page retains GitHub and About links without inactive scene buttons.
+
+Run the menu check through `chrome-devtools-axi run` with the preview server URL:
+
+```js
+const { checkMenu } = await import(process.cwd() + "/site/menu-check.mjs");
+console.log(await checkMenu(page, "http://127.0.0.1:8000/"));
+```
 
 The page uses plain HTML, CSS and JavaScript in `public/`, with no runtime dependencies.
 Nothing here reaches a Crewship host or worker image: `.dockerignore` excludes `site/`, and the playbook never copies it.
@@ -197,7 +224,9 @@ The check loads the built page in Playwright WebKit at desktop and iPhone portra
 It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
-It also checks that the first intro frame is black and that the scene keeps moving during the intro.
+The check enters through Explore before it exercises the scene.
+It checks the first rendered frame after Explore for black pixels and checks that scene time advances during the intro.
+It checks Menu clearance and the map toggle in both map sizes.
 Inside the house, it checks that manifest focus keeps the player in place and draws a sign with hit-testable links.
 It checks every sign against safe-area edges and checks map and move pad clearance before the final overlay placement.
 It checks the how, docsboard, and mailbox signs against the placement rules above.
@@ -231,7 +260,7 @@ node chromium-check.mjs
 
 ## Deploy
 
-Cloudflare Workers serves `dist/` as static assets; `wrangler.jsonc` is the configuration. The [harbor workflow](../.github/workflows/harbor.yml) builds and deploys on every push to `main`, on each published release, and on a manual run. Each run is a GitHub deployment in the `crewship.si` environment, which accepts only `main` and `v*` tags and holds the deploy token as its `CLOUDFLARE_API_TOKEN` secret and the account id as its `CLOUDFLARE_ACCOUNT_ID` variable.
+Cloudflare Workers serves `dist/` as static assets; `wrangler.jsonc` is the configuration. The [harbor workflow](../.github/workflows/harbor.yml) builds and deploys on every push to `main`, on each published stable release (not prereleases), and on a manual run. Each run is a GitHub deployment in the `crewship.si` environment, which accepts only `main` and `v*` tags and holds the deploy token as its `CLOUDFLARE_API_TOKEN` secret and the account id as its `CLOUDFLARE_ACCOUNT_ID` variable.
 
 To deploy by hand with a token that can edit the `crewship` Worker:
 
