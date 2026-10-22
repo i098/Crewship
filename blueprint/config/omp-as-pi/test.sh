@@ -58,6 +58,34 @@ run -nc --mode json --session "$UUID"
 [ $rc = 0 ] && [ "$(argv)" = "--config $HERE/gate-overlay.yml --no-rules --no-skills --no-extensions --resume $UUID --mode json" ] &&
 	pass "-nc spelling + resume" || bad "-nc resume: [$(argv)]"
 
+for effort in xhigh max auto; do
+	run --model anthropic/claude-opus-5-5 --thinking "$effort" --mode json
+	[ $rc = 0 ] && [ "$(argv)" = "--model anthropic/claude-opus-5-5 --thinking high --mode json" ] &&
+		pass "opus $effort capped" || bad "opus $effort: [$(argv)]"
+	run --model "anthropic/claude-opus-5-5:$effort" --mode json
+	[ $rc = 0 ] && [ "$(argv)" = "--model anthropic/claude-opus-5-5:high --mode json" ] &&
+		pass "opus :$effort capped" || bad "opus :$effort: [$(argv)]"
+done
+
+for model in claude-opus-5-5 anthropic/claude-opus-5-5; do
+	run --model "$model" --mode json
+	[ $rc = 0 ] && [ "$(argv)" = "--model $model --thinking high --mode json" ] &&
+		pass "opus without effort capped" || bad "opus default: [$(argv)]"
+done
+
+for effort in low medium high; do
+	run --model anthropic/claude-opus-5-5 --thinking "$effort" --mode json
+	[ $rc = 0 ] && [ "$(argv)" = "--model anthropic/claude-opus-5-5 --thinking $effort --mode json" ] &&
+		pass "opus $effort unchanged" || bad "opus $effort: [$(argv)]"
+	run --model "anthropic/claude-opus-5-5:$effort" --mode json
+	[ $rc = 0 ] && [ "$(argv)" = "--model anthropic/claude-opus-5-5:$effort --mode json" ] &&
+		pass "opus :$effort unchanged" || bad "opus :$effort: [$(argv)]"
+done
+
+FM_OPUS_EFFORT_UNCAPPED=1 run --model anthropic/claude-opus-5-5:max --thinking xhigh --mode json
+[ $rc = 0 ] && [ "$(argv)" = "--model anthropic/claude-opus-5-5:max --thinking xhigh --mode json" ] &&
+	pass "opus override unchanged" || bad "opus override: [$(argv)]"
+
 # --- fail closed --------------------------------------------------------------
 expect_refuse() { # <label> <args...>
 	local label=$1

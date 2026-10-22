@@ -198,6 +198,16 @@
     remote_src: true
   become: true
 
+- name: Install the spawned Opus effort cap omp extension
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/omp-opus-effort-cap.ts"
+    dest: "{{ crewship_omp_opus_effort_cap_extension }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+
 # The omp extension that runs the sentrux and fallow quality gate at the end of
 # every agent turn (docs/omp.md#quality-gate). Managed: every apply rewrites it.
 - name: Install the quality gate omp extension
