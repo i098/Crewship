@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Send the operator the few Instagram reels worth watching, from the agent account.
 
-See SKILL.md for the isolated uv command and dependency requirements.
-This script imports instagram_dm.py from the same directory.
+Run it with `uv run --quiet --with instagrapi python reel_curator.py COMMAND`; it imports instagram_dm.py next to it.
 
 reel_curator.py run      # one cycle: pull, skip seen, transcribe, drop non-English, score, share at most the daily cap
 reel_curator.py follow   # follow every configured account not yet followed, minutes apart

@@ -7,7 +7,6 @@ import io
 import json
 import os
 import runpy
-import shlex
 import shutil
 import ssl
 import subprocess
@@ -22,7 +21,6 @@ from threading import Barrier, BrokenBarrierError, Event, Thread
 
 import pytest
 import yaml
-from jinja2 import Environment, meta
 
 SPEC = importlib.util.spec_from_file_location(
     "provisions", Path(__file__).parents[1] / "scripts/provisions.py"
@@ -193,52 +191,6 @@ def test_python_security_updates_only_present_packages(tmp_path, python_security
     assert actual == expected
     assert json.loads(result.stdout)["changed"] == (installed != expected)
     assert not installer.secure_python(python, uv, environment)
-
-
-@pytest.mark.parametrize("template", [
-    "fm-insta-reply.j2", "instagram-dm-listen.service.j2",
-    "instagram-dm-poll.service.j2", "instagram-reel-curator.service.j2",
-])
-def test_instagram_launchers_require_secure_certifi(tmp_path, python_security_index, template):
-    uv, environment, wheels = python_security_index
-    for wheel in wheels.glob("certifi-*.whl"):
-        if "2026.10.18" not in wheel.name:
-            wheel.unlink()
-    security_wheel(wheels, "instagrapi", "1.0.0", ("certifi>=2026.10.18",))
-    probe = tmp_path / "probe.py"
-    probe.write_text(
-        "import importlib.metadata as m, json\n"
-        "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))\n"
-    )
-    source = (Path(SPEC.origin).parents[1] / "blueprint/ansible/templates" / template).read_text()
-    jinja = Environment()
-    jinja.filters.update(
-        quote=shlex.quote, dirname=os.path.dirname, comment=lambda value: "# " + value,
-    )
-    variables = dict.fromkeys(meta.find_undeclared_variables(jinja.parse(source)), "unused")
-    variables.update(
-        crewship_uv_bin=str(uv), crewship_instagram_dm_backend="instagrapi",
-        crewship_instagram_dm_script=str(probe), crewship_instagram_curator_script=str(probe),
-        crewship_instagram_dm_session=str(tmp_path / "session.json"),
-    )
-    rendered = jinja.from_string(source).render(variables)
-    if template.endswith("service.j2"):
-        unit = configparser.ConfigParser(interpolation=None, strict=False)
-        unit.read_string(rendered)
-        command = shlex.split(unit["Service"]["ExecStart"])
-    else:
-        launcher = tmp_path / "reply"
-        launcher.write_text(rendered)
-        launcher.chmod(0o755)
-        command = [str(launcher)]
-    blocked = subprocess.run(command, cwd=tmp_path, env=environment, capture_output=True, text=True)
-    assert blocked.returncode != 0
-    assert "certifi" in blocked.stderr
-    security_wheel(wheels, "certifi", "2026.10.19")
-    result = subprocess.run(
-        command, cwd=tmp_path, env=environment, check=True, capture_output=True, text=True,
-    )
-    assert json.loads(result.stdout) == {"instagrapi": "1.0.0", "certifi": "2026.10.19"}
 
 
 @pytest.mark.parametrize("corrupt", [False, True])

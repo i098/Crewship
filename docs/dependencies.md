@@ -30,12 +30,10 @@ Newer major lines remain eligible.
 The default recipe does not add Python's `pip` or `certifi` packages when they are absent.
 The repository lock excludes both packages, and uv creates the pruner and tool environments without pip seeds.
 Adding unused packages would add another trust store without serving a runtime need.
-Every managed Python environment requires `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
+The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
 `onboard.sh` handles the repository environment; the normal `ship.sh` command path does not run the package updater.
 It does not run the environment's pip to update packages.
-The Instagram listener, poller, reply command, and curator use isolated environments without pip seeds.
-They require secure certifi alongside instagrapi, which already depends on certifi.
 `uv pip` is a uv command, not a Python pip installation.
 The optional desktop packages bring Ubuntu's `python3-certifi` through `websockify` and `requests`.
 Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.
