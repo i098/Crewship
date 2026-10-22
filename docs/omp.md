@@ -10,7 +10,8 @@ With the `agents` profile on, `./ship.sh launch`:
    See [Dependencies](dependencies.md#latest-releases) for sources and update behavior.
 2. Copies [`blueprint/config/omp.yml`](../blueprint/config/omp.yml) to `~/.omp/agent/config.yml` (directory `0700`, file `0600`), and [`blueprint/config/omp-lsp.json`](../blueprint/config/omp-lsp.json) to `~/.omp/agent/lsp.json`, which disables the markdown language server (marksman): it costs each session about 90 MB, and markdown diagnostics add nothing to agent work.
    Every apply also merges [`blueprint/config/omp-models.yml`](../blueprint/config/omp-models.yml) into `~/.omp/agent/models.yml`, preserving user providers and unshipped model keys.
-   Shipped override keys take precedence over existing values.
+   Shipped Codex override keys take precedence over existing values.
+   Inception fields supply defaults only; existing endpoint, credential, and model choices take precedence.
    It reads the first existing configuration in omp's order: `models.yml`, `models.yaml`, then legacy `models.json`.
    The installed Bun parser preserves YAML 1.2 scalar types and reads legacy JSONC comments and trailing commas.
    When an existing model file needs parsing, missing Bun makes check mode report the installation prerequisite and skip the dependent merge.
@@ -81,7 +82,7 @@ Each key under `modelRoles` picks the model for one kind of work. A role value i
 | `plan`, `commit`, `tiny`, `vision`, `memory` | Planning, commit messages, small helper calls, image input, and memory. |
 | `advisor` | The advisor model. See [Advisor](#advisor). |
 
-`blueprint/config/omp.yml` also defines custom roles (`designer`, `subagent`, `Kimi`). The current model for each role is in [`blueprint/config/omp.yml`](../blueprint/config/omp.yml).
+`blueprint/config/omp.yml` also defines custom roles (`designer`, `subagent`). The current model for each role is in [`blueprint/config/omp.yml`](../blueprint/config/omp.yml).
 
 `retry.fallbackChains` lists, for a model id or role, the models to try when it keeps failing (rate limits, quota, outages). `retry.maxDelayMs` caps the retry backoff; a provider-stated wait longer than that fails fast instead of sleeping.
 

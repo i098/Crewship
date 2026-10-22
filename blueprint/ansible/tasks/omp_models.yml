@@ -61,7 +61,9 @@
   vars:
     current: "{{ crewship_omp_models_parsed.stdout | default('null') | from_json | default({}, true) }}"
     overrides: "{{ lookup('ansible.builtin.file', crewship_blueprint ~ '/config/omp-models.yml') | from_yaml }}"
-    wanted: "{{ current | combine(overrides, recursive=true) }}"
+    defaults: "{{ {'providers': {'inception': overrides.providers.inception}} }}"
+    managed: "{{ {'providers': overrides.providers | dict2items | rejectattr('key', 'equalto', 'inception') | items2dict} }}"
+    wanted: "{{ defaults | combine(current, recursive=true) | combine(managed, recursive=true) }}"
   ansible.builtin.copy:
     content: "{{ wanted | to_nice_json(indent=2, sort_keys=false) }}"
     dest: "{{ crewship_cfg.home }}/.omp/agent/models.yml"

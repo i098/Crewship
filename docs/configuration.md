@@ -292,6 +292,20 @@ The latest Herdr release is always installed, with the captured UI preferences, 
 
 See [Project databases](project-databases.md) for existing-host management and safe removal.
 
+### Omp model defaults
+
+New `agents` hosts limit `enabledModels` to Claude Opus 5.5, Fable 5.1, Haiku 5.5, Sonnet 5.5, GPT Sol 6.1, Astra 6, Luna 6, and Mercury 3.
+The GPT models support both the `openai` and `openai-codex` providers.
+Edit `enabledModels` in `~/.omp/agent/config.yml` to change this list, or remove the key to use omp's full model list.
+This file is first-write-only; apply preserves existing host choices.
+
+The Inception provider uses `https://api.inceptionlabs.ai/v1` and reads `INCEPTION_API_KEY` from the omp process environment.
+Set that variable before starting omp; Crewship never installs its value.
+Without the variable, Mercury requests cannot authenticate; other providers remain available.
+Edit the `inception` provider in `~/.omp/agent/models.yml` to override its endpoint, credential command, or model list.
+Apply adds missing Inception fields but preserves existing fields.
+Disable `profiles.agents` to skip agent configuration on a new host.
+
 ## Data disk
 
 Set `data_dir` to an existing absolute path on a mounted data disk.
