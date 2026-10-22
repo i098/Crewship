@@ -25,7 +25,7 @@ For each message from the owner, the service does these steps:
    With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
    It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
-   A failed Inception call goes to Firstmate; it never falls back to another provider.
+   A failed Inception classification call goes to Firstmate; it never falls back to another provider.
    Its only tool is `zoom`.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
@@ -67,7 +67,7 @@ For each message from the owner, the service does these steps:
    A social reaction may include one short text from a fixed list of safe acknowledgements.
    The text cannot contain facts or work claims; an invalid text sends the whole burst to Firstmate.
    Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
-   Failed calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
+   Failed classification calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
    A reply or reaction can set `target` to the message's 1-based position in the pending burst.
@@ -85,7 +85,8 @@ For each message from the owner, the service does these steps:
    Firstmate and service sends keep their durable recovery.
    Each transport checks cancellation after preparation and immediately before sending.
    Cancellation does not remove uncertain delivery records.
-   The service checks available transport history before cancelling an uncertain send and keeps unresolved evidence in the completion receipt.
+   For a live desk answer with an uncertain send, the service checks available transport history before cancellation.
+   It keeps unresolved evidence in the completion receipt.
    Unavailable history cannot block later supervisor sends after cancellation.
    A history check that disproves delivery clears the uncertainty before the service decides whether to hand off.
 
