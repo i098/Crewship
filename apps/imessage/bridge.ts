@@ -29,7 +29,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { basicAnswer, bubbles, compactChat, describe, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause } from "./desk.ts";
+import { basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, socialOnly, spawnDesk, typingPause, voiceAnswer, VOICE_PROMPT } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -731,7 +731,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
-      ...("answer" in answer ? { bubbles: [answer.answer], reply: target.ref.id }
+      ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid: crypto.randomUUID(), at: Date.now() } });
   flushRoutes();
@@ -756,7 +756,24 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const target = pending[(answer.target ?? pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
+  if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
+  if (stopping || !current()) return;
   return { answer, target };
+}
+
+async function rewriteVoice(draft: string): Promise<string> {
+  let proc: DeskProc | undefined;
+  try {
+    proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
+      system: VOICE_PROMPT, prompt: JSON.stringify({ draft }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+    deskRun = proc;
+    const { ok, drafted } = await readDesk(proc);
+    return voiceAnswer(draft, ok, drafted);
+  } catch {
+    return draft;
+  } finally {
+    if (deskRun === proc) deskRun = undefined;
+  }
 }
 
 function applyRoute(event: RouteEvent) {

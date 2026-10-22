@@ -94,14 +94,19 @@ def basic_rig(tmp_path, test_mode=True):
     (fake / "answer").write_text(json.dumps(answer))
     (tmp_path / "bin/omp").write_text(
         "#!/usr/bin/env python3\n"
-        "import json, os, pathlib, sys, time\n"
+        "import json, os, pathlib, signal, sys, time\n"
         "p = pathlib.Path(os.environ['FAKE_DIR'])\n"
         "prompt = sys.stdin.read()\n"
-        "with (p / 'model-calls').open('a') as f: f.write(json.dumps({'args': sys.argv, 'prompt': prompt}) + '\\n')\n"
-        "(p / 'model-started').touch()\n"
-        "while (p / 'model-hold').exists(): time.sleep(0.02)\n"
-        "print((p / 'answer').read_text())\n"
-        "sys.exit(1 if (p / 'model-fail').exists() else 0)\n"
+        "voice = '-e' not in sys.argv\n"
+        "if voice and (p / 'voice-ignore-kill').exists(): signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "if voice: (p / 'voice-pid').write_text(str(os.getpid()))\n"
+        "with (p / ('voice-calls' if voice else 'model-calls')).open('a') as f: "
+        "f.write(json.dumps({'args': sys.argv, 'prompt': prompt}) + '\\n')\n"
+        "(p / ('voice-started' if voice else 'model-started')).touch()\n"
+        "while (p / ('voice-hold' if voice else 'model-hold')).exists(): time.sleep(0.02)\n"
+        "print((p / 'voice-answer').read_text() if voice and (p / 'voice-answer').exists() else "
+        "json.loads(prompt)['draft'] if voice else (p / 'answer').read_text())\n"
+        "sys.exit(1 if (p / ('voice-fail' if voice else 'model-fail')).exists() else 0)\n"
     )
     (tmp_path / "bin/fm-inbox").write_text(
         "#!/usr/bin/env python3\n"
@@ -139,6 +144,152 @@ def basic_rig(tmp_path, test_mode=True):
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
 
     return fake, state, notes, err, start, receive, cli, text, records
+
+
+@pytest.mark.parametrize("rewrite,expected", [
+    ("there are 1,200 jobs\n\ndetails: https://example.test/jobs/12", "there are 1,200 jobs\nsend details: https://example.test/jobs/12"),
+    ("There are 1201 jobs. Details: https://example.test/jobs/12", None),
+    ("There are 1200 jobs. Details: https://example.test/jobs/13", None),
+    ("", None),
+])
+def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, rewrite, expected):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    draft = "There are 1200 jobs. Details: https://example.test/jobs/12"
+    (fake / "status").write_text(draft)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "answer": draft, "evidence": [{"source": "status", "quote": draft}],
+    }))
+    (fake / "voice-answer").write_text(rewrite)
+    bridge = start(1)
+    try:
+        receive("question", "How many jobs are there?")
+        desk_clock()
+        wait_for(lambda: (fake / "voice-started").exists(), "the voice pass")
+        wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the saved route")
+        wait_for(lambda: text(fake / "sent").count("send ") == (2 if expected else 1), "the voice bubbles")
+        assert text(fake / "sent") == f"send {expected or draft}\n"
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("draft,rewrite", [
+    ("The build is not ready.", "the build is ready"),
+    ("The build is paused.", "I fixed the build."),
+    ("The build is paused.", "The build is running."),
+    ("Firstmate is not the desk.", "The desk is not Firstmate."),
+    ("The fee is $12.", "The fee is 12."),
+])
+def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "status").write_text(draft)
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "answer": draft, "evidence": [{"source": "status", "quote": draft}],
+    }))
+    (fake / "voice-answer").write_text(rewrite)
+    bridge = start(1)
+    try:
+        receive("question", "What does the status say?")
+        desk_clock()
+        wait_for(lambda: text(fake / "sent"), "the checked draft after unsafe rewriting")
+        assert text(fake / "sent") == f"send {draft}\n"
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("failure", ["voice-hold", "voice-fail"])
+def test_voice_failure_sends_original(tmp_path, desk_clock, monkeypatch, failure):
+    monkeypatch.setenv("FM_IMESSAGE_TEST_VOICE_MS", "100")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / failure).touch()
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: text(fake / "sent"), "the original after voice failure")
+        assert text(fake / "sent") == "send The build is paused.\n"
+        assert (fake / "voice-started").exists()
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("reaction_text", [None, "nice!"])
+def test_reaction_has_no_voice_pass(tmp_path, desk_clock, reaction_text):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    answer = {"kind": "tapback", "emoji": "❤️"}
+    if reaction_text:
+        answer["text"] = reaction_text
+    (fake / "answer").write_text(json.dumps(answer))
+    bridge = start(1)
+    try:
+        receive("thanks", "thanks!")
+        desk_clock()
+        expected = f"send {reaction_text}\n" if reaction_text else ""
+        expected += "react thanks ❤️\n"
+        wait_for(lambda: text(fake / "sent") == expected, "the social reaction")
+        assert not (fake / "voice-started").exists()
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("activity", ["send", "react", "typing", "new-text"])
+def test_voice_stands_down_before_delivery(tmp_path, desk_clock, activity):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "voice-hold").touch()
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: (fake / "voice-started").exists(), "the held voice pass")
+        if activity == "new-text":
+            receive("correction", "Deploy it instead")
+            desk_clock()
+        elif activity == "send":
+            cli("Supervisor answer")
+        else:
+            cli(f"--{activity}", *(["❤️"] if activity == "react" else []))
+        wait_for(lambda: "photon-question " in text(notes), "the cancelled voice handoff")
+        (fake / "voice-hold").unlink()
+        assert "The build is paused." not in text(fake / "sent")
+        if activity == "new-text":
+            wait_for(lambda: "photon-correction " in text(notes), "the replacement handoff")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_cancelled_voice_cleanup_keeps_the_replacement_draft(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "voice-hold").touch()
+    (fake / "voice-ignore-kill").touch()
+    bridge = start(1)
+    try:
+        receive("question", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: (fake / "voice-started").exists(), "the held voice pass")
+        old_pid = int(text(fake / "voice-pid"))
+        (fake / "model-hold").touch()
+        (fake / "model-started").unlink()
+        receive("correction", "What is the current build status?")
+        desk_clock()
+        wait_for(lambda: (fake / "model-started").exists(), "the replacement classification")
+        (fake / "voice-hold").unlink()
+        wait_for(lambda: not os.path.exists(f"/proc/{old_pid}"), "the old voice process exit")
+        desk_clock(0)
+        (fake / "model-hold").unlink()
+        wait_for(lambda: text(fake / "sent"), "the replacement answer")
+        assert text(fake / "sent") == "send The build is paused.\n"
+        assert text(notes) == ""
+    finally:
+        (fake / "voice-hold").unlink(missing_ok=True)
+        bridge.terminate()
+        bridge.wait(10)
 
 
 def prepare_typing_exit(fake, exit_path):
@@ -1167,6 +1318,11 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
                 release.wait(20)
             if mode == "refused":
                 status, reply = 500, {"error": "upstream echo body-secret"}
+            elif "tools" not in body:
+                if body["reasoning_effort"] != "instant":
+                    status, reply = 400, {"error": "unsupported reasoning effort"}
+                else:
+                    status, reply = 200, {"choices": [{"message": {"content": "the build is paused"}}]}
             elif len(requests) == 1:
                 call = {"id": "c1", "type": "function", "function": {"name": "zoom", "arguments": '{"id": 0, "n": 1}'}}
                 status, reply = 200, {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
@@ -1195,7 +1351,9 @@ def test_inception_desk_answers_through_zoom_or_hands_off_without_a_fallback(tmp
         receive("first", "What is the build status?")
         if mode == "answer":
             wait_for(lambda: text(fake / "sent"), "the direct answer")
-            assert text(fake / "sent").splitlines() == ["send The build is paused."]
+            assert text(fake / "sent").splitlines() == ["send the build is paused"]
+            assert requests[2]["body"]["reasoning_effort"] == "instant"
+            assert "tools" not in requests[2]["body"]
             assert text(notes) == ""
             result = requests[1]["body"]["messages"][-1]
             assert (result["role"], result["tool_call_id"]) == ("tool", "c1") and "What is the build status?" in result["content"]

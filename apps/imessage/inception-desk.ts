@@ -1,12 +1,12 @@
 // The front desk's call on Inception's OpenAI-compatible chat-completions API, run like `omp -p`: argv is the model,
 // the reasoning effort and the system prompt, stdin the prompt, stdout the answer, and exit 0 only with an answer.
-// spawnDesk (desk.ts) starts it, so the 45-second timeout, the kill on a new text and the stop stay the same.
-// Its one tool is zoom, as in zoom.ts. stderr gets one safe line per request: never the key, the prompt or a body.
+// spawnDesk (desk.ts) owns the timeout and cancellation. Voice uses one request without tools.
+// Classification has zoom as its only tool. stderr gets safe metadata, never the key, prompt, or body.
 // No request body passes INCEPTION_MAX serialized bytes; zoom results stop with LIMIT_REACHED before one could.
 import { INCEPTION_MAX } from "./desk.ts";
 import { CALL_OVERHEAD, clip, LIMIT_REACHED, load, ZOOM_MAX, zoom } from "./memory.ts";
 
-const [model, reasoning, system] = process.argv.slice(2);
+const [model, reasoning, system, mode] = process.argv.slice(2);
 const url = process.env.FM_DESK_INCEPTION_URL || "https://api.inceptionlabs.ai/v1/chat/completions";
 const key = process.env.INCEPTION_API_KEY;
 const tools = [{
@@ -39,7 +39,7 @@ function zoomText(call: Call): string {
 
 if (!key) fail("INCEPTION_API_KEY is not set");
 const messages: unknown[] = [{ role: "system", content: system }, { role: "user", content: await Bun.stdin.text() }];
-const body = () => JSON.stringify({ model, reasoning_effort: reasoning, messages, tools });
+const body = () => JSON.stringify({ model, reasoning_effort: reasoning, messages, ...(mode === "voice" ? {} : { tools }) });
 // The bytes one tool message adds to the next body: the serialized message and its comma.
 const toolBytes = (id: string, content: string) => Buffer.byteLength(JSON.stringify({ role: "tool", tool_call_id: id, content })) + 1;
 
@@ -70,6 +70,7 @@ for (;;) {
   if (!response.ok) fail("refused");
   const reply: Reply | undefined = (await response.json().catch(() => undefined))?.choices?.[0]?.message;
   if (!reply) fail("no message in the response");
+  if (mode === "voice" && reply.tool_calls?.length) fail("unexpected voice tool call");
   if (!reply.tool_calls?.length) {
     await Bun.write(Bun.stdout, reply.content ?? "");
     process.exit(reply.content?.trim() ? 0 : 1);

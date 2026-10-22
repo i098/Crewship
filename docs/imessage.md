@@ -42,6 +42,14 @@ For each message from the owner, the service does these steps:
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
    It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
+   After those checks, one voice pass rewrites only the wording in the owner's short, blunt chat style.
+   The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
+   The service rejects changed numbers or links, empty replies, failed calls, and replies over 110% of the draft's length.
+   It also requires the original words in order, including negations, because number and link checks cannot prove a paraphrase safe.
+   Case, punctuation, spacing, and number grouping may change; links must match exactly.
+   A rejected rewrite sends the original checked draft.
+   Blank lines separate bubbles; lists stay in one bubble.
+   Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
    Later corrections and follow-ups guide that selection.
    A purely social burst can receive one reaction and finish without a Firstmate note or wake.
@@ -80,6 +88,10 @@ An edit that the owner makes while that stream is down is lost.
 The BlueBubbles line does not report edits: an edit there files no note.
 
 The runner keeps its 45-second timeout.
+The voice pass uses the same desk model, no tools, and a separate five-second timeout.
+It disables omp reasoning and uses Inception's `instant` reasoning level.
+New messages and Firstmate activity cancel this pass through the same path as classification.
+The voice call receives only the checked draft, not chat history or fleet status.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
 
