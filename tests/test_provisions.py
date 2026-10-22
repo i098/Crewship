@@ -845,13 +845,20 @@ def test_no_mistakes_follows_the_prerelease_channel_and_skips_drafts(monkeypatch
     assert "https://api.github.com/repos/kunchenguid/treehouse/releases/latest" in requested
 
 
-def test_a_release_list_with_only_drafts_is_refused(monkeypatch):
+@pytest.mark.parametrize("releases", [[], [{"tag_name": "v9.9.11", "draft": True, "assets": []}]])
+def test_a_release_list_without_published_releases_uses_public_pages(monkeypatch, releases):
+    rate_limited_github(monkeypatch)
+    pages = installer.urllib.request.urlopen
+
     def urlopen(request, **kwargs):
-        return Download(json.dumps([{"tag_name": "v9.9.11", "draft": True, "assets": []}]).encode())
+        if request.full_url.startswith("https://api.github.com/"):
+            return Download(json.dumps(releases).encode())
+        return pages(request, **kwargs)
 
     monkeypatch.setattr(installer.urllib.request, "urlopen", urlopen)
-    with pytest.raises(ValueError, match="no-mistakes has no published release"):
-        installer.resolve_latest("linux-x86_64", {"no-mistakes"})
+    latest = installer.resolve_latest("linux-x86_64", {"no-mistakes"})
+    assert latest["no-mistakes"]["version"] == "9.9.10-beta.1"
+    assert latest["no-mistakes"]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
 
 
 @pytest.mark.parametrize(
