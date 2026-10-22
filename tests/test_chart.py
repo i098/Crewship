@@ -42,11 +42,15 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
             ("oss-fleet/doctor", 0o700), ("oss-fleet/browsers", 0o750),
             (".local/share/crewship/imessage", 0o700),
             (".local/share/crewship/instagram-desk", 0o750),
+            (".local/share/crewship/cli", 0o750),
+            (".local/share/crewship/schedules", 0o700),
         ):
             directory = home / path
             directory.mkdir(parents=True)
             directory.chmod(mode)
         (home / ".local/bin/ponytail-review").write_text("keep this existing file\n")
+        (home / ".local/share/crewship/cli/crewship.js").write_text("keep this command\n")
+        (home / ".local/share/crewship/schedules/main.ts").write_text("keep this schedule\n")
     before_files = {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
                     for path in home.rglob("*") if path.is_file()}
     before_dirs = {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
@@ -63,6 +67,10 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
             "Inspect the harness preference directories", "Check for existing harness preference files",
         )
     ]
+    tool_tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/tools.yml").read_text())
+    start = next(i for i, task in enumerate(tool_tasks) if task["name"] == "Ensure the Crewship command directory")
+    end = next(i for i, task in enumerate(tool_tasks) if task["name"] == "Install the locked OpenTUI dependencies")
+    tasks.extend(tool_tasks[start:end])
     site_tasks = yaml.safe_load((ROOT / "blueprint/ansible/site.yml").read_text())[0]["tasks"]
     for include in site_tasks:
         dynamic = include.get("ansible.builtin.include_tasks", {})
@@ -129,6 +137,7 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
     assert all((home / path).is_dir() for path in (
         ".local/bin", ".omp/agent/extensions", ".no-mistakes", ".acpx",
     ))
+    assert all((home / ".local/share/crewship" / path).is_dir() for path in ("cli", "schedules"))
     for path, enabled in (
         ("oss-fleet/doctor", profiles.get("fleet_guards", False)),
         ("oss-fleet/browsers",
