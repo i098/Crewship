@@ -1279,6 +1279,7 @@ mock.module("node:fs", () => ({
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("registered", [False, True])
 @pytest.mark.parametrize("recover", [False, True])
 @pytest.mark.parametrize("message,fact", [
     ("What is the build status?", "The build is paused."),
@@ -1291,8 +1292,12 @@ mock.module("node:fs", () => ({
     ("OK response count?", "OK responses: 2"),
     ("Go ahead policy?", "The policy requires owner approval."),
 ])
-def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(tmp_path, message, fact, recover):
+def test_basic_answer_uses_haiku_without_a_supervisor_note_and_survives_replay(tmp_path, message, fact, recover, registered):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    if registered:
+        registry = tmp_path / "data/secondmates.md"
+        registry.parent.mkdir()
+        registry.write_text(f"- web-mate - Website owner (home: {tmp_path / 'mate'}; scope: Website pages; projects: test; added 2026-10-23)\n")
     (fake / "status").write_text(fact)
     (fake / "answer").write_text(json.dumps({
         "kind": "reply", "answer": fact, "evidence": [{"source": "status", "quote": fact}],

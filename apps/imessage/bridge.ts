@@ -170,6 +170,7 @@ type DeskResult = { answer: { answer: string } | { react: string; text?: string 
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string } | { deskCancelled: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
+const mateDeliveries = new Set<string>();
 let routingRetry: NodeJS.Timeout | undefined;
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
@@ -766,7 +767,7 @@ async function runDesk(current: () => boolean) {
   if (!pending.length) return;
   const registered = secondmates(FM_HOME);
   const mates = pending.every((r) => r.mateEligible) ? registered : [];
-  if (!DESK_VETTED || (registered.length && !mates.length) || (pending.some((r) => r.firstmate) && !mates.length)) return handoffPending();
+  if (!DESK_VETTED || (pending.some((r) => r.firstmate) && !mates.length)) return handoffPending();
   const finishTyping = startDeskTyping(pending, current);
   let queued = false;
   try {
@@ -775,7 +776,7 @@ async function runDesk(current: () => boolean) {
     if (result === undefined) {
       const mate = await draftHandoff(pending, mates, current);
       if (stopping || !current()) return;
-      if (mate) handoffToMate(pending, mate);
+      if (mate) await handoffToMate(pending, mate, current);
       else handoffPending();
     } else {
       commitDeskAnswer(pending, result);
@@ -842,24 +843,34 @@ async function draftHandoff(pending: Routing[], mates: Secondmate[], current: ()
   return mate && secondmates(FM_HOME).find((entry) => entry.id === mate.id && entry.home === mate.home && entry.scope === mate.scope);
 }
 
-function handoffToMate(pending: Routing[], mate: Secondmate) {
+async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
   recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
-  for (const item of pending) {
-    // Record uncertainty before sending: fm-send has no deduplication key, so recovery must not resend.
-    let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
-    recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
-    try {
-      const sender = join(dirname(realpathSync(Bun.which(INBOX) ?? INBOX)), "fm-send.sh");
-      const sent = Bun.spawnSync([sender, mate.id, `[from captain via desk] ${item.authored ?? item.text}`],
-        { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 });
-      if (sent.exitCode === 0) handoffNote = `routed to ${mate.id}`;
-    } catch (e) {
-      handoffNote = undefined;
-      log("mate delivery")(e);
+  for (const item of pending) mateDeliveries.add(item.requestId);
+  try {
+    for (const item of pending) {
+      if (stopping || !current()) break;
+      // Record uncertainty before sending: fm-send has no deduplication key, so recovery must not resend.
+      let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
+      recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
+      let proc: Bun.Subprocess | undefined;
+      try {
+        const sender = join(dirname(realpathSync(Bun.which(INBOX) ?? INBOX)), "fm-send.sh");
+        proc = track(Bun.spawn([sender, mate.id, `[from captain via desk] ${item.authored ?? item.text}`],
+          { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
+        deskRun = proc;
+        if (await proc.exited === 0) handoffNote = `routed to ${mate.id}`;
+      } catch (e) {
+        if (!proc) handoffNote = undefined;
+        log("mate delivery")(e);
+      } finally {
+        if (deskRun === proc) deskRun = undefined;
+      }
+      recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
     }
-    recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
+  } finally {
+    for (const item of pending) mateDeliveries.delete(item.requestId);
+    flushRoutes();
   }
-  flushRoutes();
 }
 
 async function rewriteVoice(draft: string): Promise<string> {
@@ -928,6 +939,7 @@ function flushRoutes() {
   clearTimeout(routingRetry);
   let failed = false;
   for (const item of routing.values()) {
+    if (mateDeliveries.has(item.requestId)) continue;
     try {
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);

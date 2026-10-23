@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import time
 
 import pytest
 from test_imessage import wait_for
@@ -33,11 +34,16 @@ def routing_rig(tmp_path):
     sender = tmp_path / "bin/fm-send.sh"
     sender.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, os, pathlib, sys, time\n"
+        "import json, os, pathlib, signal, sys, time\n"
         "p = pathlib.Path(os.environ['FAKE_DIR'])\n"
+        "def cancelled(signum, frame):\n"
+        "    (p / 'send-cancelled').touch()\n"
+        "    sys.exit(143)\n"
+        "signal.signal(signal.SIGTERM, cancelled)\n"
         "if not (pathlib.Path(os.environ['FM_HOME']) / 'state' / (sys.argv[1] + '.meta')).is_file(): sys.exit(1)\n"
         "with (p / 'mate-sends').open('a') as f:\n"
         "    f.write(json.dumps({'home': os.environ['FM_HOME'], 'args': sys.argv[1:]}) + '\\n')\n"
+        "while (p / 'mate-hold').exists(): time.sleep(0.02)\n"
         "if (p / 'send-timeout').exists(): time.sleep(30)\n"
         "sys.exit(1 if (p / 'send-fail').exists() else 0)\n"
     )
@@ -245,10 +251,21 @@ def test_sender_timeout_preserves_uncertainty_for_firstmate(tmp_path, desk_clock
     try:
         receive("work", "Fix the website menu")
         desk_clock()
+        wait_for(lambda: text(fake / "mate-sends"), "the active sender")
+        started = time.monotonic()
+        desk_clock(4000)
+        assert time.monotonic() - started < 2
         wait_for(lambda: "photon-work " in text(notes), "the uncertain-delivery handoff")
         assert "Delivery to web-mate may be incomplete" in text(notes)
         assert "Fix the website menu" in text(notes)
         assert len(text(fake / "mate-sends").splitlines()) == 1
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        receive("work", "Fix the website menu")
+        desk_clock()
+        assert len(text(fake / "mate-sends").splitlines()) == 1
+        assert text(notes).count("photon-work ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -270,6 +287,65 @@ def test_scope_change_after_semicolon_cancels_stale_route(tmp_path, desk_clock):
         (fake / "model-hold").unlink()
         wait_for(lambda: "photon-work " in text(notes), "the stale-scope handoff")
         assert text(fake / "mate-sends") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_same_mate_burst_delivers_each_text_once(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    messages = ["Fix the website menu", "Fix the website footer", "Fix the website header"]
+    bridge = start(1)
+    try:
+        for index, message in enumerate(messages):
+            receive(str(index), message)
+        desk_clock()
+        wait_for(lambda: text(notes).count("routed to web-mate") == 3, "the complete mate handoff")
+        sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
+        assert [send["args"] for send in sends] == [
+            ["web-mate", f"[from captain via desk] {message}"] for message in messages
+        ]
+        for index in range(3):
+            assert text(notes).count(f"photon-{index} ") == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("cancel", ["inbound", "firstmate", "shutdown"])
+def test_slow_mate_sender_allows_cancellation_and_keeps_uncertainty(tmp_path, desk_clock, cancel):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    (fake / "mate-hold").touch()
+    bridge = start(1)
+    try:
+        for index in range(3):
+            receive(str(index), f"Fix the website section {index}")
+        desk_clock()
+        wait_for(lambda: text(fake / "mate-sends"), "the held mate sender")
+        assert text(notes) == ""
+        started = time.monotonic()
+        desk_clock(4000)
+        if cancel == "inbound":
+            receive("new", "Fix the database export")
+        elif cancel == "firstmate":
+            assert cli("--typing") == "typing\n"
+        else:
+            bridge.terminate()
+            bridge.wait(10)
+        wait_for(lambda: (fake / "send-cancelled").exists(), "sender cancellation", timeout=2)
+        assert time.monotonic() - started < 2
+        (fake / "mate-hold").unlink()
+        if cancel != "shutdown":
+            wait_for(lambda: "photon-2 " in text(notes), "the cancelled burst handoff")
+            bridge.terminate()
+            bridge.wait(10)
+        bridge = start(2)
+        wait_for(lambda: "photon-2 " in text(notes), "the recovered burst handoff")
+        assert len(text(fake / "mate-sends").splitlines()) == 1
+        assert text(notes).count("Delivery to web-mate may be incomplete") == 1
+        for index in range(3):
+            assert text(notes).count(f"photon-{index} ") == 1
+        assert "routed to web-mate" not in text(notes)
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -181,10 +181,12 @@ A successful mate delivery adds the line `routed to <mate-id>` before the origin
 A failed sender, missing command, or five-second delivery timeout hands the request to Firstmate.
 The journal saves delivery uncertainty before calling the sender because `fm-send.sh` has no deduplication key.
 A failed or interrupted send retains this warning so Firstmate checks the mate's inbox before sending again.
+The sender runs asynchronously, so inbound messages and Firstmate commands remain responsive during delivery.
+New owner text, Firstmate activity, and shutdown cancel the active sender and stop the remaining sends in that burst.
 Inbox retries and service restarts never repeat a recorded mate delivery.
 
 Firstmate activity still cancels an unfinished routing decision and sends pending work to Firstmate.
-Direct short answers and social reactions stay unchanged.
+Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
 Handoffs still send no extra desk acknowledgement.
 
 ## Upstream outages
