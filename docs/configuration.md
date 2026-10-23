@@ -177,6 +177,7 @@ crewship:
       stopped_hours: 24   # Remove a stopped container this long after it exits
   firstmate:
     url: https://github.com/kunchenguid/firstmate.git
+    backend: herdr       # New Firstmate checkouts only
     # checklist:          # Optional; set only in .local/host.yml
     #   repo: owner/private-repo
     #   path: checklist.md
@@ -229,6 +230,14 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `board` needs `firstmate` and `development`.
 
 The Firstmate checkout tracks the default branch of upstream Firstmate, not a sha. Every apply fetches `origin/main` and puts `main` at that revision plus the [Firstmate patch layer](dependencies.md#firstmate-patch-layer), so tracking it is how a host stays current. Do not re-pin it to a sha. Each run resolves `origin/main` once and reports the sha it installed. To track a fork, set `firstmate.url` in `.local/host.yml`. The URL applies to a fresh clone; verification fails when an existing checkout's `origin` is a different URL, and provisioning never changes it for you. To switch an existing checkout, run `git -C <workspace>/firstmate remote set-url origin <url>` and `git -C <workspace>/firstmate fetch origin`, reconcile any local commits on `main` with `origin/main` by hand, then run `./ship.sh launch`.
+
+New setups use `firstmate.backend: herdr`, including the guided checklist.
+Before the first launch, select `tmux`, `zellij`, `orca`, `cmux`, `paseo`, or `rex` to use another supported backend.
+The alternative must be installed separately.
+Apply seeds `<workspace>/firstmate/config/backend` only when it creates the Firstmate checkout.
+Existing checkouts keep their backend file unchanged, including an empty or absent file and its runtime detection.
+Changing the recipe does not switch a running fleet.
+Explicit Firstmate `--backend` and `FM_BACKEND` choices still take precedence.
 
 ### Firstmate dispatch defaults
 

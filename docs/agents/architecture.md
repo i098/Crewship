@@ -124,6 +124,7 @@ The [fleet cleanup guards](../fleet-guards.md#cleanup-pool-roots) remove eligibl
 ## Seeded Firstmate and OMP configuration
 
 The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`blueprint/ansible/group_vars/all/agent_config.yml`) from this repository's `blueprint/config/` into the Firstmate checkout's `config/`, which Firstmate gitignores. Preflight requires every source and verify requires every destination. The seeded files:
+The backend is separate: apply writes `firstmate.backend` only when it creates the checkout, and never requires it on an existing checkout.
 
 | File | Value |
 | --- | --- |
@@ -131,7 +132,8 @@ The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`
 | `secondmate-harness` | `omp anthropic/claude-opus-5-5 medium`. |
 | `omp-crew-overlay.yml` | omp overlay Firstmate applies to crewmate and scout launches, never secondmates, ahead of its tracked worker overlay. It sets `modelRoles.advisor: anthropic/claude-fable-5-1:low`, `advisor.enabled: true`, `advisor.immuneTurns: 10` and `advisor.syncBacklog: "off"`, plus `providers.anthropic.serverSideFallback: false`: with the global server-side fallback on, Anthropic rejects every advisor call with a 400. Every omp crewmate runs a fable-5.1 advisor at low thinking (its lowest level). Crews never wait on it, because `syncBacklog: "off"` overrides the global `"1"`. Turns that land during a review batch into the next call instead of one call per turn, and the advisor interrupts at most once per 10 turns. omp has no every-N-turns setting. |
 | `spawn-memory-floor-mb` | `8000`; see [fleet guards](../fleet-guards.md). |
-| `crew-harness`, `backend` | Crew harness and Herdr backend. |
+| `crew-harness` | Crew harness. |
+| `backend` | New checkouts only: `firstmate.backend`, default `herdr`. Existing files and an absent backend stay unchanged. |
 | `startup-memory-budget` | `1000000` estimated tokens: no practical cap on the startup prompt memory. |
 | `herdr-presentation-spaces` | `off`: crewmates and scouts use the flat Herdr layout, not one workspace per task. |
 | `turnend-churn-absorb` | Present (empty): the watcher may also count a pane that changed as work evidence for a bare turn end. |

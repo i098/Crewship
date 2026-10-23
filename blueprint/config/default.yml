@@ -112,6 +112,7 @@ crewship:
     # is also why it must not be re-pinned to a sha.
     # Override url in .local/host.yml to track a fork instead.
     url: https://github.com/kunchenguid/firstmate.git
+    backend: herdr
   desktop:
     display: 1
     novnc_port: 6080

@@ -43,6 +43,8 @@ def host(tmp_path):
     patches = tmp_path / "patches"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(upstream)], check=True)
     subprocess.run(["git", "clone", "-q", str(upstream), str(dev)], check=True)
+    (dev / ".gitignore").write_text("config/\n")
+    git(dev, "add", ".gitignore")
     lines = [f"line {n}" for n in range(1, 41)]
     commit(dev, "watch.sh", lines, "upstream: initial")
     git(dev, "push", "-q", "origin", "HEAD:main")
@@ -64,7 +66,7 @@ def host(tmp_path):
     }
 
 
-def apply(host):
+def apply(host, **firstmate):
     playbook = host["tmp"] / "firstmate.yml"
     playbook.write_text(
         yaml.safe_dump(
@@ -81,6 +83,7 @@ def apply(host):
         )
     )
     variables = {
+        **yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/agent_config.yml").read_text()),
         # The dispatch-settings tasks ask for root; nothing here needs it.
         "ansible_become": False,
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
@@ -90,8 +93,10 @@ def apply(host):
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_firstmate_dir": str(host["checkout"]),
         "crewship_firstmate_patch_dir": str(host["patches"]),
-        "crewship_firstmate_config_names": [],
-        "crewship_cfg": {"user": getpass.getuser(), "firstmate": {"url": str(host["upstream"])}},
+        "crewship_cfg": {
+            "user": getpass.getuser(),
+            "firstmate": {"url": str(host["upstream"]), **firstmate},
+        },
     }
     result = subprocess.run(
         [
@@ -148,6 +153,52 @@ def test_fresh_clone_gets_the_layer_and_a_second_apply_changes_nothing(host):
     assert result.returncode == 0, result.stdout
     assert changed == 0
     assert git(checkout, "rev-parse", "HEAD") == head
+
+
+@pytest.mark.parametrize("backend", [None, "herdr", "tmux", "zellij", "orca", "cmux", "paseo", "rex"])
+def test_new_checkout_seeds_the_selected_backend_once(host, backend):
+    selected = {} if backend is None else {"backend": backend}
+    result, _ = apply(host, **selected)
+    assert result.returncode == 0, result.stdout
+    destination = host["checkout"] / "config/backend"
+    assert destination.read_text() == f"{backend or 'herdr'}\n"
+    result, changed = apply(host, backend="tmux" if backend != "tmux" else "herdr")
+    assert result.returncode == 0, result.stdout
+    assert changed == 0
+    assert destination.read_text() == f"{backend or 'herdr'}\n"
+
+
+@pytest.mark.parametrize("backend", [None, "", "herdr\n", "tmux\n", "zellij\n", "orca\n", "cmux\n", "paseo\n", "rex\n"])
+def test_existing_checkout_preserves_explicit_and_implicit_backends(host, backend):
+    git(host["tmp"], "clone", "-q", str(host["upstream"]), str(host["checkout"]))
+    destination = host["checkout"] / "config/backend"
+    destination.parent.mkdir()
+    if backend is not None:
+        destination.write_text(backend)
+    result, _ = apply(host, backend="herdr")
+    assert result.returncode == 0, result.stdout
+    if backend is None:
+        assert not destination.exists()
+    else:
+        assert destination.read_text() == backend
+    result, changed = apply(host, backend="herdr")
+    assert result.returncode == 0, result.stdout
+    assert changed == 0
+
+
+@pytest.mark.parametrize("backend", [None, "zellij"])
+def test_failed_fresh_setup_keeps_the_backend_on_retry(host, backend):
+    selected = {} if backend is None else {"backend": backend}
+    patch = host["first"].read_bytes()
+    host["first"].write_text("invalid patch\n")
+    result, _ = apply(host, **selected)
+    assert result.returncode != 0
+    destination = host["checkout"] / "config/backend"
+    assert destination.read_text() == f"{backend or 'herdr'}\n"
+    host["first"].write_bytes(patch)
+    result, _ = apply(host, **selected)
+    assert result.returncode == 0, result.stdout
+    assert destination.read_text() == f"{backend or 'herdr'}\n"
 
 
 def test_upstream_advance_rebuilds_the_layer_on_the_new_origin_main(host):
