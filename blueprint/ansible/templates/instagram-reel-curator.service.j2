@@ -23,4 +23,4 @@ EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
 Environment=INSTAGRAM_DM_INTERVAL={{ crewship_instagram_dm_interval }}
 Environment=CURATOR_CONFIG={{ crewship_instagram_curator_config }}
 Environment=CURATOR_LOG={{ crewship_instagram_curator_log }}
-ExecStart={{ crewship_uv_bin }} run --quiet --with instagrapi python {{ crewship_instagram_curator_script }} run
+ExecStart={{ crewship_uv_bin }} run --no-project --isolated --quiet --with instagrapi --with 'certifi>=2026.10.19' python {{ crewship_instagram_curator_script }} run

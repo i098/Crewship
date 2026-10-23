@@ -43,7 +43,7 @@ The repository lock excludes both packages, and uv creates the pruner and tool e
 Adding unused packages would add another trust store without serving a runtime need.
 The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
-The Instagram environment updates are tracked separately in [#833](https://github.com/i098/Crewship/issues/833).
+See [Instagram Python environments](#instagram-python-environments) for the isolated Instagram commands.
 `onboard.sh` handles the repository environment selected by uv, including `UV_PROJECT_ENVIRONMENT`.
 When uv is available, `ship.sh` does not run this repository-environment updater.
 The updater uses uv, not the environment's pip.
@@ -92,6 +92,15 @@ See [Schedule viewer](configuration.md#schedule-viewer) for its controls and inv
 
 - The latest uv (below), then `uv sync --locked`: ansible-core 2.21.4, jsonschema 4.26.0, PyYAML 6.0.3. `uv.lock` is this repository's own development environment, so it stays locked.
 - See [pyproject.toml](../pyproject.toml) for the dev dependency group.
+
+## Instagram Python environments
+
+The listener, poller, reply command, and curator run instagrapi in isolated uv environments with `certifi>=2026.10.19`.
+Isolation prevents older pip or certifi packages in the base interpreter from entering these environments.
+The commands also use `--no-project` so the current project's dependencies cannot add an older pip.
+uv does not seed pip here, so no pip copy needs an update.
+See [CA trust and security minimums](#ca-trust-and-security-minimums) for host trust setup before dependency downloads.
+Already-running listeners keep their existing environment until restarted; this change applies to their next launch.
 
 ## Latest releases
 

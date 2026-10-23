@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read Instagram DMs with instagrapi, hand new ones to an agent at once, and reply from the agent account.
 
-Run it with `uv run --quiet --with instagrapi python instagram_dm.py ...` (instagrapi is imported only when a command needs it).
+See SKILL.md for the isolated uv command and dependency requirements.
+instagrapi loads only when a command needs it.
 
 instagram_dm.py login [--force]     # the one manual login (a human, the app checked first); needs INSTAGRAM_FIRSTMATE_USERNAME / _PASSWORD
 instagram_dm.py inbox [--limit N]    # thread id, "request" for a message request, title
