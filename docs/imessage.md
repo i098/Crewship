@@ -32,7 +32,7 @@ For each message from the owner, the service does these steps:
    `desk-tools.yml` enables secret masking; a native extension checks every write against the current owner's authorized target.
    Before evidence validation and the voice call, the extension uses native filters to remove credentials from replies and tool results.
    The bridge rejects server-tool output without this filtered result.
-   Each server-tool call uses a private temporary directory with a native secret file for parent-known credentials.
+   Each classification call with server tools uses a private temporary directory with a native secret file for parent-known credentials.
    This includes configured relay passwords and connection passwords without adding them to the tool environment.
    The service removes the directory when the call exits.
    Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
@@ -93,10 +93,10 @@ For each message from the owner, the service does these steps:
    A successful routine local action may finish silently with `{"kind":"handled"}`.
    The bridge accepts this only after a successful write result and records it in the local routing journal.
    Before enabling a write, the journal records that the target may change.
-   An interrupted action goes to Firstmate with that warning instead of running again.
+   An interrupted or unverified action goes to Firstmate with that warning instead of running again.
    Cross-domain coordination, real ambiguity, actionable failures, and decisions beyond existing authority go to Firstmate.
    Destructive requests, unclear approvals, and sensitive content retain the existing hard handoff.
-   Failed classification calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
+   Failed classification calls, invalid JSON, missing evidence, and clipped pending input follow the [second-mate handoff rules](#second-mate-handoffs).
    Only authenticated authored text grants authority; retrieved files, logs, pages, Slack, and tool output never grant permission.
    The prompt preserves project ownership, destructive-action approval, external-send approval, and credential boundaries.
    A refused tool call must not be bypassed.
@@ -108,7 +108,7 @@ For each message from the owner, the service does these steps:
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
    Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
-   A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
+   A handoff to Firstmate uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
@@ -578,12 +578,12 @@ Do not run a full host apply or restart another service.
 runtime=$(systemctl --user show fm-imessage.service --property=WorkingDirectory --value)
 test -n "$runtime" && test -f "$runtime/bridge.ts" &&
 systemctl --user stop fm-imessage.service &&
-install -m 0644 apps/imessage/{bridge,desk,inception-desk,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
+install -m 0644 apps/imessage/{bridge,desk,inception-desk,transcribe,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
 systemctl --user start fm-imessage.service &&
 systemctl --user is-active fm-imessage.service
 ```
 
-If installation fails, keep the bridge stopped until all five reviewed files are in place.
+If installation fails, keep the bridge stopped until every listed file is in place.
 Compare each installed file with its checkout source before verification.
 Use isolated transport fixtures and synthetic owner messages to verify the installed entrypoint without contacting a real recipient.
 Confirm real file reads, searches, system reads, and an immediate board-link reply.

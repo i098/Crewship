@@ -223,10 +223,8 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
 // The serialized input allowance used for Inception's initial view and tool-free voice call.
 export const INCEPTION_MAX = 100_000;
 
-// One desk call's input: the view, recent originals, fleet status and latest messages (clipped to
-// what is left). For omp the system prompt and the input stay ZOOM_RESERVE under CEILING. For Inception they are
-// measured as JSON strings and keep room for one zoom turn's LIMIT_REACHED under INCEPTION_MAX. `spent` is the
-// call's size in bytes so far, for zoom.ts's budget.
+// The initial view reserves framing and zoom space; the native runtime owns later request sizes.
+// `spent` seeds zoom.ts's byte budget. See docs/imessage.md#desk-memory.
 export function deskInput(system: string, view: string, status: string, latest: string, provider = "omp", recent = ""): { prompt: string; spent: number } {
   const chat = `<chat>\n${clip(view, VIEW_MAX)}\n</chat>\n\n<recent>\n`;
   const rest = `\n</recent>\n\nFleet status (durable records, may lag):\n${clip(status, STATUS_MAX)}\n\nLatest messages, after the chat:\n`;
