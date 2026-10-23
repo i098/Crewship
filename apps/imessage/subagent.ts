@@ -78,14 +78,15 @@ Set target to the 1-based request number being answered. Do not return prose, ac
     const answer = checkedResult(options, result);
     if (answer.kind !== "answer") return answer;
     process = spawnDesk({ ...options, provider: "inception", model: "mercury-3", reasoning: "low",
-      system: voicePrompt(result.question), prompt: JSON.stringify({ draft: answer.answer, question: result.question }),
+      system: `${voicePrompt(result.question)}\nWhen writing prose, keep the source words in order. Add only grammatical connecting words.`,
+      prompt: JSON.stringify({ draft: answer.answer, question: result.question }),
       spent: 0, voice: true });
     options.onProcess(process);
     const voiced = await readDesk(process);
     process = undefined;
     if (!current()) return;
     if (!voiced.ok) return { kind: "handoff", reason: "failed", tools };
-    const bubbles = voiceAnswer(answer, result.question, voiced.ok, voiced.drafted);
+    const bubbles = voiceAnswer(answer, result.question, voiced.ok, voiced.drafted, true);
     return bubbles ? { kind: "answer", bubbles, target: answer.target, tools }
       : { kind: "handoff", reason: "unverified", tools };
   } catch {

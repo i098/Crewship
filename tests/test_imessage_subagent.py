@@ -190,10 +190,79 @@ def test_failed_worker_returns_handoff_without_voice(tmp_path):
     assert len(result["calls"]) == 1
 
 
-@pytest.mark.parametrize("voice", ["The build passed with 50 jobs.", '{"answer":"The build is paused."}', '["The build is paused."]'])
-def test_voice_cannot_change_checked_facts(tmp_path, voice):
-    result = run_subagent(tmp_path, voice=voice)
-    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": {}}
+@pytest.mark.parametrize("voice", [
+    "The build is ready.",
+    "The build is paused and ready.",
+    "The build is paused. The release is ready.",
+    "The build passed with 50 jobs.",
+    '{"answer":"The build is paused."}',
+    '["The build is paused."]',
+])
+@pytest.mark.parametrize("tool_backed", [False, True])
+def test_voice_cannot_change_checked_facts(tmp_path, voice, tool_backed):
+    tools = {"read-1": {"name": "read", "text": FACT}} if tool_backed else {}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}]} if tool_backed else REPLY
+    result = run_subagent(tmp_path, voice=voice, reply=reply, tools=tools)
+    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": tools}
+
+
+@pytest.mark.parametrize("source,voice", [
+    ("The build is waiting.", "The build is running."),
+    ("The build is paused.", "The release is paused."),
+    ("Alpha is ready. Beta is paused.", "Alpha is paused. Beta is ready."),
+])
+def test_voice_cannot_replace_or_reassign_source_words(tmp_path, source, voice):
+    tools = {"read-1": {"name": "read", "text": source}}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools, voice=voice)
+    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": tools}
+
+
+def test_voice_cannot_invent_a_subject_for_a_status(tmp_path):
+    tools = {"read-1": {"name": "read", "text": "Paused."}}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools, voice="The setup is paused.")
+    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": tools}
+
+
+def test_voice_can_change_case_and_bubble_breaks_without_changing_words(tmp_path):
+    source = "The build is paused. The release is waiting."
+    tools = {"read-1": {"name": "read", "text": source}}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools,
+                          voice="the build is paused.\n\nthe release is waiting.")
+    assert result["result"] == {
+        "kind": "answer", "bubbles": ["the build is paused.", "the release is waiting."], "tools": tools,
+    }
+
+
+@pytest.mark.parametrize("source,question,voice,bubbles", [
+    (
+        "runtime: herdr\nmemory: off",
+        "Return the exact runtime and memory values, one per line.",
+        "herdr\noff",
+        ["herdr\noff"],
+    ),
+    (
+        "runtime: herdr\nmemory: off",
+        "What are the settings?",
+        "The runtime is herdr.\n\nMemory is off.",
+        ["The runtime is herdr.", "Memory is off."],
+    ),
+    (
+        "- **Restart-proof**: work stays available after a restart.",
+        "How durable is the setup?",
+        "It is restart-proof, so work stays available after a restart.",
+        ["It is restart-proof, so work stays available after a restart."],
+    ),
+])
+def test_worker_keeps_exact_values_and_grounded_prose(tmp_path, source, question, voice, bubbles):
+    tools = {"read-1": {"name": "read", "text": source}}
+    reply = {"kind": "sources", "sources": [
+        {"tool": 1, "line": index + 1} for index, _ in enumerate(source.splitlines())
+    ]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools, request=question, voice=voice)
+    assert result["result"] == {"kind": "answer", "bubbles": bubbles, "tools": tools}
 
 
 def test_mismatched_write_grant_does_not_spawn(tmp_path):
