@@ -160,7 +160,7 @@ def basic_rig(tmp_path, test_mode=True):
 
 
 @pytest.mark.parametrize("rewrite,expected", [
-    ("There are 1200 jobs\n\nDetails: https://example.test/jobs/12", "There are 1200 jobs\nsend Details: https://example.test/jobs/12"),
+    ("There are 1200 jobs\n\nSee https://example.test/jobs/12", "There are 1200 jobs\nsend See https://example.test/jobs/12"),
     ("There are 1201 jobs. Details: https://example.test/jobs/12", None),
     ("There are 1200 jobs. Details: https://example.test/jobs/13", None),
     ("There are 1,200 jobs. Details: https://example.test/jobs/12", None),
@@ -248,7 +248,6 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
 
 @pytest.mark.parametrize("draft,rewrite", [
     ("The build is paused.", "The build's paused."),
-    ("The build is paused.", "Paused: the build."),
     ("There are 5 jobs ready.", "5 jobs are ready."),
     ("The build is blocked.", "Blocked."),
     ("The build isn’t ready.", "The build isn't ready."),
@@ -1796,6 +1795,11 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         ["The entrypoint is My-Handler."],
         "The entrypoint is My-Handler.",
     ),
+    (
+        "Quote the runtime and memory sentence.\nKeep the original text.",
+        ["The runtime is `herdr`, with memory `off`."],
+        "The runtime is `herdr`, with memory `off`.",
+    ),
 ])
 def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
     rig, replies, requests = native_desk
@@ -1848,6 +1852,11 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
     (["herdr", "off"], "Runtime: herdr\nMemory: off", False, None),
     (["herdr", "off"], "RUNTIME: herdr\nMEMORY: off", False, None),
     (["Runtime: herdr", "Memory: off"], "The runtime is tmux, with memory off.", False, None),
+    (["runtime: herdr", "memory: off"], "The settings are:\nRuntime: herdr\nMemory: off", False, None),
+    (["runtime: herdr", "memory: off"], "The runtime is `herdr`, with memory `off`.", False, None),
+    (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values.\nOne per line."),
+    (["herdr", "off"], "herdr\noff", True, "Return the runtime and memory values exactly.\nOne per line."),
+    (["herdr", "off"], "herdr\noff", True, "Quote the values verbatim.\nKeep both lines."),
 ])
 def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
     rig, replies, requests = native_desk
@@ -1890,6 +1899,36 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("batched", [False, True])
+def test_native_exact_output_accepts_multiline_and_batched_requests(tmp_path, native_desk, batched):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    draft = "herdr\noff"
+    parts = ["Return the exact runtime and memory values.", "One per line."]
+    messages = parts if batched else ["\n".join(parts)]
+    (fake / "status").write_text(draft)
+    (fake / "voice-answer").write_text(draft)
+    replies.append(lambda body: {"content": json.dumps({
+        "kind": "reply", "answer": draft,
+        "evidence": [{"source": "status", "quote": line} for line in draft.splitlines()],
+    })})
+    bridge = start(1)
+    try:
+        for index, message in enumerate(messages):
+            receive(f"exact-{index}", message)
+        wait_for(lambda: text(fake / "sent"), "the exact multiline answer", timeout=45)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed exact answer")
+        assert text(fake / "sent") == f"send {draft}\n"
+        assert text(notes) == ""
+        assert [row["text"] for row in records() if row["kind"] == "owner"] == messages
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == [draft]
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": draft, "question": "\n".join(parts)}]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("source_text,rewrite", [
     ("runtime: herdr\nmemory: off", ""),
     ("runtime: herdr\nmemory: off", "The runtime is tmux and memory is on."),
@@ -1910,6 +1949,8 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     ("my-handler is the entrypoint.", "My-handler is the entrypoint."),
     ("herdr\noff", "Runtime: herdr\nMemory: off"),
     ("RUNTIME: herdr\nMEMORY: off", "The runtime is tmux, with memory off."),
+    ("runtime: herdr\nmemory: off", "The settings are:\nRuntime: herdr\nMemory: off"),
+    ("runtime: herdr\nmemory: off", "The runtime is `herdr`, with memory `off`."),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk
@@ -2215,6 +2256,7 @@ def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path_factory, mo
 def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
+    (fake / "voice-answer").write_text("The desk service is active.")
     systemctl = tmp_path / "bin/systemctl"
     systemctl.write_text(
         "#!/usr/bin/env python3\n"
@@ -2250,7 +2292,7 @@ def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
         assert [json.loads(line) for line in text(fake / "systemctl-calls").splitlines()] == [
             ["--user", "is-active", "--", "fm-imessage.service"],
         ]
-        assert text(fake / "sent") == "send active\n"
+        assert text(fake / "sent") == "send The desk service is active.\n"
         assert text(notes) == ""
     finally:
         bridge.terminate()

@@ -71,8 +71,11 @@ For each message from the owner, the service does these steps:
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
    The reply check rejects Markdown, configuration rows, and bare source values unless the original question explicitly requests exact output.
+   A retained configuration row still causes rejection when other lines contain prose.
+   Unrequested inline code also causes rejection; the service does not strip its formatting.
    An explanation containing “exactly” does not authorize raw output.
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
+   The same rules apply when a request spans lines or combines several messages.
    Validated model-identity replies can retain the configured model name alone.
    All source-backed answers can use up to 2,000 characters so bare values can become useful sentences.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.

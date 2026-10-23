@@ -327,16 +327,15 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
 
 function requestsExactOutput(question: string): boolean {
   if (/\b(?:not|no|without|never|don['’]t)\b[^.!?\n]*\b(?:exact(?:ly)?|raw|verbatim|quot(?:e|ation)s?)\b/i.test(question)) return false;
-  const request = /^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(give|show|return|send|print|provide|repeat|list|quote|copy|what\s+(?:is|are)|which\s+(?:is|are))(?:\s+me)?\s+(?:the\s+)?(.+)$/i.exec(question.trim());
+  const request = /^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(give|show|return|send|print|provide|repeat|list|quote|copy|what\s+(?:is|are)|which\s+(?:is|are))(?:\s+me)?\s+(?:the\s+)?(.+)$/is.exec(question.trim());
   if (!request) return false;
   if (/^(?:quote|copy)$/i.test(request[1]!)) return true;
   return /^(?:exact|raw|verbatim)\s+(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?)\b/i.test(request[2]!)
-    || /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?))\s+(?:exactly|verbatim|raw)\s*[.!?]*$/i.test(request[2]!);
+    || /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?))\s+(?:exactly|verbatim|raw)\s*(?:[.!?]+(?=\s|$)|$)/i.test(request[2]!);
 }
 
 function sourceStyle(text: string, literals: string[], identity: boolean): boolean {
-  if (/^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\|)/m.test(text)
-    || text.split(/\r?\n/).filter((line) => line.trim()).every((line) => /^[ \t]*[a-z_][\w.-]*:\s/i.test(line))) return true;
+  if (/\x60[^\x60]+\x60|^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*:\s)/mi.test(text)) return true;
   return !identity && literals.length > 0 && (text.split(/\s*\n\s*/).every((line) => literals.includes(line))
     || (text.match(/[\w-]+/g) ?? []).every((word) => literals.includes(word)));
 }
