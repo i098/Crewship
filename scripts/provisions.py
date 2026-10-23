@@ -616,6 +616,7 @@ def install_asset(home, name, spec, key):
             paths = binaries_in(unpacked, asset["binaries"])
             for path in paths.values():
                 path.chmod(0o755)
+            paths = verified_binaries(name, version, unpacked, asset["binaries"])
             (unpacked / ".asset.json").write_text(
                 json.dumps({"spec": expected, "files": {n: digest(p) for n, p in paths.items()}})
                 + "\n"

@@ -3,11 +3,12 @@ import grp
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
 from pathlib import Path
-from string import Template
 
 import pytest
 import yaml
@@ -177,6 +178,8 @@ def test_ca_guard_checks_directory_roots(tmp_path, default_path, blocked):
 
 
 def test_runtime_trust_environment_preserves_node_flags(tmp_path):
+    generator = "/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator"
+    node = shutil.which("node")
     home = tmp_path / "home"
     (home / ".config/environment.d").mkdir(parents=True)
     variables = {}
@@ -207,34 +210,59 @@ def test_runtime_trust_environment_preserves_node_flags(tmp_path):
         assert result.returncode == 0, result.stdout + result.stderr
         if attempt:
             assert "changed=0" in result.stdout
-    environment = {
-        **os.environ, "HOME": str(home),
-        "NODE_OPTIONS": "--trace-warnings --max-old-space-size=512",
-        "SSL_CERT_FILE": "/old/bundle", "REQUESTS_CA_BUNDLE": "/old/bundle",
-        "PIP_CERT": "/old/bundle", "PIP_USE_DEPRECATED": "",
-    }
-    expected = {
-        "NODE_OPTIONS": "--trace-warnings --max-old-space-size=512 --use-openssl-ca",
+    preload = tmp_path / "pre load/flag.js"
+    preload.parent.mkdir()
+    preload.write_text("")
+    trust = {
         "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
         "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
         "PIP_CERT": "/etc/ssl/certs/ca-certificates.crt",
         "PIP_USE_DEPRECATED": "legacy-certs",
     }
-    for profile in (".profile", ".bashrc"):
-        result = subprocess.run(
+    probe = (
+        'const o = require("internal/options"); console.log(JSON.stringify({'
+        'require: o.getOptionValue("--require"), trace: o.getOptionValue("--trace-warnings"),'
+        'openssl: o.getOptionValue("--use-openssl-ca"), system: o.getOptionValue("--use-system-ca"),'
+        'bundled: o.getOptionValue("--use-bundled-ca"), env: process.env}))'
+    )
+    client = [node, "--expose-internals", "-e", probe] if node else [
+        sys.executable, "-c",
+        'import json, os; print(json.dumps({"env": dict(os.environ)}))',
+    ]
+    expected = {"require": [str(preload)], "trace": True,
+                "openssl": True, "system": False, "bundled": False}
+    for selector in ("", "--use-system-ca ", "--use-bundled-ca ", "--use-openssl-ca "):
+        options = f'{selector}--trace-warnings --require "{preload}"'
+        environment = {
+            **os.environ, "HOME": str(home), "NODE_OPTIONS": options,
+            "SSL_CERT_FILE": "/old/bundle", "REQUESTS_CA_BUNDLE": "/old/bundle",
+            "PIP_CERT": "/old/bundle", "PIP_USE_DEPRECATED": "",
+        }
+        runs = [
             ["bash", "--noprofile", "--norc", "-c",
-             '. "$1"; . "$1"; exec "$2" -c "import json, os; print(json.dumps(dict(os.environ)))"',
-             "trust-check", str(home / profile), sys.executable],
-            env=environment, capture_output=True, text=True, check=True,
-        )
-        actual = json.loads(result.stdout)
-        assert {key: actual[key] for key in expected} == expected
-    # The emitted environment.d contract uses simple ${NAME} expansion.
-    actual = environment.copy()
-    for line in (home / ".config/environment.d/60-crewship-trust.conf").read_text().splitlines():
-        key, value = line.split("=", 1)
-        actual[key] = Template(value).substitute(actual).strip()
-    assert {key: actual[key] for key in expected} == expected
+             '. "$1"; . "$1"; shift; exec "$@"',
+             "trust-check", str(home / profile), *client]
+            for profile in (".profile", ".bashrc")
+        ]
+        if os.access(generator, os.X_OK):
+            # The user manager parses the generator's double-quoted output like a shell.
+            manager = subprocess.run([generator], env=environment, capture_output=True,
+                                     text=True, check=True).stdout.splitlines()
+            runs.append(["bash", "--noprofile", "--norc", "-c",
+                         'set -a; eval "$1"; shift; exec "$@"', "trust-check",
+                         "\n".join(line for line in manager
+                                   if line.split("=", 1)[0] in {"NODE_OPTIONS", *trust}), *client])
+        for run in runs:
+            result = subprocess.run(run, env=environment, capture_output=True, text=True)
+            assert result.returncode == 0, (selector, run, result.stderr)
+            actual = json.loads(result.stdout)
+            env = actual.pop("env")
+            if node:
+                assert actual == expected, (selector, run)
+            assert {key: env[key] for key in trust} == trust
+            assert env["NODE_OPTIONS"] == (
+                f"{options} --no-use-system-ca --no-use-bundled-ca --use-openssl-ca"
+            )
 
 
 def redirect_system_paths(tasks, root):
@@ -708,3 +736,53 @@ print(json.dumps({{"result": result}}))
         assert len(actual["runs"]) == 1
         assert json.loads(viewer_call.read_text()) == [str(home / ".local/share/crewship/schedules/main.ts")]
         assert "changed=0" in result.stdout
+
+
+@pytest.mark.parametrize("location", ["default", "relative", "absolute"])
+def test_onboarding_uses_the_uv_project_environment(tmp_path, location):
+    project = tmp_path / "project"
+    (project / "scripts").mkdir(parents=True)
+    shutil.copy2(ROOT / "onboard.sh", project / "onboard.sh")
+    shutil.copy2(ROOT / "scripts/provisions.py", project / "scripts/provisions.py")
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "onboard-regression"\nversion = "0.0.0"\n'
+        'requires-python = ">=3.12"\ndependencies = []\n[tool.uv]\npackage = false\n'
+    )
+    home = tmp_path / "home"
+    commands = home / ".local/bin"
+    commands.mkdir(parents=True)
+    (commands / "uv").symlink_to(shutil.which("uv"))
+    python = commands / "python3"
+    python.write_text(
+        '#!/bin/sh\n'
+        'if [ "${4-}" = "--tools" ] && [ "${5-}" = "uv" ]; then exit 0; fi\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n'
+    )
+    python.chmod(0o755)
+    environment = {
+        **os.environ, "HOME": str(home),
+        "PATH": str(commands) + os.pathsep + os.environ["PATH"],
+        "UV_PYTHON": sys.executable, "UV_OFFLINE": "1",
+        "UV_PYTHON_DOWNLOADS": "never", "UV_CACHE_DIR": str(tmp_path / "cache"),
+    }
+    for key in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_NO_PROJECT", "PYTHONPATH"):
+        environment.pop(key, None)
+    selected = project / ".venv"
+    if location != "default":
+        selected = project / "custom-env" if location == "relative" else tmp_path / "external-env"
+        environment["UV_PROJECT_ENVIRONMENT"] = (
+            "custom-env" if location == "relative" else str(selected)
+        )
+    subprocess.run(
+        [str(commands / "uv"), "lock", "--project", str(project)],
+        env=environment, check=True, capture_output=True,
+    )
+    for _ in range(2):
+        result = subprocess.run(
+            ["bash", str(project / "onboard.sh")], cwd=tmp_path, env=environment,
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (selected / "bin/python").exists()
+        if location != "default":
+            assert not (project / ".venv").exists()

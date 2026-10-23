@@ -24,13 +24,15 @@ If that check fails, update the system trust store before requesting a release p
 The earlier bootstrap downloads require an already trusted system CA store.
 
 Node still follows the newest release, with minimum versions of 22.23.4, 24.22.1, and 26.12.1 in their respective major lines.
-The installer rejects older or unsupported releases and checks the installed executable before linking it onto PATH.
+The installer rejects older or unsupported releases.
+It checks extracted executables before promotion and installed executables before linking them onto PATH.
+A rejected archive leaves no installed artifact, so a corrected release can be retried.
 Newer major lines remain eligible.
 
 The recipe also directs new shell and user-service processes to the filtered system CA store.
 It writes `.profile`, `.bashrc`, and `~/.config/environment.d/60-crewship-trust.conf`.
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `PIP_CERT` select `/etc/ssl/certs/ca-certificates.crt`.
-`NODE_OPTIONS` adds `--use-openssl-ca` and preserves unrelated Node flags.
+`NODE_OPTIONS` appends `--no-use-system-ca --no-use-bundled-ca --use-openssl-ca` to disable conflicting selectors and preserve unrelated Node flags.
 Unlike `--use-system-ca`, this option replaces Node's bundled trust instead of adding system trust to it.
 `PIP_USE_DEPRECATED=legacy-certs` disables pip's additive truststore backend, so `PIP_CERT` does not retain pip's vendored roots.
 The version floors alone do not remove all compromised roots from published runtime bundles.
@@ -41,7 +43,8 @@ The repository lock excludes both packages, and uv creates the pruner and tool e
 Adding unused packages would add another trust store without serving a runtime need.
 The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
-`onboard.sh` handles the repository environment; the normal `ship.sh` command path does not run the package updater.
+`onboard.sh` handles the repository environment selected by uv, including `UV_PROJECT_ENVIRONMENT`.
+The normal `ship.sh` command path does not run the package updater.
 It does not run the environment's pip to update packages.
 The fdu installer selects the newest available releases even when `UV_RESOLUTION` requests older versions.
 `uv pip` is a uv command, not a Python pip installation.

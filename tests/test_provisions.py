@@ -107,6 +107,45 @@ def test_node_install_checks_the_executable_version(tmp_path, monkeypatch, versi
         assert not (tmp_path / ".local/bin/node").exists()
 
 
+def test_rejected_node_archive_allows_corrected_retry_without_weakening_drift_guard(
+    tmp_path, monkeypatch
+):
+    archives = {}
+    for version in ("26.12.0", "26.12.1"):
+        executable = f"#!/bin/sh\nprintf 'v{version}\\n'\n".encode()
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            member = tarfile.TarInfo("node/bin/node")
+            member.size = len(executable)
+            member.mode = 0o644
+            archive.addfile(member, io.BytesIO(executable))
+        archives[version] = stream.getvalue()
+
+    payload = archives["26.12.0"]
+    spec = asset(payload)
+    spec["version"] = "26.12.1"
+    release = spec["assets"]["linux-x86_64"]
+    release.update({"format": "tar", "binaries": {"node": "node/bin/node"}})
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(payload))
+    final = tmp_path / ".local/share/crewship/tools/node/26.12.1/linux-x86_64"
+    command = tmp_path / ".local/bin/node"
+
+    with pytest.raises(ValueError, match="node.*below security minimum"):
+        installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    assert not final.exists()
+    assert not os.path.lexists(command)
+
+    payload = archives["26.12.1"]
+    release["sha256"] = hashlib.sha256(payload).hexdigest()
+    assert installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    assert subprocess.check_output([command, "--version"], text=True).strip() == "v26.12.1"
+    assert not installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+
+    command.write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
+    with pytest.raises(ValueError, match="installed artifact drifted"):
+        installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+
+
 def security_wheel(directory, name, version, dependencies=(), console=False):
     dist_info = f"{name}-{version}.dist-info"
     files = {
