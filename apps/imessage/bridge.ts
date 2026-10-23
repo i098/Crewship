@@ -48,6 +48,8 @@ function track<T extends Bun.Subprocess>(proc: T): T {
 async function stop() {
   if (stopping) return;
   stopDeskTyping?.();
+  for (const timer of acknowledgementTimers.values()) clearTimeout(timer);
+  if (commandTypingSpace) typing(commandTypingSpace, false);
   stopping = true;
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
@@ -94,6 +96,7 @@ const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_M
 // Only the test suite may override the short quiet period and the burst cap.
 const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 350;
 const MAX_WAIT_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_MAX_WAIT_MS ? Number(env.FM_IMESSAGE_TEST_MAX_WAIT_MS) : 2000;
+const ACK_MS = 8000;
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -129,11 +132,23 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
+const trace = (id: string, event: string) => {
+  try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
+  catch (e) { log("trace")(e); }
+};
+let commandTypingTimer: NodeJS.Timeout | undefined;
+let commandTypingSpace: LineMessage["space"] | undefined;
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
 const typing = (space: LineMessage["space"] | undefined, on: boolean) => {
   if (!space) return;
-  deskTypingPending = deskTypingPending.then(() => {
-    if (!stopping) return on ? space.startTyping() : space.stopTyping();
+  clearTimeout(commandTypingTimer);
+  commandTypingSpace = on ? space : undefined;
+  if (on) commandTypingTimer = setTimeout(() => typing(space, false), ACK_MS);
+  deskTypingPending = deskTypingPending.then(async () => {
+    if (!stopping || !on) {
+      await (on ? space.startTyping() : space.stopTyping());
+      trace(latestRef?.id ?? "command", on ? "typing-start" : "typing-stop");
+    }
   }).catch(log(on ? "start typing" : "stop typing"));
 };
 // This service is the memory's one writer: systemd runs one instance of the unit.
@@ -163,15 +178,16 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
-type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string };
+type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
 let routingRetry: NodeJS.Timeout | undefined;
+const acknowledgementTimers = new Map<string, NodeJS.Timeout>();
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -373,6 +389,7 @@ const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgai
 });
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
+scheduleAcknowledgement();
 if (pendingRoutes().length) {
   prefetchInboxStatus();
   desk.inboundText();
@@ -405,7 +422,7 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
-    // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
+    // Supervisor activity cancels a draft; only a confirmed response ends the acknowledgement wait.
     recordRoute({ deskCancelled: true });
     desk.firstmateActive();
     handoffPending();
@@ -449,7 +466,9 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
-    return queue({ ...destination, image, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
+    return queue({ ...destination, image, bubbles: parts,
+      ...(target ? { requests: [`${target.line ?? "photon"}-${target.id}`] } : {}),
+      reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
   },
 });
 
@@ -527,6 +546,11 @@ function hasRestoredUnsentText(o: Out): boolean {
 }
 
 function checkDeskDelivery(o: Out) {
+  if (o.acknowledgement) {
+    const latest = [...routing.values()].findLast((r) => sameChat(r.ref, o));
+    if (o.id !== latest?.ref.id || !o.requests?.some((id) => !routing.get(id)?.responded)) throw deskCancelled;
+    return;
+  }
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
 }
 
@@ -547,6 +571,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
       lostDeskAnswer(o);
       break;
     }
+    recordResponse(o);
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
   }
@@ -593,6 +618,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
     throw e;
   }
   finishDeskDelivery(o);
+  if (o.kind === "desk") recordResponse(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
@@ -620,7 +646,10 @@ async function deliverCard(o: Out, kind: Kind) {
     if (!card.sent) fileNote(`card-${card.key}-${card.expires}-failed`, `(card ${card.key} was not sent: ${why})`);
     throw Object.assign(new Error(`card ${card.key}: ${why}`), { permanent: true });
   }
-  if (!card.sent) remember(kind, `[card ${card.key}: ${card.title}]`);
+  if (!card.sent) {
+    recordResponse(o);
+    remember(kind, `[card ${card.key}: ${card.title}]`);
+  }
 }
 
 // His pick on a choice card's page: the inbox note, then the bubble edit, queued behind the sends before it.
@@ -719,6 +748,60 @@ function remember(kind: Kind, text: string, requestId?: string): number | undefi
   }
 }
 
+function sameChat(a: Ref, b: Ref | undefined) {
+  return a.space === b?.space && (a.line ?? "photon") === (b?.line ?? "photon");
+}
+
+function recordResponse(o: Out) {
+  const ids = o.requests ?? [...routing.values()].filter((r) => r.at && r.at <= (o.at ?? 0)
+    && sameChat(r.ref, o)).map((r) => r.requestId);
+  const unanswered = ids.filter((id) => !routing.get(id)?.responded);
+  if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
+  trace(o.id, "transport-accepted");
+  scheduleAcknowledgement();
+  if (o.acknowledgement && commandTypingSpace?.id === o.space) typing(commandTypingSpace, false);
+}
+
+function scheduleAcknowledgement() {
+  const chats = new Map<string, Routing[]>();
+  for (const item of routing.values()) {
+    if (!item.at || item.responded || !directChat.test(item.ref.space)) continue;
+    const key = `${item.ref.line ?? "photon"}:${item.ref.space}`;
+    const pending = chats.get(key) ?? [];
+    pending.push(item);
+    chats.set(key, pending);
+  }
+  for (const pending of chats.values()) scheduleChatAcknowledgement(pending);
+}
+
+function scheduleChatAcknowledgement(pending: Routing[]) {
+  const target = pending.at(-1)!;
+  if (acknowledgementTimers.has(target.requestId) || target.acknowledgement || Date.now() - target.at! > 60_000) return;
+  if (socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[pending[0]!.memoryId - 1])) return;
+  acknowledgementTimers.set(target.requestId, setTimeout(() => {
+    acknowledgementTimers.delete(target.requestId);
+    acknowledge(pending);
+  }, Math.max(0, ACK_MS - (Date.now() - target.at!))));
+}
+
+function acknowledge(pending: Routing[]) {
+  const target = pending.at(-1)!;
+  const latest = [...routing.values()].findLast((r) => sameChat(r.ref, target.ref));
+  if (stopping || muted() || target.responded || target !== latest) return;
+  if (target.out) return finishDeskDelivery(target.out);
+  desk.firstmateActive();
+  cancelDesk();
+  const ids = pending.map((r) => r.requestId);
+  const text = target.authored ?? target.text;
+  const subject = supervisorOnly(text) || text.includes("(sent an attachment")
+    ? "your message" : `“${text.replace(/\s+/g, " ").slice(0, 160)}”`;
+  const out: Out = { ...target.ref, requestId: `ack-${target.requestId}`, requests: ids,
+    acknowledgement: true, kind: "desk", guid: crypto.randomUUID(), at: Date.now(),
+    bubbles: [`I saved ${subject}; no confirmed answer yet.`], reply: target.ref.id };
+  recordRoute({ ids, acknowledgement: out });
+  handoffPending();
+}
+
 function prefetchInboxStatus() {
   if (DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
 }
@@ -730,8 +813,7 @@ async function readInboxStatus() {
 }
 
 function startDeskTyping(pending: Routing[], current: () => boolean) {
-  const space = pending.every(({ ref }) => ref.space === latestRef?.space
-    && (ref.line ?? "photon") === (latestRef?.line ?? "photon")) ? latest?.space : undefined;
+  const space = pending.every(({ ref }) => sameChat(ref, latestRef)) ? latest?.space : undefined;
   let active = true;
   let refreshing = false;
   const refresh = () => {
@@ -739,6 +821,7 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
     refreshing = true;
     deskTypingPending = deskTypingPending.then(async () => {
       if (active && !stopping && current()) await space.startTyping();
+      if (active && !stopping && current()) trace(pending.at(-1)!.ref.id, "typing-start");
     }).catch(log("start typing")).finally(() => { refreshing = false; });
   };
   const timer = setInterval(() => {
@@ -753,7 +836,10 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
       stopDeskTyping = undefined;
       deskTypingRequestId = undefined;
     }
-    deskTypingPending = deskTypingPending.then(() => space?.stopTyping()).catch(log("stop typing"));
+    deskTypingPending = deskTypingPending.then(async () => {
+      await space?.stopTyping();
+      if (space) trace(pending.at(-1)!.ref.id, "typing-stop");
+    }).catch(log("stop typing"));
   };
   stopDeskTyping = finishTyping;
   refresh();
@@ -822,13 +908,16 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER, memory.recent(from));
   if (!statusOk || !prompt.includes(latestText)) return;
   const writePath = armWrite(pending);
+  trace(pending.at(-1)!.ref.id, "model-start");
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath }));
   deskRun = proc;
   const { ok, drafted, tools } = await readDesk(proc, true);
+  trace(pending.at(-1)!.ref.id, ok ? "model-result" : "model-failed");
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
   const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
+  if (!answer) trace(pending.at(-1)!.ref.id, "model-handoff");
   if (!answer) return;
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
@@ -906,6 +995,10 @@ function applyRoute(event: RouteEvent) {
   else if ("received" in event) {
     deskGeneration++;
     routing.set(event.received.requestId, { ...event.received, route: "pending" });
+  } else if ("responded" in event) {
+    for (const id of event.ids) Object.assign(routing.get(id)!, { responded: true, acknowledgement: undefined });
+  } else if ("acknowledgement" in event) {
+    for (const id of event.ids) routing.get(id)!.acknowledgement = event.acknowledgement;
   } else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
     handoffNote: event.handoffNote, ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
 }
@@ -913,7 +1006,7 @@ function applyRoute(event: RouteEvent) {
 function recordRoute(event: RouteEvent) {
   const fd = openSync(ROUTING_LOG, "a", 0o600);
   try {
-    writeSync(fd, `${JSON.stringify(event)}\n`);
+    writeSync(fd, `${JSON.stringify({ at: Date.now(), ...event })}\n`);
     fsyncSync(fd);
   } finally { closeSync(fd); }
   const dir = openSync(STATE, "r");
@@ -932,9 +1025,11 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
+  if (item.acknowledgement) return;
   if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
+  scheduleAcknowledgement();
 }
 
 function pendingRoutes() {
@@ -955,6 +1050,7 @@ function flushRoutes() {
   for (const item of routing.values()) {
     if (mateDeliveries.has(item.requestId)) continue;
     try {
+      if (item.acknowledgement && !muted()) outbox.add(item.acknowledgement);
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);
         recordRoute({ ids: [item.requestId], route: "handoff" });
@@ -962,9 +1058,10 @@ function flushRoutes() {
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
         if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
+        trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
-      recordRoute({ ids: [item.requestId], route: "done" });
+      recordRoute({ ids: [item.requestId], route: "done", out: item.out });
     } catch (e) {
       log("route delivery")(e);
       failed = true;
@@ -997,7 +1094,7 @@ function fileNote(requestId: string, text: string): boolean {
   if (stopping) return false;
   const note = Bun.spawnSync(
     [INBOX, "note", "--request-id", requestId, "--", `[iMessage from the owner; answer with fm-imessage] ${text}`],
-    { cwd: FM_HOME, env: { ...env, FM_HOME } },
+    { cwd: FM_HOME, env: { ...env, FM_HOME }, timeout: 5000 },
   );
   return note.exitCode === 0;
 }
@@ -1045,7 +1142,7 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  await message.read().catch(log("mark read"));
+  await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
   const pending = pendingRoutes();
   if (pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
@@ -1056,13 +1153,15 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, 
   const mateEligible = !firstmate && !supervisorOnly(authored);
   // Destructive requests, unclear approvals, and sensitive content keep the existing supervisor boundary.
   firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
-  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible };
+  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, at: Date.now() };
   prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);
   flushRoutes();
   cancelDesk();
+  if (commandTypingSpace) typing(commandTypingSpace, false);
   desk.inboundText();
+  scheduleAcknowledgement();
 }
 
 function authoredText(content: LineMessage["content"]): string | undefined {

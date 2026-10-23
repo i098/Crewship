@@ -57,8 +57,8 @@ if (process.env.STATE_DIRECTORY) {
   const schedule = globalThis.setTimeout;
   const cancel = globalThis.clearTimeout;
   globalThis.setTimeout = (fn, ms, ...args) => {
-    if (![process.env.FM_IMESSAGE_TEST_QUIET_MS, process.env.FM_IMESSAGE_TEST_MAX_WAIT_MS]
-        .some((value) => ms === Number(value))) return schedule(fn, ms, ...args);
+    if (![8000, Number(process.env.FM_IMESSAGE_TEST_QUIET_MS),
+          Number(process.env.FM_IMESSAGE_TEST_MAX_WAIT_MS)].includes(ms)) return schedule(fn, ms, ...args);
     const timer = { at: Date.now() + ms, run: () => fn(...args) };
     timers.set(timer, timer);
     return timer;
@@ -523,11 +523,11 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
             wait_for(lambda: "photon-question " in text(notes), "the desk handoff")
         if exit_path != "shutdown":
             desk_clock(0)
-            before = events()
+            before = len(events())
             desk_clock(8000)
-            assert events() == before
-        assert all(row["chat"] == "iMessage;-;+10000000000" for row in events())
-        assert events()[-1]["on"] == (exit_path == "typing")
+            wait_for(lambda: events()[-1]["on"] is False, "the final typing cleanup")
+            assert not any(row["on"] for row in events()[before:])
+        assert events()[-1]["on"] is False
     finally:
         if bridge.poll() is None:
             bridge.terminate()
@@ -570,7 +570,6 @@ def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_
         (fake / "typing-hold").touch()
         desk_clock(4000)
         wait_for(lambda: (fake / "typing-waiting").exists(), "the pending typing refresh")
-        desk_clock(4000)
         if exit_path == "answer":
             (fake / "model-hold").unlink()
             wait_for(lambda: text(fake / "sent"), "the response without waiting for typing")
@@ -586,8 +585,10 @@ def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_
         expected = [True, True, False] + ([True] if exit_path == "typing" else [])
         wait_for(lambda: events() == expected, "the ordered typing state after the pending refresh")
         if exit_path != "shutdown":
+            before = len(events())
             desk_clock(8000)
-            assert events() == expected
+            wait_for(lambda: events()[-1] is False, "the expired typing lease")
+            assert not any(events()[before:])
     finally:
         (fake / "typing-hold").unlink(missing_ok=True)
         if bridge.poll() is None:
@@ -1437,7 +1438,7 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
     ("What is Firstmate's run status?", "Firstmate's run status is green."),
     ("When does Firstmate start?", "Firstmate's start time is 9am."),
 ])
-def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source_kind, question, fact):
+def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_clock, source_kind, question, fact):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     if source_kind == "status":
         (fake / "status").write_text(fact)
@@ -1454,6 +1455,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     bridge = start(1)
     try:
         receive("description", question)
+        desk_clock()
         wait_for(lambda: text(fake / "sent"), "the grounded description")
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
@@ -1461,7 +1463,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
         bridge.wait(10)
         bridge = start(2)
         receive("description", question)
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -1494,7 +1496,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     "Firstmate’s working on it.",
     "Firstmate's run the checks.",
 ])
-def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
+def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, desk_clock, source_kind, claim):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     if source_kind == "status":
         (fake / "status").write_text(claim)
@@ -1511,12 +1513,13 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, sourc
     bridge = start(1)
     try:
         receive("claim", "What is the bridge status?")
+        desk_clock()
         wait_for(lambda: "photon-claim " in text(notes), "the action-claim handoff")
         bridge.terminate()
         bridge.wait(10)
         bridge = start(2)
         receive("claim", "What is the bridge status?")
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(notes).count("photon-claim ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the bridge status?"]
@@ -2547,7 +2550,8 @@ def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(
         wait_for(lambda: "photon-activity " in text(notes), "the handoff after supervisor activity")
         desk_clock(TEST_QUIET_MS * 6)
         assert text(notes).count("photon-activity ") == 1
-        assert text(fake / "sent").splitlines() == expected
+        assert text(fake / "sent").splitlines()[:len(expected)] == expected
+        assert "send The build is paused." not in text(fake / "sent").splitlines()
     finally:
         bridge.terminate()
         bridge.wait(10)
