@@ -43,7 +43,7 @@ The repository lock excludes both packages, and uv creates the pruner and tool e
 Adding unused packages would add another trust store without serving a runtime need.
 The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
-The Instagram environment updates are tracked separately in [#833](https://github.com/i098/Crewship/issues/833).
+See [Instagram Python environments](#instagram-python-environments) for the isolated Instagram commands.
 `onboard.sh` handles the repository environment selected by uv, including `UV_PROJECT_ENVIRONMENT`.
 When uv is available, `ship.sh` does not run this repository-environment updater.
 The updater uses uv, not the environment's pip.
@@ -99,10 +99,7 @@ The listener, poller, reply command, and curator run instagrapi in isolated uv e
 Isolation prevents older pip or certifi packages in the base interpreter from entering these environments.
 The commands also use `--no-project` so the current project's dependencies cannot add an older pip.
 uv does not seed pip here, so no pip copy needs an update.
-The environments keep absent packages absent; any retained pip copy requires `pip>=26.2.2`.
-The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2) describes the compromised emSign roots.
-[pip 26.2.2](https://pip.pypa.io/en/stable/news/#v26-2-2) includes the updated certifi.
-Update the host CA store before dependency downloads; the [system trust change](https://github.com/i098/Crewship/issues/830) handles that separately.
+See [CA trust and security minimums](#ca-trust-and-security-minimums) for host trust setup before dependency downloads.
 Already-running listeners keep their existing environment until restarted; this change applies to their next launch.
 
 ## Latest releases
