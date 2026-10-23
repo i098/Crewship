@@ -37,6 +37,7 @@ For each message from the owner, the service does these steps:
    The service removes the directory when the call exits.
    Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
    The target is resolved before the call and checked again before writing, including symbolic links.
+   The native-normalized destination must resolve to that same authorized target; normalization cannot select a different file.
    Empty writes and unapproved targets are blocked; retrieved content cannot add a target.
    A shebang write requires approval if the native writer would add execute permissions, including when it creates a file.
    Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
@@ -46,6 +47,7 @@ For each message from the owner, the service does these steps:
    Shell commands still require native approval, except the listed system reads.
    The automatic service check is exactly `systemctl --user is-active -- fm-imessage.service`; other service commands require approval.
    The child receives only its provider credentials and required runtime variables, not transport credentials.
+   Native tools retain `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` so local user-service inspection can connect to the existing bus.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.

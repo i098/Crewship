@@ -6,7 +6,7 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { builtinCredentialSecretEntries, collectEnvSecrets, loadSecrets, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-scan";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
-import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
+import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern, resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 import { isReadableUrlPath } from "@oh-my-pi/pi-tui/tools/read";
 import { Budget, load, zoom } from "./memory.ts";
 import { canonicalWritePath } from "./desk.ts";
@@ -88,6 +88,7 @@ async function guardServerTools({ toolName, input }: { toolName: string; input: 
   if (toolName !== "write") return;
   const allowed = process.env.FM_DESK_WRITE_PATH;
   if (!allowed || typeof input.path !== "string" || canonicalWritePath(input.path) !== allowed
+    || canonicalWritePath(resolveToCwd(input.path, process.cwd())) !== allowed
     || typeof input.content !== "string" || !input.content.trim()) {
     return { block: true, reason: "The owner did not authorize this non-empty write to this absolute path. Hand off for approval." };
   }

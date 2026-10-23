@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -1912,6 +1913,43 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("bus_variable", ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"])
+def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path, monkeypatch, request, bus_variable):
+    if not shutil.which("systemctl"):
+        pytest.skip("needs systemctl")
+    runtime = tmp_path / "runtime"
+    (runtime / "systemd").mkdir(parents=True, mode=0o700)
+    if bus_variable == "XDG_RUNTIME_DIR":
+        address = runtime / "systemd/private"
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+        monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    else:
+        address = runtime / "bus"
+        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", f"unix:path={address}")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(address))
+        listener.listen(1)
+        listener.settimeout(45)
+        rig, replies, requests = request.getfixturevalue("native_desk")
+        fake, state, notes, err, start, receive, cli, text, records = rig
+        replies.extend([
+            lambda body: {"tool_calls": [
+                tool_call("bash", {"command": "systemctl --user is-active -- fm-imessage.service"}),
+            ]},
+            lambda body: {"content": '{"kind":"handoff"}'},
+        ])
+        bridge = start(1)
+        try:
+            receive("bus", "Check whether the desk service is active.")
+            connection, _ = listener.accept()
+            connection.close()
+            wait_for(lambda: "photon-bus " in text(notes), "the completed user-bus connection", timeout=45)
+        finally:
+            bridge.terminate()
+            bridge.wait(10)
+
+
 def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
@@ -2017,6 +2055,39 @@ def test_native_writes_preserve_execute_permissions(tmp_path, native_desk, kind,
             assert original.read_text() == "before" if kind != "new" else not original.exists()
         if kind != "new":
             assert original.stat().st_mode & 0o777 == mode
+        assert text(fake / "sent") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("space,normalized_exists", [
+    ("\u00a0", True), ("\u00a0", False), ("\u202f", True), ("\u3000", True),
+])
+def test_native_write_cannot_change_the_normalized_destination(tmp_path, native_desk, space, normalized_exists):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    target = tmp_path / f"report{space}2026.txt"
+    normalized = tmp_path / "report 2026.txt"
+    target.write_text("authorized original")
+    if normalized_exists:
+        normalized.write_text("unrelated original")
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("write", {"path": str(target), "content": "after"})]},
+        lambda body: {"content": '{"kind":"handled"}'},
+    ])
+    bridge = start(1)
+    try:
+        receive("destination", f'Set "{target}" to "after".')
+        wait_for(lambda: "photon-destination " in text(notes), "the changed-destination refusal", timeout=45)
+        assert target.read_text() == "authorized original"
+        if normalized_exists:
+            assert normalized.read_text() == "unrelated original"
+        else:
+            assert not normalized.exists()
+        results = [message["content"] for body in requests
+                   for message in body["messages"] if message["role"] == "tool"]
+        assert any("authorize" in result for result in results)
         assert text(fake / "sent") == ""
     finally:
         bridge.terminate()

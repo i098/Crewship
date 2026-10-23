@@ -383,7 +383,7 @@ export function spawnDesk(o: DeskOptions): DeskProc {
   const env = inception && o.voice
     ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
     : !o.serverTools && !inception ? { ...o.env, ...desk }
-    : { ...Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR",
+    : { ...Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR",
       ...(inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"])].map((key) => [key, o.env[key]])),
       ...desk, FM_DESK_INCEPTION_INSTANT: inception && reasoning === "instant" ? "1" : undefined,
       FM_DESK_SERVER_TOOLS: o.serverTools ? "1" : undefined,
