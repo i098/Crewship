@@ -307,6 +307,43 @@
     - crewship_manage_profile_path | bool
     - crewship_account_ready | bool
 
+- name: Use system CA trust in shell profiles
+  ansible.builtin.blockinfile:
+    path: "{{ crewship_cfg.home }}/{{ item }}"
+    create: true
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    marker: "# {mark} crewship CA trust"
+    block: |
+      {% for key, value in crewship_trust_env | dictsort %}
+      export {{ key }}="{{ value }}"
+      {% endfor %}
+      # Node rejects --use-openssl-ca beside an enabled --use-system-ca or
+      # --use-bundled-ca; the trailing negations switch those off.
+      case " ${NODE_OPTIONS-}" in
+        *" --no-use-system-ca --no-use-bundled-ca --use-openssl-ca") ;;
+        *) NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--no-use-system-ca --no-use-bundled-ca --use-openssl-ca" ;;
+      esac
+      export NODE_OPTIONS
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  loop: [".profile", ".bashrc"]
+  when: crewship_account_ready | bool
+
+- name: Use system CA trust for future user-manager processes
+  ansible.builtin.copy:
+    dest: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-trust.conf"
+    content: |
+      {% for key, value in crewship_trust_env | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
+      NODE_OPTIONS=${NODE_OPTIONS:+${NODE_OPTIONS} }--no-use-system-ca --no-use-bundled-ca --use-openssl-ca
+    mode: "0600"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  notify: reload user systemd
+  when: crewship_account_ready | bool
+
 # --- user manager -----------------------------------------------------------
 # Skipped entirely when start_services is false (image builds, containers).
 

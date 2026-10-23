@@ -26,6 +26,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -41,6 +42,7 @@ from pathlib import Path, PurePosixPath
 from threading import Lock
 
 GITHUB_API = "https://api.github.com/repos/{}/releases"
+NODE_SECURITY_MINIMUMS = {22: (22, 23, 4), 24: (24, 22, 1), 26: (26, 12, 1)}
 FORGEJO_RELEASES = (
     "https://codeberg.org/api/v1/repos/forgejo/forgejo/releases?draft=false&pre-release=false"
 )
@@ -299,6 +301,44 @@ def latest_release(repo, tool, prerelease):
         return release_from_pages(repo, tool, prerelease)
 
 
+def require_secure_node(version):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version)
+    if not match:
+        raise ValueError(f"node {version!r} is not a stable release; security minimum required")
+    installed = tuple(map(int, match.groups()))
+    minimum = NODE_SECURITY_MINIMUMS.get(installed[0])
+    if minimum is None:
+        if installed[0] > max(NODE_SECURITY_MINIMUMS):
+            return
+        raise ValueError(f"node {version} has no supported security minimum; use Node 22, 24, or 26+")
+    if installed < minimum:
+        floor = ".".join(map(str, minimum))
+        raise ValueError(f"node {version} is below security minimum {floor}")
+
+
+def check_ca_bundle():
+    context = ssl.create_default_context()
+    paths = ssl.get_default_verify_paths()
+    for directory in os.environ.get(paths.openssl_capath_env, paths.openssl_capath).split(os.pathsep):
+        if not directory or not Path(directory).is_dir():
+            continue
+        for certificate in Path(directory).iterdir():
+            if re.fullmatch(r"[0-9a-f]{8}\.\d+", certificate.name) and certificate.is_file():
+                context.load_verify_locations(cafile=str(certificate))
+    blocked = [
+        str(certificate["subject"])
+        for certificate in context.get_ca_certs()
+        if re.search(r"emsign|emudhra", str(certificate["subject"]), re.I)
+    ]
+    if blocked:
+        raise ValueError(
+            "system CA bundle still trusts compromised eMudhra/emSign roots: "
+            + "; ".join(blocked)
+            + ". Update ca-certificates and remove or distrust these roots before release lookups."
+        )
+    print(json.dumps({"changed": False, "ca_trust": "no eMudhra/emSign roots"}))
+
+
 def verified(tool, version, key, name, url, checksum, binaries):
     """A lock-shaped spec, only when the publisher lists a SHA-256 for the asset."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
@@ -357,6 +397,7 @@ def resolve_release_group(key, names):
     if "node" in names:
         releases = json.loads(fetch("https://nodejs.org/dist/index.json", "node release"))
         tag = max((r["version"] for r in releases), key=lambda v: tuple(map(int, v[1:].split("."))))
+        require_secure_node(tag)
         name = f"node-{tag}-linux-{ARCH[key]['node']}.tar.xz"
         sums = fetch(f"https://nodejs.org/dist/{tag}/SHASUMS256.txt", "node checksums").decode()
         match = re.search(rf"^([0-9a-f]{{64}})  {re.escape(name)}$", sums, re.M)
@@ -530,6 +571,14 @@ def install_gh_guard(home, real_binary, name="gh"):
     return link_binary(home, name, wrapper) or changed
 
 
+def verified_binaries(name, version, directory, patterns):
+    paths = binaries_in(directory, patterns)
+    if name == "node":
+        require_secure_node(version)
+        require_secure_node(subprocess.check_output([paths["node"], "--version"], text=True).strip())
+    return paths
+
+
 def install_asset(home, name, spec, key):
     version = spec["version"]
     if (
@@ -567,13 +616,14 @@ def install_asset(home, name, spec, key):
             paths = binaries_in(unpacked, asset["binaries"])
             for path in paths.values():
                 path.chmod(0o755)
+            paths = verified_binaries(name, version, unpacked, asset["binaries"])
             (unpacked / ".asset.json").write_text(
                 json.dumps({"spec": expected, "files": {n: digest(p) for n, p in paths.items()}})
                 + "\n"
             )
             unpacked.rename(final)
         changed = True
-    for binary, path in binaries_in(final, asset["binaries"]).items():
+    for binary, path in verified_binaries(name, version, final, asset["binaries"]).items():
         if binary == "gh":
             changed = install_gh_guard(home, path) or changed
         else:
@@ -599,6 +649,29 @@ def link_grammars(home, store):
 
 def command(argv, environment):
     subprocess.run([str(arg) for arg in argv], env=environment, check=True, stdout=sys.stderr)
+
+
+def secure_python(python, uv, environment):
+    probe = (
+        "import importlib.metadata as m, json, sys; "
+        "assert sys.prefix != sys.base_prefix, 'refusing to modify system Python'; "
+        "print(json.dumps({d.metadata['Name'].lower(): m.version(d.metadata['Name']) for d in m.distributions() "
+        "if d.metadata['Name'].lower() in ('pip', 'certifi')}))"
+    )
+    before = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
+    requirements = [
+        f"{name}>={floor}" for name, floor in (("certifi", "2026.10.19"), ("pip", "26.2.2"))
+        if name in before
+    ]
+    if not requirements:
+        return False
+    command(
+        [uv, "pip", "install", "--system-certs", "--no-build", "--no-deps",
+         "--python", python, *requirements],
+        environment,
+    )
+    after = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
+    return before != after
 
 
 def link_package_bins(home, destination, package_names):
@@ -807,10 +880,17 @@ def fdu_install(home, environment):
 
     before = version()
     command(
-        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build", "fdu"],
+        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build",
+         "--resolution", "highest", "fdu"],
         {**environment, "UV_TOOL_BIN_DIR": str(home / ".local/bin")},
     )
-    return version() != before
+    tool_dir = subprocess.check_output(
+        [home / ".local/bin/uv", "tool", "dir"], env=environment, text=True
+    ).strip()
+    changed = secure_python(
+        Path(tool_dir) / "fdu/bin/python", home / ".local/bin/uv", environment
+    )
+    return version() != before or changed
 
 
 # omp marketplace plugins: name -> repository.
@@ -877,6 +957,8 @@ def main():
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
+    parser.add_argument("--check-ca", action="store_true", help="reject compromised system CA roots")
+    parser.add_argument("--python-env", type=Path, help="secure present pip and certifi in a virtualenv")
     parser.add_argument("--development", action="store_true")
     parser.add_argument(
         "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
@@ -897,6 +979,12 @@ def main():
         "--resolved", type=json.loads, help="--resolve output to install instead of resolving"
     )
     args = parser.parse_args()
+    if args.check_ca:
+        return check_ca_bundle()
+    if args.python_env:
+        changed = secure_python(args.python_env, args.home / ".local/bin/uv", dict(os.environ))
+        print(json.dumps({"changed": changed}))
+        return
     key = platform_key()
     names = args.tools.split(",") + (AGENT_TOOLS if args.npm else [])
     if "sentrux" in names:

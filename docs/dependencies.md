@@ -11,6 +11,54 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
 `./ship.sh chart` installs none of this.
 
+### CA trust and security minimums
+
+`launch` first disables the four Mozilla emSign entries in `/etc/ca-certificates.conf` and rebuilds the system CA store.
+It checks the CA bundle and hashed certificate directories before Ansible's first network lookup.
+It then refreshes signed APT metadata, upgrades `ca-certificates` to the latest available package, and checks trust again.
+The disabled roots are emSign Root CA - C1 and G1, and emSign ECC Root CA - C3 and G3.
+An interrupted rebuild is retried when the effective trust store is still unsafe, even if all four configuration entries already match.
+The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2) states: “Certifi 2026.10.18 removes root certificates from "emSign" from the root store.”
+`chart` checks the existing trust store without upgrading packages.
+If that check fails, update the system trust store before requesting a release preview.
+The earlier bootstrap downloads require an already trusted system CA store.
+
+Node still follows the newest release, with minimum versions of 22.23.4, 24.22.1, and 26.12.1 in their respective major lines.
+The installer rejects older or unsupported releases.
+It checks extracted executables before promotion and installed executables before linking them onto PATH.
+A rejected archive leaves no installed artifact, so a corrected release can be retried.
+Newer major lines remain eligible.
+
+The recipe also directs new shell and user-service processes to the filtered system CA store.
+It writes `.profile`, `.bashrc`, and `~/.config/environment.d/60-crewship-trust.conf`.
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `PIP_CERT` select `/etc/ssl/certs/ca-certificates.crt`.
+`NODE_OPTIONS` appends `--no-use-system-ca --no-use-bundled-ca --use-openssl-ca` to disable conflicting selectors and preserve unrelated Node flags.
+Unlike `--use-system-ca`, this option replaces Node's bundled trust instead of adding system trust to it.
+`PIP_USE_DEPRECATED=legacy-certs` disables pip's additive truststore backend, so `PIP_CERT` does not retain pip's vendored roots.
+The version floors alone do not remove all compromised roots from published runtime bundles.
+These settings do not modify installed CA bundles or add unused Python packages.
+
+The default recipe does not add Python's `pip` or `certifi` packages when they are absent.
+The repository lock excludes both packages, and uv creates the pruner and tool environments without pip seeds.
+Adding unused packages would add another trust store without serving a runtime need.
+The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
+After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
+The Instagram environment updates are tracked separately in [#833](https://github.com/i098/Crewship/issues/833).
+`onboard.sh` handles the repository environment selected by uv, including `UV_PROJECT_ENVIRONMENT`.
+When uv is available, `ship.sh` does not run this repository-environment updater.
+The updater uses uv, not the environment's pip.
+The fdu installer selects the newest available releases even when `UV_RESOLUTION` requests older versions.
+`uv pip` is a uv command, not a Python pip installation.
+The optional desktop packages bring Ubuntu's `python3-certifi` through `websockify` and `requests`.
+Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.
+The recipe does not replace distribution Python packages with PyPI packages.
+
+For separately managed Python environments, select filtered system trust as described above before further pip downloads.
+Then update any installed certifi and pip packages to the minimum versions above before updating Node.
+Environments created outside Crewship remain outside this recipe.
+The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2), [pip release notes](https://pip.pypa.io/en/stable/news/#v26-2-2), and [Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) describe the fixes.
+The sources do not prescribe a combined update order.
+
 ## Diagrams
 
 The `agents` profile installs the latest published [Ondine](https://github.com/wevm/ondine) release from the npm registry.

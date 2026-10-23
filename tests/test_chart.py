@@ -3,6 +3,8 @@ import grp
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -12,6 +14,256 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
+
+
+@pytest.mark.parametrize("subject,blocked", [
+    ("/CN=emSign Root CA - G1/O=eMudhra Technologies Limited", True),
+    ("/CN=Replacement Root/O=eMudhra Inc", True),
+    ("/CN=Test Root/O=Test CA", False),
+])
+def test_chart_checks_ca_trust_without_updating_packages(tmp_path, subject, blocked):
+    bundle = tmp_path / "ca.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+         "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(bundle),
+         "-subj", subject, "-days", "1", "-addext", "basicConstraints=critical,CA:TRUE"],
+        check=True, capture_output=True,
+    )
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/preflight.yml").read_text())
+    start = next(i for i, task in enumerate(tasks)
+                 if task["name"] == "Distrust the compromised emSign roots")
+    end = next(i for i, task in enumerate(tasks)
+               if task["name"] == "Resolve the latest tool releases")
+    playbook = tmp_path / "trust.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "environment": {"SSL_CERT_FILE": str(bundle), "SSL_CERT_DIR": str(empty)},
+        "vars": {"crewship_installer": str(ROOT / "scripts/provisions.py"),
+                 "crewship_cfg": {"home": str(tmp_path)}},
+        "tasks": tasks[start:end],
+    }]))
+    before = bundle.read_bytes()
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+         str(playbook), "--check"],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    assert (result.returncode != 0) == blocked, output
+    assert bundle.read_bytes() == before
+    assert "changed=0" in output
+    if blocked:
+        assert "system CA bundle still trusts compromised eMudhra/emSign roots" in output
+    else:
+        assert "failed=0" in output
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_emsign_distrust_rebuilds_the_bundle_and_is_idempotent(tmp_path, interrupted):
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/preflight.yml").read_text())
+    start = next(i for i, task in enumerate(tasks)
+                 if task["name"] == "Distrust the compromised emSign roots")
+    end = next(i for i, task in enumerate(tasks)
+               if task["name"] == "Refresh signed apt metadata before updating CA trust")
+    tasks = tasks[start:end]
+    root = tmp_path / "roots"
+    (root / "mozilla").mkdir(parents=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    store = tmp_path / "store"
+    store.mkdir()
+    blocked = tasks[0]["loop"]
+    names = [*blocked, "mozilla/Unrelated_Root.crt"]
+    for name in names:
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+             "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(root / name),
+             "-subj", "/CN=" + Path(name).stem, "-days", "1",
+             "-addext", "basicConstraints=critical,CA:TRUE"],
+            check=True, capture_output=True,
+        )
+    config = tmp_path / "ca-certificates.conf"
+    config.write_text("\n".join(names) + "\n")
+    updater = [
+        "update-ca-certificates", "--fresh", "--certsconf", str(config),
+        "--certsdir", str(root), "--localcertsdir", str(empty),
+        "--etccertsdir", str(store), "--hooksdir", str(empty),
+    ]
+    subprocess.run(updater, check=True, capture_output=True)
+    tasks[0]["ansible.builtin.lineinfile"]["path"] = str(config)
+    rebuild = next(task for task in tasks
+                   if task["name"] == "Rebuild system CA trust after distrusting emSign")
+    rebuild["ansible.builtin.command"]["argv"] = updater
+    for task in tasks:
+        task["become"] = False
+    playbook = tmp_path / "distrust.yml"
+    play = {
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "environment": {"SSL_CERT_FILE": str(store / "ca-certificates.crt"),
+                        "SSL_CERT_DIR": str(empty)},
+        "vars": {"crewship_installer": str(ROOT / "scripts/provisions.py"),
+                 "crewship_cfg": {"home": str(tmp_path)}},
+        "tasks": tasks,
+    }
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook)]
+    if interrupted:
+        playbook.write_text(yaml.safe_dump([{
+            **play, "tasks": [tasks[0], {"ansible.builtin.fail": {"msg": "interrupted"}}],
+        }]))
+        stopped = subprocess.run(command, capture_output=True, text=True)
+        assert stopped.returncode != 0
+        assert config.read_text().splitlines() == [*("!" + name for name in blocked), names[-1]]
+        unsafe = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/provisions.py"), "--home", str(tmp_path),
+             "--check-ca"],
+            env={**os.environ, **play["environment"]}, capture_output=True, text=True,
+        )
+        assert unsafe.returncode != 0
+        assert "still trusts compromised" in unsafe.stderr
+    playbook.write_text(yaml.safe_dump([play]))
+    first = subprocess.run(command, capture_output=True, text=True)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert config.read_text().splitlines() == [*("!" + name for name in blocked), names[-1]]
+    second = subprocess.run(command, capture_output=True, text=True)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "changed=0" in second.stdout
+
+
+@pytest.mark.parametrize("default_path", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_ca_guard_checks_directory_roots(tmp_path, default_path, blocked):
+    store = tmp_path / "store"
+    store.mkdir()
+    root = store / "root.pem"
+    subject = "/CN=emSign Root CA - G1" if blocked else "/CN=Unrelated Root"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+         "-nodes", "-keyout", str(tmp_path / "ca.key"), "-out", str(root),
+         "-subj", subject, "-days", "1", "-addext", "basicConstraints=critical,CA:TRUE"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(["openssl", "rehash", str(store)], check=True, capture_output=True)
+    subprocess.run(
+        ["openssl", "verify", "-no-CAfile", "-no-CAstore", "-CApath", str(store), str(root)],
+        check=True, capture_output=True,
+    )
+    environment = {**os.environ, "SSL_CERT_FILE": str(tmp_path / "absent.pem")}
+    if default_path:
+        environment.pop("SSL_CERT_DIR", None)
+    else:
+        environment["SSL_CERT_DIR"] = str(store)
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import runpy, ssl, sys; "
+         "paths = ssl.get_default_verify_paths()._replace("
+         "capath=sys.argv[1], openssl_capath=sys.argv[1]); "
+         "ssl.get_default_verify_paths = lambda: paths; "
+         "context = ssl.create_default_context(); "
+         "context.load_verify_locations(capath=sys.argv[1]); "
+         "assert not context.get_ca_certs(); "
+         "ssl.create_default_context = lambda: context; "
+         "sys.argv = [sys.argv[2], '--home', sys.argv[1], '--check-ca']; "
+         "runpy.run_path(sys.argv[0], run_name='__main__')",
+         str(store), str(ROOT / "scripts/provisions.py")],
+        env=environment, capture_output=True, text=True,
+    )
+    assert (result.returncode != 0) == blocked, result.stdout + result.stderr
+    if blocked:
+        assert "still trusts compromised" in result.stderr
+    else:
+        assert json.loads(result.stdout)["changed"] is False
+
+
+def test_runtime_trust_environment_preserves_node_flags(tmp_path):
+    generator = "/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator"
+    node = shutil.which("node")
+    home = tmp_path / "home"
+    (home / ".config/environment.d").mkdir(parents=True)
+    variables = {}
+    for name in ("base", "services"):
+        variables.update(yaml.safe_load(
+            (ROOT / f"blueprint/ansible/group_vars/all/{name}.yml").read_text()
+        ))
+    variables.update({
+        "crewship_cfg": {"home": str(home), "user": getpass.getuser()},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_account_ready": True, "crewship_become_target": False,
+    })
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+    playbook = tmp_path / "runtime-trust.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": variables,
+        "tasks": [task for task in tasks if task["name"] in (
+            "Use system CA trust in shell profiles",
+            "Use system CA trust for future user-manager processes",
+        )],
+        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "deferred"}}],
+    }]))
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook)]
+    for attempt in range(2):
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if attempt:
+            assert "changed=0" in result.stdout
+    preload = tmp_path / "pre load/flag.js"
+    preload.parent.mkdir()
+    preload.write_text("")
+    trust = {
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+        "PIP_CERT": "/etc/ssl/certs/ca-certificates.crt",
+        "PIP_USE_DEPRECATED": "legacy-certs",
+    }
+    probe = (
+        'const o = require("internal/options"); console.log(JSON.stringify({'
+        'require: o.getOptionValue("--require"), trace: o.getOptionValue("--trace-warnings"),'
+        'openssl: o.getOptionValue("--use-openssl-ca"), system: o.getOptionValue("--use-system-ca"),'
+        'bundled: o.getOptionValue("--use-bundled-ca"), env: process.env}))'
+    )
+    client = [node, "--expose-internals", "-e", probe] if node else [
+        sys.executable, "-c",
+        'import json, os; print(json.dumps({"env": dict(os.environ)}))',
+    ]
+    expected = {"require": [str(preload)], "trace": True,
+                "openssl": True, "system": False, "bundled": False}
+    for selector in ("", "--use-system-ca ", "--use-bundled-ca ", "--use-openssl-ca "):
+        options = f'{selector}--trace-warnings --require "{preload}"'
+        environment = {
+            **os.environ, "HOME": str(home), "NODE_OPTIONS": options,
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            "SSL_CERT_FILE": "/old/bundle", "REQUESTS_CA_BUNDLE": "/old/bundle",
+            "PIP_CERT": "/old/bundle", "PIP_USE_DEPRECATED": "",
+        }
+        runs = [
+            ["bash", "--noprofile", "--norc", "-c",
+             '. "$1"; . "$1"; shift; exec "$@"',
+             "trust-check", str(home / profile), *client]
+            for profile in (".profile", ".bashrc")
+        ]
+        if os.access(generator, os.X_OK):
+            # The user manager parses the generator's double-quoted output like a shell.
+            manager = subprocess.run([generator], env=environment, capture_output=True,
+                                     text=True, check=True).stdout.splitlines()
+            runs.append(["bash", "--noprofile", "--norc", "-c",
+                         'set -a; eval "$1"; shift; exec "$@"', "trust-check",
+                         "\n".join(line for line in manager
+                                   if line.split("=", 1)[0] in {"NODE_OPTIONS", *trust}), *client])
+        for run in runs:
+            result = subprocess.run(run, env=environment, capture_output=True, text=True)
+            assert result.returncode == 0, (selector, run, result.stderr)
+            actual = json.loads(result.stdout)
+            env = actual.pop("env")
+            if node:
+                assert actual == expected, (selector, run)
+            assert {key: env[key] for key in trust} == trust
+            assert env["NODE_OPTIONS"] == (
+                f"{options} --no-use-system-ca --no-use-bundled-ca --use-openssl-ca"
+            )
 
 
 def redirect_system_paths(tasks, root):
@@ -485,3 +737,53 @@ print(json.dumps({{"result": result}}))
         assert len(actual["runs"]) == 1
         assert json.loads(viewer_call.read_text()) == [str(home / ".local/share/crewship/schedules/main.ts")]
         assert "changed=0" in result.stdout
+
+
+@pytest.mark.parametrize("location", ["default", "relative", "absolute"])
+def test_onboarding_uses_the_uv_project_environment(tmp_path, location):
+    project = tmp_path / "project"
+    (project / "scripts").mkdir(parents=True)
+    shutil.copy2(ROOT / "onboard.sh", project / "onboard.sh")
+    shutil.copy2(ROOT / "scripts/provisions.py", project / "scripts/provisions.py")
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "onboard-regression"\nversion = "0.0.0"\n'
+        'requires-python = ">=3.12"\ndependencies = []\n[tool.uv]\npackage = false\n'
+    )
+    home = tmp_path / "home"
+    commands = home / ".local/bin"
+    commands.mkdir(parents=True)
+    (commands / "uv").symlink_to(shutil.which("uv"))
+    python = commands / "python3"
+    python.write_text(
+        '#!/bin/sh\n'
+        'if [ "${4-}" = "--tools" ] && [ "${5-}" = "uv" ]; then exit 0; fi\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n'
+    )
+    python.chmod(0o755)
+    environment = {
+        **os.environ, "HOME": str(home),
+        "PATH": str(commands) + os.pathsep + os.environ["PATH"],
+        "UV_PYTHON": sys.executable, "UV_OFFLINE": "1",
+        "UV_PYTHON_DOWNLOADS": "never", "UV_CACHE_DIR": str(tmp_path / "cache"),
+    }
+    for key in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_NO_PROJECT", "PYTHONPATH"):
+        environment.pop(key, None)
+    selected = project / ".venv"
+    if location != "default":
+        selected = project / "custom-env" if location == "relative" else tmp_path / "external-env"
+        environment["UV_PROJECT_ENVIRONMENT"] = (
+            "custom-env" if location == "relative" else str(selected)
+        )
+    subprocess.run(
+        [str(commands / "uv"), "lock", "--project", str(project)],
+        env=environment, check=True, capture_output=True,
+    )
+    for _ in range(2):
+        result = subprocess.run(
+            ["bash", str(project / "onboard.sh")], cwd=tmp_path, env=environment,
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (selected / "bin/python").exists()
+        if location != "default":
+            assert not (project / ".venv").exists()
