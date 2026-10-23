@@ -839,8 +839,7 @@ async function draftHandoff(pending: Routing[], mates: Secondmate[], current: ()
   const { ok, drafted } = await readDesk(proc);
   if (deskRun !== proc) return;
   deskRun = undefined;
-  const mate = handoffTarget(ok, drafted, mates);
-  return mate && secondmates(FM_HOME).find((entry) => entry.id === mate.id && entry.home === mate.home && entry.scope === mate.scope);
+  return handoffTarget(ok, drafted, mates);
 }
 
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
@@ -848,7 +847,8 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   for (const item of pending) mateDeliveries.add(item.requestId);
   try {
     for (const item of pending) {
-      if (stopping || !current()) break;
+      if (stopping || !current()
+        || !secondmates(FM_HOME).some((entry) => entry.id === mate.id && entry.home === mate.home && entry.scope === mate.scope)) break;
       // Record uncertainty before sending: fm-send has no deduplication key, so recovery must not resend.
       let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
       recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });

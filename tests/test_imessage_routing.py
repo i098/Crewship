@@ -349,3 +349,46 @@ def test_slow_mate_sender_allows_cancellation_and_keeps_uncertainty(tmp_path, de
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize("change", ["missing", "removed", "id", "home", "scope", "unchanged"])
+def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_path, desk_clock, change):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    messages = ["Fix the website menu", "Fix the website footer", "Fix the website header"]
+    (fake / "mate-hold").touch()
+    bridge = start(1)
+    try:
+        for index, message in enumerate(messages):
+            receive(str(index), message)
+        desk_clock()
+        wait_for(lambda: text(fake / "mate-sends"), "the held first delivery")
+        registry = tmp_path / "data/secondmates.md"
+        if change == "missing":
+            registry.unlink()
+        elif change == "removed":
+            registry.write_text("".join(
+                line for line in registry.read_text().splitlines(keepends=True)
+                if not line.startswith("- web-mate - ")
+            ))
+        elif change != "unchanged":
+            before, after = {
+                "id": ("- web-mate - ", "- other-mate - "),
+                "home": (f"home: {tmp_path / 'mates/web-mate'};", f"home: {tmp_path / 'replacement'};"),
+                "scope": ("exclude native applications", "reports only"),
+            }[change]
+            registry.write_text(registry.read_text().replace(before, after))
+        (fake / "mate-hold").unlink()
+        wait_for(lambda: "photon-2 " in text(notes), "the remaining Firstmate notes")
+        expected = messages if change == "unchanged" else messages[:1]
+        sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
+        assert [send["args"] for send in sends] == [
+            ["web-mate", f"[from captain via desk] {message}"] for message in expected
+        ]
+        assert text(notes).count("routed to web-mate") == len(expected)
+        assert "may be incomplete" not in text(notes)
+        for index, message in enumerate(messages):
+            assert text(notes).count(f"photon-{index} ") == 1
+            assert message in text(notes)
+    finally:
+        bridge.terminate()
+        bridge.wait(10)

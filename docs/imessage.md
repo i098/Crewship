@@ -174,7 +174,8 @@ The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, includ
 The service sets `FM_HOME` to the main home that owns the second mates as tasks and holds the routing table.
 It passes the mate id and `[from captain via desk] <verbatim text>` as separate arguments, without a shell.
 The sender uses the mate's existing inbox.
-The desk checks the registry again before delivery; a changed entry causes a Firstmate handoff.
+The desk checks the registered id, home, and complete scope before each send.
+A missing or changed entry sends the remaining texts to Firstmate.
 
 Every handed-off text still produces the normal stable-id Firstmate inbox note.
 A successful mate delivery adds the line `routed to <mate-id>` before the original note text.
