@@ -43,17 +43,18 @@ The repository lock excludes both packages, and uv creates the pruner and tool e
 Adding unused packages would add another trust store without serving a runtime need.
 The repository, pruner, and fdu environments require `pip>=26.2.2` and `certifi>=2026.10.19` when those packages are present.
 After creating or updating the repository, pruner, and fdu environments, the recipe uses uv with system certificates to enforce these floors.
+The Instagram environment updates are tracked separately in [#833](https://github.com/i098/Crewship/issues/833).
 `onboard.sh` handles the repository environment selected by uv, including `UV_PROJECT_ENVIRONMENT`.
-The normal `ship.sh` command path does not run the package updater.
-It does not run the environment's pip to update packages.
+When uv is available, `ship.sh` does not run this repository-environment updater.
+The updater uses uv, not the environment's pip.
 The fdu installer selects the newest available releases even when `UV_RESOLUTION` requests older versions.
 `uv pip` is a uv command, not a Python pip installation.
 The optional desktop packages bring Ubuntu's `python3-certifi` through `websockify` and `requests`.
 Ubuntu patches that certifi to use `/etc/ssl/certs/ca-certificates.crt`, so its trust update comes from `ca-certificates`.
 The recipe does not replace distribution Python packages with PyPI packages.
 
-For separately managed Python environments, Crewship recommends updating the CA bundle or certifi to at least 2026.10.19 before further pip downloads.
-Then update pip to at least 26.2.2, which includes the updated certifi, before updating Node.
+For separately managed Python environments, select filtered system trust as described above before further pip downloads.
+Then update any installed certifi and pip packages to the minimum versions above before updating Node.
 Environments created outside Crewship remain outside this recipe.
 The [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2), [pip release notes](https://pip.pypa.io/en/stable/news/#v26-2-2), and [Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) describe the fixes.
 The sources do not prescribe a combined update order.
