@@ -32,6 +32,7 @@ Validate the host file, preview the changes, then apply selected profiles; omp p
 <!-- /ondine -->
 
 Firstmate supervises work through inboxes and status files; crews use the dispatch policy and call model providers directly.
+Each worker uses an isolated Git checkout from a reusable Treehouse pool; see [worktree sharing, pool paths, and cleanup](agents/architecture.md#treehouse-and-worker-worktrees).
 
 ### Stall nudge
 

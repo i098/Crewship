@@ -67,6 +67,60 @@ For Compose or local image builds, clone this repository and use its root [`comp
 The `worker` profile starts the worker; the optional `data` profile adds example PostgreSQL and Redis services.
 Set up the password file described in `compose.yml` before enabling `data`.
 
+## Treehouse and worker worktrees
+
+The `agents` profile installs [Treehouse](https://github.com/kunchenguid/treehouse), which manages a pool of reusable Git worktrees.
+Firstmate uses this pool for worker checkouts on the native Herdr backend.
+A Git worktree shares the repository's objects, history, and branch references, but has its own files, index, and `HEAD`.
+Each worker gets a separate checkout so its edits, staging, and branch switches do not change another worker's files.
+This is filesystem isolation for concurrent development, not a security sandbox: workers still share the host, credentials, and external services.
+
+### Paths and configuration
+
+Without a root override, pools live under `~/.treehouse`.
+The normal checkout layout is `~/.treehouse/<repo-id>/<slot>/<repo>`.
+The repository ID combines the repository name with a hash of its remote URL, or its absolute path for a local-only repository.
+The pool root contains multiple repository pools; it is not the primary clone or a Firstmate task home.
+Firstmate keeps task records in its home's `state/` directory and records the worker checkout as `worktree` in the task metadata.
+Do not infer checkout ownership from a directory name.
+
+Treehouse appends `.treehouse` to an explicit `root`: `/srv/crew-data` selects `/srv/crew-data/.treehouse`, not `/srv/crew-data` itself.
+Root selection uses `--root`, then `TREEHOUSE_ROOT`, then `root` in the project `treehouse.toml` or user `~/.config/treehouse/config.toml`.
+A project config takes precedence over the user config; with neither, Treehouse uses its built-in default.
+Relative roots resolve from the repository root.
+Crewship's `data_dir` setting writes the user-level root for future pools; see [bulk storage and compatibility limits](../configuration.md#compatibility-limits).
+Changing the root does not move existing pools and can make them invisible to a command using the new root.
+Do not change it while workers use that pool.
+
+### Create, reuse, and cleanup
+
+1. Firstmate's `bin/fm-spawn.sh` runs `treehouse get` in the project, verifies the resulting isolated checkout, and records its task ownership.
+   Treehouse fetches by default, reuses a clean, idle, unleased worktree whose work is merged, or creates a slot within `max_trees`.
+   It resets the checkout to the selected base and normally hands it over with detached `HEAD`; the worker creates its task branch.
+   Reuse belongs to the same backing clone, even when another clone has the same remote URL.
+2. Treehouse keeps reusable slots rather than cloning the repository for every task.
+   Ignored dependency and build files can remain in a returned slot, so later work can reuse them.
+   Optional user-level `post_create` hooks run after acquisition, including reuse; Crewship does not require a warm-up hook.
+3. Firstmate's `bin/fm-teardown.sh` checks task ownership and work safety before returning the recorded checkout.
+   `treehouse return <path>` terminates lingering processes, resets the checkout, and releases its reservation for reuse.
+   Returning can discard changes; workers must not return their own slot or clean another worker's pool.
+   Firstmate owns task cleanup, including checking for uncommitted or unlanded work.
+
+Show the current repository's pool:
+
+```bash
+treehouse status
+treehouse status --json
+```
+
+Status is not strictly read-only: recovery can repair missing pool state, move untracked files into retained backups, and release recovered reservations.
+Check recovery messages and backups before further maintenance.
+
+Treehouse also supports durable reservations with `get --lease`; these remain reserved until returned, even without a running process.
+For manual maintenance, `treehouse prune` previews stale, clean, idle, merged worktrees; `--yes` performs deletion.
+Leave live-pool maintenance to Firstmate or the responsible operator, not a worker acting on an apparently idle directory.
+The [fleet cleanup guards](../fleet-guards.md#cleanup-pool-roots) remove eligible build output separately; they do not replace task ownership checks.
+
 ## Seeded Firstmate and OMP configuration
 
 The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`blueprint/ansible/group_vars/all/agent_config.yml`) from this repository's `blueprint/config/` into the Firstmate checkout's `config/`, which Firstmate gitignores. Preflight requires every source and verify requires every destination. The seeded files:
