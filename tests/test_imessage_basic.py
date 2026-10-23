@@ -508,6 +508,7 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
             wait_for(lambda: (fake / "model-started").exists(), "the held desk call")
         assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}]
         desk_clock(4000)
+        wait_for(lambda: len(events()) == 2, "the typing refresh")
         assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}] * 2
         end_typing_turn(fake, exit_path, receive, cli, bridge)
         wait_for(lambda: any(not row["on"] for row in events()), "typing stopped")
@@ -622,6 +623,7 @@ def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waitin
             return [json.loads(row) for row in text(fake / "typing-events").splitlines()]
 
         expected = ([False, False] if waiting == "queued" else []) + [True, True]
+        wait_for(lambda: [row["on"] for row in events()] == expected, "typing while delivery is pending")
         assert [row["on"] for row in events()] == expected
         hold.unlink()
         wait_for(lambda: events()[-1]["on"] is False, "typing stopped after delivery")
@@ -693,6 +695,7 @@ mock.module("node:fs", () => ({
         assert pending.get("done", 0) == 0
         assert not list((state / "outbox-done").glob("*.json"))
         desk_clock(8000)
+        wait_for(lambda: events()[-1]["on"] is False, "typing stopped after the progress write failure")
         assert events() == [
             {"chat": "iMessage;-;+10000000000", "on": True},
             {"chat": "iMessage;-;+10000000000", "on": False},
