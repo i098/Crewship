@@ -114,6 +114,21 @@
       when: not (crewship_prune_runtime_current | bool)
       notify: restart chrome autoprune timer
 
+    - name: Secure Python packages present in the pruner runtime
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ crewship_installer }}"
+          - --home
+          - "{{ crewship_cfg.home }}"
+          - --python-env
+          - "{{ crewship_pruner_python }}"
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env | combine(crewship_pruner_uv_env) }}"
+      register: crewship_prune_security
+      changed_when: (crewship_prune_security.stdout | from_json).changed
+
     - name: Confirm the runtime provides the resolved psutil
       ansible.builtin.command:
         argv: ["{{ crewship_pruner_python }}", -c, "import psutil; print(psutil.__version__)"]

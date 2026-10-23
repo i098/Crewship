@@ -7,6 +7,7 @@ import io
 import json
 import os
 import runpy
+import shutil
 import ssl
 import subprocess
 import sys
@@ -59,6 +60,201 @@ def test_verified_install_runs_and_second_install_changes_nothing(tmp_path, monk
     command = tmp_path / ".local/bin/tool"
     assert subprocess.check_output([command], text=True).strip() == "tool 1.0.0"
     assert not installer.install_asset(tmp_path, "tool", spec, "linux-x86_64")
+
+
+@pytest.mark.parametrize(("version", "floor", "passes"), [
+    ("22.23.3", "22.23.4", False), ("22.23.4", "22.23.4", True),
+    ("24.22.0", "24.22.1", False), ("24.22.1", "24.22.1", True),
+    ("26.12.0", "26.12.1", False), ("26.12.1", "26.12.1", True),
+    ("26.13.0", "26.12.1", True), ("30.1.0", None, True),
+])
+def test_node_resolution_enforces_its_major_security_floor(monkeypatch, version, floor, passes):
+    def fetch(url, source):
+        if url.endswith("index.json"):
+            return json.dumps([{"version": "v" + version}]).encode()
+        return ("a" * 64 + f"  node-v{version}-linux-x64.tar.xz\n").encode()
+
+    monkeypatch.setattr(installer, "fetch", fetch)
+    if passes:
+        assert installer.resolve_latest("linux-x86_64", {"node"})["node"]["version"] == version
+    else:
+        with pytest.raises(ValueError, match=rf"node v{version} is below security minimum {floor}"):
+            installer.resolve_latest("linux-x86_64", {"node"})
+
+
+@pytest.mark.parametrize("version", ["20.99.0", "23.99.0", "26.12.1-rc.1", "invalid"])
+def test_node_security_floor_rejects_unsupported_or_unstable_versions(version):
+    with pytest.raises(ValueError, match="node.*security minimum"):
+        installer.require_secure_node(version)
+
+
+@pytest.mark.parametrize(("version", "passes"), [
+    ("22.23.3", False), ("22.23.4", True),
+    ("24.22.0", False), ("24.22.1", True),
+    ("26.12.0", False), ("26.12.1", True),
+])
+def test_node_install_checks_the_executable_version(tmp_path, monkeypatch, version, passes):
+    payload = f"#!/bin/sh\nprintf 'v{version}\\n'\n".encode()
+    spec = asset(payload)
+    spec["version"] = "26.12.1"
+    spec["assets"]["linux-x86_64"]["binaries"] = {"node": "node"}
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(payload))
+    if passes:
+        assert installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    else:
+        with pytest.raises(ValueError, match="node.*below security minimum"):
+            installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+        assert not (tmp_path / ".local/bin/node").exists()
+
+
+def test_rejected_node_archive_allows_corrected_retry_without_weakening_drift_guard(
+    tmp_path, monkeypatch
+):
+    archives = {}
+    for version in ("26.12.0", "26.12.1"):
+        executable = f"#!/bin/sh\nprintf 'v{version}\\n'\n".encode()
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            member = tarfile.TarInfo("node/bin/node")
+            member.size = len(executable)
+            member.mode = 0o644
+            archive.addfile(member, io.BytesIO(executable))
+        archives[version] = stream.getvalue()
+
+    payload = archives["26.12.0"]
+    spec = asset(payload)
+    spec["version"] = "26.12.1"
+    release = spec["assets"]["linux-x86_64"]
+    release.update({"format": "tar", "binaries": {"node": "node/bin/node"}})
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: Download(payload))
+    final = tmp_path / ".local/share/crewship/tools/node/26.12.1/linux-x86_64"
+    command = tmp_path / ".local/bin/node"
+
+    with pytest.raises(ValueError, match="node.*below security minimum"):
+        installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    assert not final.exists()
+    assert not os.path.lexists(command)
+
+    payload = archives["26.12.1"]
+    release["sha256"] = hashlib.sha256(payload).hexdigest()
+    assert installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+    assert subprocess.check_output([command, "--version"], text=True).strip() == "v26.12.1"
+    assert not installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+
+    command.write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
+    with pytest.raises(ValueError, match="installed artifact drifted"):
+        installer.install_asset(tmp_path, "node", spec, "linux-x86_64")
+
+
+def security_wheel(directory, name, version, dependencies=(), console=False):
+    dist_info = f"{name}-{version}.dist-info"
+    files = {
+        f"{dist_info}/METADATA": (
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+            + "".join(f"Requires-Dist: {dependency}\n" for dependency in dependencies)
+        ),
+        f"{dist_info}/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        f"{name}/__init__.py": (
+            f"def main():\n    print('{name} {version}')\n" if console else ""
+        ),
+    }
+    if console:
+        files[f"{dist_info}/entry_points.txt"] = f"[console_scripts]\n{name} = {name}:main\n"
+    files[f"{dist_info}/RECORD"] = "".join(f"{path},,\n" for path in files)
+    wheel = directory / f"{name}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return wheel
+
+
+@pytest.fixture
+def python_security_index(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    for name, versions in {
+        "pip": ("26.2.1", "26.2.2", "26.3.0"),
+        "certifi": ("2026.10.18", "2026.10.19", "2026.11.1"),
+    }.items():
+        for version in versions:
+            security_wheel(wheels, name, version)
+    environment = {
+        **os.environ, "UV_NO_CONFIG": "1", "UV_NO_INDEX": "1", "UV_OFFLINE": "1",
+        "UV_FIND_LINKS": str(wheels), "UV_CACHE_DIR": str(tmp_path / "cache"),
+        "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_PYTHON_DOWNLOADS": "never",
+        "UV_PYTHON": str(Path(sys.executable).resolve()), "UV_NO_PROJECT": "1",
+    }
+    environment.pop("VIRTUAL_ENV", None)
+    environment.pop("PYTHONPATH", None)
+    return Path(shutil.which("uv")), environment, wheels
+
+
+@pytest.mark.parametrize("installed", [
+    {}, {"pip": "26.2.1"}, {"certifi": "2026.10.18"},
+    {"pip": "26.2.1", "certifi": "2026.10.18"},
+    {"pip": "26.2.2", "certifi": "2026.11.1"},
+])
+def test_python_security_updates_only_present_packages(tmp_path, python_security_index, installed):
+    uv, environment, _ = python_security_index
+    managed = tmp_path / ".local/bin"
+    managed.mkdir(parents=True)
+    (managed / "uv").symlink_to(uv)
+    other = tmp_path / "other-bin"
+    other.mkdir()
+    (other / "uv").write_text("#!/bin/sh\nexit 99\n")
+    (other / "uv").chmod(0o755)
+    environment["PATH"] = f"{other}{os.pathsep}{environment['PATH']}"
+    python = tmp_path / "venv/bin/python"
+    subprocess.run([uv, "venv", "--python", sys.executable, python.parent.parent],
+                   env=environment, check=True, capture_output=True)
+    if installed:
+        subprocess.run(
+            [uv, "pip", "install", "--python", python,
+             *(f"{name}=={version}" for name, version in installed.items())],
+            env=environment, check=True, capture_output=True,
+        )
+    result = subprocess.run(
+        [sys.executable, SPEC.origin, "--home", tmp_path, "--python-env", python],
+        env=environment, check=True, capture_output=True, text=True,
+    )
+    expected = {
+        name: {"pip": "26.3.0", "certifi": "2026.11.1"}[name]
+        if version in ("26.2.1", "2026.10.18") else version
+        for name, version in installed.items()
+    }
+    actual = json.loads(subprocess.check_output(
+        [python, "-c", "import importlib.metadata as m, json; "
+         "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))"],
+        env=environment,
+    ))
+    assert actual == expected
+    assert json.loads(result.stdout)["changed"] == (installed != expected)
+    assert not installer.secure_python(python, uv, environment)
+
+
+def test_python_security_reports_upgrade_with_inherited_metadata(tmp_path, python_security_index):
+    uv, environment, wheels = python_security_index
+    inherited = tmp_path / "inherited"
+    subprocess.run(
+        [uv, "pip", "install", "--target", inherited, wheels / "certifi-2026.10.18-py3-none-any.whl"],
+        env=environment, check=True, capture_output=True,
+    )
+    python = tmp_path / "venv/bin/python"
+    subprocess.run(
+        [uv, "venv", "--system-site-packages", "--python", sys.executable, python.parent.parent],
+        env=environment, check=True, capture_output=True,
+    )
+    site = subprocess.check_output(
+        [python, "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        env=environment, text=True,
+    ).strip()
+    (Path(site) / "inherited.pth").write_text(str(inherited) + "\n")
+    assert installer.secure_python(python, uv, environment)
+    assert subprocess.check_output(
+        [python, "-I", "-c", "import importlib.metadata as m; print(m.version('certifi'))"],
+        env=environment, text=True,
+    ).strip() == "2026.11.1"
+    assert not installer.secure_python(python, uv, environment)
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
@@ -1284,24 +1480,28 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     assert "error: network down" in capsys.readouterr().err
 
 
-def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(tmp_path):
+@pytest.mark.parametrize("resolution", ["highest", "lowest"])
+def test_fdu_installs_with_uv_into_the_account_bin_and_reports_change_only_on_a_new_version(
+    tmp_path, python_security_index, resolution,
+):
+    uv, environment, wheels = python_security_index
+    environment["UV_RESOLUTION"] = resolution
     bin_dir = tmp_path / ".local/bin"
     bin_dir.mkdir(parents=True)
-    release = tmp_path / "release"
-    release.write_text("fdu 0.5.0\n")
-    uv = bin_dir / "uv"
-    uv.write_text(
-        "#!/bin/sh\n"
-        '[ "$*" = "tool install --upgrade --no-build fdu" ] || exit 2\n'
-        f'printf \'#!/bin/sh\\necho "%s"\\n\' "$(cat {release})" > "$UV_TOOL_BIN_DIR/fdu"\n'
-        'chmod +x "$UV_TOOL_BIN_DIR/fdu"\n'
-    )
-    uv.chmod(0o755)
-    assert installer.fdu_install(tmp_path, {}) is True
+    (bin_dir / "uv").symlink_to(uv)
+    security_wheel(wheels, "fdu", "0.5.0", ("certifi>=2026.10.18",), console=True)
+    assert installer.fdu_install(tmp_path, environment) is True
     assert subprocess.check_output([bin_dir / "fdu"], text=True) == "fdu 0.5.0\n"
-    assert installer.fdu_install(tmp_path, {}) is False
-    release.write_text("fdu 0.6.0\n")
-    assert installer.fdu_install(tmp_path, {}) is True
+    assert installer.fdu_install(tmp_path, environment) is False
+    security_wheel(wheels, "fdu", "0.6.0", ("certifi>=2026.10.18",), console=True)
+    assert installer.fdu_install(tmp_path, environment) is True
+    assert subprocess.check_output([bin_dir / "fdu"], text=True) == "fdu 0.6.0\n"
+    python = tmp_path / "tools/fdu/bin/python"
+    assert json.loads(subprocess.check_output(
+        [python, "-c", "import importlib.metadata as m, json; "
+         "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))"],
+        env=environment,
+    )) == {"fdu": "0.6.0", "certifi": "2026.11.1"}
 
 
 def test_every_installed_tool_has_a_built_with_line():
