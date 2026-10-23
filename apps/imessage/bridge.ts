@@ -903,8 +903,8 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
-      ...("bubbles" in answer ? { bubbles: answer.bubbles, reply: target.ref.id }
-        : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
+      ...("bubbles" in answer ? { bubbles: answer.bubbles }
+        : { react: answer.react, ...(answer.text ? { bubbles: [answer.text] } : {}) }),
       kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
   handoffPending();
 }
