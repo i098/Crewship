@@ -167,6 +167,10 @@ A completed desk turn records its outcome in the private `desk.log`, including `
 The log also records read completion, typing start and stop, model start and result, inbox acceptance, and transport acceptance.
 These events contain timestamps and message ids, not model output or credentials.
 Typing events retain the originating message id when a newer message arrives before the transport operation completes.
+`transport-accepted` records successful transport completion before outbox or routing writes.
+`response-confirmed` records routing confirmation and can repeat during recovery without another send.
+`history-reconciled` records a delivery found in transport history, not a new send.
+`card-update-accepted` records an accepted card edit separately from initial card delivery.
 Transport acceptance is not proof of user-visible delivery; verify the receiving device for live delivery checks.
 
 For a standalone text, both desks accept classification answers only from one complete JSON object whose `kind` or `decision` is `reply`.

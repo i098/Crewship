@@ -31,6 +31,11 @@ def test_failed_desk_acknowledges_one_burst_and_clears_typing(tmp_path, desk_clo
         receive("detail", "Check the release job, not the build job.")
         desk_clock()
         wait_for(lambda: text(notes) or (fake / "model-started").exists(), "the model attempt or handoff")
+        if failure != "model-hold":
+            wait_for(lambda: {
+                request for event in map(json.loads, text(state / "routing.jsonl").splitlines())
+                if event.get("route") == "done" for request in event["ids"]
+            } >= {"photon-lookup", "photon-detail"}, "the completed failure handoff")
         desk_clock(8000)
         wait_for(lambda: text(fake / "sent"), "the delayed acknowledgement")
         sent = text(fake / "sent").splitlines()
@@ -404,11 +409,16 @@ mock.module("node:fs", () => ({
         assert bridge.wait(10) == 91
         assert len(text(fake / "sent").splitlines()) == 1
         assert not any(event.get("responded") for event in map(json.loads, text(state / "routing.jsonl").splitlines()))
+        acceptance = [row for row in text(state / "desk.log").splitlines() if row.endswith(" transport-accepted")]
+        assert len(acceptance) == 1
         bridge = start(2)
         wait_for(lambda: any(event.get("responded") for event in map(json.loads, text(state / "routing.jsonl").splitlines())), "the replayed card confirmation")
         wait_for(lambda: not list((state / "outbox").glob("*.json")), "the replayed card completion")
         before = text(fake / "sent")
         assert len(before.splitlines()) == (2 if app else 1)
+        assert [row for row in text(state / "desk.log").splitlines() if row.endswith(" transport-accepted")] == acceptance
+        assert text(state / "desk.log").count("card-update-accepted") == (1 if app else 0)
+        assert "options response-confirmed" in text(state / "desk.log")
         desk_clock(8000)
         assert text(fake / "sent") == before
         receive("backup", "Check the backup job")
@@ -473,6 +483,9 @@ def test_uncertain_acknowledgement_reconciles_before_cancellation(tmp_path, desk
         assert not receipt.get("maybe")
         assert receipt.get("done", 0) == (1 if history == "accepted" else 0)
         assert read_text(rig.fake / "sent") == ""
+        trace = read_text(rig.state / "desk.log")
+        assert ("release history-reconciled" in trace) == (history == "accepted")
+        assert ("release transport-accepted" in trace) == (history == "not-sent")
         rig.stop()
         rig.start()
         desk_clock(8000)
@@ -641,7 +654,9 @@ const fault = `${process.env.FAKE_DIR}/confirmation-failure`;
 const descriptors = new Set();
 const responses = new Set();
 function fail() {
-  real.appendFileSync(`${process.env.FAKE_DIR}/confirmation-attempts`, "attempt\\n");
+  const log = `${process.env.STATE_DIRECTORY}/desk.log`;
+  const accepted = real.readFileSync(log, "utf8").trim().split("\\n").filter((row) => row.endsWith(" transport-accepted"));
+  real.appendFileSync(`${process.env.FAKE_DIR}/confirmation-attempts`, JSON.stringify(accepted) + "\\n");
   throw Object.assign(new Error("injected response journal failure"), { code: "EIO" });
 }
 mock.module("node:fs", () => ({
@@ -693,6 +708,10 @@ mock.module("node:fs", () => ({
         wait_for(lambda: len(text(fake / "confirmation-attempts").splitlines()) >= 2, "repeated response confirmation attempts")
         sent = text(fake / "sent").splitlines()
         assert len(sent) == 1
+        acceptance = json.loads(text(fake / "confirmation-attempts").splitlines()[0])
+        assert len(acceptance) == 1
+        assert acceptance[0].endswith(" question transport-accepted")
+        assert all(json.loads(row) == acceptance for row in text(fake / "confirmation-attempts").splitlines())
         pending = json.loads(next((state / "outbox").glob("*.json")).read_text())
         if output == "reaction":
             assert pending["reacted"] is True
@@ -701,6 +720,7 @@ mock.module("node:fs", () => ({
         wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup before confirmation recovery")
         desk_clock(8000)
         assert text(fake / "sent").splitlines() == sent
+        desk_clock(22000)
         if restart:
             bridge.terminate()
             bridge.wait(10)
@@ -712,8 +732,14 @@ mock.module("node:fs", () => ({
         assert ["photon-question"] in confirmations
         expected = sent + (["send The build is paused."] if output == "image" else [])
         assert text(fake / "sent").splitlines() == expected
+        traces = text(state / "desk.log").splitlines()
+        accepted = [row for row in traces if row.endswith(" transport-accepted")]
+        assert len(accepted) == len(expected)
+        assert accepted[0] == acceptance[0]
+        assert any(row.endswith(" question response-confirmed") for row in traces)
         desk_clock(8000)
         assert text(fake / "sent").splitlines() == expected
+        assert [row for row in text(state / "desk.log").splitlines() if row.endswith(" transport-accepted")] == accepted
     finally:
         fault.unlink(missing_ok=True)
         bridge.terminate()

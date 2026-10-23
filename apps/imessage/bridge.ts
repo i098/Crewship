@@ -197,7 +197,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
-  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<unknown>;
+  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
@@ -281,11 +281,13 @@ async function startLine(name: string): Promise<Line> {
       const thread = await threadOf(space, reply);
       if (thread) {
         beforeSend?.();
-        return thread.reply(text);
+        await thread.reply(text);
+        return "accepted" as const;
       }
       const chat = await imessage(app).space.get(space);
       beforeSend?.();
-      return chat.send(text);
+      await chat.send(text);
+      return "accepted" as const;
     },
     async sendImage(space, picture, reply) {
       const content = attachment(picture.path, { name: picture.name, mimeType: picture.mimeType });
@@ -629,6 +631,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
       if (notSent(e)) save(o);
       throw e;
     }
+    trace(o.id, "transport-accepted");
     finishDeskDelivery(o);
     save((o = { ...o, reacted: true, maybe: undefined }));
   }
@@ -653,7 +656,14 @@ async function deliverCard(o: Out, kind: Kind) {
   }
   const url = `${CARD_URL}/c/${card.token}`;
   try {
-    const session = card.app ? await line.sendCard!(o.space, url, cardLayout(card), card.live, card.session) : await line.send(o.space, url, undefined, o.guid && `${o.guid}-0`).then(() => undefined);
+    let session;
+    if (card.app) {
+      session = await line.sendCard!(o.space, url, cardLayout(card), card.live, card.session);
+      trace(o.id, card.sent ? "card-update-accepted" : "transport-accepted");
+    } else {
+      const outcome = await line.send(o.space, url, undefined, o.guid && `${o.guid}-0`);
+      trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
+    }
     cards!.save({ ...cards!.read(card.token)!, sent: true, session: session ?? card.session });
   } catch (e) {
     if (transient(e)) throw e;
@@ -689,7 +699,10 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     if (!line.sent || typeof bubble !== "string") maybe[name] = space;
     else {
       try {
-        if (await line.sent(space, bubble, o.since ?? 0)) return;
+        if (await line.sent(space, bubble, o.since ?? 0)) {
+          trace(o.id, "history-reconciled");
+          return;
+        }
       } catch (e) {
         checkDeskDelivery(o);
         throw e;
@@ -741,8 +754,13 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
-        if (typeof bubble === "string") await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
-        else await line.sendImage!(space, bubble, thread);
+        if (typeof bubble === "string") {
+          const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
+          trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
+        } else {
+          await line.sendImage!(space, bubble, thread);
+          trace(o.id, "transport-accepted");
+        }
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
         throw e;
@@ -774,7 +792,7 @@ function recordResponse(o: Out) {
     return item && !item.responded && sameChat(item.ref, o);
   });
   if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
-  trace(o.id, "transport-accepted");
+  trace(o.id, "response-confirmed");
   scheduleAcknowledgement();
 }
 

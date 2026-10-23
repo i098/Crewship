@@ -1317,12 +1317,13 @@ import {{ BlueBubbles }} from {BB};
 const a = relay(), b = relay(), c = relay();
 const bb = line([a, b, c]);
 a.down();
-await bb.send(chat, "one relay down");
+const sent = await bb.send(chat, "one relay down");
 const downLogs = logs.filter((l) => l.startsWith("relay 1")).length;
 a.start(); b.hang = true;
 const ambiguous = line([b, c]);
-await ambiguous.send(chat, "answer lost");
+const reconciled = await ambiguous.send(chat, "answer lost");
 done({{
+  sent, reconciled,
   a: a.sent.map((s) => s.message), b: b.sent.map((s) => s.message), c: c.sent.map((s) => s.message), downLogs,
   checked: [b, c].some((r) => r.calls.some((x) => x.startsWith("GET chat/"))), logs,
 }});
@@ -1332,6 +1333,7 @@ done({{
     assert result["c"] == []  # a relay showed the lost-answer send as sent, so it was not sent again
     assert result["checked"]
     assert result["downLogs"] == 1
+    assert (result["sent"], result["reconciled"]) == ("accepted", "reconciled")
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
