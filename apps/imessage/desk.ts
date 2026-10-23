@@ -345,7 +345,7 @@ function sourceStyle(text: string, literals: string[], identity: boolean): boole
 }
 
 type VoiceField = { name: string; value: string };
-const VOICE_FIELD = /^([a-z_][\w.-]*)[ \t]*(?::[ \t]+|=[ \t]*)(.+)$/gmi;
+const VOICE_FIELD = /^[ \t]*(?:-[ \t]+|>[ \t]*)*([a-z_][\w.-]*)[ \t]*(?::[ \t]+|=[ \t]*)(.+)$/gmi;
 
 function voiceFields(draft: string): VoiceField[] {
   return Array.from(draft.matchAll(VOICE_FIELD), (match) => ({

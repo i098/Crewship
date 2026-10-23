@@ -85,6 +85,7 @@ For each message from the owner, the service does these steps:
    Source comparison normalizes configuration separators and paired inline Markdown delimiters; it never changes delivered characters.
    Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
    Prose configuration replies must keep named fields directly paired with their source values; unverifiable paraphrases require a handoff.
+   Source indentation, dash markers, and blockquote markers do not change those field-to-value checks.
    Only the approved prose pairs `Read-only`/`read-only` and `Restart-proof`/`restart-proof` can change case.
    All other hyphenated tokens retain their case, including sentence-leading identifiers.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.

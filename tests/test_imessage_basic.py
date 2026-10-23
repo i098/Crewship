@@ -1840,6 +1840,21 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         ["logging=on", "memory=off"],
         "on\noff",
     ),
+    (
+        "What are the logging and memory settings?",
+        [" logging: on", " memory: off"],
+        "Logging is on and memory is off.",
+    ),
+    (
+        "What are the logging and memory settings?",
+        ["- logging=true", "- memory=false"],
+        "Logging is true and memory is false.",
+    ),
+    (
+        "Which runtime is configured?",
+        ["> runtime: herdr"],
+        "The runtime is herdr.",
+    ),
 ])
 def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
     rig, replies, requests = native_desk
@@ -2020,6 +2035,13 @@ def test_native_exact_output_respects_complete_multiline_and_batched_requests(tm
     ("logging: true\nmemory: false", "Logging is false and memory is true."),
     ("logging=enabled\nmemory=disabled", "Logging is disabled and memory is enabled."),
     ("logging: enabled\nmemory: disabled", "Logging is disabled and memory is enabled."),
+    (" logging: on\n memory: off", "Logging is off and memory is on."),
+    ("\tlogging=on\n\tmemory=off", "Logging is off and memory is on."),
+    ("- logging=true\n- memory=false", "Logging is false and memory is true."),
+    ("> logging: enabled\n> memory: disabled", "Logging is disabled and memory is enabled."),
+    (" runtime: herdr", "The runtime is tmux."),
+    ("- runtime=herdr", "The runtime is tmux."),
+    ("> runtime: herdr", "The runtime is tmux."),
     ("> Work survives a restart.", "> Work survives a restart."),
     ("_Durable_ setup.", "_Durable_ setup."),
     ("[Board](https://example.org/board)", "[Board](https://example.org/board)"),
