@@ -625,3 +625,96 @@ if (process.env.FM_TEST_AUDIO === "unsaved") {
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize("failure", ["write", "fsync"])
+@pytest.mark.parametrize("output", ["text", "image", "acknowledgement", "reaction"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_accepted_response_survives_journal_failure_without_resending(tmp_path, desk_clock, monkeypatch, failure, output, restart):
+    preload = tmp_path / "confirmation-failure.ts"
+    preload.write_text("""
+import * as fs from "node:fs";
+import { mock } from "bun:test";
+const real = { ...fs };
+const journal = `${process.env.STATE_DIRECTORY}/routing.jsonl`;
+const fault = `${process.env.FAKE_DIR}/confirmation-failure`;
+const descriptors = new Set();
+const responses = new Set();
+function fail() {
+  real.appendFileSync(`${process.env.FAKE_DIR}/confirmation-attempts`, "attempt\\n");
+  throw Object.assign(new Error("injected response journal failure"), { code: "EIO" });
+}
+mock.module("node:fs", () => ({
+  ...real,
+  openSync(path, ...args) {
+    const fd = real.openSync(path, ...args);
+    if (path === journal) descriptors.add(fd);
+    return fd;
+  },
+  writeSync(fd, data, ...args) {
+    if (descriptors.has(fd) && typeof data === "string" && JSON.parse(data).responded) {
+      if (process.env.FM_TEST_JOURNAL_FAILURE === "write" && real.existsSync(fault)) fail();
+      responses.add(fd);
+    }
+    return real.writeSync(fd, data, ...args);
+  },
+  fsyncSync(fd) {
+    if (responses.has(fd) && process.env.FM_TEST_JOURNAL_FAILURE === "fsync" && real.existsSync(fault)) fail();
+    return real.fsyncSync(fd);
+  },
+  closeSync(fd) {
+    descriptors.delete(fd);
+    responses.delete(fd);
+    return real.closeSync(fd);
+  },
+}));
+""")
+    monkeypatch.setenv("FM_TEST_JOURNAL_FAILURE", failure)
+    monkeypatch.setenv("BUN_OPTIONS", f"{os.environ['BUN_OPTIONS']} --preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    fault = fake / "confirmation-failure"
+    fault.touch()
+    if output == "reaction":
+        (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
+    bridge = start(1)
+    try:
+        receive("question", "Thanks!" if output == "reaction" else "What is the build status?")
+        if output == "image":
+            photo = tmp_path / "reply.png"
+            photo.write_bytes(png(2, 2))
+            cli("--typing")
+            cli("--image", str(photo), "The build is paused.")
+        elif output == "acknowledgement":
+            cli("--typing")
+            desk_clock(8000)
+        else:
+            desk_clock()
+        wait_for(lambda: len(text(fake / "confirmation-attempts").splitlines()) >= 2, "repeated response confirmation attempts")
+        sent = text(fake / "sent").splitlines()
+        assert len(sent) == 1
+        pending = json.loads(next((state / "outbox").glob("*.json")).read_text())
+        if output == "reaction":
+            assert pending["reacted"] is True
+        else:
+            assert pending["done"] == 1
+        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup before confirmation recovery")
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == sent
+        if restart:
+            bridge.terminate()
+            bridge.wait(10)
+        fault.unlink()
+        if restart:
+            bridge = start(2)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "response confirmation recovery")
+        confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
+        assert ["photon-question"] in confirmations
+        expected = sent + (["send The build is paused."] if output == "image" else [])
+        assert text(fake / "sent").splitlines() == expected
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == expected
+    finally:
+        fault.unlink(missing_ok=True)
+        bridge.terminate()
+        bridge.wait(10)

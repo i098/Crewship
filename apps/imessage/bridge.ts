@@ -178,7 +178,7 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
@@ -559,6 +559,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
+  if (o.done) recordResponse(o);
   const update = (next: Out) => { save(next); o = next; };
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
@@ -573,9 +574,9 @@ async function deliver(o: Out, save: (o: Out) => void) {
       lostDeskAnswer(o);
       break;
     }
-    recordResponse(o);
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
+    recordResponse(o);
   }
   const text = deliveredText(o);
   if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
@@ -614,20 +615,23 @@ function deliveredText(o: Out) {
 
 async function deliverReaction(o: Out, save: (o: Out) => void) {
   // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
-  if (o.at === undefined) save((o = { ...o, at: Date.now() }));
-  if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
-  const line = lineOf(o);
-  if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
-  try {
-    await line.react(o, o.react!, () => {
-      checkDeskDelivery(o);
-      save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
-    });
-  } catch (e) {
-    if (notSent(e)) save(o);
-    throw e;
+  if (!o.reacted) {
+    if (o.at === undefined) save((o = { ...o, at: Date.now() }));
+    if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
+    const line = lineOf(o);
+    if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
+    try {
+      await line.react(o, o.react!, () => {
+        checkDeskDelivery(o);
+        save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
+      });
+    } catch (e) {
+      if (notSent(e)) save(o);
+      throw e;
+    }
+    finishDeskDelivery(o);
+    save((o = { ...o, reacted: true, maybe: undefined }));
   }
-  finishDeskDelivery(o);
   if (o.kind === "desk") recordResponse(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
@@ -764,6 +768,7 @@ function sameChat(a: Ref, b: Ref | undefined) {
 }
 
 function recordResponse(o: Out) {
+  if (o.acknowledgement && commandTypingSpace?.id === o.space) typing(commandTypingSpace, false);
   const unanswered = (o.requests ?? []).filter((id) => {
     const item = routing.get(id);
     return item && !item.responded && sameChat(item.ref, o);
@@ -771,7 +776,6 @@ function recordResponse(o: Out) {
   if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
   trace(o.id, "transport-accepted");
   scheduleAcknowledgement();
-  if (o.acknowledgement && commandTypingSpace?.id === o.space) typing(commandTypingSpace, false);
 }
 
 function scheduleAcknowledgement() {

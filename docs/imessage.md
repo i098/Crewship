@@ -193,6 +193,9 @@ The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
 The journal stores response confirmations separately from routing completion.
+The outbox saves accepted bubble and reaction progress before recording response confirmation.
+If a routing-journal write or sync fails, retries confirm that saved progress without sending it again.
+Transport acceptance stops the desk's typing indicator before those writes.
 It persists a keyed acknowledgement per burst; completed outbox receipts prevent replay after a restart.
 Cancelling an acknowledgement before any possible delivery releases its requests and persists a new identity for the next attempt.
 Journal replay rejects the cancelled identity, so a crash cannot revive it or suppress the replacement.
