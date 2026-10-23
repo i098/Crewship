@@ -338,7 +338,7 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
   if (exact === "source" || (exact && !fields.length)) return;
   const literals = voiceLiterals(source.answer, fields);
   if (/```/.test(text) || (!exact && sourceStyle(text, literals, source.identity))) return;
-  if (!preservesVoiceFacts(source.answer, text, literals, preserveWords && !exact) || !preservesFieldValues(fields, text)) return;
+  if (!preservesVoiceFacts(source.answer, text, literals, preserveWords, !!exact) || !preservesFieldValues(fields, text)) return;
   return exact ? [text] : bubbles(text);
 }
 
@@ -379,7 +379,7 @@ function voiceLiterals(draft: string, fields: VoiceField[]): string[] {
   return literals;
 }
 
-function preservesVoiceFacts(draft: string, text: string, literals: string[], preserveWords: boolean): boolean {
+function preservesVoiceFacts(draft: string, text: string, literals: string[], preserveWords: boolean, exact: boolean): boolean {
   // Ignore paired inline markup only for source comparison; never strip the delivered answer.
   const checked = draft.replace(VOICE_FIELD, "$1 $2")
     .replace(/(^|\s)(\*\*|\x60|\*)(?=\S)(.+?\S|\S)\2(?=$|[\s.,;:!?])/gm, "$1$3")
@@ -387,7 +387,7 @@ function preservesVoiceFacts(draft: string, text: string, literals: string[], pr
     .replace(/\[([^\]\r\n]+)\]\(([^)\r\n]+)\)/g, "$1 $2")
     .replace(/(^|\s)_(?!_)(?=\S)([^_\r\n]*\S)_(?=$|[\s.,;:!?])/gm, "$1$2");
   if (protectedVoiceTokens(checked) !== protectedVoiceTokens(text) || voicePolarity(checked) !== voicePolarity(text) || voiceFlags(checked) !== voiceFlags(text)) return false;
-  if (preserveWords && !preservesVoiceWordOrder(checked, text)) return false;
+  if (preserveWords && !exact && !preservesVoiceWordOrder(checked, text)) return false;
   return preservesLiteralValues(literals, text);
 }
 

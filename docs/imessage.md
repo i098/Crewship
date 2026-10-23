@@ -72,6 +72,7 @@ For each message from the owner, the service does these steps:
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
    Without an explicit exact-output request, the reply check rejects headings, bullets, pipe-style tables, configuration rows, and bare source values.
+   It also rejects JSON objects and arrays.
    A retained configuration row still causes rejection when other lines contain prose.
    Unrequested inline code also causes rejection; the service does not strip its formatting.
    The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
@@ -286,6 +287,45 @@ Inbox retries and service restarts never repeat a recorded mate delivery.
 Firstmate activity still cancels an unfinished routing decision and sends pending work to Firstmate.
 Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
 Delayed handoffs follow the [acknowledgement rules](#what-it-does).
+
+## Guarded front modules
+
+The repository also contains a separate front, worker, dispatch policy, and relay validator.
+`bridge.ts` does not call these modules; the service still uses the loop described above.
+These modules do not enable a deployment or replace transport, memory, outbox recovery, or the acknowledgement rules.
+
+- **Front:** [`front.ts`](../apps/imessage/front.ts) calls Mercury-3 directly with low reasoning, no tools, at most two attempts, and one shared 15-second deadline.
+  It returns safe social text or a work proposal, not an executed action or delivery receipt.
+  Safe social and continuity turns stay local even when the provider fails or proposes work.
+  Recall, factual context, approval context, and mixed requests cannot use the continuity shortcut.
+  Other failures return a Firstmate relay proposal; caller cancellation throws instead of returning a stale result.
+  `loadFrontRedactor` loads native masking before the front turn, including configured secrets and parent-known credentials.
+  Each attempt masks all message data, including retry history, without changing protocol fields or the authorization header.
+  Numeric references identify advertised models, reasoning levels, and mates even when masking makes their labels identical.
+  The front resolves these references against the original catalog; unknown references cannot select a model or mate.
+  Original input objects and strings remain unchanged.
+- **Dispatch policy:** [`dispatch-policy.ts`](../apps/imessage/dispatch-policy.ts) reads the installed omp catalog, host settings, model overrides, and Firstmate's dispatch file.
+  The caller supplies native credential availability; the loader does not open credential storage, execute credential commands, or refresh tokens.
+  It filters unavailable and disabled providers before resolving enabled model patterns.
+  General work excludes Fable and Mercury; a trusted `simple-coding` purpose permits Mercury only at high reasoning.
+  Explicit dispatch efforts restrict choices, and Opus reasoning never exceeds high.
+  Selection returns execution and credential fields from the trusted catalog, not model-supplied fields.
+- **Worker:** [`subagent.ts`](../apps/imessage/subagent.ts) reuses the [guarded native tools](#what-it-does) in a private call directory.
+  The caller validates the model choice and journals any authorized write target before starting the worker.
+  The selected worker model cannot change through model fallback, context promotion, or Anthropic server-side fallback.
+  Tool answers select one to eight distinct physical lines from successful results; selections preserve complete lines and quotation whitespace.
+  Only these verified tool selections can retain blank lines; the shared quote validator still rejects blank evidence.
+  A checked answer receives one tool-free Mercury-3 voice pass at low reasoning.
+  Prose must retain source words in order, with only limited connecting words; [exact-output rules](#what-it-does) still apply.
+  Failed or unverified output returns a handoff instead of raw text.
+  Cancellation or stale work returns no result.
+- **Relay:** [`relay.ts`](../apps/imessage/relay.ts) accepts only eligible, unprotected work for one registered domain.
+  It checks authenticated request restrictions independently of the front proposal.
+  The caller must recheck the registered id, home, and scope before each send through `relayTargetCurrent`.
+
+The caller still owns durable request identity, routing decisions, delivery, and memory.
+The caller must check `current()` again before committing a worker result.
+The [front](../tests/test_imessage_front.py), [dispatch](../tests/test_imessage_dispatch_policy.py), [worker](../tests/test_imessage_subagent.py), and [relay](../tests/test_imessage_relay.py) regressions cover these module boundaries.
 
 ## Upstream outages
 
