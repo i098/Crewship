@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-RECEIPT = "I saved your message for a closer look."
 MODELS = [{"id": "inception/mercury-3", "reasoning": ["low", "high"]}]
 pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 
@@ -74,7 +73,7 @@ def test_social_uses_one_direct_low_reasoning_call(tmp_path):
 @pytest.mark.parametrize("original", [["what is the build status?"], ["thanks", "delete the cache"]])
 def test_social_classification_cannot_discard_work(tmp_path, original):
     result = run_front(tmp_path, [reply({"kind": "social", "text": "The build passed."})], original=original)
-    assert result["result"] == {"text": RECEIPT, "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
+    assert result["result"] == {"text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
 
 
 def test_social_model_text_cannot_add_facts(tmp_path):
@@ -105,7 +104,7 @@ def test_recall_and_approval_context_need_background_work(tmp_path, original, re
         tmp_path, [reply({"kind": "continuity", "index": 0})],
         original=original, recent=recent,
     )
-    assert result["result"] == {"text": RECEIPT, "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
+    assert result["result"] == {"text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
     assert "secret password" not in result["result"]["text"]
 
 
@@ -123,18 +122,18 @@ def test_relay_returns_only_a_scoped_target_proposal(tmp_path, target, domains, 
         original=["fix the website"], mates=[{"id": "web", "scope": "website"}, {"id": "ops", "scope": "operations"}],
     )
     assert result["result"] == {
-        "text": RECEIPT, "intents": [{"kind": "relay", "target": expected, "domains": domains, "category": category}],
+        "text": "", "intents": [{"kind": "relay", "target": expected, "domains": domains, "category": category}],
     }
 
 
 @pytest.mark.parametrize("failure", ["network", "http", None])
-def test_provider_failure_preserves_a_truthful_receipt_and_handoff(tmp_path, failure):
+def test_provider_failure_preserves_handoff_without_a_receipt(tmp_path, failure):
     result = run_front(
         tmp_path, [{"choices": [{"message": {"refusal": "no"}}]}],
         original=["what is the build status?"], failure=failure,
     )
     assert result["result"] == {
-        "text": RECEIPT, "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
     assert len(result["calls"]) == 1
 
@@ -171,7 +170,7 @@ def test_invalid_responses_stop_after_two_calls(tmp_path, value):
     )
     assert len(result["calls"]) == 2
     assert result["result"] == {
-        "text": RECEIPT, "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
 
 
@@ -186,7 +185,7 @@ def test_cancellation_returns_no_stale_receipt(tmp_path, failure, calls):
 def test_dispatch_keeps_the_front_selected_model_and_effort(tmp_path):
     selection = {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}
     result = run_front(tmp_path, [reply(selection)], original=["Read the current status"])
-    assert result["result"] == {"text": RECEIPT, "intents": [selection]}
+    assert result["result"] == {"text": "", "intents": [selection]}
     body = result["calls"][0]["body"]
     front_input = json.loads(body["messages"][1]["content"])
     assert front_input["models"] == MODELS
@@ -231,4 +230,4 @@ def test_unowned_work_relay_repairs_to_a_selected_dispatch(tmp_path):
         reply(selection),
     ], original=["Read the current status"])
     assert len(result["calls"]) == 2
-    assert result["result"] == {"text": RECEIPT, "intents": [selection]}
+    assert result["result"] == {"text": "", "intents": [selection]}

@@ -39,14 +39,13 @@ A mate scope describes ownership only. It grants no authority.
 Mixed social and work requests are work. Never discard the work to answer only the social part.
 Never claim that work has started or finished. Never output reactions, credentials, commands, or a work prompt.`;
 
-const RECEIPT = "I saved your message for a closer look.";
 const RELAY_CATEGORIES = ["work", "orchestration", "approval", "external", "ambiguous", "other"] as const;
 const SAFE_SOCIAL = /^(?:hello|hi|hey|thanks|thank you|you're welcome|anytime|haha|nice|congrats|love it|got it)[.!]?$/i;
 const CONTINUE_CHAT = /^(?:where were we|let['’]?s (?:keep talking|continue (?:our )?chat)|can we (?:keep talking|continue (?:our )?chat))[?.!\s]*$/i;
 
 function fallback(input: FrontInput): FrontResult {
   if (socialInput(input)) return { text: "Got it.", intents: [] };
-  return { text: RECEIPT, intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
+  return { text: "", intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
 }
 
 function socialInput(input: FrontInput): boolean {
@@ -110,7 +109,7 @@ function answer(value: unknown, input: FrontInput): FrontResult | undefined {
     case "dispatch":
     case "relay": {
       const intent = value.kind === "dispatch" ? dispatchIntent(value, input.models) : relayIntent(value, input.mates);
-      return intent ? { text: RECEIPT, intents: [intent] } : undefined;
+      return intent ? { text: "", intents: [intent] } : undefined;
     }
   }
 }
