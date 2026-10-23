@@ -355,7 +355,7 @@ function requestsExactOutput(question: string): "source" | "values" | false {
 }
 
 function sourceStyle(text: string, literals: string[], identity: boolean): boolean {
-  if (/\x60[^\x60]+\x60|^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*[ \t]*(?::[ \t]+|=[ \t]*))/mi.test(text)) return true;
+  if (/^[ \t]*[\[{]|\x60[^\x60]+\x60|^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*[ \t]*(?::[ \t]+|=[ \t]*))/mi.test(text)) return true;
   if (/^[ \t]*>|(?<![\p{L}\p{N}_])_(?=\S)[^_\r\n]+(?<=\S)_(?![\p{L}\p{N}_])|\[[^\]\r\n]+\]\([^)\r\n]+\)/mu.test(text)) return true;
   return !identity && literals.length > 0 && (text.split(/\s*\n\s*/).every((line) => literals.includes(line))
     || (text.match(/[\w-]+/g) ?? []).every((word) => literals.includes(word)));

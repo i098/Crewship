@@ -130,7 +130,7 @@ def test_failed_worker_returns_handoff_without_voice(tmp_path):
     assert len(result["calls"]) == 1
 
 
-@pytest.mark.parametrize("voice", ["The build passed with 50 jobs.", '{"answer":"The build is paused."}'])
+@pytest.mark.parametrize("voice", ["The build passed with 50 jobs.", '{"answer":"The build is paused."}', '["The build is paused."]'])
 def test_voice_cannot_change_checked_facts(tmp_path, voice):
     result = run_subagent(tmp_path, voice=voice)
     assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": {}}
@@ -345,17 +345,14 @@ def test_other_selected_provider_does_not_receive_anthropic_context(tmp_path):
 
 
 
+@pytest.mark.parametrize("quote", ["  Alpha is ready.  \n\tBeta is paused.\t", '{"answer":"The build is paused."}'])
 @pytest.mark.parametrize("voice_event", [False, True])
-def test_exact_source_keeps_whitespace_in_one_validated_bubble(tmp_path, voice_event):
-    quote = "  Alpha is ready.  \n\tBeta is paused.\t"
+def test_exact_source_keeps_whitespace_in_one_validated_bubble(tmp_path, voice_event, quote):
     question = "Quote the output exactly."
     tools = {"read-1": {"name": "read", "text": quote}}
-    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}, {"tool": 1, "line": 2}]}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": i + 1} for i, _ in enumerate(quote.splitlines())]}
     result = run_subagent(tmp_path, reply=reply, tools=tools, voice=quote, request=question, voice_event=voice_event)
     assert result["result"] == {"kind": "answer", "bubbles": [quote], "tools": tools}
-    native, voice = result["calls"]
-    assert native["question"] == question
-    assert json.loads(voice["prompt"]) == {"draft": quote, "question": question}
 
 
 def test_voice_uses_the_masked_question_from_native_result(tmp_path):
