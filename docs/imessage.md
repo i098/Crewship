@@ -110,15 +110,17 @@ For each message from the owner, the service does these steps:
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
    Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
+   A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and acknowledgement deadlines.
    A handoff uses `fm-inbox.sh note --request-id`; acceptance means the inbox saved it, not that the supervisor answered.
    If a direct-chat burst has no confirmed response after eight seconds, the bridge sends one request-specific acknowledgement.
    Each direct chat keeps its own deadline; messages in another chat do not cancel it.
    A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
+   Active mate delivery does not block a due acknowledgement or keep that chat's typing indicator active.
    It uses the existing outbox, keeps every request in the handoff, and states that no confirmed answer exists yet.
    It omits quoted content for sensitive messages and attachments.
    A prompt answer suppresses the acknowledgement; typing alone does not.
    A queued supervisor response suppresses it only after the transport accepts that response.
-   An explicit `--reply N` confirms only its selected request, even with `--no-thread`.
+   An explicit `--reply N` confirms only its selected message and that message's current edit requests, even with `--no-thread`.
    The acknowledgement targets the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.
    Restart replay confirms an initial card from its saved acceptance; a later card edit does not confirm newer requests.
@@ -137,6 +139,7 @@ For each message from the owner, the service does these steps:
    Each transport checks cancellation after preparation and immediately before sending.
    Cancellation does not remove uncertain delivery records.
    For a live desk answer with an uncertain send, the service checks available transport history before cancellation.
+   Acknowledgements also check available history before cancellation, including after a restart.
    It keeps unresolved evidence in the completion receipt.
    Unavailable history cannot block later supervisor sends after cancellation.
    A history check that disproves delivery clears the uncertainty before the service decides whether to hand off.
@@ -145,6 +148,7 @@ Neither transport reports typing events from the owner, so only a new text start
 
 When the owner edits a text on the Photon line, the service files `[edited] <new text> (was: <old text>)`.
 The note wakes Firstmate.
+Edits of known messages keep the original chat reference, even when the raw event uses a different chat identifier.
 The service keeps his last 100 texts in memory for the old text.
 If it does not know the old text, the note says so.
 This can happen when the text came before the last restart.

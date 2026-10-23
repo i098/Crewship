@@ -6,8 +6,8 @@ import shutil
 import time
 
 import pytest
-from test_imessage import card_url, http, publish_json, wait_for
-from test_imessage_basic import basic_rig
+from test_imessage import card_url, http, png, publish_json, read_text, wait_for
+from test_imessage_basic import basic_rig, transport_desk_rig
 from test_imessage_basic import desk_clock as desk_clock
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
@@ -429,6 +429,92 @@ mock.module("node:fs", () => ({
         bridge = start(3)
         desk_clock(8000)
         assert text(fake / "sent") == sent
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("history", ["accepted", "not-sent"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_uncertain_acknowledgement_reconciles_before_cancellation(tmp_path, desk_clock, history, restart):
+    rig, receive = transport_desk_rig(tmp_path)
+    retry = rig.fake / "retry-pause"
+    try:
+        rig.start()
+        receive("bluebubbles", "release", "Check the release job")
+        rig.cli("--typing")
+        retry.write_text("15")
+        rig.relay_mode("lost" if history == "not-sent" else "garbled")
+        desk_clock(8000)
+        wait_for(lambda: (rig.fake / "retry-waiting").exists(), "the uncertain acknowledgement")
+        first = rig.outbox()[0]
+        assert first["maybe"] == {"bluebubbles": "iMessage;-;+10000000000"}
+        receive("bluebubbles", "backup", "Check the backup job")
+        rig.cli("--reply", "1", "The backup job passed.")
+        if restart:
+            rig.stop()
+        rig.relay_mode("")
+        retry.unlink()
+        if restart:
+            rig.start()
+        wait_for(lambda: len(read_text(rig.fake / "relay-sent").splitlines()) >= 2, "the reconciled acknowledgement and targeted answer")
+        wait_for(lambda: not rig.outbox(), "the reconciled outbox")
+        acknowledgement = "iMessage;-;+10000000000 I saved “Check the release job”; no confirmed answer yet."
+        answer = "iMessage;-;+10000000000 The backup job passed."
+        expected = [answer, acknowledgement] if history == "not-sent" else [acknowledgement, answer]
+        assert read_text(rig.fake / "relay-sent").splitlines() == expected
+        receipt = next(
+            item for path in (rig.state / "outbox-done").glob("*.json")
+            if (item := json.loads(path.read_text())).get("requestId") == first["requestId"]
+        )
+        assert not receipt.get("maybe")
+        assert receipt.get("done", 0) == (1 if history == "accepted" else 0)
+        assert read_text(rig.fake / "sent") == ""
+        rig.stop()
+        rig.start()
+        desk_clock(8000)
+        assert read_text(rig.fake / "relay-sent").splitlines() == expected
+    finally:
+        retry.unlink(missing_ok=True)
+        rig.close()
+
+
+@pytest.mark.parametrize("image", [False, True])
+@pytest.mark.parametrize("plain", [False, True])
+def test_explicit_reply_confirms_current_edits(tmp_path, desk_clock, image, plain):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("original", "Check the release job")
+        for sequence, message in enumerate(["Check the backup job", "Check the deploy job"], 1):
+            publish_json(fake / "edits" / f"{sequence}.json", {
+                "type": "message.edited", "sequence": sequence, "messageGuid": "original",
+                "content": {"text": message}, "chatGuid": "any;-;+10000000000", "isFromMe": False,
+            })
+            wait_for(lambda: f"photon-original-edit-{sequence} " in text(notes), "the edited request")
+        arguments = ["--reply", "1", *(["--no-thread"] if plain else [])]
+        expected = []
+        if image:
+            photo = tmp_path / "reply.png"
+            photo.write_bytes(png(2, 2))
+            arguments += ["--image", str(photo)]
+            expected.append("send [image reply.png image/png 2x2]")
+        expected.append("send The deploy job passed.")
+        cli(*arguments, "The deploy job passed.")
+        wait_for(lambda: len(text(fake / "sent").splitlines()) >= len(expected), "the explicit reply")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed reply")
+        confirmations = [
+            event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines())
+            if event.get("responded")
+        ]
+        assert confirmations == [["photon-original", "photon-original-edit-1", "photon-original-edit-2"]]
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == expected
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == expected
     finally:
         bridge.terminate()
         bridge.wait(10)

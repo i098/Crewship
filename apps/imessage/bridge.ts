@@ -467,7 +467,7 @@ Bun.serve({
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
     return queue({ ...destination, image, bubbles: parts,
-      ...(target ? { requests: [`${target.line ?? "photon"}-${target.id}`] } : {}),
+      ...(target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
       reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
   },
 });
@@ -592,7 +592,7 @@ function releaseCancelledAcknowledgement(o: Out) {
 
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
   try {
-    if (o.deskSession !== deskSession) checkDeskDelivery(o);
+    if (!o.acknowledgement && o.deskSession !== deskSession) checkDeskDelivery(o);
     if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
     return true;
@@ -765,7 +765,10 @@ function sameChat(a: Ref, b: Ref | undefined) {
 function recordResponse(o: Out) {
   const ids = o.requests ?? [...routing.values()].filter((r) => r.at && r.at <= (o.at ?? 0)
     && sameChat(r.ref, o)).map((r) => r.requestId);
-  const unanswered = ids.filter((id) => !routing.get(id)?.responded);
+  const unanswered = ids.filter((id) => {
+    const item = routing.get(id);
+    return item && !item.responded && sameChat(item.ref, o);
+  });
   if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
   trace(o.id, "transport-accepted");
   scheduleAcknowledgement();
@@ -800,6 +803,7 @@ function acknowledge(pending: Routing[]) {
   if (stopping || muted() || !target || target.acknowledgement
     || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
   if (target.out) return finishDeskDelivery(target.out);
+  if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
   const unassigned = pending.filter((r) => r.route === "pending");
   if (unassigned.length) {
     cancelDesk();
@@ -830,6 +834,7 @@ async function readInboxStatus() {
 
 function startDeskTyping(pending: Routing[], current: () => boolean) {
   const space = pending.every(({ ref }) => sameChat(ref, latestRef)) ? latest?.space : undefined;
+  deskTypingRequestId = pending.at(-1)!.requestId;
   let active = true;
   let refreshing = false;
   const refresh = () => {
@@ -896,11 +901,11 @@ async function runDesk(current: () => boolean) {
 
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   const { answer, target } = result;
-  const ids = pending.map((r) => r.requestId);
   if ("handled" in answer) {
-    recordRoute({ ids, route: "done" });
+    recordRoute({ ids: pending.map((r) => r.requestId), route: "done" });
     return;
   }
+  const ids = pending.filter((r) => sameChat(r.ref, target.ref)).map((r) => r.requestId);
   const guid = crypto.randomUUID();
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
@@ -908,7 +913,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
       ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
-  flushRoutes();
+  handoffPending();
 }
 
 function armWrite(pending: Routing[]): string | undefined {
@@ -1066,9 +1071,9 @@ function flushRoutes() {
   clearTimeout(routingRetry);
   let failed = false;
   for (const item of routing.values()) {
-    if (mateDeliveries.has(item.requestId)) continue;
     try {
       if (item.acknowledgement && !muted()) outbox.add(item.acknowledgement);
+      if (mateDeliveries.has(item.requestId)) continue;
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);
         recordRoute({ ids: [item.requestId], route: "handoff" });
@@ -1218,7 +1223,8 @@ function edited(e: EventTypeMap["message.edited"]) {
   const text = e.content.text ?? "(no text)";
   const was = said.get(e.messageGuid) ?? "not known: the bridge did not see the text before the edit";
   console.log("fm-imessage: inbound edit -> note");
-  receive(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, { space: e.chatGuid, id: e.messageGuid }, true);
+  const ref = routing.get(`photon-${e.messageGuid}`)?.ref ?? { space: e.chatGuid, id: e.messageGuid };
+  receive(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, ref, true);
   heard(e.messageGuid, text);
   handoffPending();
 }

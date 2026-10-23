@@ -43,7 +43,8 @@ def routing_rig(tmp_path):
         "if not (pathlib.Path(os.environ['FM_HOME']) / 'state' / (sys.argv[1] + '.meta')).is_file(): sys.exit(1)\n"
         "with (p / 'mate-sends').open('a') as f:\n"
         "    f.write(json.dumps({'home': os.environ['FM_HOME'], 'args': sys.argv[1:]}) + '\\n')\n"
-        "while (p / 'mate-hold').exists(): time.sleep(0.02)\n"
+        "call = len((p / 'mate-sends').read_text().splitlines())\n"
+        "while (p / 'mate-hold').exists() or (p / f'mate-hold-{call}').exists(): time.sleep(0.02)\n"
         "if (p / 'send-timeout').exists(): time.sleep(30)\n"
         "sys.exit(1 if (p / 'send-fail').exists() else 0)\n"
     )
@@ -400,5 +401,40 @@ def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_
         for index, message in enumerate(messages):
             assert text(notes).count(f"photon-{index} ") == (0 if message in expected else 1)
     finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_due_acknowledgement_passes_active_mate_delivery(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    first = fake / "mate-hold-1"
+    second = fake / "mate-hold-2"
+    first.touch()
+    second.touch()
+    bridge = start(1)
+    try:
+        receive("menu", "Fix the website menu")
+        receive("footer", "Fix the website footer")
+        desk_clock()
+        wait_for(lambda: len(text(fake / "mate-sends").splitlines()) == 1, "the first held delivery")
+        desk_clock(4000)
+        first.unlink()
+        wait_for(lambda: len(text(fake / "mate-sends").splitlines()) == 2, "the second held delivery")
+        desk_clock(2000)
+        wait_for(lambda: text(fake / "sent"), "the acknowledgement during mate delivery", timeout=2)
+        wait_for(lambda: text(fake / "typing-events") and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"], "typing cleanup during mate delivery", timeout=2)
+        assert text(fake / "sent").splitlines() == ["send I saved “Fix the website footer”; no confirmed answer yet."]
+        assert not (fake / "send-cancelled").exists()
+        assert text(notes) == ""
+        second.unlink()
+        wait_for(lambda: text(notes).count("routed to web-mate") == 2, "both completed mate deliveries")
+        assert text(notes).count("photon-menu ") == text(notes).count("photon-footer ") == 1
+        before = text(fake / "sent")
+        desk_clock(8000)
+        assert text(fake / "sent") == before
+    finally:
+        first.unlink(missing_ok=True)
+        second.unlink(missing_ok=True)
         bridge.terminate()
         bridge.wait(10)

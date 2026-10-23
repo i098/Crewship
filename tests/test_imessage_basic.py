@@ -534,19 +534,35 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
             bridge.wait(10)
 
 
-def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path, desk_clock):
+@pytest.mark.parametrize("target", [1, 2])
+def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path, desk_clock, target):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    answer = json.loads((fake / "answer").read_text())
-    (fake / "answer").write_text(json.dumps({**answer, "target": 1}))
+    fact = "The build is paused." if target == 1 else "The queue is empty."
+    (fake / "status").write_text("The build is paused.\nThe queue is empty.")
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "target": target, "answer": fact,
+        "evidence": [{"source": "status", "quote": fact}],
+    }))
     (fake / "typing-down").unlink()
     bridge = start(1)
     try:
         receive("question", "What is the build status?")
-        receive("elsewhere", "And now?", space="iMessage;-;+10000000001")
+        receive("elsewhere", "What is the queue status?", space="iMessage;-;+10000000001")
         desk_clock()
         wait_for(lambda: text(fake / "sent"), "the selected chat response")
-        assert text(fake / "send-targets") == "iMessage;-;+10000000000\n"
+        chat = "iMessage;-;+10000000000" if target == 1 else "iMessage;-;+10000000001"
+        assert text(fake / "send-targets") == f"{chat}\n"
         assert text(fake / "typing-events") == ""
+        answered, unanswered = ("question", "elsewhere") if target == 1 else ("elsewhere", "question")
+        wait_for(lambda: f"photon-{unanswered} " in text(notes), "the other chat handoff")
+        assert f"photon-{answered} " not in text(notes)
+        confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
+        assert confirmations == [[f"photon-{answered}"]]
+        desk_clock(8000)
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the other chat acknowledgement")
+        assert text(fake / "sent").splitlines()[0] == f"send {fact}"
+        assert "no confirmed answer yet" in text(fake / "sent").splitlines()[1]
+        assert set(text(fake / "send-targets").splitlines()) == {"iMessage;-;+10000000000", "iMessage;-;+10000000001"}
     finally:
         bridge.terminate()
         bridge.wait(10)
