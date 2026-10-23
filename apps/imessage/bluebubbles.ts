@@ -263,7 +263,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
           { after: String(since - this.opts.skewMs), sort: "DESC", limit: "50" })) as BBMessage[];
         asked = true;
         this.suspects.delete(r);
-        if (recent.some((m) => m.isFromMe && m.text?.trim() === text.trim())) return true;
+        if (recent.some((m) => m.isFromMe && m.text === text)) return true;
       } catch {
         continue;
       }

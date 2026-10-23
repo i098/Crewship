@@ -13,9 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import yaml
 from test_imessage import (
+    DESK,
     ROOT,
     TEST_QUIET_MS,
     FallbackRig,
+    bun,
     fake_bridge,
     publish_json,
     read_text,
@@ -159,14 +161,40 @@ def basic_rig(tmp_path, test_mode=True):
     return fake, state, notes, err, start, receive, cli, text, records
 
 
+@pytest.mark.parametrize("event_output", [False, True])
+@pytest.mark.parametrize("question,draft", [
+    ("Quote the source text.", " logging: on\n memory: off"),
+    ("Copy the source text.", "\tlogging: on  \n\n memory: off\t \n"),
+    ("Return the exact command.", "\t run-tool  inspect --json \t"),
+    ("Return raw output.", "  first\r\n\r\n\tsecond  \r\n"),
+])
+def test_exact_voice_output_keeps_all_characters(event_output, question, draft):
+    result = bun(f"""
+import {{ readDesk, voiceAnswer }} from {DESK};
+const draft = {json.dumps(draft)};
+const question = {json.dumps(question)};
+const output = {json.dumps(event_output)}
+  ? JSON.stringify({{ type: "message_end", message: {{ role: "assistant", content: [{{ type: "text", text: draft }}] }} }}) + "\\n"
+  : draft;
+const proc = Bun.spawn([process.execPath, "-e", "process.stdout.write(" + JSON.stringify(output) + ")"], {{ stdout: "pipe" }});
+const {{ ok, drafted }} = await readDesk(proc);
+const source = {{ answer: draft, identity: false }};
+console.log(JSON.stringify({{
+  kept: voiceAnswer(source, question, ok, drafted),
+  changed: voiceAnswer(source, question, ok, draft.trim()) ?? null,
+}}));
+""")
+    assert result == {"kept": [draft], "changed": None}
+
+
 @pytest.mark.parametrize("rewrite,expected", [
-    ("There are 1200 jobs\n\nDetails: https://example.test/jobs/12", "There are 1200 jobs\nsend Details: https://example.test/jobs/12"),
+    ("There are 1200 jobs\n\nSee https://example.test/jobs/12", "There are 1200 jobs\nsend See https://example.test/jobs/12"),
     ("There are 1201 jobs. Details: https://example.test/jobs/12", None),
     ("There are 1200 jobs. Details: https://example.test/jobs/13", None),
     ("There are 1,200 jobs. Details: https://example.test/jobs/12", None),
     ("", None),
 ])
-def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, rewrite, expected):
+def test_voice_keeps_numbers_and_links_or_hands_off(tmp_path, desk_clock, rewrite, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     draft = "There are 1200 jobs. Details: https://example.test/jobs/12"
     (fake / "status").write_text(draft)
@@ -179,10 +207,15 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
         receive("question", "How many jobs are there?")
         desk_clock()
         wait_for(lambda: (fake / "voice-started").exists(), "the voice pass")
-        wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the saved route")
-        wait_for(lambda: text(fake / "sent").count("send ") == (2 if expected else 1), "the voice bubbles")
-        assert text(fake / "sent") == f"send {expected or draft}\n"
-        assert text(notes) == ""
+        if expected:
+            wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the saved route")
+            wait_for(lambda: text(fake / "sent").count("send ") == 2, "the voice bubbles")
+            assert text(fake / "sent") == f"send {expected}\n"
+            assert text(notes) == ""
+        else:
+            wait_for(lambda: "photon-question " in text(notes), "the invalid voice handoff")
+            assert text(fake / "sent") == ""
+            assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -219,6 +252,8 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
     ("The build is blocked.", "The build is ready."),
     ("The test is broken.", "The test is passing."),
     ("The tests failed.", "The tests passed."),
+    ("Read-only pip probes skip files that pip cannot open.", "Read-write pip probes skip files that pip cannot open."),
+    ("Read-only pip probes skip files that pip cannot open.", "Pip probes skip files that pip cannot open."),
 ])
 def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -231,9 +266,9 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
     try:
         receive("question", "What does the status say?")
         desk_clock()
-        wait_for(lambda: text(fake / "sent"), "the checked draft after unsafe rewriting")
-        assert text(fake / "sent") == f"send {draft}\n"
-        assert text(notes) == ""
+        wait_for(lambda: "photon-question " in text(notes), "the changed claim handoff")
+        assert text(fake / "sent") == ""
+        assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -241,10 +276,10 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
 
 @pytest.mark.parametrize("draft,rewrite", [
     ("The build is paused.", "The build's paused."),
-    ("The build is paused.", "Paused: the build."),
     ("There are 5 jobs ready.", "5 jobs are ready."),
     ("The build is blocked.", "Blocked."),
     ("The build isn’t ready.", "The build isn't ready."),
+    ("Read-only pip probes skip files that pip cannot open.", "read-only pip probes skip files that pip cannot open."),
 ])
 def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -266,7 +301,7 @@ def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draf
 
 
 @pytest.mark.parametrize("failure", ["voice-hold", "voice-fail"])
-def test_voice_failure_sends_original(tmp_path, desk_clock, monkeypatch, failure):
+def test_voice_failure_hands_off_without_sending_source(tmp_path, desk_clock, monkeypatch, failure):
     monkeypatch.setenv("FM_IMESSAGE_TEST_VOICE_MS", "100")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / failure).touch()
@@ -274,10 +309,10 @@ def test_voice_failure_sends_original(tmp_path, desk_clock, monkeypatch, failure
     try:
         receive("question", "What is the build status?")
         desk_clock()
-        wait_for(lambda: text(fake / "sent"), "the original after voice failure")
-        assert text(fake / "sent") == "send The build is paused.\n"
+        wait_for(lambda: "photon-question " in text(notes), "the voice failure handoff")
+        assert text(fake / "sent") == ""
         assert (fake / "voice-started").exists()
-        assert text(notes) == ""
+        assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -1432,6 +1467,7 @@ def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, c
     ('{"kind":"handoff"}', False),
     ('{"kind":"reply","answer":"Deployed.","evidence":[]}', False),
     ('{"kind":"reply","answer":"The build passed.","evidence":[{"source":"status","quote":"The build passed."}]}', False),
+    ('{"kind":"reply","answer":"The build passed.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
     ('{"kind":"reply","answer":"I deployed it.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
     ('{"kind":"reply","answer":"The build is paused.","evidence":[{"source":"status","quote":"The build is paused."}]}', True),
 ])
@@ -1640,7 +1676,8 @@ def native_desk(tmp_path, monkeypatch, request, desk_clock):
             requests.append(body)
             if not body.get("stream"):
                 draft = json.loads(body["messages"][-1]["content"])["draft"]
-                data = json.dumps({"choices": [{"message": {"content": draft}}]}).encode()
+                answer = tmp_path / "fake/voice-answer"
+                data = json.dumps({"choices": [{"message": {"content": answer.read_text() if answer.exists() else draft}}]}).encode()
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(data)
@@ -1731,8 +1768,407 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("source_kind", ["tool", "status", "supervisor", "desk"])
+@pytest.mark.parametrize("question,rewrite,expected", [
+    ("Quote the source text.", " logging: on\n memory: off", " logging: on\n memory: off"),
+    ("Quote the source text.", "logging: on\n memory: off", None),
+    ("Quote the source text.", " logging: on\n  memory: off", None),
+    ("Quote the source text.", " logging: on\n memory: off ", None),
+    ("What are the settings?", " \nLogging is on.\n \nMemory is off.\n ", "Logging is on.\n\nMemory is off."),
+])
+def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_desk, source_kind, question, rewrite, expected):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    draft = " logging: on\n memory: off"
+    if source_kind == "tool":
+        source = tmp_path / "settings.txt"
+        source.write_text(draft)
+        replies.append(lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]})
+        evidence = [{"source": "tool", "quote": line} for line in draft.splitlines()]
+    elif source_kind == "status":
+        (fake / "status").write_text(draft)
+        evidence = [{"source": "status", "quote": line} for line in draft.splitlines()]
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = [{"source": "chat", "id": 0, "quote": line} for line in draft.splitlines()]
+    replies.append(lambda body: {"content": json.dumps({"kind": "reply", "answer": draft, "evidence": evidence})})
+    (fake / "voice-answer").write_text(rewrite)
+    bridge = start(1)
+    try:
+        receive("quote", question)
+        wait_for(lambda: text(fake / "sent") or "photon-quote " in text(notes), "the quotation result", timeout=45)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete quotation delivery")
+        assert text(fake / "sent") == ("" if expected is None else "".join(f"send {part}\n" for part in expected.split("\n\n")))
+        assert text(notes).count("photon-quote ") == (1 if expected is None else 0)
+        prior = [draft] if source_kind == "desk" else []
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == prior + ([] if expected is None else [expected])
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": draft, "question": question}]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("question,lines,answer", [
+    (
+        "How optimized is the setup, and why is herdr not the default?",
+        [
+            "- **Restart-proof**: work stays available after a restart.",
+            "runtime: herdr",
+            "memory: off",
+        ],
+        "The setup is restart-proof, meaning work stays available after a restart. The runtime is herdr, with memory off.",
+    ),
+    (
+        "Return the exact runtime and memory values, one per line.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
+        "Please show raw output.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
+        "Return the runtime and memory values exactly.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
+        "Give me the board link and the command with its exact identifier.",
+        ["board: https://example.org/boards/ABC-42", "command: `run-tool inspect --json`"],
+        "The board is https://example.org/boards/ABC-42\n\nThe command is run-tool inspect --json",
+    ),
+    (
+        "What is the exact entrypoint identifier?",
+        ["entrypoint: __init__"],
+        "The entrypoint is __init__",
+    ),
+    (
+        "How do pip probes handle files they cannot open?",
+        ["Read-only pip probes skip files that pip cannot open."],
+        "read-only pip probes skip files that pip cannot open.",
+    ),
+    (
+        "Return the exact command.",
+        ["command: `run-tool inspect --json`"],
+        "run-tool inspect --json",
+    ),
+    (
+        "Quote the setup description verbatim.",
+        ["- **Restart-proof**: work stays available after a restart."],
+        "- **Restart-proof**: work stays available after a restart.",
+    ),
+    (
+        "Which entrypoint is configured?",
+        ["The entrypoint is My-Handler."],
+        "The entrypoint is My-Handler.",
+    ),
+    (
+        "Quote the runtime and memory sentence.\nKeep the original text.",
+        ["The runtime is `herdr`, with memory `off`."],
+        "The runtime is `herdr`, with memory `off`.",
+    ),
+    (
+        "How durable is the setup?",
+        ["> Work survives a restart."],
+        "Work survives a restart.",
+    ),
+    (
+        "How durable is the setup?",
+        ["_Durable_ setup."],
+        "Durable setup.",
+    ),
+    (
+        "What is the board URL?",
+        ["[Board](https://example.org/board)"],
+        "https://example.org/board",
+    ),
+    (
+        "Quote the source text.",
+        ["> Work survives a restart."],
+        "> Work survives a restart.",
+    ),
+    (
+        "Quote the source text.",
+        ["_Durable_ setup."],
+        "_Durable_ setup.",
+    ),
+    (
+        "Quote the source text.",
+        ["[Board](https://example.org/board)"],
+        "[Board](https://example.org/board)",
+    ),
+    (
+        "What are the logging and memory settings?",
+        ["logging=on", "memory=off"],
+        "Logging is on and memory is off.",
+    ),
+    (
+        "Return the exact values.",
+        ["logging=on", "memory=off"],
+        "on\noff",
+    ),
+    (
+        "What are the logging and memory settings?",
+        [" logging: on", " memory: off"],
+        "Logging is on and memory is off.",
+    ),
+    (
+        "What are the logging and memory settings?",
+        ["- logging=true", "- memory=false"],
+        "Logging is true and memory is false.",
+    ),
+    (
+        "Which runtime is configured?",
+        ["> runtime: herdr"],
+        "The runtime is herdr.",
+    ),
+])
+def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source = tmp_path / "setup.txt"
+    source.write_text("\n".join(lines))
+    (fake / "voice-answer").write_text(answer)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]},
+        lambda body: {"content": json.dumps({
+            "kind": "reply", "answer": "\n".join(lines),
+            "evidence": [{"source": "tool", "quote": line} for line in lines],
+        })},
+    ])
+    bridge = start(1)
+    try:
+        receive("lookup", question)
+        wait_for(lambda: text(fake / "sent") or "photon-lookup " in text(notes), "the lookup result", timeout=45)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete lookup delivery")
+        assert text(fake / "sent") == "".join(f"send {part}\n" for part in answer.split("\n\n"))
+        assert text(notes) == ""
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == [answer]
+        results = [message["content"] for body in requests for message in body["messages"] if message["role"] == "tool"]
+        assert all(any(line in result for result in results) for line in lines)
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("lines,rewrite,accepted,question", [
+    (
+        ["herdr", "off"],
+        "The runtime is herdr, with memory off.",
+        True,
+        None,
+    ),
+    (
+        ["- **Restart-proof**: work stays available after a restart.", "herdr", "off"],
+        "The setup is restart-proof, meaning work stays available after a restart. The runtime is herdr, with memory off.",
+        True,
+        None,
+    ),
+    (["herdr", "off"], "", False, None),
+    (["herdr", "off"], "The runtime is tmux, with memory on.", False, None),
+    (["herdr", "off"], "herdr\noff", False, None),
+    (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values, one per line."),
+    (["herdr", "off"], "herdr\noff", False, "Do not return raw values. Explain the runtime and memory settings."),
+    (["herdr", "off"], "herdr\noff", False, "Give me an explanation of exactly why herdr is used"),
+    (["herdr", "off"], "Runtime: herdr\nMemory: off", False, None),
+    (["herdr", "off"], "RUNTIME: herdr\nMEMORY: off", False, None),
+    (["Runtime: herdr", "Memory: off"], "The runtime is tmux, with memory off.", False, None),
+    (["runtime: herdr", "memory: off"], "The settings are:\nRuntime: herdr\nMemory: off", False, None),
+    (["runtime: herdr", "memory: off"], "The runtime is `herdr`, with memory `off`.", False, None),
+    (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values.\nOne per line."),
+    (["herdr", "off"], "herdr\noff", True, "Return the runtime and memory values exactly.\nOne per line."),
+    (["herdr", "off"], "herdr\noff", True, "Quote the values verbatim.\nKeep both lines."),
+    (["runtime=herdr", "memory=off"], "runtime=herdr\nmemory=off", False, None),
+    (["runtime = herdr", "memory = off"], "The settings are:\nRuntime = herdr\nMemory = off", False, None),
+    (["runtime=herdr", "memory=off"], "The runtime is herdr, with memory off.", True, None),
+    (["logging=on", "memory=off"], "Logging is off and memory is on.", False, None),
+    (["> Work survives a restart."], "> Work survives a restart.", False, "How durable is the setup?"),
+    (["_Durable_ setup."], "_Durable_ setup.", False, "How durable is the setup?"),
+    (["[Board](https://example.org/board)"], "[Board](https://example.org/board)", False, "What is the board URL?"),
+])
+def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source_text = "\n".join(lines)
+    if source_kind == "status":
+        (fake / "status").write_text(source_text)
+        evidence = [{"source": "status", "quote": line} for line in lines]
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = [{"source": "chat", "id": 0, "quote": line} for line in lines]
+    (fake / "voice-answer").write_text(rewrite)
+    count = 2 if accepted else 1
+    replies.extend([
+        lambda body: {"content": json.dumps({"kind": "reply", "answer": source_text, "evidence": evidence})}
+        for _ in range(count)
+    ])
+    bridge = start(1)
+    try:
+        question = question or "Which runtime and memory settings does the restart-proof setup use?"
+        for index in range(count):
+            receive(f"lookup-{index}", question)
+            if accepted:
+                wait_for(lambda: text(fake / "sent").count("send ") == index + 1, "the plain excerpt answer", timeout=45)
+                wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete excerpt delivery")
+            else:
+                wait_for(lambda: "photon-lookup-0 " in text(notes), "the rejected excerpt handoff", timeout=45)
+        assert text(fake / "sent") == (f"send {rewrite}\n" * count if accepted else "")
+        assert text(notes).count("photon-lookup-0 ") == (0 if accepted else 1)
+        expected = ([source_text] if source_kind == "desk" else []) + ([rewrite] * count if accepted else [])
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
+        assert not any(message["role"] == "tool" for body in requests for message in body["messages"])
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": source_text, "question": question}] * count
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("question,continuation,response,accepted", [
+    ("Return the exact runtime and memory values.", "One per line.", "herdr\noff", True),
+    ("Return the exact runtime and memory values.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Return the runtime and memory values exactly.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Quote the values verbatim.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Copy the values.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "One per line.\nActually, use prose instead.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "Include details about the host.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "Actually, use prose instead.", "The runtime is herdr, with memory off.", True),
+])
+def test_native_exact_output_respects_complete_multiline_and_batched_requests(tmp_path, native_desk, batched, question, continuation, response, accepted):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    draft = "herdr\noff"
+    parts = [question, continuation]
+    messages = parts if batched else ["\n".join(parts)]
+    (fake / "status").write_text(draft)
+    (fake / "voice-answer").write_text(response)
+    replies.append(lambda body: {"content": json.dumps({
+        "kind": "reply", "answer": draft,
+        "evidence": [{"source": "status", "quote": line} for line in draft.splitlines()],
+    })})
+    bridge = start(1)
+    try:
+        for index, message in enumerate(messages):
+            receive(f"exact-{index}", message)
+        if accepted:
+            wait_for(lambda: text(fake / "sent"), "the complete-request answer", timeout=45)
+            wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed answer")
+        else:
+            wait_for(lambda: f"photon-exact-{len(messages) - 1} " in text(notes), "the withdrawn exact-request handoff", timeout=45)
+        assert text(fake / "sent") == (f"send {response}\n" if accepted else "")
+        assert all(text(notes).count(f"photon-exact-{index} ") == (0 if accepted else 1) for index in range(len(messages)))
+        assert [row["text"] for row in records() if row["kind"] == "owner"] == messages
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == ([response] if accepted else [])
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": draft, "question": "\n".join(parts)}]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source_text,rewrite", [
+    ("runtime: herdr\nmemory: off", ""),
+    ("runtime: herdr\nmemory: off", "The runtime is tmux and memory is on."),
+    ("runtime: herdr\nmemory: off", "I saved the settings."),
+    ("runtime: herdr", "The runtime is herdr and memory is off."),
+    ("command: crewship inspect --json", "Run crewship inspect"),
+    ("entrypoint: `My-Handler`", "The entrypoint is my-handler"),
+    ("Read-only pip probes skip files that pip cannot open.", "Read-write pip probes skip files that pip cannot open."),
+    ("Read-only pip probes skip files that pip cannot open.", "Pip probes skip files that pip cannot open."),
+    ("herdr\noff", "herdr\noff"),
+    ("herdr\noff", "off\n\nherdr"),
+    ("herdr\noff", "herdr, off"),
+    ("herdr\noff", '["herdr","off"]'),
+    ("The entrypoint is My-Handler.", "The entrypoint is my-handler."),
+    ("The entrypoint is my-handler.", "The entrypoint is My-handler."),
+    ("My-Handler is the entrypoint.", "my-handler is the entrypoint."),
+    ("My-handler is the entrypoint.", "my-handler is the entrypoint."),
+    ("my-handler is the entrypoint.", "My-handler is the entrypoint."),
+    ("herdr\noff", "Runtime: herdr\nMemory: off"),
+    ("RUNTIME: herdr\nMEMORY: off", "The runtime is tmux, with memory off."),
+    ("runtime: herdr\nmemory: off", "The settings are:\nRuntime: herdr\nMemory: off"),
+    ("runtime: herdr\nmemory: off", "The runtime is `herdr`, with memory `off`."),
+    ("runtime=herdr\nmemory=off", "runtime=herdr\nmemory=off"),
+    ("runtime=herdr\nmemory=off", "The settings are:\nRuntime=herdr\nMemory=off"),
+    ("runtime=herdr\nmemory=off", "The runtime is tmux, with memory off."),
+    ("logging=on\nmemory=off", "Logging is off and memory is on."),
+    ("logging: on\nmemory: off", "Logging is off and memory is on."),
+    ("logging=true\nmemory=false", "Logging is false and memory is true."),
+    ("logging: true\nmemory: false", "Logging is false and memory is true."),
+    ("logging=enabled\nmemory=disabled", "Logging is disabled and memory is enabled."),
+    ("logging: enabled\nmemory: disabled", "Logging is disabled and memory is enabled."),
+    (" logging: on\n memory: off", "Logging is off and memory is on."),
+    ("\tlogging=on\n\tmemory=off", "Logging is off and memory is on."),
+    ("- logging=true\n- memory=false", "Logging is false and memory is true."),
+    ("> logging: enabled\n> memory: disabled", "Logging is disabled and memory is enabled."),
+    (" runtime: herdr", "The runtime is tmux."),
+    ("- runtime=herdr", "The runtime is tmux."),
+    ("> runtime: herdr", "The runtime is tmux."),
+    ("> Work survives a restart.", "> Work survives a restart."),
+    ("_Durable_ setup.", "_Durable_ setup."),
+    ("[Board](https://example.org/board)", "[Board](https://example.org/board)"),
+])
+def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source = tmp_path / "setup.txt"
+    source.write_text(source_text)
+    (fake / "voice-answer").write_text(rewrite)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]},
+        lambda body: {"content": json.dumps({
+            "kind": "reply", "answer": source_text,
+            "evidence": [{"source": "tool", "quote": line} for line in source_text.splitlines()],
+        })},
+    ])
+    bridge = start(1)
+    try:
+        receive("lookup", "What are the current runtime and memory settings?")
+        wait_for(lambda: "photon-lookup " in text(notes), "the invalid voice handoff", timeout=45)
+        assert text(fake / "sent") == ""
+        assert text(notes).count("photon-lookup ") == 1
+        assert not [row for row in records() if row["kind"] == "desk"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_native_question_is_redacted_before_contextual_voice(tmp_path, native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    secret = "ghp_" + "Ab12" * 10
+    replies.append(lambda body: {"content": json.dumps({
+        "kind": "reply", "answer": "The build is paused.",
+        "evidence": [{"source": "status", "quote": "The build is paused."}],
+    })})
+    bridge = start(1)
+    try:
+        receive("question", f"Token {secret}. What is the build status?")
+        wait_for(lambda: text(fake / "sent"), "the redacted question answer", timeout=45)
+        voice = next(body for body in requests if not body.get("stream"))
+        assert json.loads(voice["messages"][-1]["content"]) == {
+            "draft": "The build is paused.", "question": "Token [REDACTED]. What is the build status?",
+        }
+        assert secret not in json.dumps(voice)
+        assert text(fake / "sent") == "send The build is paused.\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("source,secret", [
     ("read", "ghp_" + "Ab12" * 10),
+    ("read-provider", "ghp_" + "Ab12" * 10),
     ("grep", "private-value-from-configured-secrets"),
     ("read", "-----BEGIN PRIVATE KEY-----\nprivate-key-data\n-----END PRIVATE KEY-----"),
     ("status", "ghp_" + "Cd34" * 10),
@@ -1742,6 +2178,8 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
     fake, state, notes, err, start, receive, cli, text, records = rig
     fact = f"API_TOKEN={secret}"
     safe = "API_TOKEN=[REDACTED]"
+    answer = "API_TOKEN is [REDACTED]."
+    (fake / "voice-answer").write_text(answer)
     target = tmp_path / "config.env"
     target.write_text(fact)
     if source == "grep":
@@ -1752,11 +2190,20 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
         arguments = {"path": str(target)}
         if source == "grep":
             arguments["pattern"] = "API_TOKEN"
-        replies.append(lambda body: {"tool_calls": [tool_call(source, arguments)]})
-    replies.append(lambda body: {"content": json.dumps({
-        "kind": "reply", "answer": fact,
-        "evidence": [{"source": "status" if source == "status" else "tool", "quote": fact}],
-    })})
+        replies.append(lambda body: {"tool_calls": [tool_call(source.removesuffix("-provider"), arguments)]})
+
+    def reply(body):
+        quote = fact
+        if source == "read-provider":
+            quote = next(line for message in body["messages"] if message["role"] == "tool"
+                         for line in message["content"].splitlines() if line.startswith("API_TOKEN="))
+            assert secret not in quote
+        return {"content": json.dumps({
+            "kind": "reply", "answer": quote,
+            "evidence": [{"source": "status" if source == "status" else "tool", "quote": quote}],
+        })}
+
+    replies.append(reply)
     bridge = start(1)
     try:
         receive("config", f"Show the data in {target}.")
@@ -1768,8 +2215,8 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
             wait_for(lambda: text(fake / "sent"), "the filtered native answer", timeout=45)
             voice = [body for body in requests if not body.get("stream")]
             assert len(voice) == 1
-            assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe}
-            assert text(fake / "sent").splitlines() == [f"send {safe}"]
+            assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the data in {target}."}
+            assert text(fake / "sent").splitlines() == [f"send {answer}"]
             assert text(notes) == ""
         assert secret not in json.dumps(records())
         assert target.read_text() == fact
@@ -1809,6 +2256,8 @@ def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tm
     )
     facts = [f"{name}={value}" for name, value in secrets.items()]
     safe = "\n".join(f"{name}=[REDACTED]" for name in secrets)
+    answer = "; ".join(f"{name} is [REDACTED]" for name in secrets) + "."
+    (fake / "voice-answer").write_text(answer)
     replies.extend([
         lambda body: {"tool_calls": [tool_call("read", {"path": str(target)})]},
         lambda body: {"content": json.dumps({
@@ -1821,8 +2270,8 @@ def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tm
         receive("values", f"Show the server values in {target}.")
         wait_for(lambda: text(fake / "sent"), "the filtered parent-credential answer", timeout=45)
         voice = [body for body in requests if not body.get("stream")]
-        assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe}
-        assert text(fake / "sent") == f"send {safe}\n"
+        assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the server values in {target}."}
+        assert text(fake / "sent") == f"send {answer}\n"
         for secret in secrets.values():
             assert secret not in json.dumps(requests)
             assert secret not in json.dumps(records())
@@ -1948,10 +2397,10 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
 
 
 @pytest.mark.parametrize("bus_variable", ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"])
-def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path, monkeypatch, request, bus_variable):
+def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path_factory, monkeypatch, request, bus_variable):
     if not shutil.which("systemctl"):
         pytest.skip("needs systemctl")
-    runtime = tmp_path / "runtime"
+    runtime = tmp_path_factory.mktemp("bus")
     (runtime / "systemd").mkdir(parents=True, mode=0o700)
     if bus_variable == "XDG_RUNTIME_DIR":
         address = runtime / "systemd/private"
@@ -1987,6 +2436,7 @@ def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path, monkeypatc
 def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
+    (fake / "voice-answer").write_text("The desk service is active.")
     systemctl = tmp_path / "bin/systemctl"
     systemctl.write_text(
         "#!/usr/bin/env python3\n"
@@ -2022,7 +2472,7 @@ def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
         assert [json.loads(line) for line in text(fake / "systemctl-calls").splitlines()] == [
             ["--user", "is-active", "--", "fm-imessage.service"],
         ]
-        assert text(fake / "sent") == "send active\n"
+        assert text(fake / "sent") == "send The desk service is active.\n"
         assert text(notes) == ""
     finally:
         bridge.terminate()

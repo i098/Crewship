@@ -30,7 +30,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, VOICE_PROMPT } from "./desk.ts";
+import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -181,7 +181,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
-type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
+type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -914,7 +914,7 @@ async function runDesk(current: () => boolean) {
       queued = !("handled" in result.answer);
     }
     const at = result?.target.ref ?? pending.at(-1)!.ref;
-    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
+    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "bubbles" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
   } finally {
     if (!queued) finishTyping();
   }
@@ -931,7 +931,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
-      ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
+      ...("bubbles" in answer ? { bubbles: answer.bubbles, reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
   handoffPending();
@@ -953,9 +953,10 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (!statusOk || !prompt.includes(latestText)) return;
   const writePath = armWrite(pending);
   trace(pending.at(-1)!.ref.id, "model-start");
-  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath }));
+  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath,
+    question: pending.map((item) => item.authored ?? item.text).join("\n") }));
   deskRun = proc;
-  const { ok, drafted, tools } = await readDesk(proc, true);
+  const { ok, drafted, tools, question } = await readDesk(proc, true);
   trace(pending.at(-1)!.ref.id, ok ? "model-result" : "model-failed");
   if (deskRun !== proc) return;
   deskRun = undefined;
@@ -966,10 +967,18 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
     return;
   }
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
+  return prepareDeskAnswer(answer, pending, from, question);
+}
+
+async function prepareDeskAnswer(answer: BasicAnswer, pending: Routing[], from: number, question: string): Promise<DeskResult | undefined> {
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
-  if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
+  if ("answer" in answer) {
+    const rewritten = await rewriteVoice(answer, question);
+    if (!rewritten) return;
+    return { answer: { bubbles: rewritten }, target };
+  }
   return { answer, target };
 }
 
@@ -1021,16 +1030,16 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   }
 }
 
-async function rewriteVoice(draft: string): Promise<string> {
+async function rewriteVoice(source: VoiceSource, question: string): Promise<string[] | undefined> {
   let proc: DeskProc | undefined;
   try {
     proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
-      system: VOICE_PROMPT, prompt: JSON.stringify({ draft }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+      system: voicePrompt(question), prompt: JSON.stringify({ draft: source.answer, question }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
     deskRun = proc;
     const { ok, drafted } = await readDesk(proc);
-    return voiceAnswer(draft, ok, drafted);
+    return voiceAnswer(source, question, ok, drafted);
   } catch {
-    return draft;
+    return;
   } finally {
     if (deskRun === proc) deskRun = undefined;
   }
