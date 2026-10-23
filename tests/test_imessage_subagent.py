@@ -345,7 +345,11 @@ def test_other_selected_provider_does_not_receive_anthropic_context(tmp_path):
 
 
 
-@pytest.mark.parametrize("quote", ["  Alpha is ready.  \n\tBeta is paused.\t", '{"answer":"The build is paused."}'])
+@pytest.mark.parametrize("quote", [
+    "  Alpha is ready.  \n\tBeta is paused.\t",
+    '{"answer":"The build is paused."}',
+    "Alpha is ready.\n\nBeta is paused.",
+])
 @pytest.mark.parametrize("voice_event", [False, True])
 def test_exact_source_keeps_whitespace_in_one_validated_bubble(tmp_path, voice_event, quote):
     question = "Quote the output exactly."

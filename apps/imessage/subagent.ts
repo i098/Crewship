@@ -145,7 +145,7 @@ function sourceQuotes(references: unknown[], tools: DeskEvidence): string[] | un
     if (selected.has(key)) return;
     selected.add(key);
     const line = results[source.tool - 1].text.split(/\r?\n/)[source.line - 1];
-    if (line === undefined || !line.trim()) return;
+    if (line === undefined) return;
     quotes.push(line);
   }
   return quotes;

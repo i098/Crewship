@@ -187,7 +187,11 @@ console.log(JSON.stringify(models.map(({{ id, reasoning, apiKeyEnv }}) => ({{ id
     assert {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
 
 
-def test_loader_allows_only_enabled_direct_openai_models(tmp_path):
+@pytest.mark.parametrize("enabled,disabled", [
+    ("openai/gpt-6.1-sol", []),
+    ("gpt-6.1-sol", ["openai-codex"]),
+])
+def test_loader_allows_only_enabled_direct_openai_models(tmp_path, enabled, disabled):
     if not shutil.which("omp"):
         pytest.skip("needs the installed omp catalog")
     home = tmp_path / "home"
@@ -195,7 +199,7 @@ def test_loader_allows_only_enabled_direct_openai_models(tmp_path):
     (home / "config").mkdir(parents=True)
     agent.mkdir()
     (home / "config/crew-dispatch.json").write_bytes((ROOT / "blueprint/config/crew-dispatch.json").read_bytes())
-    (agent / "config.yml").write_text(json.dumps({"enabledModels": ["openai/gpt-6.1-sol"]}))
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": [enabled], "disabledProviders": disabled}))
     result = bun(SOURCE + f"""
 process.env.PI_CODING_AGENT_DIR = {json.dumps(str(agent))};
 globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
@@ -236,3 +240,106 @@ const models = await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str
 console.log(JSON.stringify(models.map((model) => model.apiKeyEnv)));
 """)
     assert result == [expected]
+
+
+@pytest.fixture
+def host_catalog(tmp_path):
+    if not shutil.which("omp"):
+        pytest.skip("needs the installed omp catalog")
+    home = tmp_path / "home"
+    agent = tmp_path / "agent"
+    (home / "config").mkdir(parents=True)
+    agent.mkdir()
+    (home / "config/crew-dispatch.json").write_bytes((ROOT / "blueprint/config/crew-dispatch.json").read_bytes())
+    return home, agent
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_loader_normalizes_legacy_thinking_levels(host_catalog, custom):
+    home, agent = host_catalog
+    model = "claude-haiku-5-5"
+    thinking = {"mode": "anthropic-adaptive", "levels": ["low", "high"]}
+    provider = {
+        "baseUrl": "https://api.anthropic.com",
+        "api": "anthropic-messages",
+        "apiKey": "!printenv ANTHROPIC_API_KEY",
+        **({"models": [{"id": model, "thinking": thinking}]} if custom
+           else {"modelOverrides": {model: {"thinking": thinking}}}),
+    }
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": [f"anthropic/{model}"]}))
+    (agent / "models.yml").write_text(json.dumps({"providers": {"anthropic": provider}}))
+    before = {path: path.read_bytes() for path in agent.iterdir()}
+    result = bun(SOURCE + f"""
+globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
+console.log(JSON.stringify((await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str(agent))}))
+  .map((model) => model.reasoning)));
+""")
+    assert result == [["low", "high"]]
+    assert {path: path.read_bytes() for path in agent.iterdir()} == before
+
+
+@pytest.mark.parametrize("model_override", [False, True])
+def test_loader_applies_provider_compat_before_model_overrides(host_catalog, model_override):
+    home, agent = host_catalog
+    provider = {"compat": {"supportsReasoningEffort": False}}
+    if model_override:
+        provider["modelOverrides"] = {"gpt-6.1-sol": {"compat": {"supportsReasoningEffort": True}}}
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": ["openai/gpt-6.1-sol"]}))
+    (agent / "models.yml").write_text(json.dumps({"providers": {"openai": provider}}))
+    result = bun(SOURCE + f"""
+globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
+console.log(JSON.stringify((await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str(agent))}))
+  .map((model) => model.id)));
+""")
+    assert result == (["openai/gpt-6.1-sol"] if model_override else [])
+
+
+@pytest.mark.parametrize("api_key", ["!printenv CUSTOM_OPENAI_API_KEY", "CUSTOM_OPENAI_API_KEY"])
+def test_loader_selects_the_configured_credential_variable(host_catalog, api_key):
+    home, agent = host_catalog
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": ["openai/gpt-6.1-sol"]}))
+    (agent / "models.yml").write_text(json.dumps({"providers": {"openai": {"apiKey": api_key}}}))
+    result = bun(SOURCE + f"""
+process.env.CUSTOM_OPENAI_API_KEY = "custom-test-key";
+process.env.OPENAI_API_KEY = "default-test-key";
+globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
+console.log(JSON.stringify((await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str(agent))}))
+  .map((model) => model.apiKeyEnv)));
+""")
+    assert result == ["CUSTOM_OPENAI_API_KEY"]
+
+
+@pytest.mark.parametrize("api_key", [
+    "!printenv CUSTOM_OPENAI_API_KEY OTHER_API_KEY",
+    "!printf secret",
+    "literal-test-key",
+    "UNSET_CUSTOM_OPENAI_API_KEY",
+])
+def test_loader_keeps_native_owned_credentials_without_defaulting(host_catalog, api_key):
+    home, agent = host_catalog
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": ["openai/gpt-6.1-sol"]}))
+    (agent / "models.yml").write_text(json.dumps({"providers": {"openai": {"apiKey": api_key}}}))
+    result = bun(SOURCE + f"""
+delete process.env.UNSET_CUSTOM_OPENAI_API_KEY;
+process.env.OPENAI_API_KEY = "default-test-key";
+globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
+console.log(JSON.stringify((await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str(agent))}))
+  .map((model) => ({{ id: model.id, apiKeyEnv: model.apiKeyEnv }}))));
+""")
+    assert result == [{"id": "openai/gpt-6.1-sol", "apiKeyEnv": None}]
+
+
+def test_loader_does_not_execute_configured_credential_commands(host_catalog):
+    home, agent = host_catalog
+    marker = home / "command-ran"
+    (agent / "config.yml").write_text(json.dumps({"enabledModels": ["openai/gpt-6.1-sol"]}))
+    (agent / "models.yml").write_text(json.dumps({
+        "providers": {"openai": {"apiKey": f"!touch {marker}; printenv CUSTOM_OPENAI_API_KEY"}},
+    }))
+    result = bun(SOURCE + f"""
+globalThis.fetch = () => {{ throw new Error("network forbidden"); }};
+console.log(JSON.stringify((await loadDispatchModels({json.dumps(str(home))}, {json.dumps(str(agent))}))
+  .map((model) => ({{ id: model.id, apiKeyEnv: model.apiKeyEnv }}))));
+""")
+    assert result == [{"id": "openai/gpt-6.1-sol", "apiKeyEnv": None}]
+    assert not marker.exists()

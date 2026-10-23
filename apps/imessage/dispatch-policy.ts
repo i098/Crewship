@@ -97,14 +97,24 @@ type ConfigurationTools = {
   };
   validation: {
     validateProviderConfiguration(provider: string, config: Record<string, unknown>, mode: "models-config"): void;
+    ModelsConfigFile: { schema: { assert(value: unknown): { providers?: Record<string, Record<string, unknown>> } } };
   };
 };
 
-function credentialName(provider: string, sources: {
+function credentialName(provider: string, config: Record<string, unknown> | undefined, sources: {
   environment: Record<string, string | undefined>;
   isFoundryEnabled(): boolean;
   getEnvApiKeyName(provider: string): string | undefined;
+  envExact(name: string): string | undefined;
+  isCommandConfigValue(value: string): boolean;
 }): string | null {
+  if (typeof config?.apiKey === "string") {
+    if (sources.isCommandConfigValue(config.apiKey)) {
+      const name = /^printenv[ \t]+([A-Za-z_][A-Za-z0-9_]*)$/.exec(config.apiKey.slice(1).trim())?.[1];
+      if (name) return name;
+    } else if (sources.envExact(config.apiKey)) return config.apiKey;
+    return null;
+  }
   if (provider === "inception") return "INCEPTION_API_KEY";
   if (provider === "anthropic") return anthropicApiKeyEnv(sources.environment, sources.isFoundryEnabled());
   return sources.getEnvApiKeyName(provider) ?? null;
@@ -115,6 +125,10 @@ function applyProvider(models: CatalogModel[], provider: string, value: unknown,
   const definitions = value.models ?? [];
   if (!Array.isArray(definitions)) throw new Error("Invalid host model definitions");
   tools.validation.validateProviderConfiguration(provider, { ...value, models: definitions }, "models-config");
+  if (value.compat !== undefined) {
+    models = models.map((model) => model.provider === provider
+      ? tools.patches.applyModelOverride(model, { compat: value.compat }) : model);
+  }
   for (const definition of definitions) {
     const overlay = tools.custom.buildCustomModelOverlay(provider, value.baseUrl, value.api, undefined, undefined,
       value.authHeader, value.compat, value.auth, value.remoteCompaction, definition);
@@ -133,15 +147,16 @@ function applyProvider(models: CatalogModel[], provider: string, value: unknown,
   return models;
 }
 
-function configuredCatalog(models: CatalogModel[], agentDir: string, tools: ConfigurationTools): CatalogModel[] {
+function configuredCatalog(models: CatalogModel[], agentDir: string, tools: ConfigurationTools) {
   const path = ["models.yml", "models.yaml", "models.json"].map((name) => join(agentDir, name)).find(existsSync);
+  let providers: Record<string, Record<string, unknown>> = {};
   if (path) {
     const source = readFileSync(path, "utf8");
-    const config = path.endsWith(".json") ? JSONC.parse(source) : YAML.parse(source);
-    if (!record(config) || !record(config.providers)) throw new Error("Invalid host model configuration");
-    for (const [provider, value] of Object.entries(config.providers)) models = applyProvider(models, provider, value, tools);
+    const config = tools.validation.ModelsConfigFile.schema.assert(path.endsWith(".json") ? JSONC.parse(source) : YAML.parse(source));
+    providers = config.providers ?? {};
+    for (const [provider, value] of Object.entries(providers)) models = applyProvider(models, provider, value, tools);
   }
-  return models;
+  return { models, providers };
 }
 
 export async function loadDispatchModels(home: string, agentDir: string, cwd = home, purpose: DispatchPurpose = "general"): Promise<DispatchModel[]> {
@@ -149,27 +164,30 @@ export async function loadDispatchModels(home: string, agentDir: string, cwd = h
   if (!executable) throw new Error("The installed omp catalog is unavailable");
   const base = dirname(realpathSync(executable));
   const load = (name: string) => import(pathToFileURL(Bun.resolveSync(name, base)).href);
-  const [catalog, thinking, settingsApi, modelSettings, resolver, custom, patches, validation, credentials, runtimeEnvironment, foundry] = await Promise.all([
+  const [catalog, thinking, settingsApi, modelSettings, resolver, custom, patches, validation, credentials, configValues, runtimeEnvironment, foundry] = await Promise.all([
     load("@oh-my-pi/pi-catalog/models"), load("@oh-my-pi/pi-catalog/model-thinking"),
     load("@oh-my-pi/pi-coding-agent/config/settings"), load("@oh-my-pi/pi-coding-agent/config/model-settings"),
     load("@oh-my-pi/pi-coding-agent/config/model-resolver"), load("@oh-my-pi/pi-coding-agent/config/custom-models"),
     load("@oh-my-pi/pi-coding-agent/config/model-patch"), load("@oh-my-pi/pi-coding-agent/config/models-config"),
-    load("@oh-my-pi/pi-ai/env-api-key"),
+    load("@oh-my-pi/pi-ai/env-api-key"), load("@oh-my-pi/pi-coding-agent/config/resolve-config-value"),
     load("@oh-my-pi/pi-utils"), load("@oh-my-pi/pi-ai/utils/foundry"),
   ]);
   const credentialSources = {
     environment: runtimeEnvironment.$env,
     isFoundryEnabled: foundry.isFoundryEnabled,
     getEnvApiKeyName: credentials.getEnvApiKeyName,
+    envExact: runtimeEnvironment.$envExact,
+    isCommandConfigValue: configValues.isCommandConfigValue,
   };
   const settings = await settingsApi.Settings.loadReadOnly({ agentDir, cwd });
-  const models = configuredCatalog(catalog.getBundledProviders().flatMap((provider: string) => catalog.getBundledModels(provider)),
+  const { models, providers } = configuredCatalog(catalog.getBundledProviders().flatMap((provider: string) => catalog.getBundledModels(provider)),
     agentDir, { custom, patches, validation });
   const disabled = new Set(modelSettings.cfgDisabledProviders.get(settings));
-  const enabled = resolver.filterAvailableModelsByEnabledPatterns(models, modelSettings.cfgEnabledModels.get(settings), settings);
-  const entries = enabled.filter((model: { provider: string }) => !disabled.has(model.provider)).map((model: { provider: string; id: string }) => ({
+  const enabled = resolver.filterAvailableModelsByEnabledPatterns(models.filter((model) => !disabled.has(model.provider)),
+    modelSettings.cfgEnabledModels.get(settings), settings);
+  const entries = enabled.map((model: { provider: string; id: string }) => ({
     provider: model.provider, id: model.id, reasoning: thinking.getSupportedEfforts(model),
-    apiKeyEnv: credentialName(model.provider, credentialSources),
+    apiKeyEnv: credentialName(model.provider, providers[model.provider], credentialSources),
   }));
   return dispatchModels(entries, JSON.parse(readFileSync(join(home, "config", "crew-dispatch.json"), "utf8")), purpose);
 }

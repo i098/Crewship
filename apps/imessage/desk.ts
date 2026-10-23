@@ -206,13 +206,12 @@ export function socialOnly(texts: readonly string[], previous?: { kind: string; 
 
 function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: readonly { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }, tools: DeskEvidence) {
   if (typeof evidence?.quote !== "string") return;
-  if (!evidence.quote.trim()) return;
   let source: string | undefined;
   switch (evidence.source) {
     case "status": source = status; break;
     case "identity": {
       const model = evidence.subject === "desk" ? models.desk : evidence.subject === "supervisor" ? models.supervisor : undefined;
-      return evidence.quote === model ? evidence.quote : undefined;
+      return model && evidence.quote === model ? evidence.quote : undefined;
     }
     case "tool": {
       return Object.values(tools).some(({ text }) => text.split(/\r?\n/).some((line) =>
