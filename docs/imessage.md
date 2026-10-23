@@ -71,7 +71,7 @@ For each message from the owner, the service does these steps:
    Before checking evidence, it also maps native credential placeholders and source credentials to the same `[REDACTED]` marker.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
-   The reply check rejects Markdown, colon or equals configuration rows, and bare source values unless the complete request explicitly permits exact output.
+   Without an explicit exact-output request, the reply check rejects headings, bullets, pipe-style tables, configuration rows, and bare source values.
    A retained configuration row still causes rejection when other lines contain prose.
    Unrequested inline code also causes rejection; the service does not strip its formatting.
    The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
@@ -86,10 +86,10 @@ For each message from the owner, the service does these steps:
    All source-backed answers can use up to 2,000 characters so bare values can become useful sentences.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
    Source comparison normalizes configuration separators and paired inline Markdown delimiters; it never changes delivered characters.
-   Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
+   Rewrites retain standalone scalar values, configuration field values, and the contents of inline code exactly.
    Prose configuration replies must keep named fields directly paired with their source values; unverifiable paraphrases require a handoff.
    Source indentation, dash markers, and blockquote markers do not change those field-to-value checks.
-   Only the approved prose pairs `Read-only`/`read-only` and `Restart-proof`/`restart-proof` can change case.
+   Only the hyphenated prose pairs `Read-only`/`read-only` and `Restart-proof`/`restart-proof` can change case.
    All other hyphenated tokens retain their case, including sentence-leading identifiers.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
    Polarity words must keep the same counts and immediately adjacent punctuation.
