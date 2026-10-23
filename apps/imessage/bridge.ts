@@ -30,7 +30,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, VOICE_PROMPT, type VoiceSource } from "./desk.ts";
+import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -1034,7 +1034,7 @@ async function rewriteVoice(source: VoiceSource, question: string): Promise<stri
   let proc: DeskProc | undefined;
   try {
     proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
-      system: VOICE_PROMPT, prompt: JSON.stringify({ draft: source.answer, question }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+      system: voicePrompt(question), prompt: JSON.stringify({ draft: source.answer, question }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
     deskRun = proc;
     const { ok, drafted } = await readDesk(proc);
     return voiceAnswer(source, question, ok, drafted);

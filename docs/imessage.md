@@ -77,7 +77,8 @@ For each message from the owner, the service does these steps:
    The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
    An explanation containing “exactly” does not authorize raw output.
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
-   The voice prompt distinguishes verbatim quotations, which retain source formatting, from exact values, which omit field labels.
+   The voice prompt uses the reply check's exact-output decision to select quotation or prose instructions before the model call.
+   Prose instructions retain descriptions after source labels; quotation instructions retain the full source line, including bullets and emphasis.
    The same rules apply when a request spans lines or combines several messages.
    Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
    Any other unconsumed or conflicting instruction selects the normal prose checks.
