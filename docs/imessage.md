@@ -66,7 +66,8 @@ For each message from the owner, the service does these steps:
    Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction.
    A social reaction may include one short text from a fixed list of safe acknowledgements.
    The text cannot contain facts or work claims; an invalid text sends the whole burst to Firstmate.
-   Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions go to Firstmate.
+   Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions normally go to Firstmate.
+   A configured [second-mate routing table](#second-mate-handoffs) lets the desk send clear single-domain work to its owner instead.
    Failed classification calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
@@ -149,6 +150,42 @@ The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's
 
 The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, typing and command tapbacks target the newest saved text. A file from before the time was kept counts as the oldest.
 The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
+
+### Second-mate handoffs
+
+The desk reads `$FM_HOME/data/secondmates.md` at runtime.
+Routing stays off when this file is missing, unreadable, empty, or contains an invalid entry.
+Single-home installs keep their existing behavior.
+Each entry uses the existing registry format:
+
+```text
+- web-mate - Website owner (home: /srv/website-home; scope: Website pages and browser layout; projects: website; added 2026-10-23)
+```
+
+Each mate needs a unique id, an absolute home path, and a non-empty scope.
+The desk uses the configured model to select a handoff target from these ids or `firstmate`.
+It sends work to a mate only when the model reports high confidence and exactly one matching domain.
+It checks the whole pending burst, including recent context, rather than splitting related texts across mates.
+Invalid output, low confidence, ambiguous requests, and work across several domains go to Firstmate.
+Decisions, approvals, merges, credentials, and sensitive messages also stay with Firstmate.
+Attachments, group chats, edits, and unsupported desk models keep their existing Firstmate handoff.
+
+The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, including an `FM_INBOX_CMD` override.
+The service sets `FM_HOME` to the main home that owns the second mates as tasks and holds the routing table.
+It passes the mate id and `[from captain via desk] <verbatim text>` as separate arguments, without a shell.
+The sender uses the mate's existing inbox.
+The desk checks the registry again before delivery; a changed entry causes a Firstmate handoff.
+
+Every handed-off text still produces the normal stable-id Firstmate inbox note.
+A successful mate delivery adds the line `routed to <mate-id>` before the original note text.
+A failed sender, missing command, or five-second delivery timeout hands the request to Firstmate.
+The journal saves delivery uncertainty before calling the sender because `fm-send.sh` has no deduplication key.
+A failed or interrupted send retains this warning so Firstmate checks the mate's inbox before sending again.
+Inbox retries and service restarts never repeat a recorded mate delivery.
+
+Firstmate activity still cancels an unfinished routing decision and sends pending work to Firstmate.
+Direct short answers and social reactions stay unchanged.
+Handoffs still send no extra desk acknowledgement.
 
 ## Upstream outages
 
