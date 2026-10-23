@@ -1773,7 +1773,7 @@ function message(m) {
   return {
     id: m.id, direction: "inbound", sender: { id: m.sender }, space: space(m.space), timestamp: m.at ? new Date(m.at) : undefined,
     content: m.name
-      ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
+      ? { type: m.voice ? "voice" : "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
     async react(emoji) {
       call("react"); sent(`react ${m.id} ${emoji}`, m.space);

@@ -117,10 +117,11 @@ For each message from the owner, the service does these steps:
    A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
    Active mate delivery does not block a due acknowledgement or keep that chat's typing indicator active.
    It uses the existing outbox, keeps every request in the handoff, and states that no confirmed answer exists yet.
-   It omits quoted content for sensitive messages and attachments.
+   It omits quoted content for sensitive messages and attachments, including audio transcripts and saved paths.
    A prompt answer suppresses the acknowledgement; typing alone does not.
    A queued supervisor response suppresses it only after the transport accepts that response.
    An explicit `--reply N` confirms only its selected message and that message's current edit requests, even with `--no-thread`.
+   Each queued response stores its covered request ids; later arrivals cannot become covered through equal timestamps.
    The acknowledgement targets the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.
    Restart replay confirms an initial card from its saved acceptance; a later card edit does not confirm newer requests.

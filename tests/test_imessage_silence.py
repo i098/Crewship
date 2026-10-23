@@ -521,3 +521,107 @@ def test_explicit_reply_confirms_current_edits(tmp_path, desk_clock, image, plai
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize("output", ["text", "image", "link-card", "app-card"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_queued_supervisor_response_excludes_later_requests_in_same_millisecond(tmp_path, desk_clock, output, restart):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "send-hold").touch()
+    bridge = start(1)
+    try:
+        receive("release", "Check the release job")
+        if output.endswith("card"):
+            cli("--card", json.dumps({
+                "kind": "text", "key": "release", "title": "Release status",
+                "lines": ["The release job passed."], "app": output == "app-card",
+            }))
+        elif output == "image":
+            photo = tmp_path / "release.png"
+            photo.write_bytes(png(2, 2))
+            cli("--image", str(photo), "The release job passed.")
+        else:
+            cli("The release job passed.")
+        wait_for(lambda: (fake / "send-waiting").exists(), "the queued supervisor response")
+        queued = json.loads(next((state / "outbox").glob("*.json")).read_text())
+        receive("backup", "Restart the backup job")
+        arrivals = [event["received"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if "received" in event]
+        assert arrivals[0]["at"] == arrivals[1]["at"] == queued["at"]
+        if restart:
+            bridge.terminate()
+            bridge.wait(10)
+        (fake / "send-hold").unlink()
+        if restart:
+            bridge = start(2)
+        wait_for(lambda: text(fake / "sent"), "the original response")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed original response")
+        confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
+        assert confirmations == [["photon-release"]]
+        before = text(fake / "sent").splitlines()
+        assert len(before) == (2 if output == "image" else 1)
+        desk_clock(8000)
+        wait_for(lambda: len(text(fake / "sent").splitlines()) > len(before), "the later request acknowledgement")
+        sent = text(fake / "sent").splitlines()
+        assert sent[:-1] == before
+        assert sent[-1].startswith("reply backup ")
+        assert sent[-1].endswith("no confirmed answer yet.")
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(3 if restart else 2)
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == sent
+    finally:
+        (fake / "send-hold").unlink(missing_ok=True)
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("kind", ["voice", "attachment"])
+@pytest.mark.parametrize("outcome", ["transcribed", "failed", "unsaved"])
+def test_audio_acknowledgement_omits_transcript_and_saved_path(tmp_path, desk_clock, monkeypatch, kind, outcome):
+    preload = tmp_path / "audio-result.ts"
+    preload.write_text("""
+import { mock } from "bun:test";
+const path = `${process.cwd()}/transcribe.ts`;
+const transcription = { ...await import(path) };
+mock.module(path, () => ({
+  ...transcription,
+  async transcribe() {
+    if (process.env.FM_TEST_AUDIO === "failed") throw new Error("transcription failed");
+    return { text: "private transcript 743821", seconds: 4 };
+  },
+}));
+if (process.env.FM_TEST_AUDIO === "unsaved") {
+  const write = Bun.write;
+  Bun.write = (path, ...args) => {
+    if (String(path).includes("/attachments/")) throw new Error("disk full");
+    return write(path, ...args);
+  };
+}
+""")
+    monkeypatch.setenv("FM_TEST_AUDIO", outcome)
+    monkeypatch.setenv("BUN_OPTIONS", f"{os.environ['BUN_OPTIONS']} --preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    bridge = start(1)
+    try:
+        receive("audio", "", name="memo.caf", data="synthetic audio", voice=kind == "voice")
+        wait_for(lambda: "photon-audio " in text(notes), "the private audio handoff")
+        if outcome == "transcribed":
+            assert "private transcript 743821" in text(notes)
+        elif outcome == "failed":
+            assert "transcription failed" in text(notes)
+        else:
+            assert "could not be saved yet" in text(notes)
+        if outcome != "unsaved":
+            assert str(state / "attachments") in text(notes)
+        cli("--typing")
+        desk_clock(8000)
+        wait_for(lambda: text(fake / "sent"), "the generic audio acknowledgement")
+        assert text(fake / "sent").splitlines() == ["send I saved your message; no confirmed answer yet."]
+        wait_for(lambda: typing_events(fake, text)[-1] is False, "audio typing cleanup")
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == ["send I saved your message; no confirmed answer yet."]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)

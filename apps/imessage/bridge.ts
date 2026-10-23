@@ -533,7 +533,8 @@ function stage(photo: PreparedImage): Picture {
 function put(item: Out) {
   if (stopping) return false;
   if (muted()) return false;
-  outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
+  const requests = item.requests ?? [...routing.values()].filter((r) => !r.responded && sameChat(r.ref, item)).map((r) => r.requestId);
+  outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item, requests });
   return true;
 }
 
@@ -763,9 +764,7 @@ function sameChat(a: Ref, b: Ref | undefined) {
 }
 
 function recordResponse(o: Out) {
-  const ids = o.requests ?? [...routing.values()].filter((r) => r.at && r.at <= (o.at ?? 0)
-    && sameChat(r.ref, o)).map((r) => r.requestId);
-  const unanswered = ids.filter((id) => {
+  const unanswered = (o.requests ?? []).filter((id) => {
     const item = routing.get(id);
     return item && !item.responded && sameChat(item.ref, o);
   });
@@ -812,7 +811,7 @@ function acknowledge(pending: Routing[]) {
   }
   const ids = pending.map((r) => r.requestId);
   const text = target.authored ?? target.text;
-  const subject = supervisorOnly(text) || text.includes("(sent an attachment")
+  const subject = supervisorOnly(text) || /\(sent (?:an attachment|an audio message|a voice memo)|\[voice memo,/.test(text)
     ? "your message" : `“${text.replace(/\s+/g, " ").slice(0, 160)}”`;
   const guid = crypto.randomUUID();
   const out: Out = { ...target.ref, requestId: `ack-${guid}`, requests: ids,
