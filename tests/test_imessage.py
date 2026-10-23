@@ -1791,7 +1791,6 @@ function space(id) {
     async getMessage(mid) {
       call("getMessage");
       await holdLookup();
-      await holdLookup("lookup-reply-hold");
       if (existsSync(`${dir}/lookup-timeout`)) throw Object.assign(new Error("lookup timed out"), { grpcCode: 4 });
       if (existsSync(`${dir}/lookup-missing`)) return undefined;
       if (mid === "lost" && existsSync(`${dir}/lookup-stop`)) {
@@ -2223,7 +2222,7 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
-    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "reply m4 claude-haiku-5-5", "send five"]
+    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send claude-haiku-5-5", "send five"]
     assert text(fake / "sent").splitlines() == sent
     assert "typing UNAVAILABLE" in text(fake / "calls")
     saved = state / "attachments/m2-photo.jpg"
@@ -2486,6 +2485,7 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   if (path === "message/text") {
     const b = await req.json();
     appendFileSync(`${dir}/relay-payloads`, `${JSON.stringify(b)}\\n`);
+    if (mode() === "send-busy") return new Response("busy", { status: 429 });
     if (mode() === "send-down") return new Response("unavailable", { status: 503 });
     if (mode() === "lost") return new Response("garbled");
     appendFileSync(`${dir}/relay-sent`, `${b.chatGuid} ${b.message}\\n`);
@@ -2513,13 +2513,7 @@ const server = Bun.serve({ port: 0, async fetch(req) {
   if (path === "message/query") {
     const b = await req.json();
     if (b.chatGuid) {
-      if (mode() === "last-down") return new Response("history unavailable", { status: 503 });
       if (mode() === "last-404") return new Response("chat not found", { status: 404 });
-      if (existsSync(`${dir}/hold-health-after-query`)) {
-        writeFileSync(`${dir}/relay-mode`, "hold-health");
-        writeFileSync(`${dir}/health-query-waiting`, "");
-        while (existsSync(`${dir}/hold-health-after-query`)) await Bun.sleep(5);
-      }
       db.run("DELETE FROM message");
       for (const m of history()) for (const chat of m.chats) {
         db.query("INSERT INTO message VALUES (?, ?, ?, ?)").run(JSON.stringify(m), chat.guid, m.associatedMessageGuid ?? null, m.dateCreated);

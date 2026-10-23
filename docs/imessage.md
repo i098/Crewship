@@ -129,8 +129,8 @@ For each message from the owner, the service does these steps:
    A direct answer enters the existing outbox with a stable deduplication key.
    A reply or reaction can set `target` to the message's 1-based position in the pending burst.
    Without `target`, the service selects the last pending message; an invalid target causes a handoff.
-   The service threads a text only when another bubble separates the selected message from its answer.
-   It checks separation at delivery, using the same rule as `fm-imessage --reply`.
+   A desk answer or acknowledgement is a normal message, never a thread, even when later bubbles follow the selected message.
+   Only an explicit `fm-imessage --reply N` threads, by the separation rule below.
    Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
    A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and deadlines.
