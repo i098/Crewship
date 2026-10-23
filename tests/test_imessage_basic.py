@@ -1768,7 +1768,7 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
     (
         "Give me the board link and the command with its exact identifier.",
         ["board: https://example.org/boards/ABC-42", "command: `run-tool inspect --json`"],
-        "The board is https://example.org/boards/ABC-42\n\nRun run-tool inspect --json",
+        "The board is https://example.org/boards/ABC-42\n\nThe command is run-tool inspect --json",
     ),
     (
         "What is the exact entrypoint identifier?",
@@ -1799,6 +1799,46 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         "Quote the runtime and memory sentence.\nKeep the original text.",
         ["The runtime is `herdr`, with memory `off`."],
         "The runtime is `herdr`, with memory `off`.",
+    ),
+    (
+        "How durable is the setup?",
+        ["> Work survives a restart."],
+        "Work survives a restart.",
+    ),
+    (
+        "How durable is the setup?",
+        ["_Durable_ setup."],
+        "Durable setup.",
+    ),
+    (
+        "What is the board URL?",
+        ["[Board](https://example.org/board)"],
+        "https://example.org/board",
+    ),
+    (
+        "Quote the source text.",
+        ["> Work survives a restart."],
+        "> Work survives a restart.",
+    ),
+    (
+        "Quote the source text.",
+        ["_Durable_ setup."],
+        "_Durable_ setup.",
+    ),
+    (
+        "Quote the source text.",
+        ["[Board](https://example.org/board)"],
+        "[Board](https://example.org/board)",
+    ),
+    (
+        "What are the logging and memory settings?",
+        ["logging=on", "memory=off"],
+        "Logging is on and memory is off.",
+    ),
+    (
+        "Return the exact values.",
+        ["logging=on", "memory=off"],
+        "on\noff",
     ),
 ])
 def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
@@ -1860,6 +1900,10 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
     (["runtime=herdr", "memory=off"], "runtime=herdr\nmemory=off", False, None),
     (["runtime = herdr", "memory = off"], "The settings are:\nRuntime = herdr\nMemory = off", False, None),
     (["runtime=herdr", "memory=off"], "The runtime is herdr, with memory off.", True, None),
+    (["logging=on", "memory=off"], "Logging is off and memory is on.", False, None),
+    (["> Work survives a restart."], "> Work survives a restart.", False, "How durable is the setup?"),
+    (["_Durable_ setup."], "_Durable_ setup.", False, "How durable is the setup?"),
+    (["[Board](https://example.org/board)"], "[Board](https://example.org/board)", False, "What is the board URL?"),
 ])
 def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
     rig, replies, requests = native_desk
@@ -1970,6 +2014,15 @@ def test_native_exact_output_respects_complete_multiline_and_batched_requests(tm
     ("runtime=herdr\nmemory=off", "runtime=herdr\nmemory=off"),
     ("runtime=herdr\nmemory=off", "The settings are:\nRuntime=herdr\nMemory=off"),
     ("runtime=herdr\nmemory=off", "The runtime is tmux, with memory off."),
+    ("logging=on\nmemory=off", "Logging is off and memory is on."),
+    ("logging: on\nmemory: off", "Logging is off and memory is on."),
+    ("logging=true\nmemory=false", "Logging is false and memory is true."),
+    ("logging: true\nmemory: false", "Logging is false and memory is true."),
+    ("logging=enabled\nmemory=disabled", "Logging is disabled and memory is enabled."),
+    ("logging: enabled\nmemory: disabled", "Logging is disabled and memory is enabled."),
+    ("> Work survives a restart.", "> Work survives a restart."),
+    ("_Durable_ setup.", "_Durable_ setup."),
+    ("[Board](https://example.org/board)", "[Board](https://example.org/board)"),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk

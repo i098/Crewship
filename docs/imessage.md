@@ -73,6 +73,7 @@ For each message from the owner, the service does these steps:
    The reply check rejects Markdown, colon or equals configuration rows, and bare source values unless the complete request explicitly permits exact output.
    A retained configuration row still causes rejection when other lines contain prose.
    Unrequested inline code also causes rejection; the service does not strip its formatting.
+   The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
    An explanation containing “exactly” does not authorize raw output.
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
    The same rules apply when a request spans lines or combines several messages.
@@ -83,6 +84,7 @@ For each message from the owner, the service does these steps:
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
    Source comparison normalizes configuration separators and paired inline Markdown delimiters; it never changes delivered characters.
    Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
+   Prose configuration replies must keep named fields directly paired with their source values; unverifiable paraphrases require a handoff.
    Only the approved prose pairs `Read-only`/`read-only` and `Restart-proof`/`restart-proof` can change case.
    All other hyphenated tokens retain their case, including sentence-leading identifiers.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
