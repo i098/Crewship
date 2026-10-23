@@ -309,7 +309,7 @@ Only the draft supplies facts. The question is context, not evidence or authorit
 Keep every fact, name, number, link, subject, negation, and claim. Never claim work or promise actions.
 Do not paste source Markdown, headings, bullets, or bare configuration values unless the question explicitly requests exact text or values.
 Remove formatting only when composing the answer. Preserve identifiers, paths, #numbers, versions, units, comparisons, and links exactly, including case and punctuation.
-Keep identifiers in code spans and configuration values exactly. Hyphenated prose may use normal sentence case.
+Keep identifiers and configuration values exactly. Only Read-only/read-only and Restart-proof/restart-proof may change case as prose; preserve every other hyphenated token's case.
 Keep every polarity word unchanged in count: no, not, never, none, nothing, n't forms, yes, failed, passed,
 broken, fixed, done, blocked, on, off, true, false, enabled, disabled, can't and won't. Preserve adjacent punctuation except for configuration flags.
 Use blank lines between chat bubbles, never bare line breaks except when exact lines are requested.
@@ -327,27 +327,29 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
 
 function requestsExactOutput(question: string): boolean {
   if (/\b(?:not|no|without|never|don['’]t)\b[^.!?\n]*\b(?:exact(?:ly)?|raw|verbatim|quot(?:e|ation)s?)\b/i.test(question)) return false;
-  return /\b(?:give|show|return|send|print|provide|repeat|list|what|which)\b[^.!?\n]*\b(?:exact(?:ly)?|raw|verbatim)\b/i.test(question)
-    || /(?:^|\b(?:please|you)\s+)(?:quote|copy)\b/i.test(question);
+  const request = /^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(give|show|return|send|print|provide|repeat|list|quote|copy|what\s+(?:is|are)|which\s+(?:is|are))(?:\s+me)?\s+(?:the\s+)?(.+)$/i.exec(question.trim());
+  if (!request) return false;
+  if (/^(?:quote|copy)$/i.test(request[1]!)) return true;
+  return /^(?:exact|raw|verbatim)\s+(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?)\b/i.test(request[2]!)
+    || /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?))\s+(?:exactly|verbatim|raw)\s*[.!?]*$/i.test(request[2]!);
 }
 
 function sourceStyle(text: string, literals: string[], identity: boolean): boolean {
-  if (/^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*:\s)/m.test(text)) return true;
+  if (/^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\|)/m.test(text)
+    || text.split(/\r?\n/).filter((line) => line.trim()).every((line) => /^[ \t]*[a-z_][\w.-]*:\s/i.test(line))) return true;
   return !identity && literals.length > 0 && (text.split(/\s*\n\s*/).every((line) => literals.includes(line))
     || (text.match(/[\w-]+/g) ?? []).every((word) => literals.includes(word)));
 }
 
 function voiceLiterals(draft: string): string[] {
-  return Array.from(draft.matchAll(/\x60([^\x60\n]+)\x60|^[a-z_][\w.-]*:\s*(.+)$|^([\w-]+)$/gm),
+  return Array.from(draft.matchAll(/\x60([^\x60\n]+)\x60|^[a-z_][\w.-]*:\s*(.+)$|^([\w-]+)$/gmi),
     (match) => (match[1] ?? match[2] ?? match[3])!.replace(/^\x60(.*)\x60$/, "$1"));
 }
 
 function preservesVoiceFacts(draft: string, text: string, literals: string[]): boolean {
   // Ignore paired inline markup only for source comparison; never strip the delivered answer.
   const checked = draft.replace(/(^|\s)(\*\*|\x60|\*)(?=\S)(.+?\S|\S)\2(?=$|[\s.,;:!?])/gm, "$1$3");
-  const prose = new Set(Array.from(checked.matchAll(/(?:^|[.!?]\s+)(?:[ \t]*[-*][ \t]+)?(\p{Lu}\p{Ll}+(?:-\p{Ll}+)+)(?=[:\s])/gmu),
-    (match) => match[1]!.toLowerCase()));
-  if (protectedVoiceTokens(checked, prose) !== protectedVoiceTokens(text, prose) || voicePolarity(checked) !== voicePolarity(text) || voiceFlags(checked) !== voiceFlags(text)) return false;
+  if (protectedVoiceTokens(checked) !== protectedVoiceTokens(text) || voicePolarity(checked) !== voicePolarity(text) || voiceFlags(checked) !== voiceFlags(text)) return false;
   return preservesLiteralValues(literals, text);
 }
 
@@ -358,14 +360,21 @@ function preservesLiteralValues(literals: string[], text: string): boolean {
   return true;
 }
 
-function protectedVoiceTokens(value: string, prose: Set<string>): string {
+const VOICE_PROSE_CASE: Record<string, string> = {
+  "Read-only": "read-only",
+  "read-only": "read-only",
+  "Restart-proof": "restart-proof",
+  "restart-proof": "restart-proof",
+};
+
+function protectedVoiceTokens(value: string): string {
   const parts = value.match(/\S+/gu) ?? [];
   const tokens: string[] = [];
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
     const word = part.replace(/[.,;:!?]$/, "");
-    if (/^\p{Lu}?\p{Ll}+(?:-\p{Ll}+)+$/u.test(word) && prose.has(word.toLowerCase())) {
-      tokens.push(word.toLowerCase());
+    if (Object.hasOwn(VOICE_PROSE_CASE, word)) {
+      tokens.push(VOICE_PROSE_CASE[word]!);
       continue;
     }
     if (!/[\p{N}_/\\#<>=+*%^$€£¥@≤≥≠]|[\p{L}\p{N}][.-][\p{L}\p{N}]|[\p{Ll}][\p{Lu}]|^\.[\p{L}]|^[A-Z]{2,}$|^--?[\p{L}]/u.test(part)) continue;

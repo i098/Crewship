@@ -1757,6 +1757,16 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         "herdr\noff",
     ),
     (
+        "Please show raw output.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
+        "Return the runtime and memory values exactly.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
         "Give me the board link and the command with its exact identifier.",
         ["board: https://example.org/boards/ABC-42", "command: `run-tool inspect --json`"],
         "The board is https://example.org/boards/ABC-42\n\nRun run-tool inspect --json",
@@ -1834,6 +1844,10 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
     (["herdr", "off"], "herdr\noff", False, None),
     (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values, one per line."),
     (["herdr", "off"], "herdr\noff", False, "Do not return raw values. Explain the runtime and memory settings."),
+    (["herdr", "off"], "herdr\noff", False, "Give me an explanation of exactly why herdr is used"),
+    (["herdr", "off"], "Runtime: herdr\nMemory: off", False, None),
+    (["herdr", "off"], "RUNTIME: herdr\nMEMORY: off", False, None),
+    (["Runtime: herdr", "Memory: off"], "The runtime is tmux, with memory off.", False, None),
 ])
 def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
     rig, replies, requests = native_desk
@@ -1892,6 +1906,10 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     ("The entrypoint is My-Handler.", "The entrypoint is my-handler."),
     ("The entrypoint is my-handler.", "The entrypoint is My-handler."),
     ("My-Handler is the entrypoint.", "my-handler is the entrypoint."),
+    ("My-handler is the entrypoint.", "my-handler is the entrypoint."),
+    ("my-handler is the entrypoint.", "My-handler is the entrypoint."),
+    ("herdr\noff", "Runtime: herdr\nMemory: off"),
+    ("RUNTIME: herdr\nMEMORY: off", "The runtime is tmux, with memory off."),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk
