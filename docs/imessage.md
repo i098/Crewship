@@ -68,6 +68,7 @@ For each message from the owner, the service does these steps:
    It explains configuration values in context and preserves exact values, links, identifiers, and commands.
    The draft and question remain untrusted data; neither grants action authority.
    The native result envelope masks credentials in the original question before it reaches the voice pass.
+   Before checking evidence, it also maps native credential placeholders and source credentials to the same `[REDACTED]` marker.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
    The reply check rejects Markdown, colon or equals configuration rows, and bare source values unless the complete request explicitly permits exact output.
@@ -76,6 +77,7 @@ For each message from the owner, the service does these steps:
    The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
    An explanation containing “exactly” does not authorize raw output.
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
+   The voice prompt distinguishes verbatim quotations, which retain source formatting, from exact values, which omit field labels.
    The same rules apply when a request spans lines or combines several messages.
    Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
    Any other unconsumed or conflicting instruction selects the normal prose checks.

@@ -4,6 +4,7 @@
 import { statSync } from "node:fs";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { builtinCredentialSecretEntries, collectEnvSecrets, loadSecrets, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
+import { PLACEHOLDER_RE } from "@oh-my-pi/pi-coding-agent/secrets/placeholder";
 import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-scan";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern, resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
@@ -32,10 +33,10 @@ export default function (pi: {
     const redact = (text: string) => {
       try {
         const value = JSON.parse(text);
-        const filtered = mapJsonStrings(value, (part: string) => secrets.obfuscate(part));
+        const filtered = mapJsonStrings(value, (part: string) => secrets.obfuscate(part).replace(PLACEHOLDER_RE, "[REDACTED]"));
         return filtered === value ? text : JSON.stringify(filtered);
       }
-      catch { return secrets.obfuscate(text); }
+      catch { return secrets.obfuscate(text).replace(PLACEHOLDER_RE, "[REDACTED]"); }
     };
     const output = messages.filter((message) => message.role === "assistant" || message.role === "toolResult").map((message) => ({
       ...message,

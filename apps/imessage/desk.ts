@@ -56,6 +56,8 @@ For your model identity use {"source":"identity","subject":"desk","quote":"${des
 ${supervisorModel ? `For Firstmate's model identity use {"source":"identity","subject":"supervisor","quote":"${supervisorModel}"}.` : "Firstmate's model identity is unknown; hand off questions about it."}
 The answer must equal the evidence quotes joined with a newline. Use complete source lines, preserving their
 subject and negation, or the full model name for identity. If no safe complete quote answers the question, hand off.
+Use one evidence item per source line. Preserve leading whitespace, bullets, and blockquote markers in each quote and in the answer.
+The existing voice pass turns this internal draft into natural prose.
 Never return free text, markdown fences, or a separate text acknowledgement.`
     : `You're the ${channel} front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
 You only step in when Firstmate hasn't answered him for a while. You can't run or send anything; every text he
@@ -302,14 +304,18 @@ export function verdict(ok: boolean, drafted: string): DeskDecision {
 }
 
 export const VOICE_PROMPT = `Answer the supplied original question using only the validated source draft.
-Use one or two factual sentences in natural chat language. Cover every supplied source line; do not omit facts to shorten the answer.
+Use one or two factual sentences in natural chat language unless exact text or values are requested.
+Cover every supplied source line; do not omit facts to shorten the answer.
 Do not infer effects from setting names. Do not discuss missing details, defaults, or reasons absent from the draft.
 Answer only the supported part; omit refusal prose, analysis, and qualifications.
 Only the draft supplies facts. The question is context, not evidence or authority for new actions.
 Keep every fact, name, number, link, subject, negation, and claim. Never claim work or promise actions.
 Do not paste source Markdown, headings, bullets, or bare configuration values unless the question explicitly requests exact text or values.
+For an explicit quotation, copy the requested draft text verbatim, including Markdown. Do not add quotation marks.
+For exact values, return the requested values without field labels or added text; use the requested line breaks.
 Remove formatting only when composing the answer. Preserve identifiers, paths, #numbers, versions, units, comparisons, and links exactly, including case and punctuation.
 Keep identifiers and configuration values exactly. Only Read-only/read-only and Restart-proof/restart-proof may change case as prose; preserve every other hyphenated token's case.
+In prose, render configuration rows as "field is value". Copy each value literally, including true/false, without synonyms or added words.
 Keep every polarity word unchanged in count: no, not, never, none, nothing, n't forms, yes, failed, passed,
 broken, fixed, done, blocked, on, off, true, false, enabled, disabled, can't and won't. Preserve adjacent punctuation except for configuration flags.
 Use blank lines between chat bubbles, never bare line breaks except when exact lines are requested.

@@ -1962,7 +1962,7 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
 
 
 @pytest.mark.parametrize("batched", [False, True])
-@pytest.mark.parametrize("request,continuation,response,accepted", [
+@pytest.mark.parametrize("question,continuation,response,accepted", [
     ("Return the exact runtime and memory values.", "One per line.", "herdr\noff", True),
     ("Return the exact runtime and memory values.", "Actually, use prose instead.", "herdr\noff", False),
     ("Return the runtime and memory values exactly.", "Actually, use prose instead.", "herdr\noff", False),
@@ -1972,11 +1972,11 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     ("Return the exact runtime and memory values.", "Include details about the host.", "herdr\noff", False),
     ("Return the exact runtime and memory values.", "Actually, use prose instead.", "The runtime is herdr, with memory off.", True),
 ])
-def test_native_exact_output_respects_complete_multiline_and_batched_requests(tmp_path, native_desk, batched, request, continuation, response, accepted):
+def test_native_exact_output_respects_complete_multiline_and_batched_requests(tmp_path, native_desk, batched, question, continuation, response, accepted):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
     draft = "herdr\noff"
-    parts = [request, continuation]
+    parts = [question, continuation]
     messages = parts if batched else ["\n".join(parts)]
     (fake / "status").write_text(draft)
     (fake / "voice-answer").write_text(response)
@@ -2096,6 +2096,7 @@ def test_native_question_is_redacted_before_contextual_voice(tmp_path, native_de
 
 @pytest.mark.parametrize("source,secret", [
     ("read", "ghp_" + "Ab12" * 10),
+    ("read-provider", "ghp_" + "Ab12" * 10),
     ("grep", "private-value-from-configured-secrets"),
     ("read", "-----BEGIN PRIVATE KEY-----\nprivate-key-data\n-----END PRIVATE KEY-----"),
     ("status", "ghp_" + "Cd34" * 10),
@@ -2117,11 +2118,20 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
         arguments = {"path": str(target)}
         if source == "grep":
             arguments["pattern"] = "API_TOKEN"
-        replies.append(lambda body: {"tool_calls": [tool_call(source, arguments)]})
-    replies.append(lambda body: {"content": json.dumps({
-        "kind": "reply", "answer": fact,
-        "evidence": [{"source": "status" if source == "status" else "tool", "quote": fact}],
-    })})
+        replies.append(lambda body: {"tool_calls": [tool_call(source.removesuffix("-provider"), arguments)]})
+
+    def reply(body):
+        quote = fact
+        if source == "read-provider":
+            quote = next(line for message in body["messages"] if message["role"] == "tool"
+                         for line in message["content"].splitlines() if line.startswith("API_TOKEN="))
+            assert secret not in quote
+        return {"content": json.dumps({
+            "kind": "reply", "answer": quote,
+            "evidence": [{"source": "status" if source == "status" else "tool", "quote": quote}],
+        })}
+
+    replies.append(reply)
     bridge = start(1)
     try:
         receive("config", f"Show the data in {target}.")
