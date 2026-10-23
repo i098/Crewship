@@ -5,11 +5,13 @@ import { Budget, load, zoom } from "./memory.ts";
 
 // The slice of omp's ExtensionAPI this file uses.
 type Zod = { object(shape: Record<string, unknown>): unknown; number(): { describe(text: string): unknown } };
-export default function (pi: { zod: Zod; registerTool(tool: unknown): void }) {
+export default function (pi: { zod: Zod; registerTool(tool: unknown): void; registerProvider(name: string, options: { baseUrl: string }): void }) {
   const z = pi.zod;
+  if (process.env.FM_DESK_INCEPTION_URL) pi.registerProvider("inception", { baseUrl: process.env.FM_DESK_INCEPTION_URL.replace(/\/chat\/completions$/, "") });
   // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
   const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));
   pi.registerTool({
+    approval: "read",
     name: "zoom",
     label: "Zoom",
     description: "Open the line id+n of the <chat> view into the two lines of n/2 under it; n = 1 gives the message whole, with its date.",

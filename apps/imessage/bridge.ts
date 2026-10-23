@@ -166,7 +166,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string };
-type DeskResult = { answer: { answer: string } | { react: string; text?: string }; target: Routing };
+type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string } | { deskCancelled: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -780,10 +780,10 @@ async function runDesk(current: () => boolean) {
       else handoffPending();
     } else {
       commitDeskAnswer(pending, result);
-      queued = true;
+      queued = !("handled" in result.answer);
     }
     const at = result?.target.ref ?? pending.at(-1)!.ref;
-    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
+    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
   } finally {
     if (!queued) finishTyping();
   }
@@ -792,6 +792,10 @@ async function runDesk(current: () => boolean) {
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   const { answer, target } = result;
   const ids = pending.map((r) => r.requestId);
+  if ("handled" in answer) {
+    recordRoute({ ids, route: "done" });
+    return;
+  }
   const guid = crypto.randomUUID();
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
@@ -807,18 +811,19 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (!result || stopping || !current()) return;
   const { status, statusOk } = result;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
-  const latestText = pending.map((r, i) => `owner ${i + 1}: ${r.text}`).join("\n");
+  const latestText = pending.map((r, i) => `owner ${i + 1}: ${JSON.stringify({ authored: r.authored ?? r.text, context: r.text })}`).join("\n");
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER, memory.recent(from));
   if (!statusOk || !prompt.includes(latestText)) return;
-  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, requestId: pending.map((r) => r.requestId).join("\n") }));
   deskRun = proc;
-  const { ok, drafted } = await readDesk(proc);
+  const { ok, drafted, tools } = await readDesk(proc);
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
-  const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL });
+  const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
   if (!answer) return;
-  const target = pending[(answer.target ?? pending.length) - 1];
+  if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.keys(tools).join(",")}\n`, { mode: 0o600 });
+  const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
   if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
@@ -1039,8 +1044,8 @@ async function handle(line: Line, message: LineMessage) {
 function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text) {
   if (routing.has(requestId)) return;
   const mateEligible = !firstmate && !supervisorOnly(authored);
-  // Obvious actions, approvals, and secrets never depend on a model's willingness to hand off.
-  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|implement|fix|build|change|send|run|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|implement|fix|build|change|send|run|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
+  // Destructive requests, unclear approvals, and sensitive content keep the existing supervisor boundary.
+  firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
   const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible };
   prefetchInboxStatus();
   recordRoute({ received });
