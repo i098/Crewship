@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+from string import Template
 
 import pytest
 import yaml
@@ -173,6 +174,67 @@ def test_ca_guard_checks_directory_roots(tmp_path, default_path, blocked):
         assert "still trusts compromised" in result.stderr
     else:
         assert json.loads(result.stdout)["changed"] is False
+
+
+def test_runtime_trust_environment_preserves_node_flags(tmp_path):
+    home = tmp_path / "home"
+    (home / ".config/environment.d").mkdir(parents=True)
+    variables = {}
+    for name in ("base", "services"):
+        variables.update(yaml.safe_load(
+            (ROOT / f"blueprint/ansible/group_vars/all/{name}.yml").read_text()
+        ))
+    variables.update({
+        "crewship_cfg": {"home": str(home), "user": getpass.getuser()},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_account_ready": True, "crewship_become_target": False,
+    })
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+    playbook = tmp_path / "runtime-trust.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": variables,
+        "tasks": [task for task in tasks if task["name"] in (
+            "Use system CA trust in shell profiles",
+            "Use system CA trust for future user-manager processes",
+        )],
+        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "deferred"}}],
+    }]))
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook)]
+    for attempt in range(2):
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if attempt:
+            assert "changed=0" in result.stdout
+    environment = {
+        **os.environ, "HOME": str(home),
+        "NODE_OPTIONS": "--trace-warnings --max-old-space-size=512",
+        "SSL_CERT_FILE": "/old/bundle", "REQUESTS_CA_BUNDLE": "/old/bundle",
+        "PIP_CERT": "/old/bundle", "PIP_USE_DEPRECATED": "",
+    }
+    expected = {
+        "NODE_OPTIONS": "--trace-warnings --max-old-space-size=512 --use-openssl-ca",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+        "PIP_CERT": "/etc/ssl/certs/ca-certificates.crt",
+        "PIP_USE_DEPRECATED": "legacy-certs",
+    }
+    for profile in (".profile", ".bashrc"):
+        result = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-c",
+             '. "$1"; . "$1"; exec "$2" -c "import json, os; print(json.dumps(dict(os.environ)))"',
+             "trust-check", str(home / profile), sys.executable],
+            env=environment, capture_output=True, text=True, check=True,
+        )
+        actual = json.loads(result.stdout)
+        assert {key: actual[key] for key in expected} == expected
+    # The emitted environment.d contract uses simple ${NAME} expansion.
+    actual = environment.copy()
+    for line in (home / ".config/environment.d/60-crewship-trust.conf").read_text().splitlines():
+        key, value = line.split("=", 1)
+        actual[key] = Template(value).substitute(actual).strip()
+    assert {key: actual[key] for key in expected} == expected
 
 
 def redirect_system_paths(tasks, root):

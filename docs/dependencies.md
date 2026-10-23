@@ -27,6 +27,15 @@ Node still follows the newest release, with minimum versions of 22.23.4, 24.22.1
 The installer rejects older or unsupported releases and checks the installed executable before linking it onto PATH.
 Newer major lines remain eligible.
 
+The recipe also directs new shell and user-service processes to the filtered system CA store.
+It writes `.profile`, `.bashrc`, and `~/.config/environment.d/60-crewship-trust.conf`.
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `PIP_CERT` select `/etc/ssl/certs/ca-certificates.crt`.
+`NODE_OPTIONS` adds `--use-openssl-ca` and preserves unrelated Node flags.
+Unlike `--use-system-ca`, this option replaces Node's bundled trust instead of adding system trust to it.
+`PIP_USE_DEPRECATED=legacy-certs` disables pip's additive truststore backend, so `PIP_CERT` does not retain pip's vendored roots.
+The version floors alone do not remove all compromised roots from published runtime bundles.
+These settings do not modify installed CA bundles or add unused Python packages.
+
 The default recipe does not add Python's `pip` or `certifi` packages when they are absent.
 The repository lock excludes both packages, and uv creates the pruner and tool environments without pip seeds.
 Adding unused packages would add another trust store without serving a runtime need.

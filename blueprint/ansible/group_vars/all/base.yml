@@ -65,6 +65,11 @@ crewship_chrome_devtools_mcp_path: "{{ crewship_share_dir }}/chrome-devtools-mcp
 # the chrome-devtools-axi bridge, chrome-devtools-mcp and acpx.
 crewship_managed_shell_env:
   CHROME_DEVTOOLS_AXI_MCP_PATH: "{{ crewship_chrome_devtools_mcp_path }}"
+crewship_trust_env:
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+  REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+  PIP_CERT: /etc/ssl/certs/ca-certificates.crt
+  PIP_USE_DEPRECATED: legacy-certs
 # The board is opt-in; share its socket with shells and new Herdr agents.
 crewship_board_env: >-
   {{ {'CREWBOARD_SOCKET': crewship_user_runtime_dir ~ '/crewboard.sock'}
