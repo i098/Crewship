@@ -55,8 +55,8 @@ For each message from the owner, the service does these steps:
    The service stops refreshes before saving delivery progress, even if that save fails.
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
-   Command typing expires after eight seconds unless another typing command renews it.
-   An unanswered desk turn also stops typing at its eight-second response deadline.
+   Command typing has an eight-second expiry timer; another typing command renews it.
+   An unanswered desk turn stops typing when its response-deadline callback runs.
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
@@ -112,7 +112,7 @@ For each message from the owner, the service does these steps:
    They never use another chat or transport as a fallback.
    A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and acknowledgement deadlines.
    A handoff uses `fm-inbox.sh note --request-id`; acceptance means the inbox saved it, not that the supervisor answered.
-   If a direct-chat burst has no confirmed response after eight seconds, the bridge sends one request-specific acknowledgement.
+   Eight seconds after the latest unanswered request arrives in a direct chat, the bridge queues one request-specific acknowledgement.
    Each direct chat keeps its own deadline; messages in another chat do not cancel it.
    A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
    Active mate delivery does not block a due acknowledgement or keep that chat's typing indicator active.
@@ -164,8 +164,8 @@ The voice call receives only the checked draft, not chat history or fleet status
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A completed desk turn records its outcome in the private `desk.log`, including `handled` and successful tool-call ids.
 The log also records read completion, typing start and stop, model start and result, inbox acceptance, and transport acceptance.
-These events contain timestamps and request ids, not model output or credentials.
-Typing events retain the originating request id when a newer message arrives before the transport operation completes.
+These events contain timestamps and message ids, not model output or credentials.
+Typing events retain the originating message id when a newer message arrives before the transport operation completes.
 Transport acceptance is not proof of user-visible delivery; verify the receiving device for live delivery checks.
 
 For a standalone text, both desks accept classification answers only from one complete JSON object whose `kind` or `decision` is `reply`.
@@ -181,7 +181,7 @@ Capitalization may vary, and one final period or exclamation mark is allowed.
 Only a verified social burst can use this text, which shares the reaction's target and durable outbox item.
 The Instagram desk ignores this optional text.
 The parser validates the complete emoji; quotes, braces, and extra characters cannot become part of it.
-Repeated matching decision fields produce one action, while conflicts produce no visible response.
+Repeated matching decision fields produce one action, while conflicts produce no direct model response.
 All other classification output, including plain prose, mixed prose and JSON, and malformed JSON, produces no direct model response.
 Each rejected draft records one short outcome without raw model text.
 Suppressed drafts and rejected non-social reactions retain the existing single request filing, without an extra operator request.
@@ -192,10 +192,10 @@ The service replays unfinished routing after a restart.
 Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
 The journal stores response confirmations separately from routing completion.
-It persists one keyed acknowledgement per burst and does not send it again after a confirmed response or restart.
+It persists a keyed acknowledgement per burst; completed outbox receipts prevent replay after a restart.
 Cancelling an acknowledgement before any possible delivery releases its requests and persists a new identity for the next attempt.
 Journal replay rejects the cancelled identity, so a crash cannot revive it or suppress the replacement.
-Restart recovery schedules acknowledgements for unresolved requests regardless of their age.
+Restart recovery schedules acknowledgements for unresolved requests with saved receipt timestamps, regardless of their age.
 If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this failure handoff, except when startup drops restored desk text as described above.
@@ -254,7 +254,7 @@ Inbox retries and service restarts never repeat a recorded mate delivery.
 
 Firstmate activity still cancels an unfinished routing decision and sends pending work to Firstmate.
 Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
-Delayed handoffs use the same one-per-burst acknowledgement deadline as Firstmate handoffs.
+Delayed handoffs follow the [acknowledgement rules](#what-it-does).
 
 ## Upstream outages
 
@@ -634,7 +634,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage --reply N 'text'` | Targets the owner's Nth most recent text (1 is the latest). The first bubble sends plain if the target is still the last bubble in its chat at delivery. It threads only when a later bubble exists from either side; tapbacks do not count. See [Reply separation](#how-the-relay-set-behaves) for checks across BlueBubbles relays. A transport that cannot thread sends plain. The command picks the target when it runs, and the queued message keeps that target's id through retries and restarts. The service keeps at most 10 texts received since it started that were the newest text at that time. A text that arrives late (see [Inbound](#choose-the-transports)) is not kept. If the Nth text is not kept, nothing is queued and the command exits non-zero. Any other value of N queues nothing and exits with code 2. |
 | `fm-imessage --no-thread 'text'` | Forces a plain send, even with `--reply N`, regardless of option order. |
 | `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
-| `fm-imessage --typing` | Shows the typing bubble for up to eight seconds. Another typing command renews it; a send clears it. A typing error is logged. |
+| `fm-imessage --typing` | Shows the typing bubble on a best-effort basis. See [the typing lifecycle](#what-it-does) for expiry and cleanup. |
 | `fm-imessage --react '👍'` | Queues a tapback in the outbox, in order with the sends. The tapback goes on the text that was his latest when the command ran. |
 | `fm-imessage --card '<json>'` | Queues a card: a link to a page with options to tap, a chart, a timeline, or a table. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
