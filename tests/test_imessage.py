@@ -1045,7 +1045,7 @@ done({{ calls: a.calls, sent: a.sent, reaction: reaction ?? null, reply: reply ?
     assert not [call for call in result["calls"] if call.endswith("/typing") or call == "POST message/react"]
     assert [item["message"] for item in result["sent"]] == ["plain reply"]
     assert result["reaction"] == {"permanent": True, "maybeSent": False}
-    assert result["reply"] is None
+    assert result["reply"] == "accepted"
     assert "selectedMessageGuid" not in result["sent"][0] and "partIndex" not in result["sent"][0]
     assert len(result["logs"]) == 1 and "Private API" in result["logs"][0]
 
