@@ -139,15 +139,15 @@ const trace = (id: string, event: string) => {
 let commandTypingTimer: NodeJS.Timeout | undefined;
 let commandTypingSpace: LineMessage["space"] | undefined;
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
-const typing = (space: LineMessage["space"] | undefined, on: boolean) => {
+const typing = (space: LineMessage["space"] | undefined, on: boolean, id = latestRef?.id ?? "command") => {
   if (!space) return;
   clearTimeout(commandTypingTimer);
   commandTypingSpace = on ? space : undefined;
-  if (on) commandTypingTimer = setTimeout(() => typing(space, false), ACK_MS);
+  if (on) commandTypingTimer = setTimeout(() => typing(space, false, id), ACK_MS);
   deskTypingPending = deskTypingPending.then(async () => {
     if (!stopping || !on) {
       await (on ? space.startTyping() : space.stopTyping());
-      trace(latestRef?.id ?? "command", on ? "typing-start" : "typing-stop");
+      trace(id, on ? "typing-start" : "typing-stop");
     }
   }).catch(log(on ? "start typing" : "stop typing"));
 };
@@ -547,7 +547,7 @@ function hasRestoredUnsentText(o: Out): boolean {
 
 function checkDeskDelivery(o: Out) {
   if (o.acknowledgement) {
-    const latest = [...routing.values()].findLast((r) => sameChat(r.ref, o));
+    const latest = [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, o));
     if (o.id !== latest?.ref.id || !o.requests?.some((id) => !routing.get(id)?.responded)) throw deskCancelled;
     return;
   }
@@ -776,7 +776,7 @@ function scheduleAcknowledgement() {
 
 function scheduleChatAcknowledgement(pending: Routing[]) {
   const target = pending.at(-1)!;
-  if (acknowledgementTimers.has(target.requestId) || target.acknowledgement || Date.now() - target.at! > 60_000) return;
+  if (acknowledgementTimers.has(target.requestId) || target.acknowledgement) return;
   if (socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[pending[0]!.memoryId - 1])) return;
   acknowledgementTimers.set(target.requestId, setTimeout(() => {
     acknowledgementTimers.delete(target.requestId);
@@ -785,12 +785,17 @@ function scheduleChatAcknowledgement(pending: Routing[]) {
 }
 
 function acknowledge(pending: Routing[]) {
-  const target = pending.at(-1)!;
-  const latest = [...routing.values()].findLast((r) => sameChat(r.ref, target.ref));
-  if (stopping || muted() || target.responded || target !== latest) return;
+  pending = pending.filter((r) => !r.responded);
+  const target = pending.at(-1);
+  if (stopping || muted() || !target || target.acknowledgement
+    || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
   if (target.out) return finishDeskDelivery(target.out);
-  desk.firstmateActive();
-  cancelDesk();
+  const unassigned = pending.filter((r) => r.route === "pending");
+  if (unassigned.length) {
+    cancelDesk();
+    recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
+    desk.inboundText();
+  }
   const ids = pending.map((r) => r.requestId);
   const text = target.authored ?? target.text;
   const subject = supervisorOnly(text) || text.includes("(sent an attachment")
@@ -799,7 +804,7 @@ function acknowledge(pending: Routing[]) {
     acknowledgement: true, kind: "desk", guid: crypto.randomUUID(), at: Date.now(),
     bubbles: [`I saved ${subject}; no confirmed answer yet.`], reply: target.ref.id };
   recordRoute({ ids, acknowledgement: out });
-  handoffPending();
+  flushRoutes();
 }
 
 function prefetchInboxStatus() {
@@ -820,8 +825,10 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
     if (!active || refreshing || !space) return;
     refreshing = true;
     deskTypingPending = deskTypingPending.then(async () => {
-      if (active && !stopping && current()) await space.startTyping();
-      if (active && !stopping && current()) trace(pending.at(-1)!.ref.id, "typing-start");
+      if (active && !stopping && current()) {
+        await space.startTyping();
+        trace(pending.at(-1)!.ref.id, "typing-start");
+      }
     }).catch(log("start typing")).finally(() => { refreshing = false; });
   };
   const timer = setInterval(() => {

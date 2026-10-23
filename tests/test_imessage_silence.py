@@ -2,9 +2,10 @@
 
 import json
 import shutil
+import time
 
 import pytest
-from test_imessage import wait_for
+from test_imessage import publish_json, wait_for
 from test_imessage_basic import basic_rig
 from test_imessage_basic import desk_clock as desk_clock
 
@@ -149,7 +150,8 @@ def test_pure_social_burst_never_gets_a_timeout_acknowledgement(tmp_path, desk_c
         bridge.wait(10)
 
 
-def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock):
+@pytest.mark.parametrize("downtime", [0, 62_000])
+def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock, downtime):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
@@ -157,6 +159,8 @@ def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock):
         wait_for(lambda: text(notes), "the durable handoff")
         bridge.terminate()
         bridge.wait(10)
+        clock = tmp_path / "clock"
+        publish_json(clock, int(clock.read_text()) + downtime)
         bridge = start(2)
         desk_clock(8000)
         wait_for(lambda: text(fake / "sent"), "the restored acknowledgement deadline")
@@ -168,19 +172,22 @@ def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock):
 
 
 @pytest.mark.parametrize("plain", [False, True])
-def test_targeted_answer_does_not_close_another_request(tmp_path, desk_clock, plain):
+@pytest.mark.parametrize("reply", [1, 2])
+def test_targeted_answer_does_not_close_another_request(tmp_path, desk_clock, plain, reply):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
         receive("release", "Check the release job")
         receive("backup", "Check the backup job")
-        cli("--reply", "2", *(["--no-thread"] if plain else []), "The release job passed.")
-        wait_for(lambda: "The release job passed." in text(fake / "sent"), "the targeted answer")
+        answered, unanswered = ("backup", "release") if reply == 1 else ("release", "backup")
+        response = f"The {answered} job passed."
+        cli("--reply", str(reply), *(["--no-thread"] if plain else []), response)
+        wait_for(lambda: response in text(fake / "sent"), "the targeted answer")
         desk_clock(8000)
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the unanswered request acknowledgement")
-        assert "backup job" in text(fake / "sent").splitlines()[1]
+        assert f"{unanswered} job" in text(fake / "sent").splitlines()[1]
         confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
-        assert confirmations == [["photon-release"], ["photon-backup"]]
+        assert confirmations == [[f"photon-{answered}"], [f"photon-{unanswered}"]]
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -218,6 +225,102 @@ def test_delivered_card_prevents_a_false_missing_answer(tmp_path, desk_clock, ap
         desk_clock(8000)
         assert text(fake / "sent") == sent
         assert any(event.get("responded") for event in map(json.loads, text(state / "routing.jsonl").splitlines()))
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_chat_acknowledgement_leaves_another_chat_model_running(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    bridge = start(1)
+    try:
+        receive("release", "Fix the release job")
+        desk_clock(4000)
+        (fake / "model-hold").touch()
+        receive("build", "What is the build status?", space="iMessage;-;+10000000001")
+        desk_clock()
+        wait_for(lambda: (fake / "model-started").exists(), "the other chat model")
+        desk_clock(2000)
+        wait_for(lambda: text(fake / "sent"), "the first chat acknowledgement")
+        assert "release job" in text(fake / "sent")
+        assert "photon-build " not in text(notes)
+        assert "build model-failed" not in text(state / "desk.log")
+        (fake / "model-hold").unlink()
+        wait_for(lambda: "The build is paused." in text(fake / "sent"), "the other chat answer")
+        assert text(fake / "send-targets").splitlines() == [
+            "iMessage;-;+10000000000", "iMessage;-;+10000000001",
+        ]
+        wait_for(lambda: typing_events(fake, text)[-1] is False, "the other chat typing cleanup")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source", ["command", "desk"])
+def test_typing_trace_keeps_its_request_after_a_new_message(tmp_path, desk_clock, source):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "typing-hold").touch()
+    (fake / "model-hold").touch()
+    bridge = start(1)
+    try:
+        receive("release", "What is the build status?")
+        if source == "command":
+            cli("--typing")
+        else:
+            desk_clock()
+        wait_for(lambda: (fake / "typing-waiting").exists(), "the held typing start")
+        receive("backup", "Check the backup job")
+        (fake / "typing-hold").unlink()
+        wait_for(lambda: "typing-stop" in text(state / "desk.log"), "the queued typing cleanup")
+        events = [row.split()[1:] for row in text(state / "desk.log").splitlines() if "typing-" in row]
+        assert events == [["release", "typing-start"], ["release", "typing-stop"]]
+        assert typing_events(fake, text) == [True, False]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_synchronous_inbox_timeouts_delay_but_do_not_lose_acknowledgements(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "model-hold").touch()
+    (tmp_path / "bin/fm-inbox").write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys, time\n"
+        "p = pathlib.Path(os.environ['FAKE_DIR'])\n"
+        f"notes = pathlib.Path({str(notes)!r})\n"
+        "if sys.argv[1] == 'status': print((p / 'status').read_text())\n"
+        "else:\n"
+        "    key = sys.argv[sys.argv.index('--request-id') + 1]\n"
+        "    attempted = p / f'note-{key}'\n"
+        "    if not attempted.exists():\n"
+        "        attempted.touch()\n"
+        "        with (p / 'note-attempts').open('a') as f: f.write(str(time.monotonic()) + '\\n')\n"
+        "        time.sleep(120)\n"
+        "    with notes.open('a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+    )
+    bridge = start(1)
+    try:
+        receive("release", "Did the release job finish?")
+        receive("backup", "Did the backup job finish?")
+        desk_clock()
+        wait_for(lambda: (fake / "model-started").exists(), "the held model")
+        started = time.monotonic()
+        desk_clock(8000)
+        wait_for(lambda: text(fake / "sent"), "the acknowledgement after two inbox timeouts")
+        elapsed = time.monotonic() - started
+        attempts = [float(row) for row in text(fake / "note-attempts").splitlines()]
+        assert len(attempts) == 2
+        assert attempts[1] - attempts[0] >= 4.5
+        assert elapsed >= 9
+        assert text(err).count("the inbox note failed; routing retains the request") >= 2
+        assert "backup job" in text(fake / "sent")
+        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup after the timeouts")
+        wait_for(lambda: text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1, "both retained handoffs")
+        assert len(text(fake / "sent").splitlines()) == 1
+        print(f"Two synchronous inbox timeouts delayed acknowledgement by {elapsed:.3f} seconds.")
     finally:
         bridge.terminate()
         bridge.wait(10)

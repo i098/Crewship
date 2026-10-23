@@ -113,15 +113,20 @@ For each message from the owner, the service does these steps:
    A handoff uses `fm-inbox.sh note --request-id`; acceptance means the inbox saved it, not that the supervisor answered.
    If a direct-chat burst has no confirmed response after eight seconds, the bridge sends one request-specific acknowledgement.
    Each direct chat keeps its own deadline; messages in another chat do not cancel it.
+   A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
    It uses the existing outbox, keeps every request in the handoff, and states that no confirmed answer exists yet.
    It omits quoted content for sensitive messages and attachments.
    A prompt answer suppresses the acknowledgement; typing alone does not.
    A queued supervisor response suppresses it only after the transport accepts that response.
    An explicit `--reply N` confirms only its selected request, even with `--no-thread`.
+   The acknowledgement targets the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.
    A checked desk answer already in the outbox keeps its place instead of receiving a duplicate acknowledgement.
    Purely social bursts and muted chats receive no timeout acknowledgement.
    Inbox failures retry from the durable journal; each inbox command has a five-second deadline.
+   Inbox filing is synchronous and serial, so two stalled commands can block the event loop for about ten seconds.
+   This can delay acknowledgements and typing cleanup beyond eight seconds; their timers resume when filing returns.
+   The five-second limit applies to each command, not the entire batch.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
@@ -154,6 +159,7 @@ The durable status reader has a separate 5-second timeout; a timeout causes a ha
 A completed desk turn records its outcome in the private `desk.log`, including `handled` and successful tool-call ids.
 The log also records read completion, typing start and stop, model start and result, inbox acceptance, and transport acceptance.
 These events contain timestamps and request ids, not model output or credentials.
+Typing events retain the originating request id when a newer message arrives before the transport operation completes.
 Transport acceptance is not proof of user-visible delivery; verify the receiving device for live delivery checks.
 
 For a standalone text, both desks accept classification answers only from one complete JSON object whose `kind` or `decision` is `reply`.
@@ -181,7 +187,7 @@ Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
 The journal stores response confirmations separately from routing completion.
 It persists one keyed acknowledgement per burst and does not send it again after a confirmed response or restart.
-Restart recovery schedules acknowledgements only for unresolved requests received within the last minute.
+Restart recovery schedules acknowledgements for unresolved requests regardless of their age.
 If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this failure handoff, except when startup drops restored desk text as described above.
