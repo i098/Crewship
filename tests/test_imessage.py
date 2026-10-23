@@ -1337,6 +1337,38 @@ done({{
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("retry", ["relay", "outbox"])
+@pytest.mark.parametrize("historical", [
+    "logging: on\n memory: off",
+    " logging: on\n memory: off ",
+    " logging: on\n memory: off",
+])
+def test_bluebubbles_retries_quotation_unless_history_matches_every_character(retry, historical):
+    quote = " logging: on\n memory: off"
+    result = bun(f"""
+import {{ BlueBubbles }} from {BB};
+{FAKE_BB}
+const a = relay(), b = relay();
+const quote = {json.dumps(quote)};
+const since = Date.now();
+icloud.push({{ chat, text: {json.dumps(historical)}, at: since - 30_000 }});
+a.fail["message/text"] = 1;
+const retry = {json.dumps(retry)};
+const bb = line(retry === "relay" ? [a, b] : [a]);
+let outcome = await bb.send(chat, quote).catch((e) => ({{ maybeSent: e.maybeSent, status: e.status }}));
+const failure = retry === "outbox" ? outcome : null;
+if (retry === "outbox") {{
+  outcome = await bb.sent(chat, quote, since) ? "reconciled" : await bb.send(chat, quote);
+}}
+done({{ outcome, failure, sent: [a, b].flatMap((r) => r.sent.map((s) => s.message)) }});
+""")
+    matched = historical == quote
+    assert result["outcome"] == ("reconciled" if matched else "accepted")
+    assert result["sent"] == ([] if matched else [quote])
+    assert result["failure"] == ({"maybeSent": True, "status": 500} if retry == "outbox" else None)
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_bluebubbles_asks_the_relay_that_may_have_sent_even_when_it_is_marked_down():
     """A send that times out on relay 1 is checked on relay 1, not only on relay 2 whose iCloud copy lags; with no other relay, still."""
     result = bun(f"""

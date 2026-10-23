@@ -569,6 +569,7 @@ The bridge uses these routing rules with one or both transports:
   Thread support follows the Private API rule above.
   A failed history read follows the [transport fallback rules](#choose-the-transports) if no relay proves separation.
 - **No double sends.** Each outbox item keeps a client GUID, and each bubble sends with its own one (BlueBubbles `tempGuid`). If a relay may have sent a text but did not answer (a timeout, a server error, or an answer that cannot be read), the bridge asks the relays whether the text is in the chat before it sends that bubble again, on any relay or transport (see above). It looks for the same text from the line in the last minute or so. The relay that may have sent is asked first, even when its health check says it is down. Known limits: when that relay cannot answer, another relay can still send the text a second time; a text that reaches the other Macs through iCloud late can be sent twice; a text identical to one sent in the same minute counts as sent; and a text that may be out on Photon cannot be checked, so Photon sends it again (at least once).
+  History must match the complete message text, including leading and trailing whitespace.
 - **Inbound.** Every relay posts its webhook.
   A webhook carries only the message GUID that the bridge acts on.
   The bridge reads the message back from a relay with the password, so a forged webhook cannot inject text.
