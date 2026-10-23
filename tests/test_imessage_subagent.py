@@ -84,6 +84,66 @@ console.log(JSON.stringify({{ result: result ?? null,
     return json.loads(output.stdout)
 
 
+def basic_answer(tmp_path, reply, *, status=FACT, messages=None, tools=None):
+    script = tmp_path / "legacy-answer.ts"
+    script.write_text(f"""
+import {{ basicAnswer }} from {json.dumps(str(ROOT / 'apps/imessage/desk.ts'))};
+const answer = basicAnswer(
+  true, JSON.stringify({json.dumps(reply)}), {json.dumps(status)}, {json.dumps(messages or [])},
+  {{ desk: "worker", supervisor: "supervisor" }}, {json.dumps(tools or {})}
+);
+console.log(JSON.stringify(answer ?? null));
+""")
+    output = subprocess.run(["bun", str(script)], cwd=ROOT, text=True, capture_output=True, check=True)
+    return json.loads(output.stdout)
+
+
+@pytest.mark.parametrize("source", ["status", "tool", "chat"])
+@pytest.mark.parametrize("blank", ["", " \t"])
+def test_legacy_rejects_blank_evidence_even_beside_valid_facts(tmp_path, source, blank):
+    fact = "Build paused."
+    reply = {"kind": "reply", "answer": f"{fact}\n{blank}", "evidence": [
+        {"source": "status", "quote": fact}, {"source": source, "quote": blank, "id": 7},
+    ]}
+    assert basic_answer(
+        tmp_path, reply, status=f"{fact}\n{blank}",
+        messages=[{"i": 7, "kind": "supervisor", "text": blank}],
+        tools={"read-1": {"name": "read", "text": blank}},
+    ) is None
+
+
+def test_legacy_keeps_whitespace_in_nonblank_evidence(tmp_path):
+    quotes = ["  Build paused.\t", "\tTool reports ready.  ", "  Remember this.\t"]
+    reply = {"kind": "reply", "answer": "\n".join(quotes), "evidence": [
+        {"source": "status", "quote": quotes[0]},
+        {"source": "tool", "quote": quotes[1]},
+        {"source": "chat", "quote": quotes[2], "id": 7},
+    ]}
+    assert basic_answer(
+        tmp_path, reply, status=quotes[0],
+        messages=[{"i": 7, "kind": "supervisor", "text": quotes[2]}],
+        tools={"read-1": {"name": "read", "text": quotes[1]}},
+    ) == {"answer": "\n".join(quotes), "identity": False}
+
+
+def test_blank_reply_evidence_cannot_bypass_isolated_source_selection(tmp_path):
+    reply = {"kind": "reply", "answer": f"{FACT}\n", "evidence": [
+        {"source": "status", "quote": FACT}, {"source": "tool", "quote": ""},
+    ]}
+    tools = {"read-1": {"name": "read", "text": ""}}
+    result = run_subagent(tmp_path, reply=reply, tools=tools)
+    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": tools}
+    assert len(result["calls"]) == 1
+
+
+def test_blank_source_lines_cannot_bypass_answer_length_limit(tmp_path):
+    tools = {"read-1": {"name": "read", "text": " " * 2000 + "\nReady."}}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}, {"tool": 1, "line": 2}]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools)
+    assert result["result"] == {"kind": "handoff", "reason": "unverified", "tools": tools}
+    assert len(result["calls"]) == 1
+
+
 def test_checked_answer_uses_direct_private_voice(tmp_path):
     result = run_subagent(tmp_path)
     assert result["result"] == {"kind": "answer", "bubbles": [FACT], "tools": {}}
@@ -349,6 +409,8 @@ def test_other_selected_provider_does_not_receive_anthropic_context(tmp_path):
     "  Alpha is ready.  \n\tBeta is paused.\t",
     '{"answer":"The build is paused."}',
     "Alpha is ready.\n\nBeta is paused.",
+    "  Alpha is ready. \n \t\n\tBeta is paused.  ",
+    " \t\nAlpha is ready.\n\t ",
 ])
 @pytest.mark.parametrize("voice_event", [False, True])
 def test_exact_source_keeps_whitespace_in_one_validated_bubble(tmp_path, voice_event, quote):

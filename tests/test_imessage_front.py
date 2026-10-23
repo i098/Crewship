@@ -142,6 +142,60 @@ def test_recall_and_approval_context_need_background_work(tmp_path, original, re
     assert "secret password" not in result["result"]["text"]
 
 
+@pytest.mark.parametrize("selection", [
+    {"kind": "dispatch", "model": 0, "reasoning": 1},
+    {"kind": "relay", "target": None, "domains": [], "category": "other"},
+])
+def test_safe_continuity_cannot_create_work(tmp_path, selection):
+    result = run_front(
+        tmp_path, [selected_reply(selection)], original=["can we keep talking?"],
+        recent=[{"kind": "desk", "text": "Hello."}],
+    )
+    assert result["result"] == {"text": "We can keep talking.", "intents": []}
+    assert len(result["calls"]) == 1
+
+
+@pytest.mark.parametrize("failure", [
+    "missing-key", "missing-redactor", "redaction", "network", "http", "invalid-json", "refusal", None,
+])
+def test_safe_continuity_fallback_stays_local(tmp_path, failure):
+    response = {"choices": [{"message": {"refusal": "no"}}]} if failure == "refusal" else reply({"kind": "invalid"})
+    result = run_front(
+        tmp_path, [response], original=["can we keep talking?"],
+        recent=[{"kind": "desk", "text": "Hello."}], failure=failure,
+    )
+    assert result["result"] == {"text": "We can keep talking.", "intents": []}
+
+
+def test_safe_continuity_with_oversized_history_stays_local(tmp_path):
+    result = run_front(
+        tmp_path, [], original=["can we keep talking?"],
+        recent=[{"kind": "owner", "text": "x" * 100_001}, {"kind": "desk", "text": "Hello."}],
+    )
+    assert result["result"] == {"text": "We can keep talking.", "intents": []}
+    assert result["calls"] == []
+
+
+@pytest.mark.parametrize("original,recent", [
+    (["what did I ask earlier?"], [{"kind": "desk", "text": "Hello."}]),
+    (["can we keep talking?"], [{"kind": "supervisor", "text": "Should I approve?"}]),
+    (["can we keep talking?"], [{"kind": "desk", "text": "The build is paused."}]),
+    (["can we keep talking?"], [{"kind": "owner", "text": "Hello."}]),
+    (["can we keep talking?", "Read the status"], [{"kind": "desk", "text": "Hello."}]),
+    (["can we keep talking?"], []),
+    ([], [{"kind": "desk", "text": "Hello."}]),
+])
+@pytest.mark.parametrize("failure", [None, "missing-key"])
+def test_unsafe_continuity_still_hands_off(tmp_path, original, recent, failure):
+    result = run_front(
+        tmp_path, [selected_reply({"kind": "relay", "target": None, "domains": [], "category": "other"})],
+        original=original, recent=recent, failure=failure,
+    )
+    assert result["result"] == {
+        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+    }
+
+
 @pytest.mark.parametrize("target,domains,category,expected", [
     ("web", ["web"], "work", "web"),
     ("ops", ["web"], "work", "firstmate"),

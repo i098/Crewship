@@ -84,7 +84,7 @@ const CONTINUE_CHAT = /^(?:where were we|let['’]?s (?:keep talking|continue (?
 
 function fallback(input: FrontInput): FrontResult {
   if (socialInput(input)) return { text: "Got it.", intents: [] };
-  return { text: "", intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
+  return continuityAnswer(input) ?? { text: "", intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
 }
 
 function socialInput(input: FrontInput): boolean {
@@ -150,7 +150,7 @@ function relayIntent(value: Record<string, unknown>, mates: FrontInput["mates"])
 
 function continuityAnswer(input: FrontInput): FrontResult | undefined {
   const previous = input.recent.at(-1);
-  if (!previous || !SAFE_SOCIAL.test(previous.text.trim()) || !socialOnly(["thanks"], previous) ||
+  if (!input.original.length || !previous || !SAFE_SOCIAL.test(previous.text.trim()) || !socialOnly(["thanks"], previous) ||
       !input.original.every((text) => CONTINUE_CHAT.test(text.trim()))) {
     return;
   }
@@ -163,11 +163,11 @@ function answer(value: unknown, input: FrontInput): FrontResult | undefined {
     const text = typeof value.text === "string" ? value.text.trim() : "";
     return { text: SAFE_SOCIAL.test(text) ? text : "Got it.", intents: [] };
   }
+  const continuity = continuityAnswer(input);
+  if (continuity) return continuity;
   switch (value.kind) {
     case "social":
       return;
-    case "continuity":
-      return continuityAnswer(input);
     case "dispatch":
     case "relay": {
       const intent = value.kind === "dispatch" ? dispatchIntent(value, input.models) : relayIntent(value, input.mates);

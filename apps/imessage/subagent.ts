@@ -99,30 +99,33 @@ Set target to the 1-based request number being answered. Do not return prose, ac
 function checkedResult(options: SubagentOptions, result: DeskReadResult): CheckedResult {
   const { tools } = result;
   if (!result.ok) return { kind: "handoff", reason: "failed", tools };
-  const drafted = sourceReply(result.drafted, tools);
-  if (drafted === undefined) return { kind: "handoff", reason: "unverified", tools };
-  const answer = basicAnswer(result.ok, drafted, options.status, options.messages,
+  const source = sourceReply(result.drafted, tools);
+  if (source === undefined) return { kind: "handoff", reason: "unverified", tools };
+  const answer = basicAnswer(result.ok, source.drafted, options.status, options.messages,
     { desk: options.model, supervisor: options.supervisorModel }, tools);
   if (!answer || "react" in answer) return { kind: "handoff", reason: "unverified", tools };
   if ("handled" in answer) return options.writePath
     ? { kind: "handled", tools } : { kind: "handoff", reason: "unverified", tools };
   if (answer.target !== undefined && answer.target > options.requests.length) return { kind: "handoff", reason: "unverified", tools };
-  return { kind: "answer", ...answer, tools };
+  return { kind: "answer", ...answer, answer: source.answer ?? answer.answer, tools };
 }
 
-function sourceReply(drafted: string, tools: DeskEvidence): string | undefined {
+function sourceReply(drafted: string, tools: DeskEvidence): { drafted: string; answer?: string } | undefined {
   let value: Record<string, unknown>;
-  try { value = JSON.parse(drafted); } catch { return drafted; }
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.kind !== "sources") return drafted;
+  try { value = JSON.parse(drafted); } catch { return { drafted }; }
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.kind !== "sources") return { drafted };
   if (Object.keys(value).some((key) => !["kind", "target", "sources"].includes(key))
     || (value.target !== undefined && (!Number.isSafeInteger(value.target) || Number(value.target) < 1))
     || !Array.isArray(value.sources) || !value.sources.length || value.sources.length > 8) return;
   const quotes = sourceQuotes(value.sources, tools);
   if (!quotes) return;
-  return JSON.stringify({
-    kind: "reply", target: value.target, answer: quotes.join("\n"),
-    evidence: quotes.map((quote) => ({ source: "tool", quote })),
-  });
+  const answer = quotes.join("\n");
+  if (answer.length > 2000) return;
+  const facts = quotes.filter((quote) => quote.trim());
+  return { answer, drafted: JSON.stringify({
+    kind: "reply", target: value.target, answer: facts.join("\n"),
+    evidence: facts.map((quote) => ({ source: "tool", quote })),
+  }) };
 }
 
 function sourceReference(value: unknown, count: number): { tool: number; line: number } | undefined {
