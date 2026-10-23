@@ -41,9 +41,10 @@ For each message from the owner, the service does these steps:
    A shebang write requires approval if the native writer would add execute permissions, including when it creates a file.
    Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
    Direct reads stay on the local filesystem and local process or artifact interfaces.
-   The guard checks native quote removal, delimiter expansion, and URL normalization before allowing a target.
+   The guard decodes native file URLs before checking each target from quote removal and delimiter expansion.
    Network reads require approval.
    Shell commands still require native approval, except the listed system reads.
+   The automatic service check is exactly `systemctl --user is-active -- fm-imessage.service`; other service commands require approval.
    The child receives only its provider credentials and required runtime variables, not transport credentials.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.

@@ -6,7 +6,7 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { builtinCredentialSecretEntries, collectEnvSecrets, loadSecrets, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-scan";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
-import { expandDelimitedPathEntries, normalizePathLikeInput, parseFindPattern } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
+import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 import { isReadableUrlPath } from "@oh-my-pi/pi-tui/tools/read";
 import { Budget, load, zoom } from "./memory.ts";
 import { canonicalWritePath } from "./desk.ts";
@@ -68,13 +68,13 @@ export default function (pi: {
 const LOCAL_SCHEMES: Record<string, true> = { file: true, artifact: true, local: true, proc: true };
 
 async function requiresExternalReadApproval(toolName: string, rawPath: string): Promise<boolean> {
-  const path = normalizePathLikeInput(rawPath);
-  const paths = isReadableUrlPath(path) ? [path]
-    : await expandDelimitedPathEntries([path], process.cwd(), toolName === "glob" ? { splitter: parseFindPattern } : {});
+  const path = expandPath(normalizePathLikeInput(rawPath));
+  const target = InternalUrlRouter.instance().normalize(path);
+  const scheme = /^([a-z][\w+.-]*):\/\//i.exec(target)?.[1].toLowerCase();
+  if (isReadableUrlPath(target) || (scheme && !LOCAL_SCHEMES[scheme])) return true;
+  const paths = await expandDelimitedPathEntries([path], process.cwd(), toolName === "glob" ? { splitter: parseFindPattern } : {});
   for (const part of paths) {
-    const target = InternalUrlRouter.instance().normalize(normalizePathLikeInput(part));
-    const scheme = /^([a-z][\w+.-]*):\/\//i.exec(target)?.[1].toLowerCase();
-    if (isReadableUrlPath(target) || (scheme && !LOCAL_SCHEMES[scheme])) return true;
+    if (part !== path && await requiresExternalReadApproval(toolName, part)) return true;
   }
   return false;
 }

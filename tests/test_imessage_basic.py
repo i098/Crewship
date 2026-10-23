@@ -1813,8 +1813,8 @@ def test_native_normalized_local_targets_remain_readable(tmp_path, native_desk):
     literal.write_text("current local value\n")
     replies.extend([
         lambda body: {"tool_calls": [
-            tool_call("read", {"path": str(literal)}, "literal"),
-            tool_call("grep", {"path": f'"{first}"', "pattern": "local marker"}, "quoted"),
+            tool_call("read", {"path": literal.as_uri()}, "literal"),
+            tool_call("grep", {"path": f'"{first.as_uri()}"', "pattern": "local marker"}, "quoted"),
             tool_call("grep", {"path": f"{first},{second}", "pattern": "local marker"}, "combined"),
             tool_call("glob", {"path": f'"{directory}/*.log"'}, "files"),
         ]},
@@ -1872,6 +1872,11 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
         *targets, *(f'"{target}"' for target in targets),
         f"{sentinel};{targets[1]}", f"{sentinel},{targets[0]}",
         f'{sentinel},"{targets[0]}"', f'"{sentinel},{targets[1]}"',
+        f"{sentinel.as_uri()}%3B{endpoint}",
+        f"{sentinel.as_uri()}%2C{endpoint}",
+        f'"{sentinel.as_uri()}%3b{endpoint}"',
+        f"{sentinel};{sentinel.as_uri()}%3B{endpoint}",
+        f"{sentinel.as_uri()}%3B{sentinel.as_uri()}%253B{endpoint}",
     ]
     external = [
         tool_call(tool, {"path": path, **({"pattern": "keep"} if tool == "grep" else {})}, f"call_{tool}_{index}")
@@ -1902,6 +1907,51 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
         assert not (tmp_path / "external-read").exists()
         assert not (tmp_path / "direct-send").exists()
         assert text(fake / "sent") == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_native_systemctl_requires_fixed_local_arguments(tmp_path, native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    systemctl = tmp_path / "bin/systemctl"
+    systemctl.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, sys\n"
+        "with (pathlib.Path(os.environ['FAKE_DIR']) / 'systemctl-calls').open('a') as log:\n"
+        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "print('active')\n"
+    )
+    systemctl.chmod(0o755)
+    commands = [
+        "systemctl --user is-active --system --host=private.collector.example app.service",
+        "systemctl --user is-active -H private.collector.example app.service",
+        "systemctl --user is-active --machine=container app.service",
+        "systemctl --user is-active app.service",
+        "systemctl --user is-active -- fm-imessage.service extra.service",
+        "systemctl --user is-active -- fm-imessage.service --host=private.collector.example",
+    ]
+    denied = {f"remote_{index}" for index in range(len(commands))}
+    replies.extend([
+        lambda body: {"tool_calls": [
+            tool_call("bash", {"command": "systemctl --user is-active -- fm-imessage.service"}, "local"),
+            *(tool_call("bash", {"command": command}, f"remote_{index}") for index, command in enumerate(commands)),
+        ]},
+        lambda body: tool_answer("active"),
+    ])
+    bridge = start(1)
+    try:
+        receive("service", "Check whether the desk service is active.")
+        wait_for(lambda: text(fake / "sent"), "the local service answer", timeout=45)
+        results = {message["tool_call_id"]: message["content"] for body in requests
+                   for message in body["messages"] if message["role"] == "tool"}
+        assert all("approv" in results[call_id].lower() for call_id in denied)
+        assert [json.loads(line) for line in text(fake / "systemctl-calls").splitlines()] == [
+            ["--user", "is-active", "--", "fm-imessage.service"],
+        ]
+        assert text(fake / "sent") == "send active\n"
+        assert text(notes) == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
