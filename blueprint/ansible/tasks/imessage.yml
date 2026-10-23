@@ -25,7 +25,7 @@
     dest: "{{ crewship_imessage_dir }}/{{ item }}"
     mode: "0644"
     remote_src: true
-  loop: [bridge.ts, bluebubbles.ts, cards.ts, desk.ts, desk-tools.yml, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, zoom.ts]
+  loop: [bridge.ts, bluebubbles.ts, cards.ts, desk.ts, desk-tools.yml, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, transcribe.ts, zoom.ts]
   notify: restart fm-imessage
 
 - name: Install the iMessage commands

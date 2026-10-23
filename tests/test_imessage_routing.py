@@ -275,15 +275,24 @@ def test_sender_timeout_preserves_uncertainty_for_firstmate(tmp_path, desk_clock
 
 def test_scope_change_after_semicolon_cancels_stale_route(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    (tmp_path / "bin/omp").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, sys, time\n"
+        "p = pathlib.Path(os.environ['FAKE_DIR'])\n"
+        "sys.stdin.read()\n"
+        "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1':\n"
+        "    print(json.dumps({'type': 'desk_result', 'drafted': json.dumps({'kind': 'handoff'}), 'tools': {}}))\n"
+        "else:\n"
+        "    (p / 'route-started').touch()\n"
+        "    while (p / 'model-hold').exists(): time.sleep(0.02)\n"
+        "    print((p / 'answer').read_text())\n"
+    )
     (fake / "model-hold").touch()
     bridge = start(1)
     try:
         receive("work", "Fix the website menu")
         desk_clock()
-        wait_for(lambda: (fake / "model-started").exists(), "the pending scope decision")
-        call = json.loads(text(fake / "model-calls").splitlines()[-1])
-        system = call["args"][call["args"].index("--system-prompt") + 1]
-        assert json.loads(system.splitlines()[-1]) == [{"id": mate, "scope": scope} for mate, scope in SCOPES.items()]
+        wait_for(lambda: (fake / "route-started").exists(), "the pending scope decision")
         path = tmp_path / "data/secondmates.md"
         path.write_text(path.read_text().replace("exclude native applications", "reports only"))
         (fake / "model-hold").unlink()

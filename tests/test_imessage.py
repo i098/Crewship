@@ -1936,6 +1936,25 @@ def fake_bridge(tmp_path, test_mode=True):
 
     return fake, state, notes, err, start, inbound, cli, text
 
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_installed_bridge_sends_owner_messages(tmp_path):
+    fake, _, _, _, start, inbound, cli, text = fake_bridge(tmp_path)
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/imessage.yml").read_text())
+    installed = next(task["loop"] for task in tasks if task["name"] == "Install the iMessage bridge service")
+    for file in (tmp_path / "app").iterdir():
+        if file.is_file() and file.name not in installed:
+            file.unlink()
+    bridge = start(1)
+    try:
+        inbound("installed", text="What is the current status?")
+        cli("The installed bridge is ready.")
+        wait_for(lambda: text(fake / "sent"), "the installed bridge reply")
+        assert text(fake / "sent").splitlines() == ["send The installed bridge is ready."]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_path):
