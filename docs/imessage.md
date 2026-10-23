@@ -79,6 +79,8 @@ For each message from the owner, the service does these steps:
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
    The voice prompt uses the reply check's exact-output decision to select quotation or prose instructions before the model call.
    Prose instructions retain descriptions after source labels; quotation instructions retain the full source line, including bullets and emphasis.
+   Exact quotations must match the source character for character, including indentation and whitespace.
+   The service sends accepted exact output as one bubble without trimming or splitting it; normal prose still uses paragraph bubbles.
    The same rules apply when a request spans lines or combines several messages.
    Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
    Any other unconsumed or conflicting instruction selects the normal prose checks.

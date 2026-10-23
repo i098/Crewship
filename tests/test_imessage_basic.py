@@ -13,9 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import yaml
 from test_imessage import (
+    DESK,
     ROOT,
     TEST_QUIET_MS,
     FallbackRig,
+    bun,
     fake_bridge,
     publish_json,
     read_text,
@@ -157,6 +159,32 @@ def basic_rig(tmp_path, test_mode=True):
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]
 
     return fake, state, notes, err, start, receive, cli, text, records
+
+
+@pytest.mark.parametrize("event_output", [False, True])
+@pytest.mark.parametrize("question,draft", [
+    ("Quote the source text.", " logging: on\n memory: off"),
+    ("Copy the source text.", "\tlogging: on  \n\n memory: off\t \n"),
+    ("Return the exact command.", "\t run-tool  inspect --json \t"),
+    ("Return raw output.", "  first\r\n\r\n\tsecond  \r\n"),
+])
+def test_exact_voice_output_keeps_all_characters(event_output, question, draft):
+    result = bun(f"""
+import {{ readDesk, voiceAnswer }} from {DESK};
+const draft = {json.dumps(draft)};
+const question = {json.dumps(question)};
+const output = {json.dumps(event_output)}
+  ? JSON.stringify({{ type: "message_end", message: {{ role: "assistant", content: [{{ type: "text", text: draft }}] }} }}) + "\\n"
+  : draft;
+const proc = Bun.spawn([process.execPath, "-e", "process.stdout.write(" + JSON.stringify(output) + ")"], {{ stdout: "pipe" }});
+const {{ ok, drafted }} = await readDesk(proc);
+const source = {{ answer: draft, identity: false }};
+console.log(JSON.stringify({{
+  kept: voiceAnswer(source, question, ok, drafted),
+  changed: voiceAnswer(source, question, ok, draft.trim()) ?? null,
+}}));
+""")
+    assert result == {"kept": [draft], "changed": None}
 
 
 @pytest.mark.parametrize("rewrite,expected", [
@@ -1735,6 +1763,50 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         assert text(fake / "sent").splitlines() == ["send https://example.org/boards/current"]
         assert text(notes) == ""
         assert "tool-results" in text(state / "desk.log")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source_kind", ["tool", "status", "supervisor", "desk"])
+@pytest.mark.parametrize("question,rewrite,expected", [
+    ("Quote the source text.", " logging: on\n memory: off", " logging: on\n memory: off"),
+    ("Quote the source text.", "logging: on\n memory: off", None),
+    ("Quote the source text.", " logging: on\n  memory: off", None),
+    ("Quote the source text.", " logging: on\n memory: off ", None),
+    ("What are the settings?", " \nLogging is on.\n \nMemory is off.\n ", "Logging is on.\n\nMemory is off."),
+])
+def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_desk, source_kind, question, rewrite, expected):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    draft = " logging: on\n memory: off"
+    if source_kind == "tool":
+        source = tmp_path / "settings.txt"
+        source.write_text(draft)
+        replies.append(lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]})
+        evidence = [{"source": "tool", "quote": line} for line in draft.splitlines()]
+    elif source_kind == "status":
+        (fake / "status").write_text(draft)
+        evidence = [{"source": "status", "quote": line} for line in draft.splitlines()]
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = [{"source": "chat", "id": 0, "quote": line} for line in draft.splitlines()]
+    replies.append(lambda body: {"content": json.dumps({"kind": "reply", "answer": draft, "evidence": evidence})})
+    (fake / "voice-answer").write_text(rewrite)
+    bridge = start(1)
+    try:
+        receive("quote", question)
+        wait_for(lambda: text(fake / "sent") or "photon-quote " in text(notes), "the quotation result", timeout=45)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete quotation delivery")
+        assert text(fake / "sent") == ("" if expected is None else "".join(f"send {part}\n" for part in expected.split("\n\n")))
+        assert text(notes).count("photon-quote ") == (1 if expected is None else 0)
+        prior = [draft] if source_kind == "desk" else []
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == prior + ([] if expected is None else [expected])
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": draft, "question": question}]
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -181,7 +181,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
-type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
+type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
@@ -914,7 +914,7 @@ async function runDesk(current: () => boolean) {
       queued = !("handled" in result.answer);
     }
     const at = result?.target.ref ?? pending.at(-1)!.ref;
-    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "answer" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
+    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "bubbles" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
   } finally {
     if (!queued) finishTyping();
   }
@@ -931,7 +931,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
     out: { ...target.ref, requestId: target.requestId, requests: ids,
-      ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
+      ...("bubbles" in answer ? { bubbles: answer.bubbles, reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
   handoffPending();
@@ -977,7 +977,7 @@ async function prepareDeskAnswer(answer: BasicAnswer, pending: Routing[], from: 
   if ("answer" in answer) {
     const rewritten = await rewriteVoice(answer, question);
     if (!rewritten) return;
-    answer.answer = rewritten;
+    return { answer: { bubbles: rewritten }, target };
   }
   return { answer, target };
 }
@@ -1030,7 +1030,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   }
 }
 
-async function rewriteVoice(source: VoiceSource, question: string): Promise<string | undefined> {
+async function rewriteVoice(source: VoiceSource, question: string): Promise<string[] | undefined> {
   let proc: DeskProc | undefined;
   try {
     proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
