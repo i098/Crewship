@@ -557,6 +557,7 @@ def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path,
         answered, unanswered = ("question", "elsewhere") if target == 1 else ("elsewhere", "question")
         wait_for(lambda: f"photon-{unanswered} " in text(notes), "the other chat handoff")
         assert f"photon-{answered} " not in text(notes)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed response confirmation")
         confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
         assert confirmations == [[f"photon-{answered}"]]
         desk_clock(8000)

@@ -18,7 +18,7 @@ For each message from the owner, the service does these steps:
    Text received during a draft starts a new batching wait; the next draft includes every pending message.
    The desk uses the latest status result after the wait without reading it again.
    Slow message persistence can make the status snapshot older than the batching wait.
-   Attachments, unsupported content, group chats, and edits go to Firstmate without a desk answer.
+   Attachments, unsupported content, group chats, and edits go to Firstmate without a model answer.
    A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
 5. The desk model classifies the whole pending burst.
    The default is Claude Haiku 5.5 with thinking off, through the existing one-shot `omp -p` runner.
@@ -116,7 +116,7 @@ For each message from the owner, the service does these steps:
    Each direct chat keeps its own deadline; messages in another chat do not cancel it.
    A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
    Active mate delivery does not block a due acknowledgement or keep that chat's typing indicator active.
-   It uses the existing outbox, keeps every request in the handoff, and states that no confirmed answer exists yet.
+   It uses the existing outbox, preserves request routing, and states that no confirmed answer exists yet.
    It omits quoted content for sensitive messages and attachments, including audio transcripts and saved paths.
    A prompt answer suppresses the acknowledgement; typing alone does not.
    A queued supervisor response suppresses it only after the transport accepts that response.
@@ -135,7 +135,7 @@ For each message from the owner, the service does these steps:
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
-   Startup drops restored desk text that has unsent bubbles and hands its requests to Firstmate, without waiting for inbound catch-up.
+   Startup drops restored model answers that have unsent text bubbles and hands their requests to Firstmate, without waiting for inbound catch-up.
    Firstmate and service sends keep their durable recovery.
    Each transport checks cancellation after preparation and immediately before sending.
    Cancellation does not remove uncertain delivery records.
@@ -167,7 +167,7 @@ A completed desk turn records its outcome in the private `desk.log`, including `
 The log also records read completion, typing start and stop, model start and result, inbox acceptance, and transport acceptance.
 These events contain timestamps and message ids, not model output or credentials.
 Typing events retain the originating message id when a newer message arrives before the transport operation completes.
-`transport-accepted` records successful transport completion before outbox or routing writes.
+`transport-accepted` records successful transport completion before delivery-progress or response-confirmation writes.
 `response-confirmed` records routing confirmation and can repeat during recovery without another send.
 `history-reconciled` records a delivery found in transport history, not a new send.
 `card-update-accepted` records an accepted card edit separately from initial card delivery.

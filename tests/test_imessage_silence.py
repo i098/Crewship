@@ -192,6 +192,7 @@ def test_targeted_answer_does_not_close_another_request(tmp_path, desk_clock, pl
         desk_clock(8000)
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the unanswered request acknowledgement")
         assert f"{unanswered} job" in text(fake / "sent").splitlines()[1]
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed response confirmations")
         confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
         assert confirmations == [[f"photon-{answered}"], [f"photon-{unanswered}"]]
     finally:
