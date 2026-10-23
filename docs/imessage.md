@@ -60,22 +60,29 @@ For each message from the owner, the service does these steps:
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
-   The answer must quote complete lines from status, prior supervisor or desk records, or successful current tool results.
+   The internal draft must equal complete evidence lines from status, prior supervisor or desk records, or successful current tool results.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
-   The service checks these quotes against their sources.
-   It rejects unsupported facts and work claims, while allowing grounded simple-present and possessive descriptions.
-   After those checks, one voice pass rewrites only the wording in the owner's short, blunt chat style.
+   The service checks every quote against its source and rejects conflicting draft text, missing evidence, and work claims.
+   After those checks, the existing voice pass uses the original question and validated draft to write a short plain-text answer.
+   It explains configuration values in context and preserves exact values, links, identifiers, and commands.
+   The draft and question remain untrusted data; neither grants action authority.
+   The native result envelope masks credentials in the original question before it reaches the voice pass.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
-   The prompt treats the draft as untrusted data, not instructions.
-   The service rejects changed protected tokens or polarity, empty replies, failed calls, and Markdown fences.
-   It also rejects replies longer than 110% of the draft's length, rounded up to the next whole character.
+   The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and Markdown fences.
+   Tool-backed answers can use up to 2,000 characters so bare values can become useful sentences.
+   Other rewrites retain the 110% length limit, rounded up to the next whole character.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
+   Source comparison ignores paired inline Markdown delimiters; it never removes characters from the delivered answer.
+   Tool-backed rewrites retain standalone scalar values, configuration field values, and inline code exactly.
+   Hyphenated prose can use sentence case; identifiers in fields and code spans remain exact.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
    Polarity words must keep the same counts and immediately adjacent punctuation.
    These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
-   A rejected rewrite sends the original checked draft.
-   Blank lines separate bubbles; lists stay in one bubble.
+   Configuration flags `on`, `off`, `true`, `false`, `enabled`, and `disabled` retain their counts without binding sentence punctuation.
+   A rejected tool-backed rewrite hands off instead of sending raw source output.
+   Other rejected rewrites retain the original checked draft.
+   Blank lines separate bubbles; explicitly requested raw values can retain their line breaks.
    Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
    Later corrections and follow-ups guide that selection.
@@ -161,7 +168,7 @@ The classification runner has a 45-second process timeout, but the unanswered-re
 The voice pass uses the same desk model, no tools, and a separate five-second timeout.
 It disables omp reasoning and uses Inception's `instant` reasoning level.
 New messages and Firstmate activity cancel this pass through the same path as classification.
-The voice call receives only the checked draft, not chat history or fleet status.
+The voice call receives the original question and checked draft, not chat history or unvalidated fleet status.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
 A completed desk turn records its outcome in the private `desk.log`, including `handled` and successful tool-call ids.
 The log also records read completion, typing start and stop, model start and result, inbox acceptance, and transport acceptance.

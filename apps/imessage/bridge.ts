@@ -953,9 +953,10 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (!statusOk || !prompt.includes(latestText)) return;
   const writePath = armWrite(pending);
   trace(pending.at(-1)!.ref.id, "model-start");
-  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath }));
+  const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath,
+    question: pending.map((item) => item.authored ?? item.text).join("\n") }));
   deskRun = proc;
-  const { ok, drafted, tools } = await readDesk(proc, true);
+  const { ok, drafted, tools, question } = await readDesk(proc, true);
   trace(pending.at(-1)!.ref.id, ok ? "model-result" : "model-failed");
   if (deskRun !== proc) return;
   deskRun = undefined;
@@ -966,10 +967,18 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
     return;
   }
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
+  return prepareDeskAnswer(answer, pending, from, question, Object.keys(tools).length > 0);
+}
+
+async function prepareDeskAnswer(answer: DeskResult["answer"] & { target?: number }, pending: Routing[], from: number, question: string, toolBacked: boolean): Promise<DeskResult | undefined> {
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
-  if ("answer" in answer) answer.answer = await rewriteVoice(answer.answer);
+  if ("answer" in answer) {
+    const rewritten = await rewriteVoice(answer.answer, question, toolBacked);
+    if (!rewritten) return;
+    answer.answer = rewritten;
+  }
   return { answer, target };
 }
 
@@ -1021,16 +1030,16 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   }
 }
 
-async function rewriteVoice(draft: string): Promise<string> {
+async function rewriteVoice(draft: string, question: string, toolBacked: boolean): Promise<string | undefined> {
   let proc: DeskProc | undefined;
   try {
     proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
-      system: VOICE_PROMPT, prompt: JSON.stringify({ draft }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
+      system: VOICE_PROMPT, prompt: JSON.stringify({ draft, question }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
     deskRun = proc;
     const { ok, drafted } = await readDesk(proc);
-    return voiceAnswer(draft, ok, drafted);
+    return voiceAnswer(draft, ok, drafted, toolBacked);
   } catch {
-    return draft;
+    return voiceAnswer(draft, false, "", toolBacked);
   } finally {
     if (deskRun === proc) deskRun = undefined;
   }

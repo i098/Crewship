@@ -45,7 +45,7 @@ export default function (pi: {
     const tools = Object.fromEntries(output.filter((message) => message.role === "toolResult" && !message.isError)
       .map((message) => [message.toolCallId, { name: message.toolName, text: message.text }]));
     const drafted = output.findLast((message) => message.role === "assistant")?.text ?? "";
-    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools })}\n`);
+    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools, question: redact(process.env.FM_DESK_QUESTION ?? "") })}\n`);
   });
   // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
   const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));

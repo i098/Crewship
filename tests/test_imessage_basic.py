@@ -1432,6 +1432,7 @@ def test_work_approval_ambiguous_and_sensitive_handoff_once(tmp_path, message, c
     ('{"kind":"handoff"}', False),
     ('{"kind":"reply","answer":"Deployed.","evidence":[]}', False),
     ('{"kind":"reply","answer":"The build passed.","evidence":[{"source":"status","quote":"The build passed."}]}', False),
+    ('{"kind":"reply","answer":"The build passed.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
     ('{"kind":"reply","answer":"I deployed it.","evidence":[{"source":"status","quote":"The build is paused."}]}', False),
     ('{"kind":"reply","answer":"The build is paused.","evidence":[{"source":"status","quote":"The build is paused."}]}', True),
 ])
@@ -1640,7 +1641,8 @@ def native_desk(tmp_path, monkeypatch, request, desk_clock):
             requests.append(body)
             if not body.get("stream"):
                 draft = json.loads(body["messages"][-1]["content"])["draft"]
-                data = json.dumps({"choices": [{"message": {"content": draft}}]}).encode()
+                answer = tmp_path / "fake/voice-answer"
+                data = json.dumps({"choices": [{"message": {"content": answer.read_text() if answer.exists() else draft}}]}).encode()
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(data)
@@ -1731,6 +1733,116 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("question,lines,answer", [
+    (
+        "How optimized is the setup, and why is herdr not the default?",
+        [
+            "- **Restart-proof**: work stays available after a restart.",
+            "runtime: herdr",
+            "memory: off",
+        ],
+        "The setup is restart-proof, meaning work stays available after a restart. The runtime is herdr, with memory off.",
+    ),
+    (
+        "Return the exact runtime and memory values, one per line.",
+        ["herdr", "off"],
+        "herdr\noff",
+    ),
+    (
+        "Give me the board link and the command with its exact identifier.",
+        ["board: https://example.org/boards/ABC-42", "command: `run-tool inspect --json`"],
+        "The board is https://example.org/boards/ABC-42\n\nRun run-tool inspect --json",
+    ),
+    (
+        "What is the exact entrypoint identifier?",
+        ["entrypoint: __init__"],
+        "The entrypoint is __init__",
+    ),
+])
+def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source = tmp_path / "setup.txt"
+    source.write_text("\n".join(lines))
+    (fake / "voice-answer").write_text(answer)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]},
+        lambda body: {"content": json.dumps({
+            "kind": "reply", "answer": "\n".join(lines),
+            "evidence": [{"source": "tool", "quote": line} for line in lines],
+        })},
+    ])
+    bridge = start(1)
+    try:
+        receive("lookup", question)
+        wait_for(lambda: text(fake / "sent") or "photon-lookup " in text(notes), "the lookup result", timeout=45)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete lookup delivery")
+        assert text(fake / "sent") == "".join(f"send {part}\n" for part in answer.split("\n\n"))
+        assert text(notes) == ""
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == [answer]
+        results = [message["content"] for body in requests for message in body["messages"] if message["role"] == "tool"]
+        assert all(any(line in result for result in results) for line in lines)
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("source_text,rewrite", [
+    ("runtime: herdr\nmemory: off", ""),
+    ("runtime: herdr\nmemory: off", "The runtime is tmux and memory is on."),
+    ("runtime: herdr\nmemory: off", "I saved the settings."),
+    ("runtime: herdr", "The runtime is herdr and memory is off."),
+    ("command: crewship inspect --json", "Run crewship inspect"),
+    ("entrypoint: `My-Handler`", "The entrypoint is my-handler"),
+])
+def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source = tmp_path / "setup.txt"
+    source.write_text(source_text)
+    (fake / "voice-answer").write_text(rewrite)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("read", {"path": str(source)})]},
+        lambda body: {"content": json.dumps({
+            "kind": "reply", "answer": source_text,
+            "evidence": [{"source": "tool", "quote": line} for line in source_text.splitlines()],
+        })},
+    ])
+    bridge = start(1)
+    try:
+        receive("lookup", "What are the current runtime and memory settings?")
+        wait_for(lambda: "photon-lookup " in text(notes), "the invalid voice handoff", timeout=45)
+        assert text(fake / "sent") == ""
+        assert text(notes).count("photon-lookup ") == 1
+        assert not [row for row in records() if row["kind"] == "desk"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_native_question_is_redacted_before_contextual_voice(tmp_path, native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    secret = "ghp_" + "Ab12" * 10
+    replies.append(lambda body: {"content": json.dumps({
+        "kind": "reply", "answer": "The build is paused.",
+        "evidence": [{"source": "status", "quote": "The build is paused."}],
+    })})
+    bridge = start(1)
+    try:
+        receive("question", f"Token {secret}. What is the build status?")
+        wait_for(lambda: text(fake / "sent"), "the redacted question answer", timeout=45)
+        voice = next(body for body in requests if not body.get("stream"))
+        assert json.loads(voice["messages"][-1]["content"]) == {
+            "draft": "The build is paused.", "question": "Token [REDACTED]. What is the build status?",
+        }
+        assert secret not in json.dumps(voice)
+        assert text(fake / "sent") == "send The build is paused.\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("source,secret", [
     ("read", "ghp_" + "Ab12" * 10),
     ("grep", "private-value-from-configured-secrets"),
@@ -1768,7 +1880,7 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
             wait_for(lambda: text(fake / "sent"), "the filtered native answer", timeout=45)
             voice = [body for body in requests if not body.get("stream")]
             assert len(voice) == 1
-            assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe}
+            assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the data in {target}."}
             assert text(fake / "sent").splitlines() == [f"send {safe}"]
             assert text(notes) == ""
         assert secret not in json.dumps(records())
@@ -1821,7 +1933,7 @@ def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tm
         receive("values", f"Show the server values in {target}.")
         wait_for(lambda: text(fake / "sent"), "the filtered parent-credential answer", timeout=45)
         voice = [body for body in requests if not body.get("stream")]
-        assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe}
+        assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the server values in {target}."}
         assert text(fake / "sent") == f"send {safe}\n"
         for secret in secrets.values():
             assert secret not in json.dumps(requests)
@@ -1948,10 +2060,10 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
 
 
 @pytest.mark.parametrize("bus_variable", ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"])
-def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path, monkeypatch, request, bus_variable):
+def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path_factory, monkeypatch, request, bus_variable):
     if not shutil.which("systemctl"):
         pytest.skip("needs systemctl")
-    runtime = tmp_path / "runtime"
+    runtime = tmp_path_factory.mktemp("bus")
     (runtime / "systemd").mkdir(parents=True, mode=0o700)
     if bus_variable == "XDG_RUNTIME_DIR":
         address = runtime / "systemd/private"
