@@ -70,18 +70,17 @@ For each message from the owner, the service does these steps:
    The native result envelope masks credentials in the original question before it reaches the voice pass.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and Markdown fences.
-   Tool-backed answers can use up to 2,000 characters so bare values can become useful sentences.
-   Other rewrites retain the 110% length limit, rounded up to the next whole character.
+   All source-backed answers can use up to 2,000 characters so bare values can become useful sentences.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
    Source comparison ignores paired inline Markdown delimiters; it never removes characters from the delivered answer.
-   Tool-backed rewrites retain standalone scalar values, configuration field values, and inline code exactly.
-   Hyphenated prose can use sentence case; identifiers in fields and code spans remain exact.
+   Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
+   Hyphenated prose retains its words but can use sentence case and different trailing punctuation.
+   Identifiers in fields and code spans remain exact.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
    Polarity words must keep the same counts and immediately adjacent punctuation.
    These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
    Configuration flags `on`, `off`, `true`, `false`, `enabled`, and `disabled` retain their counts without binding sentence punctuation.
-   A rejected tool-backed rewrite hands off instead of sending raw source output.
-   Other rejected rewrites retain the original checked draft.
+   Every rejected rewrite hands off instead of sending raw source output, including stored chat and status excerpts.
    Blank lines separate bubbles; explicitly requested raw values can retain their line breaks.
    Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.

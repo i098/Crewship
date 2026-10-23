@@ -166,7 +166,7 @@ def basic_rig(tmp_path, test_mode=True):
     ("There are 1,200 jobs. Details: https://example.test/jobs/12", None),
     ("", None),
 ])
-def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, rewrite, expected):
+def test_voice_keeps_numbers_and_links_or_hands_off(tmp_path, desk_clock, rewrite, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     draft = "There are 1200 jobs. Details: https://example.test/jobs/12"
     (fake / "status").write_text(draft)
@@ -179,10 +179,15 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
         receive("question", "How many jobs are there?")
         desk_clock()
         wait_for(lambda: (fake / "voice-started").exists(), "the voice pass")
-        wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the saved route")
-        wait_for(lambda: text(fake / "sent").count("send ") == (2 if expected else 1), "the voice bubbles")
-        assert text(fake / "sent") == f"send {expected or draft}\n"
-        assert text(notes) == ""
+        if expected:
+            wait_for(lambda: '"route":"done"' in text(state / "routing.jsonl"), "the saved route")
+            wait_for(lambda: text(fake / "sent").count("send ") == 2, "the voice bubbles")
+            assert text(fake / "sent") == f"send {expected}\n"
+            assert text(notes) == ""
+        else:
+            wait_for(lambda: "photon-question " in text(notes), "the invalid voice handoff")
+            assert text(fake / "sent") == ""
+            assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -219,6 +224,8 @@ def test_voice_keeps_numbers_and_links_or_sends_original(tmp_path, desk_clock, r
     ("The build is blocked.", "The build is ready."),
     ("The test is broken.", "The test is passing."),
     ("The tests failed.", "The tests passed."),
+    ("Read-only pip probes skip files that pip cannot open.", "Read-write pip probes skip files that pip cannot open."),
+    ("Read-only pip probes skip files that pip cannot open.", "Pip probes skip files that pip cannot open."),
 ])
 def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -231,9 +238,9 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
     try:
         receive("question", "What does the status say?")
         desk_clock()
-        wait_for(lambda: text(fake / "sent"), "the checked draft after unsafe rewriting")
-        assert text(fake / "sent") == f"send {draft}\n"
-        assert text(notes) == ""
+        wait_for(lambda: "photon-question " in text(notes), "the changed claim handoff")
+        assert text(fake / "sent") == ""
+        assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -245,6 +252,7 @@ def test_voice_cannot_change_checked_claims(tmp_path, desk_clock, draft, rewrite
     ("There are 5 jobs ready.", "5 jobs are ready."),
     ("The build is blocked.", "Blocked."),
     ("The build isn’t ready.", "The build isn't ready."),
+    ("Read-only pip probes skip files that pip cannot open.", "read-only pip probes skip files that pip cannot open."),
 ])
 def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draft, rewrite):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
@@ -266,7 +274,7 @@ def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draf
 
 
 @pytest.mark.parametrize("failure", ["voice-hold", "voice-fail"])
-def test_voice_failure_sends_original(tmp_path, desk_clock, monkeypatch, failure):
+def test_voice_failure_hands_off_without_sending_source(tmp_path, desk_clock, monkeypatch, failure):
     monkeypatch.setenv("FM_IMESSAGE_TEST_VOICE_MS", "100")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / failure).touch()
@@ -274,10 +282,10 @@ def test_voice_failure_sends_original(tmp_path, desk_clock, monkeypatch, failure
     try:
         receive("question", "What is the build status?")
         desk_clock()
-        wait_for(lambda: text(fake / "sent"), "the original after voice failure")
-        assert text(fake / "sent") == "send The build is paused.\n"
+        wait_for(lambda: "photon-question " in text(notes), "the voice failure handoff")
+        assert text(fake / "sent") == ""
         assert (fake / "voice-started").exists()
-        assert text(notes) == ""
+        assert text(notes).count("photon-question ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -1758,6 +1766,11 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         ["entrypoint: __init__"],
         "The entrypoint is __init__",
     ),
+    (
+        "How do pip probes handle files they cannot open?",
+        ["Read-only pip probes skip files that pip cannot open."],
+        "read-only pip probes skip files that pip cannot open.",
+    ),
 ])
 def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
     rig, replies, requests = native_desk
@@ -1787,6 +1800,62 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("lines,rewrite,accepted", [
+    (
+        ["herdr", "off"],
+        "The runtime is herdr, with memory off.",
+        True,
+    ),
+    (
+        ["- **Restart-proof**: work stays available after a restart.", "herdr", "off"],
+        "The setup is restart-proof, meaning work stays available after a restart. The runtime is herdr, with memory off.",
+        True,
+    ),
+    (["herdr", "off"], "", False),
+    (["herdr", "off"], "The runtime is tmux, with memory on.", False),
+])
+def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    source_text = "\n".join(lines)
+    if source_kind == "status":
+        (fake / "status").write_text(source_text)
+        evidence = [{"source": "status", "quote": line} for line in lines]
+    else:
+        main = state / "memory/main"
+        main.mkdir(parents=True)
+        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": "2026-10-17T00:00:00.000Z"}
+        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        evidence = [{"source": "chat", "id": 0, "quote": line} for line in lines]
+    (fake / "voice-answer").write_text(rewrite)
+    count = 2 if accepted else 1
+    replies.extend([
+        lambda body: {"content": json.dumps({"kind": "reply", "answer": source_text, "evidence": evidence})}
+        for _ in range(count)
+    ])
+    bridge = start(1)
+    try:
+        question = "Which runtime and memory settings does the restart-proof setup use?"
+        for index in range(count):
+            receive(f"lookup-{index}", question)
+            if accepted:
+                wait_for(lambda: text(fake / "sent").count("send ") == index + 1, "the plain excerpt answer", timeout=45)
+                wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete excerpt delivery")
+            else:
+                wait_for(lambda: "photon-lookup-0 " in text(notes), "the rejected excerpt handoff", timeout=45)
+        assert text(fake / "sent") == (f"send {rewrite}\n" * count if accepted else "")
+        assert text(notes).count("photon-lookup-0 ") == (0 if accepted else 1)
+        expected = ([source_text] if source_kind == "desk" else []) + ([rewrite] * count if accepted else [])
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
+        assert not any(message["role"] == "tool" for body in requests for message in body["messages"])
+        voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
+        assert voices == [{"draft": source_text, "question": question}] * count
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("source_text,rewrite", [
     ("runtime: herdr\nmemory: off", ""),
     ("runtime: herdr\nmemory: off", "The runtime is tmux and memory is on."),
@@ -1794,6 +1863,8 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
     ("runtime: herdr", "The runtime is herdr and memory is off."),
     ("command: crewship inspect --json", "Run crewship inspect"),
     ("entrypoint: `My-Handler`", "The entrypoint is my-handler"),
+    ("Read-only pip probes skip files that pip cannot open.", "Read-write pip probes skip files that pip cannot open."),
+    ("Read-only pip probes skip files that pip cannot open.", "Pip probes skip files that pip cannot open."),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk

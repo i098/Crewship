@@ -967,15 +967,15 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
     return;
   }
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
-  return prepareDeskAnswer(answer, pending, from, question, Object.keys(tools).length > 0);
+  return prepareDeskAnswer(answer, pending, from, question);
 }
 
-async function prepareDeskAnswer(answer: DeskResult["answer"] & { target?: number }, pending: Routing[], from: number, question: string, toolBacked: boolean): Promise<DeskResult | undefined> {
+async function prepareDeskAnswer(answer: DeskResult["answer"] & { target?: number }, pending: Routing[], from: number, question: string): Promise<DeskResult | undefined> {
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;
   if ("react" in answer && !socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[from - 1])) return;
   if ("answer" in answer) {
-    const rewritten = await rewriteVoice(answer.answer, question, toolBacked);
+    const rewritten = await rewriteVoice(answer.answer, question);
     if (!rewritten) return;
     answer.answer = rewritten;
   }
@@ -1030,16 +1030,16 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   }
 }
 
-async function rewriteVoice(draft: string, question: string, toolBacked: boolean): Promise<string | undefined> {
+async function rewriteVoice(draft: string, question: string): Promise<string | undefined> {
   let proc: DeskProc | undefined;
   try {
     proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, voice: true,
       system: VOICE_PROMPT, prompt: JSON.stringify({ draft, question }), spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }));
     deskRun = proc;
     const { ok, drafted } = await readDesk(proc);
-    return voiceAnswer(draft, ok, drafted, toolBacked);
+    return voiceAnswer(draft, ok, drafted);
   } catch {
-    return voiceAnswer(draft, false, "", toolBacked);
+    return;
   } finally {
     if (deskRun === proc) deskRun = undefined;
   }
