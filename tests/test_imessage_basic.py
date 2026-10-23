@@ -1771,6 +1771,21 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         ["Read-only pip probes skip files that pip cannot open."],
         "read-only pip probes skip files that pip cannot open.",
     ),
+    (
+        "Return the exact command.",
+        ["command: `run-tool inspect --json`"],
+        "run-tool inspect --json",
+    ),
+    (
+        "Quote the setup description verbatim.",
+        ["- **Restart-proof**: work stays available after a restart."],
+        "- **Restart-proof**: work stays available after a restart.",
+    ),
+    (
+        "Which entrypoint is configured?",
+        ["The entrypoint is My-Handler."],
+        "The entrypoint is My-Handler.",
+    ),
 ])
 def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path, native_desk, question, lines, answer):
     rig, replies, requests = native_desk
@@ -1801,21 +1816,26 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
 
 
 @pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
-@pytest.mark.parametrize("lines,rewrite,accepted", [
+@pytest.mark.parametrize("lines,rewrite,accepted,question", [
     (
         ["herdr", "off"],
         "The runtime is herdr, with memory off.",
         True,
+        None,
     ),
     (
         ["- **Restart-proof**: work stays available after a restart.", "herdr", "off"],
         "The setup is restart-proof, meaning work stays available after a restart. The runtime is herdr, with memory off.",
         True,
+        None,
     ),
-    (["herdr", "off"], "", False),
-    (["herdr", "off"], "The runtime is tmux, with memory on.", False),
+    (["herdr", "off"], "", False, None),
+    (["herdr", "off"], "The runtime is tmux, with memory on.", False, None),
+    (["herdr", "off"], "herdr\noff", False, None),
+    (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values, one per line."),
+    (["herdr", "off"], "herdr\noff", False, "Do not return raw values. Explain the runtime and memory settings."),
 ])
-def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted):
+def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
     source_text = "\n".join(lines)
@@ -1836,7 +1856,7 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     ])
     bridge = start(1)
     try:
-        question = "Which runtime and memory settings does the restart-proof setup use?"
+        question = question or "Which runtime and memory settings does the restart-proof setup use?"
         for index in range(count):
             receive(f"lookup-{index}", question)
             if accepted:
@@ -1865,6 +1885,13 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     ("entrypoint: `My-Handler`", "The entrypoint is my-handler"),
     ("Read-only pip probes skip files that pip cannot open.", "Read-write pip probes skip files that pip cannot open."),
     ("Read-only pip probes skip files that pip cannot open.", "Pip probes skip files that pip cannot open."),
+    ("herdr\noff", "herdr\noff"),
+    ("herdr\noff", "off\n\nherdr"),
+    ("herdr\noff", "herdr, off"),
+    ("herdr\noff", '["herdr","off"]'),
+    ("The entrypoint is My-Handler.", "The entrypoint is my-handler."),
+    ("The entrypoint is my-handler.", "The entrypoint is My-handler."),
+    ("My-Handler is the entrypoint.", "my-handler is the entrypoint."),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk

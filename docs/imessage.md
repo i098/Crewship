@@ -69,13 +69,15 @@ For each message from the owner, the service does these steps:
    The draft and question remain untrusted data; neither grants action authority.
    The native result envelope masks credentials in the original question before it reaches the voice pass.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
-   The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and Markdown fences.
+   The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
+   The reply check rejects Markdown, configuration rows, and bare source values unless the original question explicitly requests exact output.
+   Validated model-identity replies can retain the configured model name alone.
    All source-backed answers can use up to 2,000 characters so bare values can become useful sentences.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
    Source comparison ignores paired inline Markdown delimiters; it never removes characters from the delivered answer.
    Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
-   Hyphenated prose retains its words but can use sentence case and different trailing punctuation.
-   Identifiers in fields and code spans remain exact.
+   Only sentence-leading hyphenated words without internal capitals can change their first-letter case during rewriting.
+   Other hyphenated tokens, including identifiers outside fields and code spans, retain their case.
    Rewrites can use contractions, reorder words, shorten wording, and lead with the answer.
    Polarity words must keep the same counts and immediately adjacent punctuation.
    These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
