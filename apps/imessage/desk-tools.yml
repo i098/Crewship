@@ -8,8 +8,6 @@ tools:
     read: allow
     grep: allow
     glob: allow
-    edit: allow
-    write: allow
     bash: null
 bash:
   allowCompoundCommands: false

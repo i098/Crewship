@@ -59,7 +59,7 @@ def routing_rig(tmp_path):
     ("data-mate", "Fix the database report export query"),
     ("build-mate", "Fix the compiler build in CI"),
 ])
-def test_mate_handoff_preserves_text_and_notifies_firstmate(tmp_path, desk_clock, mate, message):
+def test_mate_handoff_preserves_text_without_notifying_firstmate(tmp_path, desk_clock, mate, message):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     (fake / "answer").write_text(json.dumps({
         "target": mate, "confidence": "high", "domains": [mate], "category": "work",
@@ -68,11 +68,10 @@ def test_mate_handoff_preserves_text_and_notifies_firstmate(tmp_path, desk_clock
     try:
         receive("work", message)
         desk_clock()
-        wait_for(lambda: "routed to " in text(notes), "the Firstmate routing note")
+        wait_for(lambda: f"routed to {mate}" in text(state / "routing.jsonl"), "the local delivery receipt")
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
         assert sends == [{"home": str(tmp_path), "args": [mate, f"[from captain via desk] {message}"]}]
-        assert f"routed to {mate}\n{message}" in text(notes)
-        assert text(notes).count("photon-work ") == 1
+        assert text(notes) == ""
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
         bridge.terminate()
@@ -81,7 +80,7 @@ def test_mate_handoff_preserves_text_and_notifies_firstmate(tmp_path, desk_clock
         receive("work", message)
         desk_clock()
         assert text(fake / "mate-sends").splitlines() == [json.dumps(sends[0])]
-        assert text(notes).count("photon-work ") == 1
+        assert text(notes) == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -142,22 +141,22 @@ def test_route_failure_falls_back_to_firstmate(tmp_path, desk_clock, failure):
         bridge.wait(10)
 
 
-def test_firstmate_note_retries_without_resending_to_mate(tmp_path, desk_clock):
+def test_successful_mate_delivery_does_not_depend_on_main_inbox(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     (fake / "inbox-fail").touch()
     bridge = start(1)
     try:
         receive("work", "Fix the website menu")
         desk_clock()
-        wait_for(lambda: "routing retains the request" in text(err), "the retained routing note")
+        wait_for(lambda: "routed to web-mate" in text(state / "routing.jsonl"), "the local delivery receipt")
         bridge.terminate()
         bridge.wait(10)
         assert len(text(fake / "mate-sends").splitlines()) == 1
-        (fake / "inbox-fail").unlink()
         bridge = start(2)
-        wait_for(lambda: "routed to web-mate" in text(notes), "the recovered routing note")
+        receive("work", "Fix the website menu")
+        desk_clock()
         assert len(text(fake / "mate-sends").splitlines()) == 1
-        assert text(notes).count("photon-work ") == 1
+        assert text(notes) == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -213,7 +212,7 @@ def test_registry_changes_apply_without_restart(tmp_path, desk_clock):
         path.write_text(table)
         receive("after", "Fix the website layout")
         desk_clock()
-        wait_for(lambda: "routed to web-mate" in text(notes), "the added routing table")
+        wait_for(lambda: "routed to web-mate" in text(state / "routing.jsonl"), "the added routing table")
         (fake / "model-started").unlink()
         (fake / "model-hold").touch()
         receive("removed", "Fix the website footer")
@@ -223,7 +222,7 @@ def test_registry_changes_apply_without_restart(tmp_path, desk_clock):
         (fake / "model-hold").unlink()
         wait_for(lambda: "photon-removed " in text(notes), "the removed-table fallback")
         assert len(text(fake / "mate-sends").splitlines()) == 1
-        assert text(notes).count("routed to web-mate") == 1
+        assert text(notes).count("photon-after ") == 0
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -303,13 +302,12 @@ def test_same_mate_burst_delivers_each_text_once(tmp_path, desk_clock):
         for index, message in enumerate(messages):
             receive(str(index), message)
         desk_clock()
-        wait_for(lambda: text(notes).count("routed to web-mate") == 3, "the complete mate handoff")
+        wait_for(lambda: text(state / "routing.jsonl").count("routed to web-mate") == 3, "the complete mate handoff")
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
         assert [send["args"] for send in sends] == [
             ["web-mate", f"[from captain via desk] {message}"] for message in messages
         ]
-        for index in range(3):
-            assert text(notes).count(f"photon-{index} ") == 1
+        assert text(notes) == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -381,17 +379,17 @@ def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_
             }[change]
             registry.write_text(registry.read_text().replace(before, after))
         (fake / "mate-hold").unlink()
-        wait_for(lambda: "photon-2 " in text(notes), "the remaining Firstmate notes")
+        wait_for(lambda: any(json.loads(row).get("ids") == ["photon-2"] and json.loads(row).get("route") == "done"
+                             for row in text(state / "routing.jsonl").splitlines()), "the completed burst")
         expected = messages if change == "unchanged" else messages[:1]
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
         assert [send["args"] for send in sends] == [
             ["web-mate", f"[from captain via desk] {message}"] for message in expected
         ]
-        assert text(notes).count("routed to web-mate") == len(expected)
+        assert text(state / "routing.jsonl").count("routed to web-mate") == len(expected)
         assert "may be incomplete" not in text(notes)
         for index, message in enumerate(messages):
-            assert text(notes).count(f"photon-{index} ") == 1
-            assert message in text(notes)
+            assert text(notes).count(f"photon-{index} ") == (0 if message in expected else 1)
     finally:
         bridge.terminate()
         bridge.wait(10)

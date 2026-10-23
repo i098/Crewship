@@ -28,9 +28,14 @@ For each message from the owner, the service does these steps:
    A native provider hook preserves Inception's `instant` wire value; other reasoning levels pass through unchanged.
    A failed Inception call never falls back to another provider; requests follow the [second-mate handoff rules](#second-mate-handoffs).
    The Inception voice pass still uses its tool-free chat-completions request and `instant` reasoning.
-   The runtime has native `read`, `grep`, `glob`, `bash`, `edit`, and `write` tools, plus the existing `zoom` extension.
-   `desk-tools.yml` applies the native write-tier approval mode and enables secret masking.
-   Shell commands still require native approval, except the listed system reads and fire-and-forget mate delivery.
+   The runtime has native `read`, `grep`, `glob`, `bash`, and `write` tools, plus the existing `zoom` extension.
+   `desk-tools.yml` enables secret masking; a native extension checks every write against the current owner's authorized target.
+   Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
+   The target is resolved before the call and checked again before writing, including symbolic links.
+   Empty writes and unapproved targets are blocked; retrieved content cannot add a target.
+   Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
+   Direct reads stay on the local filesystem and local process or artifact interfaces; network reads require approval.
+   Shell commands still require native approval, except the listed system reads.
    The child receives only its provider credentials and required runtime variables, not transport credentials.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
@@ -73,10 +78,11 @@ For each message from the owner, the service does these steps:
    The text cannot contain facts or work claims; an invalid text prevents the social response.
    Routine lookups and authorized actions do not create Firstmate inbox work.
    The desk finds existing board URLs itself and returns the URL immediately.
-   For project work, it verifies the registered project owner and uses the existing `fm-send.sh` command.
-   Fire-and-forget delivery uses a stable id derived from the inbound request ids, without a main pending-reply expectation.
-   A successful routine action or mate delivery may finish silently with `{"kind":"handled"}`.
-   The bridge accepts this only after a successful action-tool result and records it in the local routing journal.
+   Project requests follow the verified [second-mate handoff rules](#second-mate-handoffs), without a main note after successful delivery.
+   A successful routine local action may finish silently with `{"kind":"handled"}`.
+   The bridge accepts this only after a successful write result and records it in the local routing journal.
+   Before enabling a write, the journal records that the target may change.
+   An interrupted action goes to Firstmate with that warning instead of running again.
    Cross-domain coordination, real ambiguity, actionable failures, and decisions beyond existing authority go to Firstmate.
    Destructive requests, unclear approvals, and sensitive content retain the existing hard handoff.
    Failed classification calls, invalid JSON, missing evidence, and clipped pending input also go to Firstmate.
@@ -190,15 +196,15 @@ Attachments, group chats, edits, and unsupported desk models keep their existing
 The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, including an `FM_INBOX_CMD` override.
 The service sets `FM_HOME` to the main home that owns the second mates as tasks and holds the routing table.
 It passes the mate id and `[from captain via desk] <verbatim text>` as separate arguments, without a shell.
-The sender uses the mate's existing inbox.
+The sender uses the mate's existing inbox and normal acknowledgement recovery.
 The desk checks the registered id, home, and complete scope before each send.
 A missing or changed entry sends the remaining texts to Firstmate.
 
-Every handed-off text still produces the normal stable-id Firstmate inbox note.
-A successful mate delivery adds the line `routed to <mate-id>` before the original note text.
+A successful delivery records `routed to <mate-id>` in the local journal and completes without a main inbox note.
 A failed sender, missing command, or five-second delivery timeout hands the request to Firstmate.
-The journal saves delivery uncertainty before calling the sender because `fm-send.sh` has no deduplication key.
-A failed or interrupted send retains this warning so Firstmate checks the mate's inbox before sending again.
+The journal saves delivery uncertainty before calling the sender.
+The existing sender retains acknowledgement tracking; recovery never blindly repeats an uncertain send.
+A failed or interrupted send retains a warning so Firstmate checks the mate's inbox before sending again.
 The sender runs asynchronously, so inbound messages and Firstmate commands remain responsive during delivery.
 New owner text, Firstmate activity, and shutdown cancel the active sender and stop the remaining sends in that burst.
 Inbox retries and service restarts never repeat a recorded mate delivery.
