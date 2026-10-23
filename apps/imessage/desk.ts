@@ -329,25 +329,28 @@ function requestsExactOutput(question: string): boolean {
   if (/\b(?:not|no|without|never|don['’]t)\b[^.!?\n]*\b(?:exact(?:ly)?|raw|verbatim|quot(?:e|ation)s?)\b/i.test(question)) return false;
   const request = /^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(give|show|return|send|print|provide|repeat|list|quote|copy|what\s+(?:is|are)|which\s+(?:is|are))(?:\s+me)?\s+(?:the\s+)?(.+)$/is.exec(question.trim());
   if (!request) return false;
-  if (/^(?:quote|copy)$/i.test(request[1]!)) return true;
-  return /^(?:exact|raw|verbatim)\s+(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?)\b/i.test(request[2]!)
-    || /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?))\s+(?:exactly|verbatim|raw)\s*(?:[.!?]+(?=\s|$)|$)/i.test(request[2]!);
+  const output = /^(?:quote|copy)$/i.test(request[1]!)
+    ? /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?|sentence|description))(?:\s+(?:exactly|verbatim))?\b/i.exec(request[2]!)
+    : /^(?:exact|raw|verbatim)\s+(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?)\b/i.exec(request[2]!)
+      ?? /^(?:it|this|that|(?:[\w-]+(?:\s+and\s+[\w-]+)?\s+)?(?:output|text|values?|commands?|lines?|quotations?|identifiers?))\s+(?:exactly|verbatim|raw)\b/i.exec(request[2]!);
+  return output !== null && /^(?:[\s.!?,]+(?:one per line|keep (?:both lines|(?:the )?original (?:text|formatting)|(?:its|the) flags)|do not shorten it))*[\s.!?]*$/i.test(request[2]!.slice(output[0].length));
 }
 
 function sourceStyle(text: string, literals: string[], identity: boolean): boolean {
-  if (/\x60[^\x60]+\x60|^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*:\s)/mi.test(text)) return true;
+  if (/\x60[^\x60]+\x60|^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||[a-z_][\w.-]*[ \t]*(?::[ \t]+|=[ \t]*))/mi.test(text)) return true;
   return !identity && literals.length > 0 && (text.split(/\s*\n\s*/).every((line) => literals.includes(line))
     || (text.match(/[\w-]+/g) ?? []).every((word) => literals.includes(word)));
 }
 
 function voiceLiterals(draft: string): string[] {
-  return Array.from(draft.matchAll(/\x60([^\x60\n]+)\x60|^[a-z_][\w.-]*:\s*(.+)$|^([\w-]+)$/gmi),
+  return Array.from(draft.matchAll(/\x60([^\x60\n]+)\x60|^[a-z_][\w.-]*[ \t]*(?::[ \t]+|=[ \t]*)(.+)$|^([\w-]+)$/gmi),
     (match) => (match[1] ?? match[2] ?? match[3])!.replace(/^\x60(.*)\x60$/, "$1"));
 }
 
 function preservesVoiceFacts(draft: string, text: string, literals: string[]): boolean {
   // Ignore paired inline markup only for source comparison; never strip the delivered answer.
-  const checked = draft.replace(/(^|\s)(\*\*|\x60|\*)(?=\S)(.+?\S|\S)\2(?=$|[\s.,;:!?])/gm, "$1$3");
+  const checked = draft.replace(/^([a-z_][\w.-]*)[ \t]*(?::[ \t]+|=[ \t]*)/gmi, "$1 ")
+    .replace(/(^|\s)(\*\*|\x60|\*)(?=\S)(.+?\S|\S)\2(?=$|[\s.,;:!?])/gm, "$1$3");
   if (protectedVoiceTokens(checked) !== protectedVoiceTokens(text) || voicePolarity(checked) !== voicePolarity(text) || voiceFlags(checked) !== voiceFlags(text)) return false;
   return preservesLiteralValues(literals, text);
 }

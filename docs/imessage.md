@@ -70,16 +70,18 @@ For each message from the owner, the service does these steps:
    The native result envelope masks credentials in the original question before it reaches the voice pass.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
-   The reply check rejects Markdown, configuration rows, and bare source values unless the original question explicitly requests exact output.
+   The reply check rejects Markdown, colon or equals configuration rows, and bare source values unless the complete request explicitly permits exact output.
    A retained configuration row still causes rejection when other lines contain prose.
    Unrequested inline code also causes rejection; the service does not strip its formatting.
    An explanation containing “exactly” does not authorize raw output.
    Explicit output noun phrases and quote or copy requests can authorize it; ambiguous requests cannot.
    The same rules apply when a request spans lines or combines several messages.
+   Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
+   Any other unconsumed or conflicting instruction selects the normal prose checks.
    Validated model-identity replies can retain the configured model name alone.
    All source-backed answers can use up to 2,000 characters so bare values can become useful sentences.
    Protected tokens include identifiers, paths, #numbers, versions, numbers with units, comparison operators, and links; their text and case must match.
-   Source comparison ignores paired inline Markdown delimiters; it never removes characters from the delivered answer.
+   Source comparison normalizes configuration separators and paired inline Markdown delimiters; it never changes delivered characters.
    Rewrites retain standalone scalar values, configuration field values, and inline code exactly.
    Only the approved prose pairs `Read-only`/`read-only` and `Restart-proof`/`restart-proof` can change case.
    All other hyphenated tokens retain their case, including sentence-leading identifiers.

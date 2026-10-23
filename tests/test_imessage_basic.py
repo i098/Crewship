@@ -1857,6 +1857,9 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
     (["herdr", "off"], "herdr\noff", True, "Return the exact runtime and memory values.\nOne per line."),
     (["herdr", "off"], "herdr\noff", True, "Return the runtime and memory values exactly.\nOne per line."),
     (["herdr", "off"], "herdr\noff", True, "Quote the values verbatim.\nKeep both lines."),
+    (["runtime=herdr", "memory=off"], "runtime=herdr\nmemory=off", False, None),
+    (["runtime = herdr", "memory = off"], "The settings are:\nRuntime = herdr\nMemory = off", False, None),
+    (["runtime=herdr", "memory=off"], "The runtime is herdr, with memory off.", True, None),
 ])
 def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, native_desk, source_kind, lines, rewrite, accepted, question):
     rig, replies, requests = native_desk
@@ -1900,14 +1903,24 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
 
 
 @pytest.mark.parametrize("batched", [False, True])
-def test_native_exact_output_accepts_multiline_and_batched_requests(tmp_path, native_desk, batched):
+@pytest.mark.parametrize("request,continuation,response,accepted", [
+    ("Return the exact runtime and memory values.", "One per line.", "herdr\noff", True),
+    ("Return the exact runtime and memory values.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Return the runtime and memory values exactly.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Quote the values verbatim.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Copy the values.", "Actually, use prose instead.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "One per line.\nActually, use prose instead.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "Include details about the host.", "herdr\noff", False),
+    ("Return the exact runtime and memory values.", "Actually, use prose instead.", "The runtime is herdr, with memory off.", True),
+])
+def test_native_exact_output_respects_complete_multiline_and_batched_requests(tmp_path, native_desk, batched, request, continuation, response, accepted):
     rig, replies, requests = native_desk
     fake, state, notes, err, start, receive, cli, text, records = rig
     draft = "herdr\noff"
-    parts = ["Return the exact runtime and memory values.", "One per line."]
+    parts = [request, continuation]
     messages = parts if batched else ["\n".join(parts)]
     (fake / "status").write_text(draft)
-    (fake / "voice-answer").write_text(draft)
+    (fake / "voice-answer").write_text(response)
     replies.append(lambda body: {"content": json.dumps({
         "kind": "reply", "answer": draft,
         "evidence": [{"source": "status", "quote": line} for line in draft.splitlines()],
@@ -1916,12 +1929,15 @@ def test_native_exact_output_accepts_multiline_and_batched_requests(tmp_path, na
     try:
         for index, message in enumerate(messages):
             receive(f"exact-{index}", message)
-        wait_for(lambda: text(fake / "sent"), "the exact multiline answer", timeout=45)
-        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed exact answer")
-        assert text(fake / "sent") == f"send {draft}\n"
-        assert text(notes) == ""
+        if accepted:
+            wait_for(lambda: text(fake / "sent"), "the complete-request answer", timeout=45)
+            wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed answer")
+        else:
+            wait_for(lambda: f"photon-exact-{len(messages) - 1} " in text(notes), "the withdrawn exact-request handoff", timeout=45)
+        assert text(fake / "sent") == (f"send {response}\n" if accepted else "")
+        assert all(text(notes).count(f"photon-exact-{index} ") == (0 if accepted else 1) for index in range(len(messages)))
         assert [row["text"] for row in records() if row["kind"] == "owner"] == messages
-        assert [row["text"] for row in records() if row["kind"] == "desk"] == [draft]
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == ([response] if accepted else [])
         voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
         assert voices == [{"draft": draft, "question": "\n".join(parts)}]
     finally:
@@ -1951,6 +1967,9 @@ def test_native_exact_output_accepts_multiline_and_batched_requests(tmp_path, na
     ("RUNTIME: herdr\nMEMORY: off", "The runtime is tmux, with memory off."),
     ("runtime: herdr\nmemory: off", "The settings are:\nRuntime: herdr\nMemory: off"),
     ("runtime: herdr\nmemory: off", "The runtime is `herdr`, with memory `off`."),
+    ("runtime=herdr\nmemory=off", "runtime=herdr\nmemory=off"),
+    ("runtime=herdr\nmemory=off", "The settings are:\nRuntime=herdr\nMemory=off"),
+    ("runtime=herdr\nmemory=off", "The runtime is tmux, with memory off."),
 ])
 def test_native_lookup_rejects_an_invalid_voice_without_sending_source(tmp_path, native_desk, source_text, rewrite):
     rig, replies, requests = native_desk
@@ -2011,6 +2030,8 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
     fake, state, notes, err, start, receive, cli, text, records = rig
     fact = f"API_TOKEN={secret}"
     safe = "API_TOKEN=[REDACTED]"
+    answer = "API_TOKEN is [REDACTED]."
+    (fake / "voice-answer").write_text(answer)
     target = tmp_path / "config.env"
     target.write_text(fact)
     if source == "grep":
@@ -2038,7 +2059,7 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
             voice = [body for body in requests if not body.get("stream")]
             assert len(voice) == 1
             assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the data in {target}."}
-            assert text(fake / "sent").splitlines() == [f"send {safe}"]
+            assert text(fake / "sent").splitlines() == [f"send {answer}"]
             assert text(notes) == ""
         assert secret not in json.dumps(records())
         assert target.read_text() == fact
@@ -2078,6 +2099,8 @@ def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tm
     )
     facts = [f"{name}={value}" for name, value in secrets.items()]
     safe = "\n".join(f"{name}=[REDACTED]" for name in secrets)
+    answer = "; ".join(f"{name} is [REDACTED]" for name in secrets) + "."
+    (fake / "voice-answer").write_text(answer)
     replies.extend([
         lambda body: {"tool_calls": [tool_call("read", {"path": str(target)})]},
         lambda body: {"content": json.dumps({
@@ -2091,7 +2114,7 @@ def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tm
         wait_for(lambda: text(fake / "sent"), "the filtered parent-credential answer", timeout=45)
         voice = [body for body in requests if not body.get("stream")]
         assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe, "question": f"Show the server values in {target}."}
-        assert text(fake / "sent") == f"send {safe}\n"
+        assert text(fake / "sent") == f"send {answer}\n"
         for secret in secrets.values():
             assert secret not in json.dumps(requests)
             assert secret not in json.dumps(records())
