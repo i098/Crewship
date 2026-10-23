@@ -1,4 +1,7 @@
-import { socialOnly } from "./desk.ts";
+import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
+import { deskSecretValues, socialOnly } from "./desk.ts";
 
 export type FrontMessage = { kind: string; text: string };
 export type FrontIntent = { kind: "dispatch"; model: string; reasoning: string } | {
@@ -15,8 +18,44 @@ export type FrontInput = {
   models: readonly { id: string; reasoning: readonly string[] }[];
   apiKey: string;
   signal: AbortSignal;
+  redact: (payload: string) => string;
   endpoint?: string;
 };
+
+export async function loadFrontRedactor(cwd: string, agentDir: string, env: Record<string, string | undefined> = process.env): Promise<FrontInput["redact"]> {
+  const executable = Bun.which("omp");
+  if (!executable) throw new Error("The installed omp secret filter is unavailable");
+  const base = dirname(realpathSync(executable));
+  const load = (name: string) => import(pathToFileURL(Bun.resolveSync(name, base)).href);
+  const [native, { PLACEHOLDER_RE }, { mapJsonStrings }] = await Promise.all([
+    load("@oh-my-pi/pi-coding-agent/secrets"),
+    load("@oh-my-pi/pi-coding-agent/secrets/placeholder"),
+    load("@oh-my-pi/pi-coding-agent/secrets/placeholder-scan"),
+  ]);
+  const entries = [
+    ...deskSecretValues(env).map((content) => ({ type: "plain", content })),
+    ...await native.loadSecrets(cwd, agentDir), ...native.builtinCredentialSecretEntries(),
+  ];
+  const secrets = new native.SecretObfuscator(entries.map((entry) => ({
+    ...entry, mode: "replace", replacement: "[REDACTED]",
+  })));
+  const redact = (text: string) => secrets.obfuscate(text).replace(PLACEHOLDER_RE, "[REDACTED]");
+  return (payload: string): string => {
+    const body = JSON.parse(payload);
+    for (const message of body.messages) {
+      const text = message.content;
+      let value: unknown;
+      try { value = JSON.parse(text); } catch { value = undefined; }
+      if (value !== null && typeof value === "object") {
+        const filtered = mapJsonStrings(value, redact);
+        message.content = filtered === value ? text : JSON.stringify(filtered);
+      } else {
+        message.content = redact(text);
+      }
+    }
+    return JSON.stringify(body);
+  };
+}
 
 const SYSTEM = `You are the conversational front desk. Use Mercury-3 at low reasoning.
 Return exactly one JSON object, with no markdown:
@@ -128,7 +167,7 @@ function responseText(payload: unknown): string | undefined {
 export async function runFront(input: FrontInput): Promise<FrontResult> {
   input.signal.throwIfAborted();
   if (!input.original.length || input.original.some((text) => !text.trim())) return fallback(input);
-  if (!input.apiKey) return fallback(input);
+  if (!input.apiKey || typeof input.redact !== "function") return fallback(input);
   const messages = [
     { role: "system", content: SYSTEM },
     { role: "user", content: JSON.stringify({
@@ -139,7 +178,7 @@ export async function runFront(input: FrontInput): Promise<FrontResult> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(15_000)]);
   try {
     for (let turn = 0; turn < 2; turn++) {
-      const body = JSON.stringify({ model: "mercury-3", reasoning_effort: "low", max_tokens: 512, response_format: { type: "json_object" }, messages });
+      const body = input.redact(JSON.stringify({ model: "mercury-3", reasoning_effort: "low", max_tokens: 512, response_format: { type: "json_object" }, messages }));
       if (Buffer.byteLength(body) > 100_000) return fallback(input);
       const response = await fetch(input.endpoint ?? "https://api.inceptionlabs.ai/v1/chat/completions", {
         method: "POST",

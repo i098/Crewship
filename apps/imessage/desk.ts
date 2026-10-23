@@ -468,7 +468,7 @@ function deskCommand(o: DeskOptions, reasoning: string): string[] {
       `--thinking=${inception && reasoning === "instant" ? "off" : reasoning}`, "--model", inception ? `inception/${o.model}` : o.model, "--system-prompt", system];
 }
 
-function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>): void {
+export function deskSecretValues(env: Record<string, string | undefined>): string[] {
   const names = new Set(Object.keys(env).filter((name) => /(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH|CREDENTIAL|PRIVATE|OAUTH)(?:_|$)/i.test(name)));
   for (const relay of (env.FM_BLUEBUBBLES_RELAYS ?? "").split(/\s+/)) {
     const name = relay.split(",")[1];
@@ -481,8 +481,12 @@ function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>):
     secrets.add(password);
     try { secrets.add(decodeURIComponent(password)); } catch {}
   }
+  return [...secrets];
+}
+
+function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>): void {
   mkdirSync(join(cwd, ".omp"), { mode: 0o700 });
-  writeFileSync(join(cwd, ".omp", "secrets.yml"), JSON.stringify([...secrets].map((content) => ({
+  writeFileSync(join(cwd, ".omp", "secrets.yml"), JSON.stringify(deskSecretValues(env).map((content) => ({
     type: "plain", content, mode: "replace", replacement: "[REDACTED]",
   }))), { mode: 0o600 });
 }

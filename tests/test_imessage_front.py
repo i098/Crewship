@@ -12,16 +12,20 @@ MODELS = [{"id": "inception/mercury-3", "reasoning": ["low", "high"]}]
 pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 
 
-def run_front(tmp_path, replies, *, original=None, recent=None, mates=None, models=None, failure=None):
+def run_front(tmp_path, replies, *, original=None, recent=None, mates=None, models=None,
+              failure=None, secret_env=None):
     script = tmp_path / "front-case.ts"
     script.write_text(f"""
-import {{ runFront }} from {json.dumps(str(ROOT / 'apps/imessage/front.ts'))};
+import {{ loadFrontRedactor, runFront }} from {json.dumps(str(ROOT / 'apps/imessage/front.ts'))};
 const replies = {json.dumps(replies)};
 const calls: unknown[] = [];
 const controller = new AbortController();
 const failure = {json.dumps(failure)};
+const secretEnv = {json.dumps(secret_env)};
+const redact = secretEnv === null ? (text: string) => text
+  : await loadFrontRedactor({json.dumps(str(tmp_path))}, {json.dumps(str(tmp_path / 'agent'))}, secretEnv);
 if (failure === 'pre-abort') controller.abort(new Error('cancelled'));
-globalThis.fetch = (async (url, options) => {{
+const provider = (async (url, options) => {{
   calls.push({{ url, headers: options?.headers, body: JSON.parse(String(options?.body)) }});
   if (failure === 'abort') {{
     controller.abort(new Error('cancelled'));
@@ -33,19 +37,31 @@ globalThis.fetch = (async (url, options) => {{
   if (failure === 'invalid-json') return new Response('{{');
   return Response.json(reply);
 }}) as typeof fetch;
+const server = secretEnv === null ? undefined : Bun.serve({{
+  hostname: "127.0.0.1", port: 0,
+  fetch: async (request) => provider(request.url, {{
+    headers: Object.fromEntries(request.headers), body: await request.text(),
+  }}),
+}});
+if (!server) globalThis.fetch = provider;
+const input = {{
+  original: {json.dumps(original if original is not None else ['thanks!'])},
+  recent: {json.dumps(recent or [])},
+  mates: {json.dumps(mates or [])},
+  models: {json.dumps(MODELS if models is None else models)},
+  apiKey: failure === 'missing-key' ? '' : 'test-only-key', signal: controller.signal,
+  redact: failure === 'missing-redactor' ? undefined : failure === 'redaction'
+    ? () => {{ throw new Error('redaction failed'); }} : redact,
+  endpoint: server ? `${{server.url}}chat/completions` : 'https://provider.invalid/chat/completions',
+}};
+const before = JSON.stringify(input);
 try {{
-  const result = await runFront({{
-    original: {json.dumps(original if original is not None else ['thanks!'])},
-    recent: {json.dumps(recent or [])},
-    mates: {json.dumps(mates or [])},
-    models: {json.dumps(MODELS if models is None else models)},
-    apiKey: failure === 'missing-key' ? '' : 'test-only-key', signal: controller.signal,
-    endpoint: 'https://provider.invalid/chat/completions',
-  }});
-  console.log(JSON.stringify({{ result, calls }}));
+  const result = await runFront(input);
+  console.log(JSON.stringify({{ result, calls, before, after: JSON.stringify(input) }}));
 }} catch (error) {{
   console.log(JSON.stringify({{ error: String(error), calls }}));
 }}
+finally {{ server?.stop(true); }}
 """)
     completed = subprocess.run(
         ["bun", str(script)], cwd=tmp_path, capture_output=True, text=True, check=True,
@@ -138,7 +154,10 @@ def test_provider_failure_preserves_handoff_without_a_receipt(tmp_path, failure)
     assert len(result["calls"]) == 1
 
 
-@pytest.mark.parametrize("failure", ["network", "http", None, "invalid-json", "invalid-output", "missing-key"])
+@pytest.mark.parametrize("failure", [
+    "network", "http", None, "invalid-json", "invalid-output", "missing-key",
+    "missing-redactor", "redaction",
+])
 def test_social_failure_never_creates_inbox_work(tmp_path, failure):
     response = reply({"kind": "unknown", "text": "The build passed."}) if failure == "invalid-output" else {
         "choices": [{"message": {"refusal": "no"}}],
@@ -231,3 +250,108 @@ def test_unowned_work_relay_repairs_to_a_selected_dispatch(tmp_path):
     ], original=["Read the current status"])
     assert len(result["calls"]) == 2
     assert result["result"] == {"text": "", "intents": [selection]}
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
+def test_native_masking_covers_complete_payload_and_retry_without_changing_authority(tmp_path):
+    (tmp_path / ".omp").mkdir()
+    (tmp_path / "agent").mkdir()
+    (tmp_path / ".omp/secrets.yml").write_text(json.dumps([
+        {"type": "plain", "content": "project-credential"},
+        {"type": "regex", "content": "configured-[0-9]+"},
+    ]))
+    (tmp_path / "agent/secrets.yml").write_text(json.dumps([
+        {"type": "plain", "content": "global-credential"},
+    ]))
+    escaped = 'quoted"credential\\with\nnewline'
+    environment = {
+        "INCEPTION_API_KEY": "test-only-key",
+        "CUSTOM_API_KEY": escaped,
+        "SHORT_TOKEN": "pin7",
+        "FM_BLUEBUBBLES_RELAYS": "desk,RELAY_VALUE",
+        "RELAY_VALUE": "relay-credential",
+        "DATABASE_URL": "postgres://user:url%2Bpassword@localhost/db",
+    }
+    builtin = "ghp_" + "A" * 36
+    secrets = [
+        *[environment[key] for key in ["INCEPTION_API_KEY", "CUSTOM_API_KEY", "SHORT_TOKEN", "RELAY_VALUE"]],
+        "url%2Bpassword", "url+password", "project-credential", "global-credential",
+        "configured-12345", builtin,
+    ]
+    text = " | ".join(secrets)
+    selection = {"kind": "dispatch", "model": "project-credential", "reasoning": "high"}
+    result = run_front(
+        tmp_path, [reply({"kind": "invalid", "text": text}), reply(selection)],
+        original=[f"Read the status. {text}"],
+        recent=[{"kind": "owner", "text": text}, {"kind": "desk", "text": "Hello."}],
+        mates=[{"id": "relay-credential", "scope": text}],
+        models=[{"id": "project-credential", "reasoning": ["high", "pin7"]}],
+        secret_env=environment,
+    )
+    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["before"] == result["after"]
+    assert len(result["calls"]) == 2
+    for call in result["calls"]:
+        assert call["headers"]["authorization"] == "Bearer test-only-key"
+        assert call["body"]["model"] == "mercury-3"
+        assert call["body"]["reasoning_effort"] == "low"
+        payload = json.loads(call["body"]["messages"][1]["content"])
+        expected = " | ".join(["[REDACTED]"] * len(secrets))
+        assert payload["original"] == [f"Read the status. {expected}"]
+        assert payload["recent"][0]["text"] == expected
+        assert payload["mates"] == [{"id": "[REDACTED]", "scope": expected}]
+        assert payload["models"] == [{"id": "[REDACTED]", "reasoning": ["high", "[REDACTED]"]}]
+    retry = json.loads(result["calls"][1]["body"]["messages"][2]["content"])
+    assert retry == {"kind": "invalid", "text": expected}
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
+def test_social_history_masks_credentials_before_the_direct_request(tmp_path):
+    result = run_front(
+        tmp_path, [reply({"kind": "social", "text": "You're welcome."})],
+        recent=[{"kind": "owner", "text": "The key is test-only-key"}, {"kind": "desk", "text": "Hello."}],
+        secret_env={"INCEPTION_API_KEY": "test-only-key"},
+    )
+    assert result["result"] == {"text": "You're welcome.", "intents": []}
+    assert result["before"] == result["after"]
+    assert len(result["calls"]) == 1
+    payload = json.loads(result["calls"][0]["body"]["messages"][1]["content"])
+    assert payload["recent"][0]["text"] == "The key is [REDACTED]"
+
+
+@pytest.mark.parametrize("failure", ["missing-redactor", "redaction"])
+def test_missing_or_failed_masking_sends_no_request(tmp_path, failure):
+    result = run_front(tmp_path, [], original=["Read the status"], failure=failure)
+    assert result["calls"] == []
+    assert result["result"] == {
+        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+    }
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
+@pytest.mark.parametrize("secret", ["1", "user"])
+def test_short_credentials_preserve_protocol_and_redact_data_on_both_attempts(tmp_path, secret):
+    selection = {"kind": "dispatch", "model": MODELS[0]["id"], "reasoning": "high"}
+    result = run_front(
+        tmp_path, [reply({"kind": "invalid", "text": secret}), reply(selection)],
+        original=["Read the current status", secret],
+        recent=[{"kind": "owner", "text": secret}],
+        secret_env={"SHORT_TOKEN": secret, "INCEPTION_API_KEY": "test-only-key"},
+    )
+    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["before"] == result["after"]
+    assert len(result["calls"]) == 2
+    for attempt, call in enumerate(result["calls"]):
+        body = call["body"]
+        assert body["model"] == "mercury-3"
+        assert body["max_tokens"] == 512
+        assert body["response_format"] == {"type": "json_object"}
+        assert [message["role"] for message in body["messages"]] == (
+            ["system", "user"] if attempt == 0 else ["system", "user", "assistant", "user"]
+        )
+        payload = json.loads(body["messages"][1]["content"])
+        assert payload["original"] == ["Read the current status", "[REDACTED]"]
+        assert payload["recent"] == [{"kind": "owner", "text": "[REDACTED]"}]
+    assert json.loads(result["calls"][1]["body"]["messages"][2]["content"]) == {
+        "kind": "invalid", "text": "[REDACTED]",
+    }
