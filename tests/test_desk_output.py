@@ -45,7 +45,12 @@ def run_desk(tmp_path, surface, output, status=FACT, message=REQUEST):
 
     rig = FallbackRig(tmp_path, FM_IMESSAGE_TEST="1", FM_IMESSAGE_TEST_QUIET_MS="30")
     (tmp_path / "bin/omp").write_text(
-        f"#!/bin/sh\ncat >/dev/null\nprintf '%s' {shlex.quote(output)}\n"
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "prompt = sys.stdin.read()\n"
+        f"answer = {output!r} if '-e' in sys.argv else json.loads(prompt)['draft']\n"
+        "print(json.dumps({'type': 'desk_result', 'drafted': answer, 'tools': {}}) "
+        "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1' else answer)\n"
     )
     (tmp_path / "bin/fm-inbox").write_text(
         "#!/bin/sh\n"

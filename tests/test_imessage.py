@@ -1884,7 +1884,16 @@ def fake_bridge(tmp_path, test_mode=True):
     notes = tmp_path / "notes"
     identity = json.dumps({"kind": "reply", "answer": "claude-haiku-5-5", "evidence": [{"source": "identity", "subject": "desk", "quote": "claude-haiku-5-5"}]})
     stubs = {
-        "omp": f"cat >/dev/null; [ -e {fake / 'desk-on'} ] && echo '{identity}' || echo SKIP",
+        "omp": (
+            "python3 -c " + shlex.quote(
+                "import json, os, pathlib, sys\n"
+                "prompt = sys.stdin.read()\n"
+                f"answer = {identity!r} if (pathlib.Path(os.environ['FAKE_DIR']) / 'desk-on').exists() else 'SKIP'\n"
+                "if '-e' not in sys.argv: answer = json.loads(prompt)['draft']\n"
+                "print(json.dumps({'type': 'desk_result', 'drafted': answer, 'tools': {}}) "
+                "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1' else answer)\n"
+            ) + ' "$@"'
+        ),
         "fm-inbox": f'printf "%s\\n" "$*" >> {notes}; [ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ]',
     }
     for name, body in stubs.items():
@@ -1936,6 +1945,25 @@ def fake_bridge(tmp_path, test_mode=True):
 
     return fake, state, notes, err, start, inbound, cli, text
 
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_installed_bridge_sends_owner_messages(tmp_path):
+    fake, _, _, _, start, inbound, cli, text = fake_bridge(tmp_path)
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/imessage.yml").read_text())
+    installed = next(task["loop"] for task in tasks if task["name"] == "Install the iMessage bridge service")
+    for file in (tmp_path / "app").iterdir():
+        if file.is_file() and file.name not in installed:
+            file.unlink()
+    bridge = start(1)
+    try:
+        inbound("installed", text="What is the current status?")
+        cli("The installed bridge is ready.")
+        wait_for(lambda: text(fake / "sent"), "the installed bridge reply")
+        assert text(fake / "sent").splitlines() == ["send The installed bridge is ready."]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_path):
@@ -1945,14 +1973,16 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
     runner = tmp_path / "bin/omp"
     runner.write_text(
         "#!/usr/bin/env python3\n"
-        "import sys, time\n"
-        "sys.stdin.read()\n"
+        "import json, os, sys, time\n"
+        "prompt = sys.stdin.read()\n"
         "if any('gpt-6-luna' in arg for arg in sys.argv):\n"
         f"    with open({str(attempts)!r}, 'a') as log: log.write('attempt\\n')\n"
         "    print('owner: valid summary before teardown stalls', flush=True)\n"
         "    time.sleep(120)\n"
         "else:\n"
-        "    print('{\"kind\":\"reply\",\"answer\":\"claude-haiku-5-5\",\"evidence\":[{\"source\":\"identity\",\"subject\":\"desk\",\"quote\":\"claude-haiku-5-5\"}]}')\n"
+        "    answer = '{\"kind\":\"reply\",\"answer\":\"claude-haiku-5-5\",\"evidence\":[{\"source\":\"identity\",\"subject\":\"desk\",\"quote\":\"claude-haiku-5-5\"}]}' if '-e' in sys.argv else json.loads(prompt)['draft']\n"
+        "    print(json.dumps({'type': 'desk_result', 'drafted': answer, 'tools': {}}) "
+        "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1' else answer)\n"
     )
     runner.chmod(0o755)
     bridge = start(1)
@@ -2201,7 +2231,10 @@ def test_bridge_mute_blocks_outgoing_and_still_records_inbound(tmp_path, answer,
             if answer == "tapback-text":
                 result["text"] = "thanks"
             (tmp_path / "bin/omp").write_text(
-                f"#!/bin/bash\ncat >/dev/null\necho '{json.dumps(result)}'\n"
+                "#!/bin/bash\ncat >/dev/null\n"
+                'if [ "$FM_DESK_SERVER_TOOLS" = 1 ]; then\n'
+                f"  echo '{json.dumps({'type': 'desk_result', 'drafted': json.dumps(result), 'tools': {}})}'\n"
+                f"else echo '{json.dumps(result)}'; fi\n"
             )
         assert outbox() == []
         # Mute: nothing outgoing is queued, for a Firstmate send, a reaction, and a desk answer.
@@ -2493,7 +2526,15 @@ class FallbackRig:
             d.mkdir(parents=True)
         (self.fake / "down").write_text("0")
         self.notes = tmp_path / "notes"
-        for name, body in {"omp": "cat >/dev/null; echo SKIP", "fm-inbox": f'printf "%s\\n" "$*" >> {self.notes}'}.items():
+        for name, body in {
+            "omp": (
+                "cat >/dev/null\n"
+                'if [ "$FM_DESK_SERVER_TOOLS" = 1 ]; then\n'
+                """  echo '{"type":"desk_result","drafted":"SKIP","tools":{}}'\n"""
+                "else echo SKIP; fi\n"
+            ),
+            "fm-inbox": f'printf "%s\\n" "$*" >> {self.notes}',
+        }.items():
             (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
             (bin_dir / name).chmod(0o755)
         ports = [free_port(), free_port()]

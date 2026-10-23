@@ -1,0 +1,28 @@
+memory:
+  backend: off
+secrets:
+  enabled: true
+tools:
+  approvalMode: write
+  approval:
+    read: allow
+    grep: allow
+    glob: allow
+    bash: null
+bash:
+  allowCompoundCommands: false
+  patterns:
+    - match: "uname -a"
+      approval: allow
+    - match: "uptime"
+      approval: allow
+    - match: "date -u"
+      approval: allow
+    - match: "df -h"
+      approval: allow
+    - match: "free -h"
+      approval: allow
+    - match: "ps -eo pid,ppid,comm"
+      approval: allow
+    - match: "systemctl --user is-active -- fm-imessage.service"
+      approval: allow

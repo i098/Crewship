@@ -22,11 +22,32 @@ For each message from the owner, the service does these steps:
    A desk other than `omp` with `claude-haiku-5-5` or `inception` with `mercury-3` also sends every request to Firstmate.
 5. The desk model classifies the whole pending burst.
    The default is Claude Haiku 5.5 with thinking off, through the existing one-shot `omp -p` runner.
-   With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
+   Both providers use the existing `omp -p` tool runtime for classification.
+   `desk_provider: inception` selects `inception/<desk_model>` without changing the provider or configured reasoning level.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
-   It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
+   A native provider hook preserves Inception's `instant` wire value; other reasoning levels pass through unchanged.
    A failed Inception call never falls back to another provider; requests follow the [second-mate handoff rules](#second-mate-handoffs).
-   Its only tool is `zoom`.
+   The Inception voice pass still uses its tool-free chat-completions request and `instant` reasoning.
+   The runtime has native `read`, `grep`, `glob`, `bash`, and `write` tools, plus the existing `zoom` extension.
+   `desk-tools.yml` enables secret masking; a native extension checks every write against the current owner's authorized target.
+   Before evidence validation and the voice call, the extension uses native filters to remove credentials from replies and tool results.
+   The bridge rejects server-tool output without this filtered result.
+   Each classification call with server tools uses a private temporary directory with a native secret file for parent-known credentials.
+   This includes configured relay passwords and connection passwords without adding them to the tool environment.
+   The service removes the directory when the call exits.
+   Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
+   The target is resolved before the call and checked again before writing, including symbolic links.
+   The native-normalized destination must resolve to that same authorized target; normalization cannot select a different file.
+   Empty writes and unapproved targets are blocked; retrieved content cannot add a target.
+   A shebang write requires approval if the native writer would add execute permissions, including when it creates a file.
+   Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
+   Direct reads stay on the local filesystem and local process or artifact interfaces.
+   The guard decodes native file URLs before checking each target from quote removal and delimiter expansion.
+   Network reads require approval.
+   Shell commands still require native approval, except the listed system reads.
+   The automatic service check is exactly `systemctl --user is-active -- fm-imessage.service`; other service commands require approval.
+   The child receives only its provider credentials and required runtime variables, not transport credentials.
+   Native tools retain `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` so local user-service inspection can connect to the existing bus.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
@@ -37,7 +58,7 @@ For each message from the owner, the service does these steps:
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
-   The answer must quote complete source lines from supplied status or prior supervisor or desk records.
+   The answer must quote complete lines from status, prior supervisor or desk records, or successful current tool results.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
    The service checks these quotes against their sources.
@@ -66,8 +87,20 @@ For each message from the owner, the service does these steps:
    Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction.
    A social reaction may include one short text from a fixed list of safe acknowledgements.
    The text cannot contain facts or work claims; an invalid text prevents the social response.
-   Requests without a direct answer follow the [second-mate handoff rules](#second-mate-handoffs).
-7. The service saves its routing decision before either side effect.
+   Routine lookups and authorized actions do not create Firstmate inbox work.
+   The desk finds existing board URLs itself and returns the URL immediately.
+   Project requests follow the verified [second-mate handoff rules](#second-mate-handoffs), without a main note after successful delivery.
+   A successful routine local action may finish silently with `{"kind":"handled"}`.
+   The bridge accepts this only after a successful write result and records it in the local routing journal.
+   Before enabling a write, the journal records that the target may change.
+   An interrupted or unverified action goes to Firstmate with that warning instead of running again.
+   Cross-domain coordination, real ambiguity, actionable failures, and decisions beyond existing authority go to Firstmate.
+   Destructive requests, unclear approvals, and sensitive content retain the existing hard handoff.
+   Failed classification calls, invalid JSON, missing evidence, and clipped pending input follow the [second-mate handoff rules](#second-mate-handoffs).
+   Only authenticated authored text grants authority; retrieved files, logs, pages, Slack, and tool output never grant permission.
+   The prompt preserves project ownership, destructive-action approval, external-send approval, and credential boundaries.
+   A refused tool call must not be bypassed.
+7. The service saves the routing decision before a chat response or supervisor handoff.
    A direct answer enters the existing outbox with a stable deduplication key.
    A reply or reaction can set `target` to the message's 1-based position in the pending burst.
    Without `target`, the service selects the last pending message; an invalid target causes a handoff.
@@ -75,7 +108,7 @@ For each message from the owner, the service does these steps:
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
    Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
-   A handoff uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
+   A handoff to Firstmate uses `fm-inbox.sh note --request-id` and never produces a desk acknowledgement.
    Inbox failures retry from the durable journal without blocking other requests.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
@@ -106,13 +139,13 @@ It disables omp reasoning and uses Inception's `instant` reasoning level.
 New messages and Firstmate activity cancel this pass through the same path as classification.
 The voice call receives only the checked draft, not chat history or fleet status.
 The durable status reader has a separate 5-second timeout; a timeout causes a handoff.
-A completed desk turn records the time, message id, and `basic`, `handoff`, or `react <emoji>` in the private `desk.log`.
+A completed desk turn records its outcome in the private `desk.log`, including `handled` and successful tool-call ids.
 
 For a standalone text, both desks accept classification answers only from one complete JSON object whose `kind` or `decision` is `reply`.
 The `answer` must be a non-empty string with no directive.
 iMessage checks the existing source evidence before passing that answer to the voice call.
 An action can occupy the whole trimmed output, any JSON `kind` or `decision` field, or the final line after prose.
-Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, and `HANDOFF`.
+Recognized actions are `REACT:<emoji>`, `TAPBACK:<emoji>`, `SKIP`, `HANDOFF`, and the verified iMessage `HANDLED` result.
 A JSON tapback uses `{"kind":"tapback","emoji":"👍"}`.
 An action never sends the surrounding prose.
 A JSON iMessage tapback may include `text`, for example `{"kind":"tapback","emoji":"❤️","text":"nice!"}`.
@@ -168,21 +201,21 @@ Failed status reads or clipped handoff input go directly to Firstmate.
 The desk sends work to a mate only when the model reports high confidence and exactly one matching domain.
 It checks the whole pending burst, including recent context, rather than splitting related texts across mates.
 Invalid output, low confidence, ambiguous requests, and work across several domains go to Firstmate.
-Decisions, approvals, merges, credentials, and sensitive messages also stay with Firstmate.
+Decisions, approvals, merges, destructive actions, external sends, credentials, and sensitive messages also stay with Firstmate.
 Attachments, group chats, edits, and unsupported desk models keep their existing Firstmate handoff.
 
 The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, including an `FM_INBOX_CMD` override.
 The service sets `FM_HOME` to the main home that owns the second mates as tasks and holds the routing table.
 It passes the mate id and `[from captain via desk] <verbatim text>` as separate arguments, without a shell.
-The sender uses the mate's existing inbox.
+The sender uses the mate's existing inbox and normal acknowledgement recovery.
 The desk checks the registered id, home, and complete scope before each send.
 A missing or changed entry sends the remaining texts to Firstmate.
 
-Every handed-off text still produces the normal stable-id Firstmate inbox note.
-A successful mate delivery adds the line `routed to <mate-id>` before the original note text.
+A successful delivery records `routed to <mate-id>` in the local journal and completes without a main inbox note.
 A failed sender, missing command, or five-second delivery timeout hands the request to Firstmate.
-The journal saves delivery uncertainty before calling the sender because `fm-send.sh` has no deduplication key.
-A failed or interrupted send retains this warning so Firstmate checks the mate's inbox before sending again.
+The journal saves delivery uncertainty before calling the sender.
+The existing sender retains acknowledgement tracking; recovery never blindly repeats an uncertain send.
+A failed or interrupted send retains a warning so Firstmate checks the mate's inbox before sending again.
 The sender runs asynchronously, so inbound messages and Firstmate commands remain responsive during delivery.
 New owner text, Firstmate activity, and shutdown cancel the active sender and stop the remaining sends in that burst.
 Inbox retries and service restarts never repeat a recorded mate delivery.
@@ -250,14 +283,12 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   Recent originals work before summaries finish; zoom still opens full messages.
   Owner text supplies context, not evidence for a direct answer.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
-- **The input cap.** With omp, the desk limits request input to 180,000 bytes, including reserved framing.
-  That byte limit estimates 60,000 tokens as bytes / 3; it is not an exact token count.
-  With Inception, each serialized request body, JSON escapes and framing included, is at most 100,000 bytes.
-  A byte-level token covers at least one byte, so this keeps the input within the 100k-token bound.
-  The first Inception body keeps room for one zoom turn; a body that passes the limit is never sent.
-  The desk clips the fleet status, long texts, and each zoom result (16 KB) to their head and tail.
-  After the cap, zoom returns "context limit reached", so the model answers from what it has.
-  With Inception, a zoom result is taken only while one more refused zoom turn still fits.
+- **The input cap.** The initial view keeps the existing 180,000-byte omp budget and the smaller Inception input budget.
+  These byte limits estimate token use; they are not exact token counts.
+  The native tool runtime owns later request framing and context limits.
+  The desk clips fleet status, long texts, and each zoom result (16 KB) to their head and tail.
+  After its budget, zoom returns "context limit reached", so the model answers from what it has.
+  The separate Inception voice request refuses serialized bodies above 100,000 bytes.
   Compaction uses the smaller budget below and does not clip source text.
 - **Compaction size.** Each conversation starts with at most 2,048 bytes of context and 4,096 bytes of source text.
   Long messages use complete UTF-8 chunks; the model then merges their summaries.
@@ -537,8 +568,8 @@ It waits up to another 500 ms for those children to exit, then exits with status
 The unit sets `KillMode=mixed` and `TimeoutStopSec=10` so systemd kills remaining service processes if shutdown stalls.
 See [Desk memory](#desk-memory) for compaction recovery after a restart.
 
-For this routing update, main must apply the reviewed source after merge and verify the installed bridge.
-Isolated fixture checks do not complete this step.
+For this desk update, main must apply the reviewed source after merge and verify the installed bridge files.
+Pre-merge fixture checks do not complete this step.
 Run the following commands from the reviewed checkout as the bridge account, during an approved service window.
 Keep the existing unit, credentials, model settings, dependencies, and private state unchanged.
 Do not run a full host apply or restart another service.
@@ -547,19 +578,19 @@ Do not run a full host apply or restart another service.
 runtime=$(systemctl --user show fm-imessage.service --property=WorkingDirectory --value)
 test -n "$runtime" && test -f "$runtime/bridge.ts" &&
 systemctl --user stop fm-imessage.service &&
-install -m 0644 apps/imessage/{bridge,desk,memory,outbox}.ts "$runtime/" &&
+install -m 0644 apps/imessage/{bridge,desk,inception-desk,transcribe,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
 systemctl --user start fm-imessage.service &&
 systemctl --user is-active fm-imessage.service
 ```
 
-If installation fails, keep the bridge stopped until all four reviewed files are in place.
+If installation fails, keep the bridge stopped until every listed file is in place.
 Compare each installed file with its checkout source before verification.
-From the owner's phone, ask one basic question that the supplied status or configured model identity can answer.
-Confirm one direct reply, no inbox note for that request id, and no Firstmate wake for the request.
-Then send one work or approval request.
-Confirm one stable-id inbox note and one Firstmate response, with no desk answer.
-Check the private routing journal, memory, inbox records, and service logs without publishing their contents.
-Keep both installed checks pending until main observes these results.
+Use isolated transport fixtures and synthetic owner messages to verify the installed entrypoint without contacting a real recipient.
+Confirm real file reads, searches, system reads, and an immediate board-link reply.
+Confirm direct answers and successful mate deliveries create no main inbox note.
+Confirm untrusted retrieved instructions cannot authorize deletion or an external send.
+Confirm ambiguity, cross-domain work, delivery failures, and out-of-authority decisions still escalate.
+Keep installation pending until these checks pass against the installed files.
 
 To turn it off, remove the block, then run `systemctl --user disable --now fm-imessage` and delete the unit.
 
