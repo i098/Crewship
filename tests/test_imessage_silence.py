@@ -156,7 +156,7 @@ def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock, 
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
-        receive("work", "Fix the release job")
+        receive("work", "Deploy the release job")
         wait_for(lambda: text(notes), "the durable handoff")
         bridge.terminate()
         bridge.wait(10)
@@ -199,13 +199,13 @@ def test_another_chat_does_not_cancel_a_direct_acknowledgement(tmp_path, desk_cl
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
-        receive("release", "Fix the release job")
+        receive("release", "Deploy the release job")
         desk_clock(4000)
-        receive("elsewhere", "Fix the backup job", space=other_chat)
+        receive("elsewhere", "Deploy the backup job", space=other_chat)
         desk_clock(4000)
         wait_for(lambda: text(fake / "sent"), "the original direct-chat acknowledgement")
-        assert "release job" in text(fake / "sent").splitlines()[0]
-        assert text(fake / "send-targets").splitlines()[0] == "iMessage;-;+10000000000"
+        assert text(fake / "sent") == "send I saved your message; no confirmed answer yet.\n"
+        assert text(fake / "send-targets").splitlines() == ["iMessage;-;+10000000000"]
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -236,7 +236,7 @@ def test_chat_acknowledgement_leaves_another_chat_model_running(tmp_path, desk_c
     (fake / "typing-down").unlink()
     bridge = start(1)
     try:
-        receive("release", "Fix the release job")
+        receive("release", "Deploy the release job")
         desk_clock(4000)
         (fake / "model-hold").touch()
         receive("build", "What is the build status?", space="iMessage;-;+10000000001")
@@ -244,11 +244,14 @@ def test_chat_acknowledgement_leaves_another_chat_model_running(tmp_path, desk_c
         wait_for(lambda: (fake / "model-started").exists(), "the other chat model")
         desk_clock(2000)
         wait_for(lambda: text(fake / "sent"), "the first chat acknowledgement")
-        assert "release job" in text(fake / "sent")
+        assert text(fake / "sent") == "send I saved your message; no confirmed answer yet.\n"
         assert "photon-build " not in text(notes)
         assert "build model-failed" not in text(state / "desk.log")
         (fake / "model-hold").unlink()
         wait_for(lambda: "The build is paused." in text(fake / "sent"), "the other chat answer")
+        assert text(fake / "sent").splitlines() == [
+            "send I saved your message; no confirmed answer yet.", "send The build is paused.",
+        ]
         assert text(fake / "send-targets").splitlines() == [
             "iMessage;-;+10000000000", "iMessage;-;+10000000001",
         ]

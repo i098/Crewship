@@ -361,8 +361,9 @@ def test_voice_stands_down_between_bubbles(tmp_path, desk_clock, activity):
             assert text(fake / "sent") == f"send {first}\nsend {second}\n"
         else:
             assert second not in text(fake / "sent")
-        if activity == "send":
-            wait_for(lambda: "send Supervisor answer\n" in text(fake / "sent"), "the supervisor answer")
+        if activity in ("send", "react"):
+            response = {"send": "send Supervisor answer\n", "react": "react question ❤️\n"}[activity]
+            wait_for(lambda: response in text(fake / "sent"), "the supervisor response")
         if activity == "new-text":
             desk_clock()
             wait_for(lambda: "photon-correction " in text(notes), "the correction handoff")
@@ -824,9 +825,17 @@ def transport_desk_rig(tmp_path, **env):
     return rig, receive
 
 
-@pytest.mark.parametrize("stage", ["photon-space", "photon-thread", "bluebubbles-health"])
+@pytest.mark.parametrize("stage,expected_relay", [
+    pytest.param("photon-space", "", id="photon-space"),
+    pytest.param("photon-thread", "", id="photon-thread"),
+    pytest.param(
+        "bluebubbles-health",
+        "iMessage;-;+10000000000 I saved “What is the build status?”; no confirmed answer yet.\n",
+        id="bluebubbles-health",
+    ),
+])
 @pytest.mark.parametrize("activity", ["typing", "new-text"])
-def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, activity):
+def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, expected_relay, activity):
     rig, receive = transport_desk_rig(tmp_path)
     transport = "bluebubbles" if stage == "bluebubbles-health" else "photon"
     flag, waiting = {
@@ -853,8 +862,13 @@ def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, a
         (rig.fake / flag).unlink(missing_ok=True)
         if transport == "bluebubbles":
             rig.relay_mode("")
-        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the cancelled desk receipt")
-        assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
+        wait_for(lambda: len(list((rig.state / "outbox-done").glob("*.json"))) == 1 + bool(expected_relay),
+                 "the cancelled draft and any due acknowledgement receipts")
+        receipts = [json.loads(path.read_text()) for path in (rig.state / "outbox-done").glob("*.json")]
+        draft = next(item for item in receipts if not item.get("acknowledgement"))
+        assert draft.get("done", 0) == 0
+        assert read_text(rig.fake / "sent") == ""
+        assert read_text(rig.fake / "relay-sent") == expected_relay
         assert f"{transport}-question " in read_text(rig.notes)
     finally:
         (rig.fake / flag).unlink(missing_ok=True)
@@ -1607,7 +1621,7 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
 
 
 @pytest.fixture
-def native_desk(tmp_path, monkeypatch, request):
+def native_desk(tmp_path, monkeypatch, request, desk_clock):
     executable = shutil.which("omp")
     if not executable:
         pytest.skip("needs the supported omp tool runtime")

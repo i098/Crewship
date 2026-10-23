@@ -940,8 +940,10 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   deskRun = undefined;
   if (stopping || !current()) return;
   const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
-  if (!answer) trace(pending.at(-1)!.ref.id, "model-handoff");
-  if (!answer) return;
+  if (!answer) {
+    trace(pending.at(-1)!.ref.id, "model-handoff");
+    return;
+  }
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;

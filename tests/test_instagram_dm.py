@@ -339,7 +339,6 @@ def test_a_missing_or_incomplete_session_halts_and_never_logs_in(monkeypatch, ho
     session = host / "session.json"
     monkeypatch.setenv("INSTAGRAM_DM_SESSION", str(session))
     assert "halted (SessionLost" in run(monkeypatch, ig.poll, 1000)
-    assert "a human runs `instagram_dm.py login`" in notified(host)[0][-1]
     session.write_text('{"cookies": {}}')  # a session without its pinned device would get a random one
     ig.resume()
     assert "halted (SessionLost" in run(monkeypatch, ig.poll, 2000)

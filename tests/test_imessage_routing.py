@@ -428,8 +428,8 @@ def test_due_acknowledgement_passes_active_mate_delivery(tmp_path, desk_clock):
         assert not (fake / "send-cancelled").exists()
         assert text(notes) == ""
         second.unlink()
-        wait_for(lambda: text(notes).count("routed to web-mate") == 2, "both completed mate deliveries")
-        assert text(notes).count("photon-menu ") == text(notes).count("photon-footer ") == 1
+        wait_for(lambda: text(state / "routing.jsonl").count("routed to web-mate") == 2, "both completed mate deliveries")
+        assert text(notes) == ""
         before = text(fake / "sent")
         desk_clock(8000)
         assert text(fake / "sent") == before
