@@ -159,7 +159,8 @@ function configuredCatalog(models: CatalogModel[], agentDir: string, tools: Conf
   return { models, providers };
 }
 
-export async function loadDispatchModels(home: string, agentDir: string, cwd = home, purpose: DispatchPurpose = "general"): Promise<DispatchModel[]> {
+
+export async function loadDispatchModels(home: string, agentDir: string, auth: { source(provider: string): unknown; keyless(provider: string): boolean }, cwd = home, purpose: DispatchPurpose = "general"): Promise<DispatchModel[]> {
   const executable = Bun.which("omp");
   if (!executable) throw new Error("The installed omp catalog is unavailable");
   const base = dirname(realpathSync(executable));
@@ -183,7 +184,14 @@ export async function loadDispatchModels(home: string, agentDir: string, cwd = h
   const { models, providers } = configuredCatalog(catalog.getBundledProviders().flatMap((provider: string) => catalog.getBundledModels(provider)),
     agentDir, { custom, patches, validation });
   const disabled = new Set(modelSettings.cfgDisabledProviders.get(settings));
-  const enabled = resolver.filterAvailableModelsByEnabledPatterns(models.filter((model) => !disabled.has(model.provider)),
+  const available = new Set<string>();
+  for (const provider of new Set(models.map((model) => model.provider))) {
+    if (disabled.has(provider)) continue;
+    const config = providers[provider];
+    if ((typeof config?.apiKey === "string" && config.apiKey) || config?.auth === "none"
+      || auth.source(provider) !== undefined || auth.keyless(provider)) available.add(provider);
+  }
+  const enabled = resolver.filterAvailableModelsByEnabledPatterns(models.filter((model) => available.has(model.provider)),
     modelSettings.cfgEnabledModels.get(settings), settings);
   const entries = enabled.map((model: { provider: string; id: string }) => ({
     provider: model.provider, id: model.id, reasoning: thinking.getSupportedEfforts(model),
