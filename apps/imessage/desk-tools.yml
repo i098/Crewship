@@ -26,5 +26,3 @@ bash:
       approval: allow
     - match: "systemctl --user is-active *"
       approval: allow
-    - match: "fm-send.sh * --fire-and-forget *"
-      approval: allow

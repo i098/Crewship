@@ -824,7 +824,7 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const writePath = armWrite(pending);
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath }));
   deskRun = proc;
-  const { ok, drafted, tools } = await readDesk(proc);
+  const { ok, drafted, tools } = await readDesk(proc, true);
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;

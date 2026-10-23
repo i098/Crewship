@@ -30,11 +30,13 @@ For each message from the owner, the service does these steps:
    The Inception voice pass still uses its tool-free chat-completions request and `instant` reasoning.
    The runtime has native `read`, `grep`, `glob`, `bash`, and `write` tools, plus the existing `zoom` extension.
    `desk-tools.yml` enables secret masking; a native extension checks every write against the current owner's authorized target.
+   Before evidence validation and the voice call, the extension uses native filters to remove credentials from replies and tool results.
+   The bridge rejects server-tool output without this filtered result.
    Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
    The target is resolved before the call and checked again before writing, including symbolic links.
    Empty writes and unapproved targets are blocked; retrieved content cannot add a target.
    Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
-   Direct reads stay on the local filesystem and local process or artifact interfaces; network reads require approval.
+   Direct reads stay on the local filesystem and local process or artifact interfaces; network reads require approval, including normalized URL forms.
    Shell commands still require native approval, except the listed system reads.
    The child receives only its provider credentials and required runtime variables, not transport credentials.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.

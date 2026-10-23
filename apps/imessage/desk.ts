@@ -360,6 +360,7 @@ export function spawnDesk(o: { model: string; system: string; prompt: string; sp
     : { ...Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR",
       ...(inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"])].map((key) => [key, o.env[key]])),
       ...desk, FM_DESK_INCEPTION_INSTANT: inception && reasoning === "instant" ? "1" : undefined,
+      FM_DESK_SERVER_TOOLS: o.serverTools ? "1" : undefined,
       FM_DESK_WRITE_PATH: o.writePath,
       OMP_SKIP_SETUP: "1", PATH: o.env.PATH };
   const timeout = o.voice ? (o.env.FM_IMESSAGE_TEST === "1" ? Number(o.env.FM_IMESSAGE_TEST_VOICE_MS) || 5000 : 5000) : 45_000;
@@ -367,15 +368,16 @@ export function spawnDesk(o: { model: string; system: string; prompt: string; sp
 }
 
 // What a desk call answered, and whether it exited cleanly with an answer.
-export async function readDesk(proc: DeskProc): Promise<{ ok: boolean; drafted: string; tools: DeskEvidence }> {
+export async function readDesk(proc: DeskProc, serverTools = false): Promise<{ ok: boolean; drafted: string; tools: DeskEvidence }> {
   const output = (await new Response(proc.stdout).text()).trim();
-  let drafted = output;
-  const tools: DeskEvidence = {};
+  let drafted = serverTools ? "" : output;
+  let tools: DeskEvidence = {};
   for (const line of output.split("\n")) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
-    if (event.type === "tool_execution_end" && !event.isError) {
-      tools[event.toolCallId] = { name: event.toolName, text: event.result.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n") };
+    if (serverTools) {
+      if (event.type === "desk_result") ({ drafted, tools } = event);
+      continue;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
       drafted = event.message.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
