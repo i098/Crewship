@@ -56,7 +56,7 @@ For each message from the owner, the service does these steps:
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
    Command typing has an eight-second expiry timer; another typing command renews it.
-   An unanswered desk turn stops typing when its response-deadline callback runs.
+   The response-deadline callback stops typing only for its associated desk turn.
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
@@ -92,7 +92,7 @@ For each message from the owner, the service does these steps:
    Routine lookups and authorized actions do not create Firstmate inbox work.
    The desk finds existing board URLs itself and returns the URL immediately.
    Project requests follow the verified [second-mate handoff rules](#second-mate-handoffs), without a main note after successful delivery.
-   A successful routine local action may finish silently with `{"kind":"handled"}`.
+   A successful routine local action can return `{"kind":"handled"}` without an immediate chat reply.
    The bridge accepts this only after a successful write result and records it in the local routing journal.
    Before enabling a write, the journal records that the target may change.
    An interrupted or unverified action goes to Firstmate with that warning instead of running again.
@@ -618,7 +618,8 @@ Do not run a full host apply or restart another service.
 runtime=$(systemctl --user show fm-imessage.service --property=WorkingDirectory --value)
 test -n "$runtime" && test -f "$runtime/bridge.ts" &&
 systemctl --user stop fm-imessage.service &&
-install -m 0644 apps/imessage/{bridge,desk,inception-desk,transcribe,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
+install -m 0644 apps/imessage/{bridge,bluebubbles,desk,inception-desk,transcribe,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
+install -m 0755 apps/imessage/fm-imessage "$HOME/.local/bin/fm-imessage" &&
 systemctl --user start fm-imessage.service &&
 systemctl --user is-active fm-imessage.service
 ```
