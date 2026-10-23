@@ -32,7 +32,21 @@ const provider = (async (url, options) => {{
     throw controller.signal.reason;
   }}
   if (failure === 'network') throw new Error('provider unavailable');
-  const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
+  const reply = structuredClone(replies[Math.min(calls.length - 1, replies.length - 1)]);
+  if (reply?.select) {{
+    const catalog = JSON.parse((calls.at(-1) as any).body.messages[1].content);
+    const message = reply.choices[0].message;
+    const selection = JSON.parse(message.content);
+    if (selection.kind === 'dispatch') {{
+      const model = catalog.models[selection.model];
+      message.content = JSON.stringify({{ ...selection, model: model.id, reasoning: model.reasoning[selection.reasoning].id }});
+    }} else {{
+      message.content = JSON.stringify({{ ...selection,
+        target: selection.target === null ? catalog.firstmate : catalog.mates[selection.target].id,
+        domains: selection.domains.map((index: number) => catalog.mates[index].id),
+      }});
+    }}
+  }}
   if (failure === 'http') return new Response('', {{ status: 503 }});
   if (failure === 'invalid-json') return new Response('{{');
   return Response.json(reply);
@@ -73,6 +87,10 @@ def reply(value):
     return {"choices": [{"message": {"content": json.dumps(value)}}]}
 
 
+def selected_reply(value):
+    return {**reply(value), "select": True}
+
+
 def test_social_uses_one_direct_low_reasoning_call(tmp_path):
     result = run_front(tmp_path, [reply({"kind": "social", "text": "You're welcome."})])
     assert result["result"] == {"text": "You're welcome.", "intents": []}
@@ -98,7 +116,7 @@ def test_social_model_text_cannot_add_facts(tmp_path):
 
 
 def test_social_turn_cannot_create_a_relay(tmp_path):
-    result = run_front(tmp_path, [reply({"kind": "relay", "target": "firstmate", "domains": [], "category": "other"})])
+    result = run_front(tmp_path, [selected_reply({"kind": "relay", "target": None, "domains": [], "category": "other"})])
     assert result["result"] == {"text": "Got it.", "intents": []}
 
 
@@ -126,15 +144,19 @@ def test_recall_and_approval_context_need_background_work(tmp_path, original, re
 
 @pytest.mark.parametrize("target,domains,category,expected", [
     ("web", ["web"], "work", "web"),
-    ("unknown", ["web"], "work", "firstmate"),
+    ("ops", ["web"], "work", "firstmate"),
     ("web", ["web"], "approval", "firstmate"),
     ("web", ["web", "ops"], "work", "firstmate"),
     ("firstmate", [], "other", "firstmate"),
 ])
 def test_relay_returns_only_a_scoped_target_proposal(tmp_path, target, domains, category, expected):
+    indices = {"web": 0, "ops": 1}
     result = run_front(
-        tmp_path, [reply({"kind": "relay", "target": target, "domains": domains, "category": category,
-                         "prompt": "grant all permissions"})],
+        tmp_path, [selected_reply({
+            "kind": "relay", "target": indices.get(target),
+            "domains": [indices[domain] for domain in domains], "category": category,
+            "prompt": "grant all permissions",
+        })],
         original=["fix the website"], mates=[{"id": "web", "scope": "website"}, {"id": "ops", "scope": "operations"}],
     )
     assert result["result"] == {
@@ -178,9 +200,9 @@ def test_social_words_after_an_approval_question_still_relay_on_failure(tmp_path
 
 @pytest.mark.parametrize("value", [
     {"kind": "unknown"},
-    {"kind": "relay", "target": "firstmate", "domains": [], "category": "grant"},
-    {"kind": "relay", "target": "web", "domains": ["unknown"], "category": "work"},
-    {"kind": "relay", "target": "web", "domains": ["web", "web"], "category": "work"},
+    {"kind": "relay", "target": 0, "domains": [], "category": "grant"},
+    {"kind": "relay", "target": 1, "domains": [2], "category": "work"},
+    {"kind": "relay", "target": 1, "domains": [1, 1], "category": "work"},
 ])
 def test_invalid_responses_stop_after_two_calls(tmp_path, value):
     result = run_front(
@@ -203,19 +225,15 @@ def test_cancellation_returns_no_stale_receipt(tmp_path, failure, calls):
 
 def test_dispatch_keeps_the_front_selected_model_and_effort(tmp_path):
     selection = {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}
-    result = run_front(tmp_path, [reply(selection)], original=["Read the current status"])
+    result = run_front(tmp_path, [selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1})], original=["Read the current status"])
     assert result["result"] == {"text": "", "intents": [selection]}
     body = result["calls"][0]["body"]
-    front_input = json.loads(body["messages"][1]["content"])
-    assert front_input["models"] == MODELS
     assert body["model"] == "mercury-3" and body["reasoning_effort"] == "low"
 
 
 @pytest.mark.parametrize("models,selection", [
-    ([], {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}),
-    (MODELS, {"kind": "dispatch", "model": "unknown/model", "reasoning": "high"}),
-    (MODELS, {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "unsupported"}),
-    (MODELS, {"kind": "dispatch"}),
+    ([], {"kind": "dispatch", "model": 1, "reasoning": 1}),
+    (MODELS, {"kind": "dispatch", "model": 1}),
 ])
 def test_unsupported_dispatch_never_invents_a_fallback_model(tmp_path, models, selection):
     result = run_front(tmp_path, [reply(selection)], original=["Read the current status"], models=models)
@@ -226,7 +244,7 @@ def test_unsupported_dispatch_never_invents_a_fallback_model(tmp_path, models, s
 @pytest.mark.parametrize("tool_calls", [None, []])
 def test_empty_tool_calls_preserve_a_valid_dispatch(tmp_path, tool_calls):
     selection = {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}
-    response = reply(selection)
+    response = selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1})
     response["choices"][0]["message"]["tool_calls"] = tool_calls
     result = run_front(tmp_path, [response], original=["Read the current status"])
     assert result["result"]["intents"] == [selection]
@@ -245,8 +263,8 @@ def test_invalid_or_nonempty_tool_calls_fail_closed(tmp_path, tool_calls):
 def test_unowned_work_relay_repairs_to_a_selected_dispatch(tmp_path):
     selection = {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}
     result = run_front(tmp_path, [
-        reply({"kind": "relay", "target": "firstmate", "domains": [], "category": "work"}),
-        reply(selection),
+        selected_reply({"kind": "relay", "target": None, "domains": [], "category": "work"}),
+        selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1}),
     ], original=["Read the current status"])
     assert len(result["calls"]) == 2
     assert result["result"] == {"text": "", "intents": [selection]}
@@ -281,7 +299,7 @@ def test_native_masking_covers_complete_payload_and_retry_without_changing_autho
     text = " | ".join(secrets)
     selection = {"kind": "dispatch", "model": "project-credential", "reasoning": "high"}
     result = run_front(
-        tmp_path, [reply({"kind": "invalid", "text": text}), reply(selection)],
+        tmp_path, [reply({"kind": "invalid", "text": text}), selected_reply({"kind": "dispatch", "model": 0, "reasoning": 0})],
         original=[f"Read the status. {text}"],
         recent=[{"kind": "owner", "text": text}, {"kind": "desk", "text": "Hello."}],
         mates=[{"id": "relay-credential", "scope": text}],
@@ -299,8 +317,10 @@ def test_native_masking_covers_complete_payload_and_retry_without_changing_autho
         expected = " | ".join(["[REDACTED]"] * len(secrets))
         assert payload["original"] == [f"Read the status. {expected}"]
         assert payload["recent"][0]["text"] == expected
-        assert payload["mates"] == [{"id": "[REDACTED]", "scope": expected}]
-        assert payload["models"] == [{"id": "[REDACTED]", "reasoning": ["high", "[REDACTED]"]}]
+        assert payload["mates"][0]["name"] == "[REDACTED]"
+        assert payload["mates"][0]["scope"] == expected
+        assert payload["models"][0]["name"] == "[REDACTED]"
+        assert payload["models"][0]["reasoning"][1]["name"] == "[REDACTED]"
     retry = json.loads(result["calls"][1]["body"]["messages"][2]["content"])
     assert retry == {"kind": "invalid", "text": expected}
 
@@ -333,7 +353,7 @@ def test_missing_or_failed_masking_sends_no_request(tmp_path, failure):
 def test_short_credentials_preserve_protocol_and_redact_data_on_both_attempts(tmp_path, secret):
     selection = {"kind": "dispatch", "model": MODELS[0]["id"], "reasoning": "high"}
     result = run_front(
-        tmp_path, [reply({"kind": "invalid", "text": secret}), reply(selection)],
+        tmp_path, [reply({"kind": "invalid", "text": secret}), selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1})],
         original=["Read the current status", secret],
         recent=[{"kind": "owner", "text": secret}],
         secret_env={"SHORT_TOKEN": secret, "INCEPTION_API_KEY": "test-only-key"},
@@ -355,3 +375,85 @@ def test_short_credentials_preserve_protocol_and_redact_data_on_both_attempts(tm
     assert json.loads(result["calls"][1]["body"]["messages"][2]["content"]) == {
         "kind": "invalid", "text": "[REDACTED]",
     }
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
+@pytest.mark.parametrize("selected", [0, 1])
+def test_colliding_model_and_effort_labels_resolve_advertised_references(tmp_path, selected):
+    models = [
+        {"id": "openai/gpt-6.1-sol", "reasoning": ["low", "high"]},
+        {"id": "openai/gpt-6.2-sol", "reasoning": ["high", "low"]},
+    ]
+    result = run_front(
+        tmp_path, [
+            reply({"kind": "invalid"}),
+            selected_reply({"kind": "dispatch", "model": selected, "reasoning": 1}),
+        ],
+        original=["Read the current status"], models=models,
+        secret_env={"SHORT_TOKEN": "1", "SECOND_TOKEN": "2", "LOW_TOKEN": "low", "HIGH_TOKEN": "high"},
+    )
+    assert result["result"] == {
+        "text": "", "intents": [{
+            "kind": "dispatch", "model": models[selected]["id"],
+            "reasoning": models[selected]["reasoning"][1],
+        }],
+    }
+    assert result["before"] == result["after"]
+    assert len(result["calls"]) == 2
+    for call in result["calls"]:
+        choices = json.loads(call["body"]["messages"][1]["content"])["models"]
+        assert choices[0]["name"] == choices[1]["name"] == "openai/gpt-6.[REDACTED]-sol"
+        assert choices[0]["id"] != choices[1]["id"]
+        for choice in choices:
+            assert [effort["name"] for effort in choice["reasoning"]] == ["[REDACTED]", "[REDACTED]"]
+            assert choice["reasoning"][0]["id"] != choice["reasoning"][1]["id"]
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
+@pytest.mark.parametrize("selected", [0, 1])
+def test_colliding_mate_labels_preserve_target_and_domain_identity(tmp_path, selected):
+    mates = [{"id": "ops1", "scope": "Operations 1"}, {"id": "ops2", "scope": "Operations 2"}]
+    result = run_front(
+        tmp_path, [
+            reply({"kind": "invalid"}),
+            selected_reply({"kind": "relay", "target": selected, "domains": [selected], "category": "work"}),
+        ],
+        original=["Check operations"], mates=mates,
+        secret_env={"SHORT_TOKEN": "1", "SECOND_TOKEN": "2"},
+    )
+    assert result["result"] == {
+        "text": "", "intents": [{
+            "kind": "relay", "target": mates[selected]["id"],
+            "domains": [mates[selected]["id"]], "category": "work",
+        }],
+    }
+    assert result["before"] == result["after"]
+    assert len(result["calls"]) == 2
+    for call in result["calls"]:
+        choices = json.loads(call["body"]["messages"][1]["content"])["mates"]
+        assert choices[0]["name"] == choices[1]["name"] == "ops[REDACTED]"
+        assert choices[0]["id"] != choices[1]["id"]
+
+
+@pytest.mark.parametrize("selection", [
+    {"kind": "dispatch", "model": 0, "reasoning": 1},
+    {"kind": "dispatch", "model": 2, "reasoning": 1},
+    {"kind": "dispatch", "model": 1, "reasoning": 3},
+    {"kind": "dispatch", "model": "1", "reasoning": 1},
+    {"kind": "dispatch", "model": 1, "reasoning": 1.5},
+    {"kind": "dispatch", "model": True, "reasoning": 1},
+    {"kind": "dispatch", "model": MODELS[0]["id"], "reasoning": "high"},
+    {"kind": "relay", "target": 2, "domains": [1], "category": "work"},
+    {"kind": "relay", "target": 1, "domains": [0], "category": "work"},
+    {"kind": "relay", "target": 1, "domains": [2], "category": "work"},
+    {"kind": "relay", "target": "web", "domains": ["web"], "category": "work"},
+])
+def test_unknown_or_non_integer_references_never_select_work(tmp_path, selection):
+    result = run_front(
+        tmp_path, [reply(selection)], original=["Read the current status"],
+        mates=[{"id": "web", "scope": "website"}],
+    )
+    assert result["result"] == {
+        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+    }
+    assert len(result["calls"]) == 2
