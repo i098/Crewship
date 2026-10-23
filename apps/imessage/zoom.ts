@@ -1,9 +1,12 @@
 // The desk memory tool, an omp extension: zoom(id, n) opens a line of its memory view.
 // It reads the memory directory that FM_DESK_MEMORY names; bridge.ts is the only writer. FM_DESK_SPENT is the
 // bytes the call's prompt already holds; results past the ceiling are refused (memory.ts Budget).
+import { statSync } from "node:fs";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { builtinCredentialSecretEntries, collectEnvSecrets, loadSecrets, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-scan";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import { expandDelimitedPathEntries, normalizePathLikeInput, parseFindPattern } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 import { isReadableUrlPath } from "@oh-my-pi/pi-tui/tools/read";
 import { Budget, load, zoom } from "./memory.ts";
 import { canonicalWritePath } from "./desk.ts";
@@ -64,15 +67,22 @@ export default function (pi: {
 
 const LOCAL_SCHEMES: Record<string, true> = { file: true, artifact: true, local: true, proc: true };
 
-function guardServerTools({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
-  if (["read", "grep", "glob"].includes(toolName) && typeof input.path === "string") {
-    for (const part of input.path.split(";")) {
-      const target = part.trim();
-      const scheme = /^([a-z][\w+.-]*):\/\//i.exec(target)?.[1].toLowerCase();
-      if (isReadableUrlPath(target) || (scheme && !LOCAL_SCHEMES[scheme])) {
-        return { block: true, reason: "External reads require owner approval. Hand off this request." };
-      }
-    }
+async function requiresExternalReadApproval(toolName: string, rawPath: string): Promise<boolean> {
+  const path = normalizePathLikeInput(rawPath);
+  const paths = isReadableUrlPath(path) ? [path]
+    : await expandDelimitedPathEntries([path], process.cwd(), toolName === "glob" ? { splitter: parseFindPattern } : {});
+  for (const part of paths) {
+    const target = InternalUrlRouter.instance().normalize(normalizePathLikeInput(part));
+    const scheme = /^([a-z][\w+.-]*):\/\//i.exec(target)?.[1].toLowerCase();
+    if (isReadableUrlPath(target) || (scheme && !LOCAL_SCHEMES[scheme])) return true;
+  }
+  return false;
+}
+
+async function guardServerTools({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
+  if (["read", "grep", "glob"].includes(toolName) && typeof input.path === "string"
+    && await requiresExternalReadApproval(toolName, input.path)) {
+    return { block: true, reason: "External reads require owner approval. Hand off this request." };
   }
   if (toolName === "edit") return { block: true, reason: "Use an explicitly authorized file write." };
   if (toolName !== "write") return;
@@ -80,5 +90,9 @@ function guardServerTools({ toolName, input }: { toolName: string; input: Record
   if (!allowed || typeof input.path !== "string" || canonicalWritePath(input.path) !== allowed
     || typeof input.content !== "string" || !input.content.trim()) {
     return { block: true, reason: "The owner did not authorize this non-empty write to this absolute path. Hand off for approval." };
+  }
+  if (input.content.startsWith("#!") && !input.content.startsWith("#![")) {
+    const mode = statSync(allowed, { throwIfNoEntry: false })?.mode ?? 0;
+    if ((mode & 0o111) !== 0o111) return { block: true, reason: "Adding execute permissions requires owner approval. Hand off this request." };
   }
 }

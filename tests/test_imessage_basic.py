@@ -1635,10 +1635,14 @@ def native_desk(tmp_path, monkeypatch, request):
     models = yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text())
     models["providers"]["inception"]["baseUrl"] = f"http://127.0.0.1:{server.server_port}/v1"
     (agent_dir / "models.yml").write_text(yaml.safe_dump(models))
+    overrides = getattr(request, "param", "low")
+    if isinstance(overrides, str):
+        overrides = {"FM_IMESSAGE_DESK_REASONING": overrides}
     for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3",
-                        "FM_IMESSAGE_DESK_REASONING": getattr(request, "param", "low"), "INCEPTION_API_KEY": "test-key",
+                        "FM_IMESSAGE_DESK_REASONING": "low", "INCEPTION_API_KEY": "test-key",
                         "PI_CODING_AGENT_DIR": str(tmp_path / "agent"),
-                        "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
+                        "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions",
+                        **overrides}.items():
         monkeypatch.setenv(name, value)
     rig = basic_rig(tmp_path, test_mode=False)
     (tmp_path / "bin/omp").write_text(
@@ -1739,6 +1743,100 @@ def test_native_credentials_are_removed_before_evidence_voice_and_delivery(tmp_p
         bridge.wait(10)
 
 
+@pytest.mark.parametrize("native_desk", [{
+    "BLUEBUBBLES_PASSWORD": "relay-pass-5d8a",
+    "ALTERNATE_RELAY_LOGIN": "alternate-relay-value",
+    "FM_BLUEBUBBLES_RELAYS": "http://127.0.0.1:1,ALTERNATE_RELAY_LOGIN",
+    "WORKER_ACCESS_TOKEN": "worker-token-opaque",
+    "ESCAPED_SECRET": 'quoted"\\value',
+    "DATABASE_URL": "postgres://user:connection-pass-opaque@127.0.0.1/db",
+}], indirect=True)
+def test_native_parent_credentials_stay_out_of_providers_and_tool_environment(tmp_path, native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    secrets = {"PHOTON_PROJECT_SECRET": "fake", **{
+        name: os.environ[name] for name in
+        ("BLUEBUBBLES_PASSWORD", "ALTERNATE_RELAY_LOGIN", "WORKER_ACCESS_TOKEN", "ESCAPED_SECRET")
+    }, "CONNECTION_PASSWORD": "connection-pass-opaque"}
+    target = tmp_path / "server-values.env"
+    target.write_text("\n".join(f"{name}={value}" for name, value in secrets.items()))
+    capture = tmp_path / "tool-environment.json"
+    executable = shutil.which("omp")
+    (tmp_path / "bin/omp").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, sys\n"
+        "if any('gpt-6-luna' in arg for arg in sys.argv): sys.exit(1)\n"
+        "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1':\n"
+        f"    pathlib.Path({str(capture)!r}).write_text(json.dumps({{'names': sorted(os.environ), "
+        "'cwd': os.getcwd(), 'mode': os.stat('.').st_mode & 0o777, "
+        "'secret_mode': os.stat('.omp/secrets.yml').st_mode & 0o777}))\n"
+        f"os.execv({executable!r}, [{executable!r}, *sys.argv[1:]])\n"
+    )
+    facts = [f"{name}={value}" for name, value in secrets.items()]
+    safe = "\n".join(f"{name}=[REDACTED]" for name in secrets)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("read", {"path": str(target)})]},
+        lambda body: {"content": json.dumps({
+            "kind": "reply", "answer": "\n".join(facts),
+            "evidence": [{"source": "tool", "quote": fact} for fact in facts],
+        })},
+    ])
+    bridge = start(1)
+    try:
+        receive("values", f"Show the server values in {target}.")
+        wait_for(lambda: text(fake / "sent"), "the filtered parent-credential answer", timeout=45)
+        voice = [body for body in requests if not body.get("stream")]
+        assert json.loads(voice[0]["messages"][-1]["content"]) == {"draft": safe}
+        assert text(fake / "sent") == f"send {safe}\n"
+        for secret in secrets.values():
+            assert secret not in json.dumps(requests)
+            assert secret not in json.dumps(records())
+        child = json.loads(capture.read_text())
+        assert not set(secrets).intersection(child["names"])
+        assert child["mode"] == 0o700 and child["secret_mode"] == 0o600
+        wait_for(lambda: not os.path.exists(child["cwd"]), "the removed native credential file")
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_native_normalized_local_targets_remain_readable(tmp_path, native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    directory = tmp_path / "local reports"
+    directory.mkdir()
+    first, second = directory / "first.log", directory / "second.log"
+    first.write_text("local marker first\n")
+    second.write_text("local marker second\n")
+    literal = directory / "facts;current,old.txt"
+    literal.write_text("current local value\n")
+    replies.extend([
+        lambda body: {"tool_calls": [
+            tool_call("read", {"path": str(literal)}, "literal"),
+            tool_call("grep", {"path": f'"{first}"', "pattern": "local marker"}, "quoted"),
+            tool_call("grep", {"path": f"{first},{second}", "pattern": "local marker"}, "combined"),
+            tool_call("glob", {"path": f'"{directory}/*.log"'}, "files"),
+        ]},
+        lambda body: tool_answer("current local value"),
+    ])
+    bridge = start(1)
+    try:
+        receive("local", f"Read {literal} and search the local reports.")
+        wait_for(lambda: text(fake / "sent"), "the normalized local answer", timeout=45)
+        results = {message["tool_call_id"]: message["content"] for body in requests
+                   for message in body["messages"] if message["role"] == "tool"}
+        assert "current local value" in results["literal"]
+        assert "local marker first" in results["quoted"]
+        assert "local marker first" in results["combined"] and "local marker second" in results["combined"]
+        assert "first.log" in results["files"] and "second.log" in results["files"]
+        assert text(fake / "sent") == "send current local value\n"
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 @pytest.mark.parametrize("native_desk", ["instant"], indirect=True)
 def test_native_inception_keeps_the_configured_instant_effort(native_desk):
     rig, replies, requests = native_desk
@@ -1770,10 +1868,15 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
     sender.chmod(0o755)
     endpoint = os.environ["FM_DESK_INCEPTION_URL"].split("/v1/")[0] + "/exfil"
     targets = [endpoint, endpoint.replace("://", ":/"), "https:/collector.example/collect", "www.collector.example/collect"]
+    paths = [
+        *targets, *(f'"{target}"' for target in targets),
+        f"{sentinel};{targets[1]}", f"{sentinel},{targets[0]}",
+        f'{sentinel},"{targets[0]}"', f'"{sentinel},{targets[1]}"',
+    ]
     external = [
         tool_call(tool, {"path": path, **({"pattern": "keep"} if tool == "grep" else {})}, f"call_{tool}_{index}")
         for tool in ("read", "grep", "glob")
-        for index, path in enumerate([*targets, f"{sentinel};{targets[1]}"])
+        for index, path in enumerate(paths)
     ]
     replies.extend([
         lambda body: {"tool_calls": [tool_call("read", {"path": str(injected)}, "call_read")]},
@@ -1820,6 +1923,51 @@ def test_native_local_action_finishes_without_main_inbox_or_reply(tmp_path, nati
         assert target.read_text() == "after"
         assert text(notes) == text(fake / "sent") == ""
         assert any(json.loads(row).get("route") == "done" for row in text(state / "routing.jsonl").splitlines())
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("kind,mode,content,allowed", [
+    ("existing", 0o600, "#!/bin/sh\nprintf safe\n", False),
+    ("existing", 0o700, "#!/bin/sh\nprintf safe\n", False),
+    ("symlink", 0o600, "#!/bin/sh\nprintf safe\n", False),
+    ("new", 0o600, "#!/bin/sh\nprintf safe\n", False),
+    ("existing", 0o711, "#!/bin/sh\nprintf safe\n", True),
+    ("existing", 0o600, "#![allow(dead_code)]\nfn main() {}\n", True),
+    ("existing", 0o640, "ordinary replacement\n", True),
+    ("existing", 0o600, "1:#!/bin/sh\n2:printf safe\n", True),
+])
+def test_native_writes_preserve_execute_permissions(tmp_path, native_desk, kind, mode, content, allowed):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    original = tmp_path / "helper.sh"
+    if kind != "new":
+        original.write_text("before")
+        original.chmod(mode)
+    target = original
+    if kind == "symlink":
+        target = tmp_path / "helper-link.sh"
+        target.symlink_to(original)
+    replies.extend([
+        lambda body: {"tool_calls": [tool_call("write", {"path": str(target), "content": content})]},
+        lambda body: {"content": '{"kind":"handled"}'},
+    ])
+    bridge = start(1)
+    try:
+        receive("permissions", f"Set {target} to the new contents.")
+        if allowed:
+            wait_for(lambda: "handled" in text(state / "desk.log"), "the permission-preserving write", timeout=45)
+            assert original.read_text() == content
+            assert text(notes) == ""
+        else:
+            wait_for(lambda: "photon-permissions " in text(notes), "the execute-permission handoff", timeout=45)
+            results = [message["content"] for body in requests for message in body["messages"] if message["role"] == "tool"]
+            assert any("execute permissions" in result for result in results)
+            assert original.read_text() == "before" if kind != "new" else not original.exists()
+        if kind != "new":
+            assert original.stat().st_mode & 0o777 == mode
+        assert text(fake / "sent") == ""
     finally:
         bridge.terminate()
         bridge.wait(10)

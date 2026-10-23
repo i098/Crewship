@@ -1,5 +1,5 @@
 // Pure decisions of the front desk (bridge.ts for iMessage, instagram-desk.ts for Instagram), kept free of spectrum-ts so tests run without it.
-import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
@@ -339,21 +339,47 @@ function voicePolarity(value: string): string {
   return JSON.stringify(tokens.sort());
 }
 
-// Classification uses native omp server tools for both providers; voice remains tool-free.
-// The caller tracks either process and may kill it when the turn becomes stale.
-export type DeskProc = Bun.Subprocess<any, "pipe", any>;
-export function spawnDesk(o: { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string; voice?: boolean; serverTools?: boolean; writePath?: string }): DeskProc {
-  const desk = { FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) };
+type DeskOptions = { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string; voice?: boolean; serverTools?: boolean; writePath?: string };
+
+function deskCommand(o: DeskOptions, reasoning: string): string[] {
   const inception = o.provider === "inception";
-  const reasoning = o.voice ? (inception ? "instant" : "off") : o.reasoning ?? "off";
   const system = o.serverTools ? `${o.system}\nHost context: FM_HOME=${o.env.FM_HOME ?? ""}.` : o.system;
-  const argv = inception && o.voice
+  return inception && o.voice
     ? [process.execPath, `${import.meta.dir}/inception-desk.ts`, o.model, reasoning, o.system, "voice"]
     : ["omp", "-p", "--no-extensions", ...(o.voice ? [] : ["-e", `${import.meta.dir}/zoom.ts`]),
       ...(o.serverTools ? ["--tools=read,grep,glob,bash,write,zoom", "--mode=json",
         "--config", `${import.meta.dir}/desk-tools.yml`, "--approval-mode=write"] : ["--no-tools"]),
       "--no-skills", "--no-rules", "--no-session",
       `--thinking=${inception && reasoning === "instant" ? "off" : reasoning}`, "--model", inception ? `inception/${o.model}` : o.model, "--system-prompt", system];
+}
+
+function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>): void {
+  const names = new Set(Object.keys(env).filter((name) => /(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH|CREDENTIAL|PRIVATE|OAUTH)(?:_|$)/i.test(name)));
+  for (const relay of (env.FM_BLUEBUBBLES_RELAYS ?? "").split(/\s+/)) {
+    const name = relay.split(",")[1];
+    if (name) names.add(name);
+  }
+  const secrets = new Set([...names].map((name) => env[name]).filter((value): value is string => !!value));
+  for (const value of Object.values(env)) {
+    const password = /^[a-z][a-z0-9+.-]*:\/\/[^/:@?#\s]*:([^/?#\s]+)@/i.exec(value ?? "")?.[1];
+    if (!password) continue;
+    secrets.add(password);
+    try { secrets.add(decodeURIComponent(password)); } catch {}
+  }
+  mkdirSync(join(cwd, ".omp"), { mode: 0o700 });
+  writeFileSync(join(cwd, ".omp", "secrets.yml"), JSON.stringify([...secrets].map((content) => ({
+    type: "plain", content, mode: "replace", replacement: "[REDACTED]",
+  }))), { mode: 0o600 });
+}
+
+// Classification uses native omp server tools for both providers; voice remains tool-free.
+// The caller tracks either process and may kill it when the turn becomes stale.
+export type DeskProc = Bun.Subprocess<any, "pipe", any>;
+export function spawnDesk(o: DeskOptions): DeskProc {
+  const desk = { FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) };
+  const inception = o.provider === "inception";
+  const reasoning = o.voice ? (inception ? "instant" : "off") : o.reasoning ?? "off";
+  const argv = deskCommand(o, reasoning);
   const env = inception && o.voice
     ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
     : !o.serverTools && !inception ? { ...o.env, ...desk }
@@ -364,7 +390,16 @@ export function spawnDesk(o: { model: string; system: string; prompt: string; sp
       FM_DESK_WRITE_PATH: o.writePath,
       OMP_SKIP_SETUP: "1", PATH: o.env.PATH };
   const timeout = o.voice ? (o.env.FM_IMESSAGE_TEST === "1" ? Number(o.env.FM_IMESSAGE_TEST_VOICE_MS) || 5000 : 5000) : 45_000;
-  return Bun.spawn(argv, { cwd: o.cwd, env, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: inception && o.voice ? "inherit" : "ignore", timeout });
+  const cwd = o.serverTools ? mkdtempSync(join(o.cwd, "call-")) : o.cwd;
+  try {
+    if (o.serverTools) writeDeskSecrets(cwd, o.env);
+    const proc = Bun.spawn(argv, { cwd, env, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: inception && o.voice ? "inherit" : "ignore", timeout });
+    if (o.serverTools) void proc.exited.finally(() => rmSync(cwd, { recursive: true, force: true }));
+    return proc;
+  } catch (error) {
+    if (o.serverTools) rmSync(cwd, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 // What a desk call answered, and whether it exited cleanly with an answer.

@@ -32,11 +32,17 @@ For each message from the owner, the service does these steps:
    `desk-tools.yml` enables secret masking; a native extension checks every write against the current owner's authorized target.
    Before evidence validation and the voice call, the extension uses native filters to remove credentials from replies and tool results.
    The bridge rejects server-tool output without this filtered result.
+   Each server-tool call uses a private temporary directory with a native secret file for parent-known credentials.
+   This includes configured relay passwords and connection passwords without adding them to the tool environment.
+   The service removes the directory when the call exits.
    Automatic writes require one explicit write, set, or replace request with one absolute file path and an existing parent directory.
    The target is resolved before the call and checked again before writing, including symbolic links.
    Empty writes and unapproved targets are blocked; retrieved content cannot add a target.
+   A shebang write requires approval if the native writer would add execute permissions, including when it creates a file.
    Version-controlled projects, registered mate homes, and known credential stores are not automatic write targets.
-   Direct reads stay on the local filesystem and local process or artifact interfaces; network reads require approval, including normalized URL forms.
+   Direct reads stay on the local filesystem and local process or artifact interfaces.
+   The guard checks native quote removal, delimiter expansion, and URL normalization before allowing a target.
+   Network reads require approval.
    Shell commands still require native approval, except the listed system reads.
    The child receives only its provider credentials and required runtime variables, not transport credentials.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
