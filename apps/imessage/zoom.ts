@@ -1,12 +1,15 @@
-// The front desk's one tool, an omp extension (`omp -p -e zoom.ts`): zoom(id, n) opens a line of its memory view.
+// The desk memory tool, an omp extension: zoom(id, n) opens a line of its memory view.
 // It reads the memory directory that FM_DESK_MEMORY names; bridge.ts is the only writer. FM_DESK_SPENT is the
 // bytes the call's prompt already holds; results past the ceiling are refused (memory.ts Budget).
 import { Budget, load, zoom } from "./memory.ts";
 
 // The slice of omp's ExtensionAPI this file uses.
 type Zod = { object(shape: Record<string, unknown>): unknown; number(): { describe(text: string): unknown } };
-export default function (pi: { zod: Zod; registerTool(tool: unknown): void }) {
+export default function (pi: { zod: Zod; registerTool(tool: unknown): void; on(event: "before_provider_request", handler: (event: { payload: Record<string, unknown> }) => unknown): void }) {
   const z = pi.zod;
+  if (process.env.FM_DESK_INCEPTION_INSTANT === "1") {
+    pi.on("before_provider_request", ({ payload }) => ({ ...payload, reasoning_effort: "instant" }));
+  }
   // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
   const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));
   pi.registerTool({

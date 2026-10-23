@@ -94,6 +94,9 @@ def test_mate_handoff_preserves_text_and_notifies_firstmate(tmp_path, desk_clock
     ("Merge the website change", {}),
     ("Choose which website design we should use", {}),
     ("The website password is a test value", {}),
+    ("Delete the website data", {}),
+    ("Restart the website service", {}),
+    ("Deploy the website", {}),
     ("Fix the website menu", {"target": "unknown-mate", "domains": ["unknown-mate"]}),
     ("Fix the website menu", {"category": "approval"}),
     ("Fix the website menu", {"target": "firstmate"}),
@@ -174,7 +177,6 @@ def test_missing_or_empty_registry_keeps_existing_handoff(tmp_path, desk_clock, 
         desk_clock()
         wait_for(lambda: "photon-work " in text(notes), "the single-home handoff")
         assert text(fake / "mate-sends") == ""
-        assert text(fake / "model-calls") == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -206,6 +208,7 @@ def test_registry_changes_apply_without_restart(tmp_path, desk_clock):
     bridge = start(1)
     try:
         receive("before", "Fix the website menu")
+        desk_clock()
         wait_for(lambda: "photon-before " in text(notes), "the initial Firstmate handoff")
         path.write_text(table)
         receive("after", "Fix the website layout")

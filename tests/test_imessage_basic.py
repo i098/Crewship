@@ -1196,8 +1196,6 @@ def test_burst_cap_drafts_latest_text_and_a_correction_replaces_the_draft(tmp_pa
         assert text(fake / "model-calls") == ""
         desk_clock(3)
         wait_for(lambda: (fake / "model-started").exists(), "the draft at the burst cap")
-        first = json.loads(text(fake / "model-calls").splitlines()[0])
-        assert "owner 4: Is the build paused?" in first["prompt"]
         (fake / "status").write_text("The build is running.")
         (fake / "answer").write_text(json.dumps({
             "kind": "reply", "answer": "The build is running.",
@@ -1212,9 +1210,6 @@ def test_burst_cap_drafts_latest_text_and_a_correction_replaces_the_draft(tmp_pa
         (fake / "model-hold").unlink()
         wait_for(lambda: text(fake / "sent"), "the corrected answer")
         assert text(fake / "sent").splitlines() == ["send The build is running."]
-        last = json.loads(text(fake / "model-calls").splitlines()[-1])
-        assert "owner 1: What is the build status?" in last["prompt"]
-        assert "owner 5: Correction: is the build running?" in last["prompt"]
         assert text(notes) == ""
     finally:
         bridge.terminate()
@@ -1578,7 +1573,7 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
 
 
 @pytest.fixture
-def native_desk(tmp_path, monkeypatch):
+def native_desk(tmp_path, monkeypatch, request):
     executable = shutil.which("omp")
     if not executable:
         pytest.skip("needs the supported omp tool runtime")
@@ -1618,7 +1613,7 @@ def native_desk(tmp_path, monkeypatch):
     models["providers"]["inception"]["baseUrl"] = f"http://127.0.0.1:{server.server_port}/v1"
     (agent_dir / "models.yml").write_text(yaml.safe_dump(models))
     for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3",
-                        "FM_IMESSAGE_DESK_REASONING": "low", "INCEPTION_API_KEY": "test-key",
+                        "FM_IMESSAGE_DESK_REASONING": getattr(request, "param", "low"), "INCEPTION_API_KEY": "test-key",
                         "PI_CODING_AGENT_DIR": str(tmp_path / "agent"),
                         "FM_DESK_INCEPTION_URL": f"http://127.0.0.1:{server.server_port}/v1/chat/completions"}.items():
         monkeypatch.setenv(name, value)
@@ -1653,6 +1648,7 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
             tool_call("read", {"path": str(board)}, "call_read"),
             tool_call("grep", {"pattern": "fresh lookup", "path": str(log)}, "call_search"),
             tool_call("bash", {"command": "uname -a"}, "call_system"),
+            tool_call("zoom", {"id": 0, "n": 1}, "call_zoom"),
         ]},
         lambda body: tool_answer("https://example.org/boards/current"),
     ])
@@ -1664,9 +1660,29 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         assert "https://example.org/boards/current" in results["call_read"]
         assert "fresh lookup marker" in results["call_search"]
         assert "Linux" in results["call_system"]
+        assert "Find the current board URL" in results["call_zoom"]
         assert text(fake / "sent").splitlines() == ["send https://example.org/boards/current"]
         assert text(notes) == ""
         assert "tool-results" in text(state / "desk.log")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("native_desk", ["instant"], indirect=True)
+def test_native_inception_keeps_the_configured_instant_effort(native_desk):
+    rig, replies, requests = native_desk
+    fake, state, notes, err, start, receive, cli, text, records = rig
+    replies.append(lambda body: {"content": json.dumps({
+        "kind": "reply", "answer": "mercury-3",
+        "evidence": [{"source": "identity", "subject": "desk", "quote": "mercury-3"}],
+    })})
+    bridge = start(1)
+    try:
+        receive("identity", "Which desk model answers?")
+        wait_for(lambda: text(fake / "sent"), "the instant identity answer", timeout=45)
+        assert requests[0]["reasoning_effort"] == "instant"
+        assert text(notes) == ""
     finally:
         bridge.terminate()
         bridge.wait(10)

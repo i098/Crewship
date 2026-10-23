@@ -25,6 +25,7 @@ For each message from the owner, the service does these steps:
    Both providers use the existing `omp -p` tool runtime for classification.
    `desk_provider: inception` selects `inception/<desk_model>` without changing the provider or configured reasoning level.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
+   A native provider hook preserves Inception's `instant` wire value; other reasoning levels pass through unchanged.
    A failed Inception call never falls back to another provider; requests follow the [second-mate handoff rules](#second-mate-handoffs).
    The Inception voice pass still uses its tool-free chat-completions request and `instant` reasoning.
    The runtime has native `read`, `grep`, `glob`, `bash`, `edit`, and `write` tools, plus the existing `zoom` extension.
@@ -183,7 +184,7 @@ Failed status reads or clipped handoff input go directly to Firstmate.
 The desk sends work to a mate only when the model reports high confidence and exactly one matching domain.
 It checks the whole pending burst, including recent context, rather than splitting related texts across mates.
 Invalid output, low confidence, ambiguous requests, and work across several domains go to Firstmate.
-Decisions, approvals, merges, credentials, and sensitive messages also stay with Firstmate.
+Decisions, approvals, merges, destructive actions, external sends, credentials, and sensitive messages also stay with Firstmate.
 Attachments, group chats, edits, and unsupported desk models keep their existing Firstmate handoff.
 
 The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, including an `FM_INBOX_CMD` override.
