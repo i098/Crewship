@@ -48,6 +48,8 @@ function track<T extends Bun.Subprocess>(proc: T): T {
 async function stop() {
   if (stopping) return;
   stopDeskTyping?.();
+  for (const timer of acknowledgementTimers.values()) clearTimeout(timer);
+  if (commandTypingSpace) typing(commandTypingSpace, false);
   stopping = true;
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
@@ -94,6 +96,7 @@ const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_M
 // Only the test suite may override the short quiet period and the burst cap.
 const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 350;
 const MAX_WAIT_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_MAX_WAIT_MS ? Number(env.FM_IMESSAGE_TEST_MAX_WAIT_MS) : 2000;
+const ACK_MS = 8000;
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
 // systemd's StateDirectory= sets STATE_DIRECTORY; the directory is private to the account.
@@ -129,11 +132,23 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
+const trace = (id: string, event: string) => {
+  try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
+  catch (e) { log("trace")(e); }
+};
+let commandTypingTimer: NodeJS.Timeout | undefined;
+let commandTypingSpace: LineMessage["space"] | undefined;
 // Typing bubbles are best effort: an error is logged and never fails or delays a send.
-const typing = (space: LineMessage["space"] | undefined, on: boolean) => {
+const typing = (space: LineMessage["space"] | undefined, on: boolean, id = latestRef?.id ?? "command") => {
   if (!space) return;
-  deskTypingPending = deskTypingPending.then(() => {
-    if (!stopping) return on ? space.startTyping() : space.stopTyping();
+  clearTimeout(commandTypingTimer);
+  commandTypingSpace = on ? space : undefined;
+  if (on) commandTypingTimer = setTimeout(() => typing(space, false, id), ACK_MS);
+  deskTypingPending = deskTypingPending.then(async () => {
+    if (!stopping || !on) {
+      await (on ? space.startTyping() : space.stopTyping());
+      trace(id, on ? "typing-start" : "typing-stop");
+    }
   }).catch(log(on ? "start typing" : "stop typing"));
 };
 // This service is the memory's one writer: systemd runs one instance of the unit.
@@ -163,15 +178,16 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
-type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
 let routingRetry: NodeJS.Timeout | undefined;
+const acknowledgementTimers = new Map<string, NodeJS.Timeout>();
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -181,7 +197,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
-  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<unknown>;
+  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
@@ -265,11 +281,13 @@ async function startLine(name: string): Promise<Line> {
       const thread = await threadOf(space, reply);
       if (thread) {
         beforeSend?.();
-        return thread.reply(text);
+        await thread.reply(text);
+        return "accepted" as const;
       }
       const chat = await imessage(app).space.get(space);
       beforeSend?.();
-      return chat.send(text);
+      await chat.send(text);
+      return "accepted" as const;
     },
     async sendImage(space, picture, reply) {
       const content = attachment(picture.path, { name: picture.name, mimeType: picture.mimeType });
@@ -373,6 +391,7 @@ const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgai
 });
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
+scheduleAcknowledgement();
 if (pendingRoutes().length) {
   prefetchInboxStatus();
   desk.inboundText();
@@ -405,7 +424,7 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
-    // Any Firstmate activity on the line means the real answer is coming, so the desk stands down.
+    // Supervisor activity cancels a draft; only a confirmed response ends the acknowledgement wait.
     recordRoute({ deskCancelled: true });
     desk.firstmateActive();
     handoffPending();
@@ -449,7 +468,9 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
-    return queue({ ...destination, image, bubbles: parts, reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
+    return queue({ ...destination, image, bubbles: parts,
+      ...(target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
+      reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
   },
 });
 
@@ -514,7 +535,8 @@ function stage(photo: PreparedImage): Picture {
 function put(item: Out) {
   if (stopping) return false;
   if (muted()) return false;
-  outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item });
+  const requests = item.requests ?? [...routing.values()].filter((r) => !r.responded && sameChat(r.ref, item)).map((r) => r.requestId);
+  outbox.add({ guid: crypto.randomUUID(), at: Date.now(), ...item, requests });
   return true;
 }
 
@@ -527,6 +549,11 @@ function hasRestoredUnsentText(o: Out): boolean {
 }
 
 function checkDeskDelivery(o: Out) {
+  if (o.acknowledgement) {
+    const latest = [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, o));
+    if (o.id !== latest?.ref.id || latest?.acknowledgement?.requestId !== o.requestId) throw deskCancelled;
+    return;
+  }
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
 }
 
@@ -534,6 +561,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
+  if (o.done) recordResponse(o);
   const update = (next: Out) => { save(next); o = next; };
   const parts: Bubble[] = [...(o.image ? [o.image] : []), ...(o.bubbles ?? [])];
   if (parts.length && !o.guid) save((o = { ...o, guid: crypto.randomUUID() }));
@@ -544,11 +572,13 @@ async function deliver(o: Out, save: (o: Out) => void) {
       await Bun.sleep(typingPause(part));
     }
     if (!await sendCurrentBubble(o, i, part, update)) {
+      releaseCancelledAcknowledgement(o);
       lostDeskAnswer(o);
       break;
     }
     finishDeskDelivery(o);
     save((o = { ...o, done: i + 1, maybe: undefined, since: undefined }));
+    recordResponse(o);
   }
   const text = deliveredText(o);
   if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
@@ -556,9 +586,17 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (o.image) rmSync(o.image.path, { force: true });
 }
 
+function releaseCancelledAcknowledgement(o: Out) {
+  if (!o.acknowledgement || o.done || Object.keys(o.maybe ?? {}).length) return;
+  const ids = (o.requests ?? []).filter((id) => routing.get(id)?.acknowledgement?.requestId === o.requestId);
+  if (!ids.length) return;
+  recordRoute({ ids, acknowledgement: null });
+  scheduleAcknowledgement();
+}
+
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
   try {
-    if (o.deskSession !== deskSession) checkDeskDelivery(o);
+    if (!o.acknowledgement && o.deskSession !== deskSession) checkDeskDelivery(o);
     if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
     return true;
@@ -579,20 +617,25 @@ function deliveredText(o: Out) {
 
 async function deliverReaction(o: Out, save: (o: Out) => void) {
   // A tapback is best effort: when its transport stays down it is dropped, so it never holds the sends behind it.
-  if (o.at === undefined) save((o = { ...o, at: Date.now() }));
-  if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
-  const line = lineOf(o);
-  if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
-  try {
-    await line.react(o, o.react!, () => {
-      checkDeskDelivery(o);
-      save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
-    });
-  } catch (e) {
-    if (notSent(e)) save(o);
-    throw e;
+  if (!o.reacted) {
+    if (o.at === undefined) save((o = { ...o, at: Date.now() }));
+    if (Date.now() - o.at! > REACT_MAX_MS) throw Object.assign(new Error(`tapback ${o.react} older than ${REACT_MAX_MS / 1000} s, dropped`), { permanent: true });
+    const line = lineOf(o);
+    if (!line) throw Object.assign(new Error(`transport ${o.line} is not set`), { permanent: true });
+    try {
+      await line.react(o, o.react!, () => {
+        checkDeskDelivery(o);
+        save({ ...o, maybe: { ...o.maybe, [line.name]: o.space } });
+      });
+    } catch (e) {
+      if (notSent(e)) save(o);
+      throw e;
+    }
+    trace(o.id, "transport-accepted");
+    finishDeskDelivery(o);
+    save((o = { ...o, reacted: true, maybe: undefined }));
   }
-  finishDeskDelivery(o);
+  if (o.kind === "desk") recordResponse(o);
   remember(o.kind ?? "supervisor", `tapback ${o.react} on message ${o.id}`);
 }
 
@@ -604,6 +647,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
 async function deliverCard(o: Out, kind: Kind) {
   const card = cards?.read(o.card!);
   if (!card) throw Object.assign(new Error("the card's record is gone (expired)"), { permanent: true });
+  if (card.sent && o.requests?.length !== 0) recordResponse(o);
   const line = lineOf(o);
   if (!line || (card.app && !line.sendCard)) throw Object.assign(new Error(`a card needs the ${card.app ? "photon" : o.line ?? "photon"} transport`), { permanent: true });
   if (card.sent && !card.session) {
@@ -612,7 +656,14 @@ async function deliverCard(o: Out, kind: Kind) {
   }
   const url = `${CARD_URL}/c/${card.token}`;
   try {
-    const session = card.app ? await line.sendCard!(o.space, url, cardLayout(card), card.live, card.session) : await line.send(o.space, url, undefined, o.guid && `${o.guid}-0`).then(() => undefined);
+    let session;
+    if (card.app) {
+      session = await line.sendCard!(o.space, url, cardLayout(card), card.live, card.session);
+      trace(o.id, card.sent ? "card-update-accepted" : "transport-accepted");
+    } else {
+      const outcome = await line.send(o.space, url, undefined, o.guid && `${o.guid}-0`);
+      trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
+    }
     cards!.save({ ...cards!.read(card.token)!, sent: true, session: session ?? card.session });
   } catch (e) {
     if (transient(e)) throw e;
@@ -620,7 +671,10 @@ async function deliverCard(o: Out, kind: Kind) {
     if (!card.sent) fileNote(`card-${card.key}-${card.expires}-failed`, `(card ${card.key} was not sent: ${why})`);
     throw Object.assign(new Error(`card ${card.key}: ${why}`), { permanent: true });
   }
-  if (!card.sent) remember(kind, `[card ${card.key}: ${card.title}]`);
+  if (!card.sent) {
+    recordResponse(o);
+    remember(kind, `[card ${card.key}: ${card.title}]`);
+  }
 }
 
 // His pick on a choice card's page: the inbox note, then the bubble edit, queued behind the sends before it.
@@ -628,7 +682,7 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
   const text = `[iMessage card pick] ${card.key}: ${letter(choice)}. ${card.options[choice]}`;
   if (!fileNote(`card-${card.key}-${card.expires}-pick`, text)) return false;
   remember("owner", text);
-  if (card.chat && card.app) put({ ...card.chat, card: card.token });
+  if (card.chat && card.app) put({ ...card.chat, card: card.token, requests: [] });
   return true;
 }
 
@@ -645,7 +699,10 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     if (!line.sent || typeof bubble !== "string") maybe[name] = space;
     else {
       try {
-        if (await line.sent(space, bubble, o.since ?? 0)) return;
+        if (await line.sent(space, bubble, o.since ?? 0)) {
+          trace(o.id, "history-reconciled");
+          return;
+        }
       } catch (e) {
         checkDeskDelivery(o);
         throw e;
@@ -697,8 +754,13 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
-        if (typeof bubble === "string") await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
-        else await line.sendImage!(space, bubble, thread);
+        if (typeof bubble === "string") {
+          const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
+          trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
+        } else {
+          await line.sendImage!(space, bubble, thread);
+          trace(o.id, "transport-accepted");
+        }
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
         throw e;
@@ -719,6 +781,68 @@ function remember(kind: Kind, text: string, requestId?: string): number | undefi
   }
 }
 
+function sameChat(a: Ref, b: Ref | undefined) {
+  return a.space === b?.space && (a.line ?? "photon") === (b?.line ?? "photon");
+}
+
+function recordResponse(o: Out) {
+  if (o.acknowledgement && commandTypingSpace?.id === o.space) typing(commandTypingSpace, false);
+  const unanswered = (o.requests ?? []).filter((id) => {
+    const item = routing.get(id);
+    return item && !item.responded && sameChat(item.ref, o);
+  });
+  if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
+  trace(o.id, "response-confirmed");
+  scheduleAcknowledgement();
+}
+
+function scheduleAcknowledgement() {
+  const chats = new Map<string, Routing[]>();
+  for (const item of routing.values()) {
+    if (!item.at || item.responded || !directChat.test(item.ref.space)) continue;
+    const key = `${item.ref.line ?? "photon"}:${item.ref.space}`;
+    const pending = chats.get(key) ?? [];
+    pending.push(item);
+    chats.set(key, pending);
+  }
+  for (const pending of chats.values()) scheduleChatAcknowledgement(pending);
+}
+
+function scheduleChatAcknowledgement(pending: Routing[]) {
+  const target = pending.at(-1)!;
+  if (acknowledgementTimers.has(target.requestId) || target.acknowledgement) return;
+  if (socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[pending[0]!.memoryId - 1])) return;
+  acknowledgementTimers.set(target.requestId, setTimeout(() => {
+    acknowledgementTimers.delete(target.requestId);
+    acknowledge(pending);
+  }, Math.max(0, ACK_MS - (Date.now() - target.at!))));
+}
+
+function acknowledge(pending: Routing[]) {
+  pending = pending.filter((r) => !r.responded);
+  const target = pending.at(-1);
+  if (stopping || muted() || !target || target.acknowledgement
+    || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
+  if (target.out) return finishDeskDelivery(target.out);
+  if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
+  const unassigned = pending.filter((r) => r.route === "pending");
+  if (unassigned.length) {
+    cancelDesk();
+    recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
+    desk.inboundText();
+  }
+  const ids = pending.map((r) => r.requestId);
+  const text = target.authored ?? target.text;
+  const subject = supervisorOnly(text) || /\(sent (?:an attachment|an audio message|a voice memo)|\[voice memo,/.test(text)
+    ? "your message" : `“${text.replace(/\s+/g, " ").slice(0, 160)}”`;
+  const guid = crypto.randomUUID();
+  const out: Out = { ...target.ref, requestId: `ack-${guid}`, requests: ids,
+    acknowledgement: true, kind: "desk", guid, at: Date.now(),
+    bubbles: [`I saved ${subject}; no confirmed answer yet.`], reply: target.ref.id };
+  recordRoute({ ids, acknowledgement: out });
+  flushRoutes();
+}
+
 function prefetchInboxStatus() {
   if (DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
 }
@@ -730,15 +854,18 @@ async function readInboxStatus() {
 }
 
 function startDeskTyping(pending: Routing[], current: () => boolean) {
-  const space = pending.every(({ ref }) => ref.space === latestRef?.space
-    && (ref.line ?? "photon") === (latestRef?.line ?? "photon")) ? latest?.space : undefined;
+  const space = pending.every(({ ref }) => sameChat(ref, latestRef)) ? latest?.space : undefined;
+  deskTypingRequestId = pending.at(-1)!.requestId;
   let active = true;
   let refreshing = false;
   const refresh = () => {
     if (!active || refreshing || !space) return;
     refreshing = true;
     deskTypingPending = deskTypingPending.then(async () => {
-      if (active && !stopping && current()) await space.startTyping();
+      if (active && !stopping && current()) {
+        await space.startTyping();
+        trace(pending.at(-1)!.ref.id, "typing-start");
+      }
     }).catch(log("start typing")).finally(() => { refreshing = false; });
   };
   const timer = setInterval(() => {
@@ -753,7 +880,10 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
       stopDeskTyping = undefined;
       deskTypingRequestId = undefined;
     }
-    deskTypingPending = deskTypingPending.then(() => space?.stopTyping()).catch(log("stop typing"));
+    deskTypingPending = deskTypingPending.then(async () => {
+      await space?.stopTyping();
+      if (space) trace(pending.at(-1)!.ref.id, "typing-stop");
+    }).catch(log("stop typing"));
   };
   stopDeskTyping = finishTyping;
   refresh();
@@ -792,11 +922,11 @@ async function runDesk(current: () => boolean) {
 
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   const { answer, target } = result;
-  const ids = pending.map((r) => r.requestId);
   if ("handled" in answer) {
-    recordRoute({ ids, route: "done" });
+    recordRoute({ ids: pending.map((r) => r.requestId), route: "done" });
     return;
   }
+  const ids = pending.filter((r) => sameChat(r.ref, target.ref)).map((r) => r.requestId);
   const guid = crypto.randomUUID();
   deskTypingRequestId = target.requestId;
   recordRoute({ ids, route: "desk",
@@ -804,7 +934,7 @@ function commitDeskAnswer(pending: Routing[], result: DeskResult) {
       ...("answer" in answer ? { bubbles: bubbles(answer.answer), reply: target.ref.id }
         : { react: answer.react, ...(answer.text ? { bubbles: [answer.text], reply: target.ref.id } : {}) }),
       kind: "desk", guid, at: Date.now(), deskGeneration, deskSession } });
-  flushRoutes();
+  handoffPending();
 }
 
 function armWrite(pending: Routing[]): string | undefined {
@@ -822,14 +952,19 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   const { prompt, spent } = deskInput(DESK_PROMPT, memory.render(from), status, latestText, DESK_PROVIDER, memory.recent(from));
   if (!statusOk || !prompt.includes(latestText)) return;
   const writePath = armWrite(pending);
+  trace(pending.at(-1)!.ref.id, "model-start");
   const proc = track(spawnDesk({ provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, system: DESK_PROMPT, prompt, spent, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env, serverTools: true, writePath }));
   deskRun = proc;
   const { ok, drafted, tools } = await readDesk(proc, true);
+  trace(pending.at(-1)!.ref.id, ok ? "model-result" : "model-failed");
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
   const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
-  if (!answer) return;
+  if (!answer) {
+    trace(pending.at(-1)!.ref.id, "model-handoff");
+    return;
+  }
   if (Object.keys(tools).length) appendFileSync(DESK_LOG, `${new Date().toISOString()} ${pending.at(-1)!.requestId} tool-results ${Object.entries(tools).map(([id, tool]) => `${id}:${tool.name}`).join(",")}\n`, { mode: 0o600 });
   const target = pending[("target" in answer ? answer.target ?? pending.length : pending.length) - 1];
   if (!target) return;
@@ -906,6 +1041,10 @@ function applyRoute(event: RouteEvent) {
   else if ("received" in event) {
     deskGeneration++;
     routing.set(event.received.requestId, { ...event.received, route: "pending" });
+  } else if ("responded" in event) {
+    for (const id of event.ids) Object.assign(routing.get(id)!, { responded: true, acknowledgement: undefined });
+  } else if ("acknowledgement" in event) {
+    for (const id of event.ids) routing.get(id)!.acknowledgement = event.acknowledgement ?? undefined;
   } else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
     handoffNote: event.handoffNote, ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
 }
@@ -913,7 +1052,7 @@ function applyRoute(event: RouteEvent) {
 function recordRoute(event: RouteEvent) {
   const fd = openSync(ROUTING_LOG, "a", 0o600);
   try {
-    writeSync(fd, `${JSON.stringify(event)}\n`);
+    writeSync(fd, `${JSON.stringify({ at: Date.now(), ...event })}\n`);
     fsyncSync(fd);
   } finally { closeSync(fd); }
   const dir = openSync(STATE, "r");
@@ -932,9 +1071,11 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
+  if (item.acknowledgement) return;
   if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
+  scheduleAcknowledgement();
 }
 
 function pendingRoutes() {
@@ -953,8 +1094,9 @@ function flushRoutes() {
   clearTimeout(routingRetry);
   let failed = false;
   for (const item of routing.values()) {
-    if (mateDeliveries.has(item.requestId)) continue;
     try {
+      if (item.acknowledgement && !muted()) outbox.add(item.acknowledgement);
+      if (mateDeliveries.has(item.requestId)) continue;
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);
         recordRoute({ ids: [item.requestId], route: "handoff" });
@@ -962,9 +1104,10 @@ function flushRoutes() {
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
         if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
+        trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
-      recordRoute({ ids: [item.requestId], route: "done" });
+      recordRoute({ ids: [item.requestId], route: "done", out: item.out });
     } catch (e) {
       log("route delivery")(e);
       failed = true;
@@ -997,7 +1140,7 @@ function fileNote(requestId: string, text: string): boolean {
   if (stopping) return false;
   const note = Bun.spawnSync(
     [INBOX, "note", "--request-id", requestId, "--", `[iMessage from the owner; answer with fm-imessage] ${text}`],
-    { cwd: FM_HOME, env: { ...env, FM_HOME } },
+    { cwd: FM_HOME, env: { ...env, FM_HOME }, timeout: 5000 },
   );
   return note.exitCode === 0;
 }
@@ -1045,7 +1188,7 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  await message.read().catch(log("mark read"));
+  await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
   const pending = pendingRoutes();
   if (pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
@@ -1056,13 +1199,15 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, 
   const mateEligible = !firstmate && !supervisorOnly(authored);
   // Destructive requests, unclear approvals, and sensitive content keep the existing supervisor boundary.
   firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
-  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible };
+  const received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, at: Date.now() };
   prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);
   flushRoutes();
   cancelDesk();
+  if (commandTypingSpace) typing(commandTypingSpace, false);
   desk.inboundText();
+  scheduleAcknowledgement();
 }
 
 function authoredText(content: LineMessage["content"]): string | undefined {
@@ -1101,7 +1246,8 @@ function edited(e: EventTypeMap["message.edited"]) {
   const text = e.content.text ?? "(no text)";
   const was = said.get(e.messageGuid) ?? "not known: the bridge did not see the text before the edit";
   console.log("fm-imessage: inbound edit -> note");
-  receive(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, { space: e.chatGuid, id: e.messageGuid }, true);
+  const ref = routing.get(`photon-${e.messageGuid}`)?.ref ?? { space: e.chatGuid, id: e.messageGuid };
+  receive(`photon-${e.messageGuid}-edit-${e.sequence}`, `[edited] ${text} (was: ${was})`, ref, true);
   heard(e.messageGuid, text);
   handoffPending();
 }

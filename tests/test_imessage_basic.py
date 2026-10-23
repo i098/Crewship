@@ -57,8 +57,8 @@ if (process.env.STATE_DIRECTORY) {
   const schedule = globalThis.setTimeout;
   const cancel = globalThis.clearTimeout;
   globalThis.setTimeout = (fn, ms, ...args) => {
-    if (![process.env.FM_IMESSAGE_TEST_QUIET_MS, process.env.FM_IMESSAGE_TEST_MAX_WAIT_MS]
-        .some((value) => ms === Number(value))) return schedule(fn, ms, ...args);
+    if (![8000, Number(process.env.FM_IMESSAGE_TEST_QUIET_MS),
+          Number(process.env.FM_IMESSAGE_TEST_MAX_WAIT_MS)].includes(ms)) return schedule(fn, ms, ...args);
     const timer = { at: Date.now() + ms, run: () => fn(...args) };
     timers.set(timer, timer);
     return timer;
@@ -361,8 +361,9 @@ def test_voice_stands_down_between_bubbles(tmp_path, desk_clock, activity):
             assert text(fake / "sent") == f"send {first}\nsend {second}\n"
         else:
             assert second not in text(fake / "sent")
-        if activity == "send":
-            wait_for(lambda: "send Supervisor answer\n" in text(fake / "sent"), "the supervisor answer")
+        if activity in ("send", "react"):
+            response = {"send": "send Supervisor answer\n", "react": "react question ❤️\n"}[activity]
+            wait_for(lambda: response in text(fake / "sent"), "the supervisor response")
         if activity == "new-text":
             desk_clock()
             wait_for(lambda: "photon-correction " in text(notes), "the correction handoff")
@@ -523,30 +524,47 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
             wait_for(lambda: "photon-question " in text(notes), "the desk handoff")
         if exit_path != "shutdown":
             desk_clock(0)
-            before = events()
+            before = len(events())
             desk_clock(8000)
-            assert events() == before
-        assert all(row["chat"] == "iMessage;-;+10000000000" for row in events())
-        assert events()[-1]["on"] == (exit_path == "typing")
+            wait_for(lambda: events()[-1]["on"] is False, "the final typing cleanup")
+            assert not any(row["on"] for row in events()[before:])
+        assert events()[-1]["on"] is False
     finally:
         if bridge.poll() is None:
             bridge.terminate()
             bridge.wait(10)
 
 
-def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path, desk_clock):
+@pytest.mark.parametrize("target", [1, 2])
+def test_desk_does_not_type_in_another_chat_when_the_burst_spans_chats(tmp_path, desk_clock, target):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    answer = json.loads((fake / "answer").read_text())
-    (fake / "answer").write_text(json.dumps({**answer, "target": 1}))
+    fact = "The build is paused." if target == 1 else "The queue is empty."
+    (fake / "status").write_text("The build is paused.\nThe queue is empty.")
+    (fake / "answer").write_text(json.dumps({
+        "kind": "reply", "target": target, "answer": fact,
+        "evidence": [{"source": "status", "quote": fact}],
+    }))
     (fake / "typing-down").unlink()
     bridge = start(1)
     try:
         receive("question", "What is the build status?")
-        receive("elsewhere", "And now?", space="iMessage;-;+10000000001")
+        receive("elsewhere", "What is the queue status?", space="iMessage;-;+10000000001")
         desk_clock()
         wait_for(lambda: text(fake / "sent"), "the selected chat response")
-        assert text(fake / "send-targets") == "iMessage;-;+10000000000\n"
+        chat = "iMessage;-;+10000000000" if target == 1 else "iMessage;-;+10000000001"
+        assert text(fake / "send-targets") == f"{chat}\n"
         assert text(fake / "typing-events") == ""
+        answered, unanswered = ("question", "elsewhere") if target == 1 else ("elsewhere", "question")
+        wait_for(lambda: f"photon-{unanswered} " in text(notes), "the other chat handoff")
+        assert f"photon-{answered} " not in text(notes)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed response confirmation")
+        confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
+        assert confirmations == [[f"photon-{answered}"]]
+        desk_clock(8000)
+        wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the other chat acknowledgement")
+        assert text(fake / "sent").splitlines()[0] == f"send {fact}"
+        assert "no confirmed answer yet" in text(fake / "sent").splitlines()[1]
+        assert set(text(fake / "send-targets").splitlines()) == {"iMessage;-;+10000000000", "iMessage;-;+10000000001"}
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -570,7 +588,6 @@ def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_
         (fake / "typing-hold").touch()
         desk_clock(4000)
         wait_for(lambda: (fake / "typing-waiting").exists(), "the pending typing refresh")
-        desk_clock(4000)
         if exit_path == "answer":
             (fake / "model-hold").unlink()
             wait_for(lambda: text(fake / "sent"), "the response without waiting for typing")
@@ -586,8 +603,10 @@ def test_desk_stops_typing_after_an_inflight_refresh(tmp_path, desk_clock, exit_
         expected = [True, True, False] + ([True] if exit_path == "typing" else [])
         wait_for(lambda: events() == expected, "the ordered typing state after the pending refresh")
         if exit_path != "shutdown":
+            before = len(events())
             desk_clock(8000)
-            assert events() == expected
+            wait_for(lambda: events()[-1] is False, "the expired typing lease")
+            assert not any(events()[before:])
     finally:
         (fake / "typing-hold").unlink(missing_ok=True)
         if bridge.poll() is None:
@@ -807,9 +826,17 @@ def transport_desk_rig(tmp_path, **env):
     return rig, receive
 
 
-@pytest.mark.parametrize("stage", ["photon-space", "photon-thread", "bluebubbles-health"])
+@pytest.mark.parametrize("stage,expected_relay", [
+    pytest.param("photon-space", "", id="photon-space"),
+    pytest.param("photon-thread", "", id="photon-thread"),
+    pytest.param(
+        "bluebubbles-health",
+        "iMessage;-;+10000000000 I saved “What is the build status?”; no confirmed answer yet.\n",
+        id="bluebubbles-health",
+    ),
+])
 @pytest.mark.parametrize("activity", ["typing", "new-text"])
-def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, activity):
+def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, expected_relay, activity):
     rig, receive = transport_desk_rig(tmp_path)
     transport = "bluebubbles" if stage == "bluebubbles-health" else "photon"
     flag, waiting = {
@@ -836,8 +863,13 @@ def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, a
         (rig.fake / flag).unlink(missing_ok=True)
         if transport == "bluebubbles":
             rig.relay_mode("")
-        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the cancelled desk receipt")
-        assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
+        wait_for(lambda: len(list((rig.state / "outbox-done").glob("*.json"))) == 1 + bool(expected_relay),
+                 "the cancelled draft and any due acknowledgement receipts")
+        receipts = [json.loads(path.read_text()) for path in (rig.state / "outbox-done").glob("*.json")]
+        draft = next(item for item in receipts if not item.get("acknowledgement"))
+        assert draft.get("done", 0) == 0
+        assert read_text(rig.fake / "sent") == ""
+        assert read_text(rig.fake / "relay-sent") == expected_relay
         assert f"{transport}-question " in read_text(rig.notes)
     finally:
         (rig.fake / flag).unlink(missing_ok=True)
@@ -1437,7 +1469,7 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
     ("What is Firstmate's run status?", "Firstmate's run status is green."),
     ("When does Firstmate start?", "Firstmate's start time is 9am."),
 ])
-def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source_kind, question, fact):
+def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_clock, source_kind, question, fact):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     if source_kind == "status":
         (fake / "status").write_text(fact)
@@ -1454,6 +1486,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     bridge = start(1)
     try:
         receive("description", question)
+        desk_clock()
         wait_for(lambda: text(fake / "sent"), "the grounded description")
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
@@ -1461,7 +1494,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
         bridge.wait(10)
         bridge = start(2)
         receive("description", question)
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(fake / "sent").splitlines() == [f"send {fact}"]
         assert text(notes) == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [question]
@@ -1494,7 +1527,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, source
     "Firstmate’s working on it.",
     "Firstmate's run the checks.",
 ])
-def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, source_kind, claim):
+def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, desk_clock, source_kind, claim):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     if source_kind == "status":
         (fake / "status").write_text(claim)
@@ -1511,12 +1544,13 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, sourc
     bridge = start(1)
     try:
         receive("claim", "What is the bridge status?")
+        desk_clock()
         wait_for(lambda: "photon-claim " in text(notes), "the action-claim handoff")
         bridge.terminate()
         bridge.wait(10)
         bridge = start(2)
         receive("claim", "What is the bridge status?")
-        time.sleep(PAST_QUIET)
+        desk_clock()
         assert text(notes).count("photon-claim ") == 1
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == ["What is the bridge status?"]
@@ -1588,7 +1622,7 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
 
 
 @pytest.fixture
-def native_desk(tmp_path, monkeypatch, request):
+def native_desk(tmp_path, monkeypatch, request, desk_clock):
     executable = shutil.which("omp")
     if not executable:
         pytest.skip("needs the supported omp tool runtime")
@@ -2530,12 +2564,13 @@ def test_attachment_hands_off_without_using_the_basic_model(tmp_path):
 
 
 @pytest.mark.parametrize("activity,expected", [
-    (["--typing"], []),
-    (["--react", "❤️"], ["react activity ❤️"]),
+    (["--typing"], ["send I saved “What is the build status?”; no confirmed answer yet."]),
+    (["--react", "❤️"], ["react activity ❤️", "reply activity I saved “What is the build status?”; no confirmed answer yet."]),
     (["The build is running."], ["send The build is running."]),
 ])
 def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(tmp_path, desk_clock, activity, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
     (fake / "model-hold").touch()
     bridge = start(1)
     try:
@@ -2547,6 +2582,11 @@ def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(
         wait_for(lambda: "photon-activity " in text(notes), "the handoff after supervisor activity")
         desk_clock(TEST_QUIET_MS * 6)
         assert text(notes).count("photon-activity ") == 1
+        wait_for(lambda: len(text(fake / "sent").splitlines()) >= len(expected), "the permitted response")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the drained outbox")
+        wait_for(lambda: text(fake / "typing-events") and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"], "typing cleanup")
+        desk_clock(8000)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the final drained outbox")
         assert text(fake / "sent").splitlines() == expected
     finally:
         bridge.terminate()

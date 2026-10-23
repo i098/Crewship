@@ -6,7 +6,7 @@
 # --reply N threads the first bubble only across later bubbles; --no-thread forces plain even with --reply N.
 # --image sends a photo (png, jpg or webp, up to 25 MB), then the caption as text bubbles. The bridge downscales a
 # photo with a side over 2048 px and checks it by content. Photos go over the Photon line only.
-# --typing shows the typing bubble while you compose (best effort); --react puts a tapback on his latest text.
+# --typing shows the typing bubble (best effort; timing: docs/imessage.md#what-it-does); --react puts a tapback on his latest text.
 # --card sends a card, an app bubble that opens its page in Messages: JSON text, - for stdin, or a file (docs/imessage.md#cards).
 # Exit 0 = queued: the bridge sends in order and retries while the upstream is down. Exit non-zero = nothing queued.
 url=http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}

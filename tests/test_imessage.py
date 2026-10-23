@@ -1045,7 +1045,7 @@ done({{ calls: a.calls, sent: a.sent, reaction: reaction ?? null, reply: reply ?
     assert not [call for call in result["calls"] if call.endswith("/typing") or call == "POST message/react"]
     assert [item["message"] for item in result["sent"]] == ["plain reply"]
     assert result["reaction"] == {"permanent": True, "maybeSent": False}
-    assert result["reply"] is None
+    assert result["reply"] == "accepted"
     assert "selectedMessageGuid" not in result["sent"][0] and "partIndex" not in result["sent"][0]
     assert len(result["logs"]) == 1 and "Private API" in result["logs"][0]
 
@@ -1317,12 +1317,13 @@ import {{ BlueBubbles }} from {BB};
 const a = relay(), b = relay(), c = relay();
 const bb = line([a, b, c]);
 a.down();
-await bb.send(chat, "one relay down");
+const sent = await bb.send(chat, "one relay down");
 const downLogs = logs.filter((l) => l.startsWith("relay 1")).length;
 a.start(); b.hang = true;
 const ambiguous = line([b, c]);
-await ambiguous.send(chat, "answer lost");
+const reconciled = await ambiguous.send(chat, "answer lost");
 done({{
+  sent, reconciled,
   a: a.sent.map((s) => s.message), b: b.sent.map((s) => s.message), c: c.sent.map((s) => s.message), downLogs,
   checked: [b, c].some((r) => r.calls.some((x) => x.startsWith("GET chat/"))), logs,
 }});
@@ -1332,6 +1333,7 @@ done({{
     assert result["c"] == []  # a relay showed the lost-answer send as sent, so it was not sent again
     assert result["checked"]
     assert result["downLogs"] == 1
+    assert (result["sent"], result["reconciled"]) == ("accepted", "reconciled")
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -1773,7 +1775,7 @@ function message(m) {
   return {
     id: m.id, direction: "inbound", sender: { id: m.sender }, space: space(m.space), timestamp: m.at ? new Date(m.at) : undefined,
     content: m.name
-      ? { type: "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
+      ? { type: m.voice ? "voice" : "attachment", name: m.name, async read() { call("download"); return new TextEncoder().encode(m.data); } }
       : m.content ?? { type: "text", text: m.text },
     async react(emoji) {
       call("react"); sent(`react ${m.id} ${emoji}`, m.space);

@@ -68,7 +68,10 @@ def run_desk(tmp_path, surface, output, status=FACT, message=REQUEST):
             rig.relay_message("report", message, int(time.time() * 1000))
             assert http(f"http://127.0.0.1:{rig.hook_port}/bluebubbles", "POST",
                         json.dumps({"type": "new-message", "data": {"guid": "report"}}))[0] == 200
-        wait_for(lambda: "report " in read_text(rig.state / "desk.log"), "the completed desk turn")
+        wait_for(lambda: any(
+            event.get("route") == "done" and f"{surface}-report" in event.get("ids", [])
+            for event in map(json.loads, read_text(rig.state / "routing.jsonl").splitlines())
+        ), "the completed routing decision")
         wait_for(lambda: not rig.outbox(), "the completed desk delivery")
         rig.stop()
         if output == LEAKED:
@@ -129,8 +132,7 @@ def test_only_structural_actions_leave_the_desk(tmp_path, surface, output, actio
         reaction = action if surface == "photon" else {"👍": "like", "❤️": "love"}[action]
         expected = [f"react report {reaction}"]
     assert result["sends"] == expected
-    assert len(result["log"]) == 1
-    assert not any(line in result["log"][0] for line in output.splitlines() if len(line) > 30)
+    assert not any(line in "\n".join(result["log"]) for line in output.splitlines() if len(line) > 30)
     if surface != "instagram":
         if action in ("skip", "handoff"):
             assert result["notes"].count(f"{surface}-report ") == 1
@@ -146,7 +148,6 @@ def test_request_hands_off_despite_a_reaction_directive(tmp_path, surface, outpu
     assert result["sends"] == []
     assert result["notes"].count(f"{surface}-report ") == 1
     assert REQUEST in result["notes"]
-    assert result["log"] == ["handoff"]
 
 
 @pytest.mark.parametrize("surface", ["instagram", "photon", "bluebubbles"])
@@ -167,6 +168,5 @@ def test_reply_json_sends_only_its_answer(tmp_path, surface, field, answer):
         prefix = "send" if surface == "photon" else "iMessage;-;+10000000000"
         expected = [f"{prefix} {answer}"]
     assert result["sends"] == expected
-    assert len(result["log"]) == 1
     if surface != "instagram":
         assert result["notes"] == ""
