@@ -169,7 +169,7 @@ export type DeskEvidence = Record<string, { name: string; text: string }>;
 export type VoiceSource = { answer: string; identity: boolean };
 export type BasicAnswer = (VoiceSource & { target?: number }) | { react: string; text?: string; target?: number } | { handled: true };
 
-export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }, tools: DeskEvidence = {}): BasicAnswer | undefined {
+export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: readonly { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }, tools: DeskEvidence = {}): BasicAnswer | undefined {
   const value = verdict(ok, drafted);
   if (value.kind === "handled") return Object.values(tools).some((tool) => tool.name === "write") ? { handled: true } : undefined;
   if (value.kind === "tapback") {
@@ -192,7 +192,7 @@ function claimsWork(text: string): boolean {
 
 
 // Only a narrow social vocabulary may close a request without Firstmate; uncertain context keeps the handoff.
-export function socialOnly(texts: string[], previous?: { kind: string; text: string }): boolean {
+export function socialOnly(texts: readonly string[], previous?: { kind: string; text: string }): boolean {
   if (previous?.kind === "owner" || /[?]|\b(?:approv(?:e|al)|confirm(?:ation)?|permission|proceed|go ahead|let me know|say the word|reply|unless|should i|want me|ready to)\b/i.test(previous?.text ?? "")) return false;
   return texts.length > 0 && texts.every((text) => {
     const words = text.normalize("NFKC").toLowerCase()
@@ -204,7 +204,7 @@ export function socialOnly(texts: string[], previous?: { kind: string; text: str
 }
 
 
-function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }, tools: DeskEvidence) {
+function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: readonly { i: number; kind: string; text: string }[], models: { desk: string; supervisor: string }, tools: DeskEvidence) {
   if (typeof evidence?.quote !== "string") return;
   if (!evidence.quote.trim()) return;
   let source: string | undefined;
@@ -452,7 +452,7 @@ function voiceFlags(value: string): string {
   return (value.toLowerCase().match(/\b(?:on|off|true|false|enabled|disabled)\b/g) ?? []).sort().join("|");
 }
 
-type DeskOptions = { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string; voice?: boolean; serverTools?: boolean; writePath?: string; question?: string };
+type DeskOptions = { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string; voice?: boolean; serverTools?: boolean; writePath?: string; question?: string; apiKeyEnv?: string | null; bindModel?: boolean };
 
 function deskCommand(o: DeskOptions, reasoning: string): string[] {
   const inception = o.provider === "inception";
@@ -491,13 +491,17 @@ export type DeskProc = Bun.Subprocess<any, "pipe", any>;
 export function spawnDesk(o: DeskOptions): DeskProc {
   const desk = { FM_DESK_MEMORY: o.memoryDir, FM_DESK_SPENT: String(o.spent) };
   const inception = o.provider === "inception";
-  const reasoning = o.voice ? (inception ? "instant" : "off") : o.reasoning ?? "off";
+  const reasoning = o.voice ? (inception ? o.reasoning ?? "instant" : "off") : o.reasoning ?? "off";
   const argv = deskCommand(o, reasoning);
   const env = inception && o.voice
     ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
-    : !o.serverTools && !inception ? { ...o.env, ...desk }
+    : !o.serverTools && !inception && o.apiKeyEnv === undefined ? { ...o.env, ...desk }
     : { ...Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR",
-      ...(inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"])].map((key) => [key, o.env[key]])),
+      ...(o.apiKeyEnv !== undefined ? (o.apiKeyEnv === null ? [] : [o.apiKeyEnv])
+        : inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"]),
+      ...(!inception && o.bindModel && o.model.startsWith("anthropic/") ? [
+        "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_FOUNDRY", "FOUNDRY_BASE_URL",
+      ] : [])].map((key) => [key, o.env[key]])),
       ...desk, FM_DESK_INCEPTION_INSTANT: inception && reasoning === "instant" ? "1" : undefined,
       FM_DESK_SERVER_TOOLS: o.serverTools ? "1" : undefined,
       FM_DESK_WRITE_PATH: o.writePath,
@@ -507,6 +511,15 @@ export function spawnDesk(o: DeskOptions): DeskProc {
   const cwd = o.serverTools ? mkdtempSync(join(o.cwd, "call-")) : o.cwd;
   try {
     if (o.serverTools) writeDeskSecrets(cwd, o.env);
+    if (o.serverTools && o.bindModel) {
+      const config = join(cwd, "selected-model.json");
+      writeFileSync(config, JSON.stringify({
+        retry: { modelFallback: false },
+        contextPromotion: { enabled: false },
+        providers: { anthropic: { serverSideFallback: false } },
+      }), { mode: 0o600 });
+      argv.push("--config", config);
+    }
     const proc = Bun.spawn(argv, { cwd, env, stdin: new Blob([o.prompt]), stdout: "pipe", stderr: inception && o.voice ? "inherit" : "ignore", timeout });
     if (o.serverTools) void proc.exited.finally(() => rmSync(cwd, { recursive: true, force: true }));
     return proc;
@@ -516,8 +529,10 @@ export function spawnDesk(o: DeskOptions): DeskProc {
   }
 }
 
+export type DeskReadResult = { ok: boolean; drafted: string; tools: DeskEvidence; question: string };
+
 // What a desk call answered, and whether it exited cleanly with an answer.
-export async function readDesk(proc: DeskProc, serverTools = false): Promise<{ ok: boolean; drafted: string; tools: DeskEvidence; question: string }> {
+export async function readDesk(proc: DeskProc, serverTools = false): Promise<DeskReadResult> {
   const output = await new Response(proc.stdout).text();
   let drafted = serverTools ? "" : output;
   let tools: DeskEvidence = {};
