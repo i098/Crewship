@@ -160,6 +160,27 @@ def test_firstmate_revision_pin_is_rejected(configuration):
         ship.validate_config(configuration)
 
 
+@pytest.mark.parametrize("backend", ["herdr", "tmux", "zellij", "orca", "cmux", "paseo", "rex"])
+def test_firstmate_accepts_supported_backend_choices(configuration, backend):
+    configuration["crewship"]["firstmate"]["backend"] = backend
+    assert ship.validate_config(configuration)["crewship"]["firstmate"]["backend"] == backend
+
+
+def test_firstmate_rejects_unknown_backend(configuration):
+    configuration["crewship"]["firstmate"]["backend"] = "unsupported"
+    with pytest.raises(ValueError, match="backend"):
+        ship.validate_config(configuration)
+
+
+def test_loading_an_old_host_does_not_insert_a_backend(configuration, tmp_path):
+    configuration["crewship"]["firstmate"].pop("backend", None)
+    host = tmp_path / "host.yml"
+    original = yaml.safe_dump(configuration)
+    host.write_text(original)
+    assert "backend" not in ship.load_config(host)["crewship"]["firstmate"]
+    assert host.read_text() == original
+
+
 def test_fleet_guards_require_docker_and_firstmate(configuration):
     configuration["crewship"]["profiles"]["fleet_guards"] = True
     configuration["crewship"]["profiles"]["docker"] = False
@@ -279,6 +300,7 @@ def test_dock_writes_the_core_only_unless_a_choice_is_given(tmp_path, monkeypatc
     config = dock(tmp_path, monkeypatch)
     assert on(config) == {"agents", "firstmate"}
     assert config["profiles"]["public_skills"] is False
+    assert config["firstmate"]["backend"] == "herdr"
 
 
 def test_sgrep_can_be_selected_without_development(tmp_path, monkeypatch):
@@ -337,6 +359,7 @@ def test_the_checklist_asks_until_the_answer_is_valid(tmp_path, monkeypatch, cap
     assert on(config) == {"agents", "firstmate", "public_skills", "docker", "board", "development"}
     out = capsys.readouterr().out
     assert "unknown choice 'bogus'" in out and " 1. public_skills" in out and f"{list(ship.OPT_IN).index('board') + 1}. board" in out
+    assert config["firstmate"]["backend"] == "herdr"
 
 
 def checklist(tmp_path, monkeypatch, answers, existing=()):

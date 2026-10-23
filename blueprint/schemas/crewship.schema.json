@@ -272,6 +272,10 @@
               "type": "string",
               "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
             },
+            "backend": {
+              "type": "string",
+              "enum": ["herdr", "tmux", "zellij", "orca", "cmux", "paseo", "rex"]
+            },
             "checklist": {
               "type": "object",
               "additionalProperties": false,

@@ -41,7 +41,6 @@ crewship_firstmate_config_names:
   - crew-harness
   - secondmate-harness
   - crew-dispatch.json
-  - backend
   # 1000000 estimated tokens: no practical cap on the startup prompt memory.
   - startup-memory-budget
   # Fresh spawns are refused while host MemAvailable is under this many MB

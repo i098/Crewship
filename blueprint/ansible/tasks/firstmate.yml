@@ -61,6 +61,27 @@
     - not crewship_fm_git.stat.exists
     - not ansible_check_mode
 
+- name: Initialize the backend before other fresh-checkout setup
+  when: crewship_fm_clone.changed | default(false)
+  block:
+    - name: Ensure the new Firstmate config directory
+      ansible.builtin.file:
+        path: "{{ crewship_firstmate_dir }}/config"
+        state: directory
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+      become: true
+
+    - name: Seed the backend only for a new Firstmate checkout
+      ansible.builtin.copy:
+        content: "{{ crewship_cfg.firstmate.backend | default('herdr') }}\n"
+        dest: "{{ crewship_firstmate_dir }}/config/backend"
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "0600"
+        force: false
+      become: true
+
 # The clone was created moments ago by this task run and contains no work, so
 # naming the branch here cannot destroy anything.
 - name: Put the fresh clone on branch main at origin/main

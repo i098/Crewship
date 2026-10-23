@@ -177,6 +177,7 @@ crewship:
       stopped_hours: 24   # Remove a stopped container this long after it exits
   firstmate:
     url: https://github.com/kunchenguid/firstmate.git
+    backend: herdr       # New Firstmate checkouts only
     # checklist:          # Optional; set only in .local/host.yml
     #   repo: owner/private-repo
     #   path: checklist.md
@@ -229,6 +230,17 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `board` needs `firstmate` and `development`.
 
 The Firstmate checkout tracks the default branch of upstream Firstmate, not a sha. Every apply fetches `origin/main` and puts `main` at that revision plus the [Firstmate patch layer](dependencies.md#firstmate-patch-layer), so tracking it is how a host stays current. Do not re-pin it to a sha. Each run resolves `origin/main` once and reports the sha it installed. To track a fork, set `firstmate.url` in `.local/host.yml`. The URL applies to a fresh clone; verification fails when an existing checkout's `origin` is a different URL, and provisioning never changes it for you. To switch an existing checkout, run `git -C <workspace>/firstmate remote set-url origin <url>` and `git -C <workspace>/firstmate fetch origin`, reconcile any local commits on `main` with `origin/main` by hand, then run `./ship.sh launch`.
+
+### Firstmate backend
+
+New setups use `firstmate.backend: herdr`, including the guided checklist.
+Set `firstmate.backend` in `.local/host.yml` before the apply that creates the checkout.
+Use a supported value from the [host schema](../blueprint/schemas/crewship.schema.json).
+Install an alternative backend separately.
+Apply seeds `<workspace>/firstmate/config/backend` only when it creates the Firstmate checkout.
+Existing checkouts keep their backend file unchanged, including an empty or absent file and its runtime detection.
+Changing the recipe does not switch a running fleet.
+Explicit Firstmate `--backend` and `FM_BACKEND` choices still take precedence.
 
 ### Firstmate dispatch defaults
 
@@ -286,7 +298,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | `agent_instructions` | off; absent keeps them on a host that has them | The [global instructions](omp.md#global-instructions): `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.omp/agent/AGENTS.md` as one import line. `instructions_mode` (`skip`, `overwrite` or `append`, default `append`) says what happens to a file that exists. The installer checklist asks it when one does. |
 | `development` | off | Rust toolchain (stable), build essentials. |
 | `sgrep` | off | Semantic code and document search. Select `--with sgrep` on a new host, or set `profiles.sgrep: true` and apply on an existing host. Disabling it leaves installed files untouched. See [Dependencies](dependencies.md#latest-releases) for its Rust build and model downloads. |
-| `firstmate` | on | Firstmate clone tracking upstream `main`, plus seeded Firstmate config: crew dispatch, crew and secondmate harness, the crew omp overlay (crew advisor, see [omp configuration](omp.md#advisor)), Herdr backend selection, startup memory budget, the spawn memory floor, presentation spaces off, and the turn-end pane-churn flag (see [Seeded Firstmate and OMP configuration](agents/architecture.md#seeded-firstmate-and-omp-configuration)). |
+| `firstmate` | on | Firstmate clone tracking upstream `main`, with [seeded configuration](agents/architecture.md#seeded-firstmate-and-omp-configuration) and [backend selection](#firstmate-backend). |
 | `docker` | off | Docker engine and Compose v2, with daemon defaults `init` (reaps orphaned children) and `live-restore`. Group membership is opt-in through the Ansible variable `crewship_docker_group_users`. |
 | `fleet_guards` | off | Docker guard, dev-server reaper, devtools-bridge reaper, storage guard and browser ladder. See [Fleet guards](fleet-guards.md). |
 | `project_databases` | off | One [dev database container per project](project-databases.md), in the engine the project's compose file names, with a helper and a worktree environment seeder. |

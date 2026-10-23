@@ -36,20 +36,20 @@ index 41db7f86f1ad13801083c88ce2c78bcaef7117b6..c1df515f368e17db85dfc9b9710c2b23
  On tmux there is no reclaim: a task record carries no socket identity for its endpoint, so a `missing` window cannot be told apart from one on a tmux server this seat cannot address, and both `exit` and `relaunch` refuse.
  Do not work around either refusal by respawning - it means a live agent may still hold that worktree.
 diff --git a/bin/fm-control.sh b/bin/fm-control.sh
-index 71290092d62409b37672dc673c566d37300d925a..47bad6e94b72812603c4262a5668dbe01b78b600 100755
+index ba4c547d5af992be05570c23d6823aa3783f5d55..db8a331825cd8701b1c9ea070ab90bd94cf98f32 100755
 --- a/bin/fm-control.sh
 +++ b/bin/fm-control.sh
-@@ -754,6 +754,10 @@ do_exit() {
-   # authoritative proof is the agent-state wait below. The retried Enter still
-   # matters, because a slash command opens a completion popup on some TUIs that
-   # swallows the first Enter.
+@@ -770,6 +770,10 @@ do_exit() {
+   # interacting with the typed submit verification. A Ctrl-C over leftover
+   # composer text only clears it, so Ctrl-U clears the composer first and one
+   # more Ctrl-C follows if the agent is still alive.
 +  # This verb preserves the endpoint, so tell the Herdr launch line
 +  # (bin/fm-spawn.sh) to keep the pane when the agent exits.
 +  [ "$BACKEND" != herdr ] || : > "$STATE/$ID.keep-pane" \
 +    || die "could not write $STATE/$ID.keep-pane, so the exit would close task $ID's pane"
-   verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-     || die "the exit command could not be sent to task $ID on $BACKEND"
-   [ "$verdict" != send-failed ] \
+   case "$cmd" in
+     C-c)
+       fm_backend_send_key "$BACKEND" "$T" C-u "$LABEL" \
 diff --git a/bin/fm-secondmate-liveness-lib.sh b/bin/fm-secondmate-liveness-lib.sh
 index 4118cc9b771f6531a353fbfa78cb526de112632d..6eaff3d256c23ba445c74143cc032b6dd371d5c9 100644
 --- a/bin/fm-secondmate-liveness-lib.sh
