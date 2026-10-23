@@ -235,6 +235,7 @@ def test_runtime_trust_environment_preserves_node_flags(tmp_path):
         options = f'{selector}--trace-warnings --require "{preload}"'
         environment = {
             **os.environ, "HOME": str(home), "NODE_OPTIONS": options,
+            "XDG_CONFIG_HOME": str(home / ".config"),
             "SSL_CERT_FILE": "/old/bundle", "REQUESTS_CA_BUNDLE": "/old/bundle",
             "PIP_CERT": "/old/bundle", "PIP_USE_DEPRECATED": "",
         }
