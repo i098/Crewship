@@ -1,11 +1,12 @@
 """Observe responses and typing through the real bridge, with local transport and model processes."""
 
 import json
+import os
 import shutil
 import time
 
 import pytest
-from test_imessage import publish_json, wait_for
+from test_imessage import card_url, http, publish_json, wait_for
 from test_imessage_basic import basic_rig
 from test_imessage_basic import desk_clock as desk_clock
 
@@ -321,6 +322,113 @@ def test_synchronous_inbox_timeouts_delay_but_do_not_lose_acknowledgements(tmp_p
         wait_for(lambda: text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1, "both retained handoffs")
         assert len(text(fake / "sent").splitlines()) == 1
         print(f"Two synchronous inbox timeouts delayed acknowledgement by {elapsed:.3f} seconds.")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_cancelled_acknowledgement_recovers_after_a_targeted_reply(tmp_path, desk_clock, restart):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
+    (fake / "outage").touch()
+    bridge = start(1)
+    try:
+        receive("release", "Check the release job")
+        cli("--typing")
+        desk_clock(8000)
+        wait_for(lambda: "outbox item" in text(err), "the queued acknowledgement during the outage")
+        receive("backup", "Check the backup job")
+        cli("--reply", "1", "The backup job passed.")
+        wait_for(lambda: any(
+            "acknowledgement" in event and event["acknowledgement"] is None
+            for event in map(json.loads, text(state / "routing.jsonl").splitlines())
+        ), "the cancelled acknowledgement ownership")
+        assert text(fake / "sent") == ""
+        if restart:
+            bridge.terminate()
+            bridge.wait(10)
+            bridge = start(2)
+        (fake / "outage").unlink()
+        wait_for(lambda: len(text(fake / "sent").splitlines()) >= 2, "the targeted reply and recovered acknowledgement")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the drained outbox")
+        expected = [
+            "send The backup job passed.",
+            "reply release I saved “Check the release job”; no confirmed answer yet.",
+        ]
+        assert text(fake / "sent").splitlines() == expected
+        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup")
+        assert text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(3 if restart else 2)
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == expected
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize("app", [False, True])
+def test_initial_card_replay_confirms_only_original_requests(tmp_path, desk_clock, monkeypatch, app):
+    preload = tmp_path / "card-crash.ts"
+    preload.write_text("""
+import * as fs from "node:fs";
+import { mock } from "bun:test";
+const real = { ...fs };
+const marker = `${process.env.FAKE_DIR}/card-crashed`;
+mock.module("node:fs", () => ({
+  ...real,
+  renameSync(from, to) {
+    real.renameSync(from, to);
+    if (String(to).startsWith(`${process.env.STATE_DIRECTORY}/cards/`)
+      && JSON.parse(real.readFileSync(to, "utf8")).sent && !real.existsSync(marker)) {
+      real.writeFileSync(marker, "");
+      process.exit(91);
+    }
+  },
+}));
+""")
+    monkeypatch.setenv("BUN_OPTIONS", f"{os.environ['BUN_OPTIONS']} --preload={preload}")
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("options", "Send the available options")
+        cli("--card", json.dumps({
+            "kind": "choice", "key": "options", "title": "Available options",
+            "options": ["Release", "Backup"], "app": app,
+        }))
+        assert bridge.wait(10) == 91
+        assert len(text(fake / "sent").splitlines()) == 1
+        assert not any(event.get("responded") for event in map(json.loads, text(state / "routing.jsonl").splitlines()))
+        bridge = start(2)
+        wait_for(lambda: any(event.get("responded") for event in map(json.loads, text(state / "routing.jsonl").splitlines())), "the replayed card confirmation")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the replayed card completion")
+        before = text(fake / "sent")
+        assert len(before.splitlines()) == (2 if app else 1)
+        desk_clock(8000)
+        assert text(fake / "sent") == before
+        receive("backup", "Check the backup job")
+        url = card_url(before.splitlines()[0])
+        assert http(url + "/pick", "POST", "choice=1")[0] == 303
+        if app:
+            wait_for(lambda: "Picked B: Backup" in text(fake / "sent"), "the card edit")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the card edit completion")
+        assert all(
+            "photon-backup" not in event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines())
+            if event.get("responded")
+        )
+        desk_clock(8000)
+        expected_count = len(before.splitlines()) + (2 if app else 1)
+        wait_for(lambda: len(text(fake / "sent").splitlines()) >= expected_count, "the unanswered followup acknowledgement")
+        assert len(text(fake / "sent").splitlines()) == expected_count
+        assert text(fake / "sent").splitlines()[-1].endswith("I saved “Check the backup job”; no confirmed answer yet.")
+        sent = text(fake / "sent")
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(3)
+        desk_clock(8000)
+        assert text(fake / "sent") == sent
     finally:
         bridge.terminate()
         bridge.wait(10)

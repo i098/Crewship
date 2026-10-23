@@ -182,7 +182,7 @@ type Out = Ref & { react?: string; bubbles?: string[]; image?: Picture; done?: n
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
 type DeskResult = { answer: { answer: string } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out } | { ids: string[]; responded: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -548,7 +548,7 @@ function hasRestoredUnsentText(o: Out): boolean {
 function checkDeskDelivery(o: Out) {
   if (o.acknowledgement) {
     const latest = [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, o));
-    if (o.id !== latest?.ref.id || !o.requests?.some((id) => !routing.get(id)?.responded)) throw deskCancelled;
+    if (o.id !== latest?.ref.id || latest?.acknowledgement?.requestId !== o.requestId) throw deskCancelled;
     return;
   }
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
@@ -568,6 +568,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
       await Bun.sleep(typingPause(part));
     }
     if (!await sendCurrentBubble(o, i, part, update)) {
+      releaseCancelledAcknowledgement(o);
       lostDeskAnswer(o);
       break;
     }
@@ -579,6 +580,14 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
   if (o.react) return deliverReaction(o, save);
   if (o.image) rmSync(o.image.path, { force: true });
+}
+
+function releaseCancelledAcknowledgement(o: Out) {
+  if (!o.acknowledgement || o.done || Object.keys(o.maybe ?? {}).length) return;
+  const ids = (o.requests ?? []).filter((id) => routing.get(id)?.acknowledgement?.requestId === o.requestId);
+  if (!ids.length) return;
+  recordRoute({ ids, acknowledgement: null });
+  scheduleAcknowledgement();
 }
 
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
@@ -630,6 +639,7 @@ async function deliverReaction(o: Out, save: (o: Out) => void) {
 async function deliverCard(o: Out, kind: Kind) {
   const card = cards?.read(o.card!);
   if (!card) throw Object.assign(new Error("the card's record is gone (expired)"), { permanent: true });
+  if (card.sent && o.requests?.length !== 0) recordResponse(o);
   const line = lineOf(o);
   if (!line || (card.app && !line.sendCard)) throw Object.assign(new Error(`a card needs the ${card.app ? "photon" : o.line ?? "photon"} transport`), { permanent: true });
   if (card.sent && !card.session) {
@@ -657,7 +667,7 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
   const text = `[iMessage card pick] ${card.key}: ${letter(choice)}. ${card.options[choice]}`;
   if (!fileNote(`card-${card.key}-${card.expires}-pick`, text)) return false;
   remember("owner", text);
-  if (card.chat && card.app) put({ ...card.chat, card: card.token });
+  if (card.chat && card.app) put({ ...card.chat, card: card.token, requests: [] });
   return true;
 }
 
@@ -800,8 +810,9 @@ function acknowledge(pending: Routing[]) {
   const text = target.authored ?? target.text;
   const subject = supervisorOnly(text) || text.includes("(sent an attachment")
     ? "your message" : `“${text.replace(/\s+/g, " ").slice(0, 160)}”`;
-  const out: Out = { ...target.ref, requestId: `ack-${target.requestId}`, requests: ids,
-    acknowledgement: true, kind: "desk", guid: crypto.randomUUID(), at: Date.now(),
+  const guid = crypto.randomUUID();
+  const out: Out = { ...target.ref, requestId: `ack-${guid}`, requests: ids,
+    acknowledgement: true, kind: "desk", guid, at: Date.now(),
     bubbles: [`I saved ${subject}; no confirmed answer yet.`], reply: target.ref.id };
   recordRoute({ ids, acknowledgement: out });
   flushRoutes();
@@ -1005,7 +1016,7 @@ function applyRoute(event: RouteEvent) {
   } else if ("responded" in event) {
     for (const id of event.ids) Object.assign(routing.get(id)!, { responded: true, acknowledgement: undefined });
   } else if ("acknowledgement" in event) {
-    for (const id of event.ids) routing.get(id)!.acknowledgement = event.acknowledgement;
+    for (const id of event.ids) routing.get(id)!.acknowledgement = event.acknowledgement ?? undefined;
   } else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
     handoffNote: event.handoffNote, ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
 }

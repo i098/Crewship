@@ -121,12 +121,14 @@ For each message from the owner, the service does these steps:
    An explicit `--reply N` confirms only its selected request, even with `--no-thread`.
    The acknowledgement targets the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.
+   Restart replay confirms an initial card from its saved acceptance; a later card edit does not confirm newer requests.
    A checked desk answer already in the outbox keeps its place instead of receiving a duplicate acknowledgement.
    Purely social bursts and muted chats receive no timeout acknowledgement.
    Inbox failures retry from the durable journal; each inbox command has a five-second deadline.
-   Inbox filing is synchronous and serial, so two stalled commands can block the event loop for about ten seconds.
+   Named keep: synchronous inbox filing remains serial; two stalled commands can block the event loop for about ten seconds.
    This can delay acknowledgements and typing cleanup beyond eight seconds; their timers resume when filing returns.
    The five-second limit applies to each command, not the entire batch.
+   The local regression test checks eventual acknowledgement and typing cleanup after two command timeouts.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
@@ -187,6 +189,8 @@ Completed routing records suppress repeated transport delivery.
 Keyed outbox receipts in `outbox-done/` prevent a decided answer from entering the outbox twice after a crash.
 The journal stores response confirmations separately from routing completion.
 It persists one keyed acknowledgement per burst and does not send it again after a confirmed response or restart.
+Cancelling an acknowledgement before any possible delivery releases its requests and persists a new identity for the next attempt.
+Journal replay rejects the cancelled identity, so a crash cannot revive it or suppress the replacement.
 Restart recovery schedules acknowledgements for unresolved requests regardless of their age.
 If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.

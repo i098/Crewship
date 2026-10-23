@@ -2533,12 +2533,13 @@ def test_attachment_hands_off_without_using_the_basic_model(tmp_path):
 
 
 @pytest.mark.parametrize("activity,expected", [
-    (["--typing"], []),
-    (["--react", "❤️"], ["react activity ❤️"]),
+    (["--typing"], ["send I saved “What is the build status?”; no confirmed answer yet."]),
+    (["--react", "❤️"], ["react activity ❤️", "reply activity I saved “What is the build status?”; no confirmed answer yet."]),
     (["The build is running."], ["send The build is running."]),
 ])
 def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(tmp_path, desk_clock, activity, expected):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "typing-down").unlink()
     (fake / "model-hold").touch()
     bridge = start(1)
     try:
@@ -2550,8 +2551,12 @@ def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(
         wait_for(lambda: "photon-activity " in text(notes), "the handoff after supervisor activity")
         desk_clock(TEST_QUIET_MS * 6)
         assert text(notes).count("photon-activity ") == 1
-        assert text(fake / "sent").splitlines()[:len(expected)] == expected
-        assert "send The build is paused." not in text(fake / "sent").splitlines()
+        wait_for(lambda: len(text(fake / "sent").splitlines()) >= len(expected), "the permitted response")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the drained outbox")
+        wait_for(lambda: text(fake / "typing-events") and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"], "typing cleanup")
+        desk_clock(8000)
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the final drained outbox")
+        assert text(fake / "sent").splitlines() == expected
     finally:
         bridge.terminate()
         bridge.wait(10)
