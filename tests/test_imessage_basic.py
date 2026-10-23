@@ -10,6 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+import yaml
 from test_imessage import (
     ROOT,
     TEST_QUIET_MS,
@@ -1613,7 +1614,9 @@ def native_desk(tmp_path, monkeypatch):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
-    shutil.copyfile(ROOT / "blueprint/config/omp-models.yml", agent_dir / "models.yml")
+    models = yaml.safe_load((ROOT / "blueprint/config/omp-models.yml").read_text())
+    models["providers"]["inception"]["baseUrl"] = f"http://127.0.0.1:{server.server_port}/v1"
+    (agent_dir / "models.yml").write_text(yaml.safe_dump(models))
     for name, value in {"FM_IMESSAGE_DESK_PROVIDER": "inception", "FM_IMESSAGE_DESK_MODEL": "mercury-3",
                         "FM_IMESSAGE_DESK_REASONING": "low", "INCEPTION_API_KEY": "test-key",
                         "PI_CODING_AGENT_DIR": str(tmp_path / "agent"),
