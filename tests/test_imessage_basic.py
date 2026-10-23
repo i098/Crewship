@@ -767,8 +767,8 @@ def transport_desk_rig(tmp_path, **env):
     (tmp_path / "bin/omp").write_text(
         "#!/usr/bin/env python3\n"
         "import json, os, pathlib, sys\n"
-        "sys.stdin.read()\n"
-        "answer = (pathlib.Path(os.environ['FAKE_DIR']) / 'answer').read_text()\n"
+        "prompt = sys.stdin.read()\n"
+        "answer = (pathlib.Path(os.environ['FAKE_DIR']) / 'answer').read_text() if '-e' in sys.argv else json.loads(prompt)['draft']\n"
         "print(json.dumps({'type': 'desk_result', 'drafted': answer, 'tools': {}}) "
         "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1' else answer)\n"
     )
