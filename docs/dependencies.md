@@ -13,7 +13,9 @@ The installer records resolved releases in `~/.local/share/crewship/resolved.jso
 
 ### CA trust and security minimums
 
-`launch` first disables the four Mozilla emSign entries in `/etc/ca-certificates.conf` and rebuilds the system CA store.
+`launch` first disables the four Mozilla emSign entries in `/etc/ca-certificates.conf`.
+If those entries change, it rebuilds the system CA store without the initial inspection.
+Otherwise, it inspects the existing store and rebuilds only if that inspection fails.
 It checks the CA bundle and hashed certificate directories before Ansible's first network lookup.
 It then refreshes signed APT metadata, upgrades `ca-certificates` to the latest available package, and checks trust again.
 The disabled roots are emSign Root CA - C1 and G1, and emSign ECC Root CA - C3 and G3.
