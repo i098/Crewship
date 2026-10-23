@@ -48,7 +48,7 @@ function track<T extends Bun.Subprocess>(proc: T): T {
 async function stop() {
   if (stopping) return;
   stopDeskTyping?.();
-  for (const timer of acknowledgementTimers.values()) clearTimeout(timer);
+  for (const timer of deadlineTimers.values()) clearTimeout(timer);
   if (commandTypingSpace) typing(commandTypingSpace, false);
   stopping = true;
   const running = [...children];
@@ -178,16 +178,16 @@ type Ref = { line?: string; space: string; id: string };
 // `maybe` maps each transport to the chat where the current bubble or reaction may already exist.
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; responded?: boolean };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; responded: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
 let routingRetry: NodeJS.Timeout | undefined;
-const acknowledgementTimers = new Map<string, NodeJS.Timeout>();
+const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -391,7 +391,7 @@ const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgai
 });
 for (const item of routing.values()) ensureRemembered(item);
 flushRoutes();
-scheduleAcknowledgement();
+scheduleDeadlines();
 if (pendingRoutes().length) {
   prefetchInboxStatus();
   desk.inboundText();
@@ -424,7 +424,7 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
     if (!ref) return new Response("no text from the owner yet; he must text the line first\n", { status: 503 });
-    // Supervisor activity cancels a draft; only a confirmed response ends the acknowledgement wait.
+    // Supervisor activity cancels a draft; only a confirmed response ends the deadline wait.
     recordRoute({ deskCancelled: true });
     desk.firstmateActive();
     handoffPending();
@@ -549,11 +549,6 @@ function hasRestoredUnsentText(o: Out): boolean {
 }
 
 function checkDeskDelivery(o: Out) {
-  if (o.acknowledgement) {
-    const latest = [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, o));
-    if (o.id !== latest?.ref.id || latest?.acknowledgement?.requestId !== o.requestId) throw deskCancelled;
-    return;
-  }
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
 }
 
@@ -572,7 +567,6 @@ async function deliver(o: Out, save: (o: Out) => void) {
       await Bun.sleep(typingPause(part));
     }
     if (!await sendCurrentBubble(o, i, part, update)) {
-      releaseCancelledAcknowledgement(o);
       lostDeskAnswer(o);
       break;
     }
@@ -586,17 +580,9 @@ async function deliver(o: Out, save: (o: Out) => void) {
   if (o.image) rmSync(o.image.path, { force: true });
 }
 
-function releaseCancelledAcknowledgement(o: Out) {
-  if (!o.acknowledgement || o.done || Object.keys(o.maybe ?? {}).length) return;
-  const ids = (o.requests ?? []).filter((id) => routing.get(id)?.acknowledgement?.requestId === o.requestId);
-  if (!ids.length) return;
-  recordRoute({ ids, acknowledgement: null });
-  scheduleAcknowledgement();
-}
-
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
   try {
-    if (!o.acknowledgement && o.deskSession !== deskSession) checkDeskDelivery(o);
+    if (o.deskSession !== deskSession) checkDeskDelivery(o);
     if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
     await sendBubble(o, i, part, save);
     return true;
@@ -786,17 +772,15 @@ function sameChat(a: Ref, b: Ref | undefined) {
 }
 
 function recordResponse(o: Out) {
-  if (o.acknowledgement && commandTypingSpace?.id === o.space) typing(commandTypingSpace, false);
   const unanswered = (o.requests ?? []).filter((id) => {
     const item = routing.get(id);
     return item && !item.responded && sameChat(item.ref, o);
   });
   if (unanswered.length) recordRoute({ ids: unanswered, responded: true });
   trace(o.id, "response-confirmed");
-  scheduleAcknowledgement();
 }
 
-function scheduleAcknowledgement() {
+function scheduleDeadlines() {
   const chats = new Map<string, Routing[]>();
   for (const item of routing.values()) {
     if (!item.at || item.responded || !directChat.test(item.ref.space)) continue;
@@ -805,41 +789,29 @@ function scheduleAcknowledgement() {
     pending.push(item);
     chats.set(key, pending);
   }
-  for (const pending of chats.values()) scheduleChatAcknowledgement(pending);
+  for (const pending of chats.values()) scheduleChatDeadline(pending);
 }
 
-function scheduleChatAcknowledgement(pending: Routing[]) {
+function scheduleChatDeadline(pending: Routing[]) {
   const target = pending.at(-1)!;
-  if (acknowledgementTimers.has(target.requestId) || target.acknowledgement) return;
+  if (deadlineTimers.has(target.requestId)) return;
   if (socialOnly(pending.map((r) => r.authored ?? r.text), memory.msgs[pending[0]!.memoryId - 1])) return;
-  acknowledgementTimers.set(target.requestId, setTimeout(() => {
-    acknowledgementTimers.delete(target.requestId);
-    acknowledge(pending);
-  }, Math.max(0, ACK_MS - (Date.now() - target.at!))));
+  deadlineTimers.set(target.requestId, setTimeout(() => handOffAtDeadline(pending), Math.max(0, ACK_MS - (Date.now() - target.at!))));
 }
 
-function acknowledge(pending: Routing[]) {
+// Eight seconds after the latest unanswered request: stop the typing indicator and give still-unassigned requests to Firstmate. It sends nothing to the owner.
+function handOffAtDeadline(pending: Routing[]) {
   pending = pending.filter((r) => !r.responded);
   const target = pending.at(-1);
-  if (stopping || muted() || !target || target.acknowledgement
+  if (stopping || muted() || !target
     || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
   if (target.out) return finishDeskDelivery(target.out);
   if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
   const unassigned = pending.filter((r) => r.route === "pending");
-  if (unassigned.length) {
-    cancelDesk();
-    recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
-    desk.inboundText();
-  }
-  const ids = pending.map((r) => r.requestId);
-  const text = target.authored ?? target.text;
-  const subject = supervisorOnly(text) || /\(sent (?:an attachment|an audio message|a voice memo)|\[voice memo,/.test(text)
-    ? "your message" : `“${text.replace(/\s+/g, " ").slice(0, 160)}”`;
-  const guid = crypto.randomUUID();
-  const out: Out = { ...target.ref, requestId: `ack-${guid}`, requests: ids,
-    acknowledgement: true, kind: "desk", guid, at: Date.now(),
-    bubbles: [`I saved ${subject}; no confirmed answer yet.`], reply: target.ref.id };
-  recordRoute({ ids, acknowledgement: out });
+  if (!unassigned.length) return;
+  cancelDesk();
+  recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
+  desk.inboundText();
   flushRoutes();
 }
 
@@ -1051,10 +1023,8 @@ function applyRoute(event: RouteEvent) {
     deskGeneration++;
     routing.set(event.received.requestId, { ...event.received, route: "pending" });
   } else if ("responded" in event) {
-    for (const id of event.ids) Object.assign(routing.get(id)!, { responded: true, acknowledgement: undefined });
-  } else if ("acknowledgement" in event) {
-    for (const id of event.ids) routing.get(id)!.acknowledgement = event.acknowledgement ?? undefined;
-  } else for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
+    for (const id of event.ids) routing.get(id)!.responded = true;
+  } else if ("route" in event) for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
     handoffNote: event.handoffNote, ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
 }
 
@@ -1080,11 +1050,9 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
-  if (item.acknowledgement) return;
   if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   recordRoute({ ids: item.requests, route: "handoff" });
   flushRoutes();
-  scheduleAcknowledgement();
 }
 
 function pendingRoutes() {
@@ -1104,7 +1072,6 @@ function flushRoutes() {
   let failed = false;
   for (const item of routing.values()) {
     try {
-      if (item.acknowledgement && !muted()) outbox.add(item.acknowledgement);
       if (mateDeliveries.has(item.requestId)) continue;
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);
@@ -1216,7 +1183,7 @@ function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, 
   cancelDesk();
   if (commandTypingSpace) typing(commandTypingSpace, false);
   desk.inboundText();
-  scheduleAcknowledgement();
+  scheduleDeadlines();
 }
 
 function authoredText(content: LineMessage["content"]): string | undefined {

@@ -405,7 +405,7 @@ def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_
         bridge.wait(10)
 
 
-def test_due_acknowledgement_passes_active_mate_delivery(tmp_path, desk_clock):
+def test_due_deadline_clears_typing_during_active_mate_delivery(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     (fake / "typing-down").unlink()
     first = fake / "mate-hold-1"
@@ -422,17 +422,15 @@ def test_due_acknowledgement_passes_active_mate_delivery(tmp_path, desk_clock):
         first.unlink()
         wait_for(lambda: len(text(fake / "mate-sends").splitlines()) == 2, "the second held delivery")
         desk_clock(2000)
-        wait_for(lambda: text(fake / "sent"), "the acknowledgement during mate delivery", timeout=2)
         wait_for(lambda: text(fake / "typing-events") and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"], "typing cleanup during mate delivery", timeout=2)
-        assert text(fake / "sent").splitlines() == ["send I saved “Fix the website footer”; no confirmed answer yet."]
+        assert text(fake / "sent") == ""
         assert not (fake / "send-cancelled").exists()
         assert text(notes) == ""
         second.unlink()
         wait_for(lambda: text(state / "routing.jsonl").count("routed to web-mate") == 2, "both completed mate deliveries")
         assert text(notes) == ""
-        before = text(fake / "sent")
         desk_clock(8000)
-        assert text(fake / "sent") == before
+        assert text(fake / "sent") == ""
     finally:
         first.unlink(missing_ok=True)
         second.unlink(missing_ok=True)

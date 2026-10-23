@@ -133,28 +133,27 @@ For each message from the owner, the service does these steps:
    It checks separation at delivery, using the same rule as `fm-imessage --reply`.
    Desk answers stay on the selected message's transport and chat during retries.
    They never use another chat or transport as a fallback.
-   A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and acknowledgement deadlines.
+   A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and deadlines.
    A handoff uses `fm-inbox.sh note --request-id`; acceptance means the inbox saved it, not that the supervisor answered.
-   Eight seconds after the latest unanswered request arrives in a direct chat, the bridge queues one request-specific acknowledgement.
-   Each direct chat keeps its own deadline; messages in another chat do not cancel it.
-   A deadline hands off only that chat's pending requests; it does not count as global Firstmate activity.
-   Active mate delivery does not block a due acknowledgement or keep that chat's typing indicator active.
-   It uses the existing outbox, preserves request routing, and states that no confirmed answer exists yet.
-   It omits quoted content for sensitive messages and attachments, including audio transcripts and saved paths.
-   A prompt answer suppresses the acknowledgement; typing alone does not.
-   A queued supervisor response suppresses it only after the transport accepts that response.
+   Eight seconds after the latest unanswered request arrives in a direct chat, the bridge stops that chat's typing indicator and hands off its still-unassigned requests.
+   The deadline sends the owner nothing: no receipt or fixed text says that the request is saved or unanswered.
+   Each direct chat keeps its own deadline, and it fires once per request; messages in another chat do not cancel it.
+   A deadline does not count as global Firstmate activity.
+   Active mate delivery does not block a due deadline or keep that chat's typing indicator active.
+   A prompt answer leaves nothing to hand off; typing alone does not.
+   A queued supervisor response ends the wait only after the transport accepts that response.
    An explicit `--reply N` confirms only its selected message and that message's current edit requests, even with `--no-thread`.
    Each queued response stores its covered request ids; later arrivals cannot become covered through equal timestamps.
-   The acknowledgement targets the latest unanswered request, even when a newer request already has a targeted answer.
+   The deadline applies to the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.
    Restart replay confirms an initial card from its saved acceptance; a later card edit does not confirm newer requests.
-   A checked desk answer already in the outbox keeps its place instead of receiving a duplicate acknowledgement.
-   Purely social bursts and muted chats receive no timeout acknowledgement.
+   A checked desk answer already in the outbox keeps its place at the deadline.
+   Purely social bursts and muted chats have no deadline handoff.
    Inbox failures retry from the durable journal; each inbox command has a five-second deadline.
    Named keep: synchronous inbox filing remains serial; two stalled commands can block the event loop for about ten seconds.
-   This can delay acknowledgements and typing cleanup beyond eight seconds; their timers resume when filing returns.
+   This can delay the deadline and typing cleanup beyond eight seconds; their timers resume when filing returns.
    The five-second limit applies to each command, not the entire batch.
-   The local regression test checks eventual acknowledgement and typing cleanup after two command timeouts.
+   The local regression test checks the eventual handoff and typing cleanup after two command timeouts.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
@@ -163,7 +162,6 @@ For each message from the owner, the service does these steps:
    Each transport checks cancellation after preparation and immediately before sending.
    Cancellation does not remove uncertain delivery records.
    For a live desk answer with an uncertain send, the service checks available transport history before cancellation.
-   Acknowledgements also check available history before cancellation, including after a restart.
    It keeps unresolved evidence in the completion receipt.
    Unavailable history cannot block later supervisor sends after cancellation.
    A history check that disproves delivery clears the uncertainty before the service decides whether to hand off.
@@ -223,10 +221,7 @@ The journal stores response confirmations separately from routing completion.
 The outbox saves accepted bubble and reaction progress before recording response confirmation.
 If a routing-journal write or sync fails, retries confirm that saved progress without sending it again.
 Transport acceptance stops the desk's typing indicator before those writes.
-It persists a keyed acknowledgement per burst; completed outbox receipts prevent replay after a restart.
-Cancelling an acknowledgement before any possible delivery releases its requests and persists a new identity for the next attempt.
-Journal replay rejects the cancelled identity, so a crash cannot revive it or suppress the replacement.
-Restart recovery schedules acknowledgements for unresolved requests with saved receipt timestamps, regardless of their age.
+Restart recovery schedules the deadline for unresolved requests with saved receipt timestamps, regardless of their age.
 If no response bubble was delivered and the desk response is definitely undeliverable, the saved burst ids cause one stable-id Firstmate handoff.
 Dead-letter receipts recover that handoff if the bridge stops before its failure callback completes.
 A prior uncertain send or reaction blocks this failure handoff, except when startup drops restored desk text as described above.
@@ -285,7 +280,7 @@ Inbox retries and service restarts never repeat a recorded mate delivery.
 
 Firstmate activity still cancels an unfinished routing decision and sends pending work to Firstmate.
 Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
-Delayed handoffs follow the [acknowledgement rules](#what-it-does).
+Delayed handoffs follow the [deadline rules](#what-it-does).
 
 ## Upstream outages
 
