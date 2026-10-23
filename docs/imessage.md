@@ -25,7 +25,7 @@ For each message from the owner, the service does these steps:
    With `desk_provider: inception`, `apps/imessage/inception-desk.ts` calls Inception's chat-completions API with `desk_reasoning` as its `reasoning_effort`.
    Inception needs an explicit `desk_reasoning` of `instant`, `low`, `medium`, or `high`; `instant` is valid only with Inception.
    It reads `INCEPTION_API_KEY` from `~/super.env`, keeps its own input cap (see [Desk memory](#desk-memory)), and logs only the provider, model, reasoning, HTTP status, time, and request size in bytes.
-   A failed Inception classification call goes to Firstmate; it never falls back to another provider.
+   A failed Inception call never falls back to another provider; requests follow the [second-mate handoff rules](#second-mate-handoffs).
    Its only tool is `zoom`.
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
@@ -65,10 +65,8 @@ For each message from the owner, the service does these steps:
    It favors a fitting heart, laugh, or emphasis reaction instead of a default thumbs-up.
    Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction.
    A social reaction may include one short text from a fixed list of safe acknowledgements.
-   The text cannot contain facts or work claims; an invalid text sends the whole burst to Firstmate.
-   Work, approvals, sensitive content, ambiguous requests, mixed bursts, and unsupported questions normally go to Firstmate.
-   A configured [second-mate routing table](#second-mate-handoffs) lets the desk send clear single-domain work to its owner instead.
-   Failed classification calls, invalid JSON without a valid directive, missing evidence, and clipped pending input also go to Firstmate.
+   The text cannot contain facts or work claims; an invalid text prevents the social response.
+   Requests without a direct answer follow the [second-mate handoff rules](#second-mate-handoffs).
 7. The service saves its routing decision before either side effect.
    A direct answer enters the existing outbox with a stable deduplication key.
    A reply or reaction can set `target` to the message's 1-based position in the pending burst.
@@ -146,7 +144,8 @@ Text deliveries use a stable outbox identity in memory, so restart recovery reco
 This also recovers a reply when the bridge stops after saving delivery progress but before recording memory.
 Keep the journal, receipts, memory, downloads, and pending outbox together during backups or migration.
 
-The desk's system prompt is `deskPrompt` in `apps/imessage/desk.ts`. The owner's name and the two model names come from the config.
+The basic-answer system prompt is `deskPrompt` in `apps/imessage/desk.ts`.
+The owner's name and the two model names come from the config.
 
 The service ignores texts from all other senders. It saves attachments in `~/.local/state/fm-imessage/attachments/` for Firstmate to open. That directory is private to the account (mode `0700`). The service also keeps the owner's latest text on each transport, with the time of the message (its own timestamp, or the time received when it has none), in `~/.local/state/fm-imessage/latest` (and `latest-<transport>`). After a restart, typing and command tapbacks target the newest saved text. A file from before the time was kept counts as the oldest.
 The service replaces latest-message files atomically, including the direct-chat destinations described in [Choose the transports](#choose-the-transports).
@@ -154,7 +153,7 @@ The service replaces latest-message files atomically, including the direct-chat 
 ### Second-mate handoffs
 
 The desk reads `$FM_HOME/data/secondmates.md` at runtime.
-Routing stays off when this file is missing, unreadable, empty, or contains an invalid entry.
+Second-mate routing stays off when this file is missing, unreadable, empty, or contains an invalid entry.
 Single-home installs keep their existing behavior.
 Each entry uses the existing registry format:
 
@@ -163,8 +162,10 @@ Each entry uses the existing registry format:
 ```
 
 Each mate needs a unique id, an absolute home path, and a non-empty scope.
-The desk uses the configured model to select a handoff target from these ids or `firstmate`.
-It sends work to a mate only when the model reports high confidence and exactly one matching domain.
+The desk can make a separate model call to select a handoff target from these ids or `firstmate`.
+A failed or rejected basic-answer draft can still reach this call.
+Failed status reads or clipped handoff input go directly to Firstmate.
+The desk sends work to a mate only when the model reports high confidence and exactly one matching domain.
 It checks the whole pending burst, including recent context, rather than splitting related texts across mates.
 Invalid output, low confidence, ambiguous requests, and work across several domains go to Firstmate.
 Decisions, approvals, merges, credentials, and sensitive messages also stay with Firstmate.
