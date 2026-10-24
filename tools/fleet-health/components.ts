@@ -30,7 +30,7 @@ export const binPath = (bin: string): string | null => {
   }
 }
 
-const VERSION = /\d+(?:\.\d+)+/
+const VERSION = /\d+(?:\.\d+)+(?:-(?:alpha|beta|rc)(?:\.\d+)*)?/
 
 async function run(argv: string[]): Promise<string> {
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH } })
