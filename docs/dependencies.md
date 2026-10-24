@@ -190,9 +190,10 @@ The Pyrefly configuration is the only added runtime file.
 
 `blueprint/ansible/tasks/agents.yml`, `agents` profile.
 
-- kun ([kunchenguid/kun](https://github.com/kunchenguid/kun)): apply resolves the default-branch commit with `git ls-remote` and installs that commit with `npx --yes skills add kunchenguid/kun#<sha> -g -a codex -a claude-code -y`.
+- kun ([kunchenguid/kun](https://github.com/kunchenguid/kun)): apply resolves the default-branch commit with `git ls-remote` and installs that commit with `npx --yes skills add kunchenguid/kun#<sha> -g -a codex -a claude-code --json -y`.
   The repository publishes no releases and no checksums, so the commit SHA is the pin.
   Apply writes it to `~/.agents/skills/kun/.crewship-sha`, and a matching marker skips the install.
+  `--json` makes the CLI exit non-zero when any agent install fails, so a failed install never writes the marker.
   The task sets `DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, so the skills CLI sends no telemetry.
   See [Global instructions](omp.md#global-instructions) for the line that points agents at it.
 
