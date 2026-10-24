@@ -339,7 +339,10 @@ async function fetchDeepseek(): Promise<DeepseekSummary> {
     signal: AbortSignal.timeout(40_000),
   })
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
-  if ((await p.exited) !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
+  const code = await p.exited
+  // 255 is ssh's own failure code; its stderr names the Mac's address, which must not reach the panel.
+  if (code === 255) throw new Error("Mac not reachable")
+  if (code !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
   const line = out.split("\n").findLast(l => l.trimStart().startsWith("{"))
   if (!line) throw new Error("no JSON in the CDP output")
   return JSON.parse(line) as DeepseekSummary

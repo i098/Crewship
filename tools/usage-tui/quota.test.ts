@@ -105,7 +105,7 @@ test("a failed DeepSeek read holds its error, so no second ssh runs within 10 mi
   const p = Bun.spawn(["bun", probe], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, stdout: "pipe", stderr: "ignore" })
   const out = JSON.parse(await new Response(p.stdout).text()) as { error: string | null; heldTwice: boolean }
   expect(await p.exited).toBe(0)
-  expect(out.error).toContain("Connection refused")
+  expect(out.error).toBe("Mac not reachable") // ssh's stderr names the host; the panel must not
   expect(out.heldTwice).toBe(true)
   expect(readFileSync(log, "utf8")).toBe("called\n")
 }, 30_000)
