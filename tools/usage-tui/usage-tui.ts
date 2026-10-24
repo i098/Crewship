@@ -351,7 +351,8 @@ function refreshQuota() {
 
 function syncStore() {
   // omp owns the store; its own command ingests new session files.
-  Bun.spawn(["omp", "stats", "--summary"], { stdout: "ignore", stderr: "ignore" })
+  // setsid -f: child leaves the pane's foreground group, so herdr does not list the pane as omp.
+  Bun.spawn(["setsid", "-f", "omp", "stats", "--summary"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
 }
 
 draw()
