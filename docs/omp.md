@@ -163,6 +163,7 @@ The omp that the no-mistakes daemon spawns gets its own advisor from a separate 
 ## Other seeded preferences
 
 `blueprint/config/omp.yml` also sets the theme (`dark-rose-pine`), a custom status line (see [Status line icons](#status-line-icons)), `textVerbosity: low`, `readLineNumbers: true`, hidden thinking blocks (`hideThinkingBlock: true`), steering, follow-up and interrupt modes, vim mode in the editor (`tui.vimMode`), the OpenAI priority service tier (`tier.openai: priority`), at most 128 parallel subagent tasks (`task.maxConcurrency`), compaction at 200,000 tokens with a 32,000-token retained-message budget (`compaction.thresholdTokens`, `compaction.v2RetainedMessageBudget`), the compaction order (`compaction.methodOrder`: `snapcompact` first, then `remote`, `handoff`, `shake` and `soft` as fallbacks), and tool output above 20 KB spilled to an artifact with 4 KB head and 4 KB tail inline (`tools.artifactSpillThreshold`, `tools.artifactHeadBytes`, `tools.artifactTailBytes`). Memory uses the mnemopi backend (`memory.backend: mnemopi`) with no embeddings, the `smol` model for its own calls, and polyphonic recall, enhanced recall and proactive linking on. Change a single value with `omp config set <key> <value>`, or use `/settings`.
+
 ## Status line icons
 
 The status icons extension puts the mode indicators and the configured hooks on the main status line as one row of evenly spaced Nerd Font icons, instead of one extension status line per plugin and a separate hooks line:
