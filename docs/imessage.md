@@ -282,6 +282,15 @@ Firstmate activity still cancels an unfinished routing decision and sends pendin
 Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
 Delayed handoffs follow the [deadline rules](#what-it-does).
 
+## V2 front desk
+
+Set `FM_IMESSAGE_DESK_V2=true` to replace the desk routing above with the V2 front desk. The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
+The front picks one of three results: social, dispatch, or relay.
+A purely social text gets one tapback and no text.
+Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
+Relay hands the work to the owning mate or to Firstmate with no text. An invalid front answer fails closed to a Firstmate relay.
+The typing indicator stops when a newer text replaces the running job.
+
 ## Upstream outages
 
 The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503.
