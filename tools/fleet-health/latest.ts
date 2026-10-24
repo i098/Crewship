@@ -22,7 +22,7 @@ export const loadCache = (): Cache => {
 }
 
 const getJson = async (url: string) => {
-  const response = await fetch(url, { headers: { "user-agent": "crewship-fleet-health", accept: "application/json", ...(TOKEN && url.includes("api.github.com") ? { authorization: `Bearer ${TOKEN}` } : {}) }, signal: AbortSignal.timeout(15_000) })
+  const response = await fetch(url, { headers: { "user-agent": "crewship-fleet-health", accept: "application/json", ...(TOKEN && new URL(url).host === "api.github.com" ? { authorization: `Bearer ${TOKEN}` } : {}) }, signal: AbortSignal.timeout(15_000) })
   if (!response.ok) throw new Error(`HTTP ${response.status} ${new URL(url).host}`)
   return response.json() as Promise<any>
 }
