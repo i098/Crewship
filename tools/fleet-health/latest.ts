@@ -73,6 +73,13 @@ async function fetchLatest(source: Source): Promise<string | null> {
   }
 }
 
+const save = (cache: Cache) => {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true })
+    writeFileSync(CACHE_FILE, JSON.stringify(cache))
+  } catch {}
+}
+
 // Fetches only entries older than CACHE_MS, one at a time; a failure keeps the old value and retries after RETRY_MS.
 export async function refreshLatest(list: Component[], cache: Cache, onUpdate: () => void): Promise<void> {
   const now = Date.now()
@@ -84,9 +91,8 @@ export async function refreshLatest(list: Component[], cache: Cache, onUpdate: (
     } catch (e) {
       cache[c.name] = { version: hit?.version ?? null, at: Date.now(), error: (e as Error).message }
     }
+    save(cache)
     onUpdate()
     await Bun.sleep(GAP_MS)
   }
-  mkdirSync(CACHE_DIR, { recursive: true })
-  writeFileSync(CACHE_FILE, JSON.stringify(cache))
 }
