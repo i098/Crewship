@@ -24,10 +24,19 @@ const getJson = async (url: string) => {
   if (!response.ok) throw new Error(`HTTP ${response.status} ${new URL(url).host}`)
   return response.json() as Promise<any>
 }
-const parts = (v: string) => v.replace(/^\D+/, "").split(/[.-]/).map(n => parseInt(n, 10) || 0)
+const parts = (v: string) => v.split(/[.-]/).map(n => parseInt(n, 10) || 0)
 export function compare(a: string, b: string) {
-  const x = parts(a), y = parts(b)
+  const [baseA, ...preA] = a.replace(/^\D+/, "").split(/-(.*)/), [baseB, ...preB] = b.replace(/^\D+/, "").split(/-(.*)/)
+  const x = parts(baseA), y = parts(baseB)
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0)
+  const sa = preA[0], sb = preB[0]
+  if (!sa || !sb) return sa ? -1 : sb ? 1 : 0
+  const p = sa.split("."), q = sb.split(".")
+  for (let i = 0; i < Math.max(p.length, q.length); i++) {
+    if (p[i] === undefined || q[i] === undefined) return p[i] === undefined ? -1 : 1
+    const d = /^\d+$/.test(p[i]) && /^\d+$/.test(q[i]) ? Number(p[i]) - Number(q[i]) : p[i].localeCompare(q[i])
+    if (d) return d
+  }
   return 0
 }
 const newest = (versions: string[]) => versions.reduce((a, b) => (compare(a, b) >= 0 ? a : b))
