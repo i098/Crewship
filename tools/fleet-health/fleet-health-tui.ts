@@ -126,7 +126,7 @@ function draw() {
           s(r.name.padEnd(nameW), theme.text, { ...o, b: true }),
           s((r.installed ?? "—").slice(0, verW - 2).padEnd(verW), r.installed ? theme.text : theme.muted, o),
           s((r.latest ?? "—").slice(0, verW - 2).padEnd(verW), r.state === "outdated" ? theme.warn : r.latest ? theme.text : theme.muted, o),
-          s(r.used.padEnd(usedW), r.used === "running now" ? theme.ok : r.used === "unknown" || r.used === "—" ? theme.muted : theme.text, o),
+          s(r.used.padEnd(usedW), r.used === "running now" ? theme.ok : r.used === "—" ? theme.muted : theme.text, o),
           chip(r.state),
           s(note.slice(0, Math.max(0, inner - nameW - verW * 2 - usedW - 17)), theme.muted, o),
         ],

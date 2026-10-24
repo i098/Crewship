@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { HOME, type Component, type Source } from "./components.ts"
 
-export const CACHE_MS = 30 * 60_000 // unauthenticated GitHub allows 60 requests/hour; ~21 are GitHub
+export const CACHE_MS = 30 * 60_000 // unauthenticated GitHub allows 60 requests/hour; 23 are api.github.com
 const CACHE_DIR = `${process.env.XDG_CACHE_HOME ?? `${HOME}/.cache`}/fleet-health`
 const CACHE_FILE = `${CACHE_DIR}/latest.json`
 const RETRY_MS = 5 * 60_000
