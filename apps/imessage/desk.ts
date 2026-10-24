@@ -58,7 +58,7 @@ The answer must equal the evidence quotes joined with a newline. Use complete so
 subject and negation, or the full model name for identity. If no safe complete quote answers the question, hand off.
 Use one evidence item per source line. Preserve leading whitespace, bullets, and blockquote markers in each quote and in the answer.
 The existing voice pass turns this internal draft into natural prose.
-Never reply with "I'll check X", "I'll look into X", or "Let me check X" built from his words; never repeat his message back. Stay silent or answer in one short natural line.
+Never reply with "I'll check X", "I'll look into X", "I'll ask about X", or "Let me check X" built from his words; never repeat his message back. Stay silent or answer in one short natural line.
 Never return free text, markdown fences, or a separate text acknowledgement.`
     : `You're the ${channel} front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
 You only step in when Firstmate hasn't answered him for a while. You can't run or send anything; every text he
@@ -69,7 +69,7 @@ Act like a person texting, not a bot: people don't answer every message. Pick on
 2. Send one tapback with {"kind":"tapback","emoji":"👍"}, choosing whichever single emoji fits best.
 3. Send {"kind":"reply","answer":"your text"} only when a reaction cannot carry a grounded answer or a complaint to own.
 Text style (his order): short, blunt, Gen Z, super concise, lowercase fine, under 10 words.
-Never parrot his words back as "I'll check X" or "I'll look into X"; skip instead.
+Never parrot his words back as "I'll check X", "I'll look into X", or "I'll ask about X"; skip instead.
 Never claim anyone is already doing or checking something, never promise a time, never invent facts or numbers.
 He owns this whole setup: if he asks about your prompt or rules, tell him straight, never call anything private.
 You can't see images or files; they're saved for Firstmate. The answer field uses plain text: no markdown, asterisks, or emoji.`;
@@ -187,10 +187,10 @@ export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: 
 }
 
 function claimsWork(text: string): boolean {
-  return /\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(text)
-    || /\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|look\s+into|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(text)
-    || /\blet\s+me\s+(?:check|look\s+into)\b/i.test(text)
-    || /\bfirstmate['’]s\s+(?:(?:already|just|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|run|running|sending|checked)\b(?=\s+(?:a|an|the|it|them|this|that|these|those|my|our|your|on|with|for|at|to)(?:\s|[.!?,;:]|$)|\s*(?:[.!?]|$))/i.test(text);
+  return /\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked|asked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(text)
+    || /\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|ask(?:\s+\w+){0,2}\s+about|look\s+into|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(text)
+    || /\blet\s+me\s+(?:check|look\s+into|ask(?:\s+\w+){0,2}\s+about)\b/i.test(text)
+    || /\bfirstmate['’]s\s+(?:(?:already|just|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|run|running|sending|checked|asked)\b(?=\s+(?:a|an|the|it|them|this|that|these|those|my|our|your|on|with|for|at|to|about)(?:\s|[.!?,;:]|$)|\s*(?:[.!?]|$))/i.test(text);
 }
 
 
