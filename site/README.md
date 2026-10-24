@@ -284,7 +284,7 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 The site serves on https://crewship.si, a custom domain attached to the Worker outside `wrangler.jsonc`, and each deploy records that URL under Deployments.
 
 The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
-The crawler policy allows search crawlers, including OAI-SearchBot, and blocks GPTBot.
+The crawler policy allows all search and AI crawlers, including OAI-SearchBot, GPTBot, ClaudeBot, and PerplexityBot.
 The sitemap lists the canonical home, How, and About URLs without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.

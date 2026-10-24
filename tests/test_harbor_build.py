@@ -212,9 +212,9 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                     robots = RobotFileParser()
                     robots.parse(body.decode().splitlines())
                     assert robots.site_maps() == ["https://crewship.si/sitemap.xml"]
-                    for agent in ("Googlebot", "OAI-SearchBot", "GPTBot"):
+                    for agent in ("Googlebot", "OAI-SearchBot", "GPTBot", "ClaudeBot", "PerplexityBot"):
                         for route in ("/", "/how", "/about"):
-                            assert robots.can_fetch(agent, route) == (agent != "GPTBot")
+                            assert robots.can_fetch(agent, route), (agent, route)
                 if filename.endswith(".html"):
                     assert response.getheader("Content-Type").startswith("text/html")
                     head = Head()
