@@ -155,7 +155,7 @@
     sha=$(git ls-remote https://github.com/kunchenguid/kun HEAD | cut -f1)
     marker='{{ kun_skill_dir }}/.crewship-sha'
     if [ "$(cat "$marker" 2>/dev/null || true)" = "$sha" ]; then echo "kun already at $sha"; exit 0; fi
-    npx --yes skills add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y
+    DISABLE_TELEMETRY=1 DO_NOT_TRACK=1 npx --yes skills add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y
     echo "$sha" > "$marker"
     echo "kun installed at $sha"
   args:

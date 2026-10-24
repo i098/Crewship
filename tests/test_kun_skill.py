@@ -19,7 +19,7 @@ def run(script, tmp_path):
     if not bin_dir.exists():  # stubs: git prints `<sha>\tHEAD` like ls-remote, npx creates the skill dir like `skills add -g`; no gh, as on a fresh host
         bin_dir.mkdir()
         (bin_dir / "git").write_text(f"#!/bin/sh\nprintf '{SHA}\\tHEAD\\n'\n")
-        (bin_dir / "npx").write_text(f"#!/bin/sh\nmkdir -p '{tmp_path}/kun' && echo run >> '{tmp_path}/npx.log'\n")
+        (bin_dir / "npx").write_text(f"#!/bin/sh\nmkdir -p '{tmp_path}/kun' && echo \"$*\" >> '{tmp_path}/npx.log'\n")
         for stub in bin_dir.iterdir():
             stub.chmod(0o755)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
@@ -31,6 +31,8 @@ def test_kun_installs_once_per_commit_and_skips_a_matching_marker(tmp_path):
     assert f"kun installed at {SHA}" in run(script, tmp_path)
     assert (tmp_path / "kun/.crewship-sha").read_text() == SHA + "\n"
     assert f"kun already at {SHA}" in run(script, tmp_path)
-    assert (tmp_path / "npx.log").read_text() == "run\n"
+    [install] = (tmp_path / "npx.log").read_text().splitlines()
+    assert f"kunchenguid/kun#{SHA}" in install.split()
+    assert "-g" in install.split()
     (tmp_path / "kun/.crewship-sha").write_text("old\n")  # a newer upstream commit reinstalls
     assert "kun installed at" in run(script, tmp_path)
