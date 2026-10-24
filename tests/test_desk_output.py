@@ -172,7 +172,7 @@ def test_reply_json_sends_only_its_answer(tmp_path, surface, field, answer):
         assert result["notes"] == ""
 
 
-@pytest.mark.parametrize("opener", ["I'll check", "I will check", "Let me check", "I'll look into", "Let me look into", "I'll ask about", "Let me ask about"])
+@pytest.mark.parametrize("opener", ["I'll check", "I will check", "Let me check", "I'll look into", "Let me look into", "I'll ask about", "Let me ask about", "I've asked about", "I'll ask Firstmate about", "Firstmate's asked about", "I'll ask the firstmate about", "Let me ask the firstmate about"])
 def test_instagram_reply_that_echoes_the_request_in_a_check_template_is_not_sent(tmp_path, opener):
     message = "Once all the token savings are finished - push all new changes to crewship on GitHub"
     answer = f"{opener} push all new changes to crewship on GitHub."
