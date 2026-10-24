@@ -39,6 +39,10 @@ export function compare(a: string, b: string) {
   }
   return 0
 }
+export type Comparison = "up to date" | "outdated" | "custom" | "unknown"
+// The state of an installed component against its latest release; custom builds are never outdated.
+export const classify = (have: string, latest: string | null, custom?: RegExp): Comparison =>
+  custom?.test(have) ? "custom" : latest === null ? "unknown" : compare(have, latest) >= 0 ? "up to date" : "outdated"
 const newest = (versions: string[]) => versions.reduce((a, b) => (compare(a, b) >= 0 ? a : b))
 
 async function fetchLatest(source: Source): Promise<string | null> {

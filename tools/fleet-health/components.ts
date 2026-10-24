@@ -1,12 +1,13 @@
 // Every component Crewship installs, mirrored from scripts/provisions.py
 // (GITHUB_LATEST, NPM_LATEST, OMP_PLUGINS) plus the sources Ansible or provisions.py
 // install themselves. tests/test_fleet_health_components.py fails when the two drift.
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs"
+import { basename, join } from "node:path"
 
 export const HOME = process.env.HOME ?? ""
 const BIN = `${HOME}/.local/bin`
-const PATH = `${BIN}:${process.env.PATH}:/usr/local/bin:${HOME}/oss-fleet/browsers` // the fleet browser tier keeps obscura outside ~/.local/bin
+// Off-PATH homes: cargo installs (concord, sgrep), bun links, and the fleet browser tier (obscura).
+const PATH = `${BIN}:${HOME}/.cargo/bin:${HOME}/.bun/bin:${process.env.PATH}:/usr/local/bin:${HOME}/oss-fleet/browsers`
 
 export type Source =
   | { kind: "github"; repo: string; prefix?: string; prerelease?: boolean }
@@ -18,7 +19,22 @@ export type Source =
   | { kind: "none"; note: string }
 
 // bin: the command (or file) whose access time shows the last use; absent when no file is evidence of use.
-export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null>; bin?: string }
+// custom: an installed version matching it is the owner's own build, never outdated.
+export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null>; bin?: string; custom?: RegExp }
+
+// Executable paths and names of every live process, from /proc exe and argv.
+export function liveProcesses(): Set<string> {
+  const live = new Set<string>()
+  const add = (path: string) => { live.add(path); live.add(basename(path)) }
+  for (const pid of readdirSync("/proc").filter(p => /^\d+$/.test(p))) {
+    try { add(readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, "")) } catch {}
+    try { const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); for (const arg of argv.slice(0, 2)) if (arg) add(arg) } catch {}
+  }
+  return live
+}
+
+export const isRunning = (bin: string, path: string | null, live: Set<string>) =>
+  live.has(bin) || live.has(basename(bin)) || (path !== null && live.has(path))
 
 // Real path of a command, or null. relatime keeps atime within a day of the last read; a running process is checked separately.
 export const binPath = (bin: string): string | null => {
@@ -68,7 +84,11 @@ const npmInstalled = (command: string, pkg: string) => async () => {
     const real = realpathSync(`${BIN}/${command}`)
     const at = real.indexOf(`/node_modules/${pkg}/`)
     if (at >= 0) {
-      const version = readVersion(join(real.slice(0, at), "node_modules", pkg, "package.json"))
+      const prefix = real.slice(0, at)
+      // provisions.py installs each version into <name>/<version>/; the directory name keeps a custom build's suffix.
+      const dir = basename(prefix)
+      if (/^\d+(\.\d+)+(-[0-9A-Za-z.]+)?$/.test(dir)) return dir
+      const version = readVersion(join(prefix, "node_modules", pkg, "package.json"))
       if (version) return version
     }
   } catch {}
@@ -126,7 +146,7 @@ export const components: Component[] = [
   npm("omp", "@oh-my-pi/pi-coding-agent"),
   npm("chrome-devtools-axi", "chrome-devtools-axi"),
   npm("gh-axi", "gh-axi"),
-  npm("lavish-axi", "lavish-axi"),
+  { ...npm("lavish-axi", "lavish-axi"), custom: /sketch/ },
   npm("quota-axi", "quota-axi"),
   npm("tasks-axi", "tasks-axi"),
   npm("acpx", "acpx"),

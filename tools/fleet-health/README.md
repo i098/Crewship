@@ -13,5 +13,6 @@ Keys: `↑↓` or `j k` scroll, `r` refresh, `q` quit. Installed versions refres
 - Latest versions come from the GitHub releases API (one request per component), the npm registry, PyPI, nodejs.org, rust-lang.org and Codeberg. Results are cached 30 minutes in `~/.cache/fleet-health/latest.json`, so `r` never re-fetches a fresh entry and unauthenticated GitHub stays under 60 requests per hour.
 - Last used is `running now` when a live process runs the binary, otherwise the age of the binary's access time (the filesystem's `relatime` keeps it within a day). `unknown` means no file shows use: plugins, psutil and spectrum-ts.
 - The Bun packages group is installed with `bun add --global` and only reads versions from the npm registry.
+- A component whose `custom` pattern in `components.ts` matches the installed version (lavish-axi, the owner's `-sketch` build) shows `custom`, never outdated. Commands are looked up on PATH, `~/.cargo/bin`, `~/.bun/bin`, `/usr/local/bin` and the fleet browser directory; a live process counts as in use.
 - Unknown means the component has no published release to compare (sgrep builds from its default branch), or the lookup failed.
 - Colors come from `../tui-theme/theme.ts`; the background stays transparent.

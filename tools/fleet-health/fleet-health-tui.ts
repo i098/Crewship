@@ -2,30 +2,26 @@
 // Read-only fleet health TUI: every Crewship component, installed vs latest. Never installs or upgrades.
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
-import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs"
-import { binPath, components } from "./components.ts"
-import { CACHE_MS, compare, loadCache, refreshLatest } from "./latest.ts"
+import { statSync } from "node:fs"
+import { binPath, components, isRunning, liveProcesses } from "./components.ts"
+import { CACHE_MS, classify, loadCache, refreshLatest } from "./latest.ts"
 
 const SLOW_MS = 5 * 60_000
-type State = "up to date" | "outdated" | "unknown" | "not installed"
+type State = "up to date" | "outdated" | "unknown" | "not installed" | "custom"
 type Row = { name: string; group: string; installed: string | null; latest: string | null; state: State; note: string; used: string }
 
 const cache = loadCache()
 const installed = new Map<string, string | null>()
 const lastUsed = new Map<string, string>()
 
-// Evidence only: a live process whose exe or argv names the binary, else the binary's access time (relatime: within a day).
+// Evidence only: a live process running the binary, else the binary's access time (relatime: within a day).
 function scanUsage() {
-  const live = new Set<string>()
-  for (const pid of readdirSync("/proc").filter(p => /^\d+$/.test(p))) {
-    try { live.add(readlinkSync(`/proc/${pid}/exe`)) } catch {}
-    try { for (const arg of readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")) if (arg.startsWith("/")) live.add(arg) } catch {}
-  }
+  const live = liveProcesses()
   for (const c of components) {
     const path = c.bin ? binPath(c.bin) : null
-    if (!path) { lastUsed.set(c.name, "unknown"); continue }
-    if (live.has(path)) { lastUsed.set(c.name, "running now"); continue }
-    const age = (Date.now() - statSync(path).atimeMs) / 3_600_000
+    if (!c.bin || (!path && !isRunning(c.bin, null, live))) { lastUsed.set(c.name, "unknown"); continue }
+    if (isRunning(c.bin, path, live)) { lastUsed.set(c.name, "running now"); continue }
+    const age = (Date.now() - statSync(path!).atimeMs) / 3_600_000
     lastUsed.set(c.name, age < 1 ? "<1h ago" : age < 48 ? `${Math.round(age)}h ago` : age < 24 * 60 ? `${Math.round(age / 24)}d ago` : `${Math.round(age / 24 / 30)}mo ago`)
   }
 }
@@ -42,8 +38,9 @@ function rows(): Row[] {
       if (installed.has(c.name)) state = "not installed"
       else note = "checking…"
     } else if (c.source.kind === "none") note = c.source.note
-    else if (latest === null) note = cache[c.name]?.error ?? (cache[c.name] ? "no release published" : "checking…")
-    else state = compare(have, latest) >= 0 ? "up to date" : "outdated"
+    else if (latest === null && !c.custom?.test(have)) note = cache[c.name]?.error ?? (cache[c.name] ? "no release published" : "checking…")
+    else state = classify(have, latest, c.custom)
+    if (state === "custom") note = "custom build"
     if (state !== "unknown" && cache[c.name]?.error) note = `stale: ${cache[c.name]!.error}`
     return { name: c.name, group: c.group, installed: have, latest, state, note, used: have === null ? "—" : lastUsed.get(c.name) ?? "…" }
   })
@@ -60,9 +57,9 @@ const styled = (lines: Line[]) => {
   lines.forEach((l, i) => { if (i) out.push(s("\n")); out.push(...l) })
   return new StyledText(out)
 }
-const stateColor = { "up to date": theme.ok, outdated: theme.warn, unknown: theme.muted, "not installed": theme.highlight } as const
+const stateColor = { "up to date": theme.ok, outdated: theme.warn, unknown: theme.muted, "not installed": theme.highlight, custom: theme.accent } as const
 const chip = (state: State) => s(` ${state.toUpperCase()} `.padEnd(15), theme.bg, { bg: stateColor[state], b: true })
-const rank = { outdated: 0, unknown: 1, "not installed": 2, "up to date": 3 } as const
+const rank = { outdated: 0, unknown: 1, custom: 2, "not installed": 3, "up to date": 4 } as const
 const SECTIONS: [string, string][] = [
   ["native", "Native tools"], ["runtime", "Runtimes"], ["bun", "Bun packages (npm registry)"],
   ["python", "Python packages"], ["omp plugin", "omp plugins"], ["source", "Built from source"],
@@ -90,19 +87,19 @@ function draw() {
   column.width = W
   const all = rows()
   const count = (st: State) => all.filter(r => r.state === st).length
-  const ok = count("up to date"), old = count("outdated"), unk = count("unknown"), missing = count("not installed")
+  const ok = count("up to date"), old = count("outdated"), unk = count("unknown"), missing = count("not installed"), custom = count("custom")
   const inner = W - 4
-  const barOk = Math.round((ok / all.length) * inner), barOld = Math.round((old / all.length) * inner), barUnk = Math.round(((unk + missing) / all.length) * inner)
+  const barOk = Math.round((ok / all.length) * inner), barOld = Math.round((old / all.length) * inner), barUnk = Math.round(((unk + missing + custom) / all.length) * inner)
   const stamp = checkedAt ? new Date(checkedAt).toTimeString().slice(0, 8) : "…"
   header.content = styled([
     [s(" ◆ FLEET HEALTH ", theme.bg, { bg: theme.accent, b: true }), s(`  ${all.length} components`, theme.muted), s(busy ? "   ⟳ fetching…" : `   checked ${stamp}`, busy ? theme.accent : theme.muted)],
     [s("")],
-    [s(` ${ok} `, theme.bg, { bg: theme.ok, b: true }), s(" up to date   ", theme.text), s(` ${old} `, theme.bg, { bg: theme.warn, b: true }), s(" outdated   ", theme.text), s(` ${unk} `, theme.bg, { bg: theme.muted, b: true }), s(" unknown   ", theme.text), s(` ${missing} `, theme.bg, { bg: theme.highlight, b: true }), s(" not installed", theme.text)],
+    [s(` ${ok} `, theme.bg, { bg: theme.ok, b: true }), s(" up to date   ", theme.text), s(` ${old} `, theme.bg, { bg: theme.warn, b: true }), s(" outdated   ", theme.text), s(` ${unk} `, theme.bg, { bg: theme.muted, b: true }), s(" unknown   ", theme.text), s(` ${missing} `, theme.bg, { bg: theme.highlight, b: true }), s(" not installed", theme.text), ...(custom ? [s(`   ${custom} `, theme.bg, { bg: theme.accent, b: true }), s(" custom", theme.text)] : [])],
     [s("█".repeat(barOk), theme.ok), s("█".repeat(barOld), theme.warn), s("█".repeat(Math.max(0, inner + 2 - barOk - barOld - barUnk)), theme.border), s("█".repeat(barUnk), theme.muted)],
   ])
 
   const nameW = Math.max(...all.map(r => r.name.length), 9) + 2
-  const verW = 14
+  const verW = 18
   const usedW = 14
   const order: Row[] = []
   const lines: { line: Line; index: number }[] = []
