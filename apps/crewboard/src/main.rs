@@ -1,9 +1,11 @@
 //! crewboard: a host-local, in-memory message board for agents.
-//! One binary: the daemon (`serve`) and its clients (`pub`, `sub`, `tail`, `topics`, `stat`).
+//! One binary: the daemon (`serve`) and its clients (`pub`, `sub`, `tail`, `topics`, `summary`,
+//! `summarize`, `stat`).
 
 mod board;
 mod serve;
 mod sink;
+mod summarizer;
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -23,7 +25,16 @@ const USAGE: &str = "usage:
                                           pass the last boot ID and seq back on reconnect: a different
                                           boot replays all history after a gap marker with restarted:true
   crewboard tail <topic> [-n 50] [--json] print history, then exit
-  crewboard topics                        list topics with counts
+  crewboard topics [--summary] [--json]   list topics with counts; --summary adds each topic's summary and
+                                          summary_seq (one line per topic, or JSON with --json)
+  crewboard summary <topic> [text|-] [--seq N]
+                                          set the topic's one-line summary (max 160 chars), covering
+                                          messages up to seq N (default: the newest)
+  crewboard summarize [--quiet 20] [--max-wait 120]
+                                          keep summaries fresh: after a topic's new messages, wait
+                                          --quiet seconds without a message (at most --max-wait seconds),
+                                          then ask the model command $CREWBOARD_SUMMARY_CMD (default:
+                                          omp with Haiku 5.5; prompt on stdin, summary on stdout)
   crewboard stat                          print caps, usage and the boot id
   crewboard github-sink --repo OWNER/REPO --issue N [<topic>...] [--interval 300]
                                           post the messages of the topics (default fleet) as one comment
@@ -86,9 +97,7 @@ fn socket_path() -> PathBuf {
 }
 
 fn resolve_socket(explicit: Option<OsString>, runtime_dir: Option<OsString>, uid: u32) -> PathBuf {
-    explicit.map(PathBuf::from).unwrap_or_else(|| {
-        runtime_dir.map_or_else(|| PathBuf::from(format!("/run/user/{uid}")), PathBuf::from).join("crewboard.sock")
-    })
+    explicit.map(PathBuf::from).unwrap_or_else(|| runtime_dir.map_or_else(|| PathBuf::from(format!("/run/user/{uid}")), PathBuf::from).join("crewboard.sock"))
 }
 
 /// Sends one request and returns the reply stream.
@@ -117,6 +126,16 @@ fn next(r: &mut impl BufRead) -> (String, Value) {
     }
     line.truncate(line.trim_end().len());
     (line, v)
+}
+
+/// Sends one request and returns the reply; an error reply is data here, not a failure.
+fn reply(req: Value) -> Value {
+    let mut line = String::new();
+    match request(req).read_line(&mut line) {
+        Ok(0) => off(),
+        Ok(_) => serde_json::from_str(&line).unwrap_or_else(|e| fail(&format!("bad reply: {e}"))),
+        Err(e) => fail(&e.to_string()),
+    }
 }
 
 fn print_msg(raw: &str, m: &Value, json: bool) {
@@ -222,9 +241,120 @@ fn main() {
         "sub" => subscribe(rest),
         "github-sink" => github_sink(rest),
         "tail" => tail(rest),
-        "topics" | "stat" if rest.is_empty() => println!("{}", next(&mut request(json!({"op": cmd}))).0),
+        "topics" => topics(rest),
+        "summary" => set_summary(rest),
+        "summarize" => summarize(rest),
+        "stat" if rest.is_empty() => println!("{}", next(&mut request(json!({"op": cmd}))).0),
         "-h" | "--help" | "help" => println!("{USAGE}"),
         _ => usage(),
+    }
+}
+
+fn topics(rest: &[String]) {
+    let (flags, others): (Vec<String>, Vec<String>) = rest.iter().cloned().partition(|s| s == "--summary");
+    let a = Args::parse(&others, &[]);
+    if !a.pos.is_empty() {
+        usage();
+    }
+    let summary = !flags.is_empty();
+    let (raw, v) = next(&mut request(json!({"op": "topics", "summary": summary})));
+    if summary && !a.json {
+        for t in v.as_array().into_iter().flatten() {
+            println!("{} ({}): {}", t["topic"].as_str().unwrap_or("-"), t["count"], t["summary"].as_str().unwrap_or(""));
+        }
+    } else {
+        println!("{raw}");
+    }
+}
+
+fn set_summary(rest: &[String]) {
+    let a = Args::parse(rest, &["--seq"]);
+    let (topic, words) = match &a.pos[..] {
+        [topic, words @ ..] => (*topic, words),
+        _ => usage(),
+    };
+    let text = if words.is_empty() || words == ["-"] {
+        let mut s = String::new();
+        io::stdin().read_to_string(&mut s).unwrap_or_else(|e| fail(&e.to_string()));
+        s
+    } else {
+        words.join(" ")
+    };
+    next(&mut request(json!({"op": "summary", "topic": topic, "summary": text, "seq": a.opt::<u64>("--seq")})));
+}
+
+/// One topic's refresh: its old summary and latest messages to the model, the answer to the board.
+fn refresh(topic: &str, seq: u64, cmd: &str) -> Result<(), String> {
+    let old = reply(json!({"op": "topics", "summary": true}))
+        .as_array()
+        .and_then(|ts| ts.iter().find(|t| t["topic"] == topic).and_then(|t| t["summary"].as_str().map(String::from)))
+        .unwrap_or_default();
+    let mut r = request(json!({"op": "hist", "topic": topic, "n": summarizer::CONTEXT}));
+    let mut msgs = Vec::new();
+    loop {
+        let (_, v) = next(&mut r);
+        if v["end"] == true {
+            break;
+        }
+        msgs.push(v);
+    }
+    if msgs.is_empty() {
+        return Ok(());
+    }
+    let out = summarizer::ask(cmd, &summarizer::prompt(topic, &old, &msgs), summarizer::MODEL_TIMEOUT)?;
+    let Some(line) = out.lines().map(str::trim).find(|l| !l.is_empty()) else {
+        return Err("the model answered nothing".into());
+    };
+    let v = reply(json!({"op": "summary", "topic": topic, "summary": line, "seq": seq}));
+    match v["error"].as_str() {
+        Some("stale") | None => Ok(()),
+        Some(e) => Err(e.to_owned()),
+    }
+}
+
+fn summarize(rest: &[String]) {
+    let a = Args::parse(rest, &["--quiet", "--max-wait"]);
+    if !a.pos.is_empty() {
+        usage();
+    }
+    let secs = |name, default| Duration::from_secs(a.opt(name).unwrap_or(default));
+    let mut debounce = summarizer::Debounce::new(secs("--quiet", 20), secs("--max-wait", 120));
+    let cmd = std::env::var("CREWBOARD_SUMMARY_CMD").unwrap_or_else(|_| summarizer::DEFAULT_CMD.into());
+
+    // Subscribe before reading the topics, so no message falls between the two.
+    let (tx, rx) = std::sync::mpsc::channel::<(String, u64)>();
+    let mut live = request(json!({"op": "sub", "topics": ["*"]}));
+    std::thread::spawn(move || {
+        loop {
+            let (_, m) = next(&mut live);
+            if let (Some(topic), Some(seq)) = (m["topic"].as_str(), m["seq"].as_u64()) {
+                let _ = tx.send((topic.to_owned(), seq));
+            }
+        }
+    });
+    let now = std::time::Instant::now();
+    for t in reply(json!({"op": "topics", "summary": true})).as_array().into_iter().flatten() {
+        let newest = t["newest"].as_u64().unwrap_or(0);
+        if let Some(topic) = t["topic"].as_str().filter(|_| t["summary_seq"].as_u64().unwrap_or(0) < newest) {
+            debounce.note(topic, newest, now);
+        }
+    }
+    loop {
+        for (topic, seq) in rx.try_iter() {
+            debounce.note(&topic, seq, std::time::Instant::now());
+        }
+        if let Some((topic, seq)) = debounce.take_due(std::time::Instant::now()) {
+            if let Err(e) = refresh(&topic, seq, &cmd) {
+                eprintln!("crewboard: summary of {topic}: {e}");
+                // Try again after the next quiet period.
+                debounce.note(&topic, seq, std::time::Instant::now());
+            }
+            continue;
+        }
+        let wait = debounce.wait(std::time::Instant::now()).unwrap_or(Duration::from_secs(3600));
+        if let Ok((topic, seq)) = rx.recv_timeout(wait) {
+            debounce.note(&topic, seq, std::time::Instant::now());
+        }
     }
 }
 

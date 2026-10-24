@@ -4,7 +4,9 @@
 //! (`hist` with lines ended by `{"end":true}`), except `sub`.
 //! - `{"op":"pub","topic":T,"body":B,"from":F}` -> `{"ok":true,"seq":N}`; a body over
 //!   `--max-msg` bytes or a `from` over 64 bytes is `{"ok":false,"error":"too_large"}`
-//! - `{"op":"hist","topic":T,"n":N}`, `{"op":"topics"}`, `{"op":"stat"}`
+//! - `{"op":"hist","topic":T,"n":N}`, `{"op":"topics","summary":true}`, `{"op":"stat"}`
+//! - `{"op":"summary","topic":T,"summary":S,"seq":N}` -> `{"ok":true}`; `topics` with
+//!   `summary:true` adds `summary` and `summary_seq`. `seq` is optional; `stale` when older.
 //! - `{"op":"sub","topics":[T..],"since":N,"boot":ID}` streams until either side closes.
 //!   The first line is `{"boot":ID,"seq":N}`: the board's boot id and seq. With `since`,
 //!   retained messages above it follow, led by `{"gap":true,"oldest":N}` when some were
@@ -130,7 +132,14 @@ fn answer(board: &Shared, pid: i32, req: &Value) -> String {
             let lines = b.history(req["topic"].as_str().unwrap_or(""), req["n"].as_u64().unwrap_or(50) as usize);
             return lines.concat() + "{\"end\":true}\n";
         }
-        Some("topics") => b.topics(),
+        Some("topics") => b.topics(req["summary"] == true),
+        Some("summary") => match (req["topic"].as_str(), req["summary"].as_str()) {
+            (Some(topic), Some(text)) => match b.set_summary(topic, text, req["seq"].as_u64()) {
+                Ok(()) => json!({"ok": true}),
+                Err(e) => err(e),
+            },
+            _ => err("bad_request"),
+        },
         Some("stat") => b.stat(),
         _ => err("bad_request"),
     };
