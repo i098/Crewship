@@ -170,3 +170,13 @@ def test_reply_json_sends_only_its_answer(tmp_path, surface, field, answer):
     assert result["sends"] == expected
     if surface != "instagram":
         assert result["notes"] == ""
+
+
+@pytest.mark.parametrize("surface", ["instagram", "photon", "bluebubbles"])
+@pytest.mark.parametrize("opener", ["I'll check", "I will check"])
+def test_reply_that_echoes_the_request_in_a_check_template_is_not_sent(tmp_path, surface, opener):
+    message = "Once all the token savings are finished - push all new changes to crewship on GitHub"
+    answer = f"{opener} push all new changes to crewship on GitHub."
+    output = json.dumps({"kind": "reply", "answer": answer, "evidence": [{"source": "status", "quote": answer}]})
+    result = run_desk(tmp_path, surface, output, status=answer, message=message)
+    assert result["sends"] == []

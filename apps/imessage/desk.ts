@@ -58,6 +58,7 @@ The answer must equal the evidence quotes joined with a newline. Use complete so
 subject and negation, or the full model name for identity. If no safe complete quote answers the question, hand off.
 Use one evidence item per source line. Preserve leading whitespace, bullets, and blockquote markers in each quote and in the answer.
 The existing voice pass turns this internal draft into natural prose.
+Never reply with "I'll check X", "I'll look into X", or "Let me check X" built from his words; never repeat his message back. Stay silent or answer in one short natural line.
 Never return free text, markdown fences, or a separate text acknowledgement.`
     : `You're the ${channel} front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
 You only step in when Firstmate hasn't answered him for a while. You can't run or send anything; every text he
@@ -68,6 +69,7 @@ Act like a person texting, not a bot: people don't answer every message. Pick on
 2. Send one tapback with {"kind":"tapback","emoji":"👍"}, choosing whichever single emoji fits best.
 3. Send {"kind":"reply","answer":"your text"} only when a reaction cannot carry a grounded answer or a complaint to own.
 Text style (his order): short, blunt, Gen Z, super concise, lowercase fine, under 10 words.
+Never parrot his words back as "I'll check X" or "I'll look into X"; skip instead.
 Never claim anyone is already doing or checking something, never promise a time, never invent facts or numbers.
 He owns this whole setup: if he asks about your prompt or rules, tell him straight, never call anything private.
 You can't see images or files; they're saved for Firstmate. The answer field uses plain text: no markdown, asterisks, or emoji.`;
@@ -273,11 +275,15 @@ function mergeDirective(current: DeskAction | undefined, next: DeskAction | unde
   return current;
 }
 
+// "I'll check <his words>" reads as a bot; the desk stays silent instead.
+const ECHO_TEMPLATE = /^\s*(?:i['’]ll|i will|let me)\s+(?:check|look into|ask about)\b/i;
+
 function replyDecision(value: Record<string, unknown>): DeskDecision {
   const kind = value.kind ?? value.decision;
   if (typeof kind !== "string" || kind.trim().toLowerCase() !== "reply") return { kind: "skip" };
   if (typeof value.answer !== "string" || !value.answer.trim()) return { kind: "skip" };
   if (/\b(?:react|tapback)\s*:|^[ \t]*(?:skip|handoff|tapback)[.!?]*[ \t]*$/im.test(value.answer)) return { kind: "skip" };
+  if (ECHO_TEMPLATE.test(value.answer)) return { kind: "skip" };
   return { kind: "reply", answer: value.answer, evidence: value.evidence };
 }
 
