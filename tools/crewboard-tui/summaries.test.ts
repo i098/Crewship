@@ -1,12 +1,17 @@
-import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, expect, test } from "bun:test"
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fetchSummaries } from "./summaries.ts"
 
+const dirs: string[] = []
+afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })))
+
 // A fake `crewboard` that prints `reply` and exits with `code`.
 function fake(reply: string, code = 0) {
-  const path = join(mkdtempSync(join(tmpdir(), "cbtui-")), "crewboard")
+  const dir = mkdtempSync(join(tmpdir(), "cbtui-"))
+  dirs.push(dir)
+  const path = join(dir, "crewboard")
   writeFileSync(path, `#!/bin/sh\n[ "$*" = "topics --summary --json" ] || exit 9\ncat <<'EOF'\n${reply}\nEOF\nexit ${code}\n`)
   chmodSync(path, 0o755)
   return path
