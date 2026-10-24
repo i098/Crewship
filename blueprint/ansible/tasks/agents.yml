@@ -144,15 +144,15 @@
     - result.backups | length > 0 or result.skipped | length > 0
 
 # The kun skill (https://github.com/kunchenguid/kun) has no releases, so there is no
-# published checksum: install the latest default-branch commit, resolved by one REST
-# call (gh, signed in on the host). The commit SHA goes in the task output and in a marker
+# published checksum: install the latest default-branch commit, resolved unauthenticated
+# with git ls-remote (the repo is public). The commit SHA goes in the task output and in a marker
 # inside the skill dir; a matching marker skips the install. `-a codex -a claude-code`
 # installs to ~/.agents/skills and links Claude Code; the default agent set fails on
 # PromptScript, which refuses global skills.
 - name: Install the kun skill at the latest default-branch commit
   ansible.builtin.shell: |
     set -euo pipefail
-    sha=$(gh api -H 'Accept: application/vnd.github.sha' repos/kunchenguid/kun/commits/HEAD)
+    sha=$(git ls-remote https://github.com/kunchenguid/kun HEAD | cut -f1)
     marker='{{ kun_skill_dir }}/.crewship-sha'
     if [ "$(cat "$marker" 2>/dev/null || true)" = "$sha" ]; then echo "kun already at $sha"; exit 0; fi
     npx --yes skills add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y

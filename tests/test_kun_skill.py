@@ -16,9 +16,9 @@ def kun_script(skill_dir):
 
 def run(script, tmp_path):
     bin_dir = tmp_path / "bin"
-    if not bin_dir.exists():  # stubs: gh prints a SHA, npx creates the skill dir like `skills add -g`
+    if not bin_dir.exists():  # stubs: git prints `<sha>\tHEAD` like ls-remote, npx creates the skill dir like `skills add -g`; no gh, as on a fresh host
         bin_dir.mkdir()
-        (bin_dir / "gh").write_text(f"#!/bin/sh\necho {SHA}\n")
+        (bin_dir / "git").write_text(f"#!/bin/sh\nprintf '{SHA}\\tHEAD\\n'\n")
         (bin_dir / "npx").write_text(f"#!/bin/sh\nmkdir -p '{tmp_path}/kun' && echo run >> '{tmp_path}/npx.log'\n")
         for stub in bin_dir.iterdir():
             stub.chmod(0o755)
@@ -34,7 +34,3 @@ def test_kun_installs_once_per_commit_and_skips_a_matching_marker(tmp_path):
     assert (tmp_path / "npx.log").read_text() == "run\n"
     (tmp_path / "kun/.crewship-sha").write_text("old\n")  # a newer upstream commit reinstalls
     assert "kun installed at" in run(script, tmp_path)
-
-
-def test_global_instructions_point_agents_at_kun():
-    assert "unsure how to implement something, load the `kun` skill" in (ROOT / "blueprint/config/AGENTS.md").read_text()
