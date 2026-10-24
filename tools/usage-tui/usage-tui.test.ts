@@ -10,6 +10,9 @@ test("stats sync runs omp outside the TUI's process group and session", async ()
   const log = join(dir, "calls.log")
   writeFileSync(join(dir, "omp"), `#!/bin/sh\necho "$* $(ps -o pgid=,sid= -p $$)" >> "${log}"\n`)
   chmodSync(join(dir, "omp"), 0o755)
+  // The DeepSeek read would otherwise reach the owner's Mac over the real `ssh mac` alias.
+  writeFileSync(join(dir, "ssh"), "#!/bin/sh\nexit 1\n")
+  chmodSync(join(dir, "ssh"), 0o755)
 
   const tui = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts")], {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir },

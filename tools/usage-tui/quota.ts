@@ -85,17 +85,18 @@ const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v 
 
 // ---- DeepSeek: prepaid balance, read from the platform website ----------------
 // DeepSeek has no quota API, and omp's only key is a reseller key that /user/balance refuses.
-// The site shows a USD balance, so read the response the signed-in site itself requests.
-export type DeepseekSummary = { normal_wallets?: { currency: string; balance: string }[] }
+// The site shows the prepaid balance per wallet currency, so read the response the signed-in site itself requests.
+export type DeepseekSummary = { normal_wallets?: { currency?: string; balance?: string | number }[] }
 
 export function deepseekRow(json: DeepseekSummary): QuotaRow {
-  const wallets = json.normal_wallets ?? []
+  const wallets = (json.normal_wallets ?? []).flatMap(w => (typeof w?.currency === "string" && w.currency ? [{ currency: w.currency, balance: w.balance }] : []))
   const w = wallets.find(w => w.currency === "USD") ?? wallets[0]
-  const bal = w?.balance ? Number(w.balance) : NaN
-  return { account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: finite(bal) ? `balance ${usd(bal)}` : "no balance reported" }
+  const raw = w?.balance
+  const bal = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN
+  return { account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: w && finite(bal) ? `balance ${money(bal, w.currency)}` : "no balance reported" }
 }
 
-const usd = (v: number) => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
+const money = (v: number, currency: string) => `${v < 0 ? "-" : ""}${currency === "USD" ? "$" : `${currency} `}${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
 
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
@@ -323,7 +324,9 @@ async function fetchDeepseek(): Promise<DeepseekSummary> {
   })
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
   if ((await p.exited) !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
-  return JSON.parse(out) as DeepseekSummary
+  const line = out.split("\n").findLast(l => l.trimStart().startsWith("{"))
+  if (!line) throw new Error("no JSON in the CDP output")
+  return JSON.parse(line) as DeepseekSummary
 }
 
 // A read costs a background tab in the owner's browser, so a success holds for 10 minutes; a failure retries next minute.
