@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseek, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -87,9 +87,32 @@ test("deepseekRow shows the site balance labelled with its wallet currency", () 
   expect(deepseekRow({}).note).toBe("no balance reported")
 })
 
+test("a failed DeepSeek read holds its error, so no second ssh runs within 10 minutes", async () => {
+  // The probe runs as a child with the stub first on PATH: Bun.spawn resolves commands from the
+  // PATH a process starts with, so an in-test process.env.PATH edit would still reach the real Mac.
+  const dir = mkdtempSync(join(tmpdir(), "usage-tui-ds-"))
+  const log = join(dir, "ssh.log")
+  writeFileSync(join(dir, "ssh"), `#!/bin/sh\necho called >> "${log}"\necho "ssh: connect to host mac port 22: Connection refused" >&2\nexit 255\n`)
+  chmodSync(join(dir, "ssh"), 0o755)
+  const probe = join(dir, "probe.ts")
+  writeFileSync(probe, [
+    `const { deepseek } = await import(${JSON.stringify(join(import.meta.dir, "quota.ts"))})`,
+    "const a = await deepseek()",
+    "const b = await deepseek()",
+    `console.log(JSON.stringify({ error: a.error ?? null, heldTwice: b === a }))`,
+    "",
+  ].join("\n"))
+  const p = Bun.spawn(["bun", probe], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, stdout: "pipe", stderr: "ignore" })
+  const out = JSON.parse(await new Response(p.stdout).text()) as { error: string | null; heldTwice: boolean }
+  expect(await p.exited).toBe(0)
+  expect(out.error).toContain("Connection refused")
+  expect(out.heldTwice).toBe(true)
+  expect(readFileSync(log, "utf8")).toBe("called\n")
+}, 30_000)
+
 test("buildRows shows an error row when the DeepSeek site read fails", () => {
-  const rows = buildRows({ deepseekError: "deepseek: connection refused" })
-  expect(rows.find(r => r.account === "deepseek")).toMatchObject({ leftPct: null, note: "unavailable: deepseek: connection refused" })
+  const rows = buildRows({ deepseekError: "connection refused" })
+  expect(rows.find(r => r.account === "deepseek")).toMatchObject({ leftPct: null, note: "unavailable: connection refused" })
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {

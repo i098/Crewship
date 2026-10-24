@@ -305,7 +305,7 @@ try:
     biz = main()
     print(json.dumps({"normal_wallets": biz.get("normal_wallets")}))
 except Exception as e:
-    print(f"deepseek: {e}", file=sys.stderr)
+    print(str(e), file=sys.stderr)
     sys.exit(1)
 `
 
@@ -327,9 +327,10 @@ async function fetchDeepseek(): Promise<DeepseekSummary> {
   return JSON.parse(line) as DeepseekSummary
 }
 
-// A read costs a background tab in the owner's browser, so a success holds for 10 minutes; a failure retries next minute.
-async function deepseek(): Promise<{ value?: DeepseekSummary; error?: string }> {
-  if (deepseekAt && Date.now() - deepseekAt < (deepseekLast.error ? QUOTA_MIN_MS : DEEPSEEK_MIN_MS)) return deepseekLast
+// A read costs a background tab in the owner's browser, so any result - success or failure - holds
+// for 10 minutes: a signed-out owner must not see a tab appear and vanish every minute.
+export async function deepseek(): Promise<{ value?: DeepseekSummary; error?: string }> {
+  if (deepseekAt && Date.now() - deepseekAt < DEEPSEEK_MIN_MS) return deepseekLast
   deepseekAt = Date.now()
   try {
     return (deepseekLast = { value: await fetchDeepseek() })
