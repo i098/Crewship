@@ -3,13 +3,12 @@ import { mkdtempSync, readFileSync, writeFileSync, chmodSync, existsSync, rmSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Runs the real TUI with the real `setsid` and a stub `omp` that records its own pgid and sid.
-// The quota call answers with empty JSON, so only the stats sync writes to the log.
-// Oracle: `ps` on the TUI pid. The omp child must be in a different process group and session.
+// Runs the real TUI with the real `setsid` and a stub `omp` that records its args, pgid and sid.
+// Oracle: `ps` on the TUI pid. The stats-sync omp child must be in a different process group and session.
 test("stats sync runs omp outside the TUI's process group and session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "usage-tui-"))
   const log = join(dir, "calls.log")
-  writeFileSync(join(dir, "omp"), `#!/bin/sh\ncase "$1" in stats) ps -o pgid=,sid= -p $$ >> "${log}" ;; usage) printf '{"reports":[]}\\n' ;; esac\n`)
+  writeFileSync(join(dir, "omp"), `#!/bin/sh\necho "$* $(ps -o pgid=,sid= -p $$)" >> "${log}"\n`)
   chmodSync(join(dir, "omp"), 0o755)
 
   const tui = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts")], {
@@ -22,14 +21,15 @@ test("stats sync runs omp outside the TUI's process group and session", async ()
   // Integration test: wait for the stub's log write as a filesystem event, not a delay.
   const { promise, resolve } = Promise.withResolvers<void>()
   const onChange = () => {
-    if (existsSync(log) && readFileSync(log, "utf8").includes("\n")) resolve()
+    // Only the stats sync uses setsid; the usage read shares the TUI's group, so wait for its own line.
+    if (existsSync(log) && readFileSync(log, "utf8").split("\n").some(l => l.startsWith("stats "))) resolve()
   }
   let watcher: FSWatcher | undefined
   try {
     watcher = watch(dir, onChange)
     onChange()
     await promise
-    const child = readFileSync(log, "utf8").trim().split(/\s+/)
+    const child = readFileSync(log, "utf8").split("\n").find(l => l.startsWith("stats "))!.split(/\s+/).slice(-2)
     const parent = Bun.spawnSync(["ps", "-o", "pgid=,sid=", "-p", String(tui.pid)]).stdout.toString().trim().split(/\s+/)
     expect(parent).toHaveLength(2)
     expect(child).toHaveLength(2)

@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -24,6 +24,7 @@ const FIXTURE: QuotaInput = {
   },
   zai: { data: { limits: [{ unit: 3, number: 5, usage: 1000, remaining: 250, nextResetTime: NOW + 60 * MIN }, { unit: 6, number: 1, usage: 8000, remaining: 8000, nextResetTime: NOW + 6 * 1440 * MIN }] } },
   mercury: { keyIds: [9, 4], tokens: { 4: 25_000_000, 9: 150_000_000 } },
+  deepseek: { normal_wallets: [{ currency: "USD", balance: "12.5" }] },
 }
 
 test("leftOf computes percent left and clamps overuse", () => {
@@ -74,8 +75,19 @@ test("--once prints the fixture without starting the TUI", async () => {
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
-  expect(out).toContain("no quota API")
+  expect(out).toContain("balance $12.50")
   expect(out).toContain("not reported")
+})
+
+test("deepseekRow shows the USD balance from the site summary", () => {
+  expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: "12.5" }] }).note).toBe("balance $12.50")
+  expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "10" }, { currency: "USD", balance: "-0.005077804" }] }).note).toBe("balance -$0.0051")
+  expect(deepseekRow({}).note).toBe("no balance reported")
+})
+
+test("buildRows shows an error row when the DeepSeek site read fails", () => {
+  const rows = buildRows({ deepseekError: "deepseek: connection refused" })
+  expect(rows.find(r => r.account === "deepseek")).toMatchObject({ leftPct: null, note: "unavailable: deepseek: connection refused" })
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {

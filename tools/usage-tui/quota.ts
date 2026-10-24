@@ -83,6 +83,20 @@ export function mercuryRows(keyIds: number[], tokens: Record<string, number>): Q
 }
 const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v))
 
+// ---- DeepSeek: prepaid balance, read from the platform website ----------------
+// DeepSeek has no quota API, and omp's only key is a reseller key that /user/balance refuses.
+// The site shows a USD balance, so read the response the signed-in site itself requests.
+export type DeepseekSummary = { normal_wallets?: { currency: string; balance: string }[] }
+
+export function deepseekRow(json: DeepseekSummary): QuotaRow {
+  const wallets = json.normal_wallets ?? []
+  const w = wallets.find(w => w.currency === "USD") ?? wallets[0]
+  const bal = w?.balance ? Number(w.balance) : NaN
+  return { account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: finite(bal) ? `balance ${usd(bal)}` : "no balance reported" }
+}
+
+const usd = (v: number) => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
+
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
@@ -92,6 +106,8 @@ export type QuotaInput = {
   zaiError?: string
   mercury?: { keyIds: number[]; tokens: Record<string, number> }
   mercuryError?: string
+  deepseek?: DeepseekSummary
+  deepseekError?: string
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
@@ -103,8 +119,8 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
-  // The only DeepSeek key omp holds is a reseller key; the official /user/balance and the reseller host both refuse it.
-  rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "no quota API" })
+  if (inp.deepseek) rows.push(deepseekRow(inp.deepseek))
+  else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `unavailable: ${inp.deepseekError}` : "not reported" })
   return rows
 }
 
@@ -215,9 +231,116 @@ function mercuryKeyIds(): number[] {
   }
 }
 
+// Reads the balance the signed-in Dia on the Mac loads: a background tab (never focused) replays the
+// site's own request, and CDP hands back that response body, so no cookie or token ever leaves Dia.
+const DEEPSEEK_CDP = String.raw`
+import base64, json, os, socket, struct, sys, time, urllib.request
+PORT, WANT = 9222, "/api/v0/users/get_user_summary"
+def get(p):
+    return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}{p}", timeout=10))
+def open_ws(url):
+    s = socket.create_connection(("127.0.0.1", PORT), timeout=20)
+    key = base64.b64encode(os.urandom(16)).decode()
+    s.sendall(f"GET /{url.split('/', 3)[3]} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode())
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        c = s.recv(4096)
+        if not c:
+            raise OSError("handshake failed")
+        buf += c
+    return s
+def send(s, text):
+    data = text.encode()
+    n = len(data)
+    head = bytes([0x81, 0x80 | n]) if n < 126 else bytes([0x81, 0xFE]) + struct.pack(">H", n)
+    mask = os.urandom(4)
+    s.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+def read(s, n):
+    out = b""
+    while len(out) < n:
+        c = s.recv(n - len(out))
+        if not c:
+            raise EOFError("connection closed")
+        out += c
+    return out
+def recv(s):
+    while True:
+        b1, b2 = read(s, 2)
+        n = b2 & 0x7F
+        if n == 126:
+            n = struct.unpack(">H", read(s, 2))[0]
+        elif n == 127:
+            n = struct.unpack(">Q", read(s, 8))[0]
+        payload = read(s, n)
+        if b1 & 0x0F in (1, 2):
+            return payload.decode()
+def call(s, i, method, params):
+    send(s, json.dumps({"id": i, "method": method, "params": params}))
+    while True:
+        m = json.loads(recv(s))
+        if m.get("id") == i:
+            return m
+def main():
+    browser = open_ws(get("/json/version")["webSocketDebuggerUrl"])
+    target = call(browser, 1, "Target.createTarget", {"url": "https://platform.deepseek.com/usage", "background": True})["result"]["targetId"]
+    try:
+        deadline, page = time.time() + 20, None
+        while time.time() < deadline and not page:
+            page = next((p["webSocketDebuggerUrl"] for p in get("/json/list") if p.get("id") == target and p.get("type") == "page"), None)
+            if not page:
+                time.sleep(0.3)
+        if not page:
+            raise OSError("page target did not appear")
+        ws = open_ws(page)
+        call(ws, 2, "Network.enable", {})
+        call(ws, 3, "Page.enable", {})
+        call(ws, 4, "Page.reload", {})
+        while time.time() < deadline:
+            m = json.loads(recv(ws))
+            if m.get("method") == "Network.responseReceived" and WANT in m["params"]["response"]["url"]:
+                body = call(ws, 5, "Network.getResponseBody", {"requestId": m["params"]["requestId"]})["result"]["body"]
+                return json.loads(body)["data"]["biz_data"]
+        raise OSError("balance request not seen")
+    finally:
+        call(browser, 6, "Target.closeTarget", {"targetId": target})
+try:
+    biz = main()
+    print(json.dumps({"normal_wallets": biz.get("normal_wallets")}))
+except Exception as e:
+    print(f"deepseek: {e}", file=sys.stderr)
+    sys.exit(1)
+`
+
+const DEEPSEEK_MIN_MS = 10 * 60_000
+let deepseekAt = 0
+let deepseekLast: { value?: DeepseekSummary; error?: string } = {}
+
+async function fetchDeepseek(): Promise<DeepseekSummary> {
+  const p = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "mac", "python3", "-"], {
+    stdin: new Blob([DEEPSEEK_CDP]),
+    stdout: "pipe",
+    stderr: "pipe",
+    signal: AbortSignal.timeout(40_000),
+  })
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
+  if ((await p.exited) !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
+  return JSON.parse(out) as DeepseekSummary
+}
+
+// A read costs a background tab in the owner's browser, so a success holds for 10 minutes; a failure retries next minute.
+async function deepseek(): Promise<{ value?: DeepseekSummary; error?: string }> {
+  if (deepseekAt && Date.now() - deepseekAt < (deepseekLast.error ? QUOTA_MIN_MS : DEEPSEEK_MIN_MS)) return deepseekLast
+  deepseekAt = Date.now()
+  try {
+    return (deepseekLast = { value: await fetchDeepseek() })
+  } catch (e) {
+    return (deepseekLast = { error: (e as Error).message })
+  }
+}
+
 export async function loadQuota(): Promise<QuotaInput> {
   const msg = (e: unknown) => (e as Error).message
-  const [omp, zai, mercury] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t }))])
+  const [omp, zai, mercury, ds] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek()])
   return {
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
@@ -225,5 +348,7 @@ export async function loadQuota(): Promise<QuotaInput> {
     zaiError: zai.status === "rejected" ? `unavailable: ${msg(zai.reason)}` : undefined,
     mercury: mercury.status === "fulfilled" ? mercury.value : undefined,
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
+    deepseek: ds.status === "fulfilled" ? ds.value.value : undefined,
+    deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value.error,
   }
 }
