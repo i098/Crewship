@@ -303,7 +303,8 @@ function draw() {
   const W = Math.min(MAXW, renderer.width)
   const inner = W - 4
   column.width = W
-  const H = Math.max(3, Math.min(10, renderer.height - 44))
+  const quotaHeight = 4 + (quota ? buildRows(quota).length : 0)
+  const H = Math.max(3, Math.min(10, renderer.height - 44 - quotaHeight))
   if (data) {
     const p = laParts(data.now)
     const stamp = `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")} ${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")} LA`

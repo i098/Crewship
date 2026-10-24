@@ -67,7 +67,11 @@ test("--once prints the fixture without starting the TUI", async () => {
   const p = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts"), "--once", "--fixture", file], { stdout: "pipe" })
   const out = await new Response(p.stdout).text()
   expect(await p.exited).toBe(0)
-  const lines = out.trimEnd().split("\n").map(l => l.replace(/\s+/g, " "))
+  const raw = out.trimEnd().split("\n")
+  expect(raw.map(l => l.slice(0, 25).replace(/\s+/g, " ").trim())).toEqual([
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek -",
+  ])
+  const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
   expect(out).toContain("no quota API")
