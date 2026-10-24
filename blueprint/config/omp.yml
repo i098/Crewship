@@ -87,6 +87,7 @@ statusLine:
   transparent: true
 composer:
   shape: borderless
+  tokenRate: true
 mnemopi:
   noEmbeddings: true
   llmMode: smol
@@ -100,6 +101,7 @@ task:
 tui:
   vimMode: true
   vimModeDisplay: icon
+  tight: true
 # Compact every session at 200k context: turns above 400k carried most Claude
 # tokens in a week of usage data.
 compaction:
