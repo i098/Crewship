@@ -87,6 +87,7 @@ statusLine:
   transparent: true
 composer:
   shape: borderless
+  tokenRate: true
 mnemopi:
   noEmbeddings: true
   llmMode: smol
@@ -100,6 +101,7 @@ task:
 tui:
   vimMode: true
   vimModeDisplay: icon
+  tight: true
 retry:
   fallbackChains:
     anthropic/claude-opus-5-5:
