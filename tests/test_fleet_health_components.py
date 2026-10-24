@@ -97,3 +97,46 @@ def test_npm_tool_version_keeps_custom_suffix_from_install_directory(tmp_path):
         tmp_path,
     )
     assert version == "0.1.87-sketch9"
+
+
+def test_newest_atime_walks_package_dir_and_missing_path_is_none(tmp_path):
+    import os
+
+    pkg = tmp_path / "pkg/sub"
+    pkg.mkdir(parents=True)
+    (pkg / "a.py").write_text("")
+    os.utime(pkg / "a.py", (1_700_000_000, 1_700_000_000))
+    (tmp_path / "pkg/b.py").write_text("")
+    os.utime(tmp_path / "pkg/b.py", (1_800_000_000, 1_700_000_000))
+    out = _bun(
+        'import {newestAtime} from "./components.ts";'
+        f'console.log(JSON.stringify([newestAtime("{tmp_path}/pkg/sub/a.py"), newestAtime("{tmp_path}/pkg/b.py"), newestAtime("{tmp_path}/none")]))',
+        tmp_path,
+    )
+    assert out == [1_700_000_000_000, 1_800_000_000_000, None]
+
+
+def test_plugin_trace_uses_its_own_install_dir_and_sgrep_reads_cargo_commit(tmp_path):
+    import os
+
+    cache = tmp_path / ".omp/plugins/cache/plugins"
+    (cache / "ponytail___ponytail___5.3.2").mkdir(parents=True)
+    (cache / "caveman___caveman___4.0.1").mkdir(parents=True)
+    os.utime(cache / "ponytail___ponytail___5.3.2", (1_700_000_000, 1_700_000_000))
+    os.utime(cache / "caveman___caveman___4.0.1", (1_800_000_000, 1_800_000_000))
+    (tmp_path / ".cargo").mkdir()
+    (tmp_path / ".cargo/.crates2.json").write_text(
+        json.dumps(
+            {
+                "installs": {
+                    "sgrep 0.3.0 (git+https://github.com/x/sgrep#dde0c13c8d6081f9c6d6d1d33580eebf1034aecf)": {}
+                }
+            }
+        )
+    )
+    out = _bun(
+        'import {components, traceFor} from "./components.ts"; const by = n => components.find(c => c.name === n);'
+        'console.log(JSON.stringify([traceFor(by("ponytail"), null), traceFor(by("caveman"), null), await by("sgrep").installed()]))',
+        tmp_path,
+    )
+    assert out == [1_700_000_000_000, 1_800_000_000_000, "dde0c13"]

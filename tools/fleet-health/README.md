@@ -16,3 +16,6 @@ Keys: `↑↓` or `j k` scroll, `r` refresh, `q` quit. Installed versions refres
 - A component whose `custom` pattern in `components.ts` matches the installed version (lavish-axi, the owner's `-sketch` build) shows `custom`, never outdated. Commands are looked up on PATH, `~/.cargo/bin`, `~/.bun/bin`, `/usr/local/bin` and the fleet browser directory; a live process counts as in use.
 - Unknown means the component has no published release to compare (sgrep builds from its default branch), or the lookup failed.
 - Colors come from `../tui-theme/theme.ts`; the background stays transparent.
+- Last used: a live process, else the newest access time under the binary or the component's own files (plugin install dir, spectrum-ts package, the pruner's Python libs for psutil). `never seen` means no file or process shows use. The filesystem is mounted `relatime`, so atimes can lag by about a day.
+- sgrep has no releases: its installed commit (from cargo's `.crates2.json`) is compared with the default-branch head commit.
+- Set `GITHUB_TOKEN` or `GH_TOKEN` to raise the unauthenticated GitHub rate limit; a 403 shows as the unknown note.

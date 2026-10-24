@@ -6,6 +6,8 @@ export const CACHE_MS = 30 * 60_000 // unauthenticated GitHub allows 60 requests
 const CACHE_DIR = `${process.env.XDG_CACHE_HOME ?? `${HOME}/.cache`}/fleet-health`
 const CACHE_FILE = `${CACHE_DIR}/latest.json`
 const RETRY_MS = 5 * 60_000
+// Optional: a token in the environment lifts the 60 requests/hour unauthenticated GitHub limit. Never read from files.
+const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN
 const GAP_MS = 300
 
 export type Latest = { version: string | null; at: number; error?: string }
@@ -20,7 +22,7 @@ export const loadCache = (): Cache => {
 }
 
 const getJson = async (url: string) => {
-  const response = await fetch(url, { headers: { "user-agent": "crewship-fleet-health", accept: "application/json" }, signal: AbortSignal.timeout(15_000) })
+  const response = await fetch(url, { headers: { "user-agent": "crewship-fleet-health", accept: "application/json", ...(TOKEN && url.includes("api.github.com") ? { authorization: `Bearer ${TOKEN}` } : {}) }, signal: AbortSignal.timeout(15_000) })
   if (!response.ok) throw new Error(`HTTP ${response.status} ${new URL(url).host}`)
   return response.json() as Promise<any>
 }
@@ -66,8 +68,8 @@ async function fetchLatest(source: Source): Promise<string | null> {
       const releases = await getJson("https://codeberg.org/api/v1/repos/forgejo/forgejo/releases?draft=false&pre-release=false&limit=50")
       return newest(releases.map((r: any) => r.tag_name)).replace(/^v/, "")
     }
-    case "none":
-      return null
+    case "head":
+      return String((await getJson(`https://api.github.com/repos/${source.repo}/commits/HEAD`)).sha).slice(0, 7)
   }
 }
 
@@ -75,7 +77,6 @@ async function fetchLatest(source: Source): Promise<string | null> {
 export async function refreshLatest(list: Component[], cache: Cache, onUpdate: () => void): Promise<void> {
   const now = Date.now()
   for (const c of list) {
-    if (c.source.kind === "none") { cache[c.name] = { version: null, at: now }; continue }
     const hit = cache[c.name]
     if (hit && now - hit.at < (hit.error ? RETRY_MS : CACHE_MS)) continue
     try {

@@ -1,7 +1,7 @@
 // Every component Crewship installs, mirrored from scripts/provisions.py
 // (GITHUB_LATEST, NPM_LATEST, OMP_PLUGINS) plus the sources Ansible or provisions.py
 // install themselves. tests/test_fleet_health_components.py fails when the two drift.
-import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 export const HOME = process.env.HOME ?? ""
@@ -16,11 +16,12 @@ export type Source =
   | { kind: "rustup" }
   | { kind: "pypi"; pkg: string }
   | { kind: "forgejo" }
-  | { kind: "none"; note: string }
+  | { kind: "head"; repo: string } // built from the default branch: compared by commit
 
 // bin: the command (or file) whose access time shows the last use; absent when no file is evidence of use.
+// trace: a file or directory whose newest access time shows use when the command itself is not the evidence.
 // custom: an installed version matching it is the owner's own build, never outdated.
-export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null>; bin?: string; custom?: RegExp }
+export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null>; bin?: string; trace?: string; custom?: RegExp }
 
 // Executable paths and names of every live process, from /proc exe and argv.
 export function liveProcesses(): Set<string> {
@@ -35,6 +36,33 @@ export function liveProcesses(): Set<string> {
 
 export const isRunning = (bin: string, path: string | null, live: Set<string>) =>
   live.has(bin) || live.has(basename(bin)) || (path !== null && live.has(path))
+
+// Newest access time under a path (files up to 3 levels deep, at most 500 entries): reading any file counts as use.
+export function newestAtime(path: string, depth = 3, budget = { n: 500 }): number | null {
+  try {
+    const st = statSync(path)
+    if (!st.isDirectory() || depth === 0) return st.atimeMs
+    let best = st.atimeMs
+    for (const entry of readdirSync(path)) {
+      if (budget.n-- <= 0) break
+      best = Math.max(best, newestAtime(join(path, entry), depth - 1, budget) ?? 0)
+    }
+    return best
+  } catch {
+    return null
+  }
+}
+
+// Newest access time that shows this component in use: its trace path (a plugin narrows to its own install dir), else its binary.
+export function traceFor(c: Component, binary: string | null): number | null {
+  let trace = c.trace
+  if (trace && c.group === "omp plugin") {
+    const dir = readdirSync(trace).filter(d => d.startsWith(`${c.name}___${c.name}___`)).sort().pop()
+    trace = dir ? join(trace, dir) : undefined
+  }
+  const target = trace ?? binary
+  return target ? newestAtime(target) : null
+}
 
 // Real path of a command, or null. relatime keeps atime within a day of the last read; a running process is checked separately.
 export const binPath = (bin: string): string | null => {
@@ -104,6 +132,7 @@ const npm = (name: string, pkg: string): Component => ({
 
 const plugin = (name: string, repo: string): Component => ({
   name, group: "omp plugin", source: { kind: "github", repo, prefix: "v" },
+  trace: `${HOME}/.omp/plugins/cache/plugins`, // narrowed to this plugin's install dir in scanUsage
   installed: async () => {
     try {
       const registry = JSON.parse(readFileSync(`${HOME}/.omp/plugins/installed_plugins.json`, "utf8"))
@@ -156,16 +185,30 @@ export const components: Component[] = [
   {
     name: "spectrum-ts", group: "bun", source: { kind: "npm", pkg: "spectrum-ts" },
     installed: async () => readVersion(`${HOME}/.local/share/code-factory/imessage/node_modules/spectrum-ts/package.json`),
+    trace: `${HOME}/.local/share/code-factory/imessage/node_modules/spectrum-ts`,
   },
   {
     name: "psutil", group: "python", source: { kind: "pypi", pkg: "psutil" },
+    trace: `${HOME}/.local/share/code-factory/pruner-venv/lib`, // the pruner imports it; its __pycache__ is read on each import
     installed: async () => {
       const py = `${HOME}/.local/share/code-factory/pruner-venv/bin/python`
       return existsSync(py) ? (await run([py, "-c", "import psutil;print(psutil.__version__)"])).trim().match(VERSION)?.[0] ?? null : null
     },
   },
   { name: "fdu", group: "python", source: { kind: "pypi", pkg: "fdu" }, installed: cmd("fdu"), bin: "fdu" },
-  { name: "sgrep", group: "source", source: { kind: "none", note: "tracks default branch" }, installed: cmd("sgrep"), bin: "sgrep" },
+  {
+    name: "sgrep", group: "source", source: { kind: "head", repo: "context-dot-dev/sgrep" }, bin: "sgrep",
+    // cargo records the commit it built in .crates2.json: "sgrep 0.3.0 (git+https://...#<sha>)".
+    installed: async () => {
+      try {
+        const crates = JSON.parse(readFileSync(`${HOME}/.cargo/.crates2.json`, "utf8")).installs ?? {}
+        const key = Object.keys(crates).find(k => k.startsWith("sgrep "))
+        return key?.match(/#([0-9a-f]{7})[0-9a-f]*\)/)?.[1] ?? null
+      } catch {
+        return null
+      }
+    },
+  },
   { name: "forgejo", group: "native", source: { kind: "forgejo" }, installed: async () => newestDir(`${HOME}/.local/share/crewship/forgejo`), bin: `${HOME}/.local/share/crewship/forgejo/${newestDir(`${HOME}/.local/share/crewship/forgejo`)}/forgejo` },
   plugin("ponytail", "DietrichGebert/ponytail"),
   plugin("i-have-adhd", "ayghri/i-have-adhd"),

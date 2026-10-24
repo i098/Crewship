@@ -2,8 +2,7 @@
 // Read-only fleet health TUI: every Crewship component, installed vs latest. Never installs or upgrades.
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
-import { statSync } from "node:fs"
-import { binPath, components, isRunning, liveProcesses } from "./components.ts"
+import { binPath, components, isRunning, liveProcesses, traceFor } from "./components.ts"
 import { CACHE_MS, classify, loadCache, refreshLatest } from "./latest.ts"
 
 const SLOW_MS = 5 * 60_000
@@ -14,15 +13,19 @@ const cache = loadCache()
 const installed = new Map<string, string | null>()
 const lastUsed = new Map<string, string>()
 
-// Evidence only: a live process running the binary, else the binary's access time (relatime: within a day).
+// Evidence only: a live process running the binary, else the newest access time under the binary or trace path.
+// The root filesystem is mounted relatime, so an atime is at most about a day stale; it never moves backwards.
+const age = (ms: number) => {
+  const h = (Date.now() - ms) / 3_600_000
+  return h < 1 ? "<1h ago" : h < 48 ? `${Math.round(h)}h ago` : h < 24 * 60 ? `${Math.round(h / 24)}d ago` : `${Math.round(h / 24 / 30)}mo ago`
+}
 function scanUsage() {
   const live = liveProcesses()
   for (const c of components) {
     const path = c.bin ? binPath(c.bin) : null
-    if (!c.bin || (!path && !isRunning(c.bin, null, live))) { lastUsed.set(c.name, "unknown"); continue }
-    if (isRunning(c.bin, path, live)) { lastUsed.set(c.name, "running now"); continue }
-    const age = (Date.now() - statSync(path!).atimeMs) / 3_600_000
-    lastUsed.set(c.name, age < 1 ? "<1h ago" : age < 48 ? `${Math.round(age)}h ago` : age < 24 * 60 ? `${Math.round(age / 24)}d ago` : `${Math.round(age / 24 / 30)}mo ago`)
+    if (c.bin && isRunning(c.bin, path, live)) { lastUsed.set(c.name, "running now"); continue }
+    const at = traceFor(c, path)
+    lastUsed.set(c.name, at === null ? "never seen" : age(at))
   }
 }
 let busy = false
@@ -37,9 +40,8 @@ function rows(): Row[] {
     if (have === null) {
       if (installed.has(c.name)) state = "not installed"
       else note = "checking…"
-    } else if (c.source.kind === "none") note = c.source.note
-    else if (latest === null && !c.custom?.test(have)) note = cache[c.name]?.error ?? (cache[c.name] ? "no release published" : "checking…")
-    else state = classify(have, latest, c.custom)
+    } else if (latest === null && !c.custom?.test(have)) note = cache[c.name]?.error ?? (cache[c.name] ? "no release published" : "checking…")
+    else state = c.source.kind === "head" ? (have === latest ? "up to date" : "outdated") : classify(have, latest, c.custom)
     if (state === "custom") note = "custom build"
     if (state !== "unknown" && cache[c.name]?.error) note = `stale: ${cache[c.name]!.error}`
     return { name: c.name, group: c.group, installed: have, latest, state, note, used: have === null ? "—" : lastUsed.get(c.name) ?? "…" }
