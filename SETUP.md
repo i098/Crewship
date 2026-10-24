@@ -31,6 +31,7 @@ If no launcher runtime exists, guide the user through the choices below without 
    Continue only after an explicit yes.
    Do not buy a server or start setup for the user before confirmation.
 4. Ask whether to connect from the laptop over SSH or show a command to run manually on the server.
+   Recommend [WezTerm](docs/herdr.md#client-terminal) as the terminal on the laptop.
    For SSH, use an existing alias or the hostname, non-root user, and optional port.
    Use existing SSH keys only; never request, copy, or store a private key or SSH password.
    Keep host-key checks on and agent forwarding off.
