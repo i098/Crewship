@@ -155,7 +155,7 @@
     sha=$(gh api -H 'Accept: application/vnd.github.sha' repos/kunchenguid/kun/commits/HEAD)
     marker='{{ kun_skill_dir }}/.crewship-sha'
     if [ "$(cat "$marker" 2>/dev/null || true)" = "$sha" ]; then echo "kun already at $sha"; exit 0; fi
-    npx --yes skills@1.7.4 add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y
+    npx --yes skills add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y
     echo "$sha" > "$marker"
     echo "kun installed at $sha"
   args:
