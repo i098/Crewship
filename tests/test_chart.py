@@ -634,7 +634,7 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
             assert (browsers / binary).resolve() == release / binary
 
 
-@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "preexisting"])
+@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "preexisting", "all"])
 def test_default_schedules_tab_preserves_existing_layout(tmp_path, mode):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
@@ -684,6 +684,12 @@ print(json.dumps({{"result": result}}))
 """)
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
+    pane_commands = ["usage-tui", "crewboard-tui", "fleet-health-tui"]
+    pane_log = tmp_path / "panes.log"
+    for name in pane_commands:
+        stub = local_bin / name
+        stub.write_text(f"#!/bin/sh\necho {name} >> {pane_log}\n")
+        stub.chmod(0o755)
     bun = local_bin / "bun"
     bun.write_text(f"#!{sys.executable}\nimport json, sys\n"
                    f"from pathlib import Path\nPath({str(viewer_call)!r}).write_text(json.dumps(sys.argv[1:]))\n")
@@ -705,9 +711,13 @@ print(json.dumps({{"result": result}}))
         "tasks": tool_tasks[start:end],
         "post_tasks": post_tasks,
     }]))
+    base = yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/base.yml").read_text())
     variables = {
+        **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
-                         "herdr": {"schedules_tab": mode != "disabled"}},
+                         "herdr": {"schedules_tab": mode != "disabled",
+                                  **({} if mode == "all" else {k: False for k in (
+                                      "usage_tab", "crewboard_tab", "fleet_health_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
         "crewship_share_dir": str(home / ".local/share/crewship"),
@@ -729,6 +739,11 @@ print(json.dumps({{"result": result}}))
     if mode in ("disabled", "deferred", "check", "preexisting"):
         assert actual == initial
         assert not viewer_call.exists()
+    elif mode == "all":
+        assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_commands]
+        assert len(actual["runs"]) == 4
+        assert pane_log.read_text().split() == pane_commands
+        assert "changed=0" in result.stdout
     else:
         assert actual["workspaces"] == [
             {"workspace_id": "w9", "label": "other"}, {"workspace_id": "w1", "label": "machine"},

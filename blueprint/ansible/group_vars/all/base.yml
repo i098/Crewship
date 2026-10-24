@@ -88,6 +88,18 @@ crewship_data_cache_env: >-
 crewship_herdr_bin: "{{ crewship_tools_root }}/herdr/{{ crewship_herdr_version }}/{{ crewship_platform }}/herdr"
 crewship_herdr_config_dir: "{{ crewship_cfg.home }}/.config/herdr"
 crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
+# Terminal panes installed from tools/<dir> and opened as Herdr tabs; the
+# switch names are keys under crewship.herdr, each defaulting to true.
+crewship_tuis:
+  - {dir: usage-tui, bin: usage-tui, label: usage-tui, switch: usage_tab}
+  - {dir: crewboard-tui, bin: crewboard-tui, label: crewboard-tui, switch: crewboard_tab}
+  - {dir: fleet-health, bin: fleet-health-tui, label: fleet-health-tui, switch: fleet_health_tab}
+crewship_herdr_tabs: >-
+  {{ [{'label': 'schedules', 'bin': 'crewship', 'args': ' schedules', 'switch': 'schedules_tab'}]
+     + crewship_tuis | map('combine', {'args': ''}) | list }}
+crewship_herdr_open_tabs: >-
+  {{ crewship_herdr_tabs | rejectattr('switch', 'in',
+     crewship_cfg.herdr | dict2items | rejectattr('value') | map(attribute='key') | list) | list }}
 crewship_user_units: "{{ crewship_cfg.home }}/.config/systemd/user"
 crewship_home_layout_paths: >-
   {{ [crewship_cfg.home ~ '/.config',
@@ -99,6 +111,7 @@ crewship_home_layout_paths: >-
       crewship_share_dir,
       crewship_share_dir ~ '/cli',
       crewship_share_dir ~ '/schedules',
+      crewship_share_dir ~ '/tui',
       crewship_user_units,
       crewship_cfg.workspace]
      + ([crewship_fleet_doctor_dir] if crewship_cfg.profiles.fleet_guards | bool else [])

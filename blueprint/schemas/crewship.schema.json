@@ -177,6 +177,15 @@
             "schedules_tab": {
               "type": "boolean"
             },
+            "usage_tab": {
+              "type": "boolean"
+            },
+            "crewboard_tab": {
+              "type": "boolean"
+            },
+            "fleet_health_tab": {
+              "type": "boolean"
+            },
             "theme": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]+$"

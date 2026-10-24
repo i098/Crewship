@@ -1,0 +1,31 @@
+---
+- name: List the machine tabs for {{ crewship_tab.label }}
+  ansible.builtin.command:
+    argv: ["{{ crewship_herdr_bin }}", tab, list, --workspace, "{{ crewship_machine_workspace }}"]
+  register: crewship_machine_tabs
+  changed_when: false
+
+- name: Find the {{ crewship_tab.label }} tab
+  ansible.builtin.set_fact:
+    crewship_found_tabs: >-
+      {{ (crewship_machine_tabs.stdout | from_json).result.tabs
+         | selectattr('label', 'equalto', crewship_tab.label) | list }}
+
+- name: Create the {{ crewship_tab.label }} tab
+  ansible.builtin.command:
+    argv: ["{{ crewship_herdr_bin }}", tab, create, --workspace, "{{ crewship_machine_workspace }}",
+           --cwd, "{{ crewship_cfg.home }}", --label, "{{ crewship_tab.label }}", --no-focus]
+  register: crewship_new_tab
+  when: crewship_found_tabs | length == 0
+
+- name: Show the manual start command for an existing {{ crewship_tab.label }} tab
+  ansible.builtin.debug:
+    msg: run {{ crewship_tab.bin }}{{ crewship_tab.args }} in the {{ crewship_tab.label }} tab
+  when: crewship_found_tabs | length > 0
+
+- name: Run {{ crewship_tab.bin }} in the new {{ crewship_tab.label }} tab
+  ansible.builtin.command:
+    argv: ["{{ crewship_herdr_bin }}", pane, run,
+           "{{ (crewship_new_tab.stdout | from_json).result.root_pane.pane_id }}",
+           "{{ (crewship_local_bin ~ '/' ~ crewship_tab.bin) | quote }}{{ crewship_tab.args }}"]
+  when: crewship_found_tabs | length == 0

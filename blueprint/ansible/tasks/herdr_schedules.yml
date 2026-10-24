@@ -1,7 +1,7 @@
 ---
-- name: Open the default schedules tab
+- name: Open the default Herdr tabs
   when:
-    - crewship_cfg.herdr.schedules_tab | default(true) | bool
+    - crewship_herdr_open_tabs | length > 0
     - crewship_manage_services | bool
     - not ansible_check_mode
   block:
@@ -34,33 +34,9 @@
              if crewship_machine_workspaces | length > 0
              else (crewship_machine_created.stdout | from_json).result.workspace.workspace_id }}
 
-    - name: List the machine tabs
-      ansible.builtin.command:
-        argv: ["{{ crewship_herdr_bin }}", tab, list, --workspace, "{{ crewship_machine_workspace }}"]
-      register: crewship_machine_tabs
-      changed_when: false
-
-    - name: Find the schedules tab
-      ansible.builtin.set_fact:
-        crewship_schedules_tabs: >-
-          {{ (crewship_machine_tabs.stdout | from_json).result.tabs
-             | selectattr('label', 'equalto', 'schedules') | list }}
-
-    - name: Create the schedules tab
-      ansible.builtin.command:
-        argv: ["{{ crewship_herdr_bin }}", tab, create, --workspace, "{{ crewship_machine_workspace }}",
-               --cwd, "{{ crewship_cfg.home }}", --label, schedules, --no-focus]
-      register: crewship_schedules_tab
-      when: crewship_schedules_tabs | length == 0
-
-    - name: Show the manual start command for an existing schedules tab
-      ansible.builtin.debug:
-        msg: run crewship schedules in the schedules tab
-      when: crewship_schedules_tabs | length > 0
-
-    - name: Run the schedule viewer in the new schedules tab
-      ansible.builtin.command:
-        argv: ["{{ crewship_herdr_bin }}", pane, run,
-               "{{ (crewship_schedules_tab.stdout | from_json).result.root_pane.pane_id }}",
-               "{{ (crewship_local_bin ~ '/crewship') | quote }} schedules"]
-      when: crewship_schedules_tabs | length == 0
+    - name: Open each enabled default tab
+      ansible.builtin.include_tasks: herdr_tab.yml
+      loop: "{{ crewship_herdr_open_tabs }}"
+      loop_control:
+        loop_var: crewship_tab
+        label: "{{ crewship_tab.label }}"
