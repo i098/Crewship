@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 // Every no-mistakes validation run on this host (read-only): local run records plus each firstmate home's state/*.meta.
 // `--once` prints plain text and exits; without it the table refreshes from local files.
+// Default view: running and parked runs plus runs finished in the last 24h; `--all` (key `a`) shows every run.
+// `--anonymize` replaces home, mate, task, repo and PR with stable placeholders (for screenshots).
 import { Database } from "bun:sqlite"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { theme } from "../tui-theme/theme.ts"
@@ -8,9 +10,11 @@ import { theme } from "../tui-theme/theme.ts"
 const HOME = process.env.HOME ?? ""
 const DB_PATH = process.env.RUNS_TUI_DB ?? `${HOME}/.no-mistakes/state.sqlite`
 const REFRESH_MS = 5_000
-const MAXW = 150
+const RECENT_SEC = 24 * 3600
+const MAXW = 160
+const ANON = process.argv.includes("--anonymize")
 
-// ---- homes and task mapping ---------------------------------------------
+// ---- homes, mates and task mapping --------------------------------------
 // RUNS_TUI_HOMES (":"-separated firstmate home roots) overrides discovery.
 function homeRoots(): string[] {
   if (process.env.RUNS_TUI_HOMES !== undefined) return process.env.RUNS_TUI_HOMES.split(":").filter(Boolean)
@@ -23,22 +27,15 @@ function homeRoots(): string[] {
   return roots
 }
 
-function homeLabel(root: string): string {
-  const m = root.match(/firstmate-([^/]+)\/([^/]+)\/firstmate$/)
-  return m ? `${m[1]}/${m[2]}` : "dev"
-}
+const HOME_RE = /firstmate-([^/_]+)[/_](\d+)[/_]firstmate/
+// Treehouse homes are `<suffix>/<n>`; any other root is the main firstmate home.
+const homeLabel = (root: string) => root.match(HOME_RE)?.slice(1, 3).join("/") ?? "main"
 
-// A repo registered under a home's projects/ dir belongs to that home even when its task meta is gone.
-function homeOfProject(path: string): string {
-  const root = path.match(/^(.*\/firstmate)\/projects\//)?.[1]
-  return root ? homeLabel(root) : "unknown"
-}
+type Meta = { root: string; task: string }
+type Registry = { byProject: Map<string, Meta>; byBranch: Map<string, Meta>; projectRoot: Map<string, string>; mates: Map<string, string> }
 
-type Meta = { home: string; task: string }
-const metaKey = (project: string, branch: string) => `${project}\n${branch}`
-
-function loadMetas(): Map<string, Meta> {
-  const out = new Map<string, Meta>()
+function loadRegistry(): Registry {
+  const reg: Registry = { byProject: new Map(), byBranch: new Map(), projectRoot: new Map(), mates: new Map() }
   for (const root of homeRoots()) {
     const dir = `${root}/state`
     if (!existsSync(dir)) continue
@@ -49,20 +46,37 @@ function loadMetas(): Map<string, Meta> {
         const i = line.indexOf("=")
         if (i > 0) kv[line.slice(0, i)] = line.slice(i + 1)
       }
-      if (kv.project && kv.branch) out.set(metaKey(kv.project, kv.branch), { home: homeLabel(root), task: kv.endpoint_task_id || f.slice(0, -5) })
+      const id = kv.endpoint_task_id || f.slice(0, -5)
+      // A second mate's meta names the home it owns.
+      if (kv.kind === "secondmate" && kv.home) reg.mates.set(kv.home.replace(/\/$/, ""), id.replace(/-mate(-[a-z0-9]+)?$/, ""))
+      else if (kv.branch) {
+        const meta = { root, task: id }
+        reg.byProject.set(`${kv.project}\n${kv.branch}`, meta)
+        if (!reg.byBranch.has(kv.branch)) reg.byBranch.set(kv.branch, meta)
+        if (kv.project && !reg.projectRoot.has(kv.project)) reg.projectRoot.set(kv.project, root)
+      }
     }
   }
-  return out
+  return reg
+}
+
+// A repo under a home's projects/ dir, or a worktree named after one, belongs to that home even when its task meta is gone.
+function homeRootOf(workingPath: string, worktreeDir: string | null): string | undefined {
+  const fromProject = workingPath.match(/^(.*\/firstmate)\/projects\//)?.[1]
+  if (fromProject) return fromProject
+  const w = worktreeDir?.match(/\.treehouse_(firstmate-[^_/]+)_(\d+)_firstmate_projects/)
+  return w ? `${HOME}/.treehouse/${w[1]}/${w[2]}/firstmate` : undefined
 }
 
 // ---- data ----------------------------------------------------------------
 export type Outcome = "running" | "parked" | "failed" | "passed" | "cancelled"
 export type Run = {
-  id: string; home: string; task: string; repo: string; pr: string; step: string
+  id: string; home: string; mate: string; task: string; repo: string; pr: string; step: string
   loops: Record<string, number>; elapsed: number; outcome: Outcome; updated: number
 }
 
 const ORDER: Record<Outcome, number> = { running: 0, parked: 1, failed: 2, passed: 3, cancelled: 4 }
+const isLive = (o: Outcome) => o === "running" || o === "parked"
 
 function outcomeOf(status: string, steps: { status: string }[], awaiting: number | null): Outcome {
   if (status === "completed") return "passed"
@@ -71,13 +85,13 @@ function outcomeOf(status: string, steps: { status: string }[], awaiting: number
   return awaiting || steps.some(s => s.status === "awaiting_approval" || s.status === "fix_review") ? "parked" : "running"
 }
 
-type RunRow = { id: string; branch: string; status: string; pr_url: string | null; awaiting: number | null; created_at: number; updated_at: number; working_path: string; upstream_url: string }
+type RunRow = { id: string; branch: string; status: string; pr_url: string | null; awaiting: number | null; created_at: number; updated_at: number; working_path: string; upstream_url: string; worktree_dir: string | null }
 type StepRow = { run_id: string; step_name: string; step_order: number; status: string; fixes: number; ci_fix_attempts: number }
 
 export function load(now = Date.now() / 1000): Run[] {
   const db = new Database(DB_PATH, { readonly: true })
   try {
-    const runs = db.query(`select r.id, r.branch, r.status, r.pr_url, r.awaiting_agent_since awaiting, r.created_at, r.updated_at, p.working_path, p.upstream_url
+    const runs = db.query(`select r.id, r.branch, r.status, r.pr_url, r.awaiting_agent_since awaiting, r.created_at, r.updated_at, r.worktree_dir, p.working_path, p.upstream_url
       from runs r join repos p on p.id = r.repo_id`).all() as RunRow[]
     const steps = db.query(`select s.run_id, s.step_name, s.step_order, s.status, s.ci_fix_attempts, coalesce(f.n, 0) fixes
       from step_results s
@@ -85,11 +99,12 @@ export function load(now = Date.now() / 1000): Run[] {
       order by s.step_order`).all() as StepRow[]
     const byRun = new Map<string, StepRow[]>()
     for (const s of steps) (byRun.get(s.run_id) ?? byRun.set(s.run_id, []).get(s.run_id)!).push(s)
-    const metas = loadMetas()
+    const reg = loadRegistry()
     return runs.map(r => {
       const st = byRun.get(r.id) ?? []
       const outcome = outcomeOf(r.status, st, r.awaiting)
-      const meta = metas.get(metaKey(r.working_path, r.branch))
+      const meta = reg.byProject.get(`${r.working_path}\n${r.branch}`) ?? reg.byBranch.get(r.branch)
+      const root = meta?.root ?? homeRootOf(r.working_path, r.worktree_dir) ?? reg.projectRoot.get(r.working_path)
       const live = st.find(s => s.status === "running" || s.status === "fixing" || s.status === "awaiting_approval" || s.status === "fix_review")
       const bad = st.find(s => s.status === "failed")
       const last = [...st].reverse().find(s => s.status === "completed")
@@ -100,18 +115,37 @@ export function load(now = Date.now() / 1000): Run[] {
         if (n) loops[s.step_name] = n
       }
       const pr = r.pr_url?.match(/\/pull\/(\d+)/)?.[1]
+      const label = root ? homeLabel(root) : "unknown"
       return {
-        id: r.id, home: meta?.home ?? homeOfProject(r.working_path), task: meta?.task ?? "unknown",
-        repo: (r.upstream_url.match(/([^/]+?)(?:\.git)?$/)?.[1]) ?? "unknown",
+        id: r.id, home: label,
+        mate: !root ? "unknown" : label === "main" ? "main" : reg.mates.get(root) ?? "unknown",
+        // Torn-down tasks have no meta; their branch (fm/<task>) still names the task.
+        task: meta?.task ?? (r.branch.replace(/^[^/]*\//, "") || "unknown"),
+        repo: r.upstream_url.match(/([^/]+?)(?:\.git)?$/)?.[1] ?? "unknown",
         pr: pr ? `#${pr}` : "-",
         step: cur ? cur.step_name + (cur.status === "fixing" ? " fix" : "") : "-",
         loops, outcome, updated: r.updated_at,
-        elapsed: Math.max(0, (outcome === "running" || outcome === "parked" ? now : r.updated_at) - r.created_at),
+        elapsed: Math.max(0, (isLive(outcome) ? now : r.updated_at) - r.created_at),
       }
     }).sort((a, b) => ORDER[a.outcome] - ORDER[b.outcome] || b.updated - a.updated)
   } finally {
     db.close()
   }
+}
+
+export function visible(runs: Run[], all: boolean, now = Date.now() / 1000): Run[] {
+  return all ? runs : runs.filter(r => isLive(r.outcome) || now - r.updated <= RECENT_SEC)
+}
+
+// Stable placeholders per distinct value, in first-seen order.
+export function anonymize(runs: Run[]): Run[] {
+  const seen: Record<string, Map<string, string>> = {}
+  const alias = (kind: string, v: string) => {
+    if (v === "unknown" || v === "-" || (kind === "mate" && v === "main") || (kind === "home" && v === "main")) return v
+    const m = (seen[kind] ??= new Map())
+    return m.get(v) ?? m.set(v, kind === "pr" ? `#${100 + m.size * 37}` : `${kind}-${m.size + 1}`).get(v)!
+  }
+  return runs.map(r => ({ ...r, home: alias("home", r.home), mate: alias("mate", r.mate), task: alias("task", r.task), repo: alias("repo", r.repo), pr: alias("pr", r.pr) }))
 }
 
 // ---- rendering -----------------------------------------------------------
@@ -130,19 +164,18 @@ const loopText = (l: Record<string, number>) => Object.entries(l).map(([k, v]) =
 const outcomeColor: Record<Outcome, string> = { running: theme.accent, parked: theme.warn, failed: theme.error, passed: theme.ok, cancelled: theme.muted }
 
 export function tableLines(runs: Run[], inner: number): Line[] {
-  const hw = 10, rw = 16, pw = 6, sw = 10, ew = 8, ow = 9
-  const rest = Math.max(20, inner - (hw + rw + pw + sw + ew + ow + 7 * 2))
-  const tw = Math.floor(rest * 0.4), lw = rest - tw
-  const row = (c: string[], color: (i: number) => string, bold = false): Line => {
-    const w = [hw, tw, rw, pw, sw, lw, ew, ow]
-    return c.map((t, i): Seg => [fit(t, w[i]) + (i < c.length - 1 ? "  " : ""), color(i), bold])
-  }
-  const lines = [row(["HOME", "TASK", "REPO", "PR", "STEP", "LOOPS", "ELAPSED", "OUTCOME"], () => theme.muted, true)]
+  const hw = 9, mw = 12, rw = 16, pw = 6, sw = 10, ew = 8, ow = 9
+  const rest = Math.max(20, inner - (hw + mw + rw + pw + sw + ew + ow + 8 * 2))
+  const tw = Math.floor(rest * 0.45), lw = rest - tw
+  const w = [hw, mw, tw, rw, pw, sw, lw, ew, ow]
+  const row = (c: string[], color: (i: number) => string, bold = false): Line =>
+    c.map((t, i): Seg => [fit(t, w[i]) + (i < c.length - 1 ? "  " : ""), color(i), bold])
+  const lines = [row(["HOME", "MATE", "TASK", "REPO", "PR", "STEP", "LOOPS", "ELAPSED", "OUTCOME"], () => theme.muted, true)]
   for (const r of runs) {
-    lines.push(row([r.home, r.task, r.repo, r.pr, r.step, loopText(r.loops), fmtElapsed(r.elapsed), r.outcome],
-      i => (i === 7 ? outcomeColor[r.outcome] : i === 5 && Object.keys(r.loops).length ? theme.highlight : r.home === "unknown" && i < 2 ? theme.muted : theme.text), false))
+    const cells = [r.home, r.mate, r.task, r.repo, r.pr, r.step, loopText(r.loops), fmtElapsed(r.elapsed), r.outcome]
+    lines.push(row(cells, i => (i === 8 ? outcomeColor[r.outcome] : i === 6 && cells[6] !== "-" ? theme.highlight : cells[i] === "unknown" ? theme.muted : theme.text)))
   }
-  if (!runs.length) lines.push([["No validation runs recorded.", theme.muted]])
+  if (!runs.length) lines.push([["No validation runs in this view.", theme.muted]])
   return lines
 }
 
@@ -152,14 +185,17 @@ function counts(runs: Run[]): Record<Outcome, number> {
   return c
 }
 
-export function once(runs: Run[], width = MAXW): string {
-  const c = counts(runs)
-  const head = `VALIDATION RUNS  ${runs.length} runs · ${c.running} running · ${c.parked} parked · ${c.passed} passed · ${c.failed} failed · ${c.cancelled} cancelled`
-  return [head, ...tableLines(runs, width - 4).map(l => l.map(s => s[0]).join("").trimEnd())].join("\n") + "\n"
+const scope = (shown: number, total: number, all: boolean) => (all ? `all ${total} runs` : `${shown} of ${total} runs: live + last 24h`)
+
+export function once(runs: Run[], all: boolean, width = MAXW): string {
+  const shown = visible(runs, all)
+  const c = counts(shown)
+  const head = `VALIDATION RUNS  ${scope(shown.length, runs.length, all)} · ${c.running} running · ${c.parked} parked · ${c.passed} passed · ${c.failed} failed · ${c.cancelled} cancelled`
+  return [head, ...tableLines(shown, width - 4).map(l => l.map(s => s[0]).join("").trimEnd())].join("\n") + "\n"
 }
 
 // ---- live view -----------------------------------------------------------
-async function live() {
+async function live(startAll: boolean) {
   // Dynamic: --once must run on a host where `bun install` has not been run.
   const { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg } = await import("@opentui/core")
   const chunk = ([t, color, b, back]: Seg) => {
@@ -183,27 +219,29 @@ async function live() {
   let runs: Run[] = []
   let error = ""
   let top = 0
+  let all = startAll
   const styled = (lines: Line[]) => new StyledText(lines.flatMap((l, i) => [...(i ? [chunk(["\n", theme.text])] : []), ...l.map(chunk)]))
 
   function draw() {
     const W = Math.min(MAXW, renderer.width)
     column.width = W
-    const c = counts(runs)
+    const shown = visible(runs, all)
+    const c = counts(shown)
     const page = Math.max(1, renderer.height - 6)
-    top = Math.max(0, Math.min(top, runs.length - page))
-    const lines = tableLines(runs.slice(top, top + page), W - 4)
+    top = Math.max(0, Math.min(top, shown.length - page))
+    const lines = tableLines(shown.slice(top, top + page), W - 4)
     header.content = styled([
       [[" VALIDATION RUNS ", theme.bg, true, theme.accent], ["  ", theme.text], [`${c.running} running`, theme.accent], [` · ${c.parked} parked`, theme.warn], [` · ${c.passed} passed`, theme.ok], [` · ${c.failed} failed`, theme.error], [` · ${c.cancelled} cancelled`, theme.muted]],
-      [[`${runs.length} runs · every ${REFRESH_MS / 1000}s · `, theme.muted], ["↑↓", theme.text, true], [" scroll  ", theme.muted], ["q", theme.text, true], [" quit  ", theme.muted], ["r", theme.text, true], [" refresh", theme.muted], ...(error ? [["  " + error, theme.error] as Seg] : [])],
+      [[`${scope(shown.length, runs.length, all)} · every ${REFRESH_MS / 1000}s · `, theme.muted], ["a", theme.text, true], [" all/24h  ", theme.muted], ["↑↓", theme.text, true], [" scroll  ", theme.muted], ["q", theme.text, true], [" quit  ", theme.muted], ["r", theme.text, true], [" refresh", theme.muted], ...(error ? [["  " + error, theme.error] as Seg] : [])],
     ])
     body.content = styled(lines)
     renderer.requestRender()
   }
 
-
   function refresh() {
     try {
       runs = load()
+      if (ANON) runs = anonymize(runs)
       error = ""
     } catch (e) {
       error = `Cannot read ${DB_PATH}: ${(e as Error).message}`
@@ -221,20 +259,23 @@ async function live() {
       process.exit(0)
     }
     if (k.name === "r") refresh()
+    if (k.name === "a") { all = !all; top = 0; draw() }
     if (k.name === "down" || k.name === "j") { top++; draw() }
     if (k.name === "up" || k.name === "k") { top--; draw() }
   })
 }
 
 if (import.meta.main) {
+  const all = process.argv.includes("--all")
   if (process.argv.includes("--once")) {
     try {
-      process.stdout.write(once(load()))
+      const runs = load()
+      process.stdout.write(once(ANON ? anonymize(runs) : runs, all))
     } catch (e) {
       console.error(`Cannot read ${DB_PATH}: ${(e as Error).message}`)
       process.exit(1)
     }
   } else {
-    await live()
+    await live(all)
   }
 }
