@@ -32,7 +32,9 @@ test("stats sync runs omp outside the TUI's process group and session", async ()
     watcher = watch(dir, onChange)
     onChange()
     await promise
-    const child = readFileSync(log, "utf8").split("\n").find(l => l.startsWith("stats "))!.split(/\s+/).slice(-2)
+    const line = readFileSync(log, "utf8").split("\n").find(l => l.startsWith("stats "))!
+    expect(line.split(/\s+/)).toHaveLength(4) // "stats --summary <pgid> <sid>"
+    const child = line.split(/\s+/).slice(-2)
     const parent = Bun.spawnSync(["ps", "-o", "pgid=,sid=", "-p", String(tui.pid)]).stdout.toString().trim().split(/\s+/)
     expect(parent).toHaveLength(2)
     expect(child).toHaveLength(2)
