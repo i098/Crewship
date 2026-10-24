@@ -275,15 +275,12 @@ function mergeDirective(current: DeskAction | undefined, next: DeskAction | unde
   return current;
 }
 
-// "I'll check <his words>" reads as a bot; the desk stays silent instead.
-const ECHO_TEMPLATE = /^\s*(?:i['’]ll|i will|let me)\s+(?:check|look into|ask about)\b/i;
-
 function replyDecision(value: Record<string, unknown>): DeskDecision {
   const kind = value.kind ?? value.decision;
   if (typeof kind !== "string" || kind.trim().toLowerCase() !== "reply") return { kind: "skip" };
   if (typeof value.answer !== "string" || !value.answer.trim()) return { kind: "skip" };
   if (/\b(?:react|tapback)\s*:|^[ \t]*(?:skip|handoff|tapback)[.!?]*[ \t]*$/im.test(value.answer)) return { kind: "skip" };
-  if (ECHO_TEMPLATE.test(value.answer)) return { kind: "skip" };
+  if (claimsWork(value.answer)) return { kind: "skip" };
   return { kind: "reply", answer: value.answer, evidence: value.evidence };
 }
 
