@@ -3,16 +3,13 @@ import { mkdtempSync, readFileSync, writeFileSync, chmodSync, existsSync, rmSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Runs the real TUI with stub `setsid` and `omp` on PATH. The stubs only log their argv.
-// Proves the stats sync spawns through `setsid -f`, so the child leaves the pane's process group.
-test("stats sync spawns omp through setsid -f", async () => {
+// Runs the real TUI with the real `setsid` and a stub `omp` that records its own pgid and sid.
+// Oracle: `ps` on the TUI pid. The omp child must be in a different process group and session.
+test("stats sync runs omp outside the TUI's process group and session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "usage-tui-"))
   const log = join(dir, "calls.log")
-  const stub = `#!/bin/sh\necho "\${0##*/} $*" >> "${log}"\n`
-  for (const name of ["setsid", "omp"]) {
-    writeFileSync(join(dir, name), stub)
-    chmodSync(join(dir, name), 0o755)
-  }
+  writeFileSync(join(dir, "omp"), `#!/bin/sh\nps -o pgid=,sid= -p $$ >> "${log}"\n`)
+  chmodSync(join(dir, "omp"), 0o755)
 
   const tui = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts")], {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir },
@@ -31,12 +28,16 @@ test("stats sync spawns omp through setsid -f", async () => {
     watcher = watch(dir, onChange)
     onChange()
     await promise
-    const calls = readFileSync(log, "utf8").trim().split("\n")
-    expect(calls[0]).toBe("setsid -f omp stats --summary")
+    const child = readFileSync(log, "utf8").trim().split(/\s+/)
+    const parent = Bun.spawnSync(["ps", "-o", "pgid=,sid=", "-p", String(tui.pid)]).stdout.toString().trim().split(/\s+/)
+    expect(parent).toHaveLength(2)
+    expect(child).toHaveLength(2)
+    expect(child[0]).not.toBe(parent[0])
+    expect(child[1]).not.toBe(parent[1])
   } finally {
     watcher?.close()
     tui.kill()
     await tui.exited
     rmSync(dir, { recursive: true, force: true })
   }
-}, 15_000)
+}, 60_000)
