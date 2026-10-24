@@ -1,15 +1,18 @@
 #!/usr/bin/env bun
-// Read-only viewer for the crewboard message board. Only runs `crewboard sub`; never publishes.
+// Read-only viewer for the crewboard message board. Only runs `crewboard sub` and `crewboard topics`; never publishes.
 import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
+import { fetchSummaries, type Summaries } from "./summaries.ts"
 
 type Msg = { seq: number; ts: string; topic: string; from: string | null; body: string }
 type Topic = { name: string; msgs: Msg[]; unread: number; newest: number }
-type Row = { kind: "head"; group: string; unread: number } | { kind: "topic"; topic: Topic }
+type Row = { kind: "head"; group: string; unread: number } | { kind: "topic"; topic: Topic } | { kind: "summary"; text: string }
 
 const TZ = "America/Los_Angeles"
 const LEFT_W = 38
 const MAX_BODY_LINES = 40
+const SUMMARY_EVERY_MS = 10_000
+let summaries: Summaries = new Map()
 const topics = new Map<string, Topic>()
 let connected = false
 let boot: string | null = null
@@ -62,6 +65,14 @@ async function follow() {
   }
 }
 
+async function followSummaries() {
+  for (;;) {
+    summaries = await fetchSummaries()
+    draw()
+    await Bun.sleep(SUMMARY_EVERY_MS)
+  }
+}
+
 // ---- model ----
 const groupOf = (name: string) => {
   const id = name.replace(/^task\//, "")
@@ -84,7 +95,11 @@ function rows(): Row[] {
   }).sort((a, b) => b.newest - a.newest)
   for (const { g, ts } of ordered) {
     out.push({ kind: "head", group: g, unread: ts.reduce((s, t) => s + t.unread, 0) })
-    for (const t of ts) out.push({ kind: "topic", topic: t })
+    for (const t of ts) {
+      out.push({ kind: "topic", topic: t })
+      const text = summaries.get(t.name)
+      if (text) out.push({ kind: "summary", text })
+    }
   }
   return out
 }
@@ -144,6 +159,8 @@ function leftPane(list: Row[], innerH: number) {
       const u = r.unread ? ` ${r.unread} new` : ""
       lc.push(ch(clip(`▾ ${r.group}`, lw - u.length).padEnd(lw - u.length), theme.accent, { bold: true }))
       if (u) lc.push(ch(u, theme.warn, { bold: true }))
+    } else if (r.kind === "summary") {
+      lc.push(ch("    " + clip(r.text, lw - 4), theme.muted))
     } else {
       const t = r.topic, on = t.name === selected
       const u = t.unread ? ` ${t.unread}` : ""
@@ -162,6 +179,12 @@ function rightPane(innerH: number) {
   const rw = Math.max(10, renderer.width - LEFT_W - 2)
   const t = selected ? topics.get(selected) : undefined
   right.title = t ? ` ${t.name}  (${t.msgs.length}) ` : " Messages "
+  const header: TextChunk[][] = []
+  const summary = t && summaries.get(t.name)
+  if (summary) {
+    for (const l of wrap(summary, rw - 2)) header.push([ch("  " + l, theme.highlight)])
+    header.push([ch("", theme.text)])
+  }
   const lines: TextChunk[][] = []
   if (!t) lines.push([ch(connected ? "No messages yet." : "Waiting for the board…", theme.muted)])
   else
@@ -171,10 +194,12 @@ function rightPane(innerH: number) {
       for (const l of wrap(m.body, rw - 2)) lines.push([ch("  " + l, theme.text)])
       lines.push([ch("", theme.text)])
     }
-  const maxScroll = Math.max(0, lines.length - innerH)
+  header.splice(Math.max(0, innerH - 1))
+  const bodyH = Math.max(1, innerH - header.length)
+  const maxScroll = Math.max(0, lines.length - bodyH)
   scroll = Math.min(Math.max(0, scroll), maxScroll)
   const end = lines.length - scroll
-  const view = lines.slice(Math.max(0, end - innerH), end)
+  const view = [...header, ...lines.slice(Math.max(0, end - bodyH), end)]
   const rc: TextChunk[] = []
   view.forEach((l, i) => { if (i) rc.push(NL); rc.push(...l) })
   rightText.content = new StyledText(rc)
@@ -201,7 +226,8 @@ function draw() {
   }
   const si = list.findIndex(r => r.kind === "topic" && r.topic.name === selected)
   if (si < listTop) listTop = si - (si > 0 && list[si - 1].kind === "head" ? 1 : 0)
-  if (si >= listTop + innerH) listTop = si - innerH + 1
+  const end = si + (list[si + 1]?.kind === "summary" ? 1 : 0) // keep the summary row under the topic in view
+  if (end >= listTop + innerH) listTop = end - innerH + 1
   listTop = Math.max(0, listTop)
   leftPane(list, innerH)
   rightPane(innerH)
@@ -240,3 +266,4 @@ renderer.keyInput.on("keypress", (k: { name: string; shift?: boolean }) => {
 
 draw()
 follow()
+followSummaries()
