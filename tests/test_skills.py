@@ -165,6 +165,7 @@ def apply_rules(repo, home, ladder, profiles=None):
         crewship_fleet_browsers_enabled=ladder,
     )
     argv[0] = sys.executable
+    argv.append("--no-upstream")  # the default fetches from GitHub
     result = subprocess.run(argv, check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -354,6 +355,42 @@ def test_private_git_source_fills_private_and_installs_idempotently(tmp_path):
     for root in SKILL_ROOTS:
         assert not (home / root / "gone-later").exists()
         assert (home / root / "shared/SKILL.md").read_text() == "remote shared"
+
+
+def test_upstream_skill_installs_at_the_newest_commit_and_records_its_sha(tmp_path):
+    home, remote = tmp_path / "home", tmp_path / "remote"
+    skill(remote, "skills", "vision", "v1")
+    git("init", "-q", "-b", "main", str(remote))
+
+    def commit():
+        git("-C", str(remote), "add", ".")
+        git("-C", str(remote), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x")
+        return subprocess.run(
+            ["git", "-C", str(remote), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    sha = commit()
+    upstream = {"vision": (remote.as_uri(), "skills/vision")}
+    result = skills.install(home, tmp_path, upstream=upstream, public="no")
+    assert result["changed"] and result["upstream"] == {"vision": sha}
+    for root in SKILL_ROOTS:
+        assert (home / root / "vision/SKILL.md").read_text() == "v1"
+        assert (home / root / "vision/.crewship-source").read_text() == f"{remote.as_uri()}@{sha}\n"
+
+    assert not skills.install(home, tmp_path, upstream=upstream, public="no")["changed"]
+
+    (remote / "skills/vision/SKILL.md").write_text("v2")
+    sha = commit()
+    result = skills.install(home, tmp_path, upstream=upstream, public="no")
+    assert result["changed"] and result["upstream"] == {"vision": sha}
+    assert (home / SKILL_ROOTS[0] / "vision/SKILL.md").read_text() == "v2"
+
+    # A skipped fetch leaves the installed skill and its manifest entries as they are.
+    result = skills.install(home, tmp_path, public="no")
+    assert not result["changed"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "vision/SKILL.md").read_text() == "v2"
+        assert "vision" in json.loads((home / skills.MANIFEST).read_text())[root]
 
 
 def test_private_local_directory_source_fills_private(tmp_path):
