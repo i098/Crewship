@@ -248,6 +248,30 @@ It copies the host's `sidebar_width`, `sidebar_max_width`, `[ui.sidebar.agents]`
 
 Pane state (the sidebar dots) is reported on the host by the omp integration `./ship.sh launch` installs, so the host needs nothing more. A machine that views the host with `herdr --remote` should run the same Herdr release as the host: the host runs the latest, so on the viewing machine run `herdr update`, then compare `herdr --version` with the host's.
 
+## Client terminal
+
+Use [WezTerm](https://wezterm.org) as the recommended terminal on the computer you attach from. It shows the images that [chat clients](chat.md) send, and it runs Herdr over SSH or mosh. On macOS, install it with `brew install --cask wezterm`.
+
+A short `~/.config/wezterm/wezterm.lua` is enough to start:
+
+```lua
+local wezterm = require 'wezterm'
+local config = wezterm.config_builder()
+
+config.font = wezterm.font 'JetBrains Mono'
+config.font_size = 13.0
+config.window_background_opacity = 0.9
+config.macos_window_background_blur = 20
+config.keys = {
+  { key = 'd', mods = 'CMD', action = wezterm.action.SplitHorizontal { domain = 'CurrentPaneDomain' } },
+  { key = 'w', mods = 'CMD', action = wezterm.action.CloseCurrentPane { confirm = true } },
+}
+
+return config
+```
+
+The translucent background shows the terminal's own background, which the Herdr sidebar uses (`sidebar_bg = "reset"`). Change the font and the keys to suit your computer.
+
 ## Over mosh
 
 Over mosh, Herdr 0.9.3 can paint an opaque fill over older panes ([herdr#3773](https://github.com/herdrdev/herdr/issues/3773)), and mosh drops the images in the panes. `./ship.sh launch` installs [`tools/herdr-patch/herdr-patch`](../tools/herdr-patch/herdr-patch) as `~/.local/bin/herdr-patch`, which fixes both. `mosh-server` starts its command with the system `PATH`, which has no `~/.local/bin`, so apply also links `/usr/local/bin/herdr-patch` and `/usr/local/bin/herdr` to the installed files.
