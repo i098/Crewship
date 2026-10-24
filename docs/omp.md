@@ -32,6 +32,7 @@ With the `agents` profile on, `./ship.sh launch`:
 11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 12. Installs the opt-in extension [`fm-gluttony.ts`](../blueprint/config/fm-gluttony.ts) as `~/.omp/agent/extensions/fm-gluttony.ts`.
     See [Gluttony mode](#gluttony-mode).
+13. Installs the [kun](https://github.com/kunchenguid/kun) skill to `~/.agents/skills/kun` at the latest default-branch commit, and skips it while `.crewship-sha` there holds that commit. The global instructions tell agents to load it when unsure how to implement something.
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
@@ -162,7 +163,7 @@ The omp that the no-mistakes daemon spawns gets its own advisor from a separate 
 
 ## Other seeded preferences
 
-`blueprint/config/omp.yml` also sets the theme (`dark-rose-pine`), a custom status line (see [Status line icons](#status-line-icons)), `textVerbosity: low`, `readLineNumbers: true`, hidden thinking blocks (`hideThinkingBlock: true`), steering, follow-up and interrupt modes, vim mode in the editor (`tui.vimMode`), the OpenAI priority service tier (`tier.openai: priority`), at most 128 parallel subagent tasks (`task.maxConcurrency`), compaction at 200,000 tokens with a 32,000-token retained-message budget (`compaction.thresholdTokens`, `compaction.v2RetainedMessageBudget`), and tool output above 20 KB spilled to an artifact with 4 KB head and 4 KB tail inline (`tools.artifactSpillThreshold`, `tools.artifactHeadBytes`, `tools.artifactTailBytes`). Memory uses the mnemopi backend (`memory.backend: mnemopi`) with no embeddings, the `smol` model for its own calls, and polyphonic recall, enhanced recall and proactive linking on. Change a single value with `omp config set <key> <value>`, or use `/settings`.
+`blueprint/config/omp.yml` also sets the theme (`dark-rose-pine`), a custom status line (see [Status line icons](#status-line-icons)), `textVerbosity: low`, `readLineNumbers: true`, hidden thinking blocks (`hideThinkingBlock: true`), steering, follow-up and interrupt modes, vim mode in the editor (`tui.vimMode`), the OpenAI priority service tier (`tier.openai: priority`), at most 128 parallel subagent tasks (`task.maxConcurrency`), compaction at 200,000 tokens with a 32,000-token retained-message budget (`compaction.thresholdTokens`, `compaction.v2RetainedMessageBudget`), the compaction order (`compaction.methodOrder`: `snapcompact` first, then `remote`, `handoff`, `shake` and `soft` as fallbacks), and tool output above 20 KB spilled to an artifact with 4 KB head and 4 KB tail inline (`tools.artifactSpillThreshold`, `tools.artifactHeadBytes`, `tools.artifactTailBytes`). Memory uses the mnemopi backend (`memory.backend: mnemopi`) with no embeddings, the `smol` model for its own calls, and polyphonic recall, enhanced recall and proactive linking on. Change a single value with `omp config set <key> <value>`, or use `/settings`.
 
 ## Status line icons
 

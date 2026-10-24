@@ -5,7 +5,7 @@ Each `./ship.sh launch` resolves the newest tool releases once, then installs th
 Re-running apply upgrades an existing host.
 The installer verifies downloads against publisher checksums and refuses releases without them.
 Optional Koncreet failures produce a warning instead.
-See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums.
+See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums, and [Agent skills](#agent-skills) for the kun skill.
 Neovim downloads its plugins on first start, not during apply.
 The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
@@ -135,7 +135,7 @@ Bun output stays in one labeled block per package, including command failures.
 - `agents` profile, native: gh ([cli/cli](https://github.com/cli/cli/releases/latest)), treehouse ([kunchenguid/treehouse](https://github.com/kunchenguid/treehouse/releases/latest)), verified against the GitHub release-asset digest.
 - `agents` profile, native: gws, the Google Workspace CLI ([googleworkspace/cli](https://github.com/googleworkspace/cli/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes. Signing in Google accounts is manual: see [Google Workspace CLI](google-workspace.md).
 - `agents` profile, no-mistakes ([kunchenguid/no-mistakes](https://github.com/kunchenguid/no-mistakes/releases)): the one tool that tracks the prerelease channel. Each apply resolves the newest non-draft release, betas included (not only the latest stable one), and verifies it against the GitHub release-asset digest.
-- `agents` profile, bun: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, forgejo-axi (the no-mistakes Forgejo provider; see [no-mistakes](forgejo.md#no-mistakes)), acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6. Shells and user units have `~/.bun/bin` on `PATH`, after `~/.local/bin`, for tools you add yourself with `bun add -g`.
+- `agents` profile, bun: omp (`@oh-my-pi/pi-coding-agent`), chrome-devtools-axi, gh-axi, lavish-axi, quota-axi, tasks-axi, forgejo-axi (the no-mistakes Forgejo provider; see [no-mistakes](forgejo.md#no-mistakes)), [backpass](https://github.com/kunchenguid/backpass) (proposes evidence-backed edits to AGENTS.md and CLAUDE.md from real sessions; runs through acpx and lavish-axi), acpx (runs `omp acp`; see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)), and chrome-devtools-mcp (the MCP build chrome-devtools-axi launches through `CHROME_DEVTOOLS_AXI_MCP_PATH`, which points at `~/.local/share/crewship/chrome-devtools-mcp/current`, a link the installer re-points at each release, so a new release never changes the Herdr unit or the `.profile` block and never restarts `herdr.service`). The fleet requires at least quota-axi 0.1.54 and tasks-axi 0.2.6. Shells and user units have `~/.bun/bin` on `PATH`, after `~/.local/bin`, for tools you add yourself with `bun add -g`.
   See [Diagrams](#diagrams) for the Ondine entry.
 - `agents` profile, no-mistakes pi adapter check: every apply downloads four pi adapter source files of the no-mistakes release it installs from `raw.githubusercontent.com` (each fetch gives up after 30 seconds) and compares them with the sha256 pins in `blueprint/config/omp-as-pi/check-adapter.sh`. A source that differs from its pin, or is gone from the tag (HTTP 404), switches the gate agent to `acp:omp`; a network error, a timeout or any other HTTP status leaves the agent setting as it is and prints a warning; neither fails the apply (see [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent)).
 - Retired: codex and pnpm are no longer installed (bun is the single package manager and runner; omp is the pi agent). An apply on a host that still has them removes the `codex`, `pnpm` and `pnpx` links in `~/.local/bin` that point into the old `~/.local/share/crewship/npm` prefix and changes `defaultAgent` in `~/.acpx/config.json` from `codex` to `omp` when it is still `codex`. The old prefix stays on disk, like every superseded install, so shells and AXI bridges started before the upgrade keep their files; delete it by hand when nothing uses it. Commands of the same name installed any other way are left alone.
@@ -185,6 +185,17 @@ Use a Python project with `pyrefly.toml` to select its project root.
 The runtime starter files and Apache-2.0 license come from commit `803bc181d7c0d6d5eeba9274d9be49b287294d99`.
 The unused example plugin and upstream development files are not included.
 The Pyrefly configuration is the only added runtime file.
+
+## Agent skills
+
+`blueprint/ansible/tasks/agents.yml`, `agents` profile.
+
+- kun ([kunchenguid/kun](https://github.com/kunchenguid/kun)): apply resolves the default-branch commit with `git ls-remote` and installs that commit with `npx --yes skills add kunchenguid/kun#<sha> -g -a codex -a claude-code --json -y`.
+  The repository publishes no releases and no checksums, so the commit SHA is the pin.
+  Apply writes it to `~/.agents/skills/kun/.crewship-sha`, and a matching marker skips the install.
+  `--json` makes the CLI exit non-zero when any agent install fails, so a failed install never writes the marker.
+  The task sets `DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, so the skills CLI sends no telemetry.
+  See [Global instructions](omp.md#global-instructions) for the line that points agents at it.
 
 ## Ubuntu packages
 
