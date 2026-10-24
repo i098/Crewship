@@ -291,8 +291,7 @@ def main():
             raise OSError("page target did not appear")
         ws = open_ws(page)
         call(ws, 2, "Network.enable", {})
-        call(ws, 3, "Page.enable", {})
-        call(ws, 4, "Page.reload", {})
+        call(ws, 3, "Page.reload", {})
         while time.time() < deadline:
             m = json.loads(recv(ws))
             if m.get("method") == "Network.responseReceived" and WANT in m["params"]["response"]["url"]:
