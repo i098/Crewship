@@ -133,6 +133,8 @@ The installer also installs two more OpenTUI panes from `tools/` into `~/.local/
 `launch` opens each one in the `machine` workspace in the same way as the schedules tab: a missing tab is created and the command starts there.
 The tab label is the command name, except `crewship schedules`, which is labelled `schedules`.
 An existing tab is never changed; `launch` prints `run <command> in the <label> tab` instead.
+`crewship update` re-applies the same recipe, so an updated host gets every new pane and a tab for each in its existing `machine` workspace.
+A rerun adds no duplicate tab, and it never restarts Herdr or touches a running pane.
 
 | Command | Shows | Switch (default `true`) |
 | --- | --- | --- |

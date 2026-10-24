@@ -634,7 +634,7 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
             assert (browsers / binary).resolve() == release / binary
 
 
-@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "preexisting", "all"])
+@pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "preexisting", "all", "update"])
 def test_default_schedules_tab_preserves_existing_layout(tmp_path, mode):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
@@ -646,9 +646,11 @@ def test_default_schedules_tab_preserves_existing_layout(tmp_path, mode):
     if mode == "existing":
         initial["workspaces"].append({"workspace_id": "w1", "label": "machine"})
         initial["tabs"].append({"tab_id": "w1:t1", "label": "custom"})
-    if mode == "preexisting":
+    if mode in ("preexisting", "update"):
         initial["workspaces"].append({"workspace_id": "w1", "label": "machine"})
         initial["tabs"].append({"tab_id": "w1:t2", "label": "schedules"})
+    if mode == "update":
+        initial["tabs"].insert(0, {"tab_id": "w1:t1", "label": "custom"})
     state.write_text(json.dumps(initial))
     herdr = tmp_path / "herdr"
     herdr.write_text(f"""#!{sys.executable}
@@ -716,7 +718,7 @@ print(json.dumps({{"result": result}}))
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
-                                  **({} if mode == "all" else {k: False for k in (
+                                  **({} if mode in ("all", "update") else {k: False for k in (
                                       "usage_tab", "crewboard_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
@@ -739,6 +741,11 @@ print(json.dumps({{"result": result}}))
     if mode in ("disabled", "deferred", "check", "preexisting"):
         assert actual == initial
         assert not viewer_call.exists()
+    elif mode == "update":
+        # An installed host that only has the schedules tab gains each new pane once.
+        assert [t["label"] for t in actual["tabs"]] == ["custom", "schedules", *pane_commands]
+        assert len(actual["runs"]) == 2
+        assert pane_log.read_text().split() == pane_commands
     elif mode == "all":
         assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_commands]
         assert len(actual["runs"]) == 3
