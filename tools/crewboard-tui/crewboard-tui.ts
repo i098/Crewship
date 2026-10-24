@@ -179,12 +179,13 @@ function rightPane(innerH: number) {
   const rw = Math.max(10, renderer.width - LEFT_W - 2)
   const t = selected ? topics.get(selected) : undefined
   right.title = t ? ` ${t.name}  (${t.msgs.length}) ` : " Messages "
-  const lines: TextChunk[][] = []
+  const header: TextChunk[][] = []
   const summary = t && summaries.get(t.name)
   if (summary) {
-    for (const l of wrap(summary, rw - 2)) lines.push([ch("  " + l, theme.highlight)])
-    lines.push([ch("", theme.text)])
+    for (const l of wrap(summary, rw - 2)) header.push([ch("  " + l, theme.highlight)])
+    header.push([ch("", theme.text)])
   }
+  const lines: TextChunk[][] = []
   if (!t) lines.push([ch(connected ? "No messages yet." : "Waiting for the board…", theme.muted)])
   else
     for (const m of t.msgs) {
@@ -193,10 +194,12 @@ function rightPane(innerH: number) {
       for (const l of wrap(m.body, rw - 2)) lines.push([ch("  " + l, theme.text)])
       lines.push([ch("", theme.text)])
     }
-  const maxScroll = Math.max(0, lines.length - innerH)
+  header.splice(Math.max(0, innerH - 1))
+  const bodyH = Math.max(1, innerH - header.length)
+  const maxScroll = Math.max(0, lines.length - bodyH)
   scroll = Math.min(Math.max(0, scroll), maxScroll)
   const end = lines.length - scroll
-  const view = lines.slice(Math.max(0, end - innerH), end)
+  const view = [...header, ...lines.slice(Math.max(0, end - bodyH), end)]
   const rc: TextChunk[] = []
   view.forEach((l, i) => { if (i) rc.push(NL); rc.push(...l) })
   rightText.content = new StyledText(rc)
