@@ -98,3 +98,37 @@ def test_selection_accepts_a_listed_model_and_effort():
 ])
 def test_selection_refuses_unlisted_or_unpermitted_choices(value):
     assert selection(value) is None
+
+
+@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed omp catalog")
+def test_loader_lists_available_models_from_the_installed_catalog_and_overlay(tmp_path):
+    agent, home = tmp_path / "agent", tmp_path / "home"
+    (home / "config").mkdir(parents=True)
+    agent.mkdir()
+    (agent / "models.yml").write_text(
+        "providers:\n  inception:\n    baseUrl: https://example.invalid/v1\n    api: openai-completions\n"
+        '    apiKey: "!printenv MERCURY_KEY"\n    models:\n      - id: mercury-3\n        name: Mercury 3\n        reasoning: true\n'
+    )
+    (home / "config" / "crew-dispatch.json").write_text(json.dumps(
+        {"rules": [{"use": {"harness": "omp", "model": "openai/gpt-5", "effort": "high"}}]}
+    ))
+    args = f"{json.dumps(str(home))}, {json.dumps(str(agent))}, auth, {json.dumps(str(home))}"
+    code = f"""
+import {{ loadDispatchModels }} from {POLICY};
+const auth = {{ source: (p) => (p === "openai" ? "key" : undefined), keyless: () => false }};
+console.log(JSON.stringify({{
+  general: await loadDispatchModels({args}),
+  coding: await loadDispatchModels({args}, "simple-coding"),
+}}));
+"""
+    result = bun(code)
+    general = {m["id"]: m for m in result["general"]}
+    assert general["openai/gpt-5"]["reasoning"] == ["high"]
+    assert general["openai/gpt-5"]["apiKeyEnv"] == "OPENAI_API_KEY"
+    assert "inception/mercury-3" not in general
+    assert not [m for m in general.values() if m["id"].startswith("anthropic/")]
+    mercury = {m["id"]: m for m in result["coding"]}["inception/mercury-3"]
+    assert mercury == {
+        "id": "inception/mercury-3", "provider": "inception", "model": "mercury-3",
+        "reasoning": ["high"], "apiKeyEnv": "MERCURY_KEY",
+    }
