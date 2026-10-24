@@ -166,6 +166,7 @@ NPM_LATEST = {
     "chrome-devtools-mcp": "chrome-devtools-mcp",
     "forgejo-axi": "forgejo-axi",
     "ondine": "ondine",
+    "backpass": "backpass",
 }
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.

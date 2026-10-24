@@ -131,3 +131,8 @@ def test_a_failed_target_still_records_the_earlier_writes(host):
     (home / ".codex").unlink()
     text.write_text("generic v3\n")
     assert instructions.install(home, text, "overwrite")["backups"] == []
+
+
+def test_default_instructions_route_memory_edits_through_backpass():
+    text = instructions.TEXT.read_text()
+    assert "only through backpass" in text and "`backpass apply`" in text
