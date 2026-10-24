@@ -143,6 +143,31 @@
     - not ansible_check_mode
     - result.backups | length > 0 or result.skipped | length > 0
 
+# The kun skill (https://github.com/kunchenguid/kun) has no releases, so there is no
+# published checksum: install the latest default-branch commit, resolved by one REST
+# call (gh, signed in on the host). The commit SHA goes in the task output and in a marker
+# inside the skill dir; a matching marker skips the install. `-a codex -a claude-code`
+# installs to ~/.agents/skills and links Claude Code; the default agent set fails on
+# PromptScript, which refuses global skills.
+- name: Install the kun skill at the latest default-branch commit
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sha=$(gh api -H 'Accept: application/vnd.github.sha' repos/kunchenguid/kun/commits/HEAD)
+    marker='{{ kun_skill_dir }}/.crewship-sha'
+    if [ "$(cat "$marker" 2>/dev/null || true)" = "$sha" ]; then echo "kun already at $sha"; exit 0; fi
+    npx --yes skills@1.7.4 add "kunchenguid/kun#$sha" -g -a codex -a claude-code -y
+    echo "$sha" > "$marker"
+    echo "kun installed at $sha"
+  args:
+    executable: /bin/bash
+  vars:
+    kun_skill_dir: "{{ crewship_cfg.home }}/.agents/skills/kun"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  register: crewship_kun_run
+  changed_when: "'kun installed at' in crewship_kun_run.stdout"
+  when: not ansible_check_mode
+
 # The omp extension that feeds the Herdr agent sidebar layout ($who, the pull
 # request parts and the bare topic title; docs/herdr.md). Managed: every apply
 # rewrites it.
