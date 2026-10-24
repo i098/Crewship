@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseek, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseek, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, resellerRow, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -69,8 +69,8 @@ test("--once prints the fixture without starting the TUI", async () => {
   const out = await new Response(p.stdout).text()
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
-  expect(raw.map(l => l.slice(0, 25).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek -",
+  expect(raw.map(l => l.slice(0, 30).replace(/\s+/g, " ").trim())).toEqual([
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek -", "deepseek (reseller) -",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
@@ -113,6 +113,18 @@ test("a failed DeepSeek read holds its error, so no second ssh runs within 10 mi
 test("buildRows shows an error row when the DeepSeek site read fails", () => {
   const rows = buildRows({ deepseekError: "connection refused" })
   expect(rows.find(r => r.account === "deepseek")).toMatchObject({ leftPct: null, note: "unavailable: connection refused" })
+})
+
+test("resellerRow shows the key's cumulative spend and its own account label", () => {
+  expect(resellerRow({ spend: 6.609482 })).toMatchObject({ account: "deepseek (reseller)", leftPct: null, note: "spent $6.61" })
+  expect(resellerRow({ spend: NaN }).note).toBe("no spend reported")
+})
+
+test("buildRows keeps the reseller row when the Dia read fails, and shows its own error", () => {
+  const rows = buildRows({ deepseekError: "connection refused", reseller: { spend: 1.5 } })
+  expect(rows.find(r => r.account === "deepseek")?.note).toBe("unavailable: connection refused")
+  expect(rows.find(r => r.account === "deepseek (reseller)")?.note).toBe("spent $1.50")
+  expect(buildRows({ resellerError: "reseller HTTP 401" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("unavailable: reseller HTTP 401")
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {

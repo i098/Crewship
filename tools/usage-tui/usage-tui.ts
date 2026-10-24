@@ -3,7 +3,7 @@
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
-import { BAR_W, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
+import { ACCOUNT_W, BAR_W, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
 
 const TZ = "America/Los_Angeles"
 const DB_PATH = `${process.env.HOME}/.omp/stats.db`
@@ -250,14 +250,14 @@ function modelPanel(d: Data, w: number): Line[] {
 }
 
 function quotaPanel(rows: QuotaRow[], now: number, w: number): Line[] {
-  const lines: Line[] = [[s("Account".padEnd(15) + "Window".padEnd(10) + "Used".padEnd(BAR_W + 2) + "Left".padEnd(10) + "Resets in".padEnd(10) + "At (LA)", theme.muted, { b: true })]]
+  const lines: Line[] = [[s("Account".padEnd(ACCOUNT_W) + "Window".padEnd(10) + "Used".padEnd(BAR_W + 2) + "Left".padEnd(10) + "Resets in".padEnd(10) + "At (LA)", theme.muted, { b: true })]]
   lines.push([s(rep("─", Math.min(w, 15 + 10 + BAR_W + 2 + 10 + 10 + 11)), theme.border)])
   let last = ""
   for (const r of rows) {
     const c = cells(r, now, TZ)
     const acct = r.account === last ? "" : r.account
     last = r.account
-    const head = [s(acct.padEnd(15), theme.accent, { b: true }), s(r.window.padEnd(10))]
+    const head = [s(acct.padEnd(ACCOUNT_W), theme.accent, { b: true }), s(r.window.padEnd(10))]
     if (r.leftPct === null) lines.push([...head, s(c.note, theme.muted)])
     else lines.push([...head, s(c.bar.padEnd(BAR_W + 2), c.color), s(c.left.padEnd(10), c.color, { b: true }), s(c.reset.padEnd(10)), s(c.clock.padEnd(11), theme.muted), ...(c.note ? [s(c.note, theme.muted)] : [])])
   }

@@ -98,6 +98,16 @@ export function deepseekRow(json: DeepseekSummary): QuotaRow {
 
 const money = (v: number, currency: string) => `${v < 0 ? "-" : ""}${currency === "USD" ? "$" : `${currency} `}${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
 
+// ---- DeepSeek reseller: spend so far ------------------------------------------
+// The reseller is a LiteLLM proxy that serves only /v1/models and chat. Its balance and key-info routes 404,
+// so the one real number is the key's cumulative spend, echoed in a chat response header.
+export type ResellerSpend = { spend: number }
+
+export function resellerRow(json: ResellerSpend): QuotaRow {
+  const note = finite(json.spend) ? `spent ${money(json.spend, "USD")}` : "no spend reported"
+  return { account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note }
+}
+
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
@@ -109,6 +119,8 @@ export type QuotaInput = {
   mercuryError?: string
   deepseek?: DeepseekSummary
   deepseekError?: string
+  reseller?: ResellerSpend
+  resellerError?: string
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
@@ -122,6 +134,8 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
   if (inp.deepseek) rows.push(deepseekRow(inp.deepseek))
   else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `unavailable: ${inp.deepseekError}` : "not reported" })
+  if (inp.reseller) rows.push(resellerRow(inp.reseller))
+  else rows.push({ account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.resellerError ? `unavailable: ${inp.resellerError}` : "not reported" })
   return rows
 }
 
@@ -146,6 +160,7 @@ export function clockAt(at: number, tz: string): string {
 }
 
 export const BAR_W = 20
+export const ACCOUNT_W = 20
 export type Cells = { bar: string; left: string; reset: string; clock: string; color: string; note: string }
 
 export function cells(r: QuotaRow, now: number, tz: string): Cells {
@@ -168,7 +183,7 @@ export function quotaText(rows: QuotaRow[], now: number, tz: string): string {
       const c = cells(r, now, tz)
       const acct = r.account === last ? "" : r.account
       last = r.account
-      return `${acct.padEnd(15)}${r.window.padEnd(10)}${c.bar.padEnd(BAR_W + 2)}${c.left.padEnd(10)}${c.reset.padEnd(10)}${c.clock.padEnd(11)}${c.note}`.trimEnd()
+      return `${acct.padEnd(ACCOUNT_W)}${r.window.padEnd(10)}${c.bar.padEnd(BAR_W + 2)}${c.left.padEnd(10)}${c.reset.padEnd(10)}${c.clock.padEnd(11)}${c.note}`.trimEnd()
     })
     .join("\n")
 }
@@ -341,9 +356,49 @@ export async function deepseek(): Promise<{ value?: DeepseekSummary; error?: str
   }
 }
 
+// ---- DeepSeek reseller loader -------------------------------------------------
+const RESELLER_URL = "https://api.deepseekv4pro.com/v1/chat/completions"
+let resellerAt = 0
+let resellerLast: { value?: ResellerSpend; error?: string } = {}
+
+// The key stays in this function: it is read from omp's credential store, sent as a header, and never logged or put in an error.
+async function fetchReseller(): Promise<ResellerSpend> {
+  const db = new Database(AGENT_DB, { readonly: true })
+  let key: string | undefined
+  try {
+    const row = db.query("select data from auth_credentials where provider = 'deepseek' and disabled_cause is null order by id limit 1").get() as { data: string } | null
+    const d = row && JSON.parse(row.data)
+    key = d?.apiKey ?? d?.api_key ?? d?.key
+  } finally {
+    db.close()
+  }
+  if (!key) throw new Error("no DeepSeek key in omp")
+  const r = await fetch(RESELLER_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: "deepseek-flash", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!r.ok) throw new Error(`reseller HTTP ${r.status}`)
+  const spend = Number(r.headers.get("x-litellm-key-spend"))
+  if (!r.headers.has("x-litellm-key-spend") || !Number.isFinite(spend)) throw new Error("no spend header")
+  return { spend }
+}
+
+// Each read is a paid 1-token chat call, so results (success or failure) are held for 10 minutes like the Dia read.
+export async function reseller(): Promise<{ value?: ResellerSpend; error?: string }> {
+  if (resellerAt && Date.now() - resellerAt < DEEPSEEK_MIN_MS) return resellerLast
+  resellerAt = Date.now()
+  try {
+    return (resellerLast = { value: await fetchReseller() })
+  } catch (e) {
+    return (resellerLast = { error: (e as Error).message })
+  }
+}
+
 export async function loadQuota(): Promise<QuotaInput> {
   const msg = (e: unknown) => (e as Error).message
-  const [omp, zai, mercury, ds] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek()])
+  const [omp, zai, mercury, ds, rs] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek(), reseller()])
   return {
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
@@ -353,5 +408,7 @@ export async function loadQuota(): Promise<QuotaInput> {
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
     deepseek: ds.status === "fulfilled" ? ds.value.value : undefined,
     deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value.error,
+    reseller: rs.status === "fulfilled" ? rs.value.value : undefined,
+    resellerError: rs.status === "rejected" ? msg(rs.reason) : rs.value.error,
   }
 }
