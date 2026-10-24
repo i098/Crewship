@@ -384,6 +384,7 @@ def tool_checks(config, environment):
             "quota-axi",
             "lavish-axi",
             "acpx",
+            "backpass",
         ]
     if config["profiles"]["development"]:
         tools += ["rustc", "cargo"]
