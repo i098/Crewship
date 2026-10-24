@@ -20,12 +20,15 @@ console.log(JSON.stringify(out ?? null));
 """)
 
 
-@pytest.mark.parametrize("rewritten,kept", [
-    ("The build is paused.", True),
-    ("So the build is paused.", True),
-    ("The paused build is.", False),
-    ("The build is paused and the deploy failed.", False),
-])
+@pytest.mark.parametrize(
+    "rewritten,kept",
+    [
+        ("The build is paused.", True),
+        ("So the build is paused.", True),
+        ("The paused build is.", False),
+        ("The build is paused and the deploy failed.", False),
+    ],
+)
 def test_word_order_guard_rejects_reordered_or_extended_voice(rewritten, kept):
     assert (voice("What is the status?", rewritten, True) is not None) is kept
 
@@ -41,7 +44,12 @@ def test_exact_output_with_a_read_step_still_counts_as_exact():
 
 def test_exact_output_after_other_work_is_not_exact():
     answer = "run-tool inspect --json"
-    assert voice("Restart the service then return the exact command.", "The command is " + answer, False, answer) != [answer]
+    assert voice(
+        "Restart the service then return the exact command.",
+        "The command is " + answer,
+        False,
+        answer,
+    ) != [answer]
 
 
 def test_secret_values_collects_only_credential_variables():

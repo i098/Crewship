@@ -71,7 +71,7 @@ For each message from the owner, the service does these steps:
    Before checking evidence, it also maps native credential placeholders and source credentials to the same `[REDACTED]` marker.
    The prompt requires every fact, name, number, link, subject, negation, and claim to stay unchanged.
    The service rejects changed protected tokens or polarity, empty replies, failed calls, work claims, and unrequested Markdown fences.
-   Without an explicit exact-output request, the reply check rejects headings, bullets, pipe-style tables, configuration rows, and bare source values.
+   Without an explicit exact-output request, the reply check rejects headings, bullets, pipe-style tables, configuration rows, bare source values, and replies that parse as JSON.
    A retained configuration row still causes rejection when other lines contain prose.
    Unrequested inline code also causes rejection; the service does not strip its formatting.
    The same rejection applies to blockquotes, single-underscore emphasis, and Markdown links; bare URLs and identifiers remain valid.
