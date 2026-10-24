@@ -15,6 +15,9 @@ const MAX_FROM: usize = 64;
 /// Messages queued for one subscriber before the board drops it as slow.
 pub const SUB_QUEUE: usize = 1024;
 
+/// Longest topic summary, in characters.
+pub const MAX_SUMMARY: usize = 160;
+
 pub struct Limits {
     pub cap_bytes: usize,
     pub history: usize,
@@ -40,6 +43,10 @@ struct Topic {
     evicted: u64,
     /// Seq of the latest publish, for dropping the least recently published topic.
     last: u64,
+    /// One line for readers choosing a thread; empty until a summarizer sets it.
+    summary: String,
+    /// Seq of the last message the summary covers.
+    summary_seq: u64,
 }
 
 struct Sub {
@@ -198,23 +205,45 @@ impl Board {
 
     /// The last `n` messages of `topic`, oldest first.
     pub fn history(&self, topic: &str, n: usize) -> Vec<Arc<str>> {
-        let Some(t) = self.topics.get(topic) else { return Vec::new() };
+        let Some(t) = self.topics.get(topic) else {
+            return Vec::new();
+        };
         t.ring.iter().skip(t.ring.len().saturating_sub(n)).map(|m| m.line.clone()).collect()
     }
 
-    pub fn topics(&self) -> Value {
+    /// Stores the one-line `summary` of `topic`, covering messages up to `seq` (default: the
+    /// newest). Whitespace collapses and the line is cut at `MAX_SUMMARY` characters. An older
+    /// `seq` than the stored one is `stale`: a slow summarizer must not overwrite a newer line.
+    pub fn set_summary(&mut self, topic: &str, summary: &str, seq: Option<u64>) -> Result<(), &'static str> {
+        let t = self.topics.get_mut(topic).ok_or("bad_topic")?;
+        let seq = seq.unwrap_or(t.last).min(self.seq);
+        if seq < t.summary_seq {
+            return Err("stale");
+        }
+        t.summary = summary.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_SUMMARY).collect();
+        t.summary_seq = seq;
+        Ok(())
+    }
+
+    /// The topics with counts; `with_summary` adds `summary` and `summary_seq`.
+    pub fn topics(&self, with_summary: bool) -> Value {
         let mut names: Vec<&String> = self.topics.keys().collect();
         names.sort();
         names
             .into_iter()
             .map(|name| {
-                let ring = &self.topics[name].ring;
-                json!({
+                let t = &self.topics[name];
+                let mut v = json!({
                     "topic": name,
-                    "count": ring.len(),
-                    "oldest": ring.front().map(|m| m.seq),
-                    "newest": ring.back().map(|m| m.seq),
-                })
+                    "count": t.ring.len(),
+                    "oldest": t.ring.front().map(|m| m.seq),
+                    "newest": t.ring.back().map(|m| m.seq),
+                });
+                if with_summary {
+                    v["summary"] = t.summary.as_str().into();
+                    v["summary_seq"] = t.summary_seq.into();
+                }
+                v
             })
             .collect()
     }
@@ -262,13 +291,7 @@ pub fn rfc3339(t: SystemTime) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + u64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        secs / 3600,
-        secs / 60 % 60,
-        secs % 60,
-        d.subsec_millis()
-    )
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z", secs / 3600, secs / 60 % 60, secs % 60, d.subsec_millis())
 }
 
 #[cfg(test)]
@@ -336,6 +359,30 @@ mod tests {
     }
 
     #[test]
+    fn summary_is_stored_cut_and_never_overwritten_by_an_older_one() {
+        let mut b = board(1 << 20, 10);
+        assert_eq!(b.set_summary("t", "x", None), Err("bad_topic"));
+        b.publish("t", None, 1, "x").unwrap();
+        b.publish("u", None, 1, "x").unwrap();
+        b.publish("t", None, 1, "x").unwrap();
+        assert_eq!(b.topics(false)[0].get("summary"), None);
+        assert_eq!(b.topics(true)[0]["summary"], json!(""));
+        assert_eq!(b.topics(true)[0]["summary_seq"], json!(0));
+        let long = format!("a  b\n{}", "z".repeat(300));
+        b.set_summary("t", &long, None).unwrap();
+        let t = &b.topics(true)[0];
+        assert_eq!(t["summary"].as_str().unwrap().chars().count(), MAX_SUMMARY);
+        assert!(t["summary"].as_str().unwrap().starts_with("a b z"));
+        assert_eq!(t["summary_seq"], json!(3));
+        assert_eq!(b.set_summary("t", "old", Some(1)), Err("stale"));
+        b.set_summary("t", "same seq", Some(3)).unwrap();
+        // A seq beyond the board is clamped to it.
+        b.set_summary("u", "ok", Some(99)).unwrap();
+        assert_eq!(b.topics(true)[1]["summary_seq"], json!(3));
+        assert_eq!(b.topics(true)[0]["summary"], json!("same seq"));
+    }
+
+    #[test]
     fn topic_cap_drops_the_least_recently_published_topic() {
         let mut b = board(1 << 20, 10);
         for i in 0..MAX_TOPICS {
@@ -349,7 +396,8 @@ mod tests {
         assert_eq!(b.history("t0", 10).len(), 2);
         assert_eq!(b.history("one-more", 10).len(), 1);
         assert_eq!(b.publish("Bad", None, 1, "x"), Err("bad_topic"));
-        let kept: usize = b.topics().as_array().unwrap().iter().map(|t| b.history(t["topic"].as_str().unwrap(), 10).iter().map(|l| l.len()).sum::<usize>()).sum();
+        let kept: usize =
+            b.topics(false).as_array().unwrap().iter().map(|t| b.history(t["topic"].as_str().unwrap(), 10).iter().map(|l| l.len()).sum::<usize>()).sum();
         assert_eq!(b.stat()["bytes"], json!(kept));
         // t1 held seq 2: a subscriber that saw seq 1 must be told about the loss.
         let (_, replay, _rx) = b.subscribe(vec!["t0".into()], Some(1), None).unwrap();

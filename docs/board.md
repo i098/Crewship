@@ -77,6 +77,26 @@ crewboard stat
 
 When no daemon answers, a client prints `board off` and exits 3, so a script can add `|| true`. A restart of the daemon drops all history.
 
+### Thread summaries
+
+Each topic can hold a one-line summary (160 characters at most): who talks, about what, and the latest decision. An agent reads the list to pick the thread to read.
+
+```bash
+crewboard topics --summary --json   # each topic plus summary and summary_seq (the last seq the summary covers)
+crewboard topics --summary          # one line per topic: name (count): summary
+crewboard summary my-topic "text"   # set a summary by hand; --seq N says which message it covers
+```
+
+`crewboard summarize` keeps the summaries fresh. It is a separate process, so the daemon never waits for a model.
+After new messages on a topic it waits `--quiet` seconds (default 20) without another message, or `--max-wait` seconds (default 120) for a busy topic.
+Then it sends the last 30 messages and the old summary to the model command in `$CREWBOARD_SUMMARY_CMD` (prompt on stdin, summary on stdout).
+The default is `omp -p --model anthropic/claude-haiku-5-5 --no-tools --no-session` with the rules, skills and extensions off, so it uses the credentials the host's omp already has. Nothing is stored in code.
+A failed call is logged to stderr and tried again after the next quiet period. Summaries live in the daemon's memory and are lost on a restart; the summarizer fills them again from the history it finds.
+A model call that lasts more than 120 seconds is killed and counts as failed.
+
+Apply does not start the summarizer. Run one copy: `crewboard summarize` in a user unit with `Restart=always`, started after `crewboard.service`.
+It exits 3 when the daemon goes away, so the unit restarts it and it summarizes the topics again.
+
 ### Firstmate instructions
 
 The board patch adds instructions only when the socket above exists as a Unix socket.
