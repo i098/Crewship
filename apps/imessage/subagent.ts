@@ -75,7 +75,6 @@ Set target to the 1-based request number being answered. Do not return prose, ac
     tools = result.tools;
     process = undefined;
     if (!current()) return;
-    require("node:fs").appendFileSync("/tmp/sub-dbg", "RESULT " + JSON.stringify(result).slice(0, 300) + "\n");
     const answer = checkedResult(options, result);
     if (answer.kind !== "answer") return answer;
     process = spawnDesk({ ...options, provider: "inception", model: "mercury-3", reasoning: "low",
@@ -91,7 +90,6 @@ Set target to the 1-based request number being answered. Do not return prose, ac
     return bubbles ? { kind: "answer", bubbles, target: answer.target, tools }
       : { kind: "handoff", reason: "unverified", tools };
   } catch (e) {
-    require("node:fs").appendFileSync("/tmp/sub-dbg", "CATCH " + (e instanceof Error ? e.stack : String(e)) + "\n");
     if (current()) return { kind: "handoff", reason: "failed", tools };
   } finally {
     options.signal?.removeEventListener("abort", abort);
