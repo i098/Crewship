@@ -970,3 +970,10 @@ def test_image_release_check_follows_guard_to_the_recorded_release(tmp_path, bac
     assert result.returncode == (0 if backend_version == "1.0.0" else 1), result.stdout + result.stderr
     if backend_version != "1.0.0":
         assert "expected the resolved release" in result.stdout
+
+
+def test_public_tooling_skill_turns_an_answered_lavish_board_into_a_tasks_axi_list():
+    skill = (ROOT / "blueprint/skills/public/tooling-conventions/SKILL.md").read_text()
+    line = next(row for row in skill.splitlines() if row.startswith("- Answered Lavish board"))
+    for command in ("tasks-axi add", "tasks-axi ready", "tasks-axi start", "tasks-axi done"):
+        assert command in line
