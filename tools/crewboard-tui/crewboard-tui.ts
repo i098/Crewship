@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Read-only viewer for the crewboard message board. Only runs `crewboard sub`; never publishes.
+// Read-only viewer for the crewboard message board. Only runs `crewboard sub` and `crewboard topics`; never publishes.
 import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
 import { fetchSummaries, type Summaries } from "./summaries.ts"
