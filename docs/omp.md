@@ -32,6 +32,7 @@ With the `agents` profile on, `./ship.sh launch`:
 11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 12. Installs the opt-in extension [`fm-gluttony.ts`](../blueprint/config/fm-gluttony.ts) as `~/.omp/agent/extensions/fm-gluttony.ts`.
     See [Gluttony mode](#gluttony-mode).
+13. Installs the [kun](https://github.com/kunchenguid/kun) skill to `~/.agents/skills/kun` at the latest default-branch commit, and skips it while `.crewship-sha` there holds that commit. The global instructions tell agents to load it when unsure how to implement something.
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).

@@ -5,7 +5,7 @@ Each `./ship.sh launch` resolves the newest tool releases once, then installs th
 Re-running apply upgrades an existing host.
 The installer verifies downloads against publisher checksums and refuses releases without them.
 Optional Koncreet failures produce a warning instead.
-See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums.
+See [Latest releases](#latest-releases) and [Neovim and LazyVim](#neovim-and-lazyvim) for source builds and Git downloads without publisher checksums, and [Agent skills](#agent-skills) for the kun skill.
 Neovim downloads its plugins on first start, not during apply.
 The installer records resolved releases in `~/.local/share/crewship/resolved.json` for the container smoke checks.
 `blueprint/ansible/tasks/verify.yml` also checks that Herdr and omp run the resolved releases.
@@ -185,6 +185,17 @@ Use a Python project with `pyrefly.toml` to select its project root.
 The runtime starter files and Apache-2.0 license come from commit `803bc181d7c0d6d5eeba9274d9be49b287294d99`.
 The unused example plugin and upstream development files are not included.
 The Pyrefly configuration is the only added runtime file.
+
+## Agent skills
+
+`blueprint/ansible/tasks/agents.yml`, `agents` profile.
+
+- kun ([kunchenguid/kun](https://github.com/kunchenguid/kun)): apply resolves the default-branch commit with `git ls-remote` and installs that commit with `npx --yes skills add kunchenguid/kun#<sha> -g -a codex -a claude-code --json -y`.
+  The repository publishes no releases and no checksums, so the commit SHA is the pin.
+  Apply writes it to `~/.agents/skills/kun/.crewship-sha`, and a matching marker skips the install.
+  `--json` makes the CLI exit non-zero when any agent install fails, so a failed install never writes the marker.
+  The task sets `DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, so the skills CLI sends no telemetry.
+  See [Global instructions](omp.md#global-instructions) for the line that points agents at it.
 
 ## Ubuntu packages
 
