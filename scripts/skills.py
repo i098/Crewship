@@ -10,7 +10,10 @@ whole group, with all its skills. With --private-source (a local directory,
 or a git URL fetched at --private-ref, default HEAD), its skills (<name>/ or <group>/<name>/)
 and the rules in its rules/ folder are first copied into blueprint/skills/private/
 and blueprint/rules/private/; without it, the items an earlier fill added are removed
-from there. Each item is then copied into every root of its kind in KINDS. A
+from there. Each item is then copied into every root of its kind in KINDS. Skills in
+UPSTREAM (vision) install on every host, public or not, from the newest default-branch commit of
+their repo, never pinned; a private skill of the same name wins, and the result lists each commit
+SHA. --no-upstream skips them. A
 manifest records the names this script installed, so an item the operator put
 there by hand is never replaced or removed. stdout is one JSON result.
 
@@ -52,8 +55,30 @@ KINDS = {
         (".omp/agent/rules",),
     ),
 }
+# Skills installed from the newest default-branch commit of a public repo, never pinned:
+# name: (git URL, the skill's folder in that repo). Install as private ones do, below a private skill of the same name.
+UPSTREAM = {"vision": ("https://github.com/kunchenguid/vision.git", "skills/vision")}
 MANIFEST = ".local/share/crewship/skills.json"
 CACHE = ".cache/crewship/private-skills"
+UPSTREAM_CACHE = ".cache/crewship/upstream-skills"
+
+
+def fetch_upstream(upstream, cache):
+    """Fetch each upstream repo at its HEAD; return {name: skill folder} and {name: commit SHA}.
+
+    The folder gets a .crewship-source file (URL@SHA), so the installed skill records its commit.
+    """
+    found, shas = {}, {}
+    for name, (url, folder) in upstream.items():
+        checkout = fetch(url, "HEAD", cache / name)
+        shas[name] = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        found[name] = checkout / folder
+        if not (found[name] / "SKILL.md").is_file():
+            raise FileNotFoundError(f"{url} has no {folder}/SKILL.md")
+        (found[name] / ".crewship-source").write_text(f"{url}@{shas[name]}\n")
+    return found, shas
 
 
 def fetch(source, ref, cache):
@@ -116,7 +141,7 @@ def sync(wanted, base, mine, skipped, keep=()):
     return changed
 
 
-def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules=(), public="yes"):
+def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules=(), public="yes", upstream=None):
     record = home / MANIFEST
     blueprint = repo / "blueprint"
     owned = json.loads(record.read_text()) if record.is_file() else {}
@@ -130,13 +155,15 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
     changed, installed, skipped = False, {}, []
     try:
         private = fetch(private_source, private_ref, home / CACHE) if private_source else None
+        fetched, shas = fetch_upstream(upstream or {}, home / UPSTREAM_CACHE)
         for kind, (find, folder, roots) in KINDS.items():
             filled = find(private / folder) if private else {}
             changed |= sync(filled, blueprint / kind / "private", owned[f"{kind}/private"], skipped)
             mine = find(blueprint / kind / "private")
             stale = {n for n, p in publics[kind].items() if not isinstance(p, Path) and p.parts[0] in mine}
             # private last, so it wins a name clash
-            wanted = {**{n: p for n, p in publics[kind].items() if n not in stale and public == "yes"}, **mine}
+            extra = fetched if kind == "skills" else {}
+            wanted = {**{n: p for n, p in publics[kind].items() if n not in stale and public == "yes"}, **extra, **mine}
             if kind == "rules":
                 wanted = {name: path for name, path in wanted.items() if name not in skip_rules}
             installed[kind] = sorted(wanted)
@@ -149,7 +176,7 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
         if text != before:
             record.parent.mkdir(parents=True, exist_ok=True)
             record.write_text(text)
-    return {"changed": changed, "installed": installed, "skipped": skipped}
+    return {"changed": changed, "installed": installed, "skipped": skipped, "upstream": shas}
 
 
 if __name__ == "__main__":
@@ -159,6 +186,7 @@ if __name__ == "__main__":
     parser.add_argument("--private-ref", default="HEAD")
     parser.add_argument("--skip-rule", action="append", default=[])
     parser.add_argument("--public", choices=("yes", "no", "auto"), default="yes")
+    parser.add_argument("--no-upstream", action="store_true", help="skip the UPSTREAM skills (they are fetched from GitHub)")
     args = parser.parse_args()
     home = args.home.resolve(strict=True)
-    print(json.dumps(install(home, REPO, args.private_source, args.private_ref, args.skip_rule, args.public)))
+    print(json.dumps(install(home, REPO, args.private_source, args.private_ref, args.skip_rule, args.public, {} if args.no_upstream else UPSTREAM)))
