@@ -15,7 +15,9 @@ TOOL = ROOT / "tools/fleet-health"
 def _components():
     code = 'import {components} from "./components.ts"; console.log(JSON.stringify(components.map(c => ({name: c.name, source: c.source}))))'
     try:
-        out = subprocess.run(["bun", "-e", code], cwd=TOOL, capture_output=True, text=True, check=True, timeout=60).stdout
+        out = subprocess.run(
+            ["bun", "-e", code], cwd=TOOL, capture_output=True, text=True, check=True, timeout=60
+        ).stdout
     except FileNotFoundError:
         pytest.skip("bun not installed")
     return {c["name"]: c["source"] for c in json.loads(out)}
