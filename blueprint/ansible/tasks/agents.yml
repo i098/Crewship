@@ -92,6 +92,8 @@
 # JSON object whose `changed` is the only changed signal. The public skills and rules
 # are opt-in: profiles.public_skills true installs them, false leaves them out, and
 # absent installs them only on a host that already has them. Nothing is removed for it.
+# The skills in the installer's UPSTREAM (vision) install on every host, from GitHub,
+# whatever profiles.public_skills says.
 - name: Install the Crewship skills for omp and Claude Code, and its omp rules
   ansible.builtin.command:
     argv: >-

@@ -109,6 +109,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 ## More docs
 
 - [Architecture](docs/architecture.md)
+- [Vision](VISION.md)
 - [Contributing](CONTRIBUTING.md)
 - [Support](.github/SUPPORT.md)
 - [Report a bug](../../issues/new?template=bug_report.yml)
