@@ -183,6 +183,40 @@
   changed_when: "'packages installed' in crewship_schedules_install.stdout"
   when: not ansible_check_mode
 
+- name: Install the terminal pane sources
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/tools/{{ item }}/"
+    dest: "{{ crewship_share_dir }}/tui/{{ item }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: preserve
+    directory_mode: "0755"
+    remote_src: true
+  loop: "{{ ['tui-theme'] + crewship_tuis | map(attribute='dir') | list }}"
+
+- name: Install the locked terminal pane dependencies
+  ansible.builtin.command:
+    argv: ["{{ crewship_local_bin }}/bun", install, --frozen-lockfile, --production, --ignore-scripts]
+    chdir: "{{ crewship_share_dir }}/tui/{{ item.dir }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_tui_install
+  changed_when: "'packages installed' in crewship_tui_install.stdout"
+  loop: "{{ crewship_tuis }}"
+  when: not ansible_check_mode
+
+- name: Install the terminal pane commands
+  ansible.builtin.copy:
+    dest: "{{ crewship_local_bin }}/{{ item.bin }}"
+    content: |
+      #!/bin/sh
+      exec {{ (crewship_local_bin ~ '/bun') | quote }} {{ (crewship_share_dir ~ '/tui/' ~ item.dir ~ '/' ~ item.bin ~ '.ts') | quote }} "$@"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+  loop: "{{ crewship_tuis }}"
+
 - name: Remove the superseded curses entry point
   ansible.builtin.file:
     path: "{{ crewship_local_bin }}/crewship-schedules"
