@@ -300,4 +300,10 @@ def test_default_role_and_fallback_models_are_enabled():
 
 def test_seeded_compaction_method_order_is_snapcompact_first():
     config = yaml.safe_load((ROOT / "blueprint/config/omp.yml").read_text())
-    assert config["compaction"]["methodOrder"] == ["snapcompact", "remote", "handoff", "shake", "soft"]
+    assert config["compaction"]["methodOrder"] == [
+        "snapcompact",
+        "remote",
+        "handoff",
+        "shake",
+        "soft",
+    ]
