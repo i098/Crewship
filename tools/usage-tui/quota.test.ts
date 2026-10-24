@@ -79,9 +79,11 @@ test("--once prints the fixture without starting the TUI", async () => {
   expect(out).toContain("not reported")
 })
 
-test("deepseekRow shows the USD balance from the site summary", () => {
+test("deepseekRow shows the site balance labelled with its wallet currency", () => {
   expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: "12.5" }] }).note).toBe("balance $12.50")
+  expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "100" }] }).note).toBe("balance CNY 100.00")
   expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "10" }, { currency: "USD", balance: "-0.005077804" }] }).note).toBe("balance -$0.0051")
+  expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: 0 }] }).note).toBe("balance $0.00")
   expect(deepseekRow({}).note).toBe("no balance reported")
 })
 
