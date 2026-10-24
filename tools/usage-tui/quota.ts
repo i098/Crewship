@@ -1,5 +1,6 @@
 // Remaining-quota rows for usage-tui: parsing, percent-left maths, colors, reset formatting, loaders.
-// Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key).
+// Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key),
+// the DeepSeek platform site (Dia over CDP via `ssh mac`) and a reseller chat-response header (spend).
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
@@ -13,7 +14,7 @@ export type QuotaRow = {
   usedPct: number | null // null = the source did not report this window
   leftPct: number | null
   resetsAt: number | null
-  note?: string // shown instead of the numbers, e.g. "no quota API"
+  note?: string // shown instead of the numbers, e.g. "balance $12.00"
 }
 
 const PROVIDER_NAME: Record<string, string> = { anthropic: "claude", "openai-codex": "codex" }
