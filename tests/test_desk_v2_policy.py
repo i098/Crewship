@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 from test_imessage import ROOT, bun
@@ -100,33 +101,105 @@ def test_selection_refuses_unlisted_or_unpermitted_choices(value):
     assert selection(value) is None
 
 
-@pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed omp catalog")
-def test_loader_lists_available_models_from_the_installed_catalog_and_overlay(tmp_path):
+PACKAGES = {
+    "pi-catalog": {
+        "models": """
+const models = [
+  { provider: "openai", id: "gpt-5", efforts: ["low", "high"] },
+  { provider: "openai", id: "gpt-6-luna", efforts: ["low", "high"] },
+  { provider: "anthropic", id: "claude-opus-5-5", efforts: ["low", "xhigh"] },
+  { provider: "anthropic", id: "claude-sonnet-5-5", efforts: ["low"] },
+  { provider: "other", id: "thing", efforts: ["low"] },
+];
+export const getBundledProviders = () => [...new Set(models.map((m) => m.provider))];
+export const getBundledModels = (provider) => models.filter((m) => m.provider === provider);
+""",
+        "model-thinking": "export const getSupportedEfforts = (model) => model.efforts;",
+    },
+    "pi-coding-agent": {
+        "config/settings": """
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+export const Settings = { loadReadOnly: async ({ agentDir }) => JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) };
+""",
+        "config/model-settings": """
+export const cfgDisabledProviders = { get: (settings) => settings.disabledProviders ?? [] };
+export const cfgEnabledModels = { get: (settings) => settings.enabledModels ?? [] };
+""",
+        "config/model-resolver": """
+export const filterAvailableModelsByEnabledPatterns = (models, patterns) =>
+  patterns.length ? models.filter((m) => patterns.includes(`${m.provider}/${m.id}`)) : models;
+""",
+        "config/custom-models": """
+export const buildCustomModelOverlay = (provider, baseUrl, api, _a, _b, _c, _d, _e, _f, definition) =>
+  ({ provider, id: definition.id, api, baseUrl, efforts: definition.efforts });
+export const finalizeCustomModel = (model) => model;
+""",
+        "config/model-patch": """
+export const applyModelPatch = (model, patch) => ({ ...model, ...patch });
+export const applyModelOverride = (model, override) => ({ ...model, ...override });
+""",
+        "config/models-config": """
+export const validateProviderConfiguration = () => {};
+export const ModelsConfigFile = { schema: { assert: (value) => value } };
+""",
+        "config/resolve-config-value": "export const isCommandConfigValue = (value) => value.startsWith('!');",
+    },
+    "pi-ai": {
+        "env-api-key": "export const getEnvApiKeyName = (provider) => (provider === 'openai' ? 'OPENAI_API_KEY' : undefined);",
+        "utils/foundry": "export const isFoundryEnabled = () => false;",
+    },
+    "pi-utils": {
+        "index": "export const $env = process.env; export const $envExact = (name) => process.env[name];",
+    },
+}
+
+
+def fixture_omp(root):
+    for package, modules in PACKAGES.items():
+        directory = root / "node_modules" / "@oh-my-pi" / package
+        for name, source in modules.items():
+            (directory / f"{name}.js").parent.mkdir(parents=True, exist_ok=True)
+            (directory / f"{name}.js").write_text(source)
+        exports = {".": "./index.js"} if package == "pi-utils" else {"./*": "./*.js"}
+        (directory / "package.json").write_text(json.dumps({"name": f"@oh-my-pi/{package}", "type": "module", "exports": exports}))
+    executable = root / "bin" / "omp"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    return executable.parent
+
+
+def test_loader_lists_available_models_from_catalog_overlay_and_policy(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{fixture_omp(tmp_path)}:{Path(shutil.which('bun')).parent}:/usr/bin:/bin")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     agent, home = tmp_path / "agent", tmp_path / "home"
     (home / "config").mkdir(parents=True)
     agent.mkdir()
+    (agent / "settings.json").write_text(json.dumps({"enabledModels": [
+        "openai/gpt-5", "openai/gpt-6-luna", "anthropic/claude-opus-5-5", "other/thing", "inception/mercury-3",
+    ]}))
     (agent / "models.yml").write_text(
         "providers:\n  inception:\n    baseUrl: https://example.invalid/v1\n    api: openai-completions\n"
-        '    apiKey: "!printenv MERCURY_KEY"\n    models:\n      - id: mercury-3\n        name: Mercury 3\n        reasoning: true\n'
+        '    apiKey: "!printenv MERCURY_KEY"\n    models:\n      - id: mercury-3\n        efforts: [low, high]\n'
     )
     (home / "config" / "crew-dispatch.json").write_text(json.dumps(
         {"rules": [{"use": {"harness": "omp", "model": "openai/gpt-5", "effort": "high"}}]}
     ))
     args = f"{json.dumps(str(home))}, {json.dumps(str(agent))}, auth, {json.dumps(str(home))}"
-    code = f"""
+    result = bun(f"""
 import {{ loadDispatchModels }} from {POLICY};
 const auth = {{ source: (p) => (p === "openai" ? "key" : undefined), keyless: () => false }};
 console.log(JSON.stringify({{
   general: await loadDispatchModels({args}),
   coding: await loadDispatchModels({args}, "simple-coding"),
 }}));
-"""
-    result = bun(code)
+""")
     general = {m["id"]: m for m in result["general"]}
     assert general["openai/gpt-5"]["reasoning"] == ["high"]
     assert general["openai/gpt-5"]["apiKeyEnv"] == "OPENAI_API_KEY"
-    assert "inception/mercury-3" not in general
-    assert not [m for m in general.values() if m["id"].startswith("anthropic/")]
+    assert general["openai/gpt-6-luna"]["reasoning"] == ["low", "high"]
+    assert set(general) == {"openai/gpt-5", "openai/gpt-6-luna"}
     mercury = {m["id"]: m for m in result["coding"]}["inception/mercury-3"]
     assert mercury == {
         "id": "inception/mercury-3", "provider": "inception", "model": "mercury-3",
