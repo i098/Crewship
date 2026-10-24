@@ -4,11 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 // Runs the real TUI with the real `setsid` and a stub `omp` that records its own pgid and sid.
+// The quota call answers with empty JSON, so only the stats sync writes to the log.
 // Oracle: `ps` on the TUI pid. The omp child must be in a different process group and session.
 test("stats sync runs omp outside the TUI's process group and session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "usage-tui-"))
   const log = join(dir, "calls.log")
-  writeFileSync(join(dir, "omp"), `#!/bin/sh\nps -o pgid=,sid= -p $$ >> "${log}"\n`)
+  writeFileSync(join(dir, "omp"), `#!/bin/sh\ncase "$1" in stats) ps -o pgid=,sid= -p $$ >> "${log}" ;; usage) printf '{"reports":[]}\\n' ;; esac\n`)
   chmodSync(join(dir, "omp"), 0o755)
 
   const tui = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts")], {

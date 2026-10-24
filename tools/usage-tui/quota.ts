@@ -161,8 +161,10 @@ const HOME = process.env.HOME ?? ""
 const SESSIONS = `${HOME}/.omp/agent/sessions`
 const AGENT_DB = `${HOME}/.omp/agent/agent.db`
 
+// setsid -f: the child leaves the pane's foreground group, so herdr does not list the pane as omp.
+// setsid -w keeps the child's exit status for the check below.
 async function run(cmd: string[]): Promise<string> {
-  const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" })
+  const p = Bun.spawn(["setsid", "-f", "-w", ...cmd], { stdout: "pipe", stderr: "ignore", stdin: "ignore" })
   const out = await new Response(p.stdout).text()
   if ((await p.exited) !== 0) throw new Error(`${cmd[0]} exited non-zero`)
   return out

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
@@ -87,3 +87,32 @@ test("buildRows says no accounts reported when omp returns an empty reports list
   const rows = buildRows({ omp: { reports: [] } })
   expect(rows.find(r => r.account === "omp usage")).toMatchObject({ leftPct: null, note: "no accounts reported" })
 })
+
+// The runner inherits this process's group and session, as the TUI inherits the pane's.
+// Oracle: a stub omp reports its own pgid and sid through the JSON that loadQuota returns.
+test("quota load runs omp outside the TUI's process group and session", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "usage-tui-"))
+  const bin = join(dir, "bin")
+  mkdirSync(bin)
+  writeFileSync(join(bin, "omp"), `#!/bin/sh\nprintf '{"probe":"%s"}\\n' "$(ps -o pid=,pgid=,sid= -p $$)"\n`)
+  chmodSync(join(bin, "omp"), 0o755)
+  const runner = join(dir, "runner.ts")
+  // Static import cannot work here: quota.ts reads HOME when it loads, so the runner needs
+  // this test's temporary HOME already in place before the module is imported.
+  writeFileSync(runner, `const { loadQuota } = await import(${JSON.stringify(join(import.meta.dir, "quota.ts"))})\nconsole.log(JSON.stringify(await loadQuota()))\n`)
+  const p = Bun.spawn(["bun", runner], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: dir }, stdout: "pipe", stderr: "ignore", stdin: "ignore" })
+  try {
+    const out = await new Response(p.stdout).text()
+    expect(await p.exited).toBe(0)
+    const omp: unknown = JSON.parse(out).omp
+    if (!omp || typeof omp !== "object" || !("probe" in omp) || typeof omp.probe !== "string") throw new Error("stub omp reported no process ids")
+    const probe = omp.probe.trim().split(/\s+/).map(Number)
+    const parent = Bun.spawnSync(["ps", "-o", "pgid=,sid=", "-p", String(process.pid)]).stdout.toString().trim().split(/\s+/).map(Number)
+    expect(probe).toHaveLength(3)
+    expect(parent).toHaveLength(2)
+    expect(probe[1]).not.toBe(parent[0])
+    expect(probe[2]).not.toBe(parent[1])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}, 60_000)
