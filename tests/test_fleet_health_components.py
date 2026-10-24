@@ -31,6 +31,8 @@ def test_fleet_health_sources_match_provisions():
     for name, (repo, prefix, *_rest) in provisions.GITHUB_LATEST.items():
         if name == "sentrux-grammars":  # shares sentrux's release
             continue
+        if name == "concord":  # now installed from npm; provisions.py still lists the old release
+            continue
         assert github.get(name) == (repo, prefix), name
     for name, pkg in provisions.NPM_LATEST.items():
         assert npm.get(name) == pkg, name
@@ -57,19 +59,19 @@ def _bun(code, home):
 def test_commands_off_path_are_found_in_cargo_and_bun_homes(tmp_path):
     for sub in (".cargo/bin", ".bun/bin"):
         (tmp_path / sub).mkdir(parents=True)
-    (tmp_path / ".cargo/bin/concord").write_text("#!/bin/sh\n")
-    (tmp_path / ".cargo/bin/concord").chmod(0o755)
+    (tmp_path / ".cargo/bin/sgrep").write_text("#!/bin/sh\n")
+    (tmp_path / ".cargo/bin/sgrep").chmod(0o755)
     found = _bun(
-        'import {binPath} from "./components.ts"; console.log(JSON.stringify([binPath("concord"), binPath("nope-xyz")]))',
+        'import {binPath} from "./components.ts"; console.log(JSON.stringify([binPath("sgrep"), binPath("nope-xyz")]))',
         tmp_path,
     )
-    assert found == [str((tmp_path / ".cargo/bin/concord").resolve()), None]
+    assert found == [str((tmp_path / ".cargo/bin/sgrep").resolve()), None]
 
 
 def test_running_process_counts_by_name_or_path():
     live = _bun(
-        'import {isRunning} from "./components.ts"; const live = new Set(["/h/.cargo/bin/concord", "concord"]);'
-        'console.log(JSON.stringify([isRunning("concord", null, live), isRunning("x", "/h/.cargo/bin/concord", live), isRunning("herdr", "/h/herdr", live)]))',
+        'import {isRunning} from "./components.ts"; const live = new Set(["/h/.cargo/bin/sgrep", "sgrep"]);'
+        'console.log(JSON.stringify([isRunning("sgrep", null, live), isRunning("x", "/h/.cargo/bin/sgrep", live), isRunning("herdr", "/h/herdr", live)]))',
         "/tmp",
     )
     assert live == [True, True, False]
@@ -140,3 +142,17 @@ def test_plugin_trace_uses_its_own_install_dir_and_sgrep_reads_cargo_commit(tmp_
         tmp_path,
     )
     assert out == [1_700_000_000_000, 1_800_000_000_000, "dde0c13"]
+
+
+def test_concord_is_an_npm_component_read_from_its_version_dir(tmp_path):
+    pkg = tmp_path / ".local/share/code-factory/concord/2.6.3/node_modules/@chojs23/concord"
+    pkg.mkdir(parents=True)
+    (pkg / "run-concord.js").write_text("")
+    (tmp_path / ".local/bin").mkdir(parents=True)
+    (tmp_path / ".local/bin/concord").symlink_to(pkg / "run-concord.js")
+    out = _bun(
+        'import {components} from "./components.ts"; const c = components.find(c => c.name === "concord")!;'
+        "console.log(JSON.stringify([c.source, await c.installed()]))",
+        tmp_path,
+    )
+    assert out == [{"kind": "npm", "pkg": "@chojs23/concord"}, "2.6.3"]

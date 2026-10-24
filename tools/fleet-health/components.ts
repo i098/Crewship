@@ -6,7 +6,7 @@ import { basename, join } from "node:path"
 
 export const HOME = process.env.HOME ?? ""
 const BIN = `${HOME}/.local/bin`
-// Off-PATH homes: cargo installs (concord, sgrep), bun links, and the fleet browser tier (obscura).
+// Off-PATH homes: cargo installs (sgrep), bun links, and the fleet browser tier (obscura).
 const PATH = `${BIN}:${HOME}/.cargo/bin:${HOME}/.bun/bin:${process.env.PATH}:/usr/local/bin:${HOME}/oss-fleet/browsers`
 
 export type Source =
@@ -164,7 +164,6 @@ export const components: Component[] = [
   github("fallow", "fallow-rs/fallow"),
   github("cloudflared", "cloudflare/cloudflared", ""),
   github("pyrefly", "facebook/pyrefly", ""),
-  github("concord", "chojs23/concord"),
   github("slk", "gammons/slk"),
   github("obscura", "h4ckf0r0day/obscura"),
   github("koncreet", "jimididit/koncreet"),
@@ -182,6 +181,7 @@ export const components: Component[] = [
   npm("chrome-devtools-mcp", "chrome-devtools-mcp"),
   npm("forgejo-axi", "forgejo-axi"),
   npm("ondine", "ondine"),
+  npm("concord", "@chojs23/concord"),
   {
     name: "spectrum-ts", group: "bun", source: { kind: "npm", pkg: "spectrum-ts" },
     installed: async () => readVersion(`${HOME}/.local/share/code-factory/imessage/node_modules/spectrum-ts/package.json`),
