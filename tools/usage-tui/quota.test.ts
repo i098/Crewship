@@ -82,3 +82,8 @@ test("buildRows shows an error row when Mercury fails to load", () => {
   const rows = buildRows({ mercuryError: "database is locked" })
   expect(rows.find(r => r.account === "mercury")).toMatchObject({ leftPct: null, note: "unavailable: database is locked" })
 })
+
+test("buildRows says no accounts reported when omp returns an empty reports list", () => {
+  const rows = buildRows({ omp: { reports: [] } })
+  expect(rows.find(r => r.account === "omp usage")).toMatchObject({ leftPct: null, note: "no accounts reported" })
+})

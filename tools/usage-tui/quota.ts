@@ -96,8 +96,9 @@ export type QuotaInput = {
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
   const rows: QuotaRow[] = []
-  if (inp.omp) rows.push(...parseOmp(inp.omp))
-  else rows.push({ account: "omp usage", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.ompError ?? "not reported" })
+  const ompRows = inp.omp ? parseOmp(inp.omp) : []
+  if (ompRows.length) rows.push(...ompRows)
+  else rows.push({ account: "omp usage", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.ompError ?? (inp.omp ? "no accounts reported" : "not reported") })
   if (inp.zai) rows.push(...parseZai(inp.zai))
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
