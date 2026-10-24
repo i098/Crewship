@@ -3,6 +3,7 @@
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
+import { BAR_W, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
 
 const TZ = "America/Los_Angeles"
 const DB_PATH = `${process.env.HOME}/.omp/stats.db`
@@ -248,7 +249,30 @@ function modelPanel(d: Data, w: number): Line[] {
   return lines
 }
 
+function quotaPanel(rows: QuotaRow[], now: number, w: number): Line[] {
+  const lines: Line[] = [[s("Account".padEnd(15) + "Window".padEnd(10) + "Used".padEnd(BAR_W + 2) + "Left".padEnd(10) + "Resets in".padEnd(10) + "At (LA)", theme.muted, { b: true })]]
+  lines.push([s(rep("─", Math.min(w, 15 + 10 + BAR_W + 2 + 10 + 10 + 11)), theme.border)])
+  let last = ""
+  for (const r of rows) {
+    const c = cells(r, now, TZ)
+    const acct = r.account === last ? "" : r.account
+    last = r.account
+    const head = [s(acct.padEnd(15), theme.accent, { b: true }), s(r.window.padEnd(10))]
+    if (r.leftPct === null) lines.push([...head, s(c.note, theme.muted)])
+    else lines.push([...head, s(c.bar.padEnd(BAR_W + 2), c.color), s(c.left.padEnd(10), c.color, { b: true }), s(c.reset.padEnd(10)), s(c.clock.padEnd(11), theme.muted), ...(c.note ? [s(c.note, theme.muted)] : [])])
+  }
+  return lines
+}
+
 // ---- layout --------------------------------------------------------------
+// --once prints the quota rows as text and exits; --fixture <file> reads the inputs from a recorded JSON instead of the live sources.
+if (process.argv.includes("--once")) {
+  const fx = process.argv.indexOf("--fixture")
+  const input: QuotaInput = fx > 0 ? JSON.parse(await Bun.file(process.argv[fx + 1]).text()) : await loadQuota()
+  console.log(quotaText(buildRows(input), input.now ?? Date.now(), TZ))
+  process.exit(0)
+}
+
 const renderer = await createCliRenderer({ exitOnCtrlC: true })
 const MAXW = 150
 const column = new BoxRenderable(renderer, { flexDirection: "column", width: "100%" })
@@ -267,7 +291,9 @@ column.add(header)
 const pTable = mkPanel(" Usage by period ")
 const pDays = mkPanel(" Last 14 days · input + output tokens per day ")
 const pHours = mkPanel(" Today by hour ")
+const pQuota = mkPanel(" Quota left · reset times in LA · refreshed every 60s ")
 const pModels = mkPanel(" This month by model · input + output tokens ")
+
 renderer.root.add(column)
 
 let data: Data | null = null
@@ -294,6 +320,7 @@ function draw() {
   } else {
     header.content = styled([[s(error || "Loading…", error ? theme.error : theme.muted)]])
   }
+  if (quota) pQuota.text.content = styled(quotaPanel(buildRows(quota), Date.now(), inner))
   renderer.requestRender()
 }
 
@@ -307,6 +334,20 @@ function refresh() {
   draw()
 }
 
+// Quota comes from omp usage and a few HTTP/file reads; never fetched more often than QUOTA_MIN_MS.
+let quota: QuotaInput | null = null
+let quotaAt = 0
+let quotaBusy = false
+function refreshQuota() {
+  if (quotaBusy || Date.now() - quotaAt < QUOTA_MIN_MS) return
+  quotaBusy = true
+  quotaAt = Date.now()
+  loadQuota()
+    .then(q => { quota = q })
+    .catch(e => { error = `Quota: ${(e as Error).message}` })
+    .finally(() => { quotaBusy = false; draw() })
+}
+
 function syncStore() {
   // omp owns the store; its own command ingests new session files.
   Bun.spawn(["omp", "stats", "--summary"], { stdout: "ignore", stderr: "ignore" })
@@ -315,15 +356,21 @@ function syncStore() {
 draw()
 setTimeout(refresh, 0)
 syncStore()
+refreshQuota()
 const t1 = setInterval(refresh, REFRESH_MS)
 const t2 = setInterval(syncStore, SYNC_MS)
+const t3 = setInterval(refreshQuota, QUOTA_MIN_MS + 1000)
 renderer.on("resize", draw)
 renderer.keyInput.on("keypress", (k: { name: string }) => {
   if (k.name === "q") {
     clearInterval(t1)
     clearInterval(t2)
+    clearInterval(t3)
     renderer.destroy()
     process.exit(0)
   }
-  if (k.name === "r") refresh()
+  if (k.name === "r") {
+    refresh()
+    refreshQuota()
+  }
 })
