@@ -103,6 +103,7 @@ tui:
 # Compact every session at 200k context: turns above 400k carried most Claude
 # tokens in a week of usage data.
 compaction:
+  methodOrder: [snapcompact, remote, handoff, shake, soft]
   thresholdTokens: 200000
   v2RetainedMessageBudget: 32000
 # Cap large tool results: output above 20 KB spills to an artifact; 4 KB head

@@ -296,3 +296,14 @@ def test_default_role_and_fallback_models_are_enabled():
     for model, fallbacks in config["retry"]["fallbackChains"].items():
         selected.extend([model, *fallbacks])
     assert {model.split(":")[0] for model in selected} <= enabled
+
+
+def test_seeded_compaction_method_order_is_snapcompact_first():
+    config = yaml.safe_load((ROOT / "blueprint/config/omp.yml").read_text())
+    assert config["compaction"]["methodOrder"] == [
+        "snapcompact",
+        "remote",
+        "handoff",
+        "shake",
+        "soft",
+    ]
