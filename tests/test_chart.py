@@ -684,7 +684,7 @@ print(json.dumps({{"result": result}}))
 """)
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
-    pane_commands = ["usage-tui", "crewboard-tui", "fleet-health-tui"]
+    pane_commands = ["usage-tui", "crewboard-tui"]
     pane_log = tmp_path / "panes.log"
     for name in pane_commands:
         stub = local_bin / name
@@ -717,7 +717,7 @@ print(json.dumps({{"result": result}}))
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
                                   **({} if mode == "all" else {k: False for k in (
-                                      "usage_tab", "crewboard_tab", "fleet_health_tab")})}},
+                                      "usage_tab", "crewboard_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
         "crewship_share_dir": str(home / ".local/share/crewship"),
@@ -741,7 +741,7 @@ print(json.dumps({{"result": result}}))
         assert not viewer_call.exists()
     elif mode == "all":
         assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_commands]
-        assert len(actual["runs"]) == 4
+        assert len(actual["runs"]) == 3
         assert pane_log.read_text().split() == pane_commands
         assert "changed=0" in result.stdout
     else:

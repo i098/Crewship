@@ -93,7 +93,6 @@ crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
 crewship_tuis:
   - {dir: usage-tui, bin: usage-tui, label: usage-tui, switch: usage_tab}
   - {dir: crewboard-tui, bin: crewboard-tui, label: crewboard-tui, switch: crewboard_tab}
-  - {dir: fleet-health, bin: fleet-health-tui, label: fleet-health-tui, switch: fleet_health_tab}
 crewship_herdr_tabs: >-
   {{ [{'label': 'schedules', 'bin': 'crewship', 'args': ' schedules', 'switch': 'schedules_tab'}]
      + crewship_tuis | map('combine', {'args': ''}) | list }}
