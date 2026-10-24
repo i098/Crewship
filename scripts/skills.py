@@ -13,7 +13,7 @@ and blueprint/rules/private/; without it, the items an earlier fill added are re
 from there. Each item is then copied into every root of its kind in KINDS. Skills in
 UPSTREAM (vision) install on every host, public or not, from the newest default-branch commit of
 their repo, never pinned; a private skill of the same name wins, and the result lists each commit
-SHA. --no-upstream skips them. A
+SHA. --no-upstream only skips their fetch; copies an earlier run installed stay. A
 manifest records the names this script installed, so an item the operator put
 there by hand is never replaced or removed. stdout is one JSON result.
 
@@ -156,6 +156,7 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
     try:
         private = fetch(private_source, private_ref, home / CACHE) if private_source else None
         fetched, shas = fetch_upstream(upstream or {}, home / UPSTREAM_CACHE)
+        unfetched = set(UPSTREAM) - set(fetched)
         for kind, (find, folder, roots) in KINDS.items():
             filled = find(private / folder) if private else {}
             changed |= sync(filled, blueprint / kind / "private", owned[f"{kind}/private"], skipped)
@@ -169,6 +170,8 @@ def install(home, repo=REPO, private_source=None, private_ref="HEAD", skip_rules
             installed[kind] = sorted(wanted)
             # public items already on the host stay when public is off, except a skipped rule
             keep = set() if public == "yes" else publics[kind].keys() - stale - (set(skip_rules) if kind == "rules" else set())
+            # an upstream skill whose fetch was skipped stays as it is, like a public item with public off
+            keep = keep | (unfetched if kind == "skills" else set())
             for root in roots:
                 changed |= sync(wanted, home / root, owned[root], skipped, keep)
     finally:
@@ -186,7 +189,7 @@ if __name__ == "__main__":
     parser.add_argument("--private-ref", default="HEAD")
     parser.add_argument("--skip-rule", action="append", default=[])
     parser.add_argument("--public", choices=("yes", "no", "auto"), default="yes")
-    parser.add_argument("--no-upstream", action="store_true", help="skip the UPSTREAM skills (they are fetched from GitHub)")
+    parser.add_argument("--no-upstream", action="store_true", help="skip the UPSTREAM fetch and keep installed copies (they are fetched from GitHub)")
     args = parser.parse_args()
     home = args.home.resolve(strict=True)
     print(json.dumps(install(home, REPO, args.private_source, args.private_ref, args.skip_rule, args.public, {} if args.no_upstream else UPSTREAM)))

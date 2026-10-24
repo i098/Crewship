@@ -385,6 +385,13 @@ def test_upstream_skill_installs_at_the_newest_commit_and_records_its_sha(tmp_pa
     assert result["changed"] and result["upstream"] == {"vision": sha}
     assert (home / SKILL_ROOTS[0] / "vision/SKILL.md").read_text() == "v2"
 
+    # A skipped fetch leaves the installed skill and its manifest entries as they are.
+    result = skills.install(home, tmp_path, public="no")
+    assert not result["changed"]
+    for root in SKILL_ROOTS:
+        assert (home / root / "vision/SKILL.md").read_text() == "v2"
+        assert "vision" in json.loads((home / skills.MANIFEST).read_text())[root]
+
 
 def test_private_local_directory_source_fills_private(tmp_path):
     source, home, local = tmp_path / "blueprint/skills", tmp_path / "home", tmp_path / "local"
