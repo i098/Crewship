@@ -41,58 +41,90 @@ const styled = (lines: Line[]) => {
   return new StyledText(out)
 }
 const stateColor = { "up to date": theme.ok, outdated: theme.warn, unknown: theme.muted } as const
+const chip = (state: State) => s(` ${state.toUpperCase()} `.padEnd(13), theme.bg, { bg: stateColor[state], b: true })
 const rank = { outdated: 0, unknown: 1, "up to date": 2 } as const
+const SECTIONS: [string, string][] = [
+  ["native", "Native tools"], ["runtime", "Runtimes"], ["npm", "npm packages"],
+  ["python", "Python packages"], ["omp plugin", "omp plugins"], ["source", "Built from source"],
+]
 
 const renderer = await createCliRenderer({ exitOnCtrlC: true })
 const column = new BoxRenderable(renderer, { flexDirection: "column", width: "100%" })
 const header = new TextRenderable(renderer, { content: "", flexShrink: 0 })
 const panel = new BoxRenderable(renderer, {
-  border: true, borderStyle: "rounded", borderColor: theme.border, titleColor: theme.text,
-  title: " Components · installed vs latest ", titleAlignment: "left", paddingLeft: 1, paddingRight: 1, flexShrink: 0,
+  border: true, borderStyle: "rounded", borderColor: theme.border, paddingLeft: 1, paddingRight: 1, flexShrink: 0,
 })
 const body = new TextRenderable(renderer, { content: "" })
+const footer = new TextRenderable(renderer, { content: "", flexShrink: 0 })
 panel.add(body)
 column.add(header)
 column.add(panel)
+column.add(footer)
 renderer.root.add(column)
 
 let sel = 0
 let top = 0
 
 function draw() {
-  const W = Math.min(130, renderer.width)
+  const W = Math.min(120, renderer.width)
   column.width = W
-  const list = rows().sort((a, b) => rank[a.state] - rank[b.state] || a.name.localeCompare(b.name))
-  const count = (st: State) => list.filter(r => r.state === st).length
+  const all = rows()
+  const count = (st: State) => all.filter(r => r.state === st).length
   const ok = count("up to date"), old = count("outdated"), unk = count("unknown")
   const inner = W - 4
-  const barOk = Math.round((ok / list.length) * inner), barOld = Math.round((old / list.length) * inner)
-  const view = Math.max(3, renderer.height - 8)
-  sel = Math.max(0, Math.min(sel, list.length - 1))
-  top = Math.max(0, Math.min(sel < top ? sel : sel >= top + view ? sel - view + 1 : top, list.length - view))
+  const barOk = Math.round((ok / all.length) * inner), barOld = Math.round((old / all.length) * inner)
   const stamp = checkedAt ? new Date(checkedAt).toTimeString().slice(0, 8) : "…"
   header.content = styled([
-    [s(" FLEET HEALTH ", theme.bg, { bg: theme.accent, b: true }), s("  "), s(`${ok} up to date`, theme.ok, { b: true }), s("  "), s(`${old} outdated`, theme.warn, { b: true }), s("  "), s(`${unk} unknown`, theme.muted, { b: true })],
-    [s("█".repeat(barOk), theme.ok), s("█".repeat(barOld), theme.warn), s("█".repeat(Math.max(0, inner - barOk - barOld)), theme.border)],
-    [s(`checked ${stamp}${busy ? " · fetching…" : ""} · installed every ${SLOW_MS / 60_000}m · latest cached ${CACHE_MS / 60_000}m · `, theme.muted), s("↑↓", theme.text, { b: true }), s(" scroll  ", theme.muted), s("r", theme.text, { b: true }), s(" refresh  ", theme.muted), s("q", theme.text, { b: true }), s(" quit", theme.muted)],
+    [s(" ◆ FLEET HEALTH ", theme.bg, { bg: theme.accent, b: true }), s(`  ${all.length} components`, theme.muted), s(busy ? "   ⟳ fetching…" : `   checked ${stamp}`, busy ? theme.accent : theme.muted)],
+    [s("")],
+    [s(` ${ok} `, theme.bg, { bg: theme.ok, b: true }), s(" up to date   ", theme.text), s(` ${old} `, theme.bg, { bg: theme.warn, b: true }), s(" outdated   ", theme.text), s(` ${unk} `, theme.bg, { bg: theme.muted, b: true }), s(" unknown", theme.text)],
+    [s("█".repeat(barOk), theme.ok), s("█".repeat(barOld), theme.warn), s("█".repeat(Math.max(0, inner + 2 - barOk - barOld)), theme.border)],
   ])
-  const nameW = Math.max(...list.map(r => r.name.length), 9)
-  const groupW = Math.max(...list.map(r => r.group.length), 5)
-  const out: Line[] = [[s("  " + "COMPONENT".padEnd(nameW + 2) + "KIND".padEnd(groupW + 2) + "INSTALLED".padEnd(16) + "LATEST".padEnd(16) + "STATE", theme.muted, { b: true })]]
-  list.slice(top, top + view).forEach((r, i) => {
-    const chosen = top + i === sel
-    const o = chosen ? { bg: theme.border } : {}
-    out.push([
-      s(chosen ? "▌ " : "  ", theme.accent, o),
-      s(r.name.padEnd(nameW + 2), theme.text, { ...o, b: true }),
-      s(r.group.padEnd(groupW + 2), theme.muted, o),
-      s((r.installed ?? "—").slice(0, 14).padEnd(16), theme.text, o),
-      s((r.latest ?? "—").slice(0, 14).padEnd(16), theme.text, o),
-      s("● " + r.state, stateColor[r.state], o),
-      s(r.note ? "  " + r.note : "", theme.muted, o),
-    ])
-  })
-  body.content = styled(out)
+
+  const nameW = Math.max(...all.map(r => r.name.length), 9) + 2
+  const verW = 14
+  const order: Row[] = []
+  const lines: { line: Line; index: number }[] = []
+  for (const [key, title] of SECTIONS) {
+    const group = all.filter(r => r.group === key).sort((a, b) => rank[a.state] - rank[b.state] || a.name.localeCompare(b.name))
+    if (!group.length) continue
+    const behind = group.filter(r => r.state === "outdated").length
+    if (lines.length) lines.push({ line: [s("")], index: -1 })
+    lines.push({
+      line: [s("▸ ", theme.accent), s(title, theme.text, { b: true }), s(`  ${group.length}`, theme.muted), ...(behind ? [s(`  ${behind} outdated`, theme.warn)] : group.every(r => r.state === "up to date") ? [s("  all current", theme.ok)] : [s("  not comparable", theme.muted)])],
+      index: -1,
+    })
+    lines.push({ line: [s("  " + "COMPONENT".padEnd(nameW) + "INSTALLED".padEnd(verW) + "LATEST".padEnd(verW + 2) + "STATE", theme.muted)], index: -1 })
+    for (const r of group) {
+      const chosen = order.length === sel
+      const o = chosen ? { bg: theme.border } : {}
+      const note = r.note ? "  " + r.note : ""
+      lines.push({
+        index: order.length,
+        line: [
+          s(chosen ? "▌ " : "  ", theme.accent, o),
+          s(r.name.padEnd(nameW), theme.text, { ...o, b: true }),
+          s((r.installed ?? "—").slice(0, verW - 2).padEnd(verW), r.installed ? theme.text : theme.muted, o),
+          s((r.latest ?? "—").slice(0, verW - 2).padEnd(verW), r.state === "outdated" ? theme.warn : r.latest ? theme.text : theme.muted, o),
+          s("  ", theme.text, o),
+          chip(r.state),
+          s(note.slice(0, Math.max(0, inner - nameW - verW * 2 - 19)), theme.muted, o),
+        ],
+      })
+      order.push(r)
+    }
+  }
+  sel = Math.max(0, Math.min(sel, order.length - 1))
+  // Section rows have index -1, so size the view over lines and keep the selected line in it.
+  const at = lines.findIndex(l => l.index === sel)
+  const view = Math.max(5, renderer.height - 12)
+  top = Math.max(0, Math.min(at < top ? at : at >= top + view ? at - view + 1 : top, Math.max(0, lines.length - view)))
+  body.content = styled(lines.slice(top, top + view).map(l => l.line))
+  const pick = order[sel]
+  footer.content = styled([
+    [s(pick ? ` ${pick.name} ` : "", theme.text, { b: true }), s(pick?.note ?? "", theme.muted)],
+    [s(` installed every ${SLOW_MS / 60_000}m · latest cached ${CACHE_MS / 60_000}m   `, theme.muted), s("↑↓", theme.text, { b: true }), s(" move  ", theme.muted), s("r", theme.text, { b: true }), s(" refresh  ", theme.muted), s("q", theme.text, { b: true }), s(" quit", theme.muted)],
+  ])
   renderer.requestRender()
 }
 
