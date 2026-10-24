@@ -188,7 +188,8 @@ export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: 
 
 function claimsWork(text: string): boolean {
   return /\b(?:i|we|firstmate)(?:['’](?:ve|re|m|d|ll))?\s+(?:(?:have|has|had|already|just|am|are|is|was|were|will|would|be|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|running|sending|checked)\b|\b(?:my|our)\s+(?:changes|work)\s+(?:is|are)\s+(?:live|done|complete|completed|finished)\b/i.test(text)
-    || /\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(text)
+    || /\b(?:i|we|firstmate)(?:['’](?:ve|d|ll)|\s+(?:have|has|had|will|would|did))\s+(?:(?:already|just|have)\s+)*(?:run|send|check|look\s+into|fix|repair|merge|push|restart|complete|finish|save|start|stop|deploy|change|approve|delete|do|work)\b/i.test(text)
+    || /\blet\s+me\s+(?:check|look\s+into)\b/i.test(text)
     || /\bfirstmate['’]s\s+(?:(?:already|just|been)\s+)*(?:fixed|repaired|merged|pushed|restarted|completed|finished|sent|saved|started|stopped|deployed|changed|approved|deleted|done|doing|checking|working|ran|run|running|sending|checked)\b(?=\s+(?:a|an|the|it|them|this|that|these|those|my|our|your|on|with|for|at|to)(?:\s|[.!?,;:]|$)|\s*(?:[.!?]|$))/i.test(text);
 }
 
