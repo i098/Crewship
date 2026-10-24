@@ -10,7 +10,7 @@ export type FrontIntent = { kind: "dispatch"; model: string; reasoning: string }
   domains: string[];
   category: (typeof RELAY_CATEGORIES)[number];
 };
-export type FrontResult = { text: string; intents: FrontIntent[] };
+export type FrontResult = { intents: FrontIntent[] };
 export type FrontInput = {
   original: readonly string[];
   recent: readonly FrontMessage[];
@@ -86,8 +86,8 @@ Never claim that work has started or finished. Never output reactions, credentia
 const RELAY_CATEGORIES = ["work", "orchestration", "approval", "external", "ambiguous", "other"] as const;
 
 function fallback(input: FrontInput): FrontResult {
-  if (socialInput(input)) return { text: "", intents: [] };
-  return { text: "", intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
+  if (socialInput(input)) return { intents: [] };
+  return { intents: [{ kind: "relay", target: "firstmate", domains: [], category: "other" }] };
 }
 
 // The model path failed; the log line is the only way to tell this result from a real relay choice.
@@ -160,14 +160,14 @@ function relayIntent(value: Record<string, unknown>, mates: FrontInput["mates"])
 
 function answer(value: unknown, input: FrontInput): FrontResult | undefined {
   if (!record(value) || typeof value.kind !== "string" || !["social", "dispatch", "relay"].includes(value.kind)) return;
-  if (socialInput(input)) return { text: "", intents: [] };
+  if (socialInput(input)) return { intents: [] };
   switch (value.kind) {
     case "social":
       return;
     case "dispatch":
     case "relay": {
       const intent = value.kind === "dispatch" ? dispatchIntent(value, input.models) : relayIntent(value, input.mates);
-      return intent ? { text: "", intents: [intent] } : undefined;
+      return intent ? { intents: [intent] } : undefined;
     }
   }
 }

@@ -45,7 +45,6 @@ def test_dispatch_choice_resolves_numeric_ids_and_never_writes_text():
         [{"kind": "dispatch", "model": 1, "reasoning": 2, "text": "I'll check the build status."}],
     )
     assert out["result"] == {
-        "text": "",
         "intents": [{"kind": "dispatch", "model": "openai/gpt-6-luna", "reasoning": "high"}],
     }
 
@@ -69,13 +68,13 @@ def test_unknown_ownership_goes_to_firstmate():
 
 def test_social_turn_gets_no_intent_and_no_text():
     out = front(["thanks"], [{"kind": "social", "text": "Anytime."}])
-    assert out["result"] == {"text": "", "intents": []}
+    assert out["result"] == {"intents": []}
 
 
 def test_invalid_answer_is_retried_once_then_falls_back_to_firstmate():
     out = front(["do the thing"], ["not json", "still not json"])
     assert out["calls"] == 2
-    assert out["result"] == {"text": "", "intents": [RELAY_FIRSTMATE]}
+    assert out["result"] == {"intents": [RELAY_FIRSTMATE]}
 
 
 def test_second_answer_can_recover():
@@ -89,7 +88,7 @@ def test_second_answer_can_recover():
 @pytest.mark.parametrize("kwargs", [{"status": 500}, {"api_key": ""}])
 def test_failed_or_unauthenticated_call_falls_back_to_firstmate(kwargs):
     out = front(["what is the build status?"], [{"kind": "social"}], **kwargs)
-    assert out["result"] == {"text": "", "intents": [RELAY_FIRSTMATE]}
+    assert out["result"] == {"intents": [RELAY_FIRSTMATE]}
     if kwargs.get("api_key") == "":
         assert out["calls"] == 0
 

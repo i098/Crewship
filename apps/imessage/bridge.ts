@@ -193,7 +193,7 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: true };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2" };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true };
@@ -565,7 +565,6 @@ function put(item: Out) {
 }
 
 function finishDeskDelivery(o: Out) {
-  if (o.front) return;
   const id = deskTypingRequestId;
   if (id && (o.requestId === id || o.requests?.includes(id))) stopDeskTyping?.();
 }
@@ -642,7 +641,7 @@ function deliveryTyping(kind: Kind, on: boolean) {
 }
 
 function deliveredText(o: Out) {
-  if (o.silent || o.front || !o.done) return;
+  if (o.silent || !o.done) return;
   return [...(o.image ? [`[image: ${o.image.name}]`] : []), ...(o.bubbles ?? [])].slice(0, o.done).join("\n\n");
 }
 
@@ -886,7 +885,6 @@ function v2ResponseIds(ref: Ref, target?: Ref) {
 }
 
 function recordResponse(o: Out) {
-  if (o.front) return trace(o.id, "front-reply-confirmed");
   const legacy: string[] = [];
   const selected: string[] = [];
   for (const id of o.requests ?? []) {
@@ -1003,7 +1001,7 @@ function frontContextText(redact: FrontInput["redact"], text: string): string {
 }
 
 async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Secondmate[]): Promise<FrontResult> {
-  const handoff: FrontResult = { text: "", intents: [
+  const handoff: FrontResult = { intents: [
     { kind: "relay", target: "firstmate", domains: [], category: "approval" },
   ] };
   if (pending.some((r) => r.firstmate)) return handoff;
@@ -1040,15 +1038,12 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     if (!current()) return;
     if (muted()) return handoffV2(pending);
     if (!front.intents.length) {
-      if (front.text) return commitV2Answer(pending, bubbles(front.text));
       return commitV2Reaction(pending, /\b(?:lol|ha(?:ha)+)\b|😂/iu.test(pending.at(-1)!.text) ? "😂" : "❤️");
     }
     plan = { intents: front.intents, mate: relayTarget(pending, front.intents[0], mates), front: {
       requestId: `front-${target.requestId}`, requests: pending.map((r) => r.requestId),
     } };
     recordRoute({ ids: pending.map((r) => r.requestId), v2: plan });
-    // The reply goes out while the relay or the background work runs; the request stays open for the real answer.
-    if (front.text) put({ ...target.ref, ...plan.front, kind: "desk", loop: "v2", front: true, reply: target.ref.id, bubbles: bubbles(front.text) });
   }
   const intent = plan.intents[0];
   if (intent?.kind === "dispatch") await dispatchV2(pending, intent, controller.signal, current);
@@ -1330,7 +1325,7 @@ function ensureRemembered(item: Received) {
 
 function lostDeskAnswer(item: Out) {
   finishDeskDelivery(item);
-  if (item.front || !item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
+  if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   const ids = item.loop === "v2" ? item.requests.filter((id) => !routing.get(id)?.responded) : item.requests;
   if (!ids.length) return;
   recordRoute({ ids, route: "handoff" });
