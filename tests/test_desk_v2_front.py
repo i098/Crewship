@@ -40,17 +40,30 @@ RELAY_FIRSTMATE = {"kind": "relay", "target": "firstmate", "domains": [], "categ
 
 
 def test_dispatch_choice_resolves_numeric_ids_and_never_writes_text():
-    out = front(["what is the build status?"], [{"kind": "dispatch", "model": 1, "reasoning": 2, "text": "I'll check the build status."}])
-    assert out["result"] == {"text": "", "intents": [{"kind": "dispatch", "model": "openai/gpt-6-luna", "reasoning": "high"}]}
+    out = front(
+        ["what is the build status?"],
+        [{"kind": "dispatch", "model": 1, "reasoning": 2, "text": "I'll check the build status."}],
+    )
+    assert out["result"] == {
+        "text": "",
+        "intents": [{"kind": "dispatch", "model": "openai/gpt-6-luna", "reasoning": "high"}],
+    }
 
 
 def test_work_for_one_listed_mate_relays_to_that_mate():
-    out = front(["update the docs"], [{"kind": "relay", "target": 1, "domains": [1], "category": "work"}])
-    assert out["result"]["intents"] == [{"kind": "relay", "target": "docs", "domains": ["docs"], "category": "work"}]
+    out = front(
+        ["update the docs"], [{"kind": "relay", "target": 1, "domains": [1], "category": "work"}]
+    )
+    assert out["result"]["intents"] == [
+        {"kind": "relay", "target": "docs", "domains": ["docs"], "category": "work"}
+    ]
 
 
 def test_unknown_ownership_goes_to_firstmate():
-    out = front(["do something odd"], [{"kind": "relay", "target": 0, "domains": [], "category": "ambiguous"}])
+    out = front(
+        ["do something odd"],
+        [{"kind": "relay", "target": 0, "domains": [], "category": "ambiguous"}],
+    )
     assert out["result"]["intents"][0]["target"] == "firstmate"
 
 
@@ -68,7 +81,9 @@ def test_invalid_answer_is_retried_once_then_falls_back_to_firstmate():
 
 
 def test_second_answer_can_recover():
-    out = front(["what is the build status?"], ["nope", {"kind": "dispatch", "model": 1, "reasoning": 1}])
+    out = front(
+        ["what is the build status?"], ["nope", {"kind": "dispatch", "model": 1, "reasoning": 1}]
+    )
     assert out["calls"] == 2
     assert out["result"]["intents"][0]["kind"] == "dispatch"
 
@@ -82,12 +97,17 @@ def test_failed_or_unauthenticated_call_falls_back_to_firstmate(kwargs):
 
 
 def test_secrets_are_masked_before_the_request_leaves():
-    out = front(["the password is hunter2, check the build"], [{"kind": "dispatch", "model": 1, "reasoning": 1}])
+    out = front(
+        ["the password is hunter2, check the build"],
+        [{"kind": "dispatch", "model": 1, "reasoning": 1}],
+    )
     assert "hunter2" not in out["seen"][0]["body"]
     assert "[REDACTED]" in out["seen"][0]["body"]
     assert out["seen"][0]["auth"] == "Bearer k"
 
 
 def test_model_names_that_are_not_advertised_ids_are_refused():
-    out = front(["status?"], [{"kind": "dispatch", "model": "openai/gpt-6-luna", "reasoning": "high"}] * 2)
+    out = front(
+        ["status?"], [{"kind": "dispatch", "model": "openai/gpt-6-luna", "reasoning": "high"}] * 2
+    )
     assert out["result"]["intents"] == [RELAY_FIRSTMATE]
