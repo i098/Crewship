@@ -82,7 +82,6 @@ It creates the workspace when absent and preserves custom tabs and focus.
 It never sends input to an existing tab or pane, including after a restart.
 If the schedules tab exists, `launch` leaves it unchanged and prints: `run crewship schedules in the schedules tab`.
 Set `crewship.herdr.schedules_tab: false` to skip this setup; existing tabs stay open.
-
 With `start_services: false`, run `launch` with services enabled after boot to open the tab.
 The installer already links `~/.local/bin/crewship` to the installed CLI.
 Ensure `~/.local/bin` is on your shell's `PATH` when running the command outside Herdr.
@@ -133,7 +132,7 @@ Other wrappers keep their executable names; the viewer does not inspect their ch
 The installer also installs two more OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
 `launch` opens each one in the `machine` workspace in the same way as the schedules tab: a missing tab is created and the command starts there.
 The tab label is the command name, except `crewship schedules`, which is labelled `schedules`.
-An existing tab is never changed; `launch` prints `run <command> in the <command> tab` instead.
+An existing tab is never changed; `launch` prints `run <command> in the <label> tab` instead.
 
 | Command | Shows | Switch (default `true`) |
 | --- | --- | --- |
