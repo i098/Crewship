@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, leftColor, leftOf, mercuryRows, parseOmp, parseZai, quotaText, relReset, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -67,7 +67,14 @@ test("--once prints the fixture without starting the TUI", async () => {
   const p = Bun.spawn(["bun", join(import.meta.dir, "usage-tui.ts"), "--once", "--fixture", file], { stdout: "pipe" })
   const out = await new Response(p.stdout).text()
   expect(await p.exited).toBe(0)
-  expect(out).toBe(quotaText(buildRows(FIXTURE), NOW, "America/Los_Angeles") + "\n")
+  const lines = out.trimEnd().split("\n").map(l => l.replace(/\s+/g, " "))
+  expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
+  expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
   expect(out).toContain("no quota API")
   expect(out).toContain("not reported")
+})
+
+test("buildRows shows an error row when Mercury fails to load", () => {
+  const rows = buildRows({ mercuryError: "database is locked" })
+  expect(rows.find(r => r.account === "mercury")).toMatchObject({ leftPct: null, note: "unavailable: database is locked" })
 })

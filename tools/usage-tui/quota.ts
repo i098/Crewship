@@ -91,6 +91,7 @@ export type QuotaInput = {
   zai?: ZaiQuota
   zaiError?: string
   mercury?: { keyIds: number[]; tokens: Record<string, number> }
+  mercuryError?: string
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
@@ -100,6 +101,7 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   if (inp.zai) rows.push(...parseZai(inp.zai))
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
+  else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
   // The only DeepSeek key omp holds is a reseller key; the official /user/balance and the reseller host both refuse it.
   rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "no quota API" })
   return rows
@@ -219,5 +221,6 @@ export async function loadQuota(): Promise<QuotaInput> {
     zai: zai.status === "fulfilled" ? zai.value : undefined,
     zaiError: zai.status === "rejected" ? `unavailable: ${msg(zai.reason)}` : undefined,
     mercury: mercury.status === "fulfilled" ? mercury.value : undefined,
+    mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
   }
 }
