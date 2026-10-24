@@ -17,7 +17,18 @@ export type Source =
   | { kind: "forgejo" }
   | { kind: "none"; note: string }
 
-export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null> }
+// bin: the command (or file) whose access time shows the last use; absent when no file is evidence of use.
+export type Component = { name: string; group: string; source: Source; installed: () => Promise<string | null>; bin?: string }
+
+// Real path of a command, or null. relatime keeps atime within a day of the last read; a running process is checked separately.
+export const binPath = (bin: string): string | null => {
+  try {
+    const found = bin.startsWith("/") ? bin : Bun.which(bin, { PATH })
+    return found ? realpathSync(found) : null
+  } catch {
+    return null
+  }
+}
 
 const VERSION = /\d+(?:\.\d+)+/
 
@@ -65,10 +76,10 @@ const npmInstalled = (command: string, pkg: string) => async () => {
 }
 
 const github = (name: string, repo: string, prefix = "v", opts: { prerelease?: boolean; command?: string } = {}): Component => ({
-  name, group: "native", source: { kind: "github", repo, prefix, prerelease: opts.prerelease }, installed: cmd(opts.command ?? name),
+  name, group: "native", source: { kind: "github", repo, prefix, prerelease: opts.prerelease }, installed: cmd(opts.command ?? name), bin: opts.command ?? name,
 })
 const npm = (name: string, pkg: string): Component => ({
-  name, group: "npm", source: { kind: "npm", pkg }, installed: npmInstalled(name, pkg),
+  name, group: "bun", source: { kind: "npm", pkg }, installed: npmInstalled(name, pkg), bin: name,
 })
 
 const plugin = (name: string, repo: string): Component => ({
@@ -110,8 +121,8 @@ export const components: Component[] = [
   github("koncreet", "jimididit/koncreet"),
   github("jj", "jj-vcs/jj"),
   github("gws", "googleworkspace/cli"),
-  { name: "node", group: "runtime", source: { kind: "node" }, installed: cmd("node") },
-  { name: "rustup-init", group: "runtime", source: { kind: "rustup" }, installed: cmd("rustup") },
+  { name: "node", group: "runtime", source: { kind: "node" }, installed: cmd("node"), bin: "node" },
+  { name: "rustup-init", group: "runtime", source: { kind: "rustup" }, installed: cmd("rustup"), bin: "rustup" },
   npm("omp", "@oh-my-pi/pi-coding-agent"),
   npm("chrome-devtools-axi", "chrome-devtools-axi"),
   npm("gh-axi", "gh-axi"),
@@ -123,7 +134,7 @@ export const components: Component[] = [
   npm("forgejo-axi", "forgejo-axi"),
   npm("ondine", "ondine"),
   {
-    name: "spectrum-ts", group: "npm", source: { kind: "npm", pkg: "spectrum-ts" },
+    name: "spectrum-ts", group: "bun", source: { kind: "npm", pkg: "spectrum-ts" },
     installed: async () => readVersion(`${HOME}/.local/share/code-factory/imessage/node_modules/spectrum-ts/package.json`),
   },
   {
@@ -133,9 +144,9 @@ export const components: Component[] = [
       return existsSync(py) ? (await run([py, "-c", "import psutil;print(psutil.__version__)"])).trim().match(VERSION)?.[0] ?? null : null
     },
   },
-  { name: "fdu", group: "python", source: { kind: "pypi", pkg: "fdu" }, installed: cmd("fdu") },
-  { name: "sgrep", group: "source", source: { kind: "none", note: "tracks default branch" }, installed: cmd("sgrep") },
-  { name: "forgejo", group: "native", source: { kind: "forgejo" }, installed: async () => newestDir(`${HOME}/.local/share/crewship/forgejo`) },
+  { name: "fdu", group: "python", source: { kind: "pypi", pkg: "fdu" }, installed: cmd("fdu"), bin: "fdu" },
+  { name: "sgrep", group: "source", source: { kind: "none", note: "tracks default branch" }, installed: cmd("sgrep"), bin: "sgrep" },
+  { name: "forgejo", group: "native", source: { kind: "forgejo" }, installed: async () => newestDir(`${HOME}/.local/share/crewship/forgejo`), bin: `${HOME}/.local/share/crewship/forgejo/${newestDir(`${HOME}/.local/share/crewship/forgejo`)}/forgejo` },
   plugin("ponytail", "DietrichGebert/ponytail"),
   plugin("i-have-adhd", "ayghri/i-have-adhd"),
   plugin("caveman", "JuliusBrussee/caveman"),

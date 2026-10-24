@@ -2,15 +2,33 @@
 // Read-only fleet health TUI: every Crewship component, installed vs latest. Never installs or upgrades.
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
-import { components } from "./components.ts"
+import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs"
+import { binPath, components } from "./components.ts"
 import { CACHE_MS, compare, loadCache, refreshLatest } from "./latest.ts"
 
 const SLOW_MS = 5 * 60_000
-type State = "up to date" | "outdated" | "unknown"
-type Row = { name: string; group: string; installed: string | null; latest: string | null; state: State; note: string }
+type State = "up to date" | "outdated" | "unknown" | "not installed"
+type Row = { name: string; group: string; installed: string | null; latest: string | null; state: State; note: string; used: string }
 
 const cache = loadCache()
 const installed = new Map<string, string | null>()
+const lastUsed = new Map<string, string>()
+
+// Evidence only: a live process whose exe or argv names the binary, else the binary's access time (relatime: within a day).
+function scanUsage() {
+  const live = new Set<string>()
+  for (const pid of readdirSync("/proc").filter(p => /^\d+$/.test(p))) {
+    try { live.add(readlinkSync(`/proc/${pid}/exe`)) } catch {}
+    try { for (const arg of readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")) if (arg.startsWith("/")) live.add(arg) } catch {}
+  }
+  for (const c of components) {
+    const path = c.bin ? binPath(c.bin) : null
+    if (!path) { lastUsed.set(c.name, "unknown"); continue }
+    if (live.has(path)) { lastUsed.set(c.name, "running now"); continue }
+    const age = (Date.now() - statSync(path).atimeMs) / 3_600_000
+    lastUsed.set(c.name, age < 1 ? "<1h ago" : age < 48 ? `${Math.round(age)}h ago` : age < 24 * 60 ? `${Math.round(age / 24)}d ago` : `${Math.round(age / 24 / 30)}mo ago`)
+  }
+}
 let busy = false
 let checkedAt = 0
 
@@ -20,12 +38,14 @@ function rows(): Row[] {
     const latest = cache[c.name]?.version ?? null
     let state: State = "unknown"
     let note = ""
-    if (c.source.kind === "none") note = c.source.note
-    else if (have === null) note = installed.has(c.name) ? "not installed" : "checking…"
+    if (have === null) {
+      if (installed.has(c.name)) state = "not installed"
+      else note = "checking…"
+    } else if (c.source.kind === "none") note = c.source.note
     else if (latest === null) note = cache[c.name]?.error ?? (cache[c.name] ? "no release published" : "checking…")
     else state = compare(have, latest) >= 0 ? "up to date" : "outdated"
     if (state !== "unknown" && cache[c.name]?.error) note = `stale: ${cache[c.name]!.error}`
-    return { name: c.name, group: c.group, installed: have, latest, state, note }
+    return { name: c.name, group: c.group, installed: have, latest, state, note, used: have === null ? "—" : lastUsed.get(c.name) ?? "…" }
   })
 }
 
@@ -40,11 +60,11 @@ const styled = (lines: Line[]) => {
   lines.forEach((l, i) => { if (i) out.push(s("\n")); out.push(...l) })
   return new StyledText(out)
 }
-const stateColor = { "up to date": theme.ok, outdated: theme.warn, unknown: theme.muted } as const
-const chip = (state: State) => s(` ${state.toUpperCase()} `.padEnd(13), theme.bg, { bg: stateColor[state], b: true })
-const rank = { outdated: 0, unknown: 1, "up to date": 2 } as const
+const stateColor = { "up to date": theme.ok, outdated: theme.warn, unknown: theme.muted, "not installed": theme.highlight } as const
+const chip = (state: State) => s(` ${state.toUpperCase()} `.padEnd(15), theme.bg, { bg: stateColor[state], b: true })
+const rank = { outdated: 0, unknown: 1, "not installed": 2, "up to date": 3 } as const
 const SECTIONS: [string, string][] = [
-  ["native", "Native tools"], ["runtime", "Runtimes"], ["npm", "npm packages"],
+  ["native", "Native tools"], ["runtime", "Runtimes"], ["bun", "Bun packages (npm registry)"],
   ["python", "Python packages"], ["omp plugin", "omp plugins"], ["source", "Built from source"],
 ]
 
@@ -70,19 +90,20 @@ function draw() {
   column.width = W
   const all = rows()
   const count = (st: State) => all.filter(r => r.state === st).length
-  const ok = count("up to date"), old = count("outdated"), unk = count("unknown")
+  const ok = count("up to date"), old = count("outdated"), unk = count("unknown"), missing = count("not installed")
   const inner = W - 4
-  const barOk = Math.round((ok / all.length) * inner), barOld = Math.round((old / all.length) * inner)
+  const barOk = Math.round((ok / all.length) * inner), barOld = Math.round((old / all.length) * inner), barUnk = Math.round(((unk + missing) / all.length) * inner)
   const stamp = checkedAt ? new Date(checkedAt).toTimeString().slice(0, 8) : "…"
   header.content = styled([
     [s(" ◆ FLEET HEALTH ", theme.bg, { bg: theme.accent, b: true }), s(`  ${all.length} components`, theme.muted), s(busy ? "   ⟳ fetching…" : `   checked ${stamp}`, busy ? theme.accent : theme.muted)],
     [s("")],
-    [s(` ${ok} `, theme.bg, { bg: theme.ok, b: true }), s(" up to date   ", theme.text), s(` ${old} `, theme.bg, { bg: theme.warn, b: true }), s(" outdated   ", theme.text), s(` ${unk} `, theme.bg, { bg: theme.muted, b: true }), s(" unknown", theme.text)],
-    [s("█".repeat(barOk), theme.ok), s("█".repeat(barOld), theme.warn), s("█".repeat(Math.max(0, inner + 2 - barOk - barOld)), theme.border)],
+    [s(` ${ok} `, theme.bg, { bg: theme.ok, b: true }), s(" up to date   ", theme.text), s(` ${old} `, theme.bg, { bg: theme.warn, b: true }), s(" outdated   ", theme.text), s(` ${unk} `, theme.bg, { bg: theme.muted, b: true }), s(" unknown   ", theme.text), s(` ${missing} `, theme.bg, { bg: theme.highlight, b: true }), s(" not installed", theme.text)],
+    [s("█".repeat(barOk), theme.ok), s("█".repeat(barOld), theme.warn), s("█".repeat(Math.max(0, inner + 2 - barOk - barOld - barUnk)), theme.border), s("█".repeat(barUnk), theme.muted)],
   ])
 
   const nameW = Math.max(...all.map(r => r.name.length), 9) + 2
   const verW = 14
+  const usedW = 14
   const order: Row[] = []
   const lines: { line: Line; index: number }[] = []
   for (const [key, title] of SECTIONS) {
@@ -94,7 +115,7 @@ function draw() {
       line: [s("▸ ", theme.accent), s(title, theme.text, { b: true }), s(`  ${group.length}`, theme.muted), ...(behind ? [s(`  ${behind} outdated`, theme.warn)] : group.every(r => r.state === "up to date") ? [s("  all current", theme.ok)] : [s("  not comparable", theme.muted)])],
       index: -1,
     })
-    lines.push({ line: [s("  " + "COMPONENT".padEnd(nameW) + "INSTALLED".padEnd(verW) + "LATEST".padEnd(verW + 2) + "STATE", theme.muted)], index: -1 })
+    lines.push({ line: [s("  " + "COMPONENT".padEnd(nameW) + "INSTALLED".padEnd(verW) + "LATEST".padEnd(verW) + "LAST USED".padEnd(usedW) + "STATE", theme.muted)], index: -1 })
     for (const r of group) {
       const chosen = order.length === sel
       const o = chosen ? { bg: theme.border } : {}
@@ -106,9 +127,9 @@ function draw() {
           s(r.name.padEnd(nameW), theme.text, { ...o, b: true }),
           s((r.installed ?? "—").slice(0, verW - 2).padEnd(verW), r.installed ? theme.text : theme.muted, o),
           s((r.latest ?? "—").slice(0, verW - 2).padEnd(verW), r.state === "outdated" ? theme.warn : r.latest ? theme.text : theme.muted, o),
-          s("  ", theme.text, o),
+          s(r.used.padEnd(usedW), r.used === "running now" ? theme.ok : r.used === "unknown" || r.used === "—" ? theme.muted : theme.text, o),
           chip(r.state),
-          s(note.slice(0, Math.max(0, inner - nameW - verW * 2 - 19)), theme.muted, o),
+          s(note.slice(0, Math.max(0, inner - nameW - verW * 2 - usedW - 17)), theme.muted, o),
         ],
       })
       order.push(r)
@@ -134,6 +155,7 @@ async function refresh(): Promise<void> {
   draw()
   try {
     await Promise.all(components.map(async c => { installed.set(c.name, await c.installed().catch(() => null)); }))
+    scanUsage()
     checkedAt = Date.now()
     draw()
     await refreshLatest(components, cache, draw)
