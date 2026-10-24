@@ -14,7 +14,8 @@ Unconditional restarts, bare commands and hidden state are refused.
 ## Latest, but verified
 
 Tools install at their newest release, never pinned, so a host never falls behind quietly.
-Every download is checked against the publisher's digest, and a release without one is refused.
+Every release download is checked against the publisher's digest, and a release without one is refused.
+A skill from a public repo follows that repo's newest default-branch commit and records the commit it installed.
 Security floors win over "newest": trust roots, Node and Python minimums are enforced before the first network lookup.
 Prereleases never reach a stable channel; a stable release needs the owner's explicit word.
 Only the repository's own development environments stay locked.
