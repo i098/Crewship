@@ -94,26 +94,15 @@ def deliver(rig, guid, text):
                          for e in events(rig)), f"durable ownership of {guid}", timeout=120)
 
 
-def test_short_social_answer_is_delivered_as_written(tmp_path):
+def test_social_text_gets_one_tapback_even_when_the_model_returns_text(tmp_path):
     with v2_rig(tmp_path, [{"kind": "social", "text": "Anytime."}]) as rig:
-        deliver(rig, "m1", "thanks")
-        wait_for(lambda: any(e.get("route") == "desk" and "bluebubbles-m1" in e.get("ids", [])
-                             and e.get("out", {}).get("bubbles") == ["Anytime."]
-                             for e in events(rig)), "the front answer as the desk route", timeout=120)
-        wait_for(lambda: "Anytime." in " ".join(texts(rig)), "the delivered bubble", timeout=120)
-        wait_for(lambda: rig.outbox() == [], "the empty outbox", timeout=120)
-        assert not any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
-        assert not any("react" in e.get("out", {}) for e in events(rig))
-
-
-def test_silent_social_turn_ends_in_one_tapback(tmp_path):
-    with v2_rig(tmp_path, [{"kind": "social", "text": ""}]) as rig:
         deliver(rig, "m1", "thanks")
         wait_for(lambda: any(e.get("route") == "desk" and e.get("social") and "bluebubbles-m1" in e.get("ids", [])
                              and e.get("out", {}).get("react") == "❤️" for e in events(rig)), "the social tapback", timeout=120)
         wait_for(lambda: "react m1 love" in texts(rig), "the tapback on his text", timeout=120)
         wait_for(lambda: rig.outbox() == [], "the empty outbox", timeout=120)
         assert all("react" in line for line in texts(rig))
+        assert not any(e.get("out", {}).get("bubbles") for e in events(rig))
         assert not any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
 
 

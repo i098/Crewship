@@ -89,7 +89,7 @@ Set target to the 1-based request number being answered. Do not return prose, ac
     const bubbles = voiceAnswer(answer, result.question, voiced.ok, voiced.drafted, true);
     return bubbles ? { kind: "answer", bubbles, target: answer.target, tools }
       : { kind: "handoff", reason: "unverified", tools };
-  } catch (e) {
+  } catch {
     if (current()) return { kind: "handoff", reason: "failed", tools };
   } finally {
     options.signal?.removeEventListener("abort", abort);

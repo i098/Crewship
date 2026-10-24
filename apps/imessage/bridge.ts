@@ -1103,6 +1103,7 @@ async function readInboxStatus() {
 
 function startDeskTyping(pending: Routing[], current: () => boolean) {
   const space = pending.every(({ ref }) => sameChat(ref, latestRef)) ? latest?.space : undefined;
+  stopDeskTyping?.();
   deskTypingRequestId = pending.at(-1)!.requestId;
   let active = true;
   let refreshing = false;

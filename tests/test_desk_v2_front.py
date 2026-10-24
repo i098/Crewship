@@ -67,11 +67,9 @@ def test_unknown_ownership_goes_to_firstmate():
     assert out["result"]["intents"][0]["target"] == "firstmate"
 
 
-def test_social_turn_gets_no_intent_and_only_a_safe_phrase():
-    out = front(["thanks"], [{"kind": "social", "text": "Anytime, I'll check your repo!"}])
-    assert out["result"] == {"text": "", "intents": []}
+def test_social_turn_gets_no_intent_and_no_text():
     out = front(["thanks"], [{"kind": "social", "text": "Anytime."}])
-    assert out["result"] == {"text": "Anytime.", "intents": []}
+    assert out["result"] == {"text": "", "intents": []}
 
 
 def test_invalid_answer_is_retried_once_then_falls_back_to_firstmate():
