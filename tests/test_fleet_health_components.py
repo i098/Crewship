@@ -156,3 +156,83 @@ def test_concord_is_an_npm_component_read_from_its_version_dir(tmp_path):
         tmp_path,
     )
     assert out == [{"kind": "npm", "pkg": "@chojs23/concord"}, "2.6.3"]
+
+
+def test_kun_and_vision_skills_read_their_pinned_commit(tmp_path):
+    for name, sha in (("kun", "8a04a9b"), ("vision", "7a20c38")):
+        skill = tmp_path / ".omp/agent/skills" / name
+        skill.mkdir(parents=True)
+        (skill / ".code-factory-source").write_text(
+            f"https://github.com/kunchenguid/{name}.git@{sha}3c66c4f4c051e43a82c1f05c8bf8ef9ba\n"
+        )
+    out = _bun(
+        'import {components, skillCommit} from "./components.ts"; const by = n => components.find(c => c.name === n)!;'
+        'console.log(JSON.stringify([by("kun").source, by("vision").source, skillCommit("kun"), skillCommit("vision"), skillCommit("nope")]))',
+        tmp_path,
+    )
+    assert out == [
+        {"kind": "head", "repo": "kunchenguid/kun"},
+        {"kind": "head", "repo": "kunchenguid/vision"},
+        "8a04a9b",
+        "7a20c38",
+        None,
+    ]
+
+
+def test_kun_and_vision_use_their_skill_dir_as_last_used_trace(tmp_path):
+    skill = tmp_path / ".omp/agent/skills/kun"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("")
+    import os
+
+    for path in (skill, skill / "SKILL.md"):
+        os.utime(path, (1_700_000_000, 1_700_000_000))
+    out = _bun(
+        'import {components, traceFor} from "./components.ts"; const by = n => components.find(c => c.name === n)!;'
+        'console.log(JSON.stringify([traceFor(by("kun"), null), traceFor(by("vision"), null)]))',
+        tmp_path,
+    )
+    assert out == [1_700_000_000_000, None]
+
+
+def test_backpass_reads_its_npm_version_and_is_null_when_absent(tmp_path):
+    pkg = tmp_path / ".local/share/code-factory/backpass/0.1.38/node_modules/backpass"
+    pkg.mkdir(parents=True)
+    (pkg / "cli.js").write_text("")
+    (tmp_path / ".local/bin").mkdir(parents=True)
+    (tmp_path / ".local/bin/backpass").symlink_to(pkg / "cli.js")
+    code = (
+        'import {components} from "./components.ts"; const c = components.find(c => c.name === "backpass")!;'
+        "console.log(JSON.stringify([c.source, await c.installed()]))"
+    )
+    assert _bun(code, tmp_path) == [{"kind": "npm", "pkg": "backpass"}, "0.1.38"]
+    absent = tmp_path / "empty"
+    absent.mkdir()
+    assert _bun(code, absent) == [{"kind": "npm", "pkg": "backpass"}, None]
+
+
+def test_compact_adviser_is_tracked_and_reports_not_installed(tmp_path):
+    out = _bun(
+        'import {components} from "./components.ts"; const c = components.find(c => c.name === "compact-adviser")!;'
+        "console.log(JSON.stringify([c.source, await c.installed()]))",
+        tmp_path,
+    )
+    assert out == [{"kind": "npm", "pkg": "compact-adviser"}, None]
+
+
+def test_every_installed_kunchenguid_tool_is_tracked():
+    listed = _components()
+    npm_tools = {
+        "gh-axi",
+        "chrome-devtools-axi",
+        "tasks-axi",
+        "quota-axi",
+        "lavish-axi",
+        "backpass",
+        "compact-adviser",
+    }
+    assert npm_tools <= {n for n, s in listed.items() if s["kind"] == "npm"}
+    assert {n for n, s in listed.items() if s["kind"] == "head"} == {"sgrep", "kun", "vision"}
+    assert {n: s["repo"] for n, s in listed.items() if s["kind"] == "github"}.get(
+        "no-mistakes"
+    ) == "kunchenguid/no-mistakes"

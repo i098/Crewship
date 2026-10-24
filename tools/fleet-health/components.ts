@@ -130,6 +130,19 @@ const npm = (name: string, pkg: string): Component => ({
   name, group: "bun", source: { kind: "npm", pkg }, installed: npmInstalled(name, pkg), bin: name,
 })
 
+// A skill is a git checkout under ~/.omp/agent/skills; .code-factory-source records the commit it came from.
+const SKILLS = `${HOME}/.omp/agent/skills`
+export const skillCommit = (name: string): string | null => {
+  try {
+    return readFileSync(join(SKILLS, name, ".code-factory-source"), "utf8").trim().match(/@([0-9a-f]{7})[0-9a-f]*$/)?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+const skill = (name: string, repo: string): Component => ({
+  name, group: "skill", source: { kind: "head", repo }, trace: join(SKILLS, name), installed: async () => skillCommit(name),
+})
+
 const plugin = (name: string, repo: string): Component => ({
   name, group: "omp plugin", source: { kind: "github", repo, prefix: "v" },
   trace: `${HOME}/.omp/plugins/cache/plugins`, // narrowed to this plugin's install dir in scanUsage
@@ -210,6 +223,11 @@ export const components: Component[] = [
     },
   },
   { name: "forgejo", group: "native", source: { kind: "forgejo" }, installed: async () => newestDir(`${HOME}/.local/share/crewship/forgejo`), bin: `${HOME}/.local/share/crewship/forgejo/${newestDir(`${HOME}/.local/share/crewship/forgejo`)}/forgejo` },
+  // kunchenguid tools: gh-axi, chrome-devtools-axi, tasks-axi, quota-axi and lavish-axi are on the npm list above.
+  npm("backpass", "backpass"),
+  npm("compact-adviser", "compact-adviser"), // on hold upstream: absent from the host by design
+  skill("kun", "kunchenguid/kun"),
+  skill("vision", "kunchenguid/vision"),
   plugin("ponytail", "DietrichGebert/ponytail"),
   plugin("i-have-adhd", "ayghri/i-have-adhd"),
   plugin("caveman", "JuliusBrussee/caveman"),

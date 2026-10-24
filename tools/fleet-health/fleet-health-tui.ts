@@ -64,7 +64,7 @@ const chip = (state: State) => s(` ${state.toUpperCase()} `.padEnd(15), theme.bg
 const rank = { outdated: 0, unknown: 1, custom: 2, "not installed": 3, "up to date": 4 } as const
 const SECTIONS: [string, string][] = [
   ["native", "Native tools"], ["runtime", "Runtimes"], ["bun", "Bun packages (npm registry)"],
-  ["python", "Python packages"], ["omp plugin", "omp plugins"], ["source", "Built from source"],
+  ["python", "Python packages"], ["omp plugin", "omp plugins"], ["skill", "Skills (git checkout)"], ["source", "Built from source"],
 ]
 
 const renderer = await createCliRenderer({ exitOnCtrlC: true })
