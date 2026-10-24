@@ -15,7 +15,16 @@ DESK = json.dumps(str(ROOT / "apps/imessage/desk.ts"))
 UNSET = object()
 
 
-def subagent(requests, drafted, tools=None, write_path=UNSET, voice_reply=None, voice_status=200, aborted=False, stale=False):
+def subagent(
+    requests,
+    drafted,
+    tools=None,
+    write_path=UNSET,
+    voice_reply=None,
+    voice_status=200,
+    aborted=False,
+    stale=False,
+):
     """Run runSubagent with a fake omp that drafts `drafted` over fake tool `tools`.
 
     The fake Inception endpoint echoes the draft unless `voice_reply` or a failing
@@ -40,14 +49,14 @@ const voice = Bun.serve({{ port: 0, async fetch(req) {{
   const reply = {json.dumps(voice_reply)};
   return Response.json({{ choices: [{{ message: {{ content: reply ?? JSON.parse(body.messages[1].content).draft }} }}] }});
 }} }});
+const cwd = mkdtempSync(join(tmpdir(), "fm-desk-cwd-"));
 const bin = mkdtempSync(join(tmpdir(), "fm-desk-bin-"));
 await Bun.write(join(bin, "omp"), `#!/usr/bin/env python3
-import json, sys
-sys.stdin.read()
+import json, os, sys
+open("${{join(cwd, "capture.json")}}", "w").write(json.dumps({{"argv": sys.argv, "stdin": sys.stdin.read()}}))
 print(json.dumps({{"type": "desk_result", "drafted": ${{JSON.stringify(drafted)}}, "tools": ${{JSON.stringify(tools)}}}}))
 `);
 Bun.spawnSync(["chmod", "+x", join(bin, "omp")]);
-const cwd = mkdtempSync(join(tmpdir(), "fm-desk-cwd-"));
 const requests = {json.dumps(requests)};
 let stale = false;
 const result = await runSubagent({{
@@ -66,14 +75,17 @@ const result = await runSubagent({{
   onProcess: () => {{ stale = {"true" if stale else "false"}; }},
 }});
 voice.stop(true);
-console.log(JSON.stringify({{ result, voiceCalls: voiceCalls.length }}));
+const capture = JSON.parse(await Bun.file(join(cwd, "capture.json")).text().catch(() => "null"));
+console.log(JSON.stringify({{ result, voiceCalls: voiceCalls.length, voiceBodies: voiceCalls, capture }}));
 """)
 
 
 def test_tool_sources_answer_quotes_whole_lines_only():
-    out = subagent([{"authored": "how much disk is free?", "context": "df output"}],
-                   json.dumps({"kind": "sources", "target": 1, "sources": [{"tool": 1, "line": 1}]}),
-                   tools={"1": {"text": "Disk usage is 12 percent.\nsecond line"}})
+    out = subagent(
+        [{"authored": "how much disk is free?", "context": "df output"}],
+        json.dumps({"kind": "sources", "target": 1, "sources": [{"tool": 1, "line": 1}]}),
+        tools={"1": {"text": "Disk usage is 12 percent.\nsecond line"}},
+    )
     assert out["result"]["kind"] == "answer"
     assert out["result"]["bubbles"] == ["Disk usage is 12 percent."]
     assert out["result"]["tools"] == {"1": {"text": "Disk usage is 12 percent.\nsecond line"}}
@@ -87,32 +99,47 @@ def test_unparsable_draft_hands_off_without_a_voice_call():
 
 
 def test_source_reference_outside_the_tools_hands_off():
-    out = subagent([{"authored": "how much disk is free?", "context": "df output"}],
-                   json.dumps({"kind": "sources", "target": 1, "sources": [{"tool": 9, "line": 1}]}),
-                   tools={"1": {"text": "one line"}})
-    assert out["result"] == {"kind": "handoff", "reason": "unverified", "tools": {"1": {"text": "one line"}}}
+    out = subagent(
+        [{"authored": "how much disk is free?", "context": "df output"}],
+        json.dumps({"kind": "sources", "target": 1, "sources": [{"tool": 9, "line": 1}]}),
+        tools={"1": {"text": "one line"}},
+    )
+    assert out["result"] == {
+        "kind": "handoff",
+        "reason": "unverified",
+        "tools": {"1": {"text": "one line"}},
+    }
     assert out["voiceCalls"] == 0
 
 
 def test_handled_requires_the_authorized_write_path():
     drafted = json.dumps({"kind": "handled"})
-    out = subagent([{"authored": "write the report to /tmp/report.txt", "context": ""}], drafted,
-                   write_path=json.dumps("/tmp/other.txt"))
+    out = subagent(
+        [{"authored": "write the report to /tmp/report.txt", "context": ""}],
+        drafted,
+        write_path=json.dumps("/tmp/other.txt"),
+    )
     assert out["result"]["kind"] == "handoff"
     assert out["voiceCalls"] == 0
 
 
 def test_authorized_write_with_write_tool_is_handled():
-    out = subagent([{"authored": "write to /tmp/report.txt", "context": ""}], json.dumps({"kind": "handled"}),
-                   tools={"1": {"name": "write", "text": "ok"}},
-                   write_path="authorizedWritePath([requests[0].authored])")
+    out = subagent(
+        [{"authored": "write to /tmp/report.txt", "context": ""}],
+        json.dumps({"kind": "handled"}),
+        tools={"1": {"name": "write", "text": "ok"}},
+        write_path="authorizedWritePath([requests[0].authored])",
+    )
     assert out["result"] == {"kind": "handled", "tools": {"1": {"name": "write", "text": "ok"}}}
     assert out["voiceCalls"] == 0
 
 
 def test_handled_without_a_write_tool_hands_off():
-    out = subagent([{"authored": "write to /tmp/report.txt", "context": ""}], json.dumps({"kind": "handled"}),
-                   write_path="authorizedWritePath([requests[0].authored])")
+    out = subagent(
+        [{"authored": "write to /tmp/report.txt", "context": ""}],
+        json.dumps({"kind": "handled"}),
+        write_path="authorizedWritePath([requests[0].authored])",
+    )
     assert out["result"] == {"kind": "handoff", "reason": "unverified", "tools": {}}
 
 
@@ -142,3 +169,17 @@ def test_result_stale_after_omp_returns_nothing_and_skips_voice():
     out = subagent(ASK, SOURCES, tools=DISK, stale=True)
     assert "result" not in out
     assert out["voiceCalls"] == 0
+
+
+def test_omp_gets_server_tools_and_requests_and_voice_is_tool_free():
+    out = subagent(
+        [{"authored": "how much disk is free?", "context": "df output"}], SOURCES, tools=DISK
+    )
+    argv = out["capture"]["argv"]
+    assert "--tools=read,grep,glob,bash,write,zoom" in argv
+    assert "--mode=json" in argv and "--no-tools" not in argv
+    assert argv[argv.index("--model") + 1] == "anthropic/claude-haiku-5.5"
+    assert "--thinking=off" in argv
+    assert "how much disk is free?" in out["capture"]["stdin"]
+    assert out["voiceCalls"] == 1
+    assert "tools" not in out["voiceBodies"][0]
