@@ -57,7 +57,7 @@ export function newestAtime(path: string, depth = 3, budget = { n: 500 }): numbe
 export function traceFor(c: Component, binary: string | null): number | null {
   let trace = c.trace
   if (trace && c.group === "omp plugin") {
-    const dir = readdirSync(trace).filter(d => d.startsWith(`${c.name}___${c.name}___`)).sort().pop()
+    const dir = existsSync(trace) ? readdirSync(trace).filter(d => d.startsWith(`${c.name}___${c.name}___`)).sort().pop() : undefined
     trace = dir ? join(trace, dir) : undefined
   }
   const target = trace ?? binary
