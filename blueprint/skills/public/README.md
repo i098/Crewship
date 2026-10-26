@@ -20,6 +20,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
 - [`mobile-app-first-build`](mobile-app-first-build/SKILL.md): validate an idea with a mobile web prototype, choose a platform, map flows, write requirements, build, test, and release (credits u/olenami's Reddit guide).
+- [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.
 - [`openmontage`](openmontage/SKILL.md): make a video, reel or explainer clip with OpenMontage; renders mp4 into a 1-day-pruned cache, spring motion, beat-locked synthesized sound, a self-review pass; poster frame sendable with `fm-imessage --image`.
 - [`operating-rules`](operating-rules/SKILL.md): ask or act, keep scope, finish the work, and answer a question as a question.
 - [`pr-preview`](pr-preview/SKILL.md): a Lavish board that recreates the GitHub PR, issue or comment page, with the body rendered by GitHub's Markdown API (CSS vendored from `github-markdown-css`, MIT, credited in [CREDITS.md](../../../CREDITS.md)).
