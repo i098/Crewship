@@ -19,7 +19,6 @@ STATE=${STATE:-$HERE/.storage-guard}
 LOG=$STATE/storage-guard.log
 COMMS=$STATE/COMMS.md
 NOTIFY_TIMEOUT=${STORAGE_NOTIFY_TIMEOUT:-5}
-BROADCAST_TIMEOUT=${STORAGE_BROADCAST_TIMEOUT:-3}
 FAILED=0
 STATE_OWNED=0
 WARN=${STORAGE_WARN_PCT:-85}
@@ -43,7 +42,7 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT NOTIFY_TIMEOUT BROADCAST_TIMEOUT; do
+for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT NOTIFY_TIMEOUT; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "storage-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 [ "$HYST" -lt "$WARN" ] && [ "$WARN" -lt "$CRIT" ] && [ "$CRIT" -le 100 ] \
@@ -76,8 +75,8 @@ attempt_delivery() {
   printf 'storage-guard: delivery pending %s: %s\n' "$id" "${receipt:-inbox unavailable}" >&2
   if [ -z "$file" ] || [ ! -f "$file.broadcast" ]; then
     if { [ -x "$HERE/notify-master.sh" ] \
-      && timeout -k 1 "$BROADCAST_TIMEOUT" "$HERE/notify-master.sh" "$msg" storage-guard; } \
-      || printf '%s\n' "$msg" "${file:+Pending: $file}" | timeout -k 1 "$BROADCAST_TIMEOUT" wall -n -t 2; then
+      && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" storage-guard; } \
+      || printf '%s\n' "$msg" "${file:+Pending: $file}" | timeout -k 1 3 wall -n -t 2; then
       [ -z "$file" ] || [ "$STATE_OWNED" != 1 ] || printf '%s\n' "$id" > "$file.broadcast"
     fi
   fi
