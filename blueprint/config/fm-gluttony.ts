@@ -308,6 +308,7 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 		return;
 	}
 	const homes = new Map([[home, { tiers, available }]]);
+	const restored = new WeakSet<object>();
 	proto[RESTORE_PATCHED] = homes;
 	const original = proto.getEntries;
 	proto.getEntries = function () {
@@ -315,14 +316,16 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 		const inbox = process.env.FM_TASK_INBOX;
 		const active = inbox && homes.get(path.dirname(path.dirname(inbox)));
 		if (!active) return entries;
-		return entries.map(entry => {
+		const checkCredentials = !restored.has(this);
+		const result = entries.map(entry => {
 			if (entry.type !== "session_init") return entry;
 			const cli = entry.modelRole === "smol" || entry.agent === "sonic" ? "fast" : "good";
 			const selected = entry.resolvedModel && allowedPattern(active.tiers, cli, entry.resolvedModel, true)
 				? entry.resolvedModel
 				: bounded(active.tiers, cli, entry.resolvedModel);
 			const primary = [selected, retryPattern(active.tiers, selected)].find(
-				pattern => allowedPattern(active.tiers, cli, pattern, true) && active.available.has(pattern.split(":")[0]),
+				pattern => allowedPattern(active.tiers, cli, pattern, true)
+					&& (!checkCredentials || active.available.has(pattern.split(":")[0])),
 			);
 			if (!primary) throw new Error("Gluttony: no allowed restored worker model has a usable credential.");
 			const chain = boundedChain(active.tiers, cli, primary, entry.retryFallback?.chain ?? []);
@@ -335,5 +338,7 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 					: undefined,
 			};
 		});
+		restored.add(this);
+		return result;
 	};
 }

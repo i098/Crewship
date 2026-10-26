@@ -454,6 +454,21 @@ console.log(JSON.stringify(new SessionManager([saved]).getEntries()[0].resolvedM
 """) == "anthropic/claude-haiku-5-5:high"
 
 
+def test_live_read_after_restore_uses_later_sign_in(installed, tmp_path):
+    assert run(installed, tmp_path, """
+defaultCredential = undefined;
+credentials.set('anthropic/claude-haiku-5-5', 'token');
+ext(api); await start();
+const manager = new SessionManager([{type: 'session_init', agent: 'sonic', modelRole: 'smol',
+  resolvedModel: 'anthropic/claude-haiku-5-5:high'}]);
+manager.getEntries();
+credentials.set('anthropic/claude-sonnet-5-5', 'new-token');
+manager.entries.push({type: 'session_init', agent: 'task', modelRole: 'task',
+  resolvedModel: 'anthropic/claude-sonnet-5-5:medium'});
+console.log(JSON.stringify(manager.getEntries()[1].resolvedModel));
+""") == "anthropic/claude-sonnet-5-5:medium"
+
+
 @pytest.mark.parametrize("provider,primary,retry,expected", [
     ("openai-codex", "openai-codex/gpt-6-luna:high", "openai-codex/gpt-6.1-sol:medium", []),
     ("anthropic", "inception/mercury-3:high", "anthropic/claude-sonnet-5-5:medium",
