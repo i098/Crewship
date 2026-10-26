@@ -182,7 +182,9 @@ def test_pages_carry_json_ld(tmp_path):
     assert types == {"WebSite", "SoftwareApplication"}
     faq = ld("about.html")[0]
     assert faq["@type"] == "FAQPage"
-    assert [q["name"] for q in faq["mainEntity"]][0] == "Where does it run?"
+    page = (dist / "about.html").read_text()
+    visible = re.findall(r"<h3>(.*?)</h3>\s*<p>(.*?)</p>", page.split("Short factual answers")[1], re.S)
+    assert [(q["name"], q["acceptedAnswer"]["text"]) for q in faq["mainEntity"]] == visible
     assert 'href="/how"' in (dist / "about.html").read_text()
 
 
