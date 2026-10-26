@@ -225,7 +225,8 @@ export default function (pi: GluttonyApi) {
 				const primary = `${model}:${pi.getThinkingLevel()}`;
 				boundSettings(settings, primary);
 				const roles = cfgModelRoles.get(settings);
-				cfgModelRoles.override(settings, { ...roles, smol: bounded(tiers, "fast", roles.smol) });
+				const smol = await authenticatedPattern(tiers, "fast", bounded(tiers, "fast", roles.smol), ctx);
+				cfgModelRoles.override(settings, smol ? { ...roles, smol } : roles);
 				const chains = cfgRetryFallbackChains.get(settings);
 				cfgRetryFallbackChains.override(settings, Object.fromEntries(
 					Object.entries(chains).map(([key, chain]) => [key, boundedChain(tiers, cli, primary, chain)]),

@@ -358,6 +358,19 @@ console.log(JSON.stringify(settings.roles.smol));
 """, context={"agent": {"kind": "sub"}, "model": {"provider": provider, "id": model}}) == expected
 
 
+@pytest.mark.parametrize("keys,expected", [
+    ("credentials.set('inception/mercury-3', undefined);", "anthropic/claude-haiku-5-5:high"),
+    ("defaultCredential = undefined;", "anthropic/claude-sonnet-5-5:off"),
+])
+def test_subagent_helper_role_needs_usable_credential(installed, tmp_path, keys, expected):
+    assert run(installed, tmp_path, f"""
+roles.smol = 'anthropic/claude-sonnet-5-5:off';
+{keys}
+ext(api); await start();
+console.log(JSON.stringify(settings.roles.smol));
+""", context={"agent": {"kind": "sub"}, "model": {"provider": "anthropic", "id": "claude-sonnet-5-5"}}) == expected
+
+
 @pytest.mark.parametrize("provider,model,level,expected", [
     ("anthropic", "claude-haiku-5-5", "low", "high"),
     ("anthropic", "claude-sonnet-5-5", "low", "medium"),
