@@ -238,6 +238,7 @@ export default function (pi: GluttonyApi) {
 	});
 	pi.on("before_subagent_spawn", async (event, ctx) => {
 		if (!tiers) return undefined;
+		patchRestore(pi.pi, home, tiers, await availableModels(tiers, ctx));
 		const cli = event.modelRole === "smol" || event.agent === "sonic" ? "fast" : "good";
 		const pattern = await authenticatedPattern(tiers, cli, bounded(tiers, cli, event.patterns[0]), ctx);
 		return pattern
@@ -252,6 +253,7 @@ export default function (pi: GluttonyApi) {
 		const cli: Cli = event.input.cli === "good" ? "good" : "fast";
 		const result = choose(tiers, cli, event.input.prompt ?? "");
 		if ("error" in result) return { block: true, reason: result.error };
+		patchRestore(pi.pi, home, tiers, await availableModels(tiers, ctx));
 		const pattern = await authenticatedPattern(tiers, cli, result.pattern, ctx);
 		if (!pattern) return { block: true, reason: "Gluttony: no allowed worker model has a usable credential." };
 		patch?.picked.set(`${sessionId}:${event.toolCallId}`, pattern);
