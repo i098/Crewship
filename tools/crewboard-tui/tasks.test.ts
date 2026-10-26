@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeFixture } from "./fixture.ts"
@@ -147,4 +147,18 @@ test("the stalled head shows the top 10 until opened, then all", async () => {
   expect(count(view())).toBe(10)
   expect(flatten(agents, view())[0]).toMatchObject({ kind: "stalled", n, shown: 10 })
   expect(count(view({ expanded: new Set(["stalled-all"]) }))).toBe(n)
+}, 30_000)
+
+test("a hung tasks-axi is killed at the timeout and its home loads with no tasks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cbtasks-"))
+  dirs.push(dir)
+  const homes = writeFixture(dir, { agents: 2, mates: 1, now: NOW })
+  const bin = join(dir, "hung-axi")
+  writeFileSync(bin, "#!/bin/sh\nexec sleep 60\n")
+  chmodSync(bin, 0o755)
+  const t0 = performance.now()
+  const [h] = await loadHomes(homes, bin, 300)
+  expect(h.tasks).toEqual([])
+  expect(h.progress.size).toBe(1)
+  expect(performance.now() - t0).toBeLessThan(20_000)
 }, 30_000)

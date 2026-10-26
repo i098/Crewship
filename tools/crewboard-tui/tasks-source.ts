@@ -6,6 +6,7 @@ import { parseStatus, parseTasks, type HomeData, type Progress } from "./tasks-m
 
 const FIELDS = "held,hold_reason,hold_kind"
 const PARALLEL = 8
+const SPAWN_TIMEOUT_MS = 10_000
 
 // Homes: CLI paths, else $CREWBOARD_TASKS_HOMES (colon list), else this host's firstmate homes (~/.treehouse/firstmate-*/<n>/firstmate).
 export function findHomes(args: string[], env = process.env, root = join(homedir(), ".treehouse")): string[] {
@@ -42,21 +43,21 @@ function readProgress(home: string): Map<string, Progress> {
   return out
 }
 
-async function loadHome(home: string, bin: string): Promise<HomeData> {
+async function loadHome(home: string, bin: string, timeout: number): Promise<HomeData> {
   let tasks: HomeData["tasks"] = []
   try {
-    const p = Bun.spawn([bin, "list", "--fields", FIELDS], { cwd: home, stdout: "pipe", stderr: "ignore" })
+    const p = Bun.spawn([bin, "list", "--fields", FIELDS], { cwd: home, stdout: "pipe", stderr: "ignore", timeout })
     const text = await new Response(p.stdout).text()
     if ((await p.exited) === 0) tasks = parseTasks(text)
   } catch {}
   return { mate: mateName(home), tasks, progress: readProgress(home) }
 }
 
-export async function loadHomes(homes: string[], bin = process.env.TASKS_AXI_BIN || "tasks-axi"): Promise<HomeData[]> {
+export async function loadHomes(homes: string[], bin = process.env.TASKS_AXI_BIN || "tasks-axi", timeout = SPAWN_TIMEOUT_MS): Promise<HomeData[]> {
   const out: HomeData[] = new Array(homes.length)
   let next = 0
   await Promise.all(Array.from({ length: Math.min(PARALLEL, homes.length) }, async () => {
-    for (let i = next++; i < homes.length; i = next++) out[i] = await loadHome(homes[i], bin)
+    for (let i = next++; i < homes.length; i = next++) out[i] = await loadHome(homes[i], bin, timeout)
   }))
   return out
 }

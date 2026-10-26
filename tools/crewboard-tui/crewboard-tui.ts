@@ -271,9 +271,14 @@ let taskTop = 0
 let taskRows: TaskRow[] = []
 let taskTimer: ReturnType<typeof setInterval> | undefined
 
+let reloading = false
 async function reloadTasks() {
-  const r = buildAgents(await loadHomes(findHomes(homeArgs)), Math.floor(Date.now() / 1000), stallMin * 60)
-  allAgents = r.agents; queuedCount = r.queued; tasksLoaded = true
+  if (reloading) return
+  reloading = true
+  try {
+    const r = buildAgents(await loadHomes(findHomes(homeArgs)), Math.floor(Date.now() / 1000), stallMin * 60)
+    allAgents = r.agents; queuedCount = r.queued; tasksLoaded = true
+  } finally { reloading = false }
   draw()
 }
 
