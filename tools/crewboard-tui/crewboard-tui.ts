@@ -304,41 +304,45 @@ function setMode(m: "board" | "tasks") {
   draw()
 }
 
-function tasksKey(k: { name: string; sequence?: string; shift?: boolean }) {
+type Key = { name: string; sequence?: string; shift?: boolean }
+
+function typeFilter(k: Key) {
+  if (k.name === "return") typing = false
+  else if (k.name === "escape") { typing = false; view.filter = "" }
+  else if (k.name === "backspace") view.filter = view.filter.slice(0, -1)
+  else if (k.sequence && k.sequence.length === 1 && k.sequence >= " ") view.filter += k.sequence
+}
+
+// Enter/Space toggle, Right opens, Left closes. The stalled head toggles top-10 / all.
+function toggleRow(row: TaskRow | undefined, name: string) {
+  if (!row || row.kind === "detail") return
+  const sk = row.kind === "stalled" ? "stalled-all" : row.key
+  const open = view.expanded.has(sk)
+  if (name === "left" ? !open : name === "right" && open) return
+  if (open) view.expanded.delete(sk); else view.expanded.add(sk)
+}
+
+function expandAll(collapse: boolean) {
+  view.expanded.clear()
+  if (!collapse) for (const a of allAgents) { view.expanded.add(`m:${a.mate}`); view.expanded.add(`r:${a.mate}/${a.repo}`) }
+}
+
+function tasksKey(k: Key) {
   const cur = Math.max(0, taskRows.findIndex(r => r.key === cursorKey))
   const go = (i: number) => { cursorKey = taskRows[Math.min(taskRows.length - 1, Math.max(0, i))]?.key ?? "" }
   const page = Math.max(1, renderer.height - 6)
-  if (typing) {
-    if (k.name === "return" || k.name === "escape") { typing = false; if (k.name === "escape") view.filter = "" }
-    else if (k.name === "backspace") view.filter = view.filter.slice(0, -1)
-    else if (k.sequence && k.sequence.length === 1 && k.sequence >= " ") view.filter += k.sequence
-    return draw()
-  }
-  const row = taskRows[cur]
-  switch (k.name) {
-    case "q": renderer.destroy(); process.exit(0)
-    case "t": return setMode("board")
-    case "down": case "j": go(cur + 1); break
-    case "up": case "k": go(cur - 1); break
-    case "pagedown": go(cur + page); break
-    case "pageup": go(cur - page); break
-    case "home": go(0); break
-    case "end": go(1e9); break
-    case "g": go(k.shift ? 1e9 : 0); break
-    case "return": case "space": case "right": case "left":
-      if (row && row.kind !== "detail") {
-        const sk = row.kind === "stalled" ? "stalled-all" : row.key // the stalled head toggles top-10 / all
-        const open = view.expanded.has(sk)
-        if (k.name === "left" ? open : k.name === "right" ? !open : true) { if (view.expanded.has(sk)) view.expanded.delete(sk); else view.expanded.add(sk) }
-      }
-      break
-    case "e": if (k.shift) view.expanded.clear(); else for (const a of allAgents) { view.expanded.add(`m:${a.mate}`); view.expanded.add(`r:${a.mate}/${a.repo}`) }; break
-    case "/": typing = true; break
-    case "s": view.stalledOnly = !view.stalledOnly; break
-    case "escape": view.filter = ""; view.stalledOnly = false; break
-    case "r": reloadTasks(); break
-    default: return
-  }
+  if (typing) { typeFilter(k); return draw() }
+  if (k.name === "q") { renderer.destroy(); process.exit(0) }
+  if (k.name === "t") return setMode("board")
+  const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
+  if (k.name in moves) go(moves[k.name])
+  else if (["return", "space", "right", "left"].includes(k.name)) toggleRow(taskRows[cur], k.name)
+  else if (k.name === "e") expandAll(!!k.shift)
+  else if (k.name === "/") typing = true
+  else if (k.name === "s") view.stalledOnly = !view.stalledOnly
+  else if (k.name === "escape") { view.filter = ""; view.stalledOnly = false }
+  else if (k.name === "r") reloadTasks()
+  else return
   draw()
 }
 

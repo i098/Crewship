@@ -43,30 +43,32 @@ export function header(c: Counts, o: { filter: string; typing: boolean; stalledO
   return [counts, q]
 }
 
+type Mk = (text: string, fg: string, bold?: boolean) => Seg
+
+function groupLine(r: Extract<Row, { kind: "mate" | "repo" }>, ind: string, seg: Mk, w: number): Line {
+  const flags: Seg[] = []
+  if (r.stalled) flags.push(seg(` ⚠${r.stalled}`, theme.error, true))
+  if (r.decisions) flags.push(seg(` ?${r.decisions}`, theme.warn, true))
+  flags.push(seg(` ${r.n} `, theme.muted))
+  return fit([seg(`${ind}${r.open ? "▾" : "▸"} ${r.name}`, r.kind === "mate" ? theme.accent : theme.highlight, true)], flags, w)
+}
+
+function agentLine(r: Extract<Row, { kind: "agent" }>, ind: string, seg: Mk, w: number, on: boolean): Line {
+  const a = r.agent
+  const mark = a.stalled ? seg("⚠ ", theme.error, true) : a.decision ? seg("? ", theme.warn, true) : seg("● ", theme.ok)
+  const where = r.key.startsWith("s:") ? `${a.mate} · ${a.repo} · ` : ""
+  const when = seg(` ${age(a.quiet)} `, a.stalled ? theme.error : theme.muted, a.stalled)
+  return fit([seg(ind, theme.text), mark, seg(r.open ? "▾ " : "▸ ", theme.muted), seg(`${where}${a.id}`, on ? theme.text : theme.muted, on), seg("  " + a.title, theme.muted)], [when], w)
+}
+
 function rowLine(r: Row, w: number, on: boolean): Line {
   const bg = on ? theme.border : undefined
   const ind = "  ".repeat("depth" in r ? r.depth : 0)
-  const seg = (text: string, fg: string, bold = false): Seg => ({ text, fg, bg, bold })
-  let line: Line
-  if (r.kind === "stalled") {
-    line = fit([seg(`⚠ STALLED  ${r.n}`, theme.error, true)], r.shown < r.n ? [seg(` top ${r.shown} · ⏎ shows all `, theme.muted)] : [], w)
-  } else if (r.kind === "mate" || r.kind === "repo") {
-    const flags: Seg[] = []
-    if (r.stalled) flags.push(seg(` ⚠${r.stalled}`, theme.error, true))
-    if (r.decisions) flags.push(seg(` ?${r.decisions}`, theme.warn, true))
-    flags.push(seg(` ${r.n} `, theme.muted))
-    line = fit([seg(`${ind}${r.open ? "▾" : "▸"} ${r.name}`, r.kind === "mate" ? theme.accent : theme.highlight, true)], flags, w)
-  } else if (r.kind === "agent") {
-    const a = r.agent
-    const mark = a.stalled ? seg("⚠ ", theme.error, true) : a.decision ? seg("? ", theme.warn, true) : seg("● ", theme.ok)
-    const where = r.key.startsWith("s:") ? `${a.mate} · ${a.repo} · ` : ""
-    const when = seg(` ${age(a.quiet)} `, a.stalled ? theme.error : theme.muted, a.stalled)
-    line = fit([seg(ind, theme.text), mark, seg(r.open ? "▾ " : "▸ ", theme.muted), seg(`${where}${a.id}`, on ? theme.text : theme.muted, on), seg("  " + a.title, theme.muted)], [when], w)
-  } else {
-    const fg = TONE[r.tone]
-    line = fit([seg(ind + "  ", theme.text), seg(r.label.padEnd(9), theme.muted), seg(r.text, fg)], [], w)
-  }
-  return line
+  const seg: Mk = (text, fg, bold = false) => ({ text, fg, bg, bold })
+  if (r.kind === "stalled") return fit([seg(`⚠ STALLED  ${r.n}`, theme.error, true)], r.shown < r.n ? [seg(` top ${r.shown} · ⏎ shows all `, theme.muted)] : [], w)
+  if (r.kind === "agent") return agentLine(r, ind, seg, w, on)
+  if (r.kind === "detail") return fit([seg(ind + "  ", theme.text), seg(r.label.padEnd(9), theme.muted), seg(r.text, TONE[r.tone])], [], w)
+  return groupLine(r, ind, seg, w)
 }
 
 // Rows [top, top+h) as lines. Cost is O(h), never O(rows).

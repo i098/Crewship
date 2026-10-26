@@ -123,13 +123,27 @@ export function counts(agents: Agent[], queued: number): Counts {
 
 const byQuietDesc = (a: Agent, b: Agent) => (a.quiet === b.quiet ? a.id.localeCompare(b.id) : b.quiet - a.quiet)
 
+const stat = (l: Agent[]) => ({ n: l.length, stalled: l.filter(a => a.stalled).length, decisions: l.filter(a => a.decision).length })
+const byStalledThenName = <T>(items: [string, T, Agent[]][]) => items.sort((x, y) => stat(y[2]).stalled - stat(x[2]).stalled || x[0].localeCompare(y[0]))
+
+function groupByMate(pool: Agent[]): Map<string, Map<string, Agent[]>> {
+  const mates = new Map<string, Map<string, Agent[]>>()
+  for (const a of pool) {
+    const repos = mates.get(a.mate) ?? new Map<string, Agent[]>()
+    mates.set(a.mate, repos)
+    const list = repos.get(a.repo) ?? []
+    repos.set(a.repo, list)
+    list.push(a)
+  }
+  return mates
+}
+
 // Stalled agents pinned first, then mate > repo > agent groups. Groups are collapsed unless expanded or a filter is set.
 export function flatten(agents: Agent[], v: View): Row[] {
   const pool = agents.filter(a => matches(a, v.filter) && (!v.stalledOnly || a.stalled))
   const rows: Row[] = []
   const stalled = pool.filter(a => a.stalled).sort(byQuietDesc)
-  const filtering = v.filter.trim() !== ""
-  const isOpen = (k: string) => filtering || v.all || v.expanded.has(k)
+  const isOpen = (k: string) => v.filter.trim() !== "" || v.all || v.expanded.has(k)
   const pushAgent = (a: Agent, depth: number, key: string) => {
     const open = !!v.all || v.expanded.has(key)
     rows.push({ kind: "agent", key, depth, agent: a, open })
@@ -140,26 +154,15 @@ export function flatten(agents: Agent[], v: View): Row[] {
     rows.push({ kind: "stalled", key: "stalled", n: stalled.length, shown })
     for (const a of stalled.slice(0, shown)) pushAgent(a, 1, `s:${agentKey(a)}`)
   }
-  const mates = new Map<string, Map<string, Agent[]>>()
-  for (const a of pool) {
-    let r = mates.get(a.mate)
-    if (!r) mates.set(a.mate, (r = new Map()))
-    let l = r.get(a.repo)
-    if (!l) r.set(a.repo, (l = []))
-    l.push(a)
-  }
-  const stat = (l: Agent[]) => ({ n: l.length, stalled: l.filter(a => a.stalled).length, decisions: l.filter(a => a.decision).length })
-  const order = <T>(items: [string, T, Agent[]][]) => items.sort((x, y) => stat(y[2]).stalled - stat(x[2]).stalled || x[0].localeCompare(y[0]))
-  const mateEntries = order([...mates].map(([name, repos]) => [name, repos, [...repos.values()].flat()] as [string, Map<string, Agent[]>, Agent[]]))
-  for (const [mate, repos, all] of mateEntries) {
+  const mates = [...groupByMate(pool)].map(([name, repos]) => [name, repos, [...repos.values()].flat()] as [string, Map<string, Agent[]>, Agent[]])
+  for (const [mate, repos, all] of byStalledThenName(mates)) {
     const mk = `m:${mate}`, mopen = isOpen(mk)
     rows.push({ kind: "mate", key: mk, depth: 0, name: mate, ...stat(all), open: mopen })
     if (!mopen) continue
-    for (const [repo, list] of order([...repos].map(([n, l]) => [n, l, l] as [string, Agent[], Agent[]]))) {
+    for (const [repo, list] of byStalledThenName([...repos].map(([n, l]) => [n, l, l] as [string, Agent[], Agent[]]))) {
       const rk = `r:${mate}/${repo}`, ropen = isOpen(rk)
       rows.push({ kind: "repo", key: rk, depth: 1, name: repo, ...stat(list), open: ropen })
-      if (!ropen) continue
-      for (const a of list.sort(byQuietDesc)) pushAgent(a, 2, agentKey(a))
+      if (ropen) for (const a of list.sort(byQuietDesc)) pushAgent(a, 2, agentKey(a))
     }
   }
   return rows
