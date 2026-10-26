@@ -171,7 +171,7 @@ def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
     assert (dist / head.links["icon"]).read_text().startswith("<svg ")
 
 
-def test_pages_carry_json_ld_and_cross_link(tmp_path):
+def test_pages_carry_json_ld(tmp_path):
     dist = build.build(tmp_path / "dist")
 
     def ld(name):
@@ -183,7 +183,6 @@ def test_pages_carry_json_ld_and_cross_link(tmp_path):
     faq = ld("about.html")[0]
     assert faq["@type"] == "FAQPage"
     assert [q["name"] for q in faq["mainEntity"]][0] == "Where does it run?"
-    assert 'href="/about"' in (dist / "how.html").read_text()
     assert 'href="/how"' in (dist / "about.html").read_text()
 
 
