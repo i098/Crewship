@@ -126,6 +126,7 @@ The file selects the spool and supplies these variables:
 | `CREWSHIP_USAGE_DATA_DIR` | A dedicated directory below the verified large data mount. |
 | `CREWSHIP_USAGE_MOUNT` | The actual configured mount path. |
 | `CREWSHIP_USAGE_STORE` | Optional: `spool` (the default) or `ledger`, passed to the collector as `--store`. Another value fails every record. |
+| `CREWSHIP_USAGE_TIMEOUT_MS` | Optional: the collector timeout in milliseconds. The default is 15000. |
 
 The source does not activate unless a patched runtime receives the adapter opt-in.
 Installation preserves unrelated host and agent settings.

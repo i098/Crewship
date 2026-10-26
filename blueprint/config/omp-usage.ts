@@ -45,7 +45,7 @@ function send(rows: Row[]) {
 				resolve();
 			} catch (error) { reject(error); }
 		});
-		const timeout = setTimeout(() => child.kill("SIGKILL"), 15000).unref();
+		const timeout = setTimeout(() => child.kill("SIGKILL"), Number(process.env.CREWSHIP_USAGE_TIMEOUT_MS) || 15000).unref();
 		collectors.add(child);
 		child.unref();
 		for (const stream of child.stdio) (stream as { unref?: () => void } | null)?.unref?.();

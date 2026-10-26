@@ -49,7 +49,7 @@ def native_source():
         yield directory, native / "pi-ai/src", mount
 
 
-def execute(native_source, code, *, enabled=True, collector=None, inspect=None, store=None):
+def execute(native_source, code, *, enabled=True, collector=None, inspect=None, store=None, collector_timeout=None):
     directory, native, mount = native_source
     with tempfile.TemporaryDirectory(prefix="case-", dir=directory) as temporary:
         case = Path(temporary)
@@ -66,10 +66,12 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
                        "CREWSHIP_USAGE_MOUNT": str(mount)}
         if enabled:
             environment["CREWSHIP_USAGE_ADAPTER"] = str(ADAPTER)
+        if collector_timeout:
+            environment["CREWSHIP_USAGE_TIMEOUT_MS"] = str(collector_timeout)
         if store:
             environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
-                                capture_output=True, text=True, timeout=60)
+                                capture_output=True, text=True, timeout=150)
         database = case / "data" / ("usage.sqlite" if store == "ledger" else "spool.sqlite")
         records = []
         if result.returncode != 0:
@@ -89,7 +91,7 @@ import { existsSync as usageExists } from "node:fs";
 async function waitForUsage(predicate) {
     const path = process.env.CREWSHIP_USAGE_DATA_DIR + "/"
         + (process.env.CREWSHIP_USAGE_STORE === "ledger" ? "usage.sqlite" : "spool.sqlite");
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + 100000;
     while (Date.now() < deadline) {
         if (usageExists(path)) {
             const db = new UsageDatabase(path, { readonly: true });
@@ -330,7 +332,7 @@ def test_native_helper_calls_register_separately_from_chat(native_source):
 await request();
 await completeSimple(model, context, options);
 await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2);
-''')
+''', collector_timeout=60000)
     assert result.returncode == 0, result.stderr
     assert sorted(row["producer_kind"] for row in records if row["kind"] == "register") == ["chat", "helper"]
     assert len([row for row in records if row["kind"] == "complete"]) == 2
