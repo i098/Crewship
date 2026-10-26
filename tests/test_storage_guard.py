@@ -96,6 +96,7 @@ jq -nc --arg id "$3" --argjson announced "$announced" \
             "STUB": str(self.stub),
             "FM_HOME": str(home),
             "HOSTNAME": "fixture",
+            "STORAGE_BROADCAST_TIMEOUT": "60",  # a loaded host can starve a 3s stub; the tests assert delivery, not speed
         }
         self.fs({"/": 50})
 
