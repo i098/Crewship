@@ -176,23 +176,26 @@ def test_pages_carry_json_ld(tmp_path):
 
     def ld(name):
         page = (dist / name).read_text()
-        return [json.loads(b) for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page)]
+        return [
+            json.loads(b)
+            for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page)
+        ]
 
     types = {n["@type"] for n in ld("index.html")[0]["@graph"]}
     assert types == {"WebSite", "SoftwareApplication"}
     faq = ld("about.html")[0]
     assert faq["@type"] == "FAQPage"
     page = (dist / "about.html").read_text()
-    visible = re.findall(r"<h3>(.*?)</h3>\s*<p>(.*?)</p>", page.split("Short factual answers")[1], re.S)
+    visible = re.findall(
+        r"<h3>(.*?)</h3>\s*<p>(.*?)</p>", page.split("Short factual answers")[1], re.S
+    )
     assert [(q["name"], q["acceptedAnswer"]["text"]) for q in faq["mainEntity"]] == visible
     assert 'href="/how"' in (dist / "about.html").read_text()
 
 
 def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
     dist = build.build(tmp_path / "dist")
-    with ThreadingHTTPServer(
-        ("127.0.0.1", 0), partial(serve.Handler, directory=dist)
-    ) as server:
+    with ThreadingHTTPServer(("127.0.0.1", 0), partial(serve.Handler, directory=dist)) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         connection = HTTPConnection(*server.server_address, timeout=5)
