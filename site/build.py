@@ -1,19 +1,23 @@
-"""Builds site/dist from site/public and fills the points of interest from the repository.
+"""Build the harbor and crawlable repository documentation using only the standard library.
 
-The features come from README's Features list and More docs row and from docs/features.md,
-and the release from CHANGELOG.md, so the page follows Crewship as it changes. Standard library only.
+The scene's features and release follow README.md, docs/features.md, and CHANGELOG.md.
+README.md, SETUP.md, and docs/*.md also become HTML guides under /docs.
 """
 
 import html
+import json
 import posixpath
 import re
 import shutil
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 HARBOR = Path(__file__).resolve().parent
 ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
+ORIGIN = "https://crewship.si"
 MARK = "<!-- points: site/build.py fills this list from README.md and CHANGELOG.md -->"
 FOOT_MARK = "<!-- footer: site/build.py fills the architecture link -->"
 
@@ -139,6 +143,343 @@ def points(readme, changelog, index=""):
     return rows
 
 
+def doc_routes():
+    """One stable URL per published source; keep nested developer docs on GitHub."""
+    sources = [ROOT / "README.md", ROOT / "SETUP.md", *sorted((ROOT / "docs").glob("*.md"))]
+    return {p.relative_to(ROOT).as_posix(): f"/docs/{p.stem.lower()}" for p in sources}
+
+
+def doc_link(link, source, routes, image=False):
+    """Resolve links from their Markdown location, not from the generated HTML path."""
+    parsed = urlsplit(html.unescape(link))
+    if parsed.scheme or parsed.netloc:
+        return link if parsed.scheme.lower() in ("http", "https", "mailto", "") else "#"
+    if not parsed.path:
+        return link
+    path = posixpath.normpath(posixpath.join(posixpath.dirname(source), unquote(parsed.path)))
+    if not image and path in routes:
+        return urlunsplit(("", "", routes[path], parsed.query, parsed.fragment))
+    base = "https://raw.githubusercontent.com/i098/Crewship/main/" if image else f"{REPO}/blob/main/"
+    return urljoin(base + source, link)
+
+
+INLINE = re.compile(
+    r"\\[\\`*_{}\[\]()#+.!|>-]"
+    r"|(?P<ticks>`+)(?P<code>.+?)(?P=ticks)(?!`)"
+    r"|(?P<image>!?)\[(?P<label>(?:[^\[\]]|\[[^\[\]]*\])*)\]"
+    r'\((?P<url><[^>]+>|(?:\\.|[^()\s]|\([^()]*\))+)(?:\s+"[^"]*")?\)'
+    r"|(?P<auto><(?:https?://|mailto:)[^>]+>)"
+    r"|(?P<strong>\*\*|__)(?P<bold>.+?)(?P=strong)"
+    r"|(?P<em>\*|(?<!\w)_)(?P<italic>.+?)(?P=em)(?!\w)"
+)
+
+
+def doc_inline(text, source, routes):
+    parts, end = [], 0
+    for match in INLINE.finditer(text):
+        parts.append(html.escape(text[end : match.start()]))
+        if match.group("code") is not None:
+            value = f'<code>{html.escape(match["code"])}</code>'
+        elif match.group("url") is not None:
+            url = doc_link(match["url"].strip("<>"), source, routes, bool(match["image"]))
+            if match["image"]:
+                value = (
+                    f'<img src="{html.escape(url)}" alt="{html.escape(match["label"])}"'
+                    ' loading="lazy">'
+                )
+            else:
+                value = f'<a href="{html.escape(url)}">{doc_inline(match["label"], source, routes)}</a>'
+        elif match.group("auto") is not None:
+            url = match["auto"][1:-1]
+            value = f'<a href="{html.escape(doc_link(url, source, routes))}">{html.escape(url)}</a>'
+        elif match.group("bold") is not None:
+            value = f'<strong>{doc_inline(match["bold"], source, routes)}</strong>'
+        elif match.group("italic") is not None:
+            value = f'<em>{doc_inline(match["italic"], source, routes)}</em>'
+        else:
+            value = html.escape(match[0][1:])
+        parts.append(value)
+        end = match.end()
+    parts.append(html.escape(text[end:]))
+    return "".join(parts)
+
+
+class DocHTML(HTMLParser):
+    """Keep repository pictures and links, never arbitrary HTML or event attributes."""
+
+    def __init__(self, source, routes):
+        super().__init__()
+        self.source, self.routes, self.parts = source, routes, []
+
+    def handle_starttag(self, tag, attrs):
+        allowed = {
+            "a": ("href",),
+            "picture": (),
+            "source": ("srcset", "media"),
+            "img": ("src", "alt"),
+            "br": (),
+        }
+        if tag == "div":
+            return
+        if tag not in allowed:
+            self.parts.append(html.escape(self.get_starttag_text()))
+            return
+        safe = []
+        for key, value in attrs:
+            if key not in allowed[tag] or value is None:
+                continue
+            if key in ("href", "src", "srcset"):
+                value = doc_link(value, self.source, self.routes, key != "href")
+            safe.append(f' {key}="{html.escape(value)}"')
+        if tag == "img":
+            safe.append(' loading="lazy"')
+        self.parts.append(f"<{tag}{''.join(safe)}>")
+
+    def handle_endtag(self, tag):
+        if tag in ("a", "picture"):
+            self.parts.append(f"</{tag}>")
+        elif tag not in ("div", "source", "img", "br"):
+            self.parts.append(html.escape(f"</{tag}>"))
+
+    def handle_data(self, data):
+        self.parts.append(html.escape(data))
+
+
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+HTML_HEADING = re.compile(r"<h([1-6])(?:\s[^>]*)?>(.*?)</h\1>", re.I)
+LIST = re.compile(r"^(\s*)([-+*]|\d+[.)])\s+(.+)$")
+RAW_HTML = re.compile(r"</?(?:a|div|picture|source|img|br)\b", re.I)
+RULE = re.compile(r"^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$")
+
+
+def plain_text(markup):
+    return " ".join(html.unescape(re.sub(r"<[^>]*>", "", markup)).split())
+
+
+def table_cells(line):
+    return [
+        cell.replace(r"\|", "|")
+        for cell in re.split(r"(?<!\\)\|", line.strip().removeprefix("|").removesuffix("|"))
+    ]
+
+
+def _table_at(lines, index):
+    return (
+        index + 1 < len(lines)
+        and "|" in lines[index]
+        and all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in table_cells(lines[index + 1]))
+    )
+
+
+def _block_at(lines, index):
+    line = lines[index].strip()
+    return (
+        FENCE.match(line) or HEADING.match(line) or HTML_HEADING.fullmatch(line)
+        or LIST.match(lines[index]) or line.startswith((">", "<!--"))
+        or RAW_HTML.match(line) or RULE.fullmatch(line) or _table_at(lines, index)
+    )
+
+
+def _fenced_block(lines, i, fence):
+    code = []
+    closing = rf"\s*{re.escape(fence[1][0])}{{{len(fence[1])},}}\s*"
+    while i < len(lines) and not re.fullmatch(closing, lines[i]):
+        code.append(lines[i])
+        i += 1
+    language = re.sub(r"[^a-zA-Z0-9_+-]", "", fence[2].strip().split(" ")[0])
+    body = f'<pre><code class="language-{language}">'
+    return body + html.escape("\n".join(code) + "\n") + "</code></pre>", i + 1
+
+
+def _heading_block(heading, source, routes, headings):
+    level = len(heading[1]) if heading[1].startswith("#") else int(heading[1])
+    text = doc_inline(heading[2], source, routes)
+    slug = re.sub(r"[^\w\s-]", "", plain_text(text).lower()).strip()
+    slug = re.sub(r"\s", "-", slug)
+    number = headings.get(slug, 0)
+    headings[slug] = number + 1
+    anchor = f"{slug}-{number}" if number else slug
+    return f'<h{level} id="{html.escape(anchor)}">{text}</h{level}>'
+
+
+def _quoted_block(lines, i, source, routes, headings):
+    quote = [re.sub(r"^>\s?", "", lines[i].strip())]
+    i += 1
+    while i < len(lines) and lines[i].lstrip().startswith(">"):
+        quote.append(re.sub(r"^\s*>\s?", "", lines[i]))
+        i += 1
+    body = render_markdown("\n".join(quote), source, routes, headings)
+    return "<blockquote>" + body + "</blockquote>", i
+
+
+def _list_block(lines, i, source, routes, headings):
+    first = LIST.match(lines[i])
+    ordered = first[2][0].isdigit()
+    tag = "ol" if ordered else "ul"
+    start = f' start="{int(first[2][:-1])}"' if ordered else ""
+    output = [f"<{tag}{start}>"]
+    indent = len(first[1])
+    while i < len(lines):
+        item = LIST.match(lines[i])
+        if not item or len(item[1]) != indent or item[2][0].isdigit() != ordered:
+            break
+        width = item.start(3)
+        content = [item[3]]
+        i += 1
+        while i < len(lines):
+            next_line = lines[i]
+            if next_line.strip() and len(next_line) - len(next_line.lstrip()) <= indent:
+                break
+            content.append(next_line[width:])
+            i += 1
+        output.append(
+            "<li>" + render_markdown("\n".join(content), source, routes, headings) + "</li>"
+        )
+    return "\n".join([*output, f"</{tag}>"]), i
+
+
+def _table_block(lines, i, source, routes):
+    output = ['<div class="scroll"><table><thead><tr>']
+    output.extend(
+        f"<th>{doc_inline(c.strip(), source, routes)}</th>" for c in table_cells(lines[i].strip())
+    )
+    output.append("</tr></thead><tbody>")
+    i += 2
+    while i < len(lines) and "|" in lines[i] and lines[i].strip():
+        output.append("<tr>")
+        output.extend(f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i]))
+        output.append("</tr>")
+        i += 1
+    return "\n".join([*output, "</tbody></table></div>"]), i
+
+
+def _paragraph_block(lines, i, source, routes):
+    paragraph = [lines[i].strip()]
+    i += 1
+    while i < len(lines) and lines[i].strip() and not _block_at(lines, i):
+        paragraph.append(lines[i].strip())
+        i += 1
+    return f'<p>{doc_inline(" ".join(paragraph), source, routes)}</p>', i
+
+
+def _render_block(lines, i, source, routes, headings):
+    line = lines[i].strip()
+    if fence := FENCE.match(line):
+        return _fenced_block(lines, i + 1, fence)
+    if line.startswith("<!--"):
+        i += 1
+        while "-->" not in line and i < len(lines):
+            line = lines[i]
+            i += 1
+        return "", i
+    if (heading := HEADING.match(line)) or (heading := HTML_HEADING.fullmatch(line)):
+        return _heading_block(heading, source, routes, headings), i + 1
+    if RULE.fullmatch(line):
+        return "<hr>", i + 1
+    if line.startswith(">"):
+        return _quoted_block(lines, i, source, routes, headings)
+    if LIST.match(lines[i]):
+        return _list_block(lines, i, source, routes, headings)
+    if _table_at(lines, i):
+        return _table_block(lines, i, source, routes)
+    if RAW_HTML.match(line):
+        raw = DocHTML(source, routes)
+        raw.feed(line)
+        return "".join(raw.parts), i + 1
+    return _paragraph_block(lines, i, source, routes)
+
+
+def render_markdown(markdown, source, routes, headings=None):
+    """Render the repository's Markdown subset, including nested lists and safe pictures."""
+    headings = {} if headings is None else headings
+    lines, output, i = markdown.splitlines(), [], 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        block, i = _render_block(lines, i, source, routes, headings)
+        output.append(block)
+    return "\n".join(output)
+
+
+def doc_page(title, description, route, body, source=None):
+    canonical = ORIGIN + route
+    crumbs = [("Crewship", ORIGIN + "/"), ("Documentation", ORIGIN + "/docs")]
+    if source:
+        crumbs.append((title, canonical))
+    structured = json.dumps({
+        "@context": "https://schema.org", "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": i, "name": name, "item": url}
+            for i, (name, url) in enumerate(crumbs, 1)
+        ],
+    }, ensure_ascii=False).replace("<", "\\u003c")
+    source_link = (
+        f' · <a href="{REPO}/blob/main/{html.escape(source)}">View Markdown source</a>'
+        if source else ""
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{html.escape(title)} - Crewship docs</title>
+<meta name="description" content="{html.escape(description)}">
+<link rel="canonical" href="{canonical}">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/harbor.css">
+<script type="application/ld+json">{structured}</script>
+</head>
+<body class="how about docs">
+<header class="top">
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a></nav>
+</header>
+<main><article class="post">
+{body}
+</article></main>
+<footer class="foot"><p><a href="/docs">All documentation</a>{source_link}</p></footer>
+</body>
+</html>
+"""
+
+
+def build_docs(dist):
+    routes, entries = doc_routes(), []
+    (dist / "docs").mkdir()
+    for source, route in routes.items():
+        body = render_markdown((ROOT / source).read_text(), source, routes)
+        heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", body, re.S)
+        title = plain_text(heading[1]) if heading else Path(source).stem
+        description = next(
+            (plain_text(p) for p in re.findall(r"<p>(.*?)</p>", body, re.S) if plain_text(p)),
+            title,
+        )
+        if len(description) > 160:
+            description = description[:157].rsplit(" ", 1)[0] + "..."
+        (dist / f"{route.lstrip('/')}.html").write_text(
+            doc_page(title, description, route, body, source)
+        )
+        entries.append(
+            f'<li><a href="{route}">{html.escape(title)}</a><p>{html.escape(description)}</p></li>'
+        )
+    description = "Crewship guides for installation, configuration, coding agents, and host operations."
+    index = (
+        '<h1 id="documentation">Crewship documentation</h1>'
+        f"<p>{description}</p><ul>" + "\n".join(entries) + "</ul>"
+    )
+    (dist / "docs.html").write_text(doc_page("Documentation", description, "/docs", index))
+    urls = ["/", "/how", "/about", "/docs", *routes.values()]
+    (dist / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(f"  <url><loc>{ORIGIN}{url}</loc></url>\n" for url in urls)
+        + "</urlset>\n"
+    )
+
+
 def build(dist=HARBOR / "dist"):
     readme = (ROOT / "README.md").read_text()
     changelog = (ROOT / "CHANGELOG.md").read_text()
@@ -154,6 +495,7 @@ def build(dist=HARBOR / "dist"):
     page = dist / "index.html"
     footer = f'Read the <a target="_blank" rel="noopener" href="{REPO}/blob/main/docs/architecture.md">Architecture</a>.'
     page.write_text(page.read_text().replace(MARK, items).replace(FOOT_MARK, footer))
+    build_docs(dist)
     return dist
 
 

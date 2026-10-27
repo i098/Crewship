@@ -2,9 +2,10 @@
 
 `site/` is the website for [crewship.si](https://crewship.si): a full-screen, first-person walk around the ship, dock, island, and house, drawn as text.
 
-The home page keeps its product summary and About link in the HTML and the initial harbor sign.
+The home page keeps its product summary, About link, and Docs link in the HTML.
+The start menu also links to the documentation.
 The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
-It uses the main README as its factual source and needs no JavaScript.
+The `/docs` index and guides are readable without JavaScript and are built from the repository's Markdown sources.
 
 The harbor is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
 There is no 3D engine, no WebGL and no model files.
@@ -168,6 +169,7 @@ A link with no mapping prints a warning but never blocks the build.
 The docs board shows on the mini map like the other points.
 Add an object and a `SCENE` entry to give the link its own place.
 The build limits each sign to a title, a short description and one link.
+
 Unmapped pages share a short summary with a count and one link to the README feature index.
 The welcome sign shows the home page's project links, including About.
 Posted signs first place their bottom frame row on the lowest projected support top.
@@ -191,6 +193,20 @@ The sign highlights the focused link without scrolling the scene.
 Link focus closes the map and cancels pending automatic walking.
 See [how.html](public/how.html) for the movement and Enter controls.
 
+### Published documentation
+
+The same build publishes `README.md`, `SETUP.md`, and every top-level `docs/*.md` file.
+Their URLs are `/docs/readme`, `/docs/setup`, and `/docs/<lowercase-file-stem>`.
+`dist/docs.html` is the `/docs` index; each guide is a `dist/docs/<slug>.html` file.
+The Markdown renderer has no third-party dependencies.
+It supports headings with GitHub-style IDs, paragraphs, nested lists, fenced code, inline code, emphasis, links, images, tables, and blockquotes.
+It retains the repository's picture markup through a small HTML allowlist, drops event attributes, and escapes other HTML.
+Relative links to published guides use their `/docs` URLs and keep query strings and fragments.
+Other repository links stay on GitHub; relative images use raw GitHub URLs so they render as images.
+Each guide has its own title, a description from its first paragraph (at most 160 characters), an absolute canonical URL, and breadcrumb structured data.
+`public/llms.txt` links to the published guides for AI readers.
+
+
 ## Preview
 
 ```bash
@@ -199,13 +215,14 @@ python3 site/serve.py
 ```
 
 Then open <http://localhost:8000>.
-The preview serves `/how` and `/about` without redirects and returns 404 for unknown routes.
+The preview serves `/how`, `/about`, `/docs`, and `/docs/<slug>` without redirects and returns 404 for unknown routes.
+It matches Cloudflare's default `auto-trailing-slash` handling for these HTML files: `.html` and trailing-slash aliases redirect to the extensionless canonical URL.
 Pass a port to `site/serve.py` to use a port other than 8000.
 
 ## Link preview
 
 `index.html` sets the Open Graph and Twitter card tags, with absolute https://crewship.si URLs.
-Each page defines its own title, description, and absolute canonical URL in `public/index.html`, `public/how.html`, or `public/about.html`.
+The home, How, and About pages define their metadata in `public/index.html`, `public/how.html`, and `public/about.html`; the build generates each documentation page's metadata from its source.
 The preview image `public/og.png` (1200x630) is committed, so the build and the deploy need no browser.
 `og-image.mjs` draws it with the real renderer from a fixed camera, without the sign or the mini map, and sets the title over the scene.
 It also draws `public/apple-touch-icon.png` (180x180) from `public/favicon.svg`.
@@ -225,7 +242,9 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 ## Browser checks
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
-It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
+It checks that `/how`, `/docs`, and `/docs/setup` serve HTML with their canonical URLs, including requests with a query string.
+Missing routes and directory requests return 404 rather than crashing the fixture server.
+Same-tab sign links check the destination's heading before returning to the harbor.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 The check enters through Explore before it exercises the scene.
@@ -283,8 +302,8 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler@latest deploy
 
 The site serves on https://crewship.si, a custom domain attached to the Worker outside `wrangler.jsonc`, and each deploy records that URL under Deployments.
 
-The build copies `public/robots.txt` and `public/sitemap.xml` unchanged into `dist/`.
+The build copies `public/robots.txt` unchanged and generates `dist/sitemap.xml`.
 The crawler policy allows all crawlers, including GPTBot and OAI-SearchBot.
-The sitemap lists the canonical home, How, and About URLs without modification dates.
+The sitemap lists the canonical home, How, About, documentation index, and every published guide URL without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.

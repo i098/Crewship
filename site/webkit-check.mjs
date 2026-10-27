@@ -1,4 +1,5 @@
 // Runs the WebKit browser checks documented in README.md. Run site/build.py first.
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { webkit, devices } from "playwright";
@@ -45,8 +46,13 @@ await page.context().route("**/*", async (route) => {
     await route.fulfill({ body: "<title>Link destination</title>", contentType: "text/html" });
     return;
   }
+  const canonical = url.pathname.replace(/\/+$/, "").replace(/\.html$/, "").replace(/\/index$/, "") || "/";
+  if (canonical !== url.pathname && (canonical === "/" || existsSync(new URL(canonical.slice(1) + ".html", dist)))) {
+    await route.fulfill({ status: 307, headers: { location: canonical + url.search } });
+    return;
+  }
   let path = url.pathname.slice(1) || "index.html";
-  if (path === "how" || path === "about") path += ".html";
+  if (existsSync(new URL(path + ".html", dist))) path += ".html";
   const type = { html: "text/html", js: "text/javascript", css: "text/css" }[path.split(".").pop()];
   if (path === "harbor.js") {
     const source = await readFile(new URL(path, dist), "utf8");
@@ -177,18 +183,21 @@ stage.addEventListener("pointerdown", () => { if (padId !== null) for (let i = 0
   try {
     await route.fulfill({ body: await readFile(new URL(path, dist)), contentType: type });
   } catch (error) {
-    if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    if (!["ENOENT", "ENOTDIR", "EISDIR"].includes(error.code)) throw error;
     await route.fulfill({ status: 404, body: "" });
   }
 });
 if (name === "desktop") {
   const probe = await page.context().newPage();
-  const how = await probe.goto("http://harbor.test/how?preview=1");
-  assert.equal(how.status(), 200);
-  assert(how.headers()["content-type"].startsWith("text/html"));
-  assert.equal(await probe.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
-  const missing = await probe.goto("http://harbor.test/missing");
-  assert.equal(missing.status(), 404);
+  for (const path of ["/how", "/docs", "/docs/setup"]) {
+    const response = await probe.goto(`http://harbor.test${path}?preview=1`);
+    assert.equal(response.status(), 200, path);
+    assert(response.headers()["content-type"].startsWith("text/html"), path);
+    assert.equal(await probe.locator('link[rel="canonical"]').getAttribute("href"), `https://crewship.si${path}`);
+  }
+  for (const path of ["/missing", "/docs/missing", "/audio"]) {
+    assert.equal((await probe.goto(`http://harbor.test${path}`)).status(), 404, path);
+  }
   await probe.close();
 }
 async function clickLink(link, offset = 0) {
@@ -204,14 +213,17 @@ async function clickLink(link, offset = 0) {
   const opened = popup ? result : page;
   await opened.waitForLoadState();
   assert.equal(opened.url(), link.href, `${name}: grid click opened the wrong link`);
-  if (new URL(link.href).pathname === "/how") {
+  const pathname = new URL(link.href).pathname;
+  if (pathname === "/how") {
     assert.equal(await opened.locator('link[rel="canonical"]').getAttribute("href"), "https://crewship.si/how");
   }
   if (popup) {
     await opened.close();
   } else {
     assert.equal(result.status(), 200, `${name}: same-tab destination did not load`);
-    await page.getByRole("heading", { name: "About Crewship", exact: true }).waitFor();
+    const heading = { "/about": "About Crewship", "/docs": "Crewship documentation" }[pathname];
+    assert(heading, `${name}: unexpected same-tab destination ${pathname}`);
+    await page.getByRole("heading", { name: heading, exact: true }).waitFor();
     await page.goBack();
     await page.waitForFunction(() => !document.getElementById("explore").disabled);
     if (await page.locator("#menu").evaluate((dialog) => dialog.open)) await page.click("#explore");
