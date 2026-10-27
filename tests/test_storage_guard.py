@@ -90,7 +90,6 @@ jq -nc --arg id "$3" --argjson announced "$announced" \
         self.home = home
         for name, body in STUBS.items():
             self._exe(self.stub / "bin" / name, body)
-        self._exe(self.stub / "bin/wall", 'echo wall >> "$STUB/events"; cat > /dev/null', "sh")
         self.env = {
             "PATH": f"{self.stub / 'bin'}:/usr/bin:/bin",
             "HOME": "/home/tester",
