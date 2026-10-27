@@ -235,3 +235,25 @@ def test_postmortem_lines_show_under_the_run_they_name(host, tmp_path):
     )
     assert "• 2026-10-25: paragraph entry continues here." in loose
     assert not any("not an entry" in line for line in loose)
+
+
+def test_note_naming_a_hidden_run_is_listed_as_unmatched_in_the_default_view(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -\n")
+    env = {**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}
+    out = run_once(env)
+    assert "• 2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -" in out
+    shown = run_once(env, "--all")
+    assert "• 2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -" not in shown
+    assert any(line.lstrip().startswith("↳ 2026-10-25 | 01TESTOLDFAIL") for line in shown)
+
+
+def test_anonymize_shows_no_postmortem_lines(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text(
+        "2026-10-27 | 01TESTFAIL | test | flaky | - | -\n"
+        "2026-10-26 | https://github.com/acme/widgets/pull/999 | ci | loose | - | -\n"
+    )
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all", "--anonymize")
+    text = "\n".join(out)
+    assert "↳" not in text and "POST-MORTEMS" not in text and "flaky" not in text and "loose" not in text

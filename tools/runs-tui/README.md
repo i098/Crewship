@@ -16,7 +16,7 @@ The tool reads `docs/validation-postmortems.md` in this repo, plus the files tha
 It reads two formats: markdown table rows whose first cell is a date, and lines that start with a date, such as `2026-10-27 | PR: <url> | text`.
 A plain line directly after a dated line continues that entry.
 Missing files are skipped, and the tool never writes these files.
-`--anonymize` does not change post-mortem text.
+`--anonymize` does not show post-mortem lines.
 
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 

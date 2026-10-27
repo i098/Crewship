@@ -171,6 +171,7 @@ export function readPostmortems(): string[] {
 
 // A line belongs to every run whose id, PR URL or PR number (`#42`) it names; returns the lines no run claims.
 export function attachPostmortems(runs: Run[], notes: string[]): string[] {
+  for (const r of runs) r.notes = []
   return notes.filter(n => {
     // Whole tokens, so `#421` or `/pull/421` never names PR 42.
     const refs = new Set(n.match(/#\d+|https?:\/\/[^\s)|>\]]+?\/pull\/\d+/g))
@@ -267,6 +268,7 @@ async function live(startAll: boolean) {
   renderer.root.add(column)
 
   let runs: Run[] = []
+  let postmortemNotes: string[] = []
   let unmatched: string[] = []
   let error = ""
   let top = 0
@@ -278,6 +280,7 @@ async function live(startAll: boolean) {
     const W = Math.min(MAXW, renderer.width)
     column.width = W
     const shown = visible(runs, all)
+    unmatched = ANON ? [] : attachPostmortems(shown, postmortemNotes)
     const c = counts(shown)
     const page = Math.max(1, renderer.height - 6)
     const lines = postmortems ? unmatchedLines(unmatched, W - 4) : tableLines(shown, W - 4)
@@ -295,7 +298,7 @@ async function live(startAll: boolean) {
   function refresh() {
     try {
       runs = load()
-      unmatched = attachPostmortems(runs, readPostmortems())
+      postmortemNotes = readPostmortems()
       if (ANON) runs = anonymize(runs)
       error = ""
     } catch (e) {
@@ -326,7 +329,8 @@ if (import.meta.main) {
   if (process.argv.includes("--once")) {
     try {
       const runs = load()
-      const unmatched = attachPostmortems(runs, readPostmortems())
+      const shown = visible(runs, all)
+      const unmatched = ANON ? [] : attachPostmortems(shown, readPostmortems())
       process.stdout.write(once(ANON ? anonymize(runs) : runs, all, unmatched))
     } catch (e) {
       console.error(`Cannot read ${DB_PATH}: ${(e as Error).message}`)
