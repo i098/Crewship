@@ -129,6 +129,7 @@ The extension adds this requirement to the director's brief.
 
 Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
 Saved worker models take precedence over saved role aliases.
+The `smol` helper role in these sessions follows the fast-worker bounds; it keeps its configured model when no fast model has a usable credential.
 If Mercury 3 or Sonnet 5.5 has no usable credential, the extension tries Haiku 5.5 at the selected effort.
 Anthropic-side workers can also retry on Haiku 5.5; other retry models must stay within the worker's tier.
 A spawn or restore fails with a clear message when no allowed model has a usable credential.

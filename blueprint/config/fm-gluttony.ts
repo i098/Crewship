@@ -6,6 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findScopedSettings, type Settings as HostSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgModelRoles } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import { cfgRetryFallbackChains, cfgTierOpenai } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 interface Ctx {
@@ -223,6 +224,9 @@ export default function (pi: GluttonyApi) {
 			if (settings) {
 				const primary = `${model}:${pi.getThinkingLevel()}`;
 				boundSettings(settings, primary);
+				const roles = cfgModelRoles.get(settings);
+				const smol = await authenticatedPattern(tiers, "fast", bounded(tiers, "fast", roles.smol), ctx);
+				cfgModelRoles.override(settings, smol ? { ...roles, smol } : roles);
 				const chains = cfgRetryFallbackChains.get(settings);
 				cfgRetryFallbackChains.override(settings, Object.fromEntries(
 					Object.entries(chains).map(([key, chain]) => [key, boundedChain(tiers, cli, primary, chain)]),
