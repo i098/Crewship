@@ -97,7 +97,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 
 - [`blueprint/`](blueprint/): what provisions a host: the Ansible playbook, seeds, skills, and guards.
 - [`apps/`](apps/): services Crewship runs: crew board, iMessage bridge, and secrets Worker.
-- [`tools/`](tools/): stand-alone helpers: the `crewship` launcher and schedule viewer, `herdr-patch`, and `dia-debug`.
+- [`tools/`](tools/): stand-alone helpers: the `crewship` launcher and schedule viewer, `herdr-patch`, `dia-debug`, and the `lavish-tui` board view with `lavish-keep`.
 - [`scripts/`](scripts/): the `ship.sh` CLI code, the release artifact build, and secrets helpers.
 - [`site/`](site/): the crewship.si landing page.
 - [`docs/`](docs/): the guides.
