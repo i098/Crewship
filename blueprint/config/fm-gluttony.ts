@@ -242,6 +242,7 @@ export default function (pi: GluttonyApi) {
 	});
 	pi.on("before_subagent_spawn", async (event, ctx) => {
 		if (!tiers) return undefined;
+		patchRestore(pi.pi, home, tiers, await availableModels(tiers, ctx));
 		const cli = event.modelRole === "smol" || event.agent === "sonic" ? "fast" : "good";
 		const pattern = await authenticatedPattern(tiers, cli, bounded(tiers, cli, event.patterns[0]), ctx);
 		return pattern
@@ -256,6 +257,7 @@ export default function (pi: GluttonyApi) {
 		const cli: Cli = event.input.cli === "good" ? "good" : "fast";
 		const result = choose(tiers, cli, event.input.prompt ?? "");
 		if ("error" in result) return { block: true, reason: result.error };
+		patchRestore(pi.pi, home, tiers, await availableModels(tiers, ctx));
 		const pattern = await authenticatedPattern(tiers, cli, result.pattern, ctx);
 		if (!pattern) return { block: true, reason: "Gluttony: no allowed worker model has a usable credential." };
 		patch?.picked.set(`${sessionId}:${event.toolCallId}`, pattern);
@@ -310,6 +312,7 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 		return;
 	}
 	const homes = new Map([[home, { tiers, available }]]);
+	const restored = new WeakSet<object>();
 	proto[RESTORE_PATCHED] = homes;
 	const original = proto.getEntries;
 	proto.getEntries = function () {
@@ -317,14 +320,16 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 		const inbox = process.env.FM_TASK_INBOX;
 		const active = inbox && homes.get(path.dirname(path.dirname(inbox)));
 		if (!active) return entries;
-		return entries.map(entry => {
+		const checkCredentials = !restored.has(this);
+		const result = entries.map(entry => {
 			if (entry.type !== "session_init") return entry;
 			const cli = entry.modelRole === "smol" || entry.agent === "sonic" ? "fast" : "good";
 			const selected = entry.resolvedModel && allowedPattern(active.tiers, cli, entry.resolvedModel, true)
 				? entry.resolvedModel
 				: bounded(active.tiers, cli, entry.resolvedModel);
 			const primary = [selected, retryPattern(active.tiers, selected)].find(
-				pattern => allowedPattern(active.tiers, cli, pattern, true) && active.available.has(pattern.split(":")[0]),
+				pattern => allowedPattern(active.tiers, cli, pattern, true)
+					&& (!checkCredentials || active.available.has(pattern.split(":")[0])),
 			);
 			if (!primary) throw new Error("Gluttony: no allowed restored worker model has a usable credential.");
 			const chain = boundedChain(active.tiers, cli, primary, entry.retryFallback?.chain ?? []);
@@ -337,5 +342,7 @@ function patchRestore(host: HostModule | undefined, home: string, tiers: Tiers, 
 					: undefined,
 			};
 		});
+		restored.add(this);
+		return result;
 	};
 }
