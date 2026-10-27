@@ -1,4 +1,4 @@
-// One shared palette for usage-tui, crewboard-tui and the schedules view.
+// One shared palette for usage-tui, crewboard-tui, runs-tui and the schedules view.
 export const theme = {
   bg: "#0f1419",
   panel: "#161c24",
