@@ -127,6 +127,22 @@ Other labels use the script name for recognized interpreters, or the executable 
 For a leading `cd DIR && command`, the viewer uses DIR as working-directory evidence and resolves relative executable or script paths.
 Other wrappers keep their executable names; the viewer does not inspect their child commands.
 
+### Terminal panes
+
+The installer also installs two more OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
+`launch` opens each one in the `machine` workspace in the same way as the schedules tab: a missing tab is created and the command starts there.
+The tab label is the command name, except `crewship schedules`, which is labelled `schedules`.
+An existing tab is never changed; `launch` prints `run <command> in the <label> tab` instead.
+`crewship update` re-applies the same recipe, so an updated host gets every new pane and a tab for each in its existing `machine` workspace.
+A rerun adds no duplicate tab, and it never restarts Herdr or touches a running pane.
+
+| Command | Shows | Switch (default `true`) |
+| --- | --- | --- |
+| `crewship schedules` | local cron entries, timers, and Firstmate checks | `crewship.herdr.schedules_tab` |
+| `usage-tui` | token usage from the omp stats store | `crewship.herdr.usage_tab` |
+| `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
+
+A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 
 ## The host config
 
