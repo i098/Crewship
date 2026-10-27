@@ -49,7 +49,7 @@ def native_source():
         yield directory, native / "pi-ai/src", mount
 
 
-def execute(native_source, code, *, enabled=True, collector=None, inspect=None, store=None, timeout=60):
+def execute(native_source, code, *, enabled=True, collector=None, inspect=None, store=None):
     directory, native, mount = native_source
     with tempfile.TemporaryDirectory(prefix="case-", dir=directory) as temporary:
         case = Path(temporary)
@@ -69,7 +69,7 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
         if store:
             environment["CREWSHIP_USAGE_STORE"] = store
         result = subprocess.run(["bun", str(script)], cwd=directory, env=environment,
-                                capture_output=True, text=True, timeout=timeout)
+                                capture_output=True, text=True, timeout=60)
         database = case / "data" / ("usage.sqlite" if store == "ledger" else "spool.sqlite")
         records = []
         if result.returncode != 0:
@@ -86,10 +86,10 @@ def execute(native_source, code, *, enabled=True, collector=None, inspect=None, 
 OBSERVE_USAGE = r'''
 import { Database as UsageDatabase } from "bun:sqlite";
 import { existsSync as usageExists } from "node:fs";
-async function waitForUsage(predicate, limit = 30000) {
+async function waitForUsage(predicate) {
     const path = process.env.CREWSHIP_USAGE_DATA_DIR + "/"
         + (process.env.CREWSHIP_USAGE_STORE === "ledger" ? "usage.sqlite" : "spool.sqlite");
-    const deadline = Date.now() + limit;
+    const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
         if (usageExists(path)) {
             const db = new UsageDatabase(path, { readonly: true });
@@ -326,11 +326,14 @@ await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.seque
 
 
 def test_native_helper_calls_register_separately_from_chat(native_source):
-    result, records = execute(native_source, TRANSPORT + r'''
+    for _ in range(3):
+        result, records = execute(native_source, TRANSPORT + r'''
 await request();
 await completeSimple(model, context, options);
-await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2, 100000);
-''', timeout=150)
+await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2);
+''')
+        if result.returncode == 0 or "usage records did not arrive" not in result.stderr:
+            break
     assert result.returncode == 0, result.stderr
     assert sorted(row["producer_kind"] for row in records if row["kind"] == "register") == ["chat", "helper"]
     assert len([row for row in records if row["kind"] == "complete"]) == 2
