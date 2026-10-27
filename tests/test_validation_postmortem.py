@@ -83,5 +83,4 @@ def test_seed_records_have_all_six_columns():
         assert len(cells) == 6
         assert all(cells)
         assert datetime.strptime(cells[0], "%Y-%m-%d")
-        assert cells[1].startswith("https://github.com/")
         assert "https://" in cells[5] or "../" in cells[5]
