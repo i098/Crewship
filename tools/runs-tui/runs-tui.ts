@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Every no-mistakes validation run on this host (read-only): local run records plus each firstmate home's state/*.meta.
-// `--once` prints plain text and exits; without it the table refreshes from local files.
+// `--once` prints plain text and exits; `--json` prints one JSON document (runs with post-mortems, unmatched lines) and exits; without either the table refreshes from local files.
 // Default view: running and parked runs plus runs finished in the last 24h; `--all` (key `a`) shows every run.
 // `--anonymize` replaces home, mate, task, repo and PR with stable placeholders (for screenshots).
 // Post-mortem lines (validation-postmortems.md files, read-only) show under the run they name; key `p` lists the rest.
@@ -246,6 +246,19 @@ export function once(runs: Run[], all: boolean, unmatched: string[], width = MAX
   return [head, ...text(tableLines(shown, width - 4)), ...loose].join("\n") + "\n"
 }
 
+// `--json`: one document for agents. Date, ref and text are split from the parsed line; `raw` is the line itself.
+export type Postmortem = { date: string; ref: string; text: string; raw: string }
+export function postmortemJson(raw: string): Postmortem {
+  const cells = raw.slice(10).replace(/^[:\s|]+/, "").split(" | ")
+  const [ref, ...rest] = cells.length > 1 ? cells : ["", cells[0]]
+  return { date: raw.slice(0, 10), ref: ref.replace(/^PR:\s*/, ""), text: rest.join(" | "), raw }
+}
+
+export function json(runs: Run[], all: boolean, unmatched: string[]): string {
+  const shown = visible(runs, all).map(({ notes, ...r }) => ({ ...r, postmortems: notes.map(postmortemJson) }))
+  return JSON.stringify({ runs: shown, unmatched: unmatched.map(postmortemJson) }) + "\n"
+}
+
 // ---- live view -----------------------------------------------------------
 async function live(startAll: boolean) {
   // Dynamic: --once must run on a host where `bun install` has not been run.
@@ -327,12 +340,13 @@ async function live(startAll: boolean) {
 
 if (import.meta.main) {
   const all = process.argv.includes("--all")
-  if (process.argv.includes("--once")) {
+  if (process.argv.includes("--once") || process.argv.includes("--json")) {
     try {
       const runs = load()
       const shown = visible(runs, all)
       const unmatched = ANON ? [] : attachPostmortems(shown, readPostmortems())
-      process.stdout.write(once(ANON ? anonymize(runs) : runs, all, unmatched))
+      const view = ANON ? anonymize(runs) : runs
+      process.stdout.write(process.argv.includes("--json") ? json(view, all, unmatched) : once(view, all, unmatched))
     } catch (e) {
       console.error(`Cannot read ${DB_PATH}: ${(e as Error).message}`)
       process.exit(1)

@@ -1,1 +1,1 @@
-A new `runs-tui` terminal view lists every no-mistakes validation run on the host with its home, mate, task, repo, PR, current step, fix loops, elapsed time and outcome.
+A new `runs-tui` terminal view lists every no-mistakes validation run on the host with its home, mate, task, repo, PR, current step, fix loops, elapsed time and outcome. Use `--json` to print the runs and their post-mortem lines as one JSON document for agents.

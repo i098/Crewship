@@ -16,7 +16,10 @@ The tool reads `docs/validation-postmortems.md` in this repo, plus the files tha
 It reads two formats: markdown table rows whose first cell is a date, and lines that start with a date, such as `2026-10-27 | PR: <url> | text`.
 A plain line directly after a dated line continues that entry.
 Missing files are skipped, and the tool never writes these files.
-`--anonymize` does not show post-mortem lines.
+`--anonymize` does not show post-mortem lines, in the table or in `--json`.
+
+`--json` is the agent-readable form: it prints one JSON document to stdout and exits, with no colors and no other output.
+The shape is `{"runs": [{...table fields, "postmortems": [{"date", "ref", "text", "raw"}]}], "unmatched": [{...}]}`. It uses the same view rules as `--once` (`--all` for every run) and the same parser and matching; `raw` is the parsed line.
 
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
@@ -25,6 +28,13 @@ bun install
 bun runs-tui.ts                # live, refreshes every 5s; a all/24h, p unmatched post-mortems, up/down scroll, r refresh, q quit
 bun runs-tui.ts --once --all   # plain text, for tests and screenshots
 bun runs-tui.ts --anonymize    # home, mate, task, repo and PR become placeholders (for screenshots)
+bun runs-tui.ts --json --all   # one JSON document for agents
+```
+
+Example: failed runs and their post-mortem text.
+
+```bash
+bun runs-tui.ts --json --all | jq -r '.runs[] | select(.outcome == "failed") | [.id, .pr, (.postmortems | map(.text) | join("; "))] | @tsv'
 ```
 
 `RUNS_TUI_DB` and `RUNS_TUI_HOMES` (`:`-separated home roots) override the data locations.

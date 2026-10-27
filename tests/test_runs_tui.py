@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sqlite3
@@ -269,3 +270,58 @@ def test_anonymize_shows_no_postmortem_lines(host, tmp_path):
         and "flaky" not in text
         and "loose" not in text
     )
+
+
+def run_json(env, *flags):
+    proc = subprocess.run(
+        ["bun", str(TOOL), "--json", *flags],
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(proc.stdout)  # one document, no ANSI or extra output
+
+
+def test_json_lists_runs_with_matched_and_unmatched_postmortems(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text(
+        "| Date | Run | Step | Cause |\n| --- | --- | --- | --- |\n"
+        "| 2026-10-27 | 01TESTFAIL | test | flaky a&#124;b |\n"
+        "2026-10-26 | PR: #7 | body check failed.\n"
+        "2026-10-25 | PR: https://github.com/acme/widgets/pull/999 | loose\n"
+    )
+    doc = run_json({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all")
+    by_task = {r["task"]: r for r in doc["runs"]}
+    assert len(doc["runs"]) == 5 and by_task["fix-widgets"]["pr"] == "#42"
+    assert by_task["gone-task"]["postmortems"] == [
+        {
+            "date": "2026-10-27",
+            "ref": "01TESTFAIL",
+            "text": "test | flaky a|b",
+            "raw": "2026-10-27 | 01TESTFAIL | test | flaky a|b",
+        }
+    ]
+    assert by_task["oss-task"]["postmortems"][0]["ref"] == "#7"
+    assert [(p["date"], p["ref"], p["text"]) for p in doc["unmatched"]] == [
+        ("2026-10-25", "https://github.com/acme/widgets/pull/999", "loose")
+    ]
+
+
+def test_json_default_view_hides_old_runs(host):
+    assert len(run_json(host)["runs"]) == 3
+
+
+def test_json_anonymize_has_no_postmortems_or_private_names(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-27 | 01TESTFAIL | test | flaky | - | -\n2026-10-26 | #999 | loose\n")
+    out = subprocess.run(
+        ["bun", str(TOOL), "--json", "--all", "--anonymize"],
+        env={**os.environ, **host, "CREWSHIP_POSTMORTEM_PATHS": str(note)},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    doc = json.loads(out)
+    assert doc["unmatched"] == [] and all(r["postmortems"] == [] for r in doc["runs"])
+    assert "flaky" not in out and "fix-widgets" not in out
