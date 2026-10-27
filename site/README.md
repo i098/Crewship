@@ -116,8 +116,9 @@ The basin blocks walking, and a blue `O` marks the fountain on the mini map.
 The fountain marker leaves map labels and selected point markers clear.
 Map walks check each road and approach segment against the walking collision bounds at the local floor height and require continuous ground coverage.
 Detour corners come from every walking obstacle, including trees, hedges, the basin, the house, dock cargo, and ship fixtures.
-The page builds the corner graph once before animation starts.
-Ship bob and roll do not rebuild the graph during a map click.
+The page builds the corner graph only on the first animated map walk, not while loading the start menu or entering Explore.
+It uses the same level-ship geometry as startup and reuses the graph for later walks; reduced-motion jumps never need it.
+Ship bob and roll do not rebuild the graph.
 If no free viewing spot exists, the map selection stops without moving the player.
 Without reduced motion, a missing clear route also stops the map walk without moving the player.
 

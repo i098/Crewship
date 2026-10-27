@@ -3366,6 +3366,13 @@ function rebuildRoutes() {
   approachGraph = { obstacles, nodes, edges: routeEdges(nodes, clearLinks(nodes, obstacles)) };
   return approachGraph;
 }
+// Build on the first map walk, with the same level ship used at startup. Keep the live view's motion unchanged.
+function initialRoutes() {
+  const motion = [bob, rc, rs];
+  bob = 0; rc = 1; rs = 0;
+  try { return rebuildRoutes(); }
+  finally { [bob, rc, rs] = motion; }
+}
 function nearestClear(point, nodes, obstacles) {
   const order = nodes.map((n, i) => [i, Math.hypot(point[0] - n[0], point[1] - n[1])]);
   order.sort((a, b) => a[1] - b[1]);
@@ -3373,7 +3380,7 @@ function nearestClear(point, nodes, obstacles) {
   return -1;
 }
 function approach(from, to) {
-  const { obstacles, nodes, edges } = approachGraph;
+  const { obstacles, nodes, edges } = approachGraph ?? initialRoutes();
   if (clear(from, to, obstacles)) return [to];
   const a = nearestClear(from, nodes, obstacles), b = nearestClear(to, nodes, obstacles);
   if (a < 0 || b < 0) return [];
@@ -4858,12 +4865,10 @@ function blit(px, px32, w, s, ox, oy, top, bottom) {
   }
 }
 
-// The scenery stands now: fill the height grid around it and plant the grass on it. Bob and roll change height,
-// not walking topology, so build the corner graph once before animation starts.
+// The scenery stands now: fill the height grid around it and plant the grass on it.
 fillGround();
 if (PAGE) {
   GRASS = plantGrass();
-  rebuildRoutes();
   // A font that fails to load does not stop the scene.
   document.fonts.load(`11px ${MONO}`).catch(() => {}).then(() => document.fonts.ready).then(() => requestAnimationFrame(() => {
     applyPreferences();

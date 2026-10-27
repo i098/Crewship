@@ -40,6 +40,31 @@ vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nmeasure();\n' + pr
     )
 
 
+def test_map_graph_waits_for_a_walk_and_keeps_the_stationary_topology():
+    _run_ship_scene(
+        r"""
+assert.equal(approachGraph, undefined, 'the start menu must not build the walking graph');
+const spawn = {...me};
+reduced.matches = true;
+go('how');
+assert.equal(approachGraph, undefined, 'reduced-motion jumps need no walking graph');
+Object.assign(me, spawn);
+reduced.matches = false;
+const stationary = rebuildRoutes();
+approachGraph = undefined;
+bob = 0.03; rc = Math.cos(0.025); rs = Math.sin(0.025);
+const motion = [bob, rc, rs];
+approach([5, 19.6], [-5, 19.6]);
+assert.deepEqual(approachGraph.nodes, stationary.nodes, 'first walk must retain the original graph nodes');
+assert.deepEqual(approachGraph.edges, stationary.edges, 'first walk must retain the original graph edges');
+assert.deepEqual([bob, rc, rs], motion, 'building routes must not change the visible ship motion');
+const cached = approachGraph;
+approach([5, 19.6], [-5, 19.6]);
+assert.equal(approachGraph, cached, 'later walks must reuse the graph');
+"""
+    )
+
+
 def test_ship_wheel_faces_aft_across_the_keel():
     _run_ship_scene(
         r"""
