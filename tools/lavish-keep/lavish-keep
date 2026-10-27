@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Keep a worker's lavish boards loading after its worktree is cleaned up.
+
+    lavish-keep [--list] <worktree-or-board-file>...
+
+Each lavish-axi session whose file is the given board file, or lies under the given
+directory, gets a durable copy in ~/.local/share/lavish-keep/<session key>/ (LAVISH_KEEP_DIR):
+the whole .lavish dir when the board is in one, else the board file alone. The session's
+`file` in state.json then points at the copy, so its board URL keeps loading.
+Only that field changes: a session is never ended, closed or re-keyed.
+--list prints what would be kept and changes nothing.
+Teardown, before cleanup:  lavish-keep "$WORKTREE" || true
+"""
+
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+STATE = Path(os.environ.get("LAVISH_AXI_STATE_DIR") or Path.home() / ".lavish-axi") / "state.json"
+KEEP = Path(os.environ.get("LAVISH_KEEP_DIR") or Path.home() / ".local/share/lavish-keep")
+
+
+def under(path, root):
+    return path == root or root in path.parents
+
+
+def plan(sessions, targets):
+    """Yield (key, source file, copy root or None, new file) for each session to keep."""
+    for key, s in sessions.items():
+        src = Path(s.get("file") or "")
+        if not src.is_absolute() or under(src, KEEP) or not any(under(src, t) for t in targets):
+            continue
+        dest = KEEP / key
+        lavish = next((p for p in src.parents if p.name == ".lavish"), None)
+        if lavish:
+            yield key, src, lavish, dest / ".lavish" / src.relative_to(lavish)
+        else:
+            yield key, src, None, dest / src.name
+
+
+def write_state(state):
+    """Replace state.json atomically: a temp file in the same dir, then rename."""
+    backup = STATE.with_name("state.json.lavish-keep.bak")
+    if not backup.exists():
+        shutil.copy2(STATE, backup)
+    fd, tmp = tempfile.mkstemp(dir=STATE.parent, prefix=".state.json.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(tmp, STATE.stat().st_mode & 0o777)
+        os.replace(tmp, STATE)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def main(argv):
+    dry = "--list" in argv
+    args = [a for a in argv if a != "--list"]
+    if not args or any(a.startswith("-") for a in args):
+        sys.exit(__doc__.strip())
+    if not STATE.exists():
+        print(f"lavish-keep: no {STATE}, nothing to keep")
+        return 0
+    targets = [Path(a).resolve() for a in args]
+    todo = list(plan(json.loads(STATE.read_text())["sessions"], targets))
+    kept = {}
+    for key, src, root, new in todo:
+        if not src.is_file():
+            print(f"{key}  missing  {src}")
+            continue
+        print(f"{key}  {'would keep' if dry else 'kept'}  {src} -> {new}")
+        if dry:
+            continue
+        if root:
+            shutil.copytree(root, KEEP / key / ".lavish", dirs_exist_ok=True)
+        else:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, new)
+        (KEEP / key / "keep.json").write_text(
+            json.dumps({"key": key, "source": str(src), "kept_at": int(time.time())}) + "\n"
+        )
+        kept[key] = str(new)
+    if not todo:
+        print("lavish-keep: no board sessions under " + " ".join(map(str, targets)))
+    if kept:
+        # shortcut: lavish-axi writes state.json without a lock, so a server write in this
+        # short read-modify-rename window is lost; add a lock if lavish-axi ever offers one.
+        state = json.loads(STATE.read_text())
+        for key, new in kept.items():
+            if key in state["sessions"]:
+                state["sessions"][key]["file"] = new
+        write_state(state)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
