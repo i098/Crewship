@@ -5,6 +5,7 @@ The columns are the UTC entry date, run ID or link, failed step, root cause, fix
 Keep the facts public and verified; state when a cause remains unknown or a fix has not merged.
 A log entry alone is not prevention: land the linked code, test, brief, or check change.
 The script rejects empty fields, joins whitespace, and escapes table separators.
+To read the log with the runs it names, run `bun tools/runs-tui/runs-tui.ts --json --all`. It prints one JSON document; see [the runs TUI README](../tools/runs-tui/README.md).
 
 | Date (UTC) | Run or link | Failed step | Root cause | Fix | Prevention change |
 | --- | --- | --- | --- | --- | --- |

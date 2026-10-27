@@ -10,13 +10,31 @@ Mapping, in order: a task meta matching repo and branch, then branch alone, then
 The mate is the second mate whose `kind=secondmate` meta (in the main home's `state/`) names the home; the main home shows `main`.
 A run with no task meta uses its branch name as the task. Only a home that no file names shows `unknown`.
 
+Post-mortem lines show under the run that they name in the current view: a line names a run when it contains the run ID, the PR URL or the PR number (`#42`). A line that names a run hidden by the 24h view counts as unmatched until `a` shows that run.
+`p` lists the lines that name no run; `--once` prints them below the table.
+The tool reads `docs/validation-postmortems.md` in this repo, plus the files that `CREWSHIP_POSTMORTEM_PATHS` names (`:`-separated paths or globs, for example `$HOME/fm/*/data/validation-postmortems.md`).
+It reads two formats: markdown table rows whose first cell is a date, and lines that start with a date, such as `2026-10-27 | PR: <url> | text`.
+A plain line directly after a dated line continues that entry.
+Missing files are skipped, and the tool never writes these files.
+`--anonymize` does not show post-mortem lines, in the table or in `--json`.
+
+`--json` is the agent-readable form: it prints one JSON document to stdout and exits, with no colors and no other output.
+The shape is `{"runs": [{...table fields, "postmortems": [{"date", "ref", "text", "raw"}]}], "unmatched": [{...}]}`. It uses the same view rules as `--once` (`--all` for every run) and the same parser and matching; `raw` is the parsed line.
+
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
 ```bash
 bun install
-bun runs-tui.ts                # live, refreshes every 5s; a all/24h, up/down scroll, r refresh, q quit
+bun runs-tui.ts                # live, refreshes every 5s; a all/24h, p unmatched post-mortems, up/down scroll, r refresh, q quit
 bun runs-tui.ts --once --all   # plain text, for tests and screenshots
 bun runs-tui.ts --anonymize    # home, mate, task, repo and PR become placeholders (for screenshots)
+bun runs-tui.ts --json --all   # one JSON document for agents
+```
+
+Example: failed runs and their post-mortem text.
+
+```bash
+bun runs-tui.ts --json --all | jq -r '.runs[] | select(.outcome == "failed") | [.id, .pr, (.postmortems | map(.text) | join("; "))] | @tsv'
 ```
 
 `RUNS_TUI_DB` and `RUNS_TUI_HOMES` (`:`-separated home roots) override the data locations.

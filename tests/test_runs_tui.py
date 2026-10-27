@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sqlite3
@@ -83,7 +84,7 @@ def host(tmp_path):
     done = {n: "completed" for n in STEPS}
     add_run(
         db,
-        "old-pass",
+        "01TESTOLDPASS",
         "r2",
         "fm/oss-task",
         "completed",
@@ -92,10 +93,12 @@ def host(tmp_path):
         done,
         pr="https://github.com/acme/gadgets/pull/7",
     )
-    add_run(db, "old-fail", "r1", "fm/ancient", "failed", 50 * HOUR, 60, {**done, "test": "failed"})
+    add_run(
+        db, "01TESTOLDFAIL", "r1", "fm/ancient", "failed", 50 * HOUR, 60, {**done, "test": "failed"}
+    )
     add_run(
         db,
-        "fail",
+        "01TESTFAIL",
         "r1",
         "fm/gone-task",
         "failed",
@@ -107,7 +110,7 @@ def host(tmp_path):
     )
     add_run(
         db,
-        "live",
+        "01TESTLIVE",
         "r1",
         "fm/fix-widgets",
         "running",
@@ -119,7 +122,7 @@ def host(tmp_path):
     )
     add_run(
         db,
-        "parked",
+        "01TESTPARKED",
         "r3",
         "fm/p",
         "running",
@@ -130,18 +133,28 @@ def host(tmp_path):
     )
     db.commit()
     db.close()
-    return {"RUNS_TUI_DB": str(db_path), "RUNS_TUI_HOMES": f"{main}:{mate_home}"}
+    return {
+        "RUNS_TUI_DB": str(db_path),
+        "RUNS_TUI_HOMES": f"{main}:{mate_home}",
+        "CREWSHIP_POSTMORTEM_PATHS": "",
+    }
 
 
-def rows(env, *flags):
-    out = subprocess.run(
+def run_once(env, *flags):
+    return subprocess.run(
         ["bun", str(TOOL), "--once", *flags],
         env={**os.environ, **env},
         capture_output=True,
         text=True,
         check=True,
     ).stdout.splitlines()
-    return out[0], [line.split() for line in out[2:]]
+
+
+def rows(env, *flags):
+    """Summary line and table rows; post-mortem lines and the unmatched section are skipped."""
+    out = run_once(env, *flags)
+    end = out.index("") if "" in out else len(out)
+    return out[0], [line.split() for line in out[2:end] if not line.lstrip().startswith("↳")]
 
 
 def test_maps_runs_to_home_mate_task_repo_pr_and_counts_fix_loops(host):
@@ -176,3 +189,142 @@ def test_anonymize_hides_names_but_keeps_structure(host):
     for private in ("widgets", "gadgets", "fix-widgets", "ab12", "#42", "oss-task"):
         assert private not in text
     assert table[0][:5] == ["home-1", "mate-1", "task-1", "repo-1", "#100"]
+
+
+def test_postmortem_lines_show_under_the_run_they_name(host, tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/validation-postmortems.md").write_text(
+        "# Validation post-mortems\n\n"
+        "| Date (UTC) | Run or link | Failed step | Root cause | Fix | Prevention change |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| 2026-10-27 | 01TESTFAIL | test | flaky a&#124;b | retry | [check](x.py) |\n"
+        "| 2026-10-27 | https://github.com/acme/widgets/pull/421 | ci | other PR | - | - |\n"
+    )
+    home = tmp_path / "h1/data"
+    home.mkdir(parents=True)
+    (home / "validation-postmortems.md").write_text(
+        "2026-10-27 | PR: https://github.com/acme/widgets/pull/42 | clippy failed.\n"
+        "2026-10-26 | PR: #7 | body check failed.\n"
+        "2026-10-25: paragraph entry\n"
+        "continues here.\n\n"
+        "not an entry\n"
+    )
+    paths = (
+        f"{tmp_path}/docs/validation-postmortems.md:{tmp_path}/h*/data/*.md:{tmp_path}/missing.md"
+    )
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": paths}, "--all")
+    end = out.index("")
+    under, task = {}, None
+    for line in out[2:end]:
+        if line.lstrip().startswith("↳"):
+            under.setdefault(task, []).append(line.split("↳ ", 1)[1])
+        else:
+            task = line.split()[2]
+    assert under == {
+        "fix-widgets": [
+            "2026-10-27 | PR: https://github.com/acme/widgets/pull/42 | clippy failed."
+        ],
+        "gone-task": ["2026-10-27 | 01TESTFAIL | test | flaky a|b | retry | [check](x.py)"],
+        "oss-task": ["2026-10-26 | PR: #7 | body check failed."],
+    }
+    # pull/421 is not PR #42; a paragraph's next line joins its entry; undated lines are ignored.
+    # Subset: the repo's own docs/validation-postmortems.md is always read too.
+    assert out[end + 1].startswith("POST-MORTEMS NOT MATCHED TO A RUN")
+    loose = out[end + 2 :]
+    assert (
+        "• 2026-10-27 | https://github.com/acme/widgets/pull/421 | ci | other PR | - | -" in loose
+    )
+    assert "• 2026-10-25: paragraph entry continues here." in loose
+    assert not any("not an entry" in line for line in loose)
+
+
+def test_note_with_many_repeated_urls_does_not_stall(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-27 | " + "http://" * 20000 + " | x\n")
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all")
+    assert any(line.startswith("• 2026-10-27 | http://") for line in out)
+
+
+def test_note_naming_a_hidden_run_is_listed_as_unmatched_in_the_default_view(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -\n")
+    env = {**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}
+    out = run_once(env)
+    assert "• 2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -" in out
+    shown = run_once(env, "--all")
+    assert "• 2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -" not in shown
+    assert any(line.lstrip().startswith("↳ 2026-10-25 | 01TESTOLDFAIL") for line in shown)
+
+
+def test_anonymize_shows_no_postmortem_lines(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text(
+        "2026-10-27 | 01TESTFAIL | test | flaky | - | -\n"
+        "2026-10-26 | https://github.com/acme/widgets/pull/999 | ci | loose | - | -\n"
+    )
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all", "--anonymize")
+    text = "\n".join(out)
+    assert (
+        "↳" not in text
+        and "POST-MORTEMS" not in text
+        and "flaky" not in text
+        and "loose" not in text
+    )
+
+
+def run_json(env, *flags):
+    proc = subprocess.run(
+        ["bun", str(TOOL), "--json", *flags],
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(proc.stdout)  # one document, no ANSI or extra output
+
+
+def test_json_lists_runs_with_matched_and_unmatched_postmortems(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text(
+        "| Date | Run | Step | Cause |\n| --- | --- | --- | --- |\n"
+        "| 2026-10-27 | 01TESTFAIL | test | flaky a&#124;b |\n"
+        "2026-10-26 | PR: #7 | body check failed.\n"
+        "2026-10-25 | PR: https://github.com/acme/widgets/pull/999 | loose\n"
+    )
+    doc = run_json({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all")
+    by_task = {r["task"]: r for r in doc["runs"]}
+    assert len(doc["runs"]) == 5 and by_task["fix-widgets"]["pr"] == "#42"
+    assert by_task["gone-task"]["postmortems"] == [
+        {
+            "date": "2026-10-27",
+            "ref": "01TESTFAIL",
+            "text": "test | flaky a|b",
+            "raw": "2026-10-27 | 01TESTFAIL | test | flaky a|b",
+        }
+    ]
+    assert by_task["oss-task"]["postmortems"][0]["ref"] == "#7"
+    # The repo's own docs/validation-postmortems.md is always read too; keep only this test's note.
+    mine = [p for p in doc["unmatched"] if "acme/widgets" in p["ref"]]
+    assert [(p["date"], p["ref"], p["text"]) for p in mine] == [
+        ("2026-10-25", "https://github.com/acme/widgets/pull/999", "loose")
+    ]
+
+
+def test_json_default_view_hides_old_runs(host):
+    assert len(run_json(host)["runs"]) == 3
+
+
+def test_json_anonymize_has_no_postmortems_or_private_names(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-27 | 01TESTFAIL | test | flaky | - | -\n2026-10-26 | #999 | loose\n")
+    out = subprocess.run(
+        ["bun", str(TOOL), "--json", "--all", "--anonymize"],
+        env={**os.environ, **host, "CREWSHIP_POSTMORTEM_PATHS": str(note)},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    doc = json.loads(out)
+    assert doc["unmatched"] == [] and all(r["postmortems"] == [] for r in doc["runs"])
+    assert "flaky" not in out and "fix-widgets" not in out
+    assert "github.com" not in out and "widgets" not in out
