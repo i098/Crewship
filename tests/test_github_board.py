@@ -257,6 +257,7 @@ def _apply(tmp_path, home, github_board):
         "crewship_firstmate_dir": str(home / "Dev/firstmate"),
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_manage_services": False,
+        "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
         "crewship_user_systemd_env": {},
     }
     result = subprocess.run(
