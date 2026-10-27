@@ -294,6 +294,11 @@ Verification runs `~/.no-mistakes/omp-as-pi/omp-as-pi --omp-as-pi-check`, which 
 When a new no-mistakes release changes the adapter, re-prove the wrapper against it (`test.sh --live` and a pipeline run), then update the pins in `check-adapter.sh`.
 
 Select a gate tier for each run with `no-mistakes axi run --model <id> --effort <level>`.
+
+Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
+Parallel slices of one feature merge into one feature branch; that branch gets one validation run and one pull request.
+The slices do not start separate validation runs.
+
 Without these options, the verified Pi configuration uses the ordinary tier.
 
 See [Default config](default-config.md) for the gate tiers and their model and effort choices.
