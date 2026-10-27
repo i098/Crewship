@@ -1,6 +1,6 @@
 ---
 name: apple-hig
-description: Apple Human Interface Guidelines digest for native-feeling UI. Use when designing, building or reviewing iOS, iPadOS, macOS, watchOS, tvOS or visionOS screens, SwiftUI/UIKit/AppKit code, or mobile app UI.
+description: Apple Human Interface Guidelines digest plus current iOS design and best-practice resources for native-feeling UI. Use when designing, building or reviewing iOS, iPadOS, macOS, watchOS, tvOS or visionOS screens, SwiftUI/UIKit/AppKit code, or mobile app UI.
 ---
 
 # Apple HIG
@@ -90,3 +90,17 @@ Short rules from the [Human Interface Guidelines](https://developer.apple.com/de
 Never copy one platform's layout to another. Keep names, icons and meanings the same across them.
 
 [iOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-ios) · [iPadOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-ipados) · [macOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos) · [watchOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-watchos) · [tvOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-tvos) · [visionOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-visionos)
+
+## Current iOS resources
+
+Check these before you build. Each is a link, not a copy.
+
+- [Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass): Apple guide to the current design system and materials.
+- [Apple design resources](https://developer.apple.com/design/resources/): templates, SF Symbols and fonts.
+- [SwiftUI documentation](https://developer.apple.com/documentation/swiftui): the current APIs; prefer them to deprecated ones.
+- [Apple accessibility](https://developer.apple.com/accessibility/): VoiceOver, Dynamic Type and other platform guidance.
+- [Apple design videos](https://developer.apple.com/videos/design/): WWDC sessions on new design changes.
+- [SwiftUI Agent Skill](https://github.com/twostraws/SwiftUI-Agent-Skill) (MIT, Paul Hudson): review of SwiftUI code for modern APIs, accessibility and performance.
+- [SwiftUI Agent Skill](https://github.com/AvdLee/SwiftUI-Agent-Skill) (MIT, Antoine van der Lee): SwiftUI best practices for agents.
+- [Apple HIG skills](https://github.com/CarlosZiegler/apple-hig-skills) (MIT): 21 deeper skills, one per HIG area.
+- [Apple HIG Codex skill](https://github.com/Ksanbal/apple-hig-codex-skill) (CC-BY-4.0): a single longer HIG skill.
