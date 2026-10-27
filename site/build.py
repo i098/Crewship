@@ -264,116 +264,142 @@ def table_cells(line):
     ]
 
 
+def _table_at(lines, index):
+    return (
+        index + 1 < len(lines)
+        and "|" in lines[index]
+        and all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in table_cells(lines[index + 1]))
+    )
+
+
+def _block_at(lines, index):
+    line = lines[index].strip()
+    return (
+        FENCE.match(line) or HEADING.match(line) or HTML_HEADING.fullmatch(line)
+        or LIST.match(lines[index]) or line.startswith((">", "<!--"))
+        or RAW_HTML.match(line) or RULE.fullmatch(line) or _table_at(lines, index)
+    )
+
+
+def _fenced_block(lines, i, fence):
+    code = []
+    closing = rf"\s*{re.escape(fence[1][0])}{{{len(fence[1])},}}\s*"
+    while i < len(lines) and not re.fullmatch(closing, lines[i]):
+        code.append(lines[i])
+        i += 1
+    language = re.sub(r"[^a-zA-Z0-9_+-]", "", fence[2].strip().split(" ")[0])
+    body = f'<pre><code class="language-{language}">'
+    return body + html.escape("\n".join(code) + "\n") + "</code></pre>", i + 1
+
+
+def _heading_block(heading, source, routes, headings):
+    level = len(heading[1]) if heading[1].startswith("#") else int(heading[1])
+    text = doc_inline(heading[2], source, routes)
+    slug = re.sub(r"[^\w\s-]", "", plain_text(text).lower()).strip()
+    slug = re.sub(r"\s", "-", slug)
+    number = headings.get(slug, 0)
+    headings[slug] = number + 1
+    anchor = f"{slug}-{number}" if number else slug
+    return f'<h{level} id="{html.escape(anchor)}">{text}</h{level}>'
+
+
+def _quoted_block(lines, i, source, routes, headings):
+    quote = [re.sub(r"^>\s?", "", lines[i].strip())]
+    i += 1
+    while i < len(lines) and lines[i].lstrip().startswith(">"):
+        quote.append(re.sub(r"^\s*>\s?", "", lines[i]))
+        i += 1
+    body = render_markdown("\n".join(quote), source, routes, headings)
+    return "<blockquote>" + body + "</blockquote>", i
+
+
+def _list_block(lines, i, source, routes, headings):
+    first = LIST.match(lines[i])
+    ordered = first[2][0].isdigit()
+    tag = "ol" if ordered else "ul"
+    start = f' start="{int(first[2][:-1])}"' if ordered else ""
+    output = [f"<{tag}{start}>"]
+    indent = len(first[1])
+    while i < len(lines):
+        item = LIST.match(lines[i])
+        if not item or len(item[1]) != indent or item[2][0].isdigit() != ordered:
+            break
+        width = item.start(3)
+        content = [item[3]]
+        i += 1
+        while i < len(lines):
+            next_line = lines[i]
+            if next_line.strip() and len(next_line) - len(next_line.lstrip()) <= indent:
+                break
+            content.append(next_line[width:])
+            i += 1
+        output.append(
+            "<li>" + render_markdown("\n".join(content), source, routes, headings) + "</li>"
+        )
+    return "\n".join([*output, f"</{tag}>"]), i
+
+
+def _table_block(lines, i, source, routes):
+    output = ['<div class="scroll"><table><thead><tr>']
+    output.extend(
+        f"<th>{doc_inline(c.strip(), source, routes)}</th>" for c in table_cells(lines[i].strip())
+    )
+    output.append("</tr></thead><tbody>")
+    i += 2
+    while i < len(lines) and "|" in lines[i] and lines[i].strip():
+        output.append("<tr>")
+        output.extend(f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i]))
+        output.append("</tr>")
+        i += 1
+    return "\n".join([*output, "</tbody></table></div>"]), i
+
+
+def _paragraph_block(lines, i, source, routes):
+    paragraph = [lines[i].strip()]
+    i += 1
+    while i < len(lines) and lines[i].strip() and not _block_at(lines, i):
+        paragraph.append(lines[i].strip())
+        i += 1
+    return f'<p>{doc_inline(" ".join(paragraph), source, routes)}</p>', i
+
+
+def _render_block(lines, i, source, routes, headings):
+    line = lines[i].strip()
+    if fence := FENCE.match(line):
+        return _fenced_block(lines, i + 1, fence)
+    if line.startswith("<!--"):
+        i += 1
+        while "-->" not in line and i < len(lines):
+            line = lines[i]
+            i += 1
+        return "", i
+    if (heading := HEADING.match(line)) or (heading := HTML_HEADING.fullmatch(line)):
+        return _heading_block(heading, source, routes, headings), i + 1
+    if RULE.fullmatch(line):
+        return "<hr>", i + 1
+    if line.startswith(">"):
+        return _quoted_block(lines, i, source, routes, headings)
+    if LIST.match(lines[i]):
+        return _list_block(lines, i, source, routes, headings)
+    if _table_at(lines, i):
+        return _table_block(lines, i, source, routes)
+    if RAW_HTML.match(line):
+        raw = DocHTML(source, routes)
+        raw.feed(line)
+        return "".join(raw.parts), i + 1
+    return _paragraph_block(lines, i, source, routes)
+
+
 def render_markdown(markdown, source, routes, headings=None):
     """Render the repository's Markdown subset, including nested lists and safe pictures."""
     headings = {} if headings is None else headings
     lines, output, i = markdown.splitlines(), [], 0
-
-    def table_at(index):
-        return (
-            index + 1 < len(lines)
-            and "|" in lines[index]
-            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in table_cells(lines[index + 1]))
-        )
-
-    def block_at(index):
-        line = lines[index].strip()
-        return (
-            FENCE.match(line) or HEADING.match(line) or HTML_HEADING.fullmatch(line)
-            or LIST.match(lines[index]) or line.startswith((">", "<!--"))
-            or RAW_HTML.match(line) or RULE.fullmatch(line) or table_at(index)
-        )
-
     while i < len(lines):
-        line = lines[i].strip()
-        i += 1
-        if not line:
+        if not lines[i].strip():
+            i += 1
             continue
-        fence = FENCE.match(line)
-        if fence:
-            code = []
-            while i < len(lines) and not re.fullmatch(
-                rf"\s*{re.escape(fence[1][0])}{{{len(fence[1])},}}\s*", lines[i]
-            ):
-                code.append(lines[i])
-                i += 1
-            i += 1
-            language = re.sub(r"[^a-zA-Z0-9_+-]", "", fence[2].strip().split(" ")[0])
-            output.append(
-                f'<pre><code class="language-{language}">'
-                + html.escape("\n".join(code) + "\n") + "</code></pre>"
-            )
-        elif line.startswith("<!--"):
-            while "-->" not in line and i < len(lines):
-                line = lines[i]
-                i += 1
-        elif (heading := HEADING.match(line)) or (heading := HTML_HEADING.fullmatch(line)):
-            level = len(heading[1]) if heading[1].startswith("#") else int(heading[1])
-            text = doc_inline(heading[2], source, routes)
-            slug = re.sub(r"[^\w\s-]", "", plain_text(text).lower()).strip()
-            slug = re.sub(r"\s", "-", slug)
-            number = headings.get(slug, 0)
-            headings[slug] = number + 1
-            anchor = f"{slug}-{number}" if number else slug
-            output.append(f'<h{level} id="{html.escape(anchor)}">{text}</h{level}>')
-        elif RULE.fullmatch(line):
-            output.append("<hr>")
-        elif line.startswith(">"):
-            quote = [re.sub(r"^>\s?", "", line)]
-            while i < len(lines) and lines[i].lstrip().startswith(">"):
-                quote.append(re.sub(r"^\s*>\s?", "", lines[i]))
-                i += 1
-            output.append(
-                "<blockquote>" + render_markdown("\n".join(quote), source, routes, headings)
-                + "</blockquote>"
-            )
-        elif item := LIST.match(lines[i - 1]):
-            ordered = item[2][0].isdigit()
-            tag = "ol" if ordered else "ul"
-            start = f' start="{int(item[2][:-1])}"' if ordered else ""
-            output.append(f"<{tag}{start}>")
-            i -= 1
-            indent = len(item[1])
-            while i < len(lines):
-                item = LIST.match(lines[i])
-                if not item or len(item[1]) != indent or item[2][0].isdigit() != ordered:
-                    break
-                width = item.start(3)
-                content = [item[3]]
-                i += 1
-                while i < len(lines):
-                    next_line = lines[i]
-                    if next_line.strip() and len(next_line) - len(next_line.lstrip()) <= indent:
-                        break
-                    content.append(next_line[width:])
-                    i += 1
-                output.append(
-                    "<li>" + render_markdown("\n".join(content), source, routes, headings) + "</li>"
-                )
-            output.append(f"</{tag}>")
-        elif table_at(i - 1):
-            output.append('<div class="scroll"><table><thead><tr>')
-            output.extend(f"<th>{doc_inline(c.strip(), source, routes)}</th>" for c in table_cells(line))
-            output.append("</tr></thead><tbody>")
-            i += 1
-            while i < len(lines) and "|" in lines[i] and lines[i].strip():
-                output.append("<tr>")
-                output.extend(
-                    f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i])
-                )
-                output.append("</tr>")
-                i += 1
-            output.append("</tbody></table></div>")
-        elif RAW_HTML.match(line):
-            raw = DocHTML(source, routes)
-            raw.feed(line)
-            output.append("".join(raw.parts))
-        else:
-            paragraph = [line]
-            while i < len(lines) and lines[i].strip() and not block_at(i):
-                paragraph.append(lines[i].strip())
-                i += 1
-            output.append(f'<p>{doc_inline(" ".join(paragraph), source, routes)}</p>')
+        block, i = _render_block(lines, i, source, routes, headings)
+        output.append(block)
     return "\n".join(output)
 
 

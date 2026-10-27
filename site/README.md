@@ -242,7 +242,9 @@ Rebuild `dist/` after regeneration to preview or deploy the new images.
 ## Browser checks
 
 The check loads the built page in Playwright WebKit at desktop and iPhone portrait and landscape sizes.
-It checks that `/how?preview=1` serves HTML with the How canonical URL and that `/missing` returns 404.
+It checks that `/how`, `/docs`, and `/docs/setup` serve HTML with their canonical URLs, including requests with a query string.
+Missing routes and directory requests return 404 rather than crashing the fixture server.
+Same-tab sign links check the destination's heading before returning to the harbor.
 The check fails on a crash, an uncaught error, a console error, a fallback to the plain page, or a multi-glyph `fillText` call on touch.
 The check walks through the house door and back, and down the ship's hatch and back up its ladder, with the touch pad.
 The check enters through Explore before it exercises the scene.
