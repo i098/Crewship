@@ -945,7 +945,6 @@ async function draftSelected(options: {
   pending: Routing[]; intent: FrontIntent; agentDir: string; from: number; current: () => boolean; signal: AbortSignal;
 }): Promise<DeskResult | undefined> {
   const { pending, intent, agentDir, from, current, signal } = options;
-  if (pending.some((item) => item.firstmate)) return;
   const selection = dispatchSelection(intent, await deskModels(agentDir));
   if (!selection || !current()) return;
   const status = await readInboxStatus();
@@ -959,7 +958,9 @@ async function draftSelected(options: {
     writePath: armWrite(pending), current, signal,
     onProcess: (proc) => { deskRun = track(proc); },
   });
-  if (!result || result.kind === "handoff" || !current()) return;
+  if (!result || !current()) return;
+  trace(pending.at(-1)!.requestId, `worker-${result.kind}${result.kind === "handoff" ? `-${result.reason}` : ""}`);
+  if (result.kind === "handoff") return;
   const target = pending[result.kind === "answer" ? (result.target ?? pending.length) - 1 : pending.length - 1];
   if (target) return { answer: result.kind === "answer" ? { bubbles: result.bubbles } : { handled: true }, target };
 }
@@ -973,7 +974,7 @@ async function draftFront(pending: Routing[], signal: AbortSignal, current: () =
   const from = pending.reduce((first, item) => Math.min(first, memoryByRequest.get(item.requestId) ?? item.memoryId), memory.msgs.length);
   const front = await runFront({
     original: pending.map((item) => item.authored ?? item.text),
-    recent: memory.msgs.filter((message) => message.i < from).slice(-20),
+    recent: memory.msgs.filter((message) => message.i < from).slice(-20).map(({ kind, text }) => ({ kind, text })),
     mates: secondmates(FM_HOME), models, redact, apiKey: env.INCEPTION_API_KEY || "",
     signal,
   });
@@ -986,11 +987,13 @@ async function runSelectedTurn(pending: Routing[], signal: AbortSignal, current:
   const { front, from, agentDir } = draft;
   const intent = front.intents[0];
   if (!intent) {
-    if (!front.text || pending.some((item) => item.firstmate)) return handoffPending();
+    if (!front.text) return handoffPending();
     commitDeskAnswer(pending, { answer: { bubbles: [front.text] }, target: pending.at(-1)! });
+    trace(pending.at(-1)!.requestId, "social");
     return true;
   }
   saveDeskPlan(pending, intent);
+  trace(pending.at(-1)!.requestId, `front-${intent.kind}`);
   if (intent.kind === "relay") {
     const mate = relayTarget(pending, intent, secondmates(FM_HOME));
     if (mate) await handoffToMate(pending, mate, current);
@@ -1007,7 +1010,7 @@ async function runSelectedTurn(pending: Routing[], signal: AbortSignal, current:
 async function runDeskV2(isCurrent: () => boolean) {
   const pending = pendingRoutes();
   if (!pending.length) return;
-  if (stopping || muted() || pending.some((item) => item.mutationPath)) return handoffPending();
+  if (stopping || muted() || pending.some((item) => item.mutationPath || item.firstmate)) return handoffPending();
   const controller = new AbortController();
   deskAbort = controller;
   const current = () => !stopping && !muted() && !controller.signal.aborted && isCurrent();

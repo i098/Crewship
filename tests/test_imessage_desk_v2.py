@@ -1,6 +1,7 @@
 """Exercise the installed bridge with local transports and a local front provider."""
 
 import json
+import os
 import shutil
 import sqlite3
 import threading
@@ -34,7 +35,7 @@ def test_configuration_requires_boolean_and_defaults_to_legacy():
 
 
 @contextmanager
-def desk_bridge(tmp_path, *, enabled=True, intent=None):
+def desk_bridge(tmp_path, *, enabled=True, intent=None, restored=False):
     calls = []
     release = threading.Event()
     release.set()
@@ -103,7 +104,7 @@ prompt = sys.stdin.read()
 fake = pathlib.Path(os.environ['FAKE_DIR'])
 if os.environ.get('FM_DESK_SERVER_TOOLS') == '1':
     with (fake / 'workers').open('a') as log:
-        log.write(json.dumps({'question': os.environ['FM_DESK_QUESTION'], 'args': sys.argv, 'prompt': prompt}) + '\\n')
+        log.write(json.dumps({'pid': os.getpid(), 'question': os.environ['FM_DESK_QUESTION'], 'args': sys.argv, 'prompt': prompt}) + '\\n')
     while (fake / 'hold-worker').exists(): time.sleep(0.02)
     answer = {'kind': 'reply', 'answer': 'All systems are idle.', 'evidence': [{'source': 'status', 'quote': 'All systems are idle.'}]}
     print(json.dumps({'type': 'desk_result', 'drafted': json.dumps(answer), 'tools': {}, 'question': os.environ['FM_DESK_QUESTION']}))
@@ -124,6 +125,12 @@ with pathlib.Path({str(rig.notes)!r}).open('a') as log: log.write(' '.join(sys.a
 """)
     inbox.chmod(0o755)
     try:
+        if restored:
+            rig.state.mkdir()
+            (rig.state / "routing.jsonl").write_text(json.dumps({"received": {
+                "requestId": "photon-protected", "text": "My diagnosis is private.", "firstmate": True, "memoryId": 0,
+                "ref": {"line": "photon", "space": "iMessage;-;+10000000000", "id": "protected"},
+            }}) + "\n")
         rig.start()
         yield rig, calls, release
     finally:
@@ -197,6 +204,10 @@ def test_new_request_cancels_worker_and_keeps_both_originals(tmp_path):
         wait_for(lambda: (rig.fake / "workers").exists(), "first worker")
         send(rig, "second", "Also check the current queue.")
         wait_for(lambda: len(read_text(rig.fake / "workers").splitlines()) == 2, "replacement worker")
+        first_pid = json.loads(read_text(rig.fake / "workers").splitlines()[0])["pid"]
+        wait_for(lambda: not Path(f"/proc/{first_pid}").exists(), "cancelled worker exit")
+        with pytest.raises(ProcessLookupError):
+            os.kill(first_pid, 0)
         (rig.fake / "hold-worker").unlink()
         wait_for(lambda: "All systems are idle." in read_text(rig.fake / "sent"), "replacement answer")
         workers = [json.loads(line) for line in read_text(rig.fake / "workers").splitlines()]
@@ -208,6 +219,13 @@ def test_protected_request_cannot_dispatch(tmp_path):
     with desk_bridge(tmp_path) as (rig, _, _):
         send(rig, "protected", "Please deploy the service.")
         wait_for(lambda: "photon-protected" in read_text(rig.notes), "protected handoff")
+        assert not (rig.fake / "workers").exists()
+
+
+def test_restored_protected_request_never_reaches_front(tmp_path):
+    with desk_bridge(tmp_path, restored=True) as (rig, calls, _):
+        wait_for(lambda: "photon-protected" in read_text(rig.notes), "protected recovery handoff")
+        assert calls == []
         assert not (rig.fake / "workers").exists()
 
 
