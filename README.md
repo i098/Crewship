@@ -16,6 +16,18 @@
 
 ## Quick start
 
+For agent-assisted setup, give your coding agent this instruction:
+
+```text
+Ask whether I already have a server for Crewship first.
+If yes, check its details and start setup on that server.
+If no, recommend a server for my expected load and wait for purchase confirmation.
+Follow https://github.com/i098/Crewship/blob/main/SETUP.md
+```
+
+<details>
+<summary>Manual setup</summary>
+
 Do you already have a server for Crewship?
 
 **No:** run this on your laptop with Node.js 18 or newer and npm:
@@ -45,14 +57,7 @@ Then check or resume setup **on the server**, from any directory:
 Follow the printed commands and the [manual sign-in steps](SETUP.md#1-sign-in-to-github).
 See [Setup checks](docs/configuration.md#commands) for the command's scope and limits.
 
-For agent-assisted setup, give your coding agent this instruction:
-
-```text
-Ask whether I already have a server for Crewship first.
-If yes, check its details and start setup on that server.
-If no, recommend a server for my expected load and wait for purchase confirmation.
-Follow https://github.com/i098/Crewship/blob/main/SETUP.md
-```
+</details>
 
 To update, run the same install command again.
 See [Install, update and migrate](docs/install.md) for other launchers and options.
