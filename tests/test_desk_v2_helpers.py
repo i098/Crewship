@@ -37,6 +37,22 @@ def test_word_order_guard_is_off_by_default():
     assert voice("What is the status?", "The paused build is.", False) is not None
 
 
+@pytest.mark.parametrize(
+    "answer,rewritten,kept",
+    [
+        ("The build is paused.", "The build is running.", False),
+        ("The build cannot start.", "The build can start.", False),
+        ("The build can't start.", "The build can start.", False),
+        ("The build cannot start.", "The build can't start.", True),
+        ("The build can't start.", "The build cannot start.", True),
+        ("The build is paused.", "It is paused.", True),
+        ("The build is paused and the queue is running.", "Paused build, running queue.", True),
+    ],
+)
+def test_meaning_guard_rejects_state_and_cannot_flips(answer, rewritten, kept):
+    assert (voice("What is the status?", rewritten, False, answer) is not None) is kept
+
+
 def test_exact_output_with_a_read_step_still_counts_as_exact():
     answer = "run-tool inspect --json"
     assert voice("Open the file and return the exact command.", answer, False, answer) == [answer]
