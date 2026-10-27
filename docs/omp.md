@@ -300,6 +300,9 @@ See [Default config](default-config.md) for the gate tiers and their model and e
 
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
+Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
+The brief includes the batching rule: a feature branch built from several slices gets one validation run.
+
 ## Skills
 
 Crewship keeps skills, not personal notes, in `blueprint/skills/`. `CLAUDE.md` and `AGENTS.md` stay free of personal content.
