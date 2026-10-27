@@ -256,4 +256,9 @@ def test_anonymize_shows_no_postmortem_lines(host, tmp_path):
     )
     out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all", "--anonymize")
     text = "\n".join(out)
-    assert "↳" not in text and "POST-MORTEMS" not in text and "flaky" not in text and "loose" not in text
+    assert (
+        "↳" not in text
+        and "POST-MORTEMS" not in text
+        and "flaky" not in text
+        and "loose" not in text
+    )

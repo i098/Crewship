@@ -10,7 +10,7 @@ Mapping, in order: a task meta matching repo and branch, then branch alone, then
 The mate is the second mate whose `kind=secondmate` meta (in the main home's `state/`) names the home; the main home shows `main`.
 A run with no task meta uses its branch name as the task. Only a home that no file names shows `unknown`.
 
-Post-mortem lines show under the run that they name: a line names a run when it contains the run ID, the PR URL or the PR number (`#42`).
+Post-mortem lines show under the run that they name in the current view: a line names a run when it contains the run ID, the PR URL or the PR number (`#42`). A line that names a run hidden by the 24h view counts as unmatched until `a` shows that run.
 `p` lists the lines that name no run; `--once` prints them below the table.
 The tool reads `docs/validation-postmortems.md` in this repo, plus the files that `CREWSHIP_POSTMORTEM_PATHS` names (`:`-separated paths or globs, for example `$HOME/fm/*/data/validation-postmortems.md`).
 It reads two formats: markdown table rows whose first cell is a date, and lines that start with a date, such as `2026-10-27 | PR: <url> | text`.
