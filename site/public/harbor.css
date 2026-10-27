@@ -182,3 +182,11 @@ kbd {
 .about h1 { font-size: clamp(26px, 5vw, 38px); }
 .about nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .about .post { padding: 20px; }
+
+/* Repository documentation uses the About page's layout. */
+.docs img { max-width: 100%; height: auto; }
+.docs .post h2 { margin-top: 28px; }
+.docs .post h2:first-child { margin-top: 0; }
+.docs .post pre { padding: 12px; background: var(--bg); }
+.docs .post blockquote { margin-left: 0; padding-left: 16px; border-left: 3px solid var(--line); }
+.docs .post { overflow-wrap: anywhere; }

@@ -1,4 +1,4 @@
-"""site/build.py fills the landing page's points of interest from the repository."""
+"""The static site publishes harbor signs and crawlable repository documentation."""
 
 import importlib.util
 import json
@@ -7,6 +7,7 @@ import struct
 import xml.etree.ElementTree as ET
 from collections import Counter
 from functools import partial
+from html import unescape
 from html.parser import HTMLParser
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -53,6 +54,7 @@ def built(tmp_path, monkeypatch, readme, index=None):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text(readme)
+    (root / "SETUP.md").write_text((ROOT / "SETUP.md").read_text())
     (root / "CHANGELOG.md").write_text((ROOT / "CHANGELOG.md").read_text())
     (root / "docs").mkdir()
     (root / "docs/features.md").write_text(
@@ -120,6 +122,7 @@ def test_long_descriptions_are_short_and_escape_html(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text(readme)
+    (root / "SETUP.md").write_text((ROOT / "SETUP.md").read_text())
     (root / "CHANGELOG.md").write_text((ROOT / "CHANGELOG.md").read_text())
     (root / "docs").mkdir()
     (root / "docs/features.md").write_text((ROOT / "docs/features.md").read_text())
@@ -138,6 +141,7 @@ class Head(HTMLParser):
     def __init__(self):
         super().__init__()
         self.meta, self.links = {}, {}
+        self.anchors, self.ids = [], []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -145,6 +149,10 @@ class Head(HTMLParser):
             self.meta[attrs.get("property") or attrs.get("name")] = attrs["content"]
         elif tag == "link":
             self.links[attrs["rel"]] = attrs["href"]
+        elif tag == "a":
+            self.anchors.append(attrs["href"])
+        if "id" in attrs:
+            self.ids.append(attrs["id"])
 
 
 def png_size(path):
@@ -206,6 +214,10 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                 ("/how?preview=1", "how.html"),
                 ("/about", "about.html"),
                 ("/about?preview=1", "about.html"),
+                ("/docs", "docs.html"),
+                ("/docs?preview=1", "docs.html"),
+                ("/docs/setup", "docs/setup.html"),
+                ("/docs/setup?preview=1", "docs/setup.html"),
                 ("/harbor.css", "harbor.css"),
                 ("/harbor.js", "harbor.js"),
                 ("/robots.txt", "robots.txt"),
@@ -217,7 +229,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                 assert response.status == 200, path
                 assert response.getheader("Location") is None, path
                 assert body == (dist / filename).read_bytes(), path
-                if filename in ("robots.txt", "sitemap.xml"):
+                if filename == "robots.txt":
                     assert body == (ROOT / "site/public" / filename).read_bytes()
                 if filename == "sitemap.xml":
                     sitemap = ET.fromstring(body)
@@ -228,13 +240,20 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                         "https://crewship.si/",
                         "https://crewship.si/how",
                         "https://crewship.si/about",
+                        "https://crewship.si/docs",
+                        "https://crewship.si/docs/readme",
+                        "https://crewship.si/docs/setup",
+                        *[
+                            f"https://crewship.si/docs/{p.stem}"
+                            for p in sorted((ROOT / "docs").glob("*.md"))
+                        ],
                     ]
                 if filename == "robots.txt":
                     robots = RobotFileParser()
                     robots.parse(body.decode().splitlines())
                     assert robots.site_maps() == ["https://crewship.si/sitemap.xml"]
                     for agent in ("Googlebot", "OAI-SearchBot", "GPTBot", "ClaudeBot"):
-                        for route in ("/", "/how", "/about"):
+                        for route in ("/", "/how", "/about", "/docs", "/docs/setup"):
                             assert robots.can_fetch(agent, route)
                 if filename.endswith(".html"):
                     assert response.getheader("Content-Type").startswith("text/html")
@@ -244,6 +263,10 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
             for method, path, status in [
                 ("HEAD", "/how?preview=1", 200),
                 ("HEAD", "/about?preview=1", 200),
+                ("HEAD", "/docs?preview=1", 200),
+                ("HEAD", "/docs/setup?preview=1", 200),
+                ("GET", "/docs/missing", 404),
+                ("GET", "/docs/missing/", 404),
                 ("GET", "/missing", 404),
                 ("GET", "/missing.js", 404),
                 ("HEAD", "/missing", 404),
@@ -252,7 +275,126 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                 response = connection.getresponse()
                 response.read()
                 assert response.status == status, (method, path)
+            for path, location in [
+                ("/index.html", "/"),
+                ("/how.html", "/how"),
+                ("/about/", "/about"),
+                ("/docs/", "/docs"),
+                ("/docs.html?preview=1", "/docs?preview=1"),
+                ("/docs/index", "/docs"),
+                ("/docs/index.html", "/docs"),
+                ("/docs/setup/", "/docs/setup"),
+                ("/docs/setup.html", "/docs/setup"),
+                ("/docs/setup/index.html", "/docs/setup"),
+            ]:
+                connection.request("GET", path)
+                response = connection.getresponse()
+                response.read()
+                assert response.status == 307, path
+                assert response.getheader("Location") == location, path
         finally:
             connection.close()
             server.shutdown()
             thread.join()
+
+
+def test_markdown_renders_repository_syntax_and_escapes_unsafe_html():
+    markdown = r"""# Guide & reference
+
+Read **bold** and *italic* with `a < b`, [setup](../SETUP.md#start),
+[local](other.md?view=1#section), [source](../scripts/ship.py), and <https://example.com>.
+![Screenshot](images/demo.png)
+[![Build](https://example.com/build.svg)](https://example.com/build)
+
+## Repeated `heading`
+## Repeated `heading`
+
+- Parent
+  - Nested **item**
+
+  Continuation.
+
+3. Third
+4. Fourth
+
+   ```sh
+   echo "<script> & untouched"
+   ```
+
+> Quoted **text**.
+>
+> Another paragraph.
+
+| Name | Value |
+| --- | --- |
+| `one\|two` | [other](other.md#section) |
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="images/dark.svg">
+<img src="images/demo.png" alt="A &amp; B" onerror="alert(1)">
+</picture>
+
+<script>alert(1)</script>
+[unsafe](javascript:alert%281%29)
+"""
+    body = build.render_markdown(
+        markdown, "docs/guide.md", {"SETUP.md": "/docs/setup", "docs/other.md": "/docs/other"}
+    )
+    assert '<h1 id="guide--reference">Guide &amp; reference</h1>' in body
+    assert '<h2 id="repeated-heading">' in body
+    assert '<h2 id="repeated-heading-1">' in body
+    assert "<strong>bold</strong>" in body and "<em>italic</em>" in body
+    assert "<code>a &lt; b</code>" in body
+    assert '<a href="/docs/setup#start">setup</a>' in body
+    assert '<a href="/docs/other?view=1#section">local</a>' in body
+    assert 'href="https://github.com/i098/Crewship/blob/main/scripts/ship.py"' in body
+    assert 'src="https://raw.githubusercontent.com/i098/Crewship/main/docs/images/demo.png"' in body
+    assert '<a href="https://example.com/build"><img' in body
+    assert '<source media="(prefers-color-scheme: dark)"' in body
+    assert "<ul>\n<li><p>Parent</p>\n<ul>" in body
+    assert '<ol start="3">' in body and "<p>Continuation.</p>" in body
+    assert '<pre><code class="language-sh">echo &quot;&lt;script&gt; &amp; untouched&quot;' in body
+    assert "<blockquote><p>Quoted <strong>text</strong>.</p>" in body
+    assert "<th>Name</th>" in body and "<td><code>one|two</code></td>" in body
+    assert "onerror=" not in body and "<script>" not in body and "javascript:" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
+def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_path):
+    dist = build.build(tmp_path / "dist")
+    sources = [ROOT / "README.md", ROOT / "SETUP.md", *sorted((ROOT / "docs").glob("*.md"))]
+    routes = {"/docs", *(f"/docs/{source.stem.lower()}" for source in sources)}
+    assert set(build.doc_routes()) == {source.relative_to(ROOT).as_posix() for source in sources}
+    pages, titles = {}, []
+    for route in routes:
+        page = (dist / f"{route.lstrip('/')}.html").read_text()
+        head = Head()
+        head.feed(page)
+        pages[route] = head
+        title = unescape(re.search(r"<title>(.*?)</title>", page)[1])
+        titles.append(title)
+        assert title.endswith(" - Crewship docs")
+        assert head.links["canonical"] == f"https://crewship.si{route}"
+        assert 0 < len(head.meta["description"]) <= 160
+        assert {"/", "/about", "/docs"} <= set(head.anchors)
+        assert head.links["stylesheet"] == "/harbor.css"
+        assert len(head.ids) == len(set(head.ids)), route
+        assert len(re.findall(r"<h1\b", page)) == 1, route
+        structured = json.loads(
+            re.search(r'<script type="application/ld\+json">(.*?)</script>', page)[1]
+        )
+        assert structured["@type"] == "BreadcrumbList"
+        assert structured["itemListElement"][-1]["item"] == head.links["canonical"]
+    assert len(titles) == len(set(titles))
+    assert routes - {"/docs"} <= set(pages["/docs"].anchors)
+    for route, head in pages.items():
+        for link in head.anchors:
+            parsed = urlparse(link)
+            if parsed.scheme or parsed.netloc or (parsed.path and not parsed.path.startswith("/docs")):
+                continue
+            target = parsed.path or route
+            assert target in pages, (route, link)
+            if parsed.fragment:
+                assert parsed.fragment in pages[target].ids, (route, link)
+    for link in re.findall(r"https://crewship.si(/docs[\w/-]*)", (dist / "llms.txt").read_text()):
+        assert link in pages

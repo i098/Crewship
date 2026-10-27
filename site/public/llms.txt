@@ -2,23 +2,24 @@
 
 > Crewship sets up cloud hosts for coding agents with Ansible, omp, and Firstmate.
 
-crewship.si is a walkable text world with signs linked to the repository documentation.
-The harbor build reads the repository README, feature index, and changelog for its signs.
-The guides below are the canonical documentation on the main branch.
+crewship.si publishes the repository guides as readable HTML, alongside a walkable text harbor.
+The documentation is rebuilt from the repository README, SETUP guide, and docs directory.
+The pages below are the published documentation on the project domain.
 
 ## Start here
 
-- [Overview](https://github.com/i098/Crewship/blob/main/README.md): Features, quick start, and repository layout.
-- [Setup](https://github.com/i098/Crewship/blob/main/SETUP.md): Installation and first host setup.
-- [Feature index](https://github.com/i098/Crewship/blob/main/docs/features.md): Guides for core and optional features.
+- [Documentation index](https://crewship.si/docs): All published guides.
+- [Overview](https://crewship.si/docs/readme): Features, quick start, and repository layout.
+- [Setup](https://crewship.si/docs/setup): Installation and first host setup.
+- [Feature index](https://crewship.si/docs/features): Guides for core and optional features.
 
 ## Host and agents
 
-- [Architecture](https://github.com/i098/Crewship/blob/main/docs/architecture.md): Host components and agent supervision.
-- [Configuration](https://github.com/i098/Crewship/blob/main/docs/configuration.md): Host settings and optional profiles.
-- [omp](https://github.com/i098/Crewship/blob/main/docs/omp.md): Sign-in, model roles, and agent skills.
-- [Security](https://github.com/i098/Crewship/blob/main/docs/security.md): Access controls and host security.
-- [Migration and recovery](https://github.com/i098/Crewship/blob/main/docs/recovery.md): Updates, migration, and recovery procedures.
+- [Architecture](https://crewship.si/docs/architecture): Host components and agent supervision.
+- [Configuration](https://crewship.si/docs/configuration): Host settings and optional profiles.
+- [omp](https://crewship.si/docs/omp): Sign-in, model roles, and agent skills.
+- [Security](https://crewship.si/docs/security): Access controls and host security.
+- [Migration and recovery](https://crewship.si/docs/recovery): Updates, migration, and recovery procedures.
 
 ## Project
 
