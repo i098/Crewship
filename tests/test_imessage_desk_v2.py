@@ -15,8 +15,13 @@ from jinja2 import Environment
 from test_imessage import ROOT, FallbackRig, publish_json, read_text, wait_for
 
 pytestmark = pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-MODEL = {"id": "anthropic/claude-haiku-5-5", "provider": "omp", "model": "anthropic/claude-haiku-5-5",
-         "reasoning": ["low"], "apiKeyEnv": None}
+MODEL = {
+    "id": "anthropic/claude-haiku-5-5",
+    "provider": "omp",
+    "model": "anthropic/claude-haiku-5-5",
+    "reasoning": ["low"],
+    "apiKeyEnv": None,
+}
 
 
 def test_configuration_requires_boolean_and_defaults_to_legacy():
@@ -28,9 +33,19 @@ def test_configuration_requires_boolean_and_defaults_to_legacy():
         jsonschema.validate({"owner": "+10000000000", "desk_v2": "true"}, section)
     env = Environment()
     env.filters["comment"] = lambda text: "# " + text
-    template = env.from_string((ROOT / "blueprint/ansible/templates/fm-imessage.service.j2").read_text())
-    for config, expected in (({}, "false"), ({"desk_v2": False}, "false"), ({"desk_v2": True}, "true")):
-        unit = template.render(ansible_managed="test", crewship_cfg={"imessage": config}, crewship_instagram_dm_backend="off")
+    template = env.from_string(
+        (ROOT / "blueprint/ansible/templates/fm-imessage.service.j2").read_text()
+    )
+    for config, expected in (
+        ({}, "false"),
+        ({"desk_v2": False}, "false"),
+        ({"desk_v2": True}, "true"),
+    ):
+        unit = template.render(
+            ansible_managed="test",
+            crewship_cfg={"imessage": config},
+            crewship_instagram_dm_backend="off",
+        )
         assert f'Environment="FM_IMESSAGE_DESK_V2={expected}"' in unit
 
 
@@ -64,12 +79,17 @@ def desk_bridge(tmp_path, *, enabled=True, intent=None, restored=False):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     endpoint = f"http://127.0.0.1:{server.server_port}"
-    rig = FallbackRig(tmp_path, FM_IMESSAGE_DESK_V2="true" if enabled else "false",
-                      FM_IMESSAGE_TEST="1", FM_IMESSAGE_TEST_QUIET_MS="50",
-                      INCEPTION_API_KEY="local-test", FM_DESK_INCEPTION_URL=endpoint)
+    rig = FallbackRig(
+        tmp_path,
+        FM_IMESSAGE_DESK_V2="true" if enabled else "false",
+        FM_IMESSAGE_TEST="1",
+        FM_IMESSAGE_TEST_QUIET_MS="50",
+        INCEPTION_API_KEY="local-test",
+        FM_DESK_INCEPTION_URL=endpoint,
+    )
     (rig.fake / "edits").mkdir()
     (rig.app / "front.ts").write_text(f"""
-import {{ runFront as front }} from {json.dumps(str(ROOT / 'apps/imessage/front.ts'))};
+import {{ runFront as front }} from {json.dumps(str(ROOT / "apps/imessage/front.ts"))};
 export const loadFrontRedactor = async () => (text: string) => text;
 export const runFront = (input) => front({{ ...input, endpoint: {json.dumps(endpoint)} }});
 """)
@@ -82,9 +102,13 @@ export const runFront = (input) => front({{ ...input, endpoint: {json.dumps(endp
     package_base = Path(actual_omp).resolve().parent
     credentials = tmp_path / "credentials.sqlite"
     with sqlite3.connect(credentials) as database:
-        database.execute("CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)")
-        database.execute("INSERT INTO auth_credentials VALUES (?, ?, ?, NULL)",
-                         ("anthropic", "api_key", '{"key":"fake-stored-key"}'))
+        database.execute(
+            "CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)"
+        )
+        database.execute(
+            "INSERT INTO auth_credentials VALUES (?, ?, ?, NULL)",
+            ("anthropic", "api_key", '{"key":"fake-stored-key"}'),
+        )
     bridge_source = (rig.app / "bridge.ts").read_text()
     policy = rig.app / "dispatch-policy.ts"
     policy_source = policy.read_text()
@@ -94,9 +118,11 @@ export const runFront = (input) => front({{ ...input, endpoint: {json.dumps(endp
     assert package_marker in bridge_source
     assert db_marker in bridge_source
     assert policy_marker in policy_source
-    (rig.app / "bridge.ts").write_text(bridge_source.replace(
-        package_marker, json.dumps(str(package_base))).replace(
-        db_marker, f"const path = {json.dumps(str(credentials))};"))
+    (rig.app / "bridge.ts").write_text(
+        bridge_source.replace(package_marker, json.dumps(str(package_base))).replace(
+            db_marker, f"const path = {json.dumps(str(credentials))};"
+        )
+    )
     policy.write_text(policy_source.replace(policy_marker, json.dumps(str(package_base))))
     (tmp_path / "agent").mkdir()
     rig.env["PI_CODING_AGENT_DIR"] = str(tmp_path / "agent")
@@ -135,10 +161,24 @@ with pathlib.Path({str(rig.notes)!r}).open('a') as log: log.write(' '.join(sys.a
     try:
         if restored:
             rig.state.mkdir()
-            (rig.state / "routing.jsonl").write_text(json.dumps({"received": {
-                "requestId": "photon-protected", "text": "My diagnosis is private.", "firstmate": True, "memoryId": 0,
-                "ref": {"line": "photon", "space": "iMessage;-;+10000000000", "id": "protected"},
-            }}) + "\n")
+            (rig.state / "routing.jsonl").write_text(
+                json.dumps(
+                    {
+                        "received": {
+                            "requestId": "photon-protected",
+                            "text": "My diagnosis is private.",
+                            "firstmate": True,
+                            "memoryId": 0,
+                            "ref": {
+                                "line": "photon",
+                                "space": "iMessage;-;+10000000000",
+                                "id": "protected",
+                            },
+                        }
+                    }
+                )
+                + "\n"
+            )
         rig.start()
         yield rig, calls, release
     finally:
@@ -150,9 +190,15 @@ with pathlib.Path({str(rig.notes)!r}).open('a') as log: log.write(' '.join(sys.a
 
 
 def send(rig, message_id, text):
-    publish_json(rig.fake / "inbound" / f"{message_id}.json", {
-        "id": message_id, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": text,
-    })
+    publish_json(
+        rig.fake / "inbound" / f"{message_id}.json",
+        {
+            "id": message_id,
+            "space": "iMessage;-;+10000000000",
+            "sender": "+10000000000",
+            "text": text,
+        },
+    )
 
 
 def test_selected_entrypoint_saves_receipt_before_status_and_worker(tmp_path):
@@ -211,15 +257,21 @@ def test_new_request_cancels_worker_and_keeps_both_originals(tmp_path):
         send(rig, "first", "What is the current status?")
         wait_for(lambda: (rig.fake / "workers").exists(), "first worker")
         send(rig, "second", "Also check the current queue.")
-        wait_for(lambda: len(read_text(rig.fake / "workers").splitlines()) == 2, "replacement worker")
+        wait_for(
+            lambda: len(read_text(rig.fake / "workers").splitlines()) == 2, "replacement worker"
+        )
         first_pid = json.loads(read_text(rig.fake / "workers").splitlines()[0])["pid"]
         wait_for(lambda: not Path(f"/proc/{first_pid}").exists(), "cancelled worker exit")
         with pytest.raises(ProcessLookupError):
             os.kill(first_pid, 0)
         (rig.fake / "hold-worker").unlink()
-        wait_for(lambda: "All systems are idle." in read_text(rig.fake / "sent"), "replacement answer")
+        wait_for(
+            lambda: "All systems are idle." in read_text(rig.fake / "sent"), "replacement answer"
+        )
         workers = [json.loads(line) for line in read_text(rig.fake / "workers").splitlines()]
-        assert workers[1]["question"] == "What is the current status?\nAlso check the current queue."
+        assert (
+            workers[1]["question"] == "What is the current status?\nAlso check the current queue."
+        )
         assert read_text(rig.fake / "sent").count("All systems are idle.") == 1
 
 
@@ -243,7 +295,9 @@ def test_relay_rechecks_registry_and_preserves_accepted_ownership(tmp_path, regi
     with desk_bridge(tmp_path, intent=intent) as (rig, calls, release):
         registry = tmp_path / "data/secondmates.md"
         registry.parent.mkdir()
-        registry.write_text(f"- project - Project (home: {tmp_path / 'project'}; scope: project work; projects: project)\n")
+        registry.write_text(
+            f"- project - Project (home: {tmp_path / 'project'}; scope: project work; projects: project)\n"
+        )
         sender = tmp_path / "bin/fm-send.sh"
         sender.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {rig.fake / 'relayed'}\n")
         sender.chmod(0o755)
@@ -254,7 +308,10 @@ def test_relay_rechecks_registry_and_preserves_accepted_ownership(tmp_path, regi
             registry.write_text("")
         release.set()
         if registered:
-            wait_for(lambda: "routed to project" in read_text(rig.state / "routing.jsonl"), "accepted relay")
+            wait_for(
+                lambda: "routed to project" in read_text(rig.state / "routing.jsonl"),
+                "accepted relay",
+            )
             before = read_text(rig.fake / "relayed")
             assert before.endswith("Build the project feature.\n")
             assert "note --request-id photon-relay" not in read_text(rig.notes)
