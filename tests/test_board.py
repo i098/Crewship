@@ -134,6 +134,7 @@ def _apply(tmp_path, home, board, check=False, manage_services=False):
         "crewship_board_dir": str(home / ".local/share/crewship/crewboard"),
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_manage_services": manage_services,
+        "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
         "crewship_become_target": False,
         "crewship_user_systemd_env": {},
     }
