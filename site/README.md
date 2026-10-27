@@ -288,3 +288,10 @@ The crawler policy allows all crawlers, including GPTBot and OAI-SearchBot.
 The sitemap lists the canonical home, How, and About URLs without modification dates.
 Origin redirects and Cloudflare-managed crawler settings live outside this repository.
 Check that the deployed `/robots.txt` matches the file before changing those settings.
+`public/e3c5c1952d33a0d51288552a3907210a.txt` is the [IndexNow](https://www.indexnow.org/) key file.
+After a deploy that changes page URLs or content, submit the changed URLs:
+
+```bash
+curl -fsS -X POST https://api.indexnow.org/indexnow -H 'Content-Type: application/json' \
+  -d '{"host":"crewship.si","key":"e3c5c1952d33a0d51288552a3907210a","urlList":["https://crewship.si/"]}'
+```
