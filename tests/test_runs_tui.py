@@ -303,7 +303,9 @@ def test_json_lists_runs_with_matched_and_unmatched_postmortems(host, tmp_path):
         }
     ]
     assert by_task["oss-task"]["postmortems"][0]["ref"] == "#7"
-    assert [(p["date"], p["ref"], p["text"]) for p in doc["unmatched"]] == [
+    # The repo's own docs/validation-postmortems.md is always read too; keep only this test's note.
+    mine = [p for p in doc["unmatched"] if "acme/widgets" in p["ref"]]
+    assert [(p["date"], p["ref"], p["text"]) for p in mine] == [
         ("2026-10-25", "https://github.com/acme/widgets/pull/999", "loose")
     ]
 
@@ -325,3 +327,4 @@ def test_json_anonymize_has_no_postmortems_or_private_names(host, tmp_path):
     doc = json.loads(out)
     assert doc["unmatched"] == [] and all(r["postmortems"] == [] for r in doc["runs"])
     assert "flaky" not in out and "fix-widgets" not in out
+    assert "github.com" not in out and "widgets" not in out

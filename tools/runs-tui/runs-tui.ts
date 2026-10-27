@@ -190,7 +190,7 @@ export function anonymize(runs: Run[]): Run[] {
     const m = (seen[kind] ??= new Map())
     return m.get(v) ?? m.set(v, kind === "pr" ? `#${100 + m.size * 37}` : `${kind}-${m.size + 1}`).get(v)!
   }
-  return runs.map(r => ({ ...r, home: alias("home", r.home), mate: alias("mate", r.mate), task: alias("task", r.task), repo: alias("repo", r.repo), pr: alias("pr", r.pr) }))
+  return runs.map(r => ({ ...r, prUrl: null, home: alias("home", r.home), mate: alias("mate", r.mate), task: alias("task", r.task), repo: alias("repo", r.repo), pr: alias("pr", r.pr) }))
 }
 
 // ---- rendering -----------------------------------------------------------
