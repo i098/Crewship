@@ -654,7 +654,8 @@ def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waitin
     (fake / "typing-down").unlink()
     if response == "reaction":
         (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
-    hold = fake / {"lookup": "lookup-hold", "queued": "send-hold", "retry": "outage"}[waiting]
+    lookup = "lookup" if response == "reaction" else "space"
+    hold = fake / {"lookup": f"{lookup}-hold", "queued": "send-hold", "retry": "outage"}[waiting]
     hold.touch()
     bridge = start(1)
     try:
@@ -670,7 +671,7 @@ def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waitin
         desk_clock()
         wait_for(lambda: '"route":"desk"' in text(state / "routing.jsonl"), "the queued desk response")
         if waiting == "lookup":
-            wait_for(lambda: (fake / "lookup-waiting").exists(), "the slow delivery lookup")
+            wait_for(lambda: (fake / f"{lookup}-waiting").exists(), "the slow delivery lookup")
         elif waiting == "retry":
             wait_for(lambda: "failed (try" in text(err), "the delivery retry")
         desk_clock(4000)
@@ -697,10 +698,9 @@ def test_desk_keeps_typing_until_delivery(tmp_path, desk_clock, response, waitin
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("threaded", [False, True])
 @pytest.mark.parametrize("code", ["EIO", "ENOSPC"])
 def test_desk_stops_typing_when_accepted_reply_progress_cannot_be_saved(
-    tmp_path, desk_clock, monkeypatch, threaded, code,
+    tmp_path, desk_clock, monkeypatch, code,
 ):
     preload = tmp_path / "progress-failure.ts"
     preload.write_text("""
@@ -734,16 +734,12 @@ mock.module("node:fs", () => ({
     bridge = start(1)
     try:
         receive("question", "What is the build status?")
-        if threaded:
-            next(fake.glob("last-*")).write_text("an intervening message")
         desk_clock()
         wait_for(lambda: (fake / "model-started").exists(), "the held desk model")
         (fake / "model-hold").unlink()
         wait_for(lambda: "injected delivery progress failure" in text(err), "the progress write failure")
         delivered = [json.loads(row) for row in text(fake / "delivery-events").splitlines()][0]
-        assert delivered["line"] == (
-            "reply question The build is paused." if threaded else "send The build is paused."
-        )
+        assert delivered["line"] == "send The build is paused."
         assert delivered["typing"] is True
         pending = json.loads(next((state / "outbox").glob("*.json")).read_text())
         assert pending["requestId"] == "photon-question"
@@ -859,43 +855,28 @@ def transport_desk_rig(tmp_path, **env):
     return rig, receive
 
 
-@pytest.mark.parametrize("stage", ["photon-space", "photon-thread", "bluebubbles-health"])
 @pytest.mark.parametrize("activity", ["typing", "new-text"])
-def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, stage, activity):
+def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, activity):
     rig, receive = transport_desk_rig(tmp_path)
-    transport = "bluebubbles" if stage == "bluebubbles-health" else "photon"
-    flag, waiting = {
-        "photon-space": ("space-hold", "space-waiting"),
-        "photon-thread": ("lookup-reply-hold", "lookup-reply-waiting"),
-        "bluebubbles-health": ("hold-health-after-query", "health-waiting"),
-    }[stage]
     try:
         rig.start()
-        receive(transport, "question", "What is the build status?")
-        if stage == "photon-thread":
-            next(rig.fake.glob("last-*")).write_text("another-message")
-        (rig.fake / flag).touch()
+        receive("photon", "question", "What is the build status?")
+        (rig.fake / "space-hold").touch()
         desk_clock()
-        if transport == "bluebubbles":
-            wait_for(lambda: (rig.fake / "health-query-waiting").exists(), "the completed separation query")
-            desk_clock(120000)
-            (rig.fake / flag).unlink()
-        wait_for(lambda: (rig.fake / waiting).exists(), "the transport preparation wait")
+        wait_for(lambda: (rig.fake / "space-waiting").exists(), "the transport preparation wait")
         if activity == "typing":
             rig.cli("--typing")
         else:
             receive("photon", "correction", "Deploy it instead")
-        (rig.fake / flag).unlink(missing_ok=True)
-        if transport == "bluebubbles":
-            rig.relay_mode("")
+        (rig.fake / "space-hold").unlink(missing_ok=True)
         wait_for(lambda: len(list((rig.state / "outbox-done").glob("*.json"))) == 1, "the cancelled draft receipt")
         draft = json.loads(next((rig.state / "outbox-done").glob("*.json")).read_text())
         assert draft.get("done", 0) == 0
         assert read_text(rig.fake / "sent") == ""
         assert read_text(rig.fake / "relay-sent") == ""
-        assert f"{transport}-question " in read_text(rig.notes)
+        assert "photon-question " in read_text(rig.notes)
     finally:
-        (rig.fake / flag).unlink(missing_ok=True)
+        (rig.fake / "space-hold").unlink(missing_ok=True)
         rig.relay_mode("")
         rig.close()
 
@@ -952,7 +933,7 @@ def test_restored_desk_text_is_dropped(tmp_path, desk_clock, transport, failure,
             else:
                 (rig.fake / "send-unsure").touch()
         else:
-            rig.relay_mode("last-down" if failure == "definite" else "send-down")
+            rig.relay_mode("send-busy" if failure == "definite" else "send-down")
         receive(transport, "private", "What is the build status?")
         (rig.fake / "retry-pause").write_text("15")
         desk_clock()
@@ -2894,12 +2875,8 @@ def test_expired_social_reaction_hands_the_full_burst_to_firstmate(tmp_path, mon
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("target,expected", [
-    (1, "reply burst1 The build is paused."),
-    (2, "reply burst2 The build is paused."),
-    (3, "send The build is paused."),
-])
-def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbles(tmp_path, desk_clock, target, expected):
+@pytest.mark.parametrize("target", [1, 2, 3])
+def test_burst_answer_is_plain_after_later_bubbles(tmp_path, desk_clock, target):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     answer = json.loads((fake / "answer").read_text())
     (fake / "answer").write_text(json.dumps({**answer, "target": target}))
@@ -2910,7 +2887,7 @@ def test_burst_answer_targets_the_selected_message_and_threads_only_across_bubbl
         receive("burst3", "Paused or running?")
         desk_clock()
         wait_for(lambda: text(fake / "sent"), "the selected burst answer")
-        assert text(fake / "sent").splitlines() == [expected]
+        assert text(fake / "sent").splitlines() == ["send The build is paused."]
         assert text(notes) == ""
         assert len([r for r in records() if r["kind"] == "owner"]) == 3
     finally:
