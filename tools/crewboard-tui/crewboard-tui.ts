@@ -1,8 +1,26 @@
 #!/usr/bin/env bun
-// Read-only viewer for the crewboard message board. Only runs `crewboard sub` and `crewboard topics`; never publishes.
+// Read-only viewer for the crewboard message board and tasks. Runs `crewboard`, `tasks-axi`, reads `state/*.status`; never publishes or writes.
 import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
 import { fetchSummaries, type Summaries } from "./summaries.ts"
+import { buildAgents, counts, DEFAULT_STALL_SEC, flatten, type Agent, type Row as TaskRow, type View } from "./tasks-model.ts"
+import { findHomes, loadHomes } from "./tasks-source.ts"
+import { footer as tasksFooter, header as tasksHeader, snapshot, viewport, type Line } from "./tasks-view.ts"
+
+// Flags: --once (plain tasks snapshot, then exit), --tasks (open on the tasks view), --expand, --filter TEXT, --stall-min N, --width N; other args are firstmate home paths.
+const argv = process.argv.slice(2)
+const flag = (n: string) => argv.includes(n)
+const flagVal = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined }
+const VALUE_FLAGS = ["--filter", "--stall-min", "--width"]
+const homeArgs = argv.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes(argv[i - 1]))
+const stallMin = Number(flagVal("--stall-min") ?? DEFAULT_STALL_SEC / 60)
+const REFRESH_TASKS_MS = 15_000
+
+if (flag("--once")) {
+  const { agents, queued } = buildAgents(await loadHomes(findHomes(homeArgs)), Math.floor(Date.now() / 1000), stallMin * 60)
+  console.log(snapshot(agents, queued, { expanded: new Set(), filter: flagVal("--filter") ?? "", stalledOnly: false }, { width: Number(flagVal("--width") ?? 100), stallMin, expandAll: flag("--expand") }))
+  process.exit(0)
+}
 
 type Msg = { seq: number; ts: string; topic: string; from: string | null; body: string }
 type Topic = { name: string; msgs: Msg[]; unread: number; newest: number }
@@ -146,7 +164,10 @@ const leftText = new TextRenderable(renderer, { content: "", fg: theme.text })
 const rightText = new TextRenderable(renderer, { content: "", fg: theme.text })
 const footer = new TextRenderable(renderer, { content: "", height: 1, fg: theme.muted })
 left.add(leftText); right.add(rightText); main.add(left); main.add(right)
-root.add(main); root.add(footer); renderer.root.add(root)
+const tasksBox = new BoxRenderable(renderer, { border: true, borderColor: theme.border, title: " Tasks ", titleColor: theme.accent, flexGrow: 1, visible: false })
+const tasksText = new TextRenderable(renderer, { content: "", fg: theme.text })
+tasksBox.add(tasksText)
+root.add(main); root.add(tasksBox); root.add(footer); renderer.root.add(root)
 
 let listTop = 0
 
@@ -211,11 +232,14 @@ function drawFooter() {
   footer.content = new StyledText([
     ch(" ", theme.muted), status,
     ch(`  ${topics.size} topics  ${total} msgs${unreadAll ? `  ${unreadAll} unread` : ""}${scroll ? `  ↑${scroll} lines up` : ""}`, theme.muted),
-    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  q quit", theme.muted),
+    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  q quit", theme.muted),
   ])
 }
 
 function draw() {
+  main.visible = mode === "board"
+  tasksBox.visible = mode === "tasks"
+  if (mode === "tasks") return drawTasks()
   const innerH = Math.max(1, renderer.height - 3) // main box minus border; footer takes 1
   const list = rows()
   if (!picked) {
@@ -235,6 +259,98 @@ function draw() {
   renderer.requestRender()
 }
 
+// ---- tasks view ----
+let mode: "board" | "tasks" = flag("--tasks") ? "tasks" : "board"
+let allAgents: Agent[] = []
+let queuedCount = 0
+let tasksLoaded = false
+let typing = false
+const view: View = { expanded: new Set(), filter: "", stalledOnly: false }
+let cursorKey = ""
+let taskTop = 0
+let taskRows: TaskRow[] = []
+let taskTimer: ReturnType<typeof setInterval> | undefined
+
+let reloading = false
+async function reloadTasks() {
+  if (reloading) return
+  reloading = true
+  try {
+    const r = buildAgents(await loadHomes(findHomes(homeArgs)), Math.floor(Date.now() / 1000), stallMin * 60)
+    allAgents = r.agents; queuedCount = r.queued; tasksLoaded = true
+  } finally { reloading = false }
+  draw()
+}
+
+const chunks = (lines: Line[]): TextChunk[] => lines.flatMap((l, i) => [...(i ? [NL] : []), ...l.map(s => ch(s.text, s.fg, { bg: s.bg, bold: s.bold }))])
+
+function drawTasks() {
+  const innerW = Math.max(10, renderer.width - 2)
+  const innerH = Math.max(1, renderer.height - 3)
+  const head = tasksHeader(counts(allAgents, queuedCount), { filter: view.filter, typing, stalledOnly: view.stalledOnly, stallMin })
+  const bodyH = Math.max(1, innerH - head.length)
+  taskRows = flatten(allAgents, view)
+  let cur = taskRows.findIndex(r => r.key === cursorKey)
+  if (cur < 0) { cur = 0; cursorKey = taskRows[0]?.key ?? "" }
+  if (cur < taskTop) taskTop = cur
+  if (cur >= taskTop + bodyH) taskTop = cur - bodyH + 1
+  taskTop = Math.max(0, Math.min(taskTop, Math.max(0, taskRows.length - bodyH)))
+  const body = viewport(taskRows, taskTop, bodyH, innerW, cur)
+  if (!taskRows.length) body.push([{ text: tasksLoaded ? "  no agents match" : "  loading…", fg: theme.muted }])
+  tasksText.content = new StyledText(chunks([...head, ...body]))
+  footer.content = new StyledText(chunks([tasksFooter(taskRows.length, cur, tasksLoaded)]))
+  renderer.requestRender()
+}
+
+function setMode(m: "board" | "tasks") {
+  mode = m
+  clearInterval(taskTimer)
+  if (m === "tasks") { reloadTasks(); taskTimer = setInterval(reloadTasks, REFRESH_TASKS_MS) }
+  draw()
+}
+
+type Key = { name: string; sequence?: string; shift?: boolean }
+
+function typeFilter(k: Key) {
+  if (k.name === "return") typing = false
+  else if (k.name === "escape") { typing = false; view.filter = "" }
+  else if (k.name === "backspace") view.filter = view.filter.slice(0, -1)
+  else if (k.sequence && k.sequence.length === 1 && k.sequence >= " ") view.filter += k.sequence
+}
+
+// Enter/Space toggle, Right opens, Left closes. The stalled head toggles top-10 / all.
+function toggleRow(row: TaskRow | undefined, name: string) {
+  if (!row || row.kind === "detail") return
+  const sk = row.kind === "stalled" ? "stalled-all" : row.key
+  const open = view.expanded.has(sk)
+  if (name === "left" ? !open : name === "right" && open) return
+  if (open) view.expanded.delete(sk); else view.expanded.add(sk)
+}
+
+function expandAll(collapse: boolean) {
+  view.expanded.clear()
+  if (!collapse) for (const a of allAgents) { view.expanded.add(`m:${a.mate}`); view.expanded.add(`r:${a.mate}/${a.repo}`) }
+}
+
+function tasksKey(k: Key) {
+  const cur = Math.max(0, taskRows.findIndex(r => r.key === cursorKey))
+  const go = (i: number) => { cursorKey = taskRows[Math.min(taskRows.length - 1, Math.max(0, i))]?.key ?? "" }
+  const page = Math.max(1, renderer.height - 6)
+  if (typing) { typeFilter(k); return draw() }
+  if (k.name === "q") { renderer.destroy(); process.exit(0) }
+  if (k.name === "t") return setMode("board")
+  const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
+  if (k.name in moves) go(moves[k.name])
+  else if (["return", "space", "right", "left"].includes(k.name)) toggleRow(taskRows[cur], k.name)
+  else if (k.name === "e") expandAll(!!k.shift)
+  else if (k.name === "/") typing = true
+  else if (k.name === "s") view.stalledOnly = !view.stalledOnly
+  else if (k.name === "escape") { view.filter = ""; view.stalledOnly = false }
+  else if (k.name === "r") reloadTasks()
+  else return
+  draw()
+}
+
 function move(d: number) {
   const ts = rows().filter((r): r is Extract<Row, { kind: "topic" }> => r.kind === "topic")
   const i = ts.findIndex(r => r.topic.name === selected)
@@ -248,7 +364,9 @@ function move(d: number) {
 }
 
 renderer.on("resize", draw)
-renderer.keyInput.on("keypress", (k: { name: string; shift?: boolean }) => {
+renderer.keyInput.on("keypress", (k: { name: string; sequence?: string; shift?: boolean }) => {
+  if (mode === "tasks") return tasksKey(k)
+  if (k.name === "t") return setMode("tasks")
   const page = Math.max(1, renderer.height - 5)
   switch (k.name) {
     case "q": renderer.destroy(); process.exit(0)
@@ -264,6 +382,7 @@ renderer.keyInput.on("keypress", (k: { name: string; shift?: boolean }) => {
   draw()
 })
 
+if (mode === "tasks") setMode("tasks")
 draw()
 follow()
 followSummaries()

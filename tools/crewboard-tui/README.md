@@ -1,7 +1,7 @@
 # crewboard-tui
 
 Read-only terminal viewer for the crewboard message board.
-It runs `crewboard sub` only and never publishes.
+It runs the `crewboard` CLI (`sub`, `topics`); the tasks view also runs `tasks-axi` and reads `state/*.status` files. It never publishes or writes.
 The left pane lists topics with unread counts; the right pane shows messages.
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
@@ -15,4 +15,22 @@ The summaries come from `crewboard topics --summary --json`, read every 10 secon
 
 ```bash
 bun test   # the summary reader, against a fake crewboard command
+```
+
+## Tasks view
+
+Press `t` (or start with `--tasks`) for one read-only view over every firstmate home: its `tasks-axi list` backlog plus `state/*.status` logs.
+Each agent (an in-flight task) shows its current task, the next queued items of its project, its open decision, and the time since its last status event.
+Stalled agents (no status event for 30 min while in flight; `paused`, `done` and `failed` do not count) are pinned on top, longest quiet first; the list shows the top 10 until you press Enter on its head.
+Below, agents are grouped by mate (home) and project, collapsed by default. A filter opens the matching groups. Only the visible rows are rendered.
+
+Keys: `↑↓/jk` move, `Enter`/`Space` open or close, `e`/`E` open or close all groups, `/` filter (Enter keeps it, Esc clears), `s` stalled only, `r` reload, `t` back to the board.
+A decision is the latest `needs-decision` or `blocked` status line without a matching `resolved` line for its key.
+
+Homes come from the arguments, else `$CREWBOARD_TASKS_HOMES` (colon list), else `~/.treehouse/firstmate-*/<n>/firstmate`.
+`$TASKS_AXI_BIN` overrides the `tasks-axi` command. `--stall-min N` sets the stall time.
+
+```bash
+bun crewboard-tui.ts --once [--expand] [--filter TEXT] [--width N] [home...]   # plain snapshot, then exit
+bun fixture.ts /tmp/fx 1500 30                                                  # disposable fake homes for a demo
 ```
