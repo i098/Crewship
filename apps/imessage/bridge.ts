@@ -193,7 +193,7 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2" };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true };
@@ -565,6 +565,7 @@ function put(item: Out) {
 }
 
 function finishDeskDelivery(o: Out) {
+  if (o.front) return;
   const id = deskTypingRequestId;
   if (id && (o.requestId === id || o.requests?.includes(id))) stopDeskTyping?.();
 }
@@ -885,6 +886,7 @@ function v2ResponseIds(ref: Ref, target?: Ref) {
 }
 
 function recordResponse(o: Out) {
+  if (o.front) return;
   const legacy: string[] = [];
   const selected: string[] = [];
   for (const id of o.requests ?? []) {
@@ -1046,6 +1048,10 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     recordRoute({ ids: pending.map((r) => r.requestId), v2: plan });
   }
   const intent = plan.intents[0];
+  put({
+    ...target.ref, ...plan.front, kind: "desk", loop: "v2", front: true, reply: target.ref.id,
+    bubbles: [`I am routing this request to ${intent?.kind === "relay" ? (plan.mate ? `the ${plan.mate.id} secondmate` : "Firstmate") : dispatchSelection(intent, v2Models) ? "a worker" : "Firstmate"}.`],
+  });
   if (intent?.kind === "dispatch") await dispatchV2(pending, intent, controller.signal, current);
   else if (intent?.kind === "relay") await relayV2(pending, plan, current);
 }
@@ -1324,6 +1330,7 @@ function ensureRemembered(item: Received) {
 }
 
 function lostDeskAnswer(item: Out) {
+  if (item.front) return;
   finishDeskDelivery(item);
   if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   const ids = item.loop === "v2" ? item.requests.filter((id) => !routing.get(id)?.responded) : item.requests;
