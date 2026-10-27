@@ -83,7 +83,7 @@ def host(tmp_path):
     done = {n: "completed" for n in STEPS}
     add_run(
         db,
-        "old-pass",
+        "01TESTOLDPASS",
         "r2",
         "fm/oss-task",
         "completed",
@@ -92,10 +92,12 @@ def host(tmp_path):
         done,
         pr="https://github.com/acme/gadgets/pull/7",
     )
-    add_run(db, "old-fail", "r1", "fm/ancient", "failed", 50 * HOUR, 60, {**done, "test": "failed"})
+    add_run(
+        db, "01TESTOLDFAIL", "r1", "fm/ancient", "failed", 50 * HOUR, 60, {**done, "test": "failed"}
+    )
     add_run(
         db,
-        "fail",
+        "01TESTFAIL",
         "r1",
         "fm/gone-task",
         "failed",
@@ -107,7 +109,7 @@ def host(tmp_path):
     )
     add_run(
         db,
-        "live",
+        "01TESTLIVE",
         "r1",
         "fm/fix-widgets",
         "running",
@@ -119,7 +121,7 @@ def host(tmp_path):
     )
     add_run(
         db,
-        "parked",
+        "01TESTPARKED",
         "r3",
         "fm/p",
         "running",
@@ -130,18 +132,28 @@ def host(tmp_path):
     )
     db.commit()
     db.close()
-    return {"RUNS_TUI_DB": str(db_path), "RUNS_TUI_HOMES": f"{main}:{mate_home}"}
+    return {
+        "RUNS_TUI_DB": str(db_path),
+        "RUNS_TUI_HOMES": f"{main}:{mate_home}",
+        "CREWSHIP_POSTMORTEM_PATHS": "",
+    }
 
 
-def rows(env, *flags):
-    out = subprocess.run(
+def run_once(env, *flags):
+    return subprocess.run(
         ["bun", str(TOOL), "--once", *flags],
         env={**os.environ, **env},
         capture_output=True,
         text=True,
         check=True,
     ).stdout.splitlines()
-    return out[0], [line.split() for line in out[2:]]
+
+
+def rows(env, *flags):
+    """Summary line and table rows; post-mortem lines and the unmatched section are skipped."""
+    out = run_once(env, *flags)
+    end = out.index("") if "" in out else len(out)
+    return out[0], [line.split() for line in out[2:end] if not line.lstrip().startswith("↳")]
 
 
 def test_maps_runs_to_home_mate_task_repo_pr_and_counts_fix_loops(host):
@@ -176,3 +188,50 @@ def test_anonymize_hides_names_but_keeps_structure(host):
     for private in ("widgets", "gadgets", "fix-widgets", "ab12", "#42", "oss-task"):
         assert private not in text
     assert table[0][:5] == ["home-1", "mate-1", "task-1", "repo-1", "#100"]
+
+
+def test_postmortem_lines_show_under_the_run_they_name(host, tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/validation-postmortems.md").write_text(
+        "# Validation post-mortems\n\n"
+        "| Date (UTC) | Run or link | Failed step | Root cause | Fix | Prevention change |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| 2026-10-27 | 01TESTFAIL | test | flaky a&#124;b | retry | [check](x.py) |\n"
+        "| 2026-10-27 | https://github.com/acme/widgets/pull/421 | ci | other PR | - | - |\n"
+    )
+    home = tmp_path / "h1/data"
+    home.mkdir(parents=True)
+    (home / "validation-postmortems.md").write_text(
+        "2026-10-27 | PR: https://github.com/acme/widgets/pull/42 | clippy failed.\n"
+        "2026-10-26 | PR: #7 | body check failed.\n"
+        "2026-10-25: paragraph entry\n"
+        "continues here.\n\n"
+        "not an entry\n"
+    )
+    paths = (
+        f"{tmp_path}/docs/validation-postmortems.md:{tmp_path}/h*/data/*.md:{tmp_path}/missing.md"
+    )
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": paths}, "--all")
+    end = out.index("")
+    under, task = {}, None
+    for line in out[2:end]:
+        if line.lstrip().startswith("↳"):
+            under.setdefault(task, []).append(line.split("↳ ", 1)[1])
+        else:
+            task = line.split()[2]
+    assert under == {
+        "fix-widgets": [
+            "2026-10-27 | PR: https://github.com/acme/widgets/pull/42 | clippy failed."
+        ],
+        "gone-task": ["2026-10-27 | 01TESTFAIL | test | flaky a|b | retry | [check](x.py)"],
+        "oss-task": ["2026-10-26 | PR: #7 | body check failed."],
+    }
+    # pull/421 is not PR #42; a paragraph's next line joins its entry; undated lines are ignored.
+    # Subset: the repo's own docs/validation-postmortems.md is always read too.
+    assert out[end + 1].startswith("POST-MORTEMS NOT MATCHED TO A RUN")
+    loose = out[end + 2 :]
+    assert (
+        "• 2026-10-27 | https://github.com/acme/widgets/pull/421 | ci | other PR | - | -" in loose
+    )
+    assert "• 2026-10-25: paragraph entry continues here." in loose
+    assert not any("not an entry" in line for line in loose)

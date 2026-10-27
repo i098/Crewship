@@ -10,11 +10,19 @@ Mapping, in order: a task meta matching repo and branch, then branch alone, then
 The mate is the second mate whose `kind=secondmate` meta (in the main home's `state/`) names the home; the main home shows `main`.
 A run with no task meta uses its branch name as the task. Only a home that no file names shows `unknown`.
 
+Post-mortem lines show under the run that they name: a line names a run when it contains the run ID, the PR URL or the PR number (`#42`).
+`p` lists the lines that name no run; `--once` prints them below the table.
+The tool reads `docs/validation-postmortems.md` in this repo, plus the files that `CREWSHIP_POSTMORTEM_PATHS` names (`:`-separated paths or globs, for example `$HOME/fm/*/data/validation-postmortems.md`).
+It reads two formats: markdown table rows whose first cell is a date, and lines that start with a date, such as `2026-10-27 | PR: <url> | text`.
+A plain line directly after a dated line continues that entry.
+Missing files are skipped, and the tool never writes these files.
+`--anonymize` does not change post-mortem text.
+
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
 ```bash
 bun install
-bun runs-tui.ts                # live, refreshes every 5s; a all/24h, up/down scroll, r refresh, q quit
+bun runs-tui.ts                # live, refreshes every 5s; a all/24h, p unmatched post-mortems, up/down scroll, r refresh, q quit
 bun runs-tui.ts --once --all   # plain text, for tests and screenshots
 bun runs-tui.ts --anonymize    # home, mate, task, repo and PR become placeholders (for screenshots)
 ```
