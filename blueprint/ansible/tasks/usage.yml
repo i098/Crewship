@@ -140,15 +140,27 @@
 
 - name: Remove usage assets without deleting stored metadata
   when: not (crewship_usage_enabled | bool)
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - "{{ crewship_user_units }}/crewship-usage.timer"
-    - "{{ crewship_user_units }}/crewship-usage.service"
-    - "{{ crewship_usage_assets }}/usage.py"
-    - "{{ crewship_usage_assets }}/omp-usage.ts"
-    - "{{ crewship_usage_assets }}/dashboard.json"
-    - "{{ crewship_usage_assets }}/usage.patch"
-    - "{{ crewship_usage_assets }}/capture.env"
-  notify: reload user systemd
+  block:
+    - name: Look for usage assets
+      ansible.builtin.command:
+        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_usage_paths | to_json }}"]
+      vars: &crewship_usage_paths
+        crewship_usage_paths:
+          - "{{ crewship_user_units }}/crewship-usage.timer"
+          - "{{ crewship_user_units }}/crewship-usage.service"
+          - "{{ crewship_usage_assets }}/usage.py"
+          - "{{ crewship_usage_assets }}/omp-usage.ts"
+          - "{{ crewship_usage_assets }}/dashboard.json"
+          - "{{ crewship_usage_assets }}/usage.patch"
+          - "{{ crewship_usage_assets }}/capture.env"
+      register: crewship_usage_paths_found
+      changed_when: false
+      check_mode: false
+
+    - name: Remove the present usage assets
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      vars: *crewship_usage_paths
+      loop: "{{ crewship_usage_paths | select('in', (crewship_usage_paths_found.stdout | from_json).existing) | list }}"
+      notify: reload user systemd

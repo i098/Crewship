@@ -1,5 +1,5 @@
 {
-  "_comment": "Select models by task difficulty. Use Fable only as an automatic Opus fallback, never as a spawn choice. Mercury coding and Opus profiles use high effort; the spawning home chooses effort for other tiers. omp connects directly to each provider. Codex models use a separate quota pool from Anthropic.",
+  "_comment": "Select models by task difficulty. Use Fable only as an automatic Opus fallback, never as a spawn choice. Never use GPT-6 Astra for workers; it stays enabled for other roles only. Mercury coding and Opus profiles use high effort; the spawning home chooses effort for other tiers. omp connects directly to each provider. Codex models use a separate quota pool from Anthropic.",
   "rules": [
     {
       "when": "Mechanical or small, well-specified work: typo and copy fixes, renames, docs-only edits, config or version bumps, moving files, formatting, data collection, simple scripted checks, or a narrow one-file change with an obvious fix.",

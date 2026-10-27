@@ -69,7 +69,7 @@ class Guard:
         self.doctor.mkdir()
         for script in ("storage-guard.sh", "worktree-prune.sh", "treehouse-roots.py"):
             shutil.copy(ROOT / "blueprint/fleet/doctor" / script, self.doctor)
-        self._exe(self.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/broadcasts"')
+        self._exe(self.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/broadcasts"', "sh")
         home = self.stub / "firstmate"
         (home / "bin").mkdir(parents=True)
         self._exe(home / "bin/fm-inbox.sh", r"""
@@ -100,8 +100,8 @@ jq -nc --arg id "$3" --argjson announced "$announced" \
         self.fs({"/": 50})
 
     @staticmethod
-    def _exe(path: Path, body: str):
-        path.write_text("#!/usr/bin/env bash\n" + body)
+    def _exe(path: Path, body: str, shell: str = "bash"):
+        path.write_text(f"#!/usr/bin/env {shell}\n" + body)
         path.chmod(0o755)
 
     def fs(self, pcts: dict[str, int]):
@@ -469,7 +469,7 @@ def test_initialization_errors_notify_without_changing_saved_state(guard, failur
     before = {p.name: p.read_bytes() for p in state.iterdir() if p.is_file()} if state.exists() else {}
     if delivery == "enospc":
         (guard.stub / "delivery").write_text(delivery)
-    Guard._exe(guard.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/events"')
+    Guard._exe(guard.doctor / "notify-master.sh", 'echo broadcast >> "$STUB/events"', "sh")
     pools = guard.doctor.parent / "pools"
     pools.mkdir()
     Guard._exe(guard.stub / "prune", 'echo worktree-reclaim >> "$STUB/events"')
@@ -591,10 +591,10 @@ exec /usr/bin/mv "$@"
     if delivery != "success":
         (guard.stub / "delivery").write_text("enospc")
     Guard._exe(guard.doctor / "notify-master.sh",
-               'echo broadcast >> "$STUB/events"; echo broadcast >> "$STUB/broadcasts"')
+               'echo broadcast >> "$STUB/events"; echo broadcast >> "$STUB/broadcasts"', "sh")
     if delivery == "wall":
         (guard.doctor / "notify-master.sh").unlink()
-        Guard._exe(guard.stub / "bin/wall", 'echo wall >> "$STUB/events"; cat > "$STUB/wall"')
+        Guard._exe(guard.stub / "bin/wall", 'echo wall >> "$STUB/events"; cat > "$STUB/wall"', "sh")
     pools = guard.doctor.parent / "pools"
     pools.mkdir()
     Guard._exe(guard.stub / "prune", 'echo worktree-reclaim >> "$STUB/events"')
@@ -730,7 +730,7 @@ def test_missing_configured_data_mount_never_writes_root_backed_state(guard, dir
     if directory_exists:
         data.mkdir()
     (guard.stub / "state-mount").write_text("/")
-    Guard._exe(guard.stub / "bin/wall", 'cat > "$STUB/wall"')
+    Guard._exe(guard.stub / "bin/wall", 'cat > "$STUB/wall"', "sh")
     result = guard.run(STORAGE_DATA_DIR=str(data), check=False)
     assert result.returncode != 0
     assert "configured data mount unavailable" in result.stderr
@@ -766,7 +766,7 @@ def test_root_backed_bind_mount_is_not_durable_storage(guard):
     data.mkdir()
     (guard.stub / "state-mount").write_text(str(data))
     (guard.stub / "state-device").write_text("0:1")
-    Guard._exe(guard.stub / "bin/wall", 'cat > "$STUB/wall"')
+    Guard._exe(guard.stub / "bin/wall", 'cat > "$STUB/wall"', "sh")
     assert guard.run(STORAGE_DATA_DIR=str(data), check=False).returncode != 0
     assert not (data / "storage-guard").exists()
 

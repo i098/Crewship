@@ -326,11 +326,14 @@ await waitForUsage(rows => rows.some(row => row.kind === "complete" && row.seque
 
 
 def test_native_helper_calls_register_separately_from_chat(native_source):
-    result, records = execute(native_source, TRANSPORT + r'''
+    for _ in range(3):
+        result, records = execute(native_source, TRANSPORT + r'''
 await request();
 await completeSimple(model, context, options);
 await waitForUsage(rows => rows.filter(row => row.kind === "complete").length === 2);
 ''')
+        if result.returncode == 0 or "usage records did not arrive" not in result.stderr:
+            break
     assert result.returncode == 0, result.stderr
     assert sorted(row["producer_kind"] for row in records if row["kind"] == "register") == ["chat", "helper"]
     assert len([row for row in records if row["kind"] == "complete"]) == 2

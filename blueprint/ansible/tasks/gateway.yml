@@ -100,14 +100,24 @@
         label: "{{ item.item }}"
       when: crewship_manage_services | bool
 
+    - name: Look for the gateway paths
+      ansible.builtin.command:
+        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_gateway_paths | to_json }}"]
+      vars: &crewship_gateway_paths
+        crewship_gateway_paths:
+          - "{{ crewship_user_units }}/default.target.wants/crewship-tunnel.service"
+          - "{{ crewship_user_units }}/default.target.wants/crewship-gateway.service"
+          - "{{ crewship_user_units }}/crewship-tunnel.service"
+          - "{{ crewship_user_units }}/crewship-gateway.service"
+          - "{{ crewship_gateway_script }}"
+      register: crewship_gateway_paths_found
+      changed_when: false
+      check_mode: false
+
     - name: Remove the gateway units and command
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop:
-        - "{{ crewship_user_units }}/default.target.wants/crewship-tunnel.service"
-        - "{{ crewship_user_units }}/default.target.wants/crewship-gateway.service"
-        - "{{ crewship_user_units }}/crewship-tunnel.service"
-        - "{{ crewship_user_units }}/crewship-gateway.service"
-        - "{{ crewship_gateway_script }}"
+      vars: *crewship_gateway_paths
+      loop: "{{ crewship_gateway_paths | select('in', (crewship_gateway_paths_found.stdout | from_json).existing) | list }}"
       notify: reload user systemd

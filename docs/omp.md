@@ -32,6 +32,7 @@ With the `agents` profile on, `./ship.sh launch`:
 11. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 12. Installs the opt-in extension [`fm-gluttony.ts`](../blueprint/config/fm-gluttony.ts) as `~/.omp/agent/extensions/fm-gluttony.ts`.
     See [Gluttony mode](#gluttony-mode).
+13. Installs the [kun](https://github.com/kunchenguid/kun) skill to `~/.agents/skills/kun` at the latest default-branch commit, and skips it while `.crewship-sha` there holds that commit. The global instructions tell agents to load it when unsure how to implement something.
 
 The `config.yml` and `lsp.json` copies are first-write-only.
 The recipe preserves existing settings except the two keys required by [Status line icons](#status-line-icons).
@@ -128,6 +129,7 @@ The extension adds this requirement to the director's brief.
 
 Vibe workers and their task/eval subagents use these bounds, including configured overrides, retry chains, and restored sessions.
 Saved worker models take precedence over saved role aliases.
+The `smol` helper role in these sessions follows the fast-worker bounds; it keeps its configured model when no fast model has a usable credential.
 If Mercury 3 or Sonnet 5.5 has no usable credential, the extension tries Haiku 5.5 at the selected effort.
 Anthropic-side workers can also retry on Haiku 5.5; other retry models must stay within the worker's tier.
 A spawn or restore fails with a clear message when no allowed model has a usable credential.
@@ -162,7 +164,7 @@ The omp that the no-mistakes daemon spawns gets its own advisor from a separate 
 
 ## Other seeded preferences
 
-`blueprint/config/omp.yml` also sets the theme (`dark-rose-pine`), a custom status line (see [Status line icons](#status-line-icons)), `textVerbosity: low`, `readLineNumbers: true`, hidden thinking blocks (`hideThinkingBlock: true`), steering, follow-up and interrupt modes, vim mode in the editor (`tui.vimMode`), the OpenAI priority service tier (`tier.openai: priority`), and at most 128 parallel subagent tasks (`task.maxConcurrency`). Memory uses the mnemopi backend (`memory.backend: mnemopi`) with no embeddings, the `smol` model for its own calls, and polyphonic recall, enhanced recall and proactive linking on. Change a single value with `omp config set <key> <value>`, or use `/settings`.
+`blueprint/config/omp.yml` also sets the theme (`dark-rose-pine`), a custom status line (see [Status line icons](#status-line-icons)), `textVerbosity: low`, `readLineNumbers: true`, hidden thinking blocks (`hideThinkingBlock: true`), steering, follow-up and interrupt modes, vim mode in the editor (`tui.vimMode`), the OpenAI priority service tier (`tier.openai: priority`), at most 128 parallel subagent tasks (`task.maxConcurrency`), compaction at 200,000 tokens with a 32,000-token retained-message budget (`compaction.thresholdTokens`, `compaction.v2RetainedMessageBudget`), the compaction order (`compaction.methodOrder`: `snapcompact` first, then `remote`, `handoff`, `shake` and `soft` as fallbacks), and tool output above 20 KB spilled to an artifact with 4 KB head and 4 KB tail inline (`tools.artifactSpillThreshold`, `tools.artifactHeadBytes`, `tools.artifactTailBytes`). Memory uses the mnemopi backend (`memory.backend: mnemopi`) with no embeddings, the `smol` model for its own calls, and polyphonic recall, enhanced recall and proactive linking on. Change a single value with `omp config set <key> <value>`, or use `/settings`.
 
 ## Status line icons
 
@@ -298,6 +300,9 @@ See [Default config](default-config.md) for the gate tiers and their model and e
 
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
+Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
+The brief includes the batching rule: a feature branch built from several slices gets one validation run.
+
 ## Skills
 
 Crewship keeps skills, not personal notes, in `blueprint/skills/`. `CLAUDE.md` and `AGENTS.md` stay free of personal content.
@@ -305,11 +310,13 @@ Crewship keeps skills, not personal notes, in `blueprint/skills/`. `CLAUDE.md` a
 - `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it: skills that ship with Crewship. A folder with no `SKILL.md` of its own is a group of skills, `<group>/<name>/SKILL.md`, that can share files kept once in the group folder.
 - `blueprint/skills/private/<name>/SKILL.md`: skills that stay on the host. Git ignores this folder except its README, and Docker builds leave it out.
 
-The public skills and the public rules are opt-in. Set `profiles.public_skills: true` in `.local/host.yml` to install them. With `false`, apply installs no public skill or rule. With no key, apply installs them only on a host that already has them, so an update never takes them away. Turning the key off stops updates and deletes nothing: delete a skill from `~/.omp/agent/skills/` and `~/.claude/skills/` by hand to remove it. Private skills and private rules always install.
+The public skills and the public rules are opt-in. Set `profiles.public_skills: true` in `.local/host.yml` to install them. With `false`, apply installs none of the public skills and rules. With no key, apply installs them only on a host that already has them, so an update never takes them away. Turning the key off stops updates and deletes nothing: delete a skill from `~/.omp/agent/skills/` and `~/.claude/skills/` by hand to remove it. Private skills and private rules always install.
 
 Every apply copies each skill to `~/.omp/agent/skills/<name>/` and `~/.claude/skills/<name>/` with [`scripts/skills.py`](../scripts/skills.py). A group is copied whole, with its symlinks, to `<group>/`, and each skill in it gets the link `<name>` to `<group>/<name>`, so omp and Claude Code find it under its own name and its shared files stay one copy. A private skill wins over a public skill with the same name. A private group or skill with the name of a public group replaces that whole group, so the public skills in it do not install. The installer records the names it installed in `~/.local/share/crewship/skills.json`. It rewrites only those skills, and removes one when its source leaves `blueprint/skills/`. A skill directory that the manifest does not list belongs to the operator: the installer never replaces or removes it and reports it under `skipped`. An unchanged apply changes nothing.
 
 To fill `blueprint/skills/private/` on every host from one private source, set `skills.private_source` in `.local/host.yml` ([The host config](configuration.md#the-host-config)). It is an absolute local directory or a git URL (`https://`, `ssh://`, `file://` or `user@host:path`), with an optional `skills.private_ref` that applies only to a git URL; validation rejects it beside a local directory. Each skill in the source is a top-level `<name>/SKILL.md` or, as in the public tree, a skill in a group, `<group>/<name>/SKILL.md`. Two skills with the same name in one tree stop the install with an error. Before the install, apply fetches a git source into `~/.cache/crewship/private-skills/` and copies its skills into `blueprint/skills/private/`. A git fetch signs in with the account's own git or GitHub login (for example `gh auth setup-git`), never with the config file, so the schema rejects an `https://` URL that holds a user name or token. The same manifest, under `blueprint/skills/private`, records the filled skills: a skill that leaves the source leaves `blueprint/skills/private/`, and a private skill put there by hand is never replaced. Without the setting, apply fetches nothing. Removing the setting and applying removes the skills an earlier fill added, from `blueprint/skills/private/` and from both install folders, and leaves private skills put there by hand.
+
+The skills in `UPSTREAM` in `scripts/skills.py` install on every apply, whatever `profiles.public_skills` says: they are public repos, fetched at the newest default-branch commit (never pinned) into `~/.cache/crewship/upstream-skills/`. Today that is [`vision`](https://github.com/kunchenguid/vision), which drafts a `VISION.md` from a repo's history; run `/vision` inside a repository. Each installed skill holds `.crewship-source` with the repo URL and commit SHA, and the installer prints the SHAs under `upstream`. A private skill of the same name wins. Apply needs GitHub access for them and fails when the fetch fails. `--no-upstream` skips the fetch and keeps the copies an earlier apply installed.
 
 ## Rules
 

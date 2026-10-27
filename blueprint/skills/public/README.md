@@ -2,6 +2,7 @@
 
 Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. A folder with no `SKILL.md` of its own groups skills as `<group>/<name>/SKILL.md`: a file the skills share sits once in the group folder, with a relative symlink to it in each skill. The group installs whole, with its links, and each skill in it installs as a link `<name>` to `<group>/<name>`. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
 
+- [`be-ambitious`](be-ambitious/SKILL.md): deepen a prompt through expert methods, primary sources, and external verification (MIT; [Dan McAteer](https://github.com/DannyMac180), [source](https://github.com/DannyMac180/skills/tree/main/be-ambitious)).
 - [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
 - [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
 - [`clean-code-errors`](clean-code-errors/SKILL.md): exceptions over error codes, catch blocks, wrapping library exceptions, the failure contract of a function (credits `@s4.codes` reels).
@@ -20,6 +21,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
 - [`mobile-app-first-build`](mobile-app-first-build/SKILL.md): validate an idea with a mobile web prototype, choose a platform, map flows, write requirements, build, test, and release (credits u/olenami's Reddit guide).
+- [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.
 - [`openmontage`](openmontage/SKILL.md): make a video, reel or explainer clip with OpenMontage; renders mp4 into a 1-day-pruned cache, spring motion, beat-locked synthesized sound, a self-review pass; poster frame sendable with `fm-imessage --image`.
 - [`operating-rules`](operating-rules/SKILL.md): ask or act, keep scope, finish the work, and answer a question as a question.
 - [`pr-preview`](pr-preview/SKILL.md): a Lavish board that recreates the GitHub PR, issue or comment page, with the body rendered by GitHub's Markdown API (CSS vendored from `github-markdown-css`, MIT, credited in [CREDITS.md](../../../CREDITS.md)).
@@ -27,7 +29,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`prod-readiness`](prod-readiness/SKILL.md): run 20 evidence-backed checks before a production launch, deploy, release to users, or an "is this ready" review.
 - [`progress-bars`](progress-bars/SKILL.md): a fixed ASCII progress-bar format with percentages from real counts.
 - [`quality-gates`](quality-gates/SKILL.md): sentrux and fallow gates and the pull-based codex advisor.
-- [`repo-readme`](repo-readme/SKILL.md): write or polish a repository README: hero with badges and Sponsor button, live screenshot, present-tense features, quick start, how-it-works diagram, layout and license, with a template and a polish checklist (community files, templates, topics and SEO, social preview).
+- [`repo-readme`](repo-readme/SKILL.md): study similar repositories, then write a short README with peer-shared sections, GitHub best practices, a hero, screenshots, quick start, diagram, layout, and license.
 - [`signal-chunks`](signal-chunks/SKILL.md): plan a week with one shipping goal and a timezoned deadline, eighteen-hour chunks, three to five signal tasks, named noise, an eighty-percent effort target, and CHUNK status with a verdict (Jobs-inspired method, not a claim about Jobs' own schedule).
 - [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): relay Slack messages to iMessage; see the skill for filtering rules and setup.

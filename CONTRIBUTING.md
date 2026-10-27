@@ -105,6 +105,14 @@ uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/sit
 
 See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
 
+After every failed no-mistakes run or CI gate, append a [post-mortem](docs/validation-postmortems.md) with the command below.
+Land the linked prevention change; a log entry alone does not complete the work.
+
+```bash
+uv run scripts/validation_postmortem.py --run "RUN_ID_OR_URL" --step "FAILED_STEP" \
+  --root-cause "VERIFIED_CAUSE" --fix "FIX_APPLIED" --prevention "CHANGE_LINK"
+```
+
 ### Testing against Herdr
 
 The operator's Herdr runs the `default` session on the same host, and its workspace labels route Firstmate's work.
@@ -229,6 +237,8 @@ Check a body file before publication:
 ```bash
 python3 scripts/check_pr_body.py /tmp/pr-body.md
 ```
+
+Match the template headings and checklist text exactly, and run the body checker before each PR publication or body edit.
 
 ## Branch rules
 
