@@ -85,11 +85,19 @@ export const runFront = (input) => front({{ ...input, endpoint: {json.dumps(endp
         database.execute("CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)")
         database.execute("INSERT INTO auth_credentials VALUES (?, ?, ?, NULL)",
                          ("anthropic", "api_key", '{"key":"fake-stored-key"}'))
-    (rig.app / "bridge.ts").write_text((rig.app / "bridge.ts").read_text().replace(
-        'dirname(realpathSync(Bun.which("omp") ?? "omp"))', json.dumps(str(package_base))).replace(
-        "const path = getAgentDbPath(agentDir);", f"const path = {json.dumps(str(credentials))};"))
+    bridge_source = (rig.app / "bridge.ts").read_text()
     policy = rig.app / "dispatch-policy.ts"
-    policy.write_text(policy.read_text().replace("dirname(realpathSync(executable))", json.dumps(str(package_base))))
+    policy_source = policy.read_text()
+    package_marker = 'dirname(realpathSync(Bun.which("omp") ?? "omp"))'
+    db_marker = "const path = getAgentDbPath(agentDir);"
+    policy_marker = "dirname(realpathSync(executable))"
+    assert package_marker in bridge_source
+    assert db_marker in bridge_source
+    assert policy_marker in policy_source
+    (rig.app / "bridge.ts").write_text(bridge_source.replace(
+        package_marker, json.dumps(str(package_base))).replace(
+        db_marker, f"const path = {json.dumps(str(credentials))};"))
+    policy.write_text(policy_source.replace(policy_marker, json.dumps(str(package_base))))
     (tmp_path / "agent").mkdir()
     rig.env["PI_CODING_AGENT_DIR"] = str(tmp_path / "agent")
     rig.env.pop("ANTHROPIC_API_KEY", None)
