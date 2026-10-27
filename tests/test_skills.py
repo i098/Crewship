@@ -443,10 +443,16 @@ PRIVATE = re.compile(
 # The vendored skills (MIT) link their authors' public repositories or carry their license text.
 # Those are credits, not private details; each exemption covers only its own folder.
 VENDORED_OWNER = {
-    "blueprint/skills/public/README.md": "github.com/DannyMac180",
-    "blueprint/skills/public/be-ambitious/": "github.com/DannyMac180",
-    "blueprint/skills/public/code-clarity/": "github.com/Lakr233",
-    "blueprint/skills/public/pr-preview/": "sindresorhus@gmail.com",
+    "blueprint/skills/public/README.md": ("github.com/DannyMac180",),
+    "blueprint/skills/public/apple-hig/": (
+        "github.com/twostraws",
+        "github.com/AvdLee",
+        "github.com/CarlosZiegler",
+        "github.com/Ksanbal",
+    ),
+    "blueprint/skills/public/be-ambitious/": ("github.com/DannyMac180",),
+    "blueprint/skills/public/code-clarity/": ("github.com/Lakr233",),
+    "blueprint/skills/public/pr-preview/": ("sindresorhus@gmail.com",),
 }
 
 
@@ -462,8 +468,8 @@ def test_public_skills_and_rules_are_named_and_hold_no_private_details():
     for path in files:
         rel = path.relative_to(repo).as_posix()
         text = path.read_text()
-        allowed = next((v for k, v in VENDORED_OWNER.items() if rel.startswith(k)), None)
-        hits = [m.group(0) for m in PRIVATE.finditer(text) if m.group(0) != allowed]
+        allowed = next((v for k, v in VENDORED_OWNER.items() if rel.startswith(k)), ())
+        hits = [m.group(0) for m in PRIVATE.finditer(text) if m.group(0) not in allowed]
         assert not hits, f"{rel}: {hits[0]!r}"
         if path.name == "SKILL.md":
             meta = yaml.safe_load(text.split("---")[1])
