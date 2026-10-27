@@ -25,12 +25,18 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Database } from "bun:sqlite";
 import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessage/grpc";
 import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
+import { type FrontIntent, loadFrontRedactor, runFront } from "./front.ts";
+import { relayTarget, relayTargetCurrent } from "./relay.ts";
+import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
@@ -51,6 +57,7 @@ async function stop() {
   for (const timer of acknowledgementTimers.values()) clearTimeout(timer);
   if (commandTypingSpace) typing(commandTypingSpace, false);
   stopping = true;
+  deskAbort?.abort();
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
   await Promise.race([Promise.all([deskTypingPending, ...running.map((proc) => proc.exited)]), Bun.sleep(2000)]);
@@ -89,6 +96,7 @@ const TRANSPORTS = (env.FM_IMESSAGE_TRANSPORTS || "photon").split(/\s+/).filter(
 const DESK_PROVIDER = env.FM_IMESSAGE_DESK_PROVIDER || "omp";
 const DESK_MODEL = env.FM_IMESSAGE_DESK_MODEL || "claude-haiku-5-5";
 const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
+const DESK_V2 = env.FM_IMESSAGE_DESK_V2 === "true";
 // The desks vetted for direct answers; any other provider and model hands every request to Firstmate.
 const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
@@ -155,11 +163,12 @@ const typing = (space: LineMessage["space"] | undefined, on: boolean, id = lates
 const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 const memoryByRequest = new Map<string, number>();
 for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
-const desk = new DeskTiming(QUIET_MS, (current) => void runDesk(current).catch((e) => {
+const desk = new DeskTiming(QUIET_MS, (current) => void (DESK_V2 ? runDeskV2(current) : runDesk(current)).catch((e) => {
   log("desk failed")(e);
   handoffPending();
 }), undefined, MAX_WAIT_MS);
 let deskRun: Bun.Subprocess | undefined;
+let deskAbort: AbortController | undefined;
 let deskGeneration = 0;
 const deskSession = crypto.randomUUID();
 const deskCancelled = Object.assign(new Error("desk response cancelled"), { permanent: true, maybeSent: false });
@@ -180,9 +189,9 @@ type Ref = { line?: string; space: string; id: string };
 // `card` is the token of a card to send, or to edit in place once it is out.
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; acknowledgement?: boolean };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; acknowledgement?: Out; responded?: boolean; plan?: FrontIntent };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string } | { deskCancelled: true } | { ids: string[]; acknowledgement: Out | null } | { ids: string[]; responded: true } | { ids: string[]; plan: FrontIntent };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -400,6 +409,7 @@ if (pendingRoutes().length) {
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
 function cancelDesk() {
   stopDeskTyping?.();
+  deskAbort?.abort();
   if (!deskRun) return;
   deskRun.kill();
   deskRun = undefined;
@@ -826,7 +836,7 @@ function acknowledge(pending: Routing[]) {
   if (target.out) return finishDeskDelivery(target.out);
   if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
   const unassigned = pending.filter((r) => r.route === "pending");
-  if (unassigned.length) {
+  if (!DESK_V2 && unassigned.length) {
     cancelDesk();
     recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
     desk.inboundText();
@@ -844,7 +854,7 @@ function acknowledge(pending: Routing[]) {
 }
 
 function prefetchInboxStatus() {
-  if (DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
+  if (!DESK_V2 && DESK_VETTED) inboxStatus = readInboxStatus().catch(log("read inbox status"));
 }
 
 async function readInboxStatus() {
@@ -888,6 +898,132 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
   stopDeskTyping = finishTyping;
   refresh();
   return finishTyping;
+}
+
+async function deskModels(agentDir: string): Promise<DispatchModel[]> {
+  const base = dirname(realpathSync(Bun.which("omp") ?? "omp"));
+  const load = (name: string) => import(pathToFileURL(Bun.resolveSync(name, base)).href);
+  const [{ AuthStorage, SqliteAuthCredentialStore }, { getAgentDbPath }] = await Promise.all([
+    load("@oh-my-pi/pi-ai/auth-storage"), load("@oh-my-pi/pi-utils"),
+  ]);
+  const path = getAgentDbPath(agentDir);
+  const database = new Database(":memory:");
+  const auth = new AuthStorage(new SqliteAuthCredentialStore(database));
+  try {
+    if (existsSync(path)) {
+      const source = new Database(path, { readonly: true });
+      try {
+        const rows = source.query<{ provider: string; credential_type: string; data: string }, []>(
+          "SELECT provider, credential_type, data FROM auth_credentials WHERE disabled_cause IS NULL").all();
+        const insert = database.prepare("INSERT INTO auth_credentials (provider, credential_type, data) VALUES (?, ?, ?)");
+        for (const row of rows) insert.run(row.provider, row.credential_type, row.data);
+      } finally { source.close(); }
+    }
+    await auth.credentials.reload();
+    return await loadDispatchModels(FM_HOME, agentDir, auth.keys, DESK_DIR);
+  } finally { auth.close(); }
+}
+
+function saveDeskPlan(pending: Routing[], plan: FrontIntent) {
+  const ids = pending.map((item) => item.requestId);
+  recordRoute({ ids, plan });
+  const target = pending.at(-1)!;
+  if (!target.responded && !target.acknowledgement) {
+    const guid = crypto.randomUUID();
+    recordRoute({ ids, acknowledgement: {
+      ...target.ref, requestId: `ack-${guid}`, requests: ids, acknowledgement: true,
+      kind: "desk", guid, at: Date.now(), reply: target.ref.id,
+      bubbles: [plan.kind === "dispatch"
+        ? "I saved your request. I will check it."
+        : "I saved your request for review."],
+    } });
+  }
+  flushRoutes();
+}
+
+async function draftSelected(options: {
+  pending: Routing[]; intent: FrontIntent; agentDir: string; from: number; current: () => boolean; signal: AbortSignal;
+}): Promise<DeskResult | undefined> {
+  const { pending, intent, agentDir, from, current, signal } = options;
+  if (pending.some((item) => item.firstmate)) return;
+  const selection = dispatchSelection(intent, await deskModels(agentDir));
+  if (!selection || !current()) return;
+  const status = await readInboxStatus();
+  if (!status.statusOk || !current()) return;
+  const result = await runSubagent({
+    ...selection, owner: env.FM_IMESSAGE_OWNER_NAME || "the owner",
+    supervisorModel: SUPERVISOR_MODEL,
+    requests: pending.map((item) => ({ authored: item.authored ?? item.text, context: item.text })),
+    view: memory.render(from), recent: memory.recent(from), messages: memory.msgs,
+    status: status.status, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env,
+    writePath: armWrite(pending), current, signal,
+    onProcess: (proc) => { deskRun = track(proc); },
+  });
+  if (!result || result.kind === "handoff" || !current()) return;
+  const target = pending[result.kind === "answer" ? (result.target ?? pending.length) - 1 : pending.length - 1];
+  if (target) return { answer: result.kind === "answer" ? { bubbles: result.bubbles } : { handled: true }, target };
+}
+
+async function draftFront(pending: Routing[], signal: AbortSignal, current: () => boolean) {
+  const agentDir = env.PI_CODING_AGENT_DIR || `${env.HOME}/.omp/agent`;
+  const [models, redact] = await Promise.all([
+    deskModels(agentDir), loadFrontRedactor(DESK_DIR, agentDir, env),
+  ]);
+  if (!current()) return;
+  const from = pending.reduce((first, item) => Math.min(first, memoryByRequest.get(item.requestId) ?? item.memoryId), memory.msgs.length);
+  const front = await runFront({
+    original: pending.map((item) => item.authored ?? item.text),
+    recent: memory.msgs.filter((message) => message.i < from).slice(-20),
+    mates: secondmates(FM_HOME), models, redact, apiKey: env.INCEPTION_API_KEY || "",
+    signal,
+  });
+  return { front, from, agentDir };
+}
+
+async function runSelectedTurn(pending: Routing[], signal: AbortSignal, current: () => boolean) {
+  const draft = await draftFront(pending, signal, current);
+  if (!draft || !current()) return;
+  const { front, from, agentDir } = draft;
+  const intent = front.intents[0];
+  if (!intent) {
+    if (!front.text || pending.some((item) => item.firstmate)) return handoffPending();
+    commitDeskAnswer(pending, { answer: { bubbles: [front.text] }, target: pending.at(-1)! });
+    return true;
+  }
+  saveDeskPlan(pending, intent);
+  if (intent.kind === "relay") {
+    const mate = relayTarget(pending, intent, secondmates(FM_HOME));
+    if (mate) await handoffToMate(pending, mate, current);
+    else handoffPending();
+    return;
+  }
+  const result = await draftSelected({ pending, intent, agentDir, from, current, signal });
+  if (!current()) return;
+  if (!result) return handoffPending();
+  commitDeskAnswer(pending, result);
+  return !("handled" in result.answer);
+}
+
+async function runDeskV2(isCurrent: () => boolean) {
+  const pending = pendingRoutes();
+  if (!pending.length) return;
+  if (stopping || muted() || pending.some((item) => item.mutationPath)) return handoffPending();
+  const controller = new AbortController();
+  deskAbort = controller;
+  const current = () => !stopping && !muted() && !controller.signal.aborted && isCurrent();
+  const finishTyping = startDeskTyping(pending, current);
+  let queued = false;
+  try {
+    queued = await runSelectedTurn(pending, controller.signal, current) ?? false;
+  } catch (error) {
+    if (current()) throw error;
+  } finally {
+    if (deskAbort === controller) {
+      deskAbort = undefined;
+      deskRun = undefined;
+    }
+    if (!queued) finishTyping();
+  }
 }
 
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
@@ -1005,7 +1141,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
   try {
     for (const item of pending) {
       if (stopping || !current()
-        || !secondmates(FM_HOME).some((entry) => entry.id === mate.id && entry.home === mate.home && entry.scope === mate.scope)) break;
+        || !relayTargetCurrent(mate, secondmates(FM_HOME))) break;
       // Save uncertainty before the send; a restart must not blindly repeat a delivery.
       let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
       recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
@@ -1050,6 +1186,8 @@ function applyRoute(event: RouteEvent) {
   else if ("received" in event) {
     deskGeneration++;
     routing.set(event.received.requestId, { ...event.received, route: "pending" });
+  } else if ("plan" in event) {
+    for (const id of event.ids) routing.get(id)!.plan = event.plan;
   } else if ("responded" in event) {
     for (const id of event.ids) Object.assign(routing.get(id)!, { responded: true, acknowledgement: undefined });
   } else if ("acknowledgement" in event) {

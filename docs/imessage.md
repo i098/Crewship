@@ -2,9 +2,27 @@
 
 The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small Bun service, `fm-imessage.service`, that uses one or both of two transports for the iMessage line: a [Photon Spectrum](https://photon.codes/docs/spectrum-ts) project (the default), and [self-hosted BlueBubbles relays](#use-self-hosted-bluebubbles-relays) on Macs that you control. It is off by default.
 
+## Selectable front-desk loop
+
+`crewship.imessage.desk_v2` defaults to `false`.
+Set it to `true` to select the separate conversational front and factual worker.
+The front uses Mercury-3 with low reasoning, without tools or action authority.
+It can propose a worker or a registered second mate, but it cannot approve work.
+The bridge saves the original request, a truthful receipt, and the action plan before reading status or starting factual work.
+It sends receipts and answers through the existing durable outbox.
+The worker uses the installed model catalog and host policy, checked again after the front returns.
+The bridge keeps request identity, current registry checks, uncertain-delivery ownership, cancellation, and mute behavior.
+Attachments, edits, cards, and approval boundaries retain their existing paths.
+This loop does not send reactions.
+Missing prerequisites, invalid selections, and unverified results send the request to Firstmate.
+Set `desk_v2` back to `false` to select the legacy loop without deleting its journal or outbox.
+The installer copies both loops and their modules; the setting selects the loop at runtime.
+Deployment and a clean one-week trial require separate authorization.
+
 ## What it does
 
 For each message from the owner, the service does these steps:
+These steps describe the legacy loop, selected when `desk_v2` is `false`.
 
 1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names the text that it replies to. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
 2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
@@ -641,6 +659,7 @@ crewship:
   imessage:
     owner: "+<country code><number>"  # the owner's phone number, E.164 form
     owner_name: the owner           # optional; this is the default; how the desk prompt names him
+    desk_v2: false                  # optional; select the separate front and worker when true
     desk_provider: omp              # optional; this is the default; or inception
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort

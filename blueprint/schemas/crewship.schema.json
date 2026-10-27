@@ -346,6 +346,10 @@
               "type": "string",
               "pattern": "^[^\\n`$\"\\\\%]{1,40}$"
             },
+            "desk_v2": {
+              "type": "boolean",
+              "default": false
+            },
             "desk_provider": {
               "enum": [
                 "omp",
