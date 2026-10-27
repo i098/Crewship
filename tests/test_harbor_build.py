@@ -1,6 +1,7 @@
 """site/build.py fills the landing page's points of interest from the repository."""
 
 import importlib.util
+import json
 import re
 import struct
 import xml.etree.ElementTree as ET
@@ -170,11 +171,31 @@ def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
     assert (dist / head.links["icon"]).read_text().startswith("<svg ")
 
 
+def test_pages_carry_json_ld(tmp_path):
+    dist = build.build(tmp_path / "dist")
+
+    def ld(name):
+        page = (dist / name).read_text()
+        return [
+            json.loads(b)
+            for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page)
+        ]
+
+    types = {n["@type"] for n in ld("index.html")[0]["@graph"]}
+    assert types == {"WebSite", "SoftwareApplication"}
+    faq = ld("about.html")[0]
+    assert faq["@type"] == "FAQPage"
+    page = (dist / "about.html").read_text()
+    visible = re.findall(
+        r"<h3>(.*?)</h3>\s*<p>(.*?)</p>", page.split("Short factual answers")[1], re.S
+    )
+    assert [(q["name"], q["acceptedAnswer"]["text"]) for q in faq["mainEntity"]] == visible
+    assert 'href="/how"' in (dist / "about.html").read_text()
+
+
 def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
     dist = build.build(tmp_path / "dist")
-    with ThreadingHTTPServer(
-        ("127.0.0.1", 0), partial(serve.Handler, directory=dist)
-    ) as server:
+    with ThreadingHTTPServer(("127.0.0.1", 0), partial(serve.Handler, directory=dist)) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         connection = HTTPConnection(*server.server_address, timeout=5)
@@ -212,9 +233,9 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                     robots = RobotFileParser()
                     robots.parse(body.decode().splitlines())
                     assert robots.site_maps() == ["https://crewship.si/sitemap.xml"]
-                    for agent in ("Googlebot", "OAI-SearchBot", "GPTBot"):
+                    for agent in ("Googlebot", "OAI-SearchBot", "GPTBot", "ClaudeBot"):
                         for route in ("/", "/how", "/about"):
-                            assert robots.can_fetch(agent, route) == (agent != "GPTBot")
+                            assert robots.can_fetch(agent, route)
                 if filename.endswith(".html"):
                     assert response.getheader("Content-Type").startswith("text/html")
                     head = Head()

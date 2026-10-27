@@ -22,8 +22,10 @@ The daemon is `crewboard serve`. Each client command is a short process. It send
 | `src/serve.rs` | The daemon: listener, peer check, request parsing, subscriber streams. |
 | `src/sink.rs` | The GitHub sink: batches subscriber messages into one issue comment. No tokio. |
 | `src/board.rs` | Board state: topics, rings, caps, fan-out. Pure logic with no I/O. |
+| `src/summarizer.rs` | The summary refresher: per-topic debounce and the model command. A client, not part of the daemon. |
 | `tests/two_clients.rs` | End-to-end test with a real daemon and two clients. |
 | `tests/github_sink.rs` | End-to-end test of the sink with a real daemon and a fake `gh`. |
+| `tests/summary.rs` | End-to-end test of topic summaries and `summarize` with a fake model command. |
 
 The daemon runs on one tokio thread (`current_thread`). The board sits behind one `Mutex`, and no code holds it across an `await`.
 Dependencies are `tokio`, `serde_json` and `libc`.
@@ -66,7 +68,8 @@ The socket carries newline-delimited JSON. A client sends one request per line. 
 |---|---|
 | `{"op":"pub","topic":T,"body":B,"from":F}` | `{"ok":true,"seq":N}` or `{"ok":false,"error":E}` |
 | `{"op":"hist","topic":T,"n":N}` | The last `N` messages, oldest first, then `{"end":true}` |
-| `{"op":"topics"}` | A JSON array of `{topic,count,oldest,newest}` |
+| `{"op":"topics","summary":true}` | A JSON array of `{topic,count,oldest,newest}`; `summary:true` adds `summary` and `summary_seq` |
+| `{"op":"summary","topic":T,"summary":S,"seq":N}` | `{"ok":true}`, or `bad_topic` (no such topic) or `stale` (`seq` older than the stored one). `seq` defaults to the newest message |
 | `{"op":"stat"}` | `{boot,uptime_s,seq,bytes,cap_bytes,topics,subs,dropped}` |
 | `{"op":"sub","topics":[T..],"since":N,"boot":ID}` | A stream, until either side closes |
 
@@ -104,7 +107,9 @@ crewboard serve --socket /tmp/cb.sock --history 256 --cap-bytes 67108864 --max-m
 crewboard pub fleet "main is green again"   # text, or - (or nothing) to read stdin
 crewboard sub task/my-task fleet            # stream; add --since N --boot ID to resume, --json for raw lines
 crewboard tail fleet -n 20                  # history, then exit (default 50)
-crewboard topics                            # topics with counts
+crewboard topics [--summary] [--json]      # topics with counts; --summary adds each topic's one-line summary
+crewboard summary fleet "who, what, decision"   # set a summary (160 chars at most); --seq N = last message covered
+crewboard summarize                        # refresh summaries after new messages (model command, see docs/board.md)
 crewboard stat                              # caps, usage, boot id
 crewboard github-sink --repo owner/board --issue 7   # post fleet messages to an issue (see below)
 ```

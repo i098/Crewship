@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Subprocess } from "bun";
+import { theme } from "../tui-theme/theme.ts";
 import {
   BoxRenderable, createCliRenderer, RGBA, StyledText, TextAttributes, TextRenderable,
   type CliRenderer, type KeyEvent, type TextChunk,
@@ -18,10 +19,11 @@ type Snapshot = {
   saved: Record<string, unknown>; owners: Record<string, string>;
 };
 const colors = {
-  background: RGBA.fromHex("#111c1c"), text: RGBA.fromHex("#c6d1cc"),
-  muted: RGBA.fromHex("#788b85"), selected: RGBA.fromHex("#294337"),
-  ok: RGBA.fromHex("#b4d98b"), failed: RGBA.fromHex("#ed8a8a"),
-  running: RGBA.fromHex("#e6cf83"), unknown: RGBA.fromHex("#788b85"),
+  background: RGBA.fromValues(0, 0, 0, 0), text: RGBA.fromHex(theme.text),
+  muted: RGBA.fromHex(theme.muted), selected: RGBA.fromHex(theme.border),
+  accent: RGBA.fromHex(theme.accent), border: RGBA.fromHex(theme.border),
+  ok: RGBA.fromHex(theme.ok), failed: RGBA.fromHex(theme.error),
+  running: RGBA.fromHex(theme.warn), unknown: RGBA.fromHex(theme.muted),
 };
 const columns: Column[] = ["name", "schedule", "next", "last", "result", "owner", "purpose"];
 const collector = existsSync(join(import.meta.dir, "collector.py"))
@@ -98,13 +100,13 @@ class SchedulesView {
       root.add(node);
       return node;
     };
-    this.title = label(1, colors.ok);
+    this.title = label(1, colors.accent);
     this.title.attributes = TextAttributes.BOLD;
     this.filters = label(1);
     this.errors = label(0, colors.failed);
     this.table = label(1);
     this.panel = new BoxRenderable(renderer, {
-      width: "100%", flexGrow: 1, minHeight: 0, border: ["top"], borderColor: colors.muted,
+      width: "100%", flexGrow: 1, minHeight: 0, border: ["top"], borderColor: colors.border,
     });
     this.details = new TextRenderable(renderer, {
       width: "100%", height: "100%", fg: colors.text, wrapMode: "word", selectable: false,
@@ -112,7 +114,7 @@ class SchedulesView {
     this.panel.add(this.details);
     root.add(this.panel);
     label(1, colors.muted).content = "Local login + system only; no other accounts, containers, remote hosts, or cron child scripts.";
-    this.help = label(1, colors.ok);
+    this.help = label(1, colors.accent);
     renderer.keyInput.on("keypress", (key) => this.handleKey(key));
     renderer.on("resize", () => this.draw());
     this.draw();
@@ -211,7 +213,7 @@ class SchedulesView {
 
   private drawDetails(row?: Row) {
     const lines = row ? (this.journal.length ? [row.display.name, ...this.journal] : row.summary) : ["No matching schedules."];
-    const content = lines.map((line, index) => chunk(line + "\n", index ? colors.text : colors.ok, colors.background, index ? 0 : TextAttributes.BOLD));
+    const content = lines.map((line, index) => chunk(line + "\n", index ? colors.text : colors.accent, colors.background, index ? 0 : TextAttributes.BOLD));
     if (row && this.properties) content.push(chunk("\nProperties:\n" + row.properties.join("\n")));
     this.details.content = new StyledText(content);
   }

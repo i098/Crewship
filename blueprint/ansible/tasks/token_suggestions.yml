@@ -169,14 +169,26 @@
 
 - name: Remove unconfigured token suggestion assets without removing reports
   when: not (crewship_token_suggestions_configured | bool)
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - "{{ crewship_user_units }}/crewship-token-suggestions.service"
-    - "{{ crewship_user_units }}/crewship-token-suggestions.timer"
-    - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
-    - "{{ crewship_token_suggestions_assets }}/token_suggestions_sources.py"
-    - "{{ crewship_token_suggestions_assets }}/usage.py"
-    - "{{ crewship_token_suggestions_assets }}/config.json"
-  notify: reload user systemd
+  block:
+    - name: Look for token suggestion assets
+      ansible.builtin.command:
+        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_token_suggestion_paths | to_json }}"]
+      vars: &crewship_token_suggestion_paths
+        crewship_token_suggestion_paths:
+          - "{{ crewship_user_units }}/crewship-token-suggestions.service"
+          - "{{ crewship_user_units }}/crewship-token-suggestions.timer"
+          - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
+          - "{{ crewship_token_suggestions_assets }}/token_suggestions_sources.py"
+          - "{{ crewship_token_suggestions_assets }}/usage.py"
+          - "{{ crewship_token_suggestions_assets }}/config.json"
+      register: crewship_token_suggestion_paths_found
+      changed_when: false
+      check_mode: false
+
+    - name: Remove the present token suggestion assets
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      vars: *crewship_token_suggestion_paths
+      loop: "{{ crewship_token_suggestion_paths | select('in', (crewship_token_suggestion_paths_found.stdout | from_json).existing) | list }}"
+      notify: reload user systemd

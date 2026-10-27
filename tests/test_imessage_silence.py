@@ -6,8 +6,8 @@ import shutil
 import time
 
 import pytest
-from test_imessage import card_url, http, png, publish_json, read_text, wait_for
-from test_imessage_basic import basic_rig, transport_desk_rig
+from test_imessage import card_url, http, png, publish_json, wait_for
+from test_imessage_basic import basic_rig
 from test_imessage_basic import desk_clock as desk_clock
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
@@ -18,7 +18,7 @@ def typing_events(fake, text):
 
 
 @pytest.mark.parametrize("failure", ["model-fail", "refusal", "model-hold", "status-fail"])
-def test_failed_desk_acknowledges_one_burst_and_clears_typing(tmp_path, desk_clock, failure):
+def test_failed_desk_hands_off_one_burst_without_a_receipt_and_clears_typing(tmp_path, desk_clock, failure):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
     if failure == "refusal":
@@ -37,21 +37,18 @@ def test_failed_desk_acknowledges_one_burst_and_clears_typing(tmp_path, desk_clo
                 if event.get("route") == "done" for request in event["ids"]
             } >= {"photon-lookup", "photon-detail"}, "the completed failure handoff")
         desk_clock(8000)
-        wait_for(lambda: text(fake / "sent"), "the delayed acknowledgement")
-        sent = text(fake / "sent").splitlines()
-        assert len(sent) == 1
-        assert "release job" in sent[0]
-        assert "no confirmed answer yet" in sent[0]
-        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup")
-        assert text(notes).count("photon-lookup ") == text(notes).count("photon-detail ") == 1
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "typing cleanup")
+        wait_for(lambda: text(notes).count("photon-lookup ") == text(notes).count("photon-detail ") == 1, "the durable handoff")
+        assert text(fake / "sent") == ""
         receive("detail", "Check the release job, not the build job.")
         desk_clock(8000)
-        assert text(fake / "sent").splitlines() == sent
+        assert text(fake / "sent") == ""
+        assert text(notes).count("photon-detail ") == 1
         bridge.terminate()
         bridge.wait(10)
         bridge = start(2)
         desk_clock(8000)
-        assert text(fake / "sent").splitlines() == sent
+        assert text(fake / "sent") == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -65,20 +62,42 @@ def test_supervisor_typing_is_not_an_answer(tmp_path, desk_clock):
         receive("lookup", "Check the release job")
         cli("--typing")
         desk_clock(8000)
-        wait_for(lambda: text(fake / "sent"), "the acknowledgement while the supervisor is delayed")
-        wait_for(lambda: typing_events(fake, text)[-1] is False, "the expired typing indicator")
-        assert "release job" in text(fake / "sent")
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "the expired typing indicator")
+        assert text(fake / "sent") == ""
         cli("The release job passed.")
         wait_for(lambda: "The release job passed." in text(fake / "sent"), "the later supervisor answer")
         desk_clock(8000)
-        assert len(text(fake / "sent").splitlines()) == 2
+        assert text(fake / "sent").splitlines() == ["send The release job passed."]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_repeated_unanswered_requests_get_no_generic_receipt(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    (fake / "model-hold").touch()
+    bridge = start(1)
+    try:
+        receive("release", "Check the release job")
+        desk_clock(8000)
+        wait_for(lambda: "photon-release " in text(notes), "the first durable handoff")
+        receive("backup", "Check the backup job")
+        desk_clock(8000)
+        wait_for(lambda: "photon-backup " in text(notes), "the second durable handoff")
+        assert text(fake / "sent") == ""
+        (fake / "model-hold").unlink()
+        cli("The release job passed.")
+        wait_for(lambda: "The release job passed." in text(fake / "sent"), "the later useful answer")
+        desk_clock(8000)
+        assert text(fake / "sent").splitlines() == ["send The release job passed."]
+        assert text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
 
 
 @pytest.mark.parametrize("answer", ["desk", "supervisor"])
-def test_prompt_answer_prevents_an_acknowledgement(tmp_path, desk_clock, answer):
+def test_prompt_answer_is_the_only_response(tmp_path, desk_clock, answer):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     bridge = start(1)
     try:
@@ -118,7 +137,7 @@ def test_queued_supervisor_answer_is_not_delivery(tmp_path, desk_clock):
         bridge.wait(10)
 
 
-def test_queued_desk_answer_survives_the_acknowledgement_deadline(tmp_path, desk_clock):
+def test_queued_desk_answer_survives_the_deadline(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
     (fake / "outage").touch()
@@ -140,7 +159,7 @@ def test_queued_desk_answer_survives_the_acknowledgement_deadline(tmp_path, desk
         bridge.wait(10)
 
 
-def test_pure_social_burst_never_gets_a_timeout_acknowledgement(tmp_path, desk_clock):
+def test_pure_social_burst_gets_no_timeout_text(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"skip"}')
     bridge = start(1)
@@ -151,27 +170,6 @@ def test_pure_social_burst_never_gets_a_timeout_acknowledgement(tmp_path, desk_c
         wait_for(lambda: text(notes), "the conservative handoff")
         desk_clock(8000)
         assert text(fake / "sent") == ""
-    finally:
-        bridge.terminate()
-        bridge.wait(10)
-
-
-@pytest.mark.parametrize("downtime", [0, 62_000])
-def test_pending_handoff_acknowledgement_survives_restart(tmp_path, desk_clock, downtime):
-    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    bridge = start(1)
-    try:
-        receive("work", "Deploy the release job")
-        wait_for(lambda: text(notes), "the durable handoff")
-        bridge.terminate()
-        bridge.wait(10)
-        clock = tmp_path / "clock"
-        publish_json(clock, int(clock.read_text()) + downtime)
-        bridge = start(2)
-        desk_clock(8000)
-        wait_for(lambda: text(fake / "sent"), "the restored acknowledgement deadline")
-        assert len(text(fake / "sent").splitlines()) == 1
-        assert text(notes).count("photon-work ") == 1
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -190,28 +188,12 @@ def test_targeted_answer_does_not_close_another_request(tmp_path, desk_clock, pl
         cli("--reply", str(reply), *(["--no-thread"] if plain else []), response)
         wait_for(lambda: response in text(fake / "sent"), "the targeted answer")
         desk_clock(8000)
-        wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the unanswered request acknowledgement")
-        assert f"{unanswered} job" in text(fake / "sent").splitlines()[1]
-        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed response confirmations")
+        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed response confirmation")
+        sent = text(fake / "sent").splitlines()
+        assert len(sent) == 1 and sent[0].endswith(response)
         confirmations = [event["ids"] for event in map(json.loads, text(state / "routing.jsonl").splitlines()) if event.get("responded")]
-        assert confirmations == [[f"photon-{answered}"], [f"photon-{unanswered}"]]
-    finally:
-        bridge.terminate()
-        bridge.wait(10)
-
-
-@pytest.mark.parametrize("other_chat", ["iMessage;+;group", "iMessage;-;+10000000001"])
-def test_another_chat_does_not_cancel_a_direct_acknowledgement(tmp_path, desk_clock, other_chat):
-    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    bridge = start(1)
-    try:
-        receive("release", "Deploy the release job")
-        desk_clock(4000)
-        receive("elsewhere", "Deploy the backup job", space=other_chat)
-        desk_clock(4000)
-        wait_for(lambda: text(fake / "sent"), "the original direct-chat acknowledgement")
-        assert text(fake / "sent") == "send I saved your message; no confirmed answer yet.\n"
-        assert text(fake / "send-targets").splitlines() == ["iMessage;-;+10000000000"]
+        assert confirmations == [[f"photon-{answered}"]]
+        assert f"photon-{unanswered} " in text(notes)
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -237,7 +219,7 @@ def test_delivered_card_prevents_a_false_missing_answer(tmp_path, desk_clock, ap
         bridge.wait(10)
 
 
-def test_chat_acknowledgement_leaves_another_chat_model_running(tmp_path, desk_clock):
+def test_first_chat_deadline_leaves_another_chat_model_running(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
     bridge = start(1)
@@ -249,18 +231,13 @@ def test_chat_acknowledgement_leaves_another_chat_model_running(tmp_path, desk_c
         desk_clock()
         wait_for(lambda: (fake / "model-started").exists(), "the other chat model")
         desk_clock(2000)
-        wait_for(lambda: text(fake / "sent"), "the first chat acknowledgement")
-        assert text(fake / "sent") == "send I saved your message; no confirmed answer yet.\n"
+        assert text(fake / "sent") == ""
         assert "photon-build " not in text(notes)
         assert "build model-failed" not in text(state / "desk.log")
         (fake / "model-hold").unlink()
         wait_for(lambda: "The build is paused." in text(fake / "sent"), "the other chat answer")
-        assert text(fake / "sent").splitlines() == [
-            "send I saved your message; no confirmed answer yet.", "send The build is paused.",
-        ]
-        assert text(fake / "send-targets").splitlines() == [
-            "iMessage;-;+10000000000", "iMessage;-;+10000000001",
-        ]
+        assert text(fake / "sent").splitlines() == ["send The build is paused."]
+        assert text(fake / "send-targets").splitlines() == ["iMessage;-;+10000000001"]
         wait_for(lambda: typing_events(fake, text)[-1] is False, "the other chat typing cleanup")
     finally:
         bridge.terminate()
@@ -292,7 +269,7 @@ def test_typing_trace_keeps_its_request_after_a_new_message(tmp_path, desk_clock
         bridge.wait(10)
 
 
-def test_synchronous_inbox_timeouts_delay_but_do_not_lose_acknowledgements(tmp_path, desk_clock):
+def test_synchronous_inbox_timeouts_delay_but_do_not_lose_the_deadline_handoff(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
     (fake / "model-hold").touch()
@@ -319,60 +296,16 @@ def test_synchronous_inbox_timeouts_delay_but_do_not_lose_acknowledgements(tmp_p
         wait_for(lambda: (fake / "model-started").exists(), "the held model")
         started = time.monotonic()
         desk_clock(8000)
-        wait_for(lambda: text(fake / "sent"), "the acknowledgement after two inbox timeouts")
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "typing cleanup after two inbox timeouts")
         elapsed = time.monotonic() - started
         attempts = [float(row) for row in text(fake / "note-attempts").splitlines()]
         assert len(attempts) == 2
         assert attempts[1] - attempts[0] >= 4.5
         assert elapsed >= 9
         assert text(err).count("the inbox note failed; routing retains the request") >= 2
-        assert "backup job" in text(fake / "sent")
-        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup after the timeouts")
         wait_for(lambda: text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1, "both retained handoffs")
-        assert len(text(fake / "sent").splitlines()) == 1
-        print(f"Two synchronous inbox timeouts delayed acknowledgement by {elapsed:.3f} seconds.")
-    finally:
-        bridge.terminate()
-        bridge.wait(10)
-
-
-@pytest.mark.parametrize("restart", [False, True])
-def test_cancelled_acknowledgement_recovers_after_a_targeted_reply(tmp_path, desk_clock, restart):
-    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
-    (fake / "typing-down").unlink()
-    (fake / "outage").touch()
-    bridge = start(1)
-    try:
-        receive("release", "Check the release job")
-        cli("--typing")
-        desk_clock(8000)
-        wait_for(lambda: "outbox item" in text(err), "the queued acknowledgement during the outage")
-        receive("backup", "Check the backup job")
-        cli("--reply", "1", "The backup job passed.")
-        wait_for(lambda: any(
-            "acknowledgement" in event and event["acknowledgement"] is None
-            for event in map(json.loads, text(state / "routing.jsonl").splitlines())
-        ), "the cancelled acknowledgement ownership")
         assert text(fake / "sent") == ""
-        if restart:
-            bridge.terminate()
-            bridge.wait(10)
-            bridge = start(2)
-        (fake / "outage").unlink()
-        wait_for(lambda: len(text(fake / "sent").splitlines()) >= 2, "the targeted reply and recovered acknowledgement")
-        wait_for(lambda: not list((state / "outbox").glob("*.json")), "the drained outbox")
-        expected = [
-            "send The backup job passed.",
-            "reply release I saved “Check the release job”; no confirmed answer yet.",
-        ]
-        assert text(fake / "sent").splitlines() == expected
-        wait_for(lambda: typing_events(fake, text)[-1] is False, "typing cleanup")
-        assert text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1
-        bridge.terminate()
-        bridge.wait(10)
-        bridge = start(3 if restart else 2)
-        desk_clock(8000)
-        assert text(fake / "sent").splitlines() == expected
+        print(f"Two synchronous inbox timeouts delayed the deadline handoff by {elapsed:.3f} seconds.")
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -433,10 +366,7 @@ mock.module("node:fs", () => ({
             if event.get("responded")
         )
         desk_clock(8000)
-        expected_count = len(before.splitlines()) + (2 if app else 1)
-        wait_for(lambda: len(text(fake / "sent").splitlines()) >= expected_count, "the unanswered followup acknowledgement")
-        assert len(text(fake / "sent").splitlines()) == expected_count
-        assert text(fake / "sent").splitlines()[-1].endswith("I saved “Check the backup job”; no confirmed answer yet.")
+        assert len(text(fake / "sent").splitlines()) == len(before.splitlines()) + (1 if app else 0)
         sent = text(fake / "sent")
         bridge.terminate()
         bridge.wait(10)
@@ -446,54 +376,6 @@ mock.module("node:fs", () => ({
     finally:
         bridge.terminate()
         bridge.wait(10)
-
-
-@pytest.mark.parametrize("history", ["accepted", "not-sent"])
-@pytest.mark.parametrize("restart", [False, True])
-def test_uncertain_acknowledgement_reconciles_before_cancellation(tmp_path, desk_clock, history, restart):
-    rig, receive = transport_desk_rig(tmp_path)
-    retry = rig.fake / "retry-pause"
-    try:
-        rig.start()
-        receive("bluebubbles", "release", "Check the release job")
-        rig.cli("--typing")
-        retry.write_text("15")
-        rig.relay_mode("lost" if history == "not-sent" else "garbled")
-        desk_clock(8000)
-        wait_for(lambda: (rig.fake / "retry-waiting").exists(), "the uncertain acknowledgement")
-        first = rig.outbox()[0]
-        assert first["maybe"] == {"bluebubbles": "iMessage;-;+10000000000"}
-        receive("bluebubbles", "backup", "Check the backup job")
-        rig.cli("--reply", "1", "The backup job passed.")
-        if restart:
-            rig.stop()
-        rig.relay_mode("")
-        retry.unlink()
-        if restart:
-            rig.start()
-        wait_for(lambda: len(read_text(rig.fake / "relay-sent").splitlines()) >= 2, "the reconciled acknowledgement and targeted answer")
-        wait_for(lambda: not rig.outbox(), "the reconciled outbox")
-        acknowledgement = "iMessage;-;+10000000000 I saved “Check the release job”; no confirmed answer yet."
-        answer = "iMessage;-;+10000000000 The backup job passed."
-        expected = [answer, acknowledgement] if history == "not-sent" else [acknowledgement, answer]
-        assert read_text(rig.fake / "relay-sent").splitlines() == expected
-        receipt = next(
-            item for path in (rig.state / "outbox-done").glob("*.json")
-            if (item := json.loads(path.read_text())).get("requestId") == first["requestId"]
-        )
-        assert not receipt.get("maybe")
-        assert receipt.get("done", 0) == (1 if history == "accepted" else 0)
-        assert read_text(rig.fake / "sent") == ""
-        trace = read_text(rig.state / "desk.log")
-        assert ("release history-reconciled" in trace) == (history == "accepted")
-        assert ("release transport-accepted" in trace) == (history == "not-sent")
-        rig.stop()
-        rig.start()
-        desk_clock(8000)
-        assert read_text(rig.fake / "relay-sent").splitlines() == expected
-    finally:
-        retry.unlink(missing_ok=True)
-        rig.close()
 
 
 @pytest.mark.parametrize("image", [False, True])
@@ -574,16 +456,13 @@ def test_queued_supervisor_response_excludes_later_requests_in_same_millisecond(
         before = text(fake / "sent").splitlines()
         assert len(before) == (2 if output == "image" else 1)
         desk_clock(8000)
-        wait_for(lambda: len(text(fake / "sent").splitlines()) > len(before), "the later request acknowledgement")
-        sent = text(fake / "sent").splitlines()
-        assert sent[:-1] == before
-        assert sent[-1].startswith("reply backup ")
-        assert sent[-1].endswith("no confirmed answer yet.")
+        assert text(fake / "sent").splitlines() == before
+        assert "photon-backup " in text(notes)
         bridge.terminate()
         bridge.wait(10)
         bridge = start(3 if restart else 2)
         desk_clock(8000)
-        assert text(fake / "sent").splitlines() == sent
+        assert text(fake / "sent").splitlines() == before
     finally:
         (fake / "send-hold").unlink(missing_ok=True)
         bridge.terminate()
@@ -592,7 +471,7 @@ def test_queued_supervisor_response_excludes_later_requests_in_same_millisecond(
 
 @pytest.mark.parametrize("kind", ["voice", "attachment"])
 @pytest.mark.parametrize("outcome", ["transcribed", "failed", "unsaved"])
-def test_audio_acknowledgement_omits_transcript_and_saved_path(tmp_path, desk_clock, monkeypatch, kind, outcome):
+def test_audio_handoff_keeps_the_transcript_and_saved_path_private(tmp_path, desk_clock, monkeypatch, kind, outcome):
     preload = tmp_path / "audio-result.ts"
     preload.write_text("""
 import { mock } from "bun:test";
@@ -631,18 +510,15 @@ if (process.env.FM_TEST_AUDIO === "unsaved") {
             assert str(state / "attachments") in text(notes)
         cli("--typing")
         desk_clock(8000)
-        wait_for(lambda: text(fake / "sent"), "the generic audio acknowledgement")
-        assert text(fake / "sent").splitlines() == ["send I saved your message; no confirmed answer yet."]
-        wait_for(lambda: typing_events(fake, text)[-1] is False, "audio typing cleanup")
-        desk_clock(8000)
-        assert text(fake / "sent").splitlines() == ["send I saved your message; no confirmed answer yet."]
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "audio typing cleanup")
+        assert text(fake / "sent") == ""
     finally:
         bridge.terminate()
         bridge.wait(10)
 
 
 @pytest.mark.parametrize("failure", ["write", "fsync"])
-@pytest.mark.parametrize("output", ["text", "image", "acknowledgement", "reaction"])
+@pytest.mark.parametrize("output", ["text", "image", "reaction"])
 @pytest.mark.parametrize("restart", [False, True])
 def test_accepted_response_survives_journal_failure_without_resending(tmp_path, desk_clock, monkeypatch, failure, output, restart):
     preload = tmp_path / "confirmation-failure.ts"
@@ -701,9 +577,6 @@ mock.module("node:fs", () => ({
             photo.write_bytes(png(2, 2))
             cli("--typing")
             cli("--image", str(photo), "The build is paused.")
-        elif output == "acknowledgement":
-            cli("--typing")
-            desk_clock(8000)
         else:
             desk_clock()
         wait_for(lambda: len(text(fake / "confirmation-attempts").splitlines()) >= 2, "repeated response confirmation attempts")

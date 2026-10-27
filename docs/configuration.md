@@ -249,6 +249,7 @@ Firstmate selects Haiku 5.5 or Luna for mechanical work and Mercury 3 for simple
 Sonnet 5.5 handles ordinary engineering; Opus 5.5 handles hard work.
 Sonnet 5.5 is the default; Sol 6.1 takes ordinary work only when the Anthropic quota is exhausted.
 Mercury 3 and Opus use `effort: high`; other tiers leave effort to the spawning home.
+Astra (GPT-6) is never a worker choice.
 Fable is not a spawn choice; see [Default config](default-config.md) for the automatic fallback chain.
 Provider credentials are not included in the dispatch file.
 
@@ -294,7 +295,7 @@ The recipe refuses to overwrite a conflicting unmanaged command or an independen
 | Profile | Default | What it installs |
 | --- | --- | --- |
 | `agents` | on | omp, AXI tools, gh, no-mistakes, treehouse, gws (Google Workspace CLI; [sign-in](google-workspace.md) is manual), acpx; safe omp presentation and model-role settings (see [omp configuration](omp.md)); omp as the [no-mistakes pipeline agent](omp.md#no-mistakes-pipeline-agent); first-write acpx config; the pattern-kill guard omp extension; the [spawned Opus effort cap](#spawned-opus-effort-cap); the opt-in [gluttony](omp.md#gluttony-mode) omp extension; `~/.local/bin/ponytail-review`; browser env defaults; Chrome autoprune timer. |
-| `public_skills` | off; absent keeps them on a host that has them | The skills and rules that ship with Crewship, in `~/.omp/agent/skills/`, `~/.claude/skills/` and `~/.omp/agent/rules/`. `false` or absent on a new host installs none; `true` installs and updates them; turning it off later deletes nothing. See [Skills](omp.md#skills). Private skills always install. |
+| `public_skills` | off; absent keeps them on a host that has them | The skills and rules that ship with Crewship, in `~/.omp/agent/skills/`, `~/.claude/skills/` and `~/.omp/agent/rules/`. `false` or absent on a new host installs none of them; `true` installs and updates them; turning it off later deletes nothing. See [Skills](omp.md#skills). Private skills always install, as do the upstream skills. |
 | `agent_instructions` | off; absent keeps them on a host that has them | The [global instructions](omp.md#global-instructions): `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.omp/agent/AGENTS.md` as one import line. `instructions_mode` (`skip`, `overwrite` or `append`, default `append`) says what happens to a file that exists. The installer checklist asks it when one does. |
 | `development` | off | Rust toolchain (stable), build essentials. |
 | `sgrep` | off | Semantic code and document search. Select `--with sgrep` on a new host, or set `profiles.sgrep: true` and apply on an existing host. Disabling it leaves installed files untouched. See [Dependencies](dependencies.md#latest-releases) for its Rust build and model downloads. |

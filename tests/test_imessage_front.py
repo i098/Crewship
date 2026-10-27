@@ -1,4 +1,4 @@
-"""The direct front returns safe text and work proposals without executing work."""
+"""The direct front returns work proposals without executing work."""
 
 import json
 import shutil
@@ -93,7 +93,7 @@ def selected_reply(value):
 
 def test_social_uses_one_direct_low_reasoning_call(tmp_path):
     result = run_front(tmp_path, [reply({"kind": "social", "text": "You're welcome."})])
-    assert result["result"] == {"text": "You're welcome.", "intents": []}
+    assert result["result"] == {"intents": []}
     assert len(result["calls"]) == 1
     call = result["calls"][0]
     assert call["url"] == "https://provider.invalid/chat/completions"
@@ -107,26 +107,17 @@ def test_social_uses_one_direct_low_reasoning_call(tmp_path):
 @pytest.mark.parametrize("original", [["what is the build status?"], ["thanks", "delete the cache"]])
 def test_social_classification_cannot_discard_work(tmp_path, original):
     result = run_front(tmp_path, [reply({"kind": "social", "text": "The build passed."})], original=original)
-    assert result["result"] == {"text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
+    assert result["result"] == {"intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
 
 
 def test_social_model_text_cannot_add_facts(tmp_path):
     result = run_front(tmp_path, [reply({"kind": "social", "text": "Firstmate finished the build."})])
-    assert result["result"] == {"text": "Got it.", "intents": []}
+    assert result["result"] == {"intents": []}
 
 
 def test_social_turn_cannot_create_a_relay(tmp_path):
     result = run_front(tmp_path, [selected_reply({"kind": "relay", "target": None, "domains": [], "category": "other"})])
-    assert result["result"] == {"text": "Got it.", "intents": []}
-
-
-def test_continuity_uses_safe_text_not_a_memory_quote(tmp_path):
-    result = run_front(
-        tmp_path, [reply({"kind": "continuity", "index": 0})],
-        original=["can we keep talking?"],
-        recent=[{"kind": "owner", "text": "secret password"}, {"kind": "desk", "text": "Hello."}],
-    )
-    assert result["result"] == {"text": "We can keep talking.", "intents": []}
+    assert result["result"] == {"intents": []}
 
 
 @pytest.mark.parametrize("original,recent", [
@@ -138,42 +129,7 @@ def test_recall_and_approval_context_need_background_work(tmp_path, original, re
         tmp_path, [reply({"kind": "continuity", "index": 0})],
         original=original, recent=recent,
     )
-    assert result["result"] == {"text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
-    assert "secret password" not in result["result"]["text"]
-
-
-@pytest.mark.parametrize("selection", [
-    {"kind": "dispatch", "model": 0, "reasoning": 1},
-    {"kind": "relay", "target": None, "domains": [], "category": "other"},
-])
-def test_safe_continuity_cannot_create_work(tmp_path, selection):
-    result = run_front(
-        tmp_path, [selected_reply(selection)], original=["can we keep talking?"],
-        recent=[{"kind": "desk", "text": "Hello."}],
-    )
-    assert result["result"] == {"text": "We can keep talking.", "intents": []}
-    assert len(result["calls"]) == 1
-
-
-@pytest.mark.parametrize("failure", [
-    "missing-key", "missing-redactor", "redaction", "network", "http", "invalid-json", "refusal", None,
-])
-def test_safe_continuity_fallback_stays_local(tmp_path, failure):
-    response = {"choices": [{"message": {"refusal": "no"}}]} if failure == "refusal" else reply({"kind": "invalid"})
-    result = run_front(
-        tmp_path, [response], original=["can we keep talking?"],
-        recent=[{"kind": "desk", "text": "Hello."}], failure=failure,
-    )
-    assert result["result"] == {"text": "We can keep talking.", "intents": []}
-
-
-def test_safe_continuity_with_oversized_history_stays_local(tmp_path):
-    result = run_front(
-        tmp_path, [], original=["can we keep talking?"],
-        recent=[{"kind": "owner", "text": "x" * 100_001}, {"kind": "desk", "text": "Hello."}],
-    )
-    assert result["result"] == {"text": "We can keep talking.", "intents": []}
-    assert result["calls"] == []
+    assert result["result"] == {"intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}]}
 
 
 @pytest.mark.parametrize("original,recent", [
@@ -192,7 +148,7 @@ def test_unsafe_continuity_still_hands_off(tmp_path, original, recent, failure):
         original=original, recent=recent, failure=failure,
     )
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
 
 
@@ -214,7 +170,7 @@ def test_relay_returns_only_a_scoped_target_proposal(tmp_path, target, domains, 
         original=["fix the website"], mates=[{"id": "web", "scope": "website"}, {"id": "ops", "scope": "operations"}],
     )
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": expected, "domains": domains, "category": category}],
+        "intents": [{"kind": "relay", "target": expected, "domains": domains, "category": category}],
     }
 
 
@@ -225,7 +181,7 @@ def test_provider_failure_preserves_handoff_without_a_receipt(tmp_path, failure)
         original=["what is the build status?"], failure=failure,
     )
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
     assert len(result["calls"]) == 1
 
@@ -240,8 +196,6 @@ def test_social_failure_never_creates_inbox_work(tmp_path, failure):
     }
     result = run_front(tmp_path, [response], failure=failure)["result"]
     assert result["intents"] == []
-    assert 0 < len(result["text"]) <= 80
-    assert "build" not in result["text"].lower()
 
 
 def test_social_words_after_an_approval_question_still_relay_on_failure(tmp_path):
@@ -265,7 +219,7 @@ def test_invalid_responses_stop_after_two_calls(tmp_path, value):
     )
     assert len(result["calls"]) == 2
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
 
 
@@ -280,7 +234,7 @@ def test_cancellation_returns_no_stale_receipt(tmp_path, failure, calls):
 def test_dispatch_keeps_the_front_selected_model_and_effort(tmp_path):
     selection = {"kind": "dispatch", "model": "inception/mercury-3", "reasoning": "high"}
     result = run_front(tmp_path, [selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1})], original=["Read the current status"])
-    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["result"] == {"intents": [selection]}
     body = result["calls"][0]["body"]
     assert body["model"] == "mercury-3" and body["reasoning_effort"] == "low"
 
@@ -321,7 +275,7 @@ def test_unowned_work_relay_repairs_to_a_selected_dispatch(tmp_path):
         selected_reply({"kind": "dispatch", "model": 0, "reasoning": 1}),
     ], original=["Read the current status"])
     assert len(result["calls"]) == 2
-    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["result"] == {"intents": [selection]}
 
 
 @pytest.mark.skipif(not shutil.which("omp"), reason="needs the installed native secret filter")
@@ -360,7 +314,7 @@ def test_native_masking_covers_complete_payload_and_retry_without_changing_autho
         models=[{"id": "project-credential", "reasoning": ["high", "pin7"]}],
         secret_env=environment,
     )
-    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["result"] == {"intents": [selection]}
     assert result["before"] == result["after"]
     assert len(result["calls"]) == 2
     for call in result["calls"]:
@@ -386,7 +340,7 @@ def test_social_history_masks_credentials_before_the_direct_request(tmp_path):
         recent=[{"kind": "owner", "text": "The key is test-only-key"}, {"kind": "desk", "text": "Hello."}],
         secret_env={"INCEPTION_API_KEY": "test-only-key"},
     )
-    assert result["result"] == {"text": "You're welcome.", "intents": []}
+    assert result["result"] == {"intents": []}
     assert result["before"] == result["after"]
     assert len(result["calls"]) == 1
     payload = json.loads(result["calls"][0]["body"]["messages"][1]["content"])
@@ -398,7 +352,7 @@ def test_missing_or_failed_masking_sends_no_request(tmp_path, failure):
     result = run_front(tmp_path, [], original=["Read the status"], failure=failure)
     assert result["calls"] == []
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
 
 
@@ -412,13 +366,13 @@ def test_short_credentials_preserve_protocol_and_redact_data_on_both_attempts(tm
         recent=[{"kind": "owner", "text": secret}],
         secret_env={"SHORT_TOKEN": secret, "INCEPTION_API_KEY": "test-only-key"},
     )
-    assert result["result"] == {"text": "", "intents": [selection]}
+    assert result["result"] == {"intents": [selection]}
     assert result["before"] == result["after"]
     assert len(result["calls"]) == 2
     for attempt, call in enumerate(result["calls"]):
         body = call["body"]
         assert body["model"] == "mercury-3"
-        assert body["max_tokens"] == 512
+        assert body["max_tokens"] == 2048
         assert body["response_format"] == {"type": "json_object"}
         assert [message["role"] for message in body["messages"]] == (
             ["system", "user"] if attempt == 0 else ["system", "user", "assistant", "user"]
@@ -447,7 +401,7 @@ def test_colliding_model_and_effort_labels_resolve_advertised_references(tmp_pat
         secret_env={"SHORT_TOKEN": "1", "SECOND_TOKEN": "2", "LOW_TOKEN": "low", "HIGH_TOKEN": "high"},
     )
     assert result["result"] == {
-        "text": "", "intents": [{
+        "intents": [{
             "kind": "dispatch", "model": models[selected]["id"],
             "reasoning": models[selected]["reasoning"][1],
         }],
@@ -476,7 +430,7 @@ def test_colliding_mate_labels_preserve_target_and_domain_identity(tmp_path, sel
         secret_env={"SHORT_TOKEN": "1", "SECOND_TOKEN": "2"},
     )
     assert result["result"] == {
-        "text": "", "intents": [{
+        "intents": [{
             "kind": "relay", "target": mates[selected]["id"],
             "domains": [mates[selected]["id"]], "category": "work",
         }],
@@ -508,6 +462,6 @@ def test_unknown_or_non_integer_references_never_select_work(tmp_path, selection
         mates=[{"id": "web", "scope": "website"}],
     )
     assert result["result"] == {
-        "text": "", "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
+        "intents": [{"kind": "relay", "target": "firstmate", "domains": [], "category": "other"}],
     }
     assert len(result["calls"]) == 2

@@ -44,10 +44,15 @@ def installed(tmp_path_factory):
     package.mkdir(parents=True)
     (package / "package.json").write_text(json.dumps({
         "type": "module",
-        "exports": {"./config/settings": "./config.js", "./session/settings": "./session.js"},
+        "exports": {"./config/settings": "./config.js", "./config/model-settings": "./models.js",
+                    "./session/settings": "./session.js"},
     }))
     (package / "config.js").write_text(
         "export const findScopedSettings = () => globalThis.gluttonSettings;\n"
+    )
+    (package / "models.js").write_text(
+        "export const cfgModelRoles = {"
+        "get: scope => scope.roles, override: (scope, value) => scope.roles = value};\n"
     )
     (package / "session.js").write_text(
         "export const cfgRetryFallbackChains = {"
@@ -339,6 +344,33 @@ console.log(JSON.stringify(result));
 """, context={"agent": {"kind": "sub"}}) == {"model": "anthropic/claude-sonnet-5-5:max"}
 
 
+@pytest.mark.parametrize("provider,model,smol,expected", [
+    ("anthropic", "claude-sonnet-5-5", "anthropic/claude-sonnet-5-5:off", "inception/mercury-3:high"),
+    ("anthropic", "claude-sonnet-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-haiku-5-5:high"),
+    ("anthropic", "claude-sonnet-5-5", "anthropic/claude-haiku-5-5:medium", "anthropic/claude-haiku-5-5:medium"),
+    ("openai-codex", "gpt-6.1-sol", "anthropic/claude-haiku-5-5:high", "openai-codex/gpt-6-luna:high"),
+])
+def test_subagent_helper_role_follows_fast_bounds(installed, tmp_path, provider, model, smol, expected):
+    assert run(installed, tmp_path, f"""
+roles.smol = {json.dumps(smol)};
+ext(api); await start();
+console.log(JSON.stringify(settings.roles.smol));
+""", context={"agent": {"kind": "sub"}, "model": {"provider": provider, "id": model}}) == expected
+
+
+@pytest.mark.parametrize("keys,expected", [
+    ("credentials.set('inception/mercury-3', undefined);", "anthropic/claude-haiku-5-5:high"),
+    ("defaultCredential = undefined;", "anthropic/claude-sonnet-5-5:off"),
+])
+def test_subagent_helper_role_needs_usable_credential(installed, tmp_path, keys, expected):
+    assert run(installed, tmp_path, f"""
+roles.smol = 'anthropic/claude-sonnet-5-5:off';
+{keys}
+ext(api); await start();
+console.log(JSON.stringify(settings.roles.smol));
+""", context={"agent": {"kind": "sub"}, "model": {"provider": "anthropic", "id": "claude-sonnet-5-5"}}) == expected
+
+
 @pytest.mark.parametrize("provider,model,level,expected", [
     ("anthropic", "claude-haiku-5-5", "low", "high"),
     ("anthropic", "claude-sonnet-5-5", "low", "medium"),
@@ -440,6 +472,33 @@ try {
   console.log(JSON.stringify(error.message));
 }
 """) == "Gluttony: no allowed restored worker model has a usable credential."
+
+
+def test_spawn_after_sign_in_uses_current_credentials(installed, tmp_path):
+    assert run(installed, tmp_path, """
+defaultCredential = undefined;
+ext(api); await start();
+credentials.set('anthropic/claude-haiku-5-5', 'new-token');
+await spawn('signed-in', 'fast', 'Work');
+const saved = {type: 'session_init', agent: 'sonic', modelRole: 'smol',
+  resolvedModel: 'anthropic/claude-haiku-5-5:high'};
+console.log(JSON.stringify(new SessionManager([saved]).getEntries()[0].resolvedModel));
+""") == "anthropic/claude-haiku-5-5:high"
+
+
+def test_live_read_after_restore_uses_later_sign_in(installed, tmp_path):
+    assert run(installed, tmp_path, """
+defaultCredential = undefined;
+credentials.set('anthropic/claude-haiku-5-5', 'token');
+ext(api); await start();
+const manager = new SessionManager([{type: 'session_init', agent: 'sonic', modelRole: 'smol',
+  resolvedModel: 'anthropic/claude-haiku-5-5:high'}]);
+manager.getEntries();
+credentials.set('anthropic/claude-sonnet-5-5', 'new-token');
+manager.entries.push({type: 'session_init', agent: 'task', modelRole: 'task',
+  resolvedModel: 'anthropic/claude-sonnet-5-5:medium'});
+console.log(JSON.stringify(manager.getEntries()[1].resolvedModel));
+""") == "anthropic/claude-sonnet-5-5:medium"
 
 
 @pytest.mark.parametrize("provider,primary,retry,expected", [

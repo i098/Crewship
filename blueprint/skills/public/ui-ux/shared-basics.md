@@ -52,6 +52,19 @@ Implementation clarification (not from the reel): `em` on `font-size` is relativ
 ```
 Check: raise the browser default font size; text and spacing grow, borders do not.
 
+## Color [De2WSZDohDe]
+Source: a reel; author not identified.
+Why: RGB mixes hue, saturation and lightness. Editing one RGB value by hand breaks the rest of the scheme.
+Do: pick one brand hue (for example, 250). Primary = that hue at 85% saturation, 62% lightness. Every other color = that hue at 10% saturation. Derive neutrals by fixed lightness steps.
+Dark mode: background 8%, card 12% (background +4), secondary card 16% (card +4), text 94%.
+Light mode: background 96%, card 92% (background -4), secondary card 88% (card -4), text 8%.
+Don't: use pure white or pure black for text or backgrounds.
+Check: change only the hue. The whole scheme must recolor.
+```css
+/* don't */ --primary: #6d5bd0; --card: #1a1a1f;
+/* do */    --primary: hsl(250 85% 62%); --bg: hsl(250 10% 8%); --card: hsl(250 10% 12%); --text: hsl(250 10% 94%);
+```
+
 ## Accessibility
 - Keep every necessary label. A floating label is still a label [Db8J5z5Oy8-]. Removing icons or helper text never removes a label [Dej3pg9IYNv].
 - Respect `prefers-reduced-motion: reduce` (implementation clarification, not from a reel): replace looping or moving animation with a static frame.

@@ -92,6 +92,8 @@
 # JSON object whose `changed` is the only changed signal. The public skills and rules
 # are opt-in: profiles.public_skills true installs them, false leaves them out, and
 # absent installs them only on a host that already has them. Nothing is removed for it.
+# The skills in the installer's UPSTREAM (vision) install on every host, from GitHub,
+# whatever profiles.public_skills says.
 - name: Install the Crewship skills for omp and Claude Code, and its omp rules
   ansible.builtin.command:
     argv: >-
@@ -142,6 +144,32 @@
   when:
     - not ansible_check_mode
     - result.backups | length > 0 or result.skipped | length > 0
+
+# The kun skill (https://github.com/kunchenguid/kun) has no releases, so there is no
+# published checksum: install the latest default-branch commit, resolved unauthenticated
+# with git ls-remote (the repo is public). The commit SHA goes in the task output and in a marker
+# inside the skill dir; a matching marker skips the install. `-a codex -a claude-code`
+# installs to ~/.agents/skills and links Claude Code; the default agent set fails on
+# PromptScript, which refuses global skills.
+- name: Install the kun skill at the latest default-branch commit
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sha=$(git ls-remote https://github.com/kunchenguid/kun HEAD | cut -f1)
+    test -n "$sha"
+    marker='{{ kun_skill_dir }}/.crewship-sha'
+    if [ "$(cat "$marker" 2>/dev/null || true)" = "$sha" ]; then echo "kun already at $sha"; exit 0; fi
+    DISABLE_TELEMETRY=1 DO_NOT_TRACK=1 npx --yes skills add "kunchenguid/kun#$sha" -g -a codex -a claude-code --json -y
+    echo "$sha" > "$marker"
+    echo "kun installed at $sha"
+  args:
+    executable: /bin/bash
+  vars:
+    kun_skill_dir: "{{ crewship_cfg.home }}/.agents/skills/kun"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  register: crewship_kun_run
+  changed_when: "'kun installed at' in crewship_kun_run.stdout"
+  when: not ansible_check_mode
 
 # The omp extension that feeds the Herdr agent sidebar layout ($who, the pull
 # request parts and the bare topic title; docs/herdr.md). Managed: every apply

@@ -1,0 +1,8 @@
+{
+  "name": "@crewship/fleet-health",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opentui/core": "0.6.6"
+  }
+}
