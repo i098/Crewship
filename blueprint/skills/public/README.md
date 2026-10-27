@@ -2,6 +2,7 @@
 
 Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. A folder with no `SKILL.md` of its own groups skills as `<group>/<name>/SKILL.md`: a file the skills share sits once in the group folder, with a relative symlink to it in each skill. The group installs whole, with its links, and each skill in it installs as a link `<name>` to `<group>/<name>`. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
 
+- [`apple-hig`](apple-hig/SKILL.md): short Apple Human Interface Guidelines rules with a link to each HIG page, for iOS, macOS and mobile UI work.
 - [`be-ambitious`](be-ambitious/SKILL.md): deepen a prompt through expert methods, primary sources, and external verification (MIT; [Dan McAteer](https://github.com/DannyMac180), [source](https://github.com/DannyMac180/skills/tree/main/be-ambitious)).
 - [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
 - [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
