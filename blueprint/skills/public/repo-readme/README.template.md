@@ -8,7 +8,6 @@
 [![Release](https://img.shields.io/github/v/release/{{owner}}/{{repo}}?style=for-the-badge&logo=github&label=&color=2563eb)](https://github.com/{{owner}}/{{repo}}/releases/latest)
 [![License: {{SPDX id}}](https://img.shields.io/badge/{{SPDX--id}}-0d9488?style=for-the-badge)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/{{owner}}/{{repo}}?style=for-the-badge&logo=github&color=d97706)](https://github.com/{{owner}}/{{repo}}/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/{{owner}}/{{repo}}?style=for-the-badge&logo=git&logoColor=white&label=updated&color=6b7280)](https://github.com/{{owner}}/{{repo}}/commits/main)
 [![Sponsor](https://img.shields.io/badge/Sponsor-db61a2?style=for-the-badge&logo=githubsponsors&logoColor=white)]({{sponsor page URL}})
 
 [Try it]({{hosted URL}}) · [Docs](#more-docs) · [Changelog](CHANGELOG.md) · [Contribute](CONTRIBUTING.md)

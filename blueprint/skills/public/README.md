@@ -28,7 +28,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`prod-readiness`](prod-readiness/SKILL.md): run 20 evidence-backed checks before a production launch, deploy, release to users, or an "is this ready" review.
 - [`progress-bars`](progress-bars/SKILL.md): a fixed ASCII progress-bar format with percentages from real counts.
 - [`quality-gates`](quality-gates/SKILL.md): sentrux and fallow gates and the pull-based codex advisor.
-- [`repo-readme`](repo-readme/SKILL.md): write or polish a repository README: hero with badges and Sponsor button, live screenshot, present-tense features, quick start, how-it-works diagram, layout and license, with a template and a polish checklist (community files, templates, topics and SEO, social preview).
+- [`repo-readme`](repo-readme/SKILL.md): study similar repositories, then write a short README with peer-shared sections, GitHub best practices, a hero, screenshots, quick start, diagram, layout, and license.
 - [`signal-chunks`](signal-chunks/SKILL.md): plan a week with one shipping goal and a timezoned deadline, eighteen-hour chunks, three to five signal tasks, named noise, an eighty-percent effort target, and CHUNK status with a verdict (Jobs-inspired method, not a claim about Jobs' own schedule).
 - [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): relay Slack messages to iMessage; see the skill for filtering rules and setup.
