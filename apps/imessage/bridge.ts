@@ -1050,7 +1050,7 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
   const intent = plan.intents[0];
   put({
     ...target.ref, ...plan.front, kind: "desk", loop: "v2", front: true, reply: target.ref.id,
-    bubbles: [`I am routing this request to ${intent?.kind !== "relay" ? "a worker" : plan.mate ? `the ${plan.mate.id} secondmate` : "Firstmate"}.`],
+    bubbles: [`I am routing this request to ${intent?.kind === "relay" ? (plan.mate ? `the ${plan.mate.id} secondmate` : "Firstmate") : dispatchSelection(intent, v2Models) ? "a worker" : "Firstmate"}.`],
   });
   if (intent?.kind === "dispatch") await dispatchV2(pending, intent, controller.signal, current);
   else if (intent?.kind === "relay") await relayV2(pending, plan, current);

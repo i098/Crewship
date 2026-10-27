@@ -166,3 +166,19 @@ def test_unreachable_front_falls_back_to_firstmate(tmp_path):
                              for e in events(rig)), "the fail-closed handoff", timeout=120)
         wait_for(lambda: texts(rig), "the fallback front reply", timeout=30)
         assert not texts(rig)[0].startswith("react ")
+
+
+def test_unavailable_dispatch_model_gets_a_firstmate_receipt(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]) as rig:
+        deliver(rig, "m1", "please check the whole repo")
+        wait_for(lambda: texts(rig) and rig.outbox() == [], "the first receipt")
+        rig.stop()
+        plan = next(e["v2"] for e in events(rig) if "v2" in e)
+        plan["front"]["requestId"] = "front-unavailable"
+        plan["intents"] = [{"kind": "dispatch", "model": "nonexistent/model", "reasoning": "off"}]
+        with (rig.state / "routing.jsonl").open("a") as log:
+            log.write(json.dumps({"ids": ["bluebubbles-m1"], "v2": plan}) + "\n")
+            log.write(json.dumps({"ids": ["bluebubbles-m1"], "route": "pending"}) + "\n")
+        rig.start()
+        wait_for(lambda: len(texts(rig)) == 2, "the dispatch receipt")
+        assert "Firstmate" in texts(rig)[1] and "worker" not in texts(rig)[1]
