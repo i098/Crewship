@@ -81,6 +81,31 @@ def keep(env, *args):
     ).stdout
 
 
+def add_session(tmp, key, file):
+    state = tmp / "lavish/state.json"
+    data = json.loads(state.read_text())
+    data["sessions"][key] = {"key": key, "file": file, "url": "", "status": "open"}
+    state.write_text(json.dumps(data))
+
+
+@needs_bun
+def test_title_entities_decode_once(host):
+    tmp, _, env = host
+    add_session(tmp, "b8" * 8, board(tmp / "x/board.html", "Tags &amp;lt;b&amp;gt; &lt;i&gt;"))
+    assert "Tags &lt;b&gt; <i>" in tui(env)[1]["b8" * 8]
+
+
+@needs_bun
+def test_long_home_like_path_is_fast(host):
+    tmp, _, env = host
+    add_session(tmp, "c9" * 8, "/x/" + "firstmate-." * 60000 + "/firstmate/b.html")
+    # A backtracking home pattern took minutes on this path; timeout=10 fails the run instead.
+    rows = subprocess.run(
+        [BUN, str(TUI), "--once"], env=env, capture_output=True, text=True, check=True, timeout=10
+    ).stdout
+    assert "main" in next(line for line in rows.splitlines() if "c9" * 8 in line)
+
+
 @needs_bun
 def test_gone_workers_sort_first_with_owner_and_reason(host):
     head, rows, order = tui(host[2])

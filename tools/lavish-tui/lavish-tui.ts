@@ -28,8 +28,11 @@ function homeRoots(): string[] {
   return roots
 }
 
-const HOME_RE = /firstmate-([^/_]+)[/_](\d+)[/_]firstmate/
-const homeLabel = (root: string) => root.match(HOME_RE)?.slice(1, 3).join("/") ?? "main"
+// A treehouse home root ends in firstmate-<suffix>/<n>/firstmate and is labelled <suffix>/<n>; any other root is the main home.
+function homeLabel(root: string): string {
+  const [pool, n, leaf] = root.split("/").slice(-3)
+  return pool?.startsWith("firstmate-") && /^\d+$/.test(n ?? "") && leaf === "firstmate" ? `${pool.slice(10)}/${n}` : "main"
+}
 
 type Live = { worktrees: Map<string, string>; tasks: Set<string> } // worktree -> task; "<home root>\n<task>"
 
@@ -78,7 +81,8 @@ function titleOf(file: string): string {
     const n = readSync(fd, head, 0, head.length, 0)
     closeSync(fd)
     const t = head.toString("utf8", 0, n).match(/<title[^>]*>([^<]*)<\/title>/i)?.[1].trim()
-    if (t) return t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" }
+    if (t) return t.replace(/&(amp|lt|gt|quot|#39);/g, (_, e: string) => named[e]) // one pass, so "&amp;lt;" stays "&lt;"
   } catch {}
   return basename(file).replace(/\.html?$/, "")
 }
