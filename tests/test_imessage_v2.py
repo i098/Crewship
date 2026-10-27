@@ -79,6 +79,7 @@ def v2_rig(tmp_path, front, inception=None):
         rig.start()
         yield rig
     finally:
+        rig.close()
         if server:
             subprocess.Popen.terminate(server)
             subprocess.Popen.wait(server, 10)
@@ -106,12 +107,33 @@ def test_social_text_gets_one_tapback_even_when_the_model_returns_text(tmp_path)
         assert not any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
 
 
-def test_work_request_relays_to_firstmate_without_any_text(tmp_path):
+@pytest.mark.parametrize("resume", [None, "relay", "dispatch"])
+def test_work_request_gets_front_reply_without_completing_handoff(tmp_path, resume):
     with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]) as rig:
         deliver(rig, "m1", "please check the whole repo")
         wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", [])
                              for e in events(rig)), "the firstmate handoff", timeout=120)
-        assert not texts(rig)  # a work request hands off silently: no text and no tapback
+        wait_for(lambda: texts(rig), "the front reply", timeout=5)
+        assert len(texts(rig)) == 1
+        assert not texts(rig)[0].startswith("react ")
+        assert not any("responded" in e for e in events(rig))
+        if resume:
+            wait_for(lambda: rig.outbox() == [], "the front delivery receipt")
+            rig.stop()
+            plan = next(e["v2"] for e in events(rig) if "v2" in e)
+            if resume == "dispatch":
+                plan["intents"] = [{"kind": "dispatch", "model": "anthropic/claude-haiku-5.5", "reasoning": "off"}]
+            with (rig.state / "routing.jsonl").open("a") as log:
+                log.write(json.dumps({"ids": ["bluebubbles-m1"], "v2": plan}) + "\n")
+                log.write(json.dumps({"ids": ["bluebubbles-m1"], "route": "pending"}) + "\n")
+            rig.start()
+            wait_for(lambda: sum(e.get("route") == "handoff" for e in events(rig)) == 2, "the resumed handoff")
+            wait_for(lambda: rig.outbox() == [], "the deduplicated front reply")
+            assert len(texts(rig)) == 1
+            assert not any("responded" in e for e in events(rig))
+        rig.cli("The review is complete.")
+        wait_for(lambda: len(texts(rig)) == 2, "the final answer", timeout=30)
+        wait_for(lambda: any("responded" in e for e in events(rig)), "the completed request", timeout=30)
         assert not any(e.get("route") == "desk" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
 
 
@@ -120,4 +142,5 @@ def test_unreachable_front_falls_back_to_firstmate(tmp_path):
         deliver(rig, "m1", "please check the whole repo")
         wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", [])
                              for e in events(rig)), "the fail-closed handoff", timeout=120)
-        assert not texts(rig)
+        wait_for(lambda: texts(rig), "the fallback front reply", timeout=30)
+        assert not texts(rig)[0].startswith("react ")
