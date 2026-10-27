@@ -174,8 +174,9 @@ export function attachPostmortems(runs: Run[], notes: string[]): string[] {
   for (const r of runs) r.notes = []
   return notes.filter(n => {
     // Whole tokens, so `#421` or `/pull/421` never names PR 42.
-    const refs = new Set(n.match(/#\d+|https?:\/\/[^\s)|>\]]+?\/pull\/\d+/g))
-    const hits = runs.filter(r => n.includes(r.id) || refs.has(r.pr) || (r.prUrl !== null && refs.has(r.prUrl)))
+    const refs = new Set(n.match(/#\d+/g))
+    const namesUrl = (u: string) => n.split(u).slice(1).some(rest => !/^\d/.test(rest))
+    const hits = runs.filter(r => n.includes(r.id) || refs.has(r.pr) || (r.prUrl !== null && namesUrl(r.prUrl)))
     for (const r of hits) r.notes.push(n)
     return !hits.length
   })

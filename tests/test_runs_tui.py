@@ -237,6 +237,13 @@ def test_postmortem_lines_show_under_the_run_they_name(host, tmp_path):
     assert not any("not an entry" in line for line in loose)
 
 
+def test_note_with_many_repeated_urls_does_not_stall(host, tmp_path):
+    note = tmp_path / "pm.md"
+    note.write_text("2026-10-27 | " + "http://" * 20000 + " | x\n")
+    out = run_once({**host, "CREWSHIP_POSTMORTEM_PATHS": str(note)}, "--all")
+    assert any(line.startswith("• 2026-10-27 | http://") for line in out)
+
+
 def test_note_naming_a_hidden_run_is_listed_as_unmatched_in_the_default_view(host, tmp_path):
     note = tmp_path / "pm.md"
     note.write_text("2026-10-25 | 01TESTOLDFAIL | test | old failure | - | -\n")
