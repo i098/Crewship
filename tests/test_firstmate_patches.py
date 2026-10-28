@@ -513,3 +513,25 @@ def test_crewboard_event_source_suite_passes_on_the_patched_tree(crewboard_first
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.count("ok - ") == 7
+
+
+def test_decision_queue_suite_passes_on_the_patched_tree(tmp_path):
+    """0006 alone on a clone of the supplied upstream; its own shell suite drives the queue and the hook."""
+    source = os.environ.get("FIRSTMATE_TEST_SOURCE")
+    if not source:
+        pytest.skip("Set FIRSTMATE_TEST_SOURCE to an upstream Firstmate source tree")
+    checkout = tmp_path / "source"
+    subprocess.run(["git", "clone", "-q", "--no-checkout", source, str(checkout)], check=True)
+    target = git(Path(source), "rev-parse", "HEAD")
+    git(checkout, "checkout", "-q", "-B", "main", target)
+    patches = tmp_path / "patches"
+    patches.mkdir()
+    shutil.copy(next((ROOT / "blueprint/patches/firstmate").glob("0006-*.patch")), patches)
+    subprocess.run(["bash", SCRIPT, "apply", checkout, target, patches], check=True, capture_output=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FM_")}
+    result = subprocess.run(
+        ["bash", "tests/fm-decision-queue.test.sh"],
+        cwd=checkout, env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("ok - ") == 10
