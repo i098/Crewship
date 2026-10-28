@@ -43,3 +43,17 @@ A `queued` record shows as open, `dispatched` as in progress, `closed` as answer
 Open, in progress and stuck rows count from enqueue; answered and closed rows count from the close. The view reloads every 15 seconds and never edits a record.
 
 Keys: `↑↓/jk` move, `r` reload, `t` tasks, `d` back to the view you came from. `bun crewboard-tui.ts --once --queue [home...]` prints a plain snapshot.
+
+## Front desk view
+
+Press `m` (or start with `--desk`) for the health of the iMessage front desk (`apps/imessage`), read from its state folder (`$FM_IMESSAGE_STATE`, else `~/.local/state/fm-imessage`) and the `fm-imessage` user unit.
+It shows counts, ages and latencies only; it never opens a queue item, so no message text, number or name is shown, and it never writes, restarts or sends.
+
+- Bridge up or down: `systemctl --user is-active fm-imessage`, plus the age of the last `desk.log` line.
+- Pending bubbles: files in `outbox/`; the oldest pending age is the oldest file's modification time.
+- Retries: the highest `failed (try N)` for a pending item in the last 30 minutes of the unit's journal. The queue keeps no retry count on disk.
+- Sent, last 24 hours: `transport-accepted` lines in `desk.log` (one per bubble or tapback the transport took). `outbox-done/` keeps only keyed items, so it is not used.
+- Failed, last 24 hours: files in `outbox-dead/`, by the burial time in the file name.
+- Desk reply latency: per message, `inbox-accepted` to its first `response-confirmed` in `desk.log`; last, median and p95 over 24 hours.
+
+Keys: `r` reload, `m` back to the board, `t` tasks, `d` decision queue. It reloads every 15 seconds. `bun crewboard-tui.ts --once --desk` prints a plain snapshot.
