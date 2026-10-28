@@ -45,7 +45,7 @@ struct Topic {
     last: u64,
     /// One line for readers choosing a thread; empty until a summarizer sets it.
     summary: String,
-    /// Highest seq delivered to a non-viewer client (an agent); viewer reads never move it.
+    /// Highest seq delivered to a non-viewer client that names the topic exactly (an agent); viewers and wildcard subscribers never move it.
     read_seq: u64,
     /// Seq of the last message the summary covers.
     summary_seq: u64,
@@ -152,7 +152,7 @@ impl Board {
     }
 
     /// Delivers `line` to the matching subscribers and drops slow or closed ones.
-    /// True when a non-viewer subscriber received it.
+    /// True when a non-viewer subscriber that names the topic exactly received it; wildcards only queue.
     fn fan_out(&mut self, topic: &str, line: &Arc<str>) -> bool {
         let dropped = &mut self.dropped;
         let mut agent_read = false;
@@ -162,7 +162,7 @@ impl Board {
             }
             match s.tx.try_send(line.clone()) {
                 Ok(()) => {
-                    agent_read |= !s.viewer;
+                    agent_read |= !s.viewer && s.patterns.iter().any(|p| p == topic);
                     true
                 }
                 Err(TrySendError::Full(_)) => {
@@ -176,9 +176,9 @@ impl Board {
         agent_read
     }
 
-    /// Counts the newest message of each topic matching `patterns` as read by an agent when it is above `after`.
+    /// Counts the newest message of each topic named exactly in `patterns` as read by an agent when it is above `after`.
     fn mark_read_after(&mut self, patterns: &[String], after: u64) {
-        for (_, t) in self.topics.iter_mut().filter(|(n, _)| patterns.iter().any(|p| matches(p, n))) {
+        for (_, t) in self.topics.iter_mut().filter(|(n, _)| patterns.iter().any(|p| p == *n)) {
             if let Some(newest) = t.ring.back().map(|m| m.seq).filter(|&s| s > after) {
                 t.read_seq = t.read_seq.max(newest);
             }
@@ -499,19 +499,24 @@ mod tests {
         b.publish("t", None, 1, "2").unwrap();
         viewer.rx.try_recv().unwrap();
         assert_eq!(read_seq(&b), json!(0));
-        // An agent's live delivery moves it.
-        let (_, _, mut agent) = b.subscribe(vec!["t".into()], None, None, false).unwrap();
+        // A wildcard subscriber only queues messages.
+        let (_, _, mut star) = b.subscribe(vec!["*".into(), "t*".into()], Some(0), None, false).unwrap();
         b.publish("t", None, 1, "3").unwrap();
-        agent.rx.try_recv().unwrap();
-        assert_eq!(read_seq(&b), json!(3));
-        // An agent's replay moves it too, and a hist read is marked explicitly.
+        star.rx.try_recv().unwrap();
+        assert_eq!(read_seq(&b), json!(0));
+        // A non-viewer naming the topic exactly moves it.
+        let (_, _, mut agent) = b.subscribe(vec!["t".into()], None, None, false).unwrap();
         b.publish("t", None, 1, "4").unwrap();
+        agent.rx.try_recv().unwrap();
         assert_eq!(read_seq(&b), json!(4));
-        b.publish("u", None, 1, "5").unwrap();
+        // An agent's replay moves it too, and a hist read is marked explicitly.
+        b.publish("t", None, 1, "5").unwrap();
+        assert_eq!(read_seq(&b), json!(5));
+        b.publish("u", None, 1, "6").unwrap();
         assert_eq!(b.read("u", 10, true).len(), 1);
         assert_eq!(b.topics(false)[1]["read_seq"], json!(0));
         b.read("u", 10, false);
-        assert_eq!(b.topics(false)[1]["read_seq"], json!(5));
+        assert_eq!(b.topics(false)[1]["read_seq"], json!(6));
     }
 
     #[test]

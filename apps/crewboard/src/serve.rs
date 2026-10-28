@@ -5,8 +5,9 @@
 //! - `{"op":"pub","topic":T,"body":B,"from":F}` -> `{"ok":true,"seq":N}`; a body over
 //!   `--max-msg` bytes or a `from` over 64 bytes is `{"ok":false,"error":"too_large"}`
 //! - `{"op":"hist","topic":T,"n":N}`, `{"op":"topics","summary":true}`, `{"op":"stat"}`
-//!   `sub` and `hist` take `"viewer":true` for a human's reads. Other reads count as agent reads:
-//!   `topics` reports per topic `read_seq`, the highest seq delivered to one.
+//!   `sub` and `hist` take `"viewer":true` for a human's reads. Other reads count as agent reads,
+//!   except wildcard `sub` entries, which only queue: `topics` reports per topic `read_seq`, the
+//!   highest seq read by one.
 //! - `{"op":"summary","topic":T,"summary":S,"seq":N}` -> `{"ok":true}`; `topics` with
 //!   `summary:true` adds `summary` and `summary_seq`. `seq` is optional; `stale` when older.
 //! - `{"op":"sub","topics":[T..],"since":N,"boot":ID}` streams until either side closes.

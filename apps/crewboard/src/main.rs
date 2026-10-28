@@ -26,7 +26,8 @@ const USAGE: &str = "usage:
                                           boot replays all history after a gap marker with restarted:true
   crewboard tail <topic> [-n 50] [--json] [--viewer]
                                           print history, then exit; --viewer (also on sub) marks a human's
-                                          read: topics reports read_seq, the highest seq an agent read
+                                          read: topics reports read_seq, the highest seq an agent read;
+                                          wildcard sub topics never count as a read
   crewboard topics [--summary] [--json]   list topics with counts; --summary adds each topic's summary and
                                           summary_seq (one line per topic, or JSON with --json)
   crewboard summary <topic> [text|-] [--seq N]
