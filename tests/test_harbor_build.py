@@ -203,8 +203,14 @@ def test_pages_carry_json_ld(tmp_path):
             for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page)
         ]
 
-    types = {n["@type"] for n in ld("index.html")[0]["@graph"]}
-    assert types == {"WebSite", "SoftwareApplication"}
+    graph = {n["@type"]: n for n in ld("index.html")[0]["@graph"]}
+    assert set(graph) == {"WebSite", "Organization", "SoftwareApplication"}
+    assert graph["WebSite"]["alternateName"] == "crewship.si"
+    org = graph["Organization"]["@id"]
+    assert graph["WebSite"]["publisher"]["@id"] == graph["SoftwareApplication"]["publisher"]["@id"] == org
+    logo = urlparse(graph["Organization"]["logo"])
+    assert (logo.scheme, logo.netloc) == ("https", "crewship.si")
+    assert png_size(dist / logo.path.lstrip("/")) == (180, 180)
     faq = ld("about.html")[0]
     assert faq["@type"] == "FAQPage"
     page = (dist / "about.html").read_text()
