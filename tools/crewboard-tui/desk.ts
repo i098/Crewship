@@ -9,6 +9,7 @@ import { plain, type Line, type Seg } from "./tasks-view.ts"
 import { parseTurns, type Turn } from "./traffic.ts"
 
 const DAY_MS = 86_400_000
+const LOG_TAIL = 8 << 20
 const UNIT = "fm-imessage"
 export const STATE_DIR = process.env.FM_IMESSAGE_STATE ?? `${process.env.HOME}/.local/state/${UNIT}`
 
@@ -80,16 +81,17 @@ export function loadDesk(dir: string, nowMs: number, p: Probe): Desk {
   const pend = list(join(dir, "outbox")).filter(f => /^\d+\.json$/.test(f)).map(f => ({ seq: parseInt(f, 10), at: mtime(join(dir, "outbox", f)) })).filter(x => x.at !== undefined)
   const rc = p.journal === null ? null : retryCounts(p.journal)
   const tries = rc ? pend.map(x => rc.get(x.seq) ?? 0).filter(n => n > 0) : []
-  const log = parseLog(readText(join(dir, "desk.log")))
+  const logText = readText(join(dir, "desk.log"))
+  const log = parseLog(logText.length > LOG_TAIL ? logText.slice(logText.indexOf("\n", logText.length - LOG_TAIL) + 1) : logText) // the log grows without bound
   const sent = log.filter(e => e.ev === "transport-accepted" || e.ev === "history-reconciled").map(e => e.t) // a retry that finds the bubble already in transport history logs history-reconciled instead
   const dead = list(join(dir, "outbox-dead")).map(f => /^(\d+)-\d+\.json$/.exec(f)).filter(m => m).map(m => Number(m![1])) // file name starts with the burial time
   return {
     unit: p.unit,
     lastLogMs: log.at(-1)?.t,
-    pending: pend.length, oldestPendingMs: pend.length ? Math.min(...pend.map(x => x.at!)) : undefined,
-    retries: rc ? Math.max(0, ...tries) : null, retrying: tries.length,
-    sent24h: sent.filter(t => t >= since).length, lastSentMs: sent.length ? Math.max(...sent) : undefined,
-    dead24h: dead.filter(t => t >= since).length, deadTotal: dead.length, lastDeadMs: dead.length ? Math.max(...dead) : undefined,
+    pending: pend.length, oldestPendingMs: pend.length ? pend.reduce((m, x) => Math.min(m, x.at!), Infinity) : undefined,
+    retries: rc ? tries.reduce((m, n) => Math.max(m, n), 0) : null, retrying: tries.length,
+    sent24h: sent.filter(t => t >= since).length, lastSentMs: sent.reduce<number | undefined>((m, t) => (m === undefined || t > m ? t : m), undefined),
+    dead24h: dead.filter(t => t >= since).length, deadTotal: dead.length, lastDeadMs: dead.reduce<number | undefined>((m, t) => (m === undefined || t > m ? t : m), undefined),
     latency: latencyStats(replyLatencies(log, since)),
     turns: parseTurns(readText(join(dir, "routing.jsonl"))),
   }
