@@ -93,6 +93,7 @@ crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
 crewship_tuis:
   - {dir: usage-tui, bin: usage-tui, label: usage-tui, switch: usage_tab}
   - {dir: crewboard-tui, bin: crewboard-tui, label: crewboard-tui, switch: crewboard_tab}
+  - {dir: browser-tui, bin: browser-tui, label: browsers, switch: browsers_tab}
 # The decision-queue tab runs crewboard-tui on its queue view, under the same switch.
 crewship_herdr_tabs: >-
   {{ [{'label': 'schedules', 'bin': 'crewship', 'args': ' schedules', 'switch': 'schedules_tab'}]
