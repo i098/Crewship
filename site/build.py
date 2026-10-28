@@ -427,6 +427,12 @@ def doc_page(title, description, route, body, source=None):
 <title>{html.escape(title)} - Crewship docs</title>
 <meta name="description" content="{html.escape(description)}">
 <link rel="canonical" href="{canonical}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{canonical}">
+<meta property="og:title" content="{html.escape(title)} - Crewship docs">
+<meta property="og:description" content="{html.escape(description)}">
+<meta property="og:image" content="{ORIGIN}/og.png">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0a0f1c">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">

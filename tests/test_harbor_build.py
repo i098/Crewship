@@ -260,6 +260,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                     head = Head()
                     head.feed(body.decode())
                     assert head.links["canonical"] == "https://crewship.si" + urlparse(path).path
+                    assert head.meta["og:url"] == head.links["canonical"], path
             for method, path, status in [
                 ("HEAD", "/how?preview=1", 200),
                 ("HEAD", "/about?preview=1", 200),
@@ -376,6 +377,8 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
         assert title.endswith(" - Crewship docs")
         assert head.links["canonical"] == f"https://crewship.si{route}"
         assert 0 < len(head.meta["description"]) <= 160
+        assert head.meta["og:url"] == head.links["canonical"]
+        assert (head.meta["og:title"], head.meta["og:description"]) == (title, head.meta["description"])
         assert {"/", "/about", "/docs"} <= set(head.anchors)
         assert head.links["stylesheet"] == "/harbor.css"
         assert len(head.ids) == len(set(head.ids)), route
