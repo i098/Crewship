@@ -1,11 +1,12 @@
-// Read-only front desk health view: the iMessage bridge's outbox folders, desk.log and unit state (apps/imessage/bridge.ts, outbox.ts).
-// Shows counts, ages, retry numbers and latencies only; it never opens a queue item, so no message text, number or name is read.
+// Read-only front desk health view: the iMessage bridge's outbox folders, desk.log, routing.jsonl and unit state (apps/imessage/bridge.ts, outbox.ts).
+// The health figures are counts, ages and latencies. The recent turns list shows message text (in, route, out) from routing.jsonl, locally only.
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
 import { age } from "./tasks-model.ts"
 import { plain, type Line, type Seg } from "./tasks-view.ts"
+import { parseTurns, type Turn } from "./traffic.ts"
 
 const DAY_MS = 86_400_000
 const UNIT = "fm-imessage"
@@ -19,6 +20,7 @@ export type Desk = {
   sent24h: number; lastSentMs?: number
   dead24h: number; deadTotal: number; lastDeadMs?: number
   latency: { n: number; last?: number; median?: number; p95?: number } // seconds from inbox-accepted to response-confirmed, last 24h
+  turns: Turn[] // oldest first
 }
 
 // desk.log lines are `<ISO time> <message id> <event>`; other lines are skipped.
@@ -89,6 +91,7 @@ export function loadDesk(dir: string, nowMs: number, p: Probe): Desk {
     sent24h: sent.filter(t => t >= since).length, lastSentMs: sent.length ? Math.max(...sent) : undefined,
     dead24h: dead.filter(t => t >= since).length, deadTotal: dead.length, lastDeadMs: dead.length ? Math.max(...dead) : undefined,
     latency: latencyStats(replyLatencies(log, since)),
+    turns: parseTurns(readText(join(dir, "routing.jsonl"))),
   }
 }
 
@@ -97,14 +100,17 @@ const readText = (f: string) => { try { return readFileSync(f, "utf8") } catch {
 const ago = (ms: number | undefined, now: number) => (ms === undefined ? "never" : `${age((now - ms) / 1000)} ago`)
 const secs = (s: number | undefined) => (s === undefined ? "–" : s < 90 ? `${s.toFixed(1)}s` : age(s))
 
-export function deskLines(d: Desk, nowMs: number): Line[] {
+const flat = (s: string) => s.replace(/\s+/g, " ").trim()
+const cut = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w - 1)) + "…" : s)
+
+export function deskLines(d: Desk, nowMs: number, width = 100, height = 40): Line[] {
   const up = d.unit === "active"
   const row = (label: string, value: Seg[]): Line => [{ text: `  ${label.padEnd(18)}`, fg: theme.muted }, ...value]
   const v = (text: string, fg = theme.text, bold = false): Seg => ({ text, fg, bold })
   const m = (text: string): Seg => v(text, theme.muted)
   const retries = d.retries === null ? "journal unreadable" : d.retrying ? `${d.retries} (${d.retrying} item${d.retrying > 1 ? "s" : ""} retrying)` : "0"
   const stale = d.oldestPendingMs !== undefined && nowMs - d.oldestPendingMs > 120_000
-  return [
+  const head: Line[] = [
     [v(" "), v(up ? "● bridge up" : `○ bridge down (${d.unit})`, up ? theme.ok : theme.error, true), m(`   last desk log ${ago(d.lastLogMs, nowMs)}`)],
     [],
     row("pending bubbles", [v(`${d.pending}`, d.pending ? theme.warn : theme.muted, d.pending > 0)]),
@@ -115,8 +121,19 @@ export function deskLines(d: Desk, nowMs: number): Line[] {
     [],
     row("desk reply, 24h", [v(`${d.latency.n}`), m(` replies   last ${secs(d.latency.last)}   median ${secs(d.latency.median)}   p95 ${secs(d.latency.p95)}`)]),
   ]
+  // Two rows per turn, newest first, as many as fit; text is cut to the pane width.
+  const room = Math.max(0, Math.floor((height - head.length - 2) / 2))
+  const shown = d.turns.slice(-room).reverse()
+  if (!shown.length) return head
+  return [...head, [], [v(" recent turns", theme.accent, true), m("   in, route, out; newest first")], ...shown.flatMap((t): Line[] => {
+    const tag = `[${cut(t.route, 24)}]`
+    return [
+      [m(`  ${age((nowMs - t.at) / 1000).padStart(5)} `), v("in ", theme.muted), v(cut(flat(t.text), Math.max(10, width - 11 - tag.length - 1)), theme.text), v(" "), v(tag, t.route === "pending" ? theme.warn : theme.accent)],
+      [m("        "), v("out ", theme.muted), t.reply ? v(cut(flat(t.reply), Math.max(10, width - 12)), theme.ok) : m("–")],
+    ]
+  })]
 }
 
 export const deskFooter = (): Line => [{ text: " r reload  m back  t tasks  d queue  q quit   read-only", fg: theme.muted }]
 
-export const deskSnapshot = (d: Desk, nowMs: number) => plain(deskLines(d, nowMs))
+export const deskSnapshot = (d: Desk, nowMs: number, width = 100, height = 40) => plain(deskLines(d, nowMs, width, height))

@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parseTurns } from "./traffic.ts"
 import { deskSnapshot, latencyStats, loadDesk, parseLog, replyLatencies, retryCounts } from "./desk.ts"
 
 const dirs: string[] = []
@@ -69,4 +70,41 @@ test("snapshot shows bridge down and an unreadable journal, and an empty state s
   expect(out.find(l => l.includes("retries"))).toMatch(/journal unreadable/)
   expect(out.find(l => l.includes("oldest pending"))).toMatch(/none/)
   expect(out.find(l => l.includes("desk reply"))).toMatch(/0 replies +last – +median – +p95 –/)
+})
+
+// Events as bridge.ts recordRoute writes them (routing.jsonl); texts are invented.
+const rin = (id: string, at: number, text: string) => JSON.stringify({ at, received: { requestId: id, text, ref: { space: "s", id }, memoryId: 1, firstmate: false } })
+const ROUTING = [
+  rin("r1", 1000, "what is the eta\non the port"), JSON.stringify({ at: 1001, ids: ["r1"], route: "desk" }),
+  JSON.stringify({ at: 1002, ids: ["r1"], route: "done", out: { kind: "desk", bubbles: ["two hours", "give or take"], guid: "g1" } }),
+  rin("r2", 2000, "ship the fix"), JSON.stringify({ at: 2001, ids: ["r2"], route: "handoff", handoffNote: "n" }), JSON.stringify({ at: 2002, ids: ["r2"], route: "done" }),
+  rin("r3", 3000, "check the queue"),
+  JSON.stringify({ at: 3001, ids: ["r3"], v2: { intents: [{ kind: "relay", target: "mate-7", category: "work" }], mate: { id: "mate-7", home: "h", scope: "s" } } }),
+  JSON.stringify({ at: 3002, ids: ["r3"], route: "handoff" }),
+  rin("r4", 4000, "thanks"), JSON.stringify({ at: 4001, ids: ["r4"], route: "desk", social: true, out: { kind: "desk", react: "❤️", guid: "g4" } }),
+  rin("r5", 5000, "anyone there"),
+  JSON.stringify({ at: 5001, ids: ["nope"], route: "desk" }), "not json", JSON.stringify({ deskCancelled: true }),
+].join("\n")
+
+test("turns carry the inbound text, the route (desk, main, mate by plan, pending) and the desk's reply", () => {
+  expect(parseTurns(ROUTING)).toEqual([
+    { at: 1000, text: "what is the eta\non the port", route: "desk", reply: "two hours give or take" },
+    { at: 2000, text: "ship the fix", route: "main", reply: "" },
+    { at: 3000, text: "check the queue", route: "mate mate-7", reply: "" },
+    { at: 4000, text: "thanks", route: "desk", reply: "❤️ (tapback)" },
+    { at: 5000, text: "anyone there", route: "pending", reply: "" },
+  ])
+})
+
+test("the snapshot lists the newest turns first, flattens and cuts text to the width, and fits the height", () => {
+  const empty = mkdtempSync(join(tmpdir(), "cbdesk-"))
+  dirs.push(empty)
+  const d = { ...loadDesk(empty, NOW, { unit: "active", journal: "" }), turns: parseTurns(ROUTING) }
+  const out = deskSnapshot(d, 6_000_000, 40, 40).split("\n")
+  const at = out.findIndex(l => l.includes("recent turns"))
+  expect(out.slice(at + 1, at + 5).map(l => l.slice(7).trim())).toEqual(["in anyone there [pending]", "out –", "in thanks [desk]", "out ❤️ (tapback)"])
+  expect(out.slice(at + 1).filter(l => l.length > 40)).toEqual([])
+  expect(out.find(l => l.includes("what is the eta"))).toMatch(/what is the eta [^[]*… \[desk\]/) // cut to 40 columns
+  expect(deskSnapshot(d, 6_000_000, 100, 40)).toContain("what is the eta on the port [desk]") // newline flattened
+  expect(deskSnapshot(d, 6_000_000, 40, 16).split("\n").filter(l => /^ +\S* +in /.test(l))).toHaveLength(2) // height 16 leaves room for 2 turns
 })

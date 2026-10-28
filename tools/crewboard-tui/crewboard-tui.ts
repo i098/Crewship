@@ -19,7 +19,7 @@ const stallMin = Number(flagVal("--stall-min") ?? DEFAULT_STALL_SEC / 60)
 const REFRESH_TASKS_MS = 15_000
 
 if (flag("--once") && flag("--desk")) {
-  console.log(deskSnapshot(loadDesk(STATE_DIR, Date.now(), probe()), Date.now()))
+  console.log(deskSnapshot(loadDesk(STATE_DIR, Date.now(), probe()), Date.now(), Number(flagVal("--width") ?? 100)))
   process.exit(0)
 }
 if (flag("--once") && flag("--queue")) {
@@ -376,7 +376,7 @@ function queueKey(k: Key) {
 let desk: Desk | undefined
 
 function drawDesk() {
-  deskText.content = new StyledText(chunks(desk ? deskLines(desk, Date.now()) : []))
+  deskText.content = new StyledText(chunks(desk ? deskLines(desk, Date.now(), Math.max(10, renderer.width - 2), Math.max(1, renderer.height - 3)) : []))
   footer.content = new StyledText(chunks([deskFooter()]))
   renderer.requestRender()
 }

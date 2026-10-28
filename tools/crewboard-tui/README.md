@@ -47,13 +47,14 @@ Keys: `↑↓/jk` move, `r` reload, `t` tasks, `d` back to the view you came fro
 ## Front desk view
 
 Press `m` (or start with `--desk`) for the health of the iMessage front desk (`apps/imessage`), read from its state folder (`$FM_IMESSAGE_STATE`, else `~/.local/state/fm-imessage`) and the `fm-imessage` user unit.
-It shows counts, ages and latencies only; it never opens a queue item, so no message text, number or name is shown, and it never writes, restarts or sends.
+The health figures are counts, ages and latencies. Below them, the recent turns show **message text**: for each inbound message its text, where the desk routed it, and the desk's reply. This is a local view of the owner's own messages; keep it out of screenshots and logs you share. It never writes, restarts or sends.
 
 - Bridge up or down: `systemctl --user is-active fm-imessage`, plus the age of the last `desk.log` line.
 - Pending bubbles: files in `outbox/`; the oldest pending age is the oldest file's modification time.
 - Retries: the highest `failed (try N)` for a pending item in the last 24 hours of the unit's journal. The queue keeps no retry count on disk.
 - Sent, last 24 hours: `transport-accepted` and `history-reconciled` lines in `desk.log` (one per bubble or tapback the transport took, or found already delivered on retry). `outbox-done/` keeps only keyed items, so it is not used.
 - Failed, last 24 hours: files in `outbox-dead/`, by the burial time in the file name.
+- Recent turns: `routing.jsonl` in the state folder, one row pair per inbound message (newest first, as many as fit, text cut to the pane width). Route: `desk` (the desk answered), `main` (handed to main Firstmate), `mate <id>` (the plan names a secondmate), `dispatch <model>`, or `pending`. Out is the desk's own bubbles or tapback; a reply that a mate or main sends later does not pass through this log, so it shows `–`.
 - Desk reply latency: per message, `inbox-accepted` to its first `response-confirmed` in `desk.log`; last, median and p95 over 24 hours.
 
 Keys: `r` reload, `m` back to the board, `t` tasks, `d` decision queue. It reloads every 15 seconds. `bun crewboard-tui.ts --once --desk` prints a plain snapshot.
