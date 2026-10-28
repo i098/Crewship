@@ -79,9 +79,7 @@ def test_mapped_features_and_docs_index_appear_once(tmp_path, monkeypatch, capsy
     manifest = built(tmp_path, monkeypatch, readme)
 
     hrefs = Counter(a["href"] for a in manifest.links)
-    assert {link: hrefs[f"{build.REPO}/blob/main/{link}"] for link in links} == dict.fromkeys(
-        links, 1
-    )
+    assert {link: hrefs[build.site_href(link)] for link in links} == dict.fromkeys(links, 1)
     assert hrefs[f"{build.REPO}#features"] == 1
     assert hrefs[f"{build.REPO}/blob/main/{unmapped}"] == 1
     assert len(manifest.spots) == len(set(manifest.spots))
@@ -159,6 +157,22 @@ def png_size(path):
     data = path.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR", path
     return struct.unpack(">II", data[16:24])
+
+
+def test_home_links_published_docs_on_crewship_si(tmp_path):
+    dist = build.build(tmp_path / "dist")
+    head = Head()
+    head.feed((dist / "index.html").read_text())
+    published = set(build.doc_routes().values())
+    assert not [a for a in head.anchors if "/blob/main/docs/" in a and a.split("/blob/main/")[1].split("#")[0] in build.doc_routes()]
+    for anchor in head.anchors:
+        if anchor.startswith("/docs/"):
+            path, _, fragment = anchor.partition("#")
+            assert path in published, anchor
+            if fragment:
+                page = Head()
+                page.feed((dist / f"{path.lstrip('/')}.html").read_text())
+                assert fragment in page.ids, anchor
 
 
 def test_link_preview_tags_point_at_absolute_urls_and_real_images(tmp_path):
