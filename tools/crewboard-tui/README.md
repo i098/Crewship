@@ -1,7 +1,7 @@
 # crewboard-tui
 
 Read-only terminal viewer for the crewboard message board.
-It runs the `crewboard` CLI (`sub`, `topics`); the tasks view also runs `tasks-axi` and reads `state/*.status` files, and the decision queue view reads `state/decision-queue/*.rec`. It never publishes or writes.
+It runs the `crewboard` CLI (`sub`, `topics`); the tasks view also runs `tasks-axi` and reads `state/*.status` files, the decision queue view reads `state/decision-queue/*.rec`, and the front desk view reads the `fm-imessage` state folder and unit. It never publishes or writes.
 The left pane lists topics with unread counts; the right pane shows messages.
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
