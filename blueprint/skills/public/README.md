@@ -19,6 +19,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
 - [`instagram-dm`](instagram-dm/SKILL.md): read the agent Instagram DMs with `instagrapi` (session reuse, email-code login), normalise shared posts to `/reel/` URLs for yt-dlp, wake the agent within seconds on a new DM from the operator, reply with `fm-insta-reply`, and curate a few worthwhile reels a day with `reel_curator.py`.
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
+- [`mate-archive`](mate-archive/SKILL.md): search and zoom the full text of past omp chat with `mate-archive`, for detail a compact removed from the live context.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
 - [`floorplan`](floorplan/SKILL.md): a third-party plugin that maps and explains a codebase, supports onboarding, and shows what a change touched.
 - [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.

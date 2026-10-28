@@ -84,6 +84,17 @@
     remote_src: true
   become: true
 
+# Search past omp chat that a compact removed from the live context (docs/omp.md#chat-archive).
+- name: Install mate-archive
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/mate-archive"
+    dest: "{{ crewship_local_bin }}/mate-archive"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+    remote_src: true
+  become: true
+
 # blueprint/skills/public and blueprint/skills/private for omp and Claude Code, and blueprint/rules/public and
 # blueprint/rules/private for omp (docs/omp.md#skills, docs/omp.md#rules). With
 # skills.private_source set, the installer first fills blueprint/skills/private and
