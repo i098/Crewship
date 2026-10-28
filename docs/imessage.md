@@ -835,9 +835,9 @@ Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which 
 ## Outbound text filter
 
 `fm-imessage` cleans each text and photo caption before it sends (`apps/imessage/clean.ts`, run with bun). Sub-agent answers pass the same filter in `subagent.ts`.
-The filter removes `[Dxxxx]` decision tags, `[key=...]`, `key=`, `corr=` and `at=` tags, mate and crew ids, raw paths (`/home`, `/sdb-disk`, `/sdc-disk`, `/tmp`, `state/`, `data/`), "decision stuck after N attempts", and a status prefix (`working:`, `done:`, `needs-decision:`, `paused:`, `blocked:`, `resolved:`, `failed:`) at the start of a line.
-URLs and code fences stay as they are. Text with none of these stays byte-exact. If nothing is left, the original is sent.
-Use `fm-imessage --raw 'text'` to skip the filter. Without bun, the CLI warns and sends the text unchanged. `FM_IMESSAGE_DRY_RUN=1` prints the text instead of sending it.
+The filter removes `[Dxxxx]` decision tags, `[key=...]`, `key=` and `corr=` tags, mate and crew ids, raw paths (`/home`, `/sdb-disk`, `/sdc-disk`, `/tmp`, `state/`, `data/`), "decision stuck after N attempts", and a status prefix (`working:`, `done:`, `needs-decision:`, `paused:`) at the start of a line.
+URLs stay as they are. Text with none of these stays byte-exact. If nothing is left, the original is sent.
+Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
 
 ## Plain messages and the shared line
 

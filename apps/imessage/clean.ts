@@ -1,11 +1,11 @@
 // Outbound text filter for fm-imessage: strips tags, ids, raw paths and status prefixes from mate texts.
-// Code fences and URLs are never touched. `bun clean.ts` filters stdin to stdout.
-const HOLD = /```[\s\S]*?```|https?:\/\/\S+/g;
+// URLs are never touched. `bun clean.ts` filters stdin to stdout.
+const HOLD = /https?:\/\/\S+/g;
 const STRIP: [RegExp, string][] = [
   [/\[D[0-9a-f]{4,8}\]/gi, ""],
-  [/\[(?:key|corr|at)=[^\]]*\]/g, ""],
-  [/(?<![\w-])(?:key|corr|at)=\S*/g, ""],
-  [/^[ \t]*(?:working|done|needs-decision|paused|blocked|resolved|failed)[ \t]*:[ \t]*/gim, ""],
+  [/\[(?:key|corr)=[^\]]*\]/g, ""],
+  [/(?<![\w-])(?:key|corr)=\S*/g, ""],
+  [/^[ \t]*(?:working|done|needs-decision|paused)[ \t]*:[ \t]*/gim, ""],
   [/\b[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+\b/gi, ""],
   [/\b(?:cf|sm)-[a-z0-9][a-z0-9-]*/gi, ""],
   [/(?<![\w/.-])(?:\/(?:home|sdb-disk|sdc-disk|tmp)(?:\/\S*)?|(?:state|data)\/\S*)/g, ""],

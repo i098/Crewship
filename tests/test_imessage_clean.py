@@ -21,10 +21,10 @@ def clean(text):
 @pytest.mark.parametrize("text,want", [
     ("[D039b88] Ship it", "Ship it"),
     ("Ship it [key=nm-1-ci] now", "Ship it now"),
-    ("Ship it key=abc corr=xyz at=123", "Ship it"),
+    ("Ship it key=abc corr=xyz", "Ship it"),
     ("working: building\ndone: built", "building\nbuilt"),
     ("[D0123ab] needs-decision: pick one", "pick one"),
-    ("Blocked: x\nFailed: y\npaused: z\nresolved: w", "x\ny\nz\nw"),
+    ("Blocked: x\npaused: z", "Blocked: x\nz"),
     ("Asked crewship-mate-c1 and cf-text-filter and sm-fleet and bob-mate-7 today", "Asked and and and today"),
     ("See /home/a/b.txt and /sdb-disk/x /tmp/y state/z.log data/q", "See and"),
     ("Tests failed (decision stuck after 3 attempts). Next.", "Tests failed. Next."),
@@ -35,8 +35,8 @@ def test_rules(text, want):
     assert clean(text) == want
 
 
-def test_urls_and_code_fences_are_untouched():
-    text = "Open https://example.com/data/x?key=1&corr=2 or http://h/tmp/cf-a\n```\n[D039b88] state/x working: key=1\n```"
+def test_urls_are_untouched():
+    text = "Open https://example.com/data/x?key=1&corr=2 or http://h/tmp/cf-a"
     assert clean(text) == text
 
 
@@ -48,19 +48,25 @@ def test_empty_result_falls_back_to_original():
     assert clean("[D039b88]") == "[D039b88]"
 
 
-def cli(*args, stdin=None, env=None):
-    return subprocess.run([str(CLI), *args], input=stdin, capture_output=True, text=True,
-                          env={**os.environ, "FM_IMESSAGE_DRY_RUN": "1", **(env or {})})
+def cli(*args, stdin=None, tmp_path=None, bun_ok=True):
+    stub = tmp_path / "bin"
+    stub.mkdir(exist_ok=True)
+    (stub / "curl").write_text('#!/bin/bash\ncat > "$STUB_OUT"\n')
+    (stub / "curl").chmod(0o755)
+    out = tmp_path / "sent"
+    env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", "STUB_OUT": str(out)}
+    if not bun_ok:
+        (stub / "bun").write_text("#!/bin/bash\ncat >/dev/null; echo partial; exit 1\n")
+        (stub / "bun").chmod(0o755)
+    r = subprocess.run([str(CLI), *args], input=stdin, capture_output=True, text=True, env=env)
+    return r, out.read_text()
 
 
-def test_cli_cleans_arguments_and_stdin_but_raw_skips():
-    assert cli("done: [D039b88] Shipped /tmp/x").stdout == "Shipped\n"
-    assert cli(stdin="working: hi cf-abc").stdout == "hi\n"
-    assert cli("--raw", "done: [D039b88] Shipped").stdout == "done: [D039b88] Shipped\n"
+def test_cli_cleans_arguments_and_stdin(tmp_path):
+    assert cli("done: [D039b88] Shipped /tmp/x", tmp_path=tmp_path)[1] == "Shipped"
+    assert cli(stdin="working: hi cf-abc", tmp_path=tmp_path)[1] == "hi"
 
 
-def test_cli_without_bun_warns_and_sends_unchanged(tmp_path):
-    out = cli("done: x", env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "FM_IMESSAGE_CLEAN": ""})
-    if shutil.which("bun", path="/usr/bin:/bin"):
-        pytest.skip("bun on the minimal PATH")
-    assert out.stdout == "done: x\n" and "unfiltered" in out.stderr
+def test_cli_sends_original_when_filter_fails(tmp_path):
+    r, sent = cli("done: x", tmp_path=tmp_path, bun_ok=False)
+    assert sent == "done: x" and "unfiltered" in r.stderr
