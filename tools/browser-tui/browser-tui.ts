@@ -24,8 +24,16 @@ const isBrowser = (p: Proc | undefined) => !!p && BROWSER_EXES.has(exe(p)) && !p
 
 export function parsePs(out: string): Proc[] {
   return out.split("\n").flatMap(l => {
-    const m = l.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)
-    return m ? [{ pid: +m[1], ppid: +m[2], age: +m[3], rss: +m[4], args: m[5] }] : []
+    // Four numeric columns, then args verbatim. Linear scan: no backtracking regex on process-supplied text.
+    let rest = l.trimStart()
+    const n: number[] = []
+    for (let i = 0; i < 4; i++) {
+      const end = rest.search(/\s/)
+      if (end < 1 || !/^\d+$/.test(rest.slice(0, end))) return []
+      n.push(+rest.slice(0, end))
+      rest = rest.slice(end).trimStart()
+    }
+    return rest ? [{ pid: n[0], ppid: n[1], age: n[2], rss: n[3], args: rest }] : []
   })
 }
 
@@ -262,7 +270,7 @@ function closePage(r: Row | undefined) {
   if (!page || !port) note = "select a page first (⏎ opens a browser)"
   else ask(`Close page "${clip(page.title || page.url, 40).trimEnd()}"?`, async () => {
     // Chrome serves /json/close; Obscura drops the connection.
-    const res = await cdp(port, `/json/close/${page.id}`).catch(() => null)
+    const res = await cdp(port, `/json/close/${encodeURIComponent(page.id)}`).catch(() => null)
     return res?.ok ? "page closed" : `close failed: ${res ? `HTTP ${res.status}` : "this browser has no /json/close"}`
   })
 }
