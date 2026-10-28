@@ -1,0 +1,544 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Crewship <noreply@example.invalid>
+Date: Wed, 28 Oct 2026 03:00:00 +0000
+Subject: [PATCH] feat(bin): queue needs-decision lines and hand each to one
+ crewmate that texts the owner
+
+A needs-decision or blocked line from any mate now lands as one durable record
+under state/decision-queue/ (config/decision-queue turns it on). The watcher
+enqueues it and keeps it out of chat. fm-decision-queue.sh imports a home's open
+decisions (--dry-run counts first), spawns at most three crewmates, one per
+record, to text the owner and relay the answer with fm-send.sh --resolve-key,
+and batches the overflow into one digest text. A second mate's done line sends
+one rate-limited progress text.
+---
+ bin/fm-decision-queue-lib.sh    | 110 ++++++++++++++++++
+ bin/fm-decision-queue.sh        | 191 ++++++++++++++++++++++++++++++++
+ bin/fm-watch.sh                 |   7 +-
+ tests/fm-decision-queue.test.sh | 174 +++++++++++++++++++++++++++++
+ 4 files changed, 481 insertions(+), 1 deletion(-)
+ create mode 100755 bin/fm-decision-queue-lib.sh
+ create mode 100755 bin/fm-decision-queue.sh
+ create mode 100755 tests/fm-decision-queue.test.sh
+
+diff --git a/bin/fm-decision-queue-lib.sh b/bin/fm-decision-queue-lib.sh
+new file mode 100755
+index 00000000..b5c252ca
+--- /dev/null
++++ b/bin/fm-decision-queue-lib.sh
+@@ -0,0 +1,110 @@
++#!/usr/bin/env bash
++# fm-decision-queue-lib.sh - durable queue for needs-decision and blocked lines.
++#
++# One record file per decision under $STATE/decision-queue/, named
++# <origin>+<key>.rec ("+" is outside both slugs, so the pair is unambiguous).
++# A record is key=value lines; state is queued, dispatched, closed, or stuck.
++# Every write goes to a temp file in the same directory and moves into place.
++# The queue is on only where config/decision-queue exists.
++#
++# Needs FM_HOME and STATE. fm-classify-lib.sh must be sourced for the status folds.
++
++dq_enabled() { [ -e "${CONFIG:-$FM_HOME/config}/decision-queue" ]; }
++dq_dir() { printf '%s/decision-queue' "$STATE"; }
++
++dq_slug_ok() {
++  case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
++}
++
++dq_id() {  # <origin> <key>
++  dq_slug_ok "$1" && dq_slug_ok "$2" || return 1
++  printf '%s+%s' "$1" "$2"
++}
++
++dq_path() { printf '%s/%s.rec' "$(dq_dir)" "$1"; }
++
++# Short owner-facing tag D<6 hex> that a text carries and a reply quotes.
++dq_tag() {
++  local n
++  n=$(printf '%s' "$1" | cksum | awk '{print $1}')
++  printf 'D%06x' $((n % 16777216))
++}
++
++dq_get() {  # <id> <field>
++  sed -n "s/^$2=//p" "$(dq_path "$1")" 2>/dev/null | sed -n 1p
++}
++
++# Rewrite one field (or add it) atomically.
++dq_set() {  # <id> <field> <value>
++  local f tmp
++  f=$(dq_path "$1")
++  tmp=$(mktemp "$(dq_dir)/.rec.XXXXXX") || return 1
++  awk -v k="$2" -v v="$3" 'BEGIN { FS = OFS = "=" }
++    $1 == k && !done { print k "=" v; done = 1; next }
++    { print }
++    END { if (!done) print k "=" v }' "$f" > "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
++}
++
++dq_now() { date +%s; }
++
++# Print new, dup, or requeued. A record with the same origin, key, and note is a dup.
++dq_enqueue() {  # <origin> <key> <verb> <note>
++  local origin=$1 key=$2 verb=$3 note id f tmp existed=0
++  note=$(printf '%s' "$4" | tr '\n\t' '  ' | cut -c1-400)
++  id=$(dq_id "$origin" "$key") || { echo "fm-decision-queue: bad origin or key: $origin $key" >&2; return 1; }
++  mkdir -p "$(dq_dir)" || return 1
++  f=$(dq_path "$id")
++  if [ -f "$f" ]; then
++    existed=1
++    [ "$(dq_get "$id" note)" != "$note" ] || { echo dup; return 0; }
++  fi
++  tmp=$(mktemp "$(dq_dir)/.rec.XXXXXX") || return 1
++  printf 'origin=%s\nkey=%s\nverb=%s\nnote=%s\nenqueued_at=%s\nstate=queued\nattempts=0\n' \
++    "$origin" "$key" "$verb" "$note" "$(dq_now)" > "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
++  if [ "$existed" = 1 ]; then echo requeued; else echo new; fi
++}
++
++# 0 when <key> is still an open decision in <origin>'s status log.
++dq_is_open() {  # <origin> <key>
++  status_own_open_decisions "$STATE/$1.status" | awk -F'\t' -v k="$2" '$1 == k { f = 1 } END { exit !f }'
++}
++
++# Print "<id>" for every record in <state>, oldest enqueue first.
++dq_ids() {  # <state>
++  local f
++  for f in "$(dq_dir)"/*.rec; do
++    [ -f "$f" ] || continue
++    [ "$(sed -n 's/^state=//p' "$f" | sed -n 1p)" = "$1" ] || continue
++    printf '%s %s\n' "$(sed -n 's/^enqueued_at=//p' "$f" | sed -n 1p)" "$(basename "$f" .rec)"
++  done | sort -n | awk '{print $2}'
++}
++
++# One-line text to the owner through the front-desk line; never a phone number here.
++dq_say() {  # <text>
++  "${FM_DQ_IMESSAGE:-fm-imessage}" -- "$1"
++}
++
++# The watcher hook for one status file. Prints nothing. Returns 0 only when the
++# file's decisions were all queued, so the caller keeps them out of chat.
++# A done line of a second mate also sends one rate-limited progress text.
++dq_watch_file() {  # <status-file> <decision-owned: 1|0>
++  local f=$1 owned=$2 origin key verb note n=0 bad=0 line
++  dq_enabled || return 1
++  origin=$(basename "$f" .status)
++  if [ "$(_fm_status_kind "$f")" = secondmate ]; then
++    line=$(last_status_line "$f")
++    status_line_verb "$line" verb
++    if [ "$verb" = "done" ]; then
++      ( "${FM_DQ_SELF:-$FM_ROOT/bin/fm-decision-queue.sh}" progress "$origin" "${line#*: }" >/dev/null 2>&1 </dev/null & )
++    fi
++  fi
++  [ "$owned" = 1 ] || return 1
++  while IFS=$'\t' read -r key verb note; do
++    [ -n "$key" ] || continue
++    n=$((n + 1))
++    dq_enqueue "$origin" "$key" "$verb" "$note" >/dev/null || bad=1
++  done <<EOF
++$(status_own_open_decisions "$f")
++EOF
++  [ "$n" -gt 0 ] && [ "$bad" = 0 ]
++}
+diff --git a/bin/fm-decision-queue.sh b/bin/fm-decision-queue.sh
+new file mode 100755
+index 00000000..827745a7
+--- /dev/null
++++ b/bin/fm-decision-queue.sh
+@@ -0,0 +1,191 @@
++#!/usr/bin/env bash
++# fm-decision-queue.sh - keep needs-decision and blocked lines out of chat.
++#
++# A decision lands as one durable record under state/decision-queue/ (the watcher
++# enqueues it where config/decision-queue exists). One crewmate per record texts
++# the owner through fm-imessage, relays the answer, and closes the record.
++#
++# Usage:
++#   fm-decision-queue.sh enqueue <origin> <key> <verb> <note...>
++#   fm-decision-queue.sh import [--dry-run]     queue this home's open decisions; drop stale ones
++#   fm-decision-queue.sh dispatch [--dry-run] [--max N]
++#                                               one crewmate per queued record, at most N at once
++#                                               (default 3); the overflow goes out as one digest text
++#   fm-decision-queue.sh list [<state>]         ids in state queued (default), dispatched, closed, stuck
++#   fm-decision-queue.sh ask <id> <text...>     text the owner; the text carries the reply tag
++#   fm-decision-queue.sh await <id> [--timeout S] [--interval S]
++#                                               print the owner's tagged reply; exit 3 on timeout
++#   fm-decision-queue.sh close <id> [reason]    mark the record closed
++#   fm-decision-queue.sh progress <mate> <note...>   one rate-limited progress text
++#
++# A record id is <origin>+<key>. Environment: FM_DQ_MAX (3), FM_DQ_DIGEST_INTERVAL
++# (3600 s), FM_DQ_PROGRESS_INTERVAL (600 s), FM_DQ_ATTEMPTS (3 spawns per record),
++# FM_DQ_IMESSAGE (the text sender, default fm-imessage), FM_DQ_REPLY_LOG (the
++# bridge's routing.jsonl, default under $STATE_DIRECTORY or ~/.local/state/fm-imessage).
++# The reply log needs jq.
++set -u
++
++SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd "${d:-/}" && pwd)"
++FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
++FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
++STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
++DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
++# shellcheck source=bin/fm-classify-lib.sh
++. "$SCRIPT_DIR/fm-classify-lib.sh"
++# shellcheck source=bin/fm-decision-queue-lib.sh
++. "$SCRIPT_DIR/fm-decision-queue-lib.sh"
++
++usage() { sed -n '2,/^set -u/p' "$0" | sed '$d' | cut -c3-; }
++die() { echo "fm-decision-queue: $*" >&2; exit 1; }
++need_id() { [ -f "$(dq_path "${1:-}")" ] || die "no record: ${1:-}"; }
++
++cmd_import() {
++  local dry=0 f origin key verb note last lverb found=0 new=0 dup=0 gone=0 moved=0 out
++  [ "${1:-}" != --dry-run ] || dry=1
++  for f in "$STATE"/*.status; do
++    [ -f "$f" ] || continue
++    origin=$(basename "$f" .status)
++    dq_slug_ok "$origin" || continue
++    last=$(last_status_line "$f"); status_line_verb "$last" lverb
++    while IFS=$'\t' read -r key verb note; do
++      [ -n "$key" ] || continue
++      found=$((found + 1))
++      if [ ! -f "$STATE/$origin.meta" ]; then gone=$((gone + 1)); continue; fi
++      case "$lverb" in needs-decision|blocked) ;; *) moved=$((moved + 1)); continue ;; esac
++      if [ "$dry" = 1 ]; then
++        [ -f "$(dq_path "$(dq_id "$origin" "$key")")" ] && dup=$((dup + 1)) || new=$((new + 1))
++        continue
++      fi
++      out=$(dq_enqueue "$origin" "$key" "$verb" "$note") || continue
++      case "$out" in dup) dup=$((dup + 1)) ;; *) new=$((new + 1)) ;; esac
++    done <<EOF
++$(status_own_open_decisions "$f")
++EOF
++  done
++  printf '%sopen=%s new=%s already-queued=%s stale-task-gone=%s stale-status-moved-on=%s\n' \
++    "$([ "$dry" = 1 ] && echo 'dry-run: ')" "$found" "$new" "$dup" "$gone" "$moved"
++}
++
++active_count() {
++  local id n=0 cid
++  for id in $(dq_ids dispatched); do
++    cid=$(dq_get "$id" crewmate)
++    if [ -f "$STATE/$cid.meta" ]; then n=$((n + 1))
++    elif [ "$(dq_get "$id" attempts)" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then dq_set "$id" state stuck
++    else dq_set "$id" state queued; fi
++  done
++  printf '%s' "$n"
++}
++
++write_brief() {  # <crewmate> <id>
++  local cid=$1 id=$2 intent spec tag
++  tag=$(dq_tag "$id")
++  intent="A second mate or crewmate (origin $(dq_get "$id" origin)) opened a decision that is still unanswered, key $(dq_get "$id" key). The owner has to answer it. It must not sit in the main chat."
++  spec="Handle this one decision. Task record id: $id. Reply tag: $tag. Held line: $(dq_get "$id" verb): $(dq_get "$id" note)
++1. Read state/$(dq_get "$id" origin).status and data/$(dq_get "$id" origin)/ for context. Write a short question with 2-4 options and your recommendation.
++2. Send it: $SCRIPT_DIR/fm-decision-queue.sh ask $id '<question, options, recommendation>'. The text carries the tag $tag. Never write a phone number anywhere.
++3. Wait: $SCRIPT_DIR/fm-decision-queue.sh await $id. Exit 3 means no reply: ask once more, then append paused to your status file and stop.
++4. Relay: $SCRIPT_DIR/fm-send.sh $(dq_get "$id" origin) --resolve-key $(dq_get "$id" key) '<the owner answer, verbatim>'.
++5. Close: $SCRIPT_DIR/fm-decision-queue.sh close $id answered. Write the answer in one line to your report, then append done to your status file."
++  "${FM_DQ_BRIEF:-$SCRIPT_DIR/fm-brief.sh}" "$cid" firstmate --scout >/dev/null || return 1
++  awk -v intent="$intent" -v spec="$spec" '$0 == "{TASK}" { print intent; next } $0 == "{FIRSTMATE_SPEC}" { print spec; next } { print }' \
++    "$DATA/$cid/brief.md" > "$DATA/$cid/brief.md.tmp" && mv -f "$DATA/$cid/brief.md.tmp" "$DATA/$cid/brief.md"
++}
++
++cmd_dispatch() {
++  local dry=0 max=${FM_DQ_MAX:-3} active slots id origin key cid over='' overn=0 stamp now
++  while [ $# -gt 0 ]; do
++    case "$1" in
++      --dry-run) dry=1 ;;
++      --max) max=${2:?--max needs a number}; shift ;;
++      *) die "unknown option $1" ;;
++    esac
++    shift
++  done
++  active=$(active_count); slots=$((max - active))
++  for id in $(dq_ids queued); do
++    origin=$(dq_get "$id" origin); key=$(dq_get "$id" key)
++    if ! dq_is_open "$origin" "$key"; then
++      [ "$dry" = 1 ] || { dq_set "$id" state closed; dq_set "$id" close_reason stale; }
++      echo "stale $id"; continue
++    fi
++    if [ "$slots" -le 0 ]; then over="$over $origin"; overn=$((overn + 1)); continue; fi
++    cid=dq-$(dq_tag "$id" | tr '[:upper:]' '[:lower:]')
++    if [ "$dry" = 1 ]; then echo "would spawn $cid for $id"; slots=$((slots - 1)); continue; fi
++    dq_set "$id" attempts $(($(dq_get "$id" attempts) + 1))
++    if write_brief "$cid" "$id" && "${FM_DQ_SPAWN:-$SCRIPT_DIR/fm-spawn.sh}" "$cid" "$FM_HOME" --scout >/dev/null; then
++      dq_set "$id" crewmate "$cid"; dq_set "$id" state dispatched
++      echo "spawned $cid for $id"; slots=$((slots - 1))
++    else
++      echo "spawn failed for $id (attempt $(dq_get "$id" attempts))" >&2
++      [ "$(dq_get "$id" attempts)" -lt "${FM_DQ_ATTEMPTS:-3}" ] || dq_set "$id" state stuck
++    fi
++  done
++  [ "$overn" -gt 0 ] || return 0
++  echo "overflow $overn"
++  [ "$dry" = 0 ] || return 0
++  now=$(dq_now); stamp="$(dq_dir)/.digest-at"
++  [ "$(( now - $(cat "$stamp" 2>/dev/null || echo 0) ))" -ge "${FM_DQ_DIGEST_INTERVAL:-3600}" ] || return 0
++  dq_say "$overn more decisions wait behind the $max open ones. Mates:$(printf '%s' "$over" | tr ' ' '\n' | sed '/^$/d' | sort -u | head -5 | tr '\n' ' ')" \
++    && printf '%s\n' "$now" > "$stamp"
++}
++
++cmd_ask() {
++  local id=${1:-}; need_id "$id"; shift
++  [ $# -gt 0 ] || die "ask needs the text"
++  dq_say "[$(dq_tag "$id")] $* (reply to this text)" || die "text not sent"
++  dq_set "$id" sent_at "$(dq_now)"
++}
++
++cmd_await() {
++  local id=${1:-} timeout=21600 interval=10 sent tag log deadline reply
++  need_id "$id"; shift
++  while [ $# -gt 0 ]; do
++    case "$1" in --timeout) timeout=$2 ;; --interval) interval=$2 ;; *) die "unknown option $1" ;; esac
++    shift 2
++  done
++  sent=$(dq_get "$id" sent_at); [ -n "$sent" ] || die "ask $id first"
++  tag=$(dq_tag "$id")
++  log=${FM_DQ_REPLY_LOG:-${STATE_DIRECTORY:-$HOME/.local/state/fm-imessage}/routing.jsonl}
++  command -v jq >/dev/null || die "await needs jq"
++  deadline=$(( $(dq_now) + timeout ))
++  while :; do
++    reply=$([ -r "$log" ] && jq -r --argjson s "$((sent * 1000))" --arg t "$tag" \
++      'select(.received != null and ((.received.at // .at) >= $s) and ((.received.text // "") | contains($t))) | (.received.authored // .received.text)' "$log" 2>/dev/null | tail -1)
++    if [ -n "$reply" ]; then printf '%s\n' "$reply" | sed "s/\[$tag\]//"; return 0; fi
++    [ "$(dq_now)" -lt "$deadline" ] || return 3
++    sleep "$interval"
++  done
++}
++
++cmd_close() {
++  need_id "${1:-}"
++  dq_set "$1" state closed; dq_set "$1" closed_at "$(dq_now)"; dq_set "$1" close_reason "${2:-closed}"
++}
++
++cmd_progress() {
++  local mate=${1:-} dir now at line; shift
++  dq_slug_ok "$mate" && [ $# -gt 0 ] || die "progress needs <mate> <note>"
++  dir="$(dq_dir)/progress"; mkdir -p "$dir" || return 1
++  line="$mate: $(printf '%s' "$*" | tr '\n\t' '  ' | cut -c1-160)"
++  [ "$(cat "$dir/$mate.line" 2>/dev/null)" != "$line" ] || return 0
++  now=$(dq_now); at=$(cat "$dir/$mate.at" 2>/dev/null || echo 0)
++  [ $((now - at)) -ge "${FM_DQ_PROGRESS_INTERVAL:-600}" ] || return 0
++  dq_say "$line" || return 1
++  printf '%s\n' "$line" > "$dir/$mate.line"; printf '%s\n' "$now" > "$dir/$mate.at"
++}
++
++cmd=${1:-}; [ $# -eq 0 ] || shift
++case "$cmd" in
++  enqueue) [ $# -ge 4 ] || die "enqueue needs <origin> <key> <verb> <note>"
++           o=$1 k=$2 v=$3; shift 3; dq_enqueue "$o" "$k" "$v" "$*" ;;
++  import) cmd_import "$@" ;;
++  dispatch) cmd_dispatch "$@" ;;
++  list) dq_ids "${1:-queued}" ;;
++  ask) cmd_ask "$@" ;;
++  await) cmd_await "$@" ;;
++  close) cmd_close "$@" ;;
++  progress) cmd_progress "$@" ;;
++  ''|-h|--help|help) usage ;;
++  *) die "unknown command $cmd" ;;
++esac
+diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
+index d527ef87..8b19bc47 100755
+--- a/bin/fm-watch.sh
++++ b/bin/fm-watch.sh
+@@ -269,6 +269,9 @@ WATCH_HOME_EXISTED=0
+ # and wake emission (secondmate_liveness_tick below).
+ # shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
+ . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
++# The decision queue (config/decision-queue) takes needs-decision and blocked lines out of chat.
++# shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
++. "$SCRIPT_DIR/fm-decision-queue-lib.sh"
+ 
+ WATCH_LOCK="$STATE/.watch.lock"
+ WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
+@@ -3850,7 +3853,9 @@ EOF
+       while IFS=$(printf '\t') read -r sf sig f; do
+         [ -n "$sf" ] || continue
+         file_reason="$reason"
+-        case " $FM_SIGNAL_NEEDS_DECISION_FILES " in *" $f "*) file_reason="needs-decision:$files" ;; esac
++        case " $FM_SIGNAL_NEEDS_DECISION_FILES " in *" $f "*) file_reason="needs-decision:$files"; queue_owned=1 ;; *) queue_owned=0 ;; esac
++        # A queued decision stays out of chat; the markers below still advance.
++        dq_watch_file "$f" "$queue_owned" && continue
+         fm_wake_append signal "$(basename "$f")" "$file_reason" || exit 1
+       done <<EOF
+ $pending
+diff --git a/tests/fm-decision-queue.test.sh b/tests/fm-decision-queue.test.sh
+new file mode 100755
+index 00000000..e9eda217
+--- /dev/null
++++ b/tests/fm-decision-queue.test.sh
+@@ -0,0 +1,174 @@
++#!/usr/bin/env bash
++# Behavior tests for bin/fm-decision-queue.sh and its watcher hook.
++# Cases drive the real script against a scratch home with stub spawn, brief, and text senders.
++set -u
++
++# shellcheck source=tests/lib.sh
++. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
++
++TMP_ROOT=$(fm_test_tmproot fm-decision-queue)
++DQ="$ROOT/bin/fm-decision-queue.sh"
++
++# fresh_home <name>: scratch home with stub tools; prints the path.
++fresh_home() {
++  local h="$TMP_ROOT/$1"
++  mkdir -p "$h/state" "$h/config" "$h/data" "$h/stubs"
++  cat > "$h/stubs/say" <<'SH'
++#!/usr/bin/env bash
++[ "$1" = -- ] && shift
++printf '%s\n' "$*" >> "$FM_HOME/texts.log"
++SH
++  cat > "$h/stubs/brief" <<'SH'
++#!/usr/bin/env bash
++mkdir -p "${FM_DATA_OVERRIDE:-$FM_HOME/data}/$1"
++printf '# Task\n{TASK}\n{FIRSTMATE_SPEC}\n' > "${FM_DATA_OVERRIDE:-$FM_HOME/data}/$1/brief.md"
++SH
++  cat > "$h/stubs/spawn" <<'SH'
++#!/usr/bin/env bash
++printf '%s\n' "$1" >> "$FM_HOME/spawned.log"
++: > "$FM_HOME/state/$1.meta"
++SH
++  chmod +x "$h/stubs/"*
++  printf '%s\n' "$h"
++}
++
++# dq <home> <args...>: run the script in that home.
++dq() {
++  local h=$1; shift
++  FM_HOME="$h" FM_STATE_OVERRIDE="$h/state" FM_CONFIG_OVERRIDE="$h/config" FM_DATA_OVERRIDE="$h/data" FM_DQ_IMESSAGE="$h/stubs/say" FM_DQ_BRIEF="$h/stubs/brief" FM_DQ_SPAWN="$h/stubs/spawn" \
++    FM_DQ_REPLY_LOG="$h/routing.jsonl" "$DQ" "$@"
++}
++
++task() {  # <home> <id> <kind> <status line>...
++  local h=$1 id=$2 kind=$3; shift 3
++  printf 'kind=%s\n' "$kind" > "$h/state/$id.meta"
++  printf '%s\n' "$@" > "$h/state/$id.status"
++}
++
++test_enqueue_is_idempotent_and_replaces_a_changed_note() {
++  local h out
++  h=$(fresh_home enqueue)
++  assert_equals "new" "$(dq "$h" enqueue web k1 needs-decision 'pick a or b')" "first enqueue"
++  assert_equals "dup" "$(dq "$h" enqueue web k1 needs-decision 'pick a or b')" "same origin, key, note"
++  assert_equals "requeued" "$(dq "$h" enqueue web k1 needs-decision 'pick c or d')" "same key, new note"
++  assert_equals "1" "$(find "$h/state/decision-queue" -name '*.rec' | wc -l | tr -d ' ')" "one record per origin and key"
++  assert_equals "web+k1" "$(dq "$h" list)" "listed by id"
++  dq "$h" enqueue 'bad origin' k1 blocked x >/dev/null 2>&1 && fail "a bad origin was queued"
++  assert_equals "" "$(find "$h/state/decision-queue" -name '.rec.*')" "no temp file left behind"
++  pass "enqueue de-duplicates by origin and key and refuses unsafe names"
++}
++
++test_import_drops_stale_decisions_and_is_idempotent() {
++  local h out
++  h=$(fresh_home import)
++  task "$h" live ship 'needs-decision [at=100] [key=k1]: pick a or b'
++  task "$h" moved ship 'needs-decision [at=100] [key=k2]: old' 'working [at=200]: carried on'
++  task "$h" shut ship 'blocked [at=100] [key=k3]: stuck' 'resolved [at=150] [key=k3]: fixed'
++  printf 'needs-decision [at=100] [key=k4]: orphan\n' > "$h/state/gone.status"
++  out=$(dq "$h" import --dry-run)
++  assert_contains "$out" "dry-run: open=3 new=1 already-queued=0 stale-task-gone=1 stale-status-moved-on=1" "dry-run counts"
++  assert_absent "$h/state/decision-queue" "dry-run writes nothing"
++  out=$(dq "$h" import)
++  assert_contains "$out" "new=1 already-queued=0" "first import"
++  out=$(dq "$h" import)
++  assert_contains "$out" "new=0 already-queued=1" "second import changes nothing"
++  assert_equals "live+k1" "$(dq "$h" list)" "only the live decision is queued"
++  pass "import queues live decisions once and drops stale ones"
++}
++
++test_dispatch_caps_crewmates_and_batches_the_overflow() {
++  local h n
++  h=$(fresh_home dispatch)
++  for n in 1 2 3 4 5; do
++    task "$h" "m$n" ship "needs-decision [at=$n] [key=k$n]: question $n"
++    dq "$h" enqueue "m$n" "k$n" needs-decision "question $n" >/dev/null
++    sleep 1
++  done
++  dq "$h" dispatch >/dev/null
++  assert_equals "3" "$(wc -l < "$h/spawned.log" | tr -d ' ')" "three crewmates by default"
++  assert_equals "1" "$(wc -l < "$h/texts.log" | tr -d ' ')" "one digest text for the two left over"
++  assert_contains "$(cat "$h/texts.log")" "2 more decisions wait" "digest counts the overflow"
++  assert_contains "$(cat "$h"/data/dq-*/brief.md)" "fm-send.sh m1 --resolve-key k1" "brief tells the crewmate to relay the answer"
++  assert_equals "m1+k1" "$(dq "$h" list dispatched | head -1)" "oldest first"
++  dq "$h" dispatch >/dev/null
++  assert_equals "3" "$(wc -l < "$h/spawned.log" | tr -d ' ')" "a busy cap spawns nothing more"
++  assert_equals "1" "$(wc -l < "$h/texts.log" | tr -d ' ')" "the digest is rate limited"
++  dq "$h" close m1+k1 answered
++  rm "$h/state/$(sed -n 1p "$h/spawned.log").meta"
++  dq "$h" dispatch >/dev/null
++  assert_equals "4" "$(wc -l < "$h/spawned.log" | tr -d ' ')" "a freed slot takes the next record"
++  pass "dispatch caps concurrent crewmates, takes the oldest first, and digests the overflow"
++}
++
++test_dispatch_closes_a_record_that_is_no_longer_open() {
++  local h out
++  h=$(fresh_home stale)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
++  dq "$h" enqueue w k1 needs-decision q >/dev/null
++  printf 'resolved [at=2] [key=k1]: answered elsewhere\n' >> "$h/state/w.status"
++  out=$(dq "$h" dispatch)
++  assert_contains "$out" "stale w+k1" "reported stale"
++  assert_absent "$h/spawned.log" "no crewmate spawned"
++  assert_equals "" "$(dq "$h" list)" "nothing left queued"
++  pass "dispatch drops a decision that was resolved after it was queued"
++}
++
++test_ask_await_close_round_trip() {
++  local h tag now
++  h=$(fresh_home reply)
++  dq "$h" enqueue w k1 needs-decision q >/dev/null
++  dq "$h" ask w+k1 'Ship A or B? I recommend A.'
++  tag=$(sed -n 's/^\[\(D[0-9a-f]*\)\].*/\1/p' "$h/texts.log")
++  assert_contains "$tag" "D" "the text carries a tag"
++  now=$(($(date +%s) * 1000))
++  printf '%s\n' \
++    "{\"at\":$((now - 60000)),\"received\":{\"at\":$((now - 60000)),\"text\":\"[$tag] too early\"}}" \
++    "{\"at\":$((now + 5)),\"received\":{\"at\":$((now + 5)),\"text\":\"unrelated\"}}" > "$h/routing.jsonl"
++  dq "$h" await w+k1 --timeout 1 --interval 1 >/dev/null; assert_equals "3" "$?" "no tagged reply after the ask times out"
++  printf '%s\n' "{\"at\":$((now + 9)),\"received\":{\"at\":$((now + 9)),\"text\":\"> [$tag] Ship A or B?\\nA please\",\"authored\":\"A please\"}}" >> "$h/routing.jsonl"
++  assert_equals "A please" "$(dq "$h" await w+k1 --timeout 5 --interval 1)" "the tagged reply is relayed"
++  dq "$h" close w+k1 answered
++  assert_equals "w+k1" "$(dq "$h" list closed)" "closed"
++  pass "ask tags the text, await finds only the tagged later reply, close ends the record"
++}
++
++test_progress_is_one_line_deduped_and_rate_limited() {
++  local h
++  h=$(fresh_home progress)
++  dq "$h" progress web-mate 'chunk 1 done'
++  dq "$h" progress web-mate 'chunk 1 done'
++  dq "$h" progress web-mate 'chunk 2 done'
++  assert_equals "web-mate: chunk 1 done" "$(cat "$h/texts.log")" "same line and fast repeat are dropped"
++  FM_DQ_PROGRESS_INTERVAL=0 dq "$h" progress web-mate 'chunk 2 done'
++  assert_equals "2" "$(wc -l < "$h/texts.log" | tr -d ' ')" "a later line goes out after the interval"
++  pass "progress texts are one line, deduped, and rate limited"
++}
++
++test_watcher_hook_queues_decisions_only_where_enabled() {
++  local h
++  h=$(fresh_home hook)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
++  task "$h" sm secondmate 'done [at=5]: chunk 3 finished'
++  hook() {  # <file> <owned>
++    FM_HOME="$h" STATE="$h/state" CONFIG="$h/config" FM_STATE_OVERRIDE="$h/state" FM_CONFIG_OVERRIDE="$h/config" FM_ROOT="$ROOT" FM_DQ_SELF="$DQ" FM_DQ_IMESSAGE="$h/stubs/say" bash -c \
++      '. "$FM_ROOT/bin/fm-classify-lib.sh"; . "$FM_ROOT/bin/fm-decision-queue-lib.sh"; dq_watch_file "$1" "$2"' _ "$@"
++  }
++  hook "$h/state/w.status" 1 && fail "a home without config/decision-queue queued a decision"
++  assert_absent "$h/state/decision-queue" "off by default"
++  : > "$h/config/decision-queue"
++  hook "$h/state/w.status" 1 || fail "an enabled home kept the decision in chat"
++  assert_equals "w+k1" "$(dq "$h" list)" "decision queued"
++  hook "$h/state/sm.status" 0 && fail "a done line is not a decision"
++  sleep 1
++  assert_equals "sm: chunk 3 finished" "$(cat "$h/texts.log")" "second mate done sends one progress line"
++  pass "the watcher hook queues decisions and texts second-mate progress only when enabled"
++}
++
++fm_test_run \
++  test_enqueue_is_idempotent_and_replaces_a_changed_note \
++  test_import_drops_stale_decisions_and_is_idempotent \
++  test_dispatch_caps_crewmates_and_batches_the_overflow \
++  test_dispatch_closes_a_record_that_is_no_longer_open \
++  test_ask_await_close_round_trip \
++  test_progress_is_one_line_deduped_and_rate_limited \
++  test_watcher_hook_queues_decisions_only_where_enabled
+-- 
+2.53.0
+
