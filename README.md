@@ -109,7 +109,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 - [`tests/`](tests/): the test suite.
 - [`changelog.d/`](changelog.d/): changelog fragments, one per pull request.
 
-`install.sh`, `ship.sh`, and `onboard.sh` stay at the top, because the install URL and the release tarball depend on them.
+`install.sh`, `ship.sh`, and `onboard.sh` stay in root - install URL and the release tarball depend on them.
 
 ## More docs
 
