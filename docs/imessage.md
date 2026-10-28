@@ -650,7 +650,7 @@ crewship:
     desk_provider: omp              # optional; this is the default; or inception
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
-    desk_v2: false                 # optional; select the V2 loop with true
+    desk_v2: false                  # optional; select the V2 loop with true
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
 
