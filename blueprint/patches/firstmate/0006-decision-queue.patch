@@ -12,21 +12,21 @@ record, to text the owner and relay the answer with fm-send.sh --resolve-key,
 and batches the overflow into one digest text. A second mate's done line sends
 one rate-limited progress text.
 ---
- bin/fm-decision-queue-lib.sh    | 110 ++++++++++++++++++
- bin/fm-decision-queue.sh        | 191 ++++++++++++++++++++++++++++++++
- bin/fm-watch.sh                 |   7 +-
- tests/fm-decision-queue.test.sh | 174 +++++++++++++++++++++++++++++
- 4 files changed, 481 insertions(+), 1 deletion(-)
+ bin/fm-decision-queue-lib.sh    | 128 +++++++++++++++++++++
+ bin/fm-decision-queue.sh        | 191 +++++++++++++++++++++++++++++++
+ bin/fm-watch.sh                 |  10 +-
+ tests/fm-decision-queue.test.sh | 194 ++++++++++++++++++++++++++++++++
+ 4 files changed, 522 insertions(+), 1 deletion(-)
  create mode 100755 bin/fm-decision-queue-lib.sh
  create mode 100755 bin/fm-decision-queue.sh
  create mode 100755 tests/fm-decision-queue.test.sh
 
 diff --git a/bin/fm-decision-queue-lib.sh b/bin/fm-decision-queue-lib.sh
 new file mode 100755
-index 00000000..b5c252ca
+index 00000000..bab2ea5e
 --- /dev/null
 +++ b/bin/fm-decision-queue-lib.sh
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,128 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue-lib.sh - durable queue for needs-decision and blocked lines.
 +#
@@ -136,6 +136,24 @@ index 00000000..b5c252ca
 +$(status_own_open_decisions "$f")
 +EOF
 +  [ "$n" -gt 0 ] && [ "$bad" = 0 ]
++}
++
++# The watcher's periodic pickup: at most every FM_DQ_TICK_SECS (60), import and
++# dispatch in a detached run, so a queued decision needs no manual call.
++# One run at a time; a lock older than 10 minutes belongs to a dead run.
++dq_tick() {
++  local marker="$STATE/.decision-queue-tick" lock="$STATE/.decision-queue.lock" now
++  dq_enabled || return 0
++  now=$(dq_now)
++  [ $((now - $(cat "$marker" 2>/dev/null || echo 0))) -ge "${FM_DQ_TICK_SECS:-60}" ] || return 0
++  printf '%s\n' "$now" > "$marker" || return 0
++  [ -z "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] || rmdir "$lock" 2>/dev/null
++  (
++    mkdir "$lock" 2>/dev/null || exit 0
++    trap 'rmdir "$lock"' EXIT
++    "${FM_DQ_SELF:-$FM_ROOT/bin/fm-decision-queue.sh}" import
++    "${FM_DQ_SELF:-$FM_ROOT/bin/fm-decision-queue.sh}" dispatch
++  ) >>"$STATE/decision-queue.log" 2>&1 </dev/null &
 +}
 diff --git a/bin/fm-decision-queue.sh b/bin/fm-decision-queue.sh
 new file mode 100755
@@ -335,7 +353,7 @@ index 00000000..827745a7
 +  *) die "unknown command $cmd" ;;
 +esac
 diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
-index d527ef87..8b19bc47 100755
+index d527ef87..cb52e2d2 100755
 --- a/bin/fm-watch.sh
 +++ b/bin/fm-watch.sh
 @@ -269,6 +269,9 @@ WATCH_HOME_EXISTED=0
@@ -348,7 +366,17 @@ index d527ef87..8b19bc47 100755
  
  WATCH_LOCK="$STATE/.watch.lock"
  WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
-@@ -3850,7 +3853,9 @@ EOF
+@@ -3602,6 +3605,9 @@ while :; do
+   # No conversation scraping; unresolved records are never silently expired.
+   fm_pending_reply_tick "$STATE" || true
+ 
++  # Queued decisions are picked up here about once a minute (config/decision-queue).
++  dq_tick
++
+   # Endpoint liveness runs before queue observation: a positively dead or
+   # missing secondmate endpoint is relaunched here on a bounded cadence, which
+   # is also what unsticks that mate's foreign wake queue. The tick's single
+@@ -3850,7 +3856,9 @@ EOF
        while IFS=$(printf '\t') read -r sf sig f; do
          [ -n "$sf" ] || continue
          file_reason="$reason"
@@ -361,10 +389,10 @@ index d527ef87..8b19bc47 100755
  $pending
 diff --git a/tests/fm-decision-queue.test.sh b/tests/fm-decision-queue.test.sh
 new file mode 100755
-index 00000000..e9eda217
+index 00000000..5a73fd47
 --- /dev/null
 +++ b/tests/fm-decision-queue.test.sh
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,194 @@
 +#!/usr/bin/env bash
 +# Behavior tests for bin/fm-decision-queue.sh and its watcher hook.
 +# Cases drive the real script against a scratch home with stub spawn, brief, and text senders.
@@ -531,6 +559,25 @@ index 00000000..e9eda217
 +  pass "the watcher hook queues decisions and texts second-mate progress only when enabled"
 +}
 +
++test_watcher_tick_dispatches_a_queued_decision_without_a_manual_call() {
++  local h n=0
++  h=$(fresh_home tick)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
++  : > "$h/config/decision-queue"
++  tick() {
++    FM_HOME="$h" STATE="$h/state" CONFIG="$h/config" FM_STATE_OVERRIDE="$h/state" FM_CONFIG_OVERRIDE="$h/config" \
++      FM_DATA_OVERRIDE="$h/data" FM_ROOT="$ROOT" FM_DQ_SELF="$DQ" FM_DQ_IMESSAGE="$h/stubs/say" FM_DQ_BRIEF="$h/stubs/brief" \
++      FM_DQ_SPAWN="$h/stubs/spawn" bash -c '. "$FM_ROOT/bin/fm-classify-lib.sh"; . "$FM_ROOT/bin/fm-decision-queue-lib.sh"; dq_tick'
++  }
++  tick
++  while [ ! -s "$h/spawned.log" ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
++  assert_equals "dq-" "$(cut -c1-3 "$h/spawned.log")" "the tick imported and spawned a crewmate"
++  assert_equals "w+k1" "$(dq "$h" list dispatched)" "record dispatched"
++  tick; sleep 1
++  assert_equals "1" "$(wc -l < "$h/spawned.log" | tr -d ' ')" "a second tick inside the interval does nothing"
++  pass "the watcher tick picks up a queued decision with no manual call"
++}
++
 +fm_test_run \
 +  test_enqueue_is_idempotent_and_replaces_a_changed_note \
 +  test_import_drops_stale_decisions_and_is_idempotent \
@@ -538,7 +585,8 @@ index 00000000..e9eda217
 +  test_dispatch_closes_a_record_that_is_no_longer_open \
 +  test_ask_await_close_round_trip \
 +  test_progress_is_one_line_deduped_and_rate_limited \
-+  test_watcher_hook_queues_decisions_only_where_enabled
++  test_watcher_hook_queues_decisions_only_where_enabled \
++  test_watcher_tick_dispatches_a_queued_decision_without_a_manual_call
 -- 
 2.53.0
 
