@@ -24,7 +24,7 @@ Each agent (an in-flight task) shows its current task, the next queued items of 
 Stalled agents (no status event for 30 min while in flight; `paused`, `done` and `failed` do not count) are pinned on top, longest quiet first; the list shows the top 10 until you press Enter on its head.
 Below, agents are grouped by mate (home) and project, collapsed by default. A filter opens the matching groups. Only the visible rows are rendered.
 
-Keys: `↑↓/jk` move, `Enter`/`Space` open or close, `e`/`E` open or close all groups, `/` filter (Enter keeps it, Esc clears), `s` stalled only, `r` reload, `t` back to the board.
+Keys: `↑↓/jk` move, `Enter`/`Space` open or close, `e`/`E` open or close all groups, `/` filter (Enter keeps it, Esc clears), `s` stalled only, `r` reload, `d` decision queue, `t` back to the board.
 A decision is the latest `needs-decision` or `blocked` status line without a matching `resolved` line for its key.
 
 Homes come from the arguments, else `$CREWBOARD_TASKS_HOMES` (colon list), else `~/.treehouse/firstmate-*/<n>/firstmate`.
