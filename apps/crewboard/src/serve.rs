@@ -5,6 +5,8 @@
 //! - `{"op":"pub","topic":T,"body":B,"from":F}` -> `{"ok":true,"seq":N}`; a body over
 //!   `--max-msg` bytes or a `from` over 64 bytes is `{"ok":false,"error":"too_large"}`
 //! - `{"op":"hist","topic":T,"n":N}`, `{"op":"topics","summary":true}`, `{"op":"stat"}`
+//!   `sub` and `hist` take `"viewer":true` for a human's reads. Other reads count as agent reads:
+//!   `topics` reports per topic `read_seq`, the highest seq delivered to one.
 //! - `{"op":"summary","topic":T,"summary":S,"seq":N}` -> `{"ok":true}`; `topics` with
 //!   `summary:true` adds `summary` and `summary_seq`. `seq` is optional; `stale` when older.
 //! - `{"op":"sub","topics":[T..],"since":N,"boot":ID}` streams until either side closes.
@@ -114,7 +116,7 @@ fn subscribe(board: &Shared, req: &Value) -> Result<Subscription, &'static str> 
         Value::String(b) => Some(b.as_str()),
         _ => return Err("bad_request"),
     };
-    lock(board).subscribe(topics.ok_or("bad_request")?, req["since"].as_u64(), boot)
+    lock(board).subscribe(topics.ok_or("bad_request")?, req["since"].as_u64(), boot, req["viewer"] == true)
 }
 
 /// The reply lines to any request but `sub`, newline included.
@@ -129,7 +131,11 @@ fn answer(board: &Shared, pid: i32, req: &Value) -> String {
             _ => err("bad_request"),
         },
         Some("hist") => {
-            let lines = b.history(req["topic"].as_str().unwrap_or(""), req["n"].as_u64().unwrap_or(50) as usize);
+            let topic = req["topic"].as_str().unwrap_or("");
+            let lines = b.history(topic, req["n"].as_u64().unwrap_or(50) as usize);
+            if req["viewer"] != true {
+                b.mark_read(topic);
+            }
             return lines.concat() + "{\"end\":true}\n";
         }
         Some("topics") => b.topics(req["summary"] == true),

@@ -67,13 +67,15 @@ The socket carries newline-delimited JSON. A client sends one request per line. 
 | Request | Reply |
 |---|---|
 | `{"op":"pub","topic":T,"body":B,"from":F}` | `{"ok":true,"seq":N}` or `{"ok":false,"error":E}` |
-| `{"op":"hist","topic":T,"n":N}` | The last `N` messages, oldest first, then `{"end":true}` |
-| `{"op":"topics","summary":true}` | A JSON array of `{topic,count,oldest,newest}`; `summary:true` adds `summary` and `summary_seq` |
+| `{"op":"hist","topic":T,"n":N,"viewer":true}` | The last `N` messages, oldest first, then `{"end":true}`. Without `viewer:true` the read counts as an agent read of the topic |
+| `{"op":"topics","summary":true}` | A JSON array of `{topic,count,oldest,newest,read_seq}`; `summary:true` adds `summary` and `summary_seq` |
 | `{"op":"summary","topic":T,"summary":S,"seq":N}` | `{"ok":true}`, or `bad_topic` (no such topic) or `stale` (`seq` older than the stored one). `seq` defaults to the newest message |
 | `{"op":"stat"}` | `{boot,uptime_s,seq,bytes,cap_bytes,topics,subs,dropped}` |
-| `{"op":"sub","topics":[T..],"since":N,"boot":ID}` | A stream, until either side closes |
+| `{"op":"sub","topics":[T..],"since":N,"boot":ID,"viewer":true}` | A stream, until either side closes. Without `viewer:true`, messages it delivers count as agent reads |
 
 Errors are `bad_request`, `bad_topic`, `too_large` and `cap`.
+
+`read_seq` is the highest seq of the topic delivered to a non-viewer client, or 0. A human's tool sends `viewer:true` (`--viewer` on `sub` and `tail`), so its reads do not move it. `summarize` and `github-sink` are not agents and send it too. The board keeps `read_seq` in memory: a restart resets it.
 
 A subscription stream starts with `{"boot":ID,"seq":N}`. The boot id is new on each daemon start. `seq` is the board seq now.
 Live messages follow as they arrive. A topic entry may end in `*` and then matches by prefix.

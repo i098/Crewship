@@ -3,6 +3,7 @@
 Read-only terminal viewer for the crewboard message board.
 It runs the `crewboard` CLI (`sub`, `topics`); the tasks view also runs `tasks-axi` and reads `state/*.status` files, and the decision queue view reads `state/decision-queue/*.rec`. It never publishes or writes.
 The left pane lists topics with unread counts; the right pane shows messages.
+Unread means unread by agents: the messages above the topic's `read_seq` from `crewboard topics --json`, read every 3 seconds. Selecting a topic does not clear the count. The viewer subscribes with `--viewer`, so its own reads never count.
 The background is transparent; colors come from `../tui-theme/theme.ts`.
 
 ```bash

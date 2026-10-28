@@ -19,12 +19,14 @@ use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
   crewboard pub <topic> [text|-]          publish; reads stdin when text is - or absent
-  crewboard sub <topic>... [--since N [--boot ID]] [--json]
+  crewboard sub <topic>... [--since N [--boot ID]] [--json] [--viewer]
                                           stream messages; a trailing * matches a prefix.
                                           The first line is {\"boot\":ID,\"seq\":N} (stderr unless --json);
                                           pass the last boot ID and seq back on reconnect: a different
                                           boot replays all history after a gap marker with restarted:true
-  crewboard tail <topic> [-n 50] [--json] print history, then exit
+  crewboard tail <topic> [-n 50] [--json] [--viewer]
+                                          print history, then exit; --viewer (also on sub) marks a human's
+                                          read: topics reports read_seq, the highest seq an agent read
   crewboard topics [--summary] [--json]   list topics with counts; --summary adds each topic's summary and
                                           summary_seq (one line per topic, or JSON with --json)
   crewboard summary <topic> [text|-] [--seq N]
@@ -65,6 +67,8 @@ struct Args<'a> {
     pos: Vec<&'a str>,
     opts: Vec<(&'a str, &'a str)>,
     json: bool,
+    /// `--viewer`: a human's read, which the board does not count as an agent read.
+    viewer: bool,
 }
 
 impl<'a> Args<'a> {
@@ -75,6 +79,7 @@ impl<'a> Args<'a> {
             match arg {
                 "--" => a.pos.extend(it.by_ref()),
                 "--json" => a.json = true,
+                "--viewer" => a.viewer = true,
                 f if allowed.contains(&f) => a.opts.push((f, it.next().unwrap_or_else(|| usage()))),
                 f if f.starts_with('-') && f != "-" => usage(),
                 p => a.pos.push(p),
@@ -185,7 +190,7 @@ fn subscribe(rest: &[String]) {
     if a.pos.is_empty() || (boot.is_some() && since.is_none()) {
         usage();
     }
-    let mut r = request(json!({"op": "sub", "topics": a.pos, "since": since, "boot": boot}));
+    let mut r = request(json!({"op": "sub", "topics": a.pos, "since": since, "boot": boot, "viewer": a.viewer}));
     loop {
         let (raw, v) = next(&mut r);
         if v["boot"].is_string() {
@@ -206,7 +211,7 @@ fn subscribe(rest: &[String]) {
 fn tail(rest: &[String]) {
     let a = Args::parse(rest, &["-n"]);
     let [topic] = a.pos[..] else { usage() };
-    let mut r = request(json!({"op": "hist", "topic": topic, "n": a.opt::<u64>("-n").unwrap_or(50)}));
+    let mut r = request(json!({"op": "hist", "topic": topic, "n": a.opt::<u64>("-n").unwrap_or(50), "viewer": a.viewer}));
     loop {
         let (raw, v) = next(&mut r);
         if v["end"] == true {
@@ -224,7 +229,7 @@ fn github_sink(rest: &[String]) {
         usage();
     }
     let topics = if a.pos.is_empty() { vec!["fleet"] } else { a.pos.clone() };
-    let stream = request(json!({"op": "sub", "topics": topics}));
+    let stream = request(json!({"op": "sub", "topics": topics, "viewer": true}));
     match sink::run(stream, Duration::from_secs(secs), |body| sink::gh_post(&repo, issue, body), true) {
         sink::Stop::Off => off(),
         sink::Stop::Signal => exit(0),
@@ -289,7 +294,7 @@ fn refresh(topic: &str, seq: u64, cmd: &str) -> Result<(), String> {
         .as_array()
         .and_then(|ts| ts.iter().find(|t| t["topic"] == topic).and_then(|t| t["summary"].as_str().map(String::from)))
         .unwrap_or_default();
-    let mut r = request(json!({"op": "hist", "topic": topic, "n": summarizer::CONTEXT}));
+    let mut r = request(json!({"op": "hist", "topic": topic, "n": summarizer::CONTEXT, "viewer": true}));
     let mut msgs = Vec::new();
     loop {
         let (_, v) = next(&mut r);
@@ -323,7 +328,7 @@ fn summarize(rest: &[String]) {
 
     // Subscribe before reading the topics, so no message falls between the two.
     let (tx, rx) = std::sync::mpsc::channel::<(String, u64)>();
-    let mut live = request(json!({"op": "sub", "topics": ["*"]}));
+    let mut live = request(json!({"op": "sub", "topics": ["*"], "viewer": true}));
     std::thread::spawn(move || {
         loop {
             let (_, m) = next(&mut live);

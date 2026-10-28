@@ -45,6 +45,8 @@ struct Topic {
     last: u64,
     /// One line for readers choosing a thread; empty until a summarizer sets it.
     summary: String,
+    /// Highest seq delivered to a non-viewer client (an agent); viewer reads never move it.
+    read_seq: u64,
     /// Seq of the last message the summary covers.
     summary_seq: u64,
 }
@@ -53,6 +55,7 @@ struct Sub {
     id: u64,
     patterns: Vec<String>,
     tx: mpsc::Sender<Arc<str>>,
+    viewer: bool,
     slow: Arc<Notify>,
 }
 
@@ -143,12 +146,16 @@ impl Board {
             self.bytes -= old.line.len();
         }
         let dropped = &mut self.dropped;
+        let mut agent_read = false;
         self.subs.retain(|s| {
             if !s.patterns.iter().any(|p| matches(p, topic)) {
                 return true;
             }
             match s.tx.try_send(line.clone()) {
-                Ok(()) => true,
+                Ok(()) => {
+                    agent_read |= !s.viewer;
+                    true
+                }
                 Err(TrySendError::Full(_)) => {
                     *dropped += 1;
                     s.slow.notify_one();
@@ -157,6 +164,9 @@ impl Board {
                 Err(TrySendError::Closed(_)) => false,
             }
         });
+        if agent_read {
+            self.topics.get_mut(topic).expect("topic was just published").read_seq = seq;
+        }
         Ok(seq)
     }
 
@@ -164,7 +174,7 @@ impl Board {
     /// higher seq, led by a gap marker when any of them were evicted. The board
     /// restarted when `since` is beyond its seq or `boot` is not its boot id: that
     /// is a gap marked `restarted` and replays all retained messages.
-    pub fn subscribe(&mut self, patterns: Vec<String>, since: Option<u64>, boot: Option<&str>) -> Result<Subscription, &'static str> {
+    pub fn subscribe(&mut self, patterns: Vec<String>, since: Option<u64>, boot: Option<&str>, viewer: bool) -> Result<Subscription, &'static str> {
         if patterns.is_empty() || !patterns.iter().all(|p| valid_pattern(p)) {
             return Err("bad_topic");
         }
@@ -186,11 +196,18 @@ impl Board {
                 replay.push(format!("{{\"gap\":true,\"oldest\":{oldest}{restarted}}}\n").into());
             }
             replay.extend(msgs.into_iter().map(|m| m.line.clone()));
+            if !viewer {
+                for (_, t) in self.topics.iter_mut().filter(|(n, _)| patterns.iter().any(|p| matches(p, n))) {
+                    if let Some(newest) = t.ring.back().map(|m| m.seq).filter(|&s| restarted || s > since) {
+                        t.read_seq = t.read_seq.max(newest);
+                    }
+                }
+            }
         }
         let (tx, rx) = mpsc::channel(SUB_QUEUE);
         self.next_sub += 1;
         let slow = Arc::new(Notify::new());
-        self.subs.push(Sub { id: self.next_sub, patterns, tx, slow: slow.clone() });
+        self.subs.push(Sub { id: self.next_sub, patterns, tx, slow: slow.clone(), viewer });
         let hello = format!("{{\"boot\":{},\"seq\":{}}}\n", Value::from(self.boot.as_str()), self.seq).into();
         Ok((self.next_sub, replay, Feed { rx, slow, hello }))
     }
@@ -200,6 +217,13 @@ impl Board {
         if let Some(i) = self.subs.iter().position(|s| s.id == id) {
             self.subs.remove(i);
             self.dropped += u64::from(slow);
+        }
+    }
+
+    /// Counts the newest message of `topic` as read by an agent: a `hist` reply carried it.
+    pub fn mark_read(&mut self, topic: &str) {
+        if let Some(t) = self.topics.get_mut(topic) {
+            t.read_seq = t.ring.back().map_or(t.read_seq, |m| m.seq);
         }
     }
 
@@ -238,6 +262,7 @@ impl Board {
                     "count": t.ring.len(),
                     "oldest": t.ring.front().map(|m| m.seq),
                     "newest": t.ring.back().map(|m| m.seq),
+                    "read_seq": t.read_seq,
                 });
                 if with_summary {
                     v["summary"] = t.summary.as_str().into();
@@ -332,13 +357,13 @@ mod tests {
         }
         b.publish("u", Some("me"), 1, "4").unwrap();
         assert_eq!(seqs(&b.history("t", 10)), [json!(2), json!(3)]);
-        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(0), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(0), None, false).unwrap();
         assert_eq!(&*replay[0], "{\"gap\":true,\"oldest\":2}\n");
         assert_eq!(seqs(&replay[1..]), [json!(2), json!(3)]);
         // Nothing after seq 1 was evicted from `t`, and `u` evicted nothing.
-        let (_, replay, _rx) = b.subscribe(vec!["t".into(), "u".into()], Some(1), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t".into(), "u".into()], Some(1), None, false).unwrap();
         assert_eq!(seqs(&replay), [json!(2), json!(3), json!(4)]);
-        let (_, replay, _rx) = b.subscribe(vec!["u".into()], None, None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["u".into()], None, None, false).unwrap();
         assert!(replay.is_empty());
     }
 
@@ -400,9 +425,9 @@ mod tests {
             b.topics(false).as_array().unwrap().iter().map(|t| b.history(t["topic"].as_str().unwrap(), 10).iter().map(|l| l.len()).sum::<usize>()).sum();
         assert_eq!(b.stat()["bytes"], json!(kept));
         // t1 held seq 2: a subscriber that saw seq 1 must be told about the loss.
-        let (_, replay, _rx) = b.subscribe(vec!["t0".into()], Some(1), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t0".into()], Some(1), None, false).unwrap();
         assert_eq!(&*replay[0], "{\"gap\":true,\"oldest\":1025}\n");
-        let (_, replay, _rx) = b.subscribe(vec!["t0".into()], Some(2), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t0".into()], Some(2), None, false).unwrap();
         assert_eq!(seqs(&replay), [json!(1025)]);
     }
 
@@ -412,10 +437,10 @@ mod tests {
         for body in ["1", "2", "3"] {
             b.publish("t", None, 1, body).unwrap();
         }
-        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(100), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(100), None, false).unwrap();
         assert_eq!(&*replay[0], "{\"gap\":true,\"oldest\":1,\"restarted\":true}\n");
         assert_eq!(seqs(&replay[1..]), [json!(1), json!(2), json!(3)]);
-        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(3), None).unwrap();
+        let (_, replay, _rx) = b.subscribe(vec!["t".into()], Some(3), None, false).unwrap();
         assert!(replay.is_empty());
     }
 
@@ -425,7 +450,7 @@ mod tests {
         for body in ["1", "2", "3"] {
             old.publish("t", None, 1, body).unwrap();
         }
-        let (_, _, feed) = old.subscribe(vec!["t".into()], None, None).unwrap();
+        let (_, _, feed) = old.subscribe(vec!["t".into()], None, None, false).unwrap();
         let hello: Value = serde_json::from_str(&feed.hello).unwrap();
         assert_eq!(hello["seq"], json!(3));
         let old_boot = hello["boot"].as_str().unwrap().to_owned();
@@ -434,25 +459,63 @@ mod tests {
         for body in ["1", "2", "3", "4", "5"] {
             new.publish("t", None, 1, body).unwrap();
         }
-        let (_, _, feed) = new.subscribe(vec!["t".into()], None, None).unwrap();
+        let (_, _, feed) = new.subscribe(vec!["t".into()], None, None, false).unwrap();
         let new_boot = serde_json::from_str::<Value>(&feed.hello).unwrap()["boot"].clone();
         assert_ne!(new_boot, json!(old_boot));
 
-        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), Some(&old_boot)).unwrap();
+        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), Some(&old_boot), false).unwrap();
         assert_eq!(&*replay[0], "{\"gap\":true,\"oldest\":1,\"restarted\":true}\n");
         assert_eq!(seqs(&replay[1..]), [json!(1), json!(2), json!(3), json!(4), json!(5)]);
         // Without a boot id the seq alone cannot tell: it continues the stream.
-        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), None).unwrap();
+        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), None, false).unwrap();
         assert_eq!(seqs(&replay), [json!(4), json!(5)]);
-        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), new_boot.as_str()).unwrap();
+        let (_, replay, _rx) = new.subscribe(vec!["t".into()], Some(3), new_boot.as_str(), false).unwrap();
         assert_eq!(seqs(&replay), [json!(4), json!(5)]);
+    }
+
+    fn read_seq(b: &Board) -> Value {
+        b.topics(false)[0]["read_seq"].clone()
+    }
+
+    #[test]
+    fn read_seq_follows_agent_reads_only() {
+        let mut b = board(1 << 20, 10);
+        b.publish("t", None, 1, "1").unwrap();
+        assert_eq!(read_seq(&b), json!(0));
+        // A viewer's replay and live delivery leave it alone.
+        let (_, _, mut viewer) = b.subscribe(vec!["t".into()], Some(0), None, true).unwrap();
+        b.publish("t", None, 1, "2").unwrap();
+        viewer.rx.try_recv().unwrap();
+        assert_eq!(read_seq(&b), json!(0));
+        // An agent's live delivery moves it.
+        let (_, _, mut agent) = b.subscribe(vec!["t".into()], None, None, false).unwrap();
+        b.publish("t", None, 1, "3").unwrap();
+        agent.rx.try_recv().unwrap();
+        assert_eq!(read_seq(&b), json!(3));
+        // An agent's replay moves it too, and a hist read is marked explicitly.
+        b.publish("t", None, 1, "4").unwrap();
+        assert_eq!(read_seq(&b), json!(4));
+        b.publish("u", None, 1, "5").unwrap();
+        b.mark_read("u");
+        assert_eq!(b.topics(false)[1]["read_seq"], json!(5));
+    }
+
+    #[test]
+    fn read_seq_resets_on_restart() {
+        let mut b = board(1 << 20, 10);
+        let (_, _, _rx) = b.subscribe(vec!["t".into()], None, None, false).unwrap();
+        b.publish("t", None, 1, "1").unwrap();
+        assert_eq!(read_seq(&b), json!(1));
+        let mut fresh = board(1 << 20, 10);
+        fresh.publish("t", None, 1, "1").unwrap();
+        assert_eq!(read_seq(&fresh), json!(0));
     }
 
     #[test]
     fn slow_subscriber_is_dropped() {
         let mut b = board(1 << 20, 10);
-        let (_, _, _rx) = b.subscribe(vec!["*".into()], None, None).unwrap();
-        let (_, _, mut fast) = b.subscribe(vec!["t".into()], None, None).unwrap();
+        let (_, _, _rx) = b.subscribe(vec!["*".into()], None, None, false).unwrap();
+        let (_, _, mut fast) = b.subscribe(vec!["t".into()], None, None, false).unwrap();
         for _ in 0..SUB_QUEUE {
             b.publish("t", None, 1, "x").unwrap();
             fast.rx.try_recv().unwrap();
