@@ -14,6 +14,7 @@ WorkingDirectory={{ crewship_imessage_dir }}
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment="FM_HOME={{ crewship_firstmate_dir }}"
 Environment="FM_IMESSAGE_OWNER={{ crewship_cfg.imessage.owner }}"
+Environment="FM_IMESSAGE_DESK_V2={{ crewship_cfg.imessage.desk_v2 | default(false) | ternary('true', 'false') }}"
 Environment="FM_IMESSAGE_DESK_PROVIDER={{ crewship_imessage_desk_provider }}"
 Environment="FM_IMESSAGE_DESK_MODEL={{ crewship_imessage_desk_model }}"
 Environment="FM_IMESSAGE_DESK_REASONING={{ crewship_imessage_desk_reasoning }}"

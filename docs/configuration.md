@@ -207,6 +207,7 @@ crewship:
   #   owner: "+<country code><number>"
   #   owner_name: the owner          # the default; how the desk prompt names him
   #   # desk_provider, desk_model, desk_reasoning: optional; see imessage.md#enable-it
+  #   desk_v2: false                 # the default; true selects the V2 front desk
   #   supervisor_model: ""           # the default; see imessage.md#what-it-does for identity routing
   #   transports: [photon]           # the default; in order, e.g. [photon, bluebubbles] with the block below
   #   bluebubbles:
