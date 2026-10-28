@@ -33,7 +33,12 @@ def clean(text):
     ("Decision stuck after 3 attempts on cf-x build\nNext step", "Next step"),
     ("send /stop to cancel", "send /stop to cancel"),
     ("Not a status: working: ok mid-line done: x", "Not a status: working: ok mid-line done: x"),
-    ("[D039b88] one\n\n\n\ntwo   three ( ) [ ]", "one\n\ntwo three"),
+    ("[D039b88] one\n\n\n\ntwo   three ( ) [ ]", "one\n\n\n\ntwo   three ( ) [ ]"),
+    ("Fix (key=abc) and now", "Fix and now"),
+    ("done: x\n    nested\n  y [D039b88]", "x\n    nested\n  y"),
+    ("done: call `reset()` now", "call `reset()` now"),
+    ("done: - [ ] deploy", "- [ ] deploy"),
+    ("Fix [corr=1] now", "Fix now"),
 ])
 def test_rules(text, want):
     assert clean(text) == want
