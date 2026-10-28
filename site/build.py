@@ -89,7 +89,7 @@ def points(readme, changelog, index=""):
     """(spot, title, href, body HTML) for every point of interest."""
     rows, extra = [], []
     for title, link, desc in features(readme, index):
-        href = f"{REPO}/blob/main/{link}"
+        href = site_href(link)
         if link in SCENE:
             rows.append((SCENE[link][0], title, href, inline(desc, 52)))
         else:
@@ -147,6 +147,13 @@ def doc_routes():
     """One stable URL per published source; keep nested developer docs on GitHub."""
     sources = [ROOT / "README.md", ROOT / "SETUP.md", *sorted((ROOT / "docs").glob("*.md"))]
     return {p.relative_to(ROOT).as_posix(): f"/docs/{p.stem.lower()}" for p in sources}
+
+
+def site_href(link):
+    """The crewship.si page for a published repository doc, else its GitHub page."""
+    path, hash_, fragment = link.partition("#")
+    route = doc_routes().get(path)
+    return route + hash_ + fragment if route else f"{REPO}/blob/main/{link}"
 
 
 def doc_link(link, source, routes, image=False):
@@ -491,7 +498,7 @@ def build(dist=HARBOR / "dist"):
     changelog = (ROOT / "CHANGELOG.md").read_text()
     index = (ROOT / "docs/features.md").read_text()
     items = "\n".join(
-        f'      <li data-spot="{spot}"{" data-doc" if "/blob/main/" in href else ""}>'
+        f'      <li data-spot="{spot}"{" data-doc" if "/blob/main/" in href or href.startswith("/docs/") else ""}>'
         f'<a target="_blank" rel="noopener" href="{href}">'
         f"{html.escape(title)}</a><p>{body}</p></li>"
         for spot, title, href, body in points(readme, changelog, index)
@@ -499,7 +506,7 @@ def build(dist=HARBOR / "dist"):
     shutil.rmtree(dist, ignore_errors=True)
     shutil.copytree(HARBOR / "public", dist)
     page = dist / "index.html"
-    footer = f'Read the <a target="_blank" rel="noopener" href="{REPO}/blob/main/docs/architecture.md">Architecture</a>.'
+    footer = f'Read the <a target="_blank" rel="noopener" href="{site_href("docs/architecture.md")}">Architecture</a>.'
     page.write_text(page.read_text().replace(MARK, items).replace(FOOT_MARK, footer))
     build_docs(dist)
     return dist
