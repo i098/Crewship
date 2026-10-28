@@ -25,8 +25,10 @@ def clean(text):
     ("working: building\ndone: built", "building\nbuilt"),
     ("[D0123ab] needs-decision: pick one", "pick one"),
     ("Blocked: x\npaused: z", "Blocked: x\nz"),
-    ("Asked crewship-mate-c1 and cf-text-filter and sm-fleet and bob-mate-7 today", "Asked and and and today"),
-    ("See /home/a/b.txt and /sdb-disk/x /tmp/y state/z.log data/q", "See and"),
+    ("Asked crewship-mate-c1 and `cf-text-filter` and `sm-fleet` and bob-mate-7 today", "Asked and and and today"),
+    ("cf-text-filter: working: built", "built"),
+    ("See /home/a/b.txt and /sdb-disk/x ~/notes /tmp/y state/z.log data/q.json", "See and"),
+    ("Use data/science and cf-style, sm-ooth, state/of the art, and/or 1/2", "Use data/science and cf-style, sm-ooth, state/of the art, and/or 1/2"),
     ("Tests failed (decision stuck after 3 attempts). Next.", "Tests failed. Next."),
     ("Not a status: working: ok mid-line done: x", "Not a status: working: ok mid-line done: x"),
     ("[D039b88] one\n\n\n\ntwo   three ( ) [ ]", "one\n\ntwo three"),
@@ -64,7 +66,7 @@ def cli(*args, stdin=None, tmp_path=None, bun_ok=True):
 
 def test_cli_cleans_arguments_and_stdin(tmp_path):
     assert cli("done: [D039b88] Shipped /tmp/x", tmp_path=tmp_path)[1] == "Shipped"
-    assert cli(stdin="working: hi cf-abc", tmp_path=tmp_path)[1] == "hi"
+    assert cli(stdin="working: hi `cf-abc`", tmp_path=tmp_path)[1] == "hi"
 
 
 def test_cli_sends_original_when_filter_fails(tmp_path):

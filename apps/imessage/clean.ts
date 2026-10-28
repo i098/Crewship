@@ -5,10 +5,12 @@ const STRIP: [RegExp, string][] = [
   [/\[D[0-9a-f]{4,8}\]/gi, ""],
   [/\[(?:key|corr)=[^\]]*\]/g, ""],
   [/(?<![\w-])(?:key|corr)=\S*/g, ""],
+  [/^[ \t]*(?:cf|sm)-[a-z0-9][a-z0-9-]*[ \t]*:[ \t]*/gim, ""],
   [/^[ \t]*(?:working|done|needs-decision|paused)[ \t]*:[ \t]*/gim, ""],
   [/\b[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+\b/gi, ""],
-  [/\b(?:cf|sm)-[a-z0-9][a-z0-9-]*/gi, ""],
-  [/(?<![\w/.-])(?:\/(?:home|sdb-disk|sdc-disk|tmp)(?:\/\S*)?|(?:state|data)\/\S*)/g, ""],
+  [/`(?:cf|sm)-[a-z0-9][a-z0-9-]*`/gi, ""],
+  [/(?<![\w/.:~-])(?:~|(?=\/[\w.@-]))(?:\/[\w.@-]+)+\/?/g, ""],
+  [/(?<![\w/.-])(?:state|data)\/[\w./-]*\.[A-Za-z0-9]+/g, ""],
   [/decision stuck after \d+ attempts[.,:;]?/gi, ""],
 ];
 const TIDY: [RegExp, string][] = [
