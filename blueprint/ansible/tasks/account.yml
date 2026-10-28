@@ -330,6 +330,22 @@
   loop: [".profile", ".bashrc"]
   when: crewship_account_ready | bool
 
+- name: Give interactive Bash the zoxide directory jump
+  ansible.builtin.blockinfile:
+    path: "{{ crewship_cfg.home }}/.bashrc"
+    create: true
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    marker: "# {mark} crewship zoxide"
+    block: |
+      # Interactive shells only: agents and omp's bash tool never get `z`.
+      case $- in
+        *i*) if command -v zoxide >/dev/null 2>&1; then eval "$(zoxide init bash)"; fi ;;
+      esac
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  when: crewship_account_ready | bool
+
 - name: Use system CA trust for future user-manager processes
   ansible.builtin.copy:
     dest: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-trust.conf"
