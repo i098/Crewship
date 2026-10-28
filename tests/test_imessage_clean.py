@@ -30,6 +30,8 @@ def clean(text):
     ("See /home/a/b.txt and /sdb-disk/x ~/notes /tmp/y state/z.log data/q.json", "See and"),
     ("Use data/science and cf-style, sm-ooth, state/of the art, and/or 1/2", "Use data/science and cf-style, sm-ooth, state/of the art, and/or 1/2"),
     ("Tests failed (decision stuck after 3 attempts). Next.", "Tests failed. Next."),
+    ("Decision stuck after 3 attempts on cf-x build\nNext step", "Next step"),
+    ("send /stop to cancel", "send /stop to cancel"),
     ("Not a status: working: ok mid-line done: x", "Not a status: working: ok mid-line done: x"),
     ("[D039b88] one\n\n\n\ntwo   three ( ) [ ]", "one\n\ntwo three"),
 ])

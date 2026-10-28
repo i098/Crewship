@@ -9,8 +9,9 @@ const STRIP: [RegExp, string][] = [
   [/^[ \t]*(?:working|done|needs-decision|paused)[ \t]*:[ \t]*/gim, ""],
   [/\b[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+\b/gi, ""],
   [/`(?:cf|sm)-[a-z0-9][a-z0-9-]*`/gi, ""],
-  [/(?<![\w/.:~-])(?:~|(?=\/[\w.@-]))(?:\/[\w.@-]+)+\/?/g, ""],
+  [/(?<![\w/.:~-])(?:~(?:\/[\w.@-]+)+|(?:\/[\w.@-]+){2,})\/?/g, ""],
   [/(?<![\w/.-])(?:state|data)\/[\w./-]*\.[A-Za-z0-9]+/g, ""],
+  [/^[ \t]*decision stuck after \d+ attempts.*\n?/gim, ""],
   [/decision stuck after \d+ attempts[.,:;]?/gi, ""],
 ];
 const TIDY: [RegExp, string][] = [
