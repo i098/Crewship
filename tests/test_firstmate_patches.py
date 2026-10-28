@@ -534,4 +534,4 @@ def test_decision_queue_suite_passes_on_the_patched_tree(tmp_path):
         cwd=checkout, env=env, capture_output=True, text=True, timeout=300,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.count("ok - ") == 8
+    assert result.stdout.count("ok - ") == 10

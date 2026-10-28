@@ -161,7 +161,7 @@ new file mode 100755
 index 00000000..827745a7
 --- /dev/null
 +++ b/bin/fm-decision-queue.sh
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,195 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue.sh - keep needs-decision and blocked lines out of chat.
 +#
@@ -231,8 +231,7 @@ index 00000000..827745a7
 +}
 +
 +dq_stuck() {  # <id>
-+  dq_set "$1" state stuck
-+  dq_say "[$(dq_tag "$1")] decision stuck after $(dq_get "$1" attempts) attempts: $(dq_get "$1" origin) $(dq_get "$1" note)" >/dev/null 2>&1 || true
++  dq_say "[$(dq_tag "$1")] decision stuck after $(dq_get "$1" attempts) attempts: $(dq_get "$1" origin) $(dq_get "$1" note)" >/dev/null 2>&1 && dq_set "$1" state stuck
 +}
 +
 +active_count() {  # [dry: 1 leaves stuck records alone]
@@ -398,7 +397,7 @@ new file mode 100755
 index 00000000..5a73fd47
 --- /dev/null
 +++ b/tests/fm-decision-queue.test.sh
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,227 @@
 +#!/usr/bin/env bash
 +# Behavior tests for bin/fm-decision-queue.sh and its watcher hook.
 +# Cases drive the real script against a scratch home with stub spawn, brief, and text senders.
@@ -584,6 +583,37 @@ index 00000000..5a73fd47
 +  pass "the watcher tick picks up a queued decision with no manual call"
 +}
 +
++test_a_failed_text_keeps_a_record_out_of_stuck() {
++  local h
++  h=$(fresh_home stuck)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
++  dq "$h" enqueue w k1 needs-decision q >/dev/null
++  printf '#!/usr/bin/env bash\nexit 1\n' > "$h/stubs/spawn"
++  cp "$h/stubs/say" "$h/stubs/say.ok"; printf '#!/usr/bin/env bash\nexit 1\n' > "$h/stubs/say"
++  FM_DQ_ATTEMPTS=1 dq "$h" dispatch >/dev/null 2>&1
++  assert_equals "" "$(dq "$h" list stuck)" "no stuck record while the owner text fails"
++  cp "$h/stubs/say.ok" "$h/stubs/say"
++  FM_DQ_ATTEMPTS=1 dq "$h" dispatch >/dev/null 2>&1
++  assert_equals "w+k1" "$(dq "$h" list stuck)" "stuck once the text is sent"
++  assert_equals "1" "$(grep -c 'stuck' "$h/texts.log")" "one owner text"
++  pass "a record turns stuck only with an owner text sent"
++}
++
++test_a_reworded_note_on_a_dispatched_record_keeps_its_crewmate() {
++  local h rec
++  h=$(fresh_home renote)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
++  dq "$h" enqueue w k1 needs-decision 'pick a or b' >/dev/null
++  dq "$h" dispatch >/dev/null
++  assert_equals "dup" "$(dq "$h" enqueue w k1 needs-decision 'pick c or d')" "a reworded note on a live record is not a requeue"
++  dq "$h" dispatch >/dev/null
++  assert_equals "w+k1" "$(dq "$h" list dispatched)" "still dispatched"
++  assert_equals "1" "$(wc -l < "$h/spawned.log" | tr -d ' ')" "no second crewmate"
++  rec="$h/state/decision-queue/w+k1.rec"
++  assert_equals "pick c or d" "$(sed -n 's/^note=//p' "$rec")" "note updated"
++  pass "a reworded note on a dispatched record keeps its crewmate"
++}
++
 +fm_test_run \
 +  test_enqueue_is_idempotent_and_replaces_a_changed_note \
 +  test_import_drops_stale_decisions_and_is_idempotent \
@@ -592,7 +622,9 @@ index 00000000..5a73fd47
 +  test_ask_await_close_round_trip \
 +  test_progress_is_one_line_deduped_and_rate_limited \
 +  test_watcher_hook_queues_decisions_only_where_enabled \
-+  test_watcher_tick_dispatches_a_queued_decision_without_a_manual_call
++  test_watcher_tick_dispatches_a_queued_decision_without_a_manual_call \
++  test_a_failed_text_keeps_a_record_out_of_stuck \
++  test_a_reworded_note_on_a_dispatched_record_keeps_its_crewmate
 -- 
 2.53.0
 
