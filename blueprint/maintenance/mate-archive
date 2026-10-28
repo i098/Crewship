@@ -25,8 +25,18 @@ SECRET = re.compile(
     """)
 
 
+PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+
+
 def mask(text):
-    return "\n".join("[secret line masked]" if SECRET.search(l) else l for l in text.splitlines())
+    out, in_key = [], False
+    for l in text.splitlines():
+        if in_key or SECRET.search(l):
+            out.append("[secret line masked]")
+            in_key = (in_key or "PRIVATE KEY-----" in l) and not PEM_END.search(l)
+        else:
+            out.append(l)
+    return "\n".join(out)
 
 
 def connect():

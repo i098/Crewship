@@ -83,6 +83,14 @@ def test_secret_lines_are_masked_and_db_is_private(ma, capsys):
     assert stat.S_IMODE(ma.DB.stat().st_mode) == 0o600
 
 
+def test_multiline_private_key_is_fully_masked(ma, capsys):
+    pem = "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAbodytoken\nQ29udGludWVkYm9keQ\n-----END RSA PRIVATE KEY-----\nafterkey"
+    write_session(ma, "a", "sess-a", [pem])
+    assert run(ma, capsys, "search", "bodytoken") == "no match\n"
+    assert run(ma, capsys, "search", "Q29udGludWVkYm9keQ") == "no match\n"
+    assert "afterkey" in run(ma, capsys, "search", "afterkey")
+
+
 def test_two_indexers_on_one_file_do_not_duplicate_turns(ma, capsys):
     path = write_session(ma, "a", "sess-a", ["alpha", "beta"])
     first, second = ma.connect(), ma.connect()
