@@ -26,7 +26,7 @@ new file mode 100755
 index 00000000..bab2ea5e
 --- /dev/null
 +++ b/bin/fm-decision-queue-lib.sh
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,129 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue-lib.sh - durable queue for needs-decision and blocked lines.
 +#
@@ -86,6 +86,7 @@ index 00000000..bab2ea5e
 +  if [ -f "$f" ]; then
 +    existed=1
 +    [ "$(dq_get "$id" note)" != "$note" ] || { echo dup; return 0; }
++    [ "$(dq_get "$id" state)" != dispatched ] || { dq_set "$id" note "$note"; echo dup; return 0; }
 +  fi
 +  tmp=$(mktemp "$(dq_dir)/.rec.XXXXXX") || return 1
 +  printf 'origin=%s\nkey=%s\nverb=%s\nnote=%s\nenqueued_at=%s\nstate=queued\nattempts=0\n' \
@@ -160,7 +161,7 @@ new file mode 100755
 index 00000000..827745a7
 --- /dev/null
 +++ b/bin/fm-decision-queue.sh
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,196 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue.sh - keep needs-decision and blocked lines out of chat.
 +#
@@ -229,12 +230,17 @@ index 00000000..827745a7
 +    "$([ "$dry" = 1 ] && echo 'dry-run: ')" "$found" "$new" "$dup" "$gone" "$moved"
 +}
 +
-+active_count() {
++dq_stuck() {  # <id>
++  dq_set "$1" state stuck
++  dq_say "[$(dq_tag "$1")] decision stuck after $(dq_get "$1" attempts) attempts: $(dq_get "$1" origin) $(dq_get "$1" note)" >/dev/null 2>&1 || true
++}
++
++active_count() {  # [dry: 1 leaves stuck records alone]
 +  local id n=0 cid
 +  for id in $(dq_ids dispatched); do
 +    cid=$(dq_get "$id" crewmate)
 +    if [ -f "$STATE/$cid.meta" ]; then n=$((n + 1))
-+    elif [ "$(dq_get "$id" attempts)" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then dq_set "$id" state stuck
++    elif [ "$(dq_get "$id" attempts)" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then [ "${1:-0}" = 1 ] || dq_stuck "$id"
 +    else dq_set "$id" state queued; fi
 +  done
 +  printf '%s' "$n"
@@ -265,7 +271,7 @@ index 00000000..827745a7
 +    esac
 +    shift
 +  done
-+  active=$(active_count); slots=$((max - active))
++  active=$(active_count "$dry"); slots=$((max - active))
 +  for id in $(dq_ids queued); do
 +    origin=$(dq_get "$id" origin); key=$(dq_get "$id" key)
 +    if ! dq_is_open "$origin" "$key"; then
@@ -281,7 +287,7 @@ index 00000000..827745a7
 +      echo "spawned $cid for $id"; slots=$((slots - 1))
 +    else
 +      echo "spawn failed for $id (attempt $(dq_get "$id" attempts))" >&2
-+      [ "$(dq_get "$id" attempts)" -lt "${FM_DQ_ATTEMPTS:-3}" ] || dq_set "$id" state stuck
++      [ "$(dq_get "$id" attempts)" -lt "${FM_DQ_ATTEMPTS:-3}" ] || dq_stuck "$id"
 +    fi
 +  done
 +  [ "$overn" -gt 0 ] || return 0
