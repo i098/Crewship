@@ -1,6 +1,5 @@
 """Outbound text filter (apps/imessage/clean.ts) and its use by the fm-imessage CLI. Fixture strings only."""
 
-import json
 import os
 import shutil
 import subprocess
