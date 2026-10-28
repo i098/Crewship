@@ -19,7 +19,6 @@ ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
 ORIGIN = "https://crewship.si"
 MARK = "<!-- points: site/build.py fills this list from README.md and CHANGELOG.md -->"
-FOOT_MARK = "<!-- footer: site/build.py fills the architecture link -->"
 
 # Each Features link maps to its scene object; unmapped docs share a summary and index link.
 SCENE = {
@@ -506,8 +505,7 @@ def build(dist=HARBOR / "dist"):
     shutil.rmtree(dist, ignore_errors=True)
     shutil.copytree(HARBOR / "public", dist)
     page = dist / "index.html"
-    footer = f'Read the <a target="_blank" rel="noopener" href="{site_href("docs/architecture.md")}">Architecture</a>.'
-    page.write_text(page.read_text().replace(MARK, items).replace(FOOT_MARK, footer))
+    page.write_text(page.read_text().replace(MARK, items))
     build_docs(dist)
     return dist
 
