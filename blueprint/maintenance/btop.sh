@@ -26,7 +26,7 @@ while :; do
     stuck=0
     while kill -0 "$pid" 2>/dev/null; do
         sleep 1
-        if [ "$(cat /proc/$pid/wchan 2>/dev/null)" = wait_woken ]; then stuck=$((stuck + 1)); else stuck=0; fi
+        if cat /proc/$pid/task/*/wchan 2>/dev/null | grep -q wait_woken; then stuck=$((stuck + 1)); else stuck=0; fi
         [ "$stuck" -lt 3 ] || { again=1; kill -KILL "$pid"; break; }
     done
     wait "$pid"; rc=$?
