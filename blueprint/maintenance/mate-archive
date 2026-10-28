@@ -35,7 +35,7 @@ def connect():
     if fresh:
         os.close(os.open(DB, os.O_CREAT | os.O_WRONLY, 0o600))
     DB.chmod(0o600)
-    db = sqlite3.connect(DB)
+    db = sqlite3.connect(DB, timeout=60, isolation_level=None)  # explicit BEGIN IMMEDIATE in index_file
     db.executescript("""
         CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER NOT NULL, session TEXT NOT NULL, turns INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS turns (session TEXT NOT NULL, turn INTEGER NOT NULL, ts TEXT, role TEXT, text TEXT, PRIMARY KEY (session, turn));
@@ -62,9 +62,11 @@ def render(msg):
 
 
 def index_file(db, path):
+    db.execute("BEGIN IMMEDIATE")  # a second indexer waits here, then sees the first one's offset
     row = db.execute("SELECT offset, session, turns FROM files WHERE path=?", (str(path),)).fetchone()
     offset, session, turns = row or (0, path.stem, 0)
     if path.stat().st_size <= offset:
+        db.execute("COMMIT")
         return 0
     with open(path, "rb") as f:
         f.seek(offset)
@@ -87,7 +89,7 @@ def index_file(db, path):
                 db.execute("INSERT INTO turns_fts(rowid, text) VALUES (?,?)", (cur.lastrowid, text))
                 added += 1
     db.execute("REPLACE INTO files VALUES (?,?,?,?)", (str(path), offset + end, session, turns))
-    db.commit()
+    db.execute("COMMIT")
     return added
 
 

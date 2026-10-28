@@ -81,3 +81,10 @@ def test_secret_lines_are_masked_and_db_is_private(ma, capsys):
     assert "keep this" in out and "plain end" in out
     assert "hunter2" not in out and "sk-abc" not in out and out.count("[secret line masked]") == 3
     assert stat.S_IMODE(ma.DB.stat().st_mode) == 0o600
+
+
+def test_two_indexers_on_one_file_do_not_duplicate_turns(ma, capsys):
+    path = write_session(ma, "a", "sess-a", ["alpha", "beta"])
+    first, second = ma.connect(), ma.connect()
+    assert ma.index_file(first, path) == 2
+    assert ma.index_file(second, path) == 0
