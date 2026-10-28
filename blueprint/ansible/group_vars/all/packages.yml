@@ -25,6 +25,8 @@ crewship_base_packages:
   - libgtk-3-0t64
   # mosh-server, for `mosh <host>` from the operator's devices (docs/security.md#from-a-mac-to-the-host).
   - mosh
+  # zoxide, the `z`/`zi` directory jump for human SSH shells; only the interactive Bash block in tasks/account.yml uses it.
+  - zoxide
 # Shared libraries and a font the chrome-headless-shell that omp's browser tool and
 # puppeteer download needs on a minimal Ubuntu; installed without recommends.
 # The t64 names exist on 24.04 and 26.04.
