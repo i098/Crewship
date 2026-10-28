@@ -141,6 +141,7 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewship schedules` | local cron entries, timers, and Firstmate checks | `crewship.herdr.schedules_tab` |
 | `usage-tui` | token usage from the omp stats store | `crewship.herdr.usage_tab` |
 | `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
+| `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 

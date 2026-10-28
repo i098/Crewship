@@ -93,9 +93,11 @@ crewship_herdr_config: "{{ crewship_herdr_config_dir }}/config.toml"
 crewship_tuis:
   - {dir: usage-tui, bin: usage-tui, label: usage-tui, switch: usage_tab}
   - {dir: crewboard-tui, bin: crewboard-tui, label: crewboard-tui, switch: crewboard_tab}
+# The decision-queue tab runs crewboard-tui on its queue view, under the same switch.
 crewship_herdr_tabs: >-
   {{ [{'label': 'schedules', 'bin': 'crewship', 'args': ' schedules', 'switch': 'schedules_tab'}]
-     + crewship_tuis | map('combine', {'args': ''}) | list }}
+     + crewship_tuis | map('combine', {'args': ''}) | list
+     + [{'label': 'decision-queue', 'bin': 'crewboard-tui', 'args': ' --queue', 'switch': 'crewboard_tab'}] }}
 crewship_herdr_open_tabs: >-
   {{ crewship_herdr_tabs | rejectattr('switch', 'in',
      crewship_cfg.herdr | dict2items | rejectattr('value') | map(attribute='key') | list) | list }}

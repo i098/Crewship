@@ -9,7 +9,7 @@ const clip = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w 
 const TONE = { text: theme.text, muted: theme.muted, warn: theme.warn, ok: theme.ok }
 
 // Fit left text and right text into width w; the left side is clipped first.
-function fit(left: Seg[], right: Seg[], w: number): Line {
+export function fit(left: Seg[], right: Seg[], w: number): Line {
   const rl = right.reduce((s, x) => s + x.text.length, 0)
   const room = Math.max(0, w - rl - 1)
   const out: Line = []
@@ -82,7 +82,7 @@ export const plain = (lines: Line[]) => lines.map(l => l.map(s => s.text).join("
 
 export function footer(rows: number, cursor: number, loaded: boolean): Line {
   const m = (t: string): Seg => ({ text: t, fg: theme.muted })
-  return [m(` ${loaded ? `${rows ? cursor + 1 : 0}/${rows}` : "loading…"}  ↑↓ move  ⏎ open  e/E all  / find  s stalled  r reload  t board  q quit`)]
+  return [m(` ${loaded ? `${rows ? cursor + 1 : 0}/${rows}` : "loading…"}  ↑↓ move  ⏎ open  e/E all  / find  s stalled  r reload  d queue  t board  q quit`)]
 }
 
 // Plain-text snapshot for `--once`; `expandAll` opens every group and agent.

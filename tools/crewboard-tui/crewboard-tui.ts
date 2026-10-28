@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
-// Read-only viewer for the crewboard message board and tasks. Runs `crewboard`, `tasks-axi`, reads `state/*.status`; never publishes or writes.
+// Read-only viewer for the crewboard message board, tasks and the decision queue. Runs `crewboard`, `tasks-axi`, reads `state/*.status` and `state/decision-queue/*.rec`; never publishes or writes.
 import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
+import { loadQueue, queueFooter, queueHeader, queueRows, queueSnapshot, queueViewport, type QRow, type Rec } from "./queue.ts"
 import { fetchSummaries, type Summaries } from "./summaries.ts"
 import { buildAgents, counts, DEFAULT_STALL_SEC, flatten, type Agent, type Row as TaskRow, type View } from "./tasks-model.ts"
 import { findHomes, loadHomes } from "./tasks-source.ts"
 import { footer as tasksFooter, header as tasksHeader, snapshot, viewport, type Line } from "./tasks-view.ts"
 
-// Flags: --once (plain tasks snapshot, then exit), --tasks (open on the tasks view), --expand, --filter TEXT, --stall-min N, --width N; other args are firstmate home paths.
+// Flags: --once (plain tasks snapshot, then exit), --tasks (open on the tasks view), --queue (open on the decision queue; with --once, its snapshot), --expand, --filter TEXT, --stall-min N, --width N; other args are firstmate home paths.
 const argv = process.argv.slice(2)
 const flag = (n: string) => argv.includes(n)
 const flagVal = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined }
@@ -16,6 +17,10 @@ const homeArgs = argv.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.inclu
 const stallMin = Number(flagVal("--stall-min") ?? DEFAULT_STALL_SEC / 60)
 const REFRESH_TASKS_MS = 15_000
 
+if (flag("--once") && flag("--queue")) {
+  console.log(queueSnapshot(loadQueue(findHomes(homeArgs)), Math.floor(Date.now() / 1000), Number(flagVal("--width") ?? 100)))
+  process.exit(0)
+}
 if (flag("--once")) {
   const { agents, queued } = buildAgents(await loadHomes(findHomes(homeArgs)), Math.floor(Date.now() / 1000), stallMin * 60)
   console.log(snapshot(agents, queued, { expanded: new Set(), filter: flagVal("--filter") ?? "", stalledOnly: false }, { width: Number(flagVal("--width") ?? 100), stallMin, expandAll: flag("--expand") }))
@@ -167,7 +172,10 @@ left.add(leftText); right.add(rightText); main.add(left); main.add(right)
 const tasksBox = new BoxRenderable(renderer, { border: true, borderColor: theme.border, title: " Tasks ", titleColor: theme.accent, flexGrow: 1, visible: false })
 const tasksText = new TextRenderable(renderer, { content: "", fg: theme.text })
 tasksBox.add(tasksText)
-root.add(main); root.add(tasksBox); root.add(footer); renderer.root.add(root)
+const queueBox = new BoxRenderable(renderer, { border: true, borderColor: theme.border, title: " Decision queue ", titleColor: theme.accent, flexGrow: 1, visible: false })
+const queueText = new TextRenderable(renderer, { content: "", fg: theme.text })
+queueBox.add(queueText)
+root.add(main); root.add(tasksBox); root.add(queueBox); root.add(footer); renderer.root.add(root)
 
 let listTop = 0
 
@@ -232,14 +240,16 @@ function drawFooter() {
   footer.content = new StyledText([
     ch(" ", theme.muted), status,
     ch(`  ${topics.size} topics  ${total} msgs${unreadAll ? `  ${unreadAll} unread` : ""}${scroll ? `  ↑${scroll} lines up` : ""}`, theme.muted),
-    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  q quit", theme.muted),
+    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  d queue  q quit", theme.muted),
   ])
 }
 
 function draw() {
   main.visible = mode === "board"
   tasksBox.visible = mode === "tasks"
+  queueBox.visible = mode === "queue"
   if (mode === "tasks") return drawTasks()
+  if (mode === "queue") return drawQueue()
   const innerH = Math.max(1, renderer.height - 3) // main box minus border; footer takes 1
   const list = rows()
   if (!picked) {
@@ -260,7 +270,8 @@ function draw() {
 }
 
 // ---- tasks view ----
-let mode: "board" | "tasks" = flag("--tasks") ? "tasks" : "board"
+type Mode = "board" | "tasks" | "queue"
+let mode: Mode = flag("--queue") ? "queue" : flag("--tasks") ? "tasks" : "board"
 let allAgents: Agent[] = []
 let queuedCount = 0
 let tasksLoaded = false
@@ -302,10 +313,50 @@ function drawTasks() {
   renderer.requestRender()
 }
 
-function setMode(m: "board" | "tasks") {
+function setMode(m: Mode) {
+  if (m === "queue" && mode !== "queue") back = mode
   mode = m
   clearInterval(taskTimer)
   if (m === "tasks") { reloadTasks(); taskTimer = setInterval(reloadTasks, REFRESH_TASKS_MS) }
+  if (m === "queue") { queueRecs = loadQueue(findHomes(homeArgs)); taskTimer = setInterval(() => setMode("queue"), REFRESH_TASKS_MS) }
+  draw()
+}
+
+// ---- decision queue view ----
+let back: "board" | "tasks" = "board"
+let queueRecs: Rec[] = []
+let queueRowsNow: QRow[] = []
+let queueSel = ""
+let queueTop = 0
+
+function drawQueue() {
+  const innerW = Math.max(10, renderer.width - 2)
+  const innerH = Math.max(1, renderer.height - 3)
+  const head = queueHeader(queueRecs)
+  const bodyH = Math.max(1, innerH - head.length)
+  queueRowsNow = queueRows(queueRecs)
+  let cur = queueRowsNow.findIndex(r => r.key === queueSel)
+  if (cur < 0) { cur = 0; queueSel = queueRowsNow[0]?.key ?? "" }
+  if (cur < queueTop) queueTop = cur
+  if (cur >= queueTop + bodyH) queueTop = cur - bodyH + 1
+  queueTop = Math.max(0, Math.min(queueTop, Math.max(0, queueRowsNow.length - bodyH)))
+  const body = queueViewport(queueRowsNow, queueTop, bodyH, innerW, Math.floor(Date.now() / 1000), cur)
+  if (!queueRowsNow.length) body.push([{ text: "  no queued decisions", fg: theme.muted }])
+  queueText.content = new StyledText(chunks([...head, ...body]))
+  footer.content = new StyledText(chunks([queueFooter(queueRowsNow.length, cur)]))
+  renderer.requestRender()
+}
+
+function queueKey(k: Key) {
+  const cur = Math.max(0, queueRowsNow.findIndex(r => r.key === queueSel))
+  const page = Math.max(1, renderer.height - 5)
+  if (k.name === "q") { renderer.destroy(); process.exit(0) }
+  if (k.name === "d") return setMode(back)
+  if (k.name === "t") return setMode("tasks")
+  if (k.name === "r") return setMode("queue")
+  const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
+  if (!(k.name in moves)) return
+  queueSel = queueRowsNow[Math.min(queueRowsNow.length - 1, Math.max(0, moves[k.name]))]?.key ?? ""
   draw()
 }
 
@@ -339,6 +390,7 @@ function tasksKey(k: Key) {
   if (typing) { typeFilter(k); return draw() }
   if (k.name === "q") { renderer.destroy(); process.exit(0) }
   if (k.name === "t") return setMode("board")
+  if (k.name === "d") return setMode("queue")
   const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
   if (k.name in moves) go(moves[k.name])
   else if (["return", "space", "right", "left"].includes(k.name)) toggleRow(taskRows[cur], k.name)
@@ -366,7 +418,9 @@ function move(d: number) {
 renderer.on("resize", draw)
 renderer.keyInput.on("keypress", (k: { name: string; sequence?: string; shift?: boolean }) => {
   if (mode === "tasks") return tasksKey(k)
+  if (mode === "queue") return queueKey(k)
   if (k.name === "t") return setMode("tasks")
+  if (k.name === "d") return setMode("queue")
   const page = Math.max(1, renderer.height - 5)
   switch (k.name) {
     case "q": renderer.destroy(); process.exit(0)
@@ -382,7 +436,7 @@ renderer.keyInput.on("keypress", (k: { name: string; sequence?: string; shift?: 
   draw()
 })
 
-if (mode === "tasks") setMode("tasks")
+if (mode !== "board") setMode(mode)
 draw()
 follow()
 followSummaries()
