@@ -29,6 +29,8 @@ export async function checkMenu(page, origin) {
   await page.press("Tab");
   assert.equal(await focus(), "About");
   await page.press("Tab");
+  assert.equal(await focus(), "Docs");
+  await page.press("Tab");
   assert.equal(await focus(), "settings-open");
   await page.press("Enter");
   for (const value of ["low", "high", "auto"]) {
