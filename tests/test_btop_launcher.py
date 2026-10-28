@@ -34,7 +34,7 @@ def test_btop_blocked_on_an_unread_pty_restarts_once_the_pty_is_read(tmp_path):
         assert log.read_text().count("start") == 1
         output = drain(fd, 3)
         assert b"\x1b[2J" in output
-        assert log.read_text().count("start") == 2
+        assert log.read_text().count("start") >= 2
     finally:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)

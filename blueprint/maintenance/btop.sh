@@ -31,6 +31,8 @@ while :; do
     done
     wait "$pid"; rc=$?
     [ "$again" ] || exit "$rc"
-    # Blocks while the pty is full, so btop restarts once a client reads it.
+    # stty sets with TCSADRAIN: blocks until a client has read all queued output,
+    # so btop restarts only once the pty drains.
+    stty "$(stty -g)"
     printf '\033[2J\033[H'
 done
