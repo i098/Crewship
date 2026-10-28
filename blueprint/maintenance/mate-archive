@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+# Search past omp chat that a compact removed from the live context.
+#   mate-archive index                               read new session lines (incremental, one offset per file)
+#   mate-archive search QUERY [--session S] [--since D] [--limit N]
+#   mate-archive zoom SESSION TURN [--before N] [--after N]
+# Reads ~/.omp/agent/sessions (MATE_ARCHIVE_SESSIONS) into a SQLite FTS5 database at
+# ~/.local/share/crewship/mate-archive/archive.db (MATE_ARCHIVE_DB), mode 600. Lines that look like a secret are masked.
+import argparse
+import json
+import os
+import re
+import sqlite3
+import sys
+from pathlib import Path
+
+SESSIONS = Path(os.environ.get("MATE_ARCHIVE_SESSIONS") or "~/.omp/agent/sessions").expanduser()
+DB = Path(
+    os.environ.get("MATE_ARCHIVE_DB") or "~/.local/share/crewship/mate-archive/archive.db"
+).expanduser()
+RESULT_CAP = 4000  # characters kept of one tool result
+CALL_CAP = 2000  # characters kept of one tool call
+
+SECRET = re.compile(
+    r"""(?ix)
+    \b(api[_-]?key|access[_-]?key|private[_-]?key|\w*token|\w*secret|passw(or)?d|passwd|authorization)\b["']?\s*[:=]
+    | \bbearer\s+\S{8,}
+    | \b(sk|pk|rk)-[A-Za-z0-9_-]{16,}
+    | \b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,} | \bgithub_pat_\w{20,}
+    | \bAKIA[0-9A-Z]{16}\b | \bxox[abprs]-[A-Za-z0-9-]{10,}
+    | \beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}
+    | -----BEGIN\ [A-Z\ ]*PRIVATE\ KEY-----
+    """
+)
+
+
+PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+
+
+def mask(text):
+    out, in_key = [], False
+    for line in text.splitlines():
+        if in_key or SECRET.search(line):
+            out.append("[secret line masked]")
+            in_key = (in_key or "PRIVATE KEY-----" in line) and not PEM_END.search(line)
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def connect():
+    DB.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not DB.exists()
+    if fresh:
+        os.close(os.open(DB, os.O_CREAT | os.O_WRONLY, 0o600))
+    DB.chmod(0o600)
+    db = sqlite3.connect(
+        DB, timeout=60, isolation_level=None
+    )  # explicit BEGIN IMMEDIATE in index_file
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER NOT NULL, session TEXT NOT NULL, turns INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS turns (session TEXT NOT NULL, turn INTEGER NOT NULL, ts TEXT, role TEXT, text TEXT, PRIMARY KEY (session, turn));
+        CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(text, content='turns', content_rowid='rowid');
+    """)
+    return db
+
+
+def render(msg):
+    """One searchable text for a session message; thinking blocks are left out."""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content or []:
+        kind = b.get("type")
+        if kind == "text":
+            parts.append(b.get("text", ""))
+        elif kind == "toolCall":
+            args = json.dumps(b.get("arguments"), indent=1, ensure_ascii=False)
+            parts.append(f"[call {b.get('name')}]\n{args}"[:CALL_CAP])
+    text = "\n".join(parts)
+    return text[:RESULT_CAP] if msg.get("role") == "toolResult" else text
+
+
+def index_file(db, path):
+    db.execute("BEGIN IMMEDIATE")  # a second indexer waits here, then sees the first one's offset
+    row = db.execute(
+        "SELECT offset, session, turns FROM files WHERE path=?", (str(path),)
+    ).fetchone()
+    offset, session, turns = row or (0, path.stem, 0)
+    if path.stat().st_size <= offset:
+        db.execute("COMMIT")
+        return 0
+    with open(path, "rb") as f:
+        f.seek(offset)
+        data = f.read()
+    end = data.rfind(b"\n") + 1  # a half-written last line waits for the next run
+    added = 0
+    for line in data[:end].splitlines():
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if obj.get("type") == "session" and obj.get("id"):
+            session = obj["id"]
+        elif obj.get("type") == "message":
+            msg = obj.get("message") or {}
+            text = mask(render(msg)).strip()
+            turns += 1
+            if text:
+                cur = db.execute(
+                    "INSERT INTO turns VALUES (?,?,?,?,?)",
+                    (session, turns, obj.get("timestamp"), msg.get("role"), text),
+                )
+                db.execute("INSERT INTO turns_fts(rowid, text) VALUES (?,?)", (cur.lastrowid, text))
+                added += 1
+    db.execute("REPLACE INTO files VALUES (?,?,?,?)", (str(path), offset + end, session, turns))
+    db.execute("COMMIT")
+    return added
+
+
+def index(db):
+    return sum(index_file(db, p) for p in sorted(SESSIONS.rglob("*.jsonl")))
+
+
+def resolve(db, prefix):
+    ids = [
+        r[0]
+        for r in db.execute(
+            "SELECT DISTINCT session FROM turns WHERE session LIKE ? ESCAPE '\\'",
+            (prefix.replace("%", "\\%").replace("_", "\\_") + "%",),
+        )
+    ]
+    if len(ids) != 1:
+        sys.exit(f"mate-archive: session prefix {prefix!r} matches {len(ids)} sessions")
+    return ids[0]
+
+
+def search(db, a):
+    sql = (
+        "SELECT t.session, t.turn, t.ts, t.role, snippet(turns_fts, 0, '[', ']', '…', 24) "
+        "FROM turns_fts JOIN turns t ON t.rowid = turns_fts.rowid WHERE turns_fts MATCH ?"
+    )
+    args = ['"' + a.query.replace('"', '""') + '"' if a.phrase else a.query]
+    if a.session:
+        sql += " AND t.session = ?"
+        args.append(resolve(db, a.session))
+    if a.since:
+        sql += " AND t.ts >= ?"
+        args.append(a.since)
+    sql += " ORDER BY bm25(turns_fts) LIMIT ?"
+    args.append(a.limit)
+    try:
+        rows = db.execute(sql, args).fetchall()
+    except sqlite3.OperationalError as e:
+        sys.exit(f"mate-archive: bad query ({e}); quote odd characters or use --phrase")
+    for session, turn, ts, role, snip in rows:
+        print(f"{session} turn {turn} {role} {ts or ''}\n  {' '.join(snip.split())}")
+    if not rows:
+        print("no match")
+
+
+def zoom(db, a):
+    session = resolve(db, a.session)
+    rows = db.execute(
+        "SELECT turn, ts, role, text FROM turns WHERE session=? AND turn BETWEEN ? AND ? ORDER BY turn",
+        (session, a.turn - a.before, a.turn + a.after),
+    ).fetchall()
+    if not rows:
+        sys.exit(f"mate-archive: no turn {a.turn} in session {session}")
+    for turn, ts, role, text in rows:
+        print(f"--- {session} turn {turn} {role} {ts or ''}\n{text}")
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        prog="mate-archive",
+        description="Search past omp chat that a compact removed from the live context.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("index", help="index new session lines")
+    s = sub.add_parser("search", help="ranked snippets with session id and turn number")
+    s.add_argument("query", help="FTS5 query; words are ANDed")
+    s.add_argument("--session", help="session id or unique prefix")
+    s.add_argument("--since", help="ISO date or time, e.g. 2026-10-20")
+    s.add_argument("--limit", type=int, default=10)
+    s.add_argument("--phrase", action="store_true", help="match the query as one exact phrase")
+    z = sub.add_parser("zoom", help="full turns around a hit")
+    z.add_argument("session")
+    z.add_argument("turn", type=int)
+    z.add_argument("--before", type=int, default=1)
+    z.add_argument("--after", type=int, default=1)
+    a = p.parse_args(argv)
+    db = connect()
+    n = index(db)
+    if a.cmd == "index":
+        print(f"indexed {n} turns")
+    else:
+        {"search": search, "zoom": zoom}[a.cmd](db, a)
+
+
+if __name__ == "__main__":
+    main()
