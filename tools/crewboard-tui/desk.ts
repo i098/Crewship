@@ -64,9 +64,9 @@ export function retryCounts(journal: string): Map<number, number> {
 export type Probe = { unit: string; journal: string | null }
 
 export function probe(): Probe {
-  const run = (args: string[]) => spawnSync(args[0], args.slice(1), { encoding: "utf8", timeout: 5000 })
+  const run = (args: string[]) => spawnSync(args[0], args.slice(1), { encoding: "utf8", timeout: 15000, maxBuffer: 256 << 20 })
   const unit = run(["systemctl", "--user", "is-active", UNIT]).stdout?.trim() || "unknown"
-  const j = run(["journalctl", "--user", "-u", UNIT, "--since", "-30min", "-o", "cat", "--no-pager"])
+  const j = run(["journalctl", "--user", "-u", UNIT, "--since", "-24h", "-o", "cat", "--no-pager"])
   return { unit, journal: j.status === 0 ? j.stdout : null }
 }
 
@@ -79,7 +79,7 @@ export function loadDesk(dir: string, nowMs: number, p: Probe): Desk {
   const rc = p.journal === null ? null : retryCounts(p.journal)
   const tries = rc ? pend.map(x => rc.get(x.seq) ?? 0).filter(n => n > 0) : []
   const log = parseLog(readText(join(dir, "desk.log")))
-  const sent = log.filter(e => e.ev === "transport-accepted").map(e => e.t) // one per bubble or tapback the transport took; outbox-done keeps only keyed items
+  const sent = log.filter(e => e.ev === "transport-accepted" || e.ev === "history-reconciled").map(e => e.t) // a retry that finds the bubble already in transport history logs history-reconciled instead
   const dead = list(join(dir, "outbox-dead")).map(f => /^(\d+)-\d+\.json$/.exec(f)).filter(m => m).map(m => Number(m![1])) // file name starts with the burial time
   return {
     unit: p.unit,

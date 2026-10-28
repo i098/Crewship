@@ -53,6 +53,14 @@ test("loadDesk counts pending, sent and failed bubbles, ages and retries from th
   expect(d.latency).toEqual({ n: 1, last: 30, median: 30, p95: 30 })
 })
 
+test("loadDesk counts a history-reconciled delivery as sent and not a card-update edit", () => {
+  const dir = state()
+  writeFileSync(join(dir, "desk.log"), `${iso(300)} a transport-accepted\n${iso(200)} b history-reconciled\n${iso(100)} c card-update-accepted\n`)
+  const d = loadDesk(dir, NOW, { unit: "active", journal: "" })
+  expect(d.sent24h).toBe(2)
+  expect(d.lastSentMs).toBe(NOW - 200_000)
+})
+
 test("snapshot shows bridge down and an unreadable journal, and an empty state shows zeros", () => {
   const empty = mkdtempSync(join(tmpdir(), "cbdesk-"))
   dirs.push(empty)

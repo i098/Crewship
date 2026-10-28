@@ -51,8 +51,8 @@ It shows counts, ages and latencies only; it never opens a queue item, so no mes
 
 - Bridge up or down: `systemctl --user is-active fm-imessage`, plus the age of the last `desk.log` line.
 - Pending bubbles: files in `outbox/`; the oldest pending age is the oldest file's modification time.
-- Retries: the highest `failed (try N)` for a pending item in the last 30 minutes of the unit's journal. The queue keeps no retry count on disk.
-- Sent, last 24 hours: `transport-accepted` lines in `desk.log` (one per bubble or tapback the transport took). `outbox-done/` keeps only keyed items, so it is not used.
+- Retries: the highest `failed (try N)` for a pending item in the last 24 hours of the unit's journal. The queue keeps no retry count on disk.
+- Sent, last 24 hours: `transport-accepted` and `history-reconciled` lines in `desk.log` (one per bubble or tapback the transport took, or found already delivered on retry). `outbox-done/` keeps only keyed items, so it is not used.
 - Failed, last 24 hours: files in `outbox-dead/`, by the burial time in the file name.
 - Desk reply latency: per message, `inbox-accepted` to its first `response-confirmed` in `desk.log`; last, median and p95 over 24 hours.
 
