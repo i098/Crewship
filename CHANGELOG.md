@@ -7,6 +7,220 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-10-28
+
+### Added
+
+- Add a public skill that points to Floorplan, a third-party Claude Code plugin for interactive codebase maps.
+- Add search crawler access, a GPTBot block, a sitemap, and canonical page metadata to the Crewship site ([#759](https://github.com/i098/Crewship/issues/759)).
+- Add a readable About page at `/about` and a product summary in the home page's HTML and initial harbor sign ([#760](https://github.com/i098/Crewship/issues/760)).
+- The Harbor start menu now waits for Explore before animation and sound. Settings saves graphics, motion, and sound choices.
+  Map selections remain visible when landmarks share a cell ([#761](https://github.com/i098/Crewship/issues/761)).
+- Add `crewship init` with load, extra storage, browser sizing, a starter choice, and nominal capacity checks.
+  Support manual or SSH setup with existing keys, matching releases, and curl prerequisites.
+  Restrict guided SSH setup to public-key authentication and show both sizing formulas for loads above the presets ([#762](https://github.com/i098/Crewship/issues/762)).
+- Added `crewship schedules`, a read-only OpenTUI viewer for local cron entries, systemd timers, and registered Firstmate checks.
+  It shows purpose labels, proven owners, schedules, service results, source errors, and journal details without running jobs.
+  The viewer puts failed jobs first, colors results, and keeps raw properties behind a key.
+  The inventory includes check metadata from every validated registry home and uses only executable, script, unit, and working-directory paths to prove ownership.
+  The viewer normalizes home paths before identity matching and renders control and format characters as visible escapes.
+  The viewer shows `ExecCondition` skips as non-failure results, even without main-process history.
+  Metadata read errors preserve stale checks without scanning unvalidated homes, and unresolved command expansions no longer prove ownership ([#771](https://github.com/i098/Crewship/issues/771)).
+- The Slack relay has an optional explicit-mention-only filter and a read-only dry run that sends no notifications ([#773](https://github.com/i098/Crewship/issues/773)).
+- The Slack relay accepts `"mention_only": "direct"` to notify for every eligible direct mention and one-to-one DM, regardless of the model's verdict.
+  Failed model calls or missing lines use the plain sender, channel, and message text, including during replay.
+  Boolean filtering, deduplication, and notification limits stay unchanged.
+  Switching to direct mode clears queued lines and does not automatically replay old dropped messages.
+  An optional `dbs` list reads multiple slk profile caches read-only, with shared deduplication and per-workspace self IDs ([#781](https://github.com/i098/Crewship/issues/781)).
+- The Slack relay can keep `@everyone`, `@channel`, and `@here` messages in direct mode for each workspace with `broadcasts: true`.
+  The option defaults to false and preserves deduplication, delivery limits, and read-only Slack access.
+  Notifications for enabled workspaces include the workspace name.
+  All notification paths collapse whitespace and remove URLs before queuing each message as one line, without decoding message text again.
+  If URL removal empties a model line, the notification uses the cached sender, channel, and message text ([#785](https://github.com/i098/Crewship/issues/785)).
+- New hosts get limited models and environment-based Inception credentials; apply preserves model choices but seeds missing model files and enforces Codex context overrides ([#791](https://github.com/i098/Crewship/issues/791)).
+- The `agents` profile caps Opus 5.5 effort at `high` in Firstmate-spawned omp sessions and no-mistakes `pi` gates.
+  Primary omp sessions, other models, and lower effort levels remain unchanged.
+  Set `FM_OPUS_EFFORT_UNCAPPED=1` in the process environment to disable the cap ([#792](https://github.com/i098/Crewship/issues/792)).
+- With services enabled, `launch` creates a missing `schedules` tab in the Herdr `machine` workspace and starts `crewship schedules` there.
+  It creates missing workspaces and preserves custom tabs and focus.
+  It never sends input to an existing tab or pane.
+  If the schedules tab exists, `launch` leaves it unchanged and prints: `run crewship schedules in the schedules tab`.
+  Set `crewship.herdr.schedules_tab: false` to skip this setup.
+  The existing installer supplies the CLI link in `~/.local/bin` ([#795](https://github.com/i098/Crewship/issues/795)).
+- Install the opt-in `fm-gluttony.ts` omp extension for Firstmate crewmates and scouts.
+  Each home enables it with `config/gluttony`; it stays off by default.
+  Bound vibe workers, ordinary subagents, retries, and restored workers; require a good worker to handle status appends, edits, and commits.
+  Set native Codex Sol workers to `priority` and direct OpenAI Sol workers to `ultrafast`, including subagents and restored workers.
+  Leave shared tier defaults unchanged.
+  Document model prerequisites, the omp 18.12.1 API dependency, and the Luna ultrafast limitation ([#802](https://github.com/i098/Crewship/issues/802)).
+- The iMessage front desk selects a reply target within each burst.
+  Strictly social reactions can complete without a supervisor handoff.
+  Approvals, requests, sensitive content, and mixed bursts still reach Firstmate.
+  Routing records, checked answers, draft cancellation, and delivery recovery remain in place.
+  Desk answers remain in their original chat and transport during delivery recovery.
+  Thread metadata does not change authored-text classification.
+  Unsupported reactions cause a handoff, while uncertain reactions retain their durable delivery state.
+  Unsupported typing remains silent when no healthy relay enables the Private API.
+  Failed Photon reaction lookups allow delivery recovery without clearing uncertainty from earlier reaction attempts.
+  A crash during a Photon lookup no longer creates false delivery uncertainty.
+  BlueBubbles records reaction uncertainty only after health and capability checks, immediately before sending.
+  The front-desk regression tests use a controlled clock with real disk writes for fast, repeatable recovery checks ([#804](https://github.com/i098/Crewship/issues/804)).
+- The iMessage desk adds typing indicators.
+  See [the typing lifecycle](docs/imessage.md#what-it-does) for refresh timing, cleanup, and chat restrictions ([#814](https://github.com/i098/Crewship/issues/814)).
+- Give the desk up to 12 recent messages beside the whole-chat summary, with message ids and source kinds.
+  Keep the original text up to 500 UTF-8 bytes per message, bound the block to 6,000 bytes, and drop older messages first.
+  Preserve zoom, the input limits, and the rule that owner text cannot support a direct answer ([#815](https://github.com/i098/Crewship/issues/815)).
+- The iMessage desk now rewrites checked text replies in the owner's short chat style.
+  The change also cancels queued desk bubbles and drops restored desk text after a restart.
+  See the [iMessage behavior and recovery contract](https://github.com/i098/Crewship/blob/main/docs/imessage.md#what-it-does) for voice checks, cancellation, and delivery evidence ([#824](https://github.com/i098/Crewship/issues/824)).
+- Add the iMessage bridge [mute switch](https://github.com/i098/Crewship/blob/main/docs/imessage.md#mute) ([#832](https://github.com/i098/Crewship/issues/832)).
+- The iMessage desk can route clear single-domain work to a registered second mate while keeping Firstmate informed. Unclear or sensitive requests and failed deliveries stay with Firstmate.
+  Registered routing preserves evidence-backed short answers, including questions about approval counts and policies.
+  Mate delivery does not block the bridge, and cancellation preserves delivery uncertainty without repeating sends.
+  Each mate send rechecks the registry; changed entries send the remaining texts to Firstmate ([#835](https://github.com/i098/Crewship/issues/835)).
+- Document Treehouse worker isolation, pool locations, configuration, reuse, and safe cleanup ([#838](https://github.com/i098/Crewship/issues/838)).
+- Add native iMessage desk tools and direct mate delivery, and include transcription in installed bridges.
+  Align desk test runners with the native result protocol ([#840](https://github.com/i098/Crewship/issues/840)).
+- Add standalone guarded front, worker, dispatch, and relay modules without replacing the bridge loop.
+  See [guarded front modules](../docs/imessage.md#guarded-front-modules) for their contracts and integration limits ([#849](https://github.com/i098/Crewship/issues/849)).
+- Add the default-off `imessage.desk_v2` setting to select the V2 front desk while retaining the legacy loop for rollback ([#850](https://github.com/i098/Crewship/issues/850)).
+- A read-only terminal view shows token usage and cost by period, day, hour and model ([#859](https://github.com/i098/Crewship/issues/859)).
+- A read-only terminal viewer shows crewboard topics, unread counts and messages ([#861](https://github.com/i098/Crewship/issues/861)).
+- Add `tools/fleet-health`, a read-only TUI that lists every Crewship component with its installed version, latest version, and an up-to-date, outdated, unknown, custom or not-installed state ([#868](https://github.com/i098/Crewship/issues/868)).
+- Add the omp composer token rate and compact tui spacing to the default theme ([#870](https://github.com/i098/Crewship/issues/870)).
+- Added the `usage-tui` and `crewboard-tui` commands to the install, and `launch` now opens each as a Herdr tab in the `machine` workspace beside `schedules`.
+  Set `crewship.herdr.usage_tab` or `crewboard_tab` to `false` to skip a tab; both default to `true`.
+  `crewship update` opens the new tabs in an existing `machine` workspace once, without duplicates, and leaves running panes alone ([#871](https://github.com/i098/Crewship/issues/871)).
+- Add one-line summaries to crew board threads, set and read with the crewboard command and refreshed by a debounced model call outside the daemon ([#873](https://github.com/i098/Crewship/issues/873)).
+- Show each topic's one-line summary in crewboard-tui, under the topic name and at the top of the message pane ([#880](https://github.com/i098/Crewship/issues/880)).
+- Add desk helpers the V2 front desk needs: secret values export, read result type, voice word-order guard, multi-clause exact output ([#881](https://github.com/i098/Crewship/issues/881)).
+- The usage TUI shows how much quota is left per account and window, with the reset time, and has a `--once` text mode ([#886](https://github.com/i098/Crewship/issues/886)).
+- Add the relay target and dispatch policy modules the V2 front desk uses ([#888](https://github.com/i098/Crewship/issues/888)).
+- Add the front desk classifier module for the V2 desk ([#894](https://github.com/i098/Crewship/issues/894)).
+- Install the kun skill during apply and tell agents to load it when unsure how to implement something ([#896](https://github.com/i098/Crewship/issues/896)).
+- Install backpass with the `agents` profile, and tell agents in the default global instructions to edit AGENTS.md and CLAUDE.md through it. Existing hosts keep their instructions file ([#897](https://github.com/i098/Crewship/issues/897)).
+- Install the vision skill (kunchenguid/vision) by default with the Crewship skills step, at the newest default-branch commit, and add a draft VISION.md for Crewship ([#898](https://github.com/i098/Crewship/issues/898)).
+- The tooling-conventions skill turns answered Lavish boards into a tasks-axi task list and works it to completion ([#899](https://github.com/i098/Crewship/issues/899)).
+- Add the desk subagent module for the V2 desk ([#907](https://github.com/i098/Crewship/issues/907)).
+- Wire the V2 front desk into the iMessage bridge: a typed front answer, silent social turns as one tapback, and a fail-closed handoff to Firstmate ([#912](https://github.com/i098/Crewship/issues/912)).
+- Add the `observability` public skill: a seven-level checklist for logs, metrics, traces, correlation, alerts, SLOs, and cardinality ([#915](https://github.com/i098/Crewship/issues/915)).
+- Add an HSL color palette rule to the UI shared basics: one brand hue, fixed neutral lightness steps, and dark and light mode values ([#917](https://github.com/i098/Crewship/issues/917)).
+- Add a tasks view to crewboard-tui (key `t`, `--once` for a plain snapshot): per agent the current task, next queued items, open decisions and time since last progress, with stalled agents pinned on top, grouped by mate and project, collapsed by default, filterable and virtualized ([#919](https://github.com/i098/Crewship/issues/919)).
+- Add a shared validation post-mortem log, a script that rejects empty fields, and a contributor rule to land prevention changes ([#929](https://github.com/i098/Crewship/issues/929)).
+- `runs-tui` shows validation post-mortem lines under the run that they name in the current view, and key `p` lists the lines that name no visible run. It reads `docs/validation-postmortems.md` and the files named by `CREWSHIP_POSTMORTEM_PATHS` ([#931](https://github.com/i098/Crewship/issues/931)).
+- A new `lavish-tui` terminal view lists every lavish board with its owner worker and flags open boards whose worker is torn down, and `lavish-keep` keeps the boards of a worker loading after its worktree is cleaned up ([#941](https://github.com/i098/Crewship/issues/941)).
+- Add the MIT-licensed be-ambitious public skill with source attribution ([#942](https://github.com/i098/Crewship/issues/942)).
+- Publish the README, setup guide, and repository guides as crawlable HTML at crewship.si/docs with linked navigation, per-page metadata, breadcrumb structured data, a generated sitemap, and a dependency-free build and local preview ([#951](https://github.com/i098/Crewship/issues/951)).
+- crewship.si hosts an IndexNow key file, so changed pages can be submitted to Bing, Yandex, and other IndexNow search engines ([#953](https://github.com/i098/Crewship/issues/953)).
+- crewship.si serves the Google Search Console verification file ([#957](https://github.com/i098/Crewship/issues/957)).
+- The crewship.si About, How, and docs pages show a title, description, and preview image when shared ([#965](https://github.com/i098/Crewship/issues/965)).
+- crewship.si structured data names the site crewship.si and gives search engines the Crewship logo and official profiles ([#971](https://github.com/i098/Crewship/issues/971)).
+- The base packages now include zoxide, and apply adds a guarded block to `~/.bashrc` that loads `z` and `zi` in interactive Bash only. Agent shells and omp's bash tool do not get it ([#973](https://github.com/i098/Crewship/issues/973)).
+- Add a Firstmate patch that queues needs-decision and blocked lines, sends each to one crewmate that texts the owner, and texts a progress line when a second mate finishes a chunk ([#977](https://github.com/i098/Crewship/issues/977)).
+- Add a decision queue view to crewboard-tui (key `d`, `--once --queue` for a plain snapshot): per mate the count of open, in progress, answered, closed and stuck decisions, then one row per queued record. It is read-only.
+  `launch` and `crewship update` open it as a `decision-queue` tab in the `machine` workspace, under the `crewship.herdr.crewboard_tab` switch ([#980](https://github.com/i098/Crewship/issues/980)).
+- A new `runs-tui` terminal view lists every no-mistakes validation run on the host with its home, mate, task, repo, PR, current step, fix loops, elapsed time and outcome. Use `--json` to print the runs and their post-mortem lines as one JSON document for agents.
+- Add the apple-hig public skill: a short Apple Human Interface Guidelines digest with current iOS design and SwiftUI resources, for iOS, macOS and mobile UI work.
+
+### Changed
+
+- Skip file-removal calls for absent managed paths in the disabled board, GitHub board, gateway, usage and token suggestion cleanups, using the read-only path checker ([#747](https://github.com/i098/Crewship/issues/747)).
+- Resolve independent release sources concurrently while keeping one lookup per GitHub repository per apply and all publisher checksum checks ([#751](https://github.com/i098/Crewship/issues/751)).
+- Isolate prereleases from stable release channels, require owner approval for stable releases, and preserve legacy archive installation through an approved installer ([#763](https://github.com/i098/Crewship/issues/763)).
+- Document the guided server quick start, existing-key SSH setup, and hosting advice. Clarify where commands run and that the gateway is opt-in ([#764](https://github.com/i098/Crewship/issues/764)).
+- Read the default omp plugin registry directly during apply to avoid an extra process on warm runs.
+  Keep marketplace refreshes, missing-plugin installation, and upgrades.
+  Use the CLI fallback for custom registry layouts and when supported dotenv files exist ([#780](https://github.com/i098/Crewship/issues/780)).
+- The iMessage front desk starts reading inbox status before saving the message and refreshes the read for each new text.
+  Slow disk writes no longer delay status startup ([#786](https://github.com/i098/Crewship/issues/786)).
+- Firstmate dispatch now selects Mercury 3 at high thinking for simple coding and limits Opus profiles to high thinking.
+  Fable remains outside explicit spawn choices; the automatic Opus fallback is unchanged.
+  The configuration guide explains how to keep local dispatch settings ([#793](https://github.com/i098/Crewship/issues/793)).
+- Check home-layout directory ownership in one batch before applying filesystem changes.
+  Skip unchanged real directories while preserving their modes.
+  Keep the existing Ansible task for missing paths, links, type errors, and ownership repairs ([#819](https://github.com/i098/Crewship/issues/819)).
+- The iMessage desk starts a turn after 350 milliseconds of silence, with a two-second cap on continuous text batching. New text still cancels an older draft, and Firstmate activity still stops the desk. Status reads start with each text; Instagram timing stays unchanged ([#822](https://github.com/i098/Crewship/issues/822)).
+- The iMessage desk now chooses occasional fitting social reactions and can add a short, checked acknowledgement. Requests, questions, approvals, sensitive messages, and mixed bursts receive no desk reaction. A combined response keeps its text delivery progress through reaction retries and restarts.
+  Delivered replies use stable memory identities, so a restart between delivery progress and memory recording neither loses nor duplicates the reply.
+  Transport checks cover social reactions and work-request handoffs separately on Photon and BlueBubbles ([#823](https://github.com/i098/Crewship/issues/823)).
+- Reject desk voice rewrites that turn `paused` into `running` or `cannot start` into `can start`, while keeping contractions and shorter wording valid ([#829](https://github.com/i098/Crewship/issues/829)).
+- New Firstmate checkouts default to Herdr through `firstmate.backend`, while existing backend choices and pane safeguards remain intact on current upstream ([#845](https://github.com/i098/Crewship/issues/845)).
+- The schedules terminal view uses a shared palette and a transparent background ([#858](https://github.com/i098/Crewship/issues/858)).
+- Seed the compaction and tool-output spill settings in the omp config and state that GPT-6 Astra is never a worker model ([#860](https://github.com/i098/Crewship/issues/860)).
+- The docs recommend WezTerm as the terminal on the computer you attach from, with the install line and a short config example ([#876](https://github.com/i098/Crewship/issues/876)).
+- crewship.si now allows GPTBot, adds SoftwareApplication, WebSite and FAQPage JSON-LD, and links the How and About pages ([#879](https://github.com/i098/Crewship/issues/879)).
+- New crewship omp configs compact with snapcompact first, then remote as fallback (`compaction.methodOrder`) ([#883](https://github.com/i098/Crewship/issues/883)).
+- Show the DeepSeek prepaid balance, labelled with its wallet currency, in the usage TUI quota row, read from the signed-in DeepSeek platform site through Dia over CDP in a background tab, with an unavailable note when the read fails. A second `deepseek (reseller)` row shows the spend so far on the reseller key, read from a response header of a 1-token chat call ([#903](https://github.com/i098/Crewship/issues/903)).
+- Crewmate and scout briefs now include a rule that a feature branch built from several slices gets one validation run ([#920](https://github.com/i098/Crewship/issues/920)).
+- The README skill now compares peer repositories and forbids Last commit and Updated badges ([#938](https://github.com/i098/Crewship/issues/938)).
+- The GitHub Actions workflows now use `astral-sh/setup-uv` 10.3.2 ([#945](https://github.com/i098/Crewship/issues/945)).
+- Lead the README Quick start with the agent-assisted setup instruction and move the manual commands into a collapsed Manual setup block ([#955](https://github.com/i098/Crewship/issues/955)).
+- The README and the npm package page link to crewship.si and its docs ([#959](https://github.com/i098/Crewship/issues/959)).
+- The crewship.si home page and harbor signs link feature guides to their crewship.si docs pages, not to GitHub ([#967](https://github.com/i098/Crewship/issues/967)).
+
+### Fixed
+
+- The test retries up to 3 times when load makes the 15 s collector timeout drop a record ([#754](https://github.com/i098/Crewship/issues/754)).
+- Start the storage guard test `notify-master` stub with `sh` to reduce the chance of a dropped fallback broadcast under load ([#755](https://github.com/i098/Crewship/issues/755)).
+- Bound npm release lookups with 10-second socket timeouts and one full-document fallback for timeouts or HTTP 5xx.
+  Include the URL and attempt count in final lookup errors, including incomplete reads, invalid npm JSON, and missing npm metadata fields ([#775](https://github.com/i098/Crewship/issues/775)).
+- Fix devcontainer startup by selecting the provisioned builder stage, so Dev Containers does not try to pull `scratch`.
+  The published worker image and its isolation remain unchanged ([#777](https://github.com/i098/Crewship/issues/777)).
+- Create missing CLI and schedule directories during checkout and cloud-init previews for existing target accounts.
+  Preview the command symlink before its target is installed, without changing existing files or directory access ([#778](https://github.com/i098/Crewship/issues/778)).
+- Run the harbor browser checks in the matching Playwright image instead of downloading Ubuntu packages during CI. Keep the 10-minute job limit and all browser checks ([#784](https://github.com/i098/Crewship/issues/784)).
+- The iMessage bridge and optional card tunnel now source `~/super.env` through the service shell. This supports shell `export` assignments and prevents systemd from logging rejected secret assignments through its environment-file parser ([#794](https://github.com/i098/Crewship/issues/794)).
+- Keep the last Herdr sidebar usage percentages when `omp usage` fails, mark them stale after one hour, and allow 60 seconds for refreshes ([#799](https://github.com/i098/Crewship/issues/799)).
+- Refresh the gluttony credential check at each worker spawn, and check credentials only on the first entry read of a restored session, so a sign-in after session start works ([#807](https://github.com/i098/Crewship/issues/807)).
+- Bound the `smol` helper role in gluttony child sessions to the fast tier: its model, provider and effort follow the same bounds as fast workers. When no fast model has a usable credential, `smol` keeps its configured model ([#808](https://github.com/i098/Crewship/issues/808)).
+- Bound the CI fakeroot installation to five minutes with apt retries and network timeouts, skip installation when fakeroot is available, and allow 35 minutes for the Python and configuration job ([#809](https://github.com/i098/Crewship/issues/809)).
+- Use the public release Atom feed when the prerelease API returns no non-draft releases, so an empty or all-draft response does not stop tool provisioning ([#811](https://github.com/i098/Crewship/issues/811)).
+- Limit Herdr sidebar disk refreshes to one due home and 30 seconds per run. Slow refreshes keep the last good disk value, and deferred homes retry on the next run. Other sidebar rows wait at most 30 seconds for disk work ([#820](https://github.com/i098/Crewship/issues/820)).
+- The iMessage bridge fixes unanswered requests and expired typing.
+  Targeted replies preserve older unanswered requests, chat deadlines do not interrupt another chat's draft, and restart recovery has no age cutoff.
+  Synchronous inbox commands remain limited to five seconds each and can delay the deadline and typing timers.
+  Initial card replay confirms acceptance without treating later edits as new answers, and cross-chat desk answers preserve other chats' unanswered requests.
+  Explicit replies include current edits, and the deadline clears typing without waiting for active mate delivery.
+  Known Photon edits retain the original chat reference when raw events use a different chat identifier.
+  Cancellation tests wait for asynchronous transport completion.
+  Native-tool tests control deadline time independently of model-call duration.
+  Missing-session tests check halted behavior without requiring untruncated diagnostic text.
+  Desk answer rejection uses one branch while retaining handoff tracing.
+  See [the routing and typing contract](docs/imessage.md#what-it-does) for timing, trace fields, and recovery limits.
+  Queued supervisor responses retain their original request coverage, including when a later request arrives in the same millisecond.
+  Accepted bubbles and reactions keep their outbox progress when response confirmation fails, so journal errors do not resend them.
+  Transport acceptance traces keep their original timestamps through confirmation failures; history checks, confirmation recovery, and card edits use separate event labels.
+  Routing tests wait for outbox completion before checking response confirmations, so accepted sends cannot race those checks.
+  The BlueBubbles plain-reply test checks transport acceptance instead of the obsolete empty return value ([#841](https://github.com/i098/Crewship/issues/841)).
+- Fix [iMessage replies](https://github.com/i098/Crewship/blob/main/docs/imessage.md#what-it-does) to use plain wording, preserve requested exact output, and mask credential placeholders consistently ([#844](https://github.com/i098/Crewship/issues/844)).
+- Skip the redundant CA-store inspection when changed distrust settings already force a rebuild; keep both pre-network trust checks ([#846](https://github.com/i098/Crewship/issues/846)).
+- Send iMessage desk text as normal messages, including text sent with a reaction, even when later messages follow the selected target ([#852](https://github.com/i098/Crewship/issues/852)).
+- Stop the iMessage desk from sending the fixed "I saved ...; no confirmed answer yet" receipt after eight seconds.
+  The deadline still stops typing and hands unassigned requests to Firstmate, and the owner now gets only real answers ([#853](https://github.com/i098/Crewship/issues/853)).
+- Send a short V2 iMessage front reply before relay or dispatch work, without completing the request or stopping its typing indicator ([#857](https://github.com/i098/Crewship/issues/857)).
+- Desk no longer replies "I'll check <his words>"; the prompt forbids it, and the desk drops "I'll check", "I will check", "I'll look into" and "Let me check" replies ([#862](https://github.com/i098/Crewship/issues/862)).
+- Stop the usage-tui stats sync from making herdr list its pane as an omp agent ([#891](https://github.com/i098/Crewship/issues/891)).
+- Block the "I'll ask about" echo template in desk replies ([#901](https://github.com/i098/Crewship/issues/901)).
+- The usage TUI quota refresh runs `omp usage --json` in its own session, so the pane no longer flickers as an `omp` agent ([#902](https://github.com/i098/Crewship/issues/902)).
+- The crewship.si How page links to the About page ([#949](https://github.com/i098/Crewship/issues/949)).
+- The ASCII harbor loads its unchanged start view sooner by building the walking graph only when an animated map walk first needs it ([#961](https://github.com/i098/Crewship/issues/961)).
+- The Sentrux baseline accepts the intended How and About page links, so the quality gate passes on main again ([#962](https://github.com/i098/Crewship/issues/962)).
+- The crewship.si home footer links to the Architecture docs page on crewship.si ([#969](https://github.com/i098/Crewship/issues/969)).
+
+### Security
+
+- Distrust the four emSign roots before Ansible network lookups and recover interrupted trust rebuilds.
+  Update the system CA package and check the CA bundle and hashed certificate directories.
+  Keep latest Node selection while enforcing the 22.23.4, 24.22.1, and 26.12.1 security minimums.
+  Enforce pip 26.2.2 and certifi 2026.10.19 minimums when present in the repository, pruner, and fdu Python environments.
+  Leave absent packages absent and retain Ubuntu certifi's system CA store.
+  Report Python upgrades accurately with inherited packages and keep fdu replay unchanged under lowest-version resolver settings.
+  Direct Node, requests, and pip to filtered system trust in shell profiles and the user-service environment.
+  Disable pip's additive truststore backend and conflicting Node CA selectors while preserving unrelated flags.
+  Honor custom uv project environments and reject unsafe Node archives before installation.
+  Isolate runtime trust checks from inherited XDG configuration paths ([#830](https://github.com/i098/Crewship/issues/830)).
+- Run the four instagrapi entrypoints in isolated uv environments with certifi>=2026.10.19. Exclude older pip and certifi packages from the base interpreter and current project without adding an unused pip installation ([#833](https://github.com/i098/Crewship/issues/833)).
+
 ## [0.4.7] - 2026-10-21
 
 ### Added
@@ -500,7 +714,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/i098/Crewship/releases/tag/v0.4.8
 [0.4.7]: https://github.com/i098/Crewship/releases/tag/v0.4.7
 [0.4.6]: https://github.com/i098/Crewship/releases/tag/v0.4.6
 [0.4.5]: https://github.com/i098/Crewship/releases/tag/v0.4.5
