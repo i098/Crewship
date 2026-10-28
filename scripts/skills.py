@@ -59,7 +59,10 @@ KINDS = {
 # name: (git URL, the skill's folder in that repo). Install as private ones do, below a private skill of the same name.
 UPSTREAM = {
     "vision": ("https://github.com/kunchenguid/vision.git", "skills/vision"),
-    "security-audit": ("https://github.com/cloudflare/security-audit-skill.git", "skills/security-audit"),
+    "security-audit": (
+        "https://github.com/cloudflare/security-audit-skill.git",
+        "skills/security-audit",
+    ),
 }
 MANIFEST = ".local/share/crewship/skills.json"
 CACHE = ".cache/crewship/private-skills"
