@@ -3,15 +3,15 @@
 const HOLD = /https?:\/\/\S+/g;
 const STRIP: RegExp[] = [
   /\[D[0-9a-f]{4,8}\]/gi,
-  /\[(?:key|corr)=[^\]]*\]/g,
-  /(?<![\w-])(?:key|corr)=[^\s)\]]*/g,
+  /\[(?:key|corr)=[^\]\0]*\]/g,
+  /(?<![\w-])(?:key|corr)=[^\s)\]\0]*/g,
   /^[ \t\x01]*(?:cf|sm)-[a-z0-9][a-z0-9-]*[ \t]*:[ \t]*/gim,
   /^[ \t\x01]*(?:working|done|needs-decision|paused)[ \t]*:[ \t]*/gim,
   /\b[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+\b/gi,
   /`(?:cf|sm)-[a-z0-9][a-z0-9-]*`/gi,
   /(?<![\w/.:~-])(?:~(?:\/[\w.@-]+)+|(?:\/[\w.@-]+){2,})\/?/g,
   /(?<![\w/.-])(?:state|data)\/[\w./-]*\.[A-Za-z0-9]+/g,
-  /^[ \t\x01]*decision stuck after \d+ attempts.*\n?/gim,
+  /^[ \t\x01]*decision stuck after \d+ attempts[^\n\0]*\n?/gim,
   /decision stuck after \d+ attempts[.,:;]?/gi,
 ];
 const MARK = "\x01";
@@ -26,7 +26,7 @@ export function cleanText(text: string): string {
   if (out === held0) return text; // no slop found: leave the text byte-exact
   out = out.replace(EMPTY_BRACKETS, MARK).replace(MARK_RUN, (m, off: number, s: string) => {
     const next = s[off + m.length];
-    return off === 0 || s[off - 1] === "\n" || next === undefined || "\n,.;:!?".includes(next) ? "" : " ";
+    return off === 0 || "\n([".includes(s[off - 1]) || next === undefined || "\n,.;:!?".includes(next) ? "" : " ";
   });
   out = out.replace(/\0(\d+)\0/g, (_, i) => held[+i]).trim();
   return out || text; // never turn a send into nothing

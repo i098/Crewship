@@ -38,6 +38,8 @@ def clean(text):
     ("done: x\n    nested\n  y [D039b88]", "x\n    nested\n  y"),
     ("done: call `reset()` now", "call `reset()` now"),
     ("done: - [ ] deploy", "- [ ] deploy"),
+    ("See key=https://x.com/a ok", "See https://x.com/a ok"),
+    ("Also [key=https://y.com/b] and (corr=http://z.io)", "Also [https://y.com/b] and (http://z.io)"),
     ("Fix [corr=1] now", "Fix now"),
 ])
 def test_rules(text, want):
