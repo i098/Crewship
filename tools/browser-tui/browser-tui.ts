@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Every running browser on the host (headed and headless) with its CDP pages; close a page or stop a browser after a y/n prompt.
-import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
+import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type CliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
 
 export type Page = { id: string; title: string; url: string }
@@ -45,34 +45,40 @@ function nameOf(p: Proc, port: number | null) {
   return profile ? `${origin} · ${profile.replace(/\/$/, "").split("/").pop()}` : origin
 }
 
+type Listen = { port: number; pids: number[] }
+type ProbeFn = (port: number) => Promise<Probe | null>
+
+// One browser from its root process: the whole tree's memory, and the first port in the tree that answers CDP.
+async function describe(r: Proc, kids: Map<number, Proc[]>, listens: Listen[], probe: ProbeFn, viewer: string): Promise<Browser> {
+  const tree: Proc[] = []
+  for (const stack = [r]; stack.length; ) {
+    const p = stack.pop()!
+    tree.push(p)
+    stack.push(...(kids.get(p.pid) ?? []))
+  }
+  const pids = new Set(tree.map(p => p.pid))
+  const argPort = Number(r.args.match(/--(?:remote-debugging-)?port[= ](\d+)/)?.[1] ?? 0)
+  const ports = [...new Set([argPort, ...listens.filter(l => l.pids.some(p => pids.has(p))).map(l => l.port)])].filter(Boolean)
+  let port: number | null = null
+  let info: Probe | null = null
+  for (const p of ports) if ((info = await probe(p))) { port = p; break }
+  const headless = exe(r).startsWith("obscura") || r.args.includes("--headless") || !!info?.ua.includes("Headless")
+  return {
+    pid: r.pid, name: nameOf(r, port), kind: headless ? "headless" : "headed", port, ageSec: r.age,
+    rssKb: tree.reduce((s, p) => s + p.rss, 0), pages: info?.pages ?? [],
+    ...(port === VNC_CDP_PORT ? { viewer } : {}),
+  }
+}
+
 // Browser roots from ps, plus CDP endpoints on known ports whose owner is not visible. `probe` reads one CDP port.
-export async function discover(psOut: string, ssOut: string, probe: (port: number) => Promise<Probe | null>, viewer: string): Promise<Browser[]> {
+export async function discover(psOut: string, ssOut: string, probe: ProbeFn, viewer: string): Promise<Browser[]> {
   const procs = parsePs(psOut)
   const byPid = new Map(procs.map(p => [p.pid, p]))
   const kids = new Map<number, Proc[]>()
   for (const p of procs) kids.set(p.ppid, [...(kids.get(p.ppid) ?? []), p])
   const listens = parseListens(ssOut)
   const roots = procs.filter(p => isBrowser(p) && !isBrowser(byPid.get(p.ppid)))
-  const found = await Promise.all(roots.map(async (r): Promise<Browser> => {
-    const tree: Proc[] = []
-    for (const stack = [r]; stack.length; ) {
-      const p = stack.pop()!
-      tree.push(p)
-      stack.push(...(kids.get(p.pid) ?? []))
-    }
-    const pids = new Set(tree.map(p => p.pid))
-    const argPort = Number(r.args.match(/--(?:remote-debugging-)?port[= ](\d+)/)?.[1] ?? 0)
-    const ports = [...new Set([argPort, ...listens.filter(l => l.pids.some(p => pids.has(p))).map(l => l.port)])].filter(Boolean)
-    let port: number | null = null
-    let info: Probe | null = null
-    for (const p of ports) if ((info = await probe(p))) { port = p; break }
-    const headless = exe(r).startsWith("obscura") || r.args.includes("--headless") || !!info?.ua.includes("Headless")
-    return {
-      pid: r.pid, name: nameOf(r, port), kind: headless ? "headless" : "headed", port, ageSec: r.age,
-      rssKb: tree.reduce((s, p) => s + p.rss, 0), pages: info?.pages ?? [],
-      ...(port === VNC_CDP_PORT ? { viewer } : {}),
-    }
-  }))
+  const found = await Promise.all(roots.map(r => describe(r, kids, listens, probe, viewer)))
   const taken = new Set(found.map(b => b.port))
   const orphans = listens.filter(l => !l.pids.length && KNOWN_PORTS.includes(l.port) && !taken.has(l.port)).map(l => l.port)
   for (const port of [...new Set(orphans)]) {
@@ -150,163 +156,181 @@ export const snapshot = (bs: Browser[], w: number) =>
 
 // ---- terminal view -----------------------------------------------------------
 // Flags: --once (print the list and exit), --fixture FILE (read a recorded Browser[] JSON; page and browser actions are not sent).
+type Ui = { renderer: CliRenderer; header: TextRenderable; list: TextRenderable; footer: TextRenderable }
+let ui: Ui
+let fixture: string | undefined
+let viewer = ""
+let browsers: Browser[] = []
+let loaded = false
+let updated = ""
+let note = ""
+let error = ""
+const open = new Set<string>()
+let cursor = { key: "", page: "" }
+let top = 0
+let confirm: { text: string; act: () => Promise<string> } | null = null
+let busy = false
+
+const load = async (): Promise<Browser[]> => (fixture ? JSON.parse(await Bun.file(fixture).text()) : scan(viewer))
+const rows = () => flatten(browsers, open)
+const cur = (rs: Row[]) => Math.max(0, rs.findIndex(r => keyOf(r.b) === cursor.key && (r.page?.id ?? "") === cursor.page))
+
+function s(text: string, color: string = theme.text, o: { bg?: string; b?: boolean } = {}): TextChunk {
+  let c = fg(color)(text)
+  if (o.bg) c = bg(o.bg)(c)
+  return o.b ? bold(c) : c
+}
+const styled = (lines: TextChunk[][]) => new StyledText(lines.flatMap((l, i) => (i ? [s("\n"), ...l] : l)))
+
+function drawHeader() {
+  const headed = browsers.filter(b => b.kind === "headed").length
+  ui.header.content = styled([
+    [s(" BROWSERS ", theme.bg, { bg: theme.accent, b: true }), s(`  ${browsers.length} running  `, theme.text, { b: true }), s(`${headed} headed`, theme.highlight), s("  ·  ", theme.muted), s(`${browsers.length - headed} headless`, theme.accent)],
+    [s(loaded ? `updated ${updated} · every ${REFRESH_MS / 1000}s${fixture ? " · fixture" : ""}` : "Scanning…", theme.muted), ...(error ? [s("  " + error, theme.error)] : [])],
+  ])
+}
+
+// Formats only rows [top, top+h); the cursor stays in view.
+function drawList(rs: Row[], c: number) {
+  const inner = Math.max(20, ui.renderer.width - 4)
+  const innerH = Math.max(1, ui.renderer.height - 2 - 2 - 2 - 1) // header, footer, box border, column titles
+  top = Math.max(0, Math.min(c < top ? c : c >= top + innerH ? c - innerH + 1 : top, Math.max(0, rs.length - innerH)))
+  const lines: TextChunk[][] = [[s(columns(inner), theme.muted, { b: true })]]
+  for (let i = top; i < Math.min(rs.length, top + innerH); i++) {
+    const on = i === c
+    lines.push(rowSegs(rs[i], inner, open.has(keyOf(rs[i].b))).map(x => s(x.text, x.fg, { b: x.b || on, bg: on ? theme.border : undefined })))
+  }
+  if (loaded && !rs.length) lines.push([s("  No browsers are running.", theme.muted)])
+  ui.list.content = styled(lines)
+}
+
+function drawFooter(sel: Browser | undefined) {
+  const info = sel ? [s(` ${sel.name}`, theme.text, { b: true }), s(sel.port ? `  CDP http://127.0.0.1:${sel.port}` : "  no CDP port", theme.muted), ...(sel.viewer ? [s("  viewer ", theme.muted), s(sel.viewer, theme.highlight)] : [])] : [s(" ")]
+  const keys = confirm
+    ? [s(` ${confirm.text} `, theme.warn, { b: true }), s("y", theme.text, { b: true }), s(" yes  any other key no", theme.muted)]
+    : [s(" ↑↓ move  ⏎ pages  r reload  c copy CDP URL  x close page  K stop browser  q quit", theme.muted), ...(note ? [s("   " + note, theme.text, { b: true })] : [])]
+  ui.footer.content = styled([info, keys])
+}
+
+function draw() {
+  const rs = rows()
+  const c = cur(rs)
+  drawHeader()
+  drawList(rs, c)
+  drawFooter(rs[c]?.b)
+  ui.renderer.requestRender()
+}
+
+async function refresh() {
+  if (busy) return
+  busy = true
+  try {
+    browsers = await load()
+    error = ""
+    loaded = true
+    updated = new Date().toLocaleTimeString("en-US", { hourCycle: "h23" })
+  } catch (e) {
+    error = (e as Error).message
+  } finally {
+    busy = false
+    draw()
+  }
+}
+
+// A y/n prompt guards every action that changes a browser. Fixture mode only reports what it would do.
+function ask(text: string, act: () => Promise<string>) {
+  confirm = { text, act: fixture ? async () => "fixture: nothing sent" : act }
+}
+
+function answer(yes: boolean) {
+  const act = confirm!.act
+  confirm = null
+  if (!yes) note = "cancelled"
+  else act().catch(e => `failed: ${(e as Error).message}`).then(m => { note = m }).finally(refresh)
+}
+
+function stopBrowser(r: Row | undefined) {
+  if (!r) return
+  const { pid, name } = r.b
+  if (!pid) note = "no visible pid for this browser"
+  else ask(`Stop ${name} (pid ${pid})?`, async () => { process.kill(pid, "SIGTERM"); return `sent SIGTERM to ${pid}` })
+}
+
+function closePage(r: Row | undefined) {
+  const port = r?.b.port
+  const page = r?.page
+  if (!page || !port) note = "select a page first (⏎ opens a browser)"
+  else ask(`Close page "${clip(page.title || page.url, 40).trimEnd()}"?`, async () => {
+    // Chrome serves /json/close; Obscura drops the connection.
+    const res = await cdp(port, `/json/close/${page.id}`).catch(() => null)
+    return res?.ok ? "page closed" : `close failed: ${res ? `HTTP ${res.status}` : "this browser has no /json/close"}`
+  })
+}
+
+function copyUrl(r: Row | undefined) {
+  if (!r?.b.port) note = "no CDP port"
+  else {
+    const url = `http://127.0.0.1:${r.b.port}`
+    note = ui.renderer.copyToClipboardOSC52(url) ? `copied ${url}` : `clipboard not supported: ${url}`
+  }
+}
+
+function toggle(r: Row | undefined) {
+  if (!r) return
+  const key = keyOf(r.b)
+  if (open.has(key)) open.delete(key)
+  else open.add(key)
+  cursor = { key, page: "" }
+}
+
+function onKey(k: { name: string; shift?: boolean }) {
+  if (confirm) return answer(k.name === "y"), draw()
+  note = ""
+  const rs = rows()
+  const c = cur(rs)
+  const page = ui.renderer.height - 8
+  const moves: Record<string, number> = { down: c + 1, j: c + 1, up: c - 1, k: c - 1, pagedown: c + page, pageup: c - page }
+  const actions: Record<string, (r: Row | undefined) => void> = { K: stopBrowser, x: closePage, c: copyUrl, return: toggle, enter: toggle }
+  const name = k.name === "k" && k.shift ? "K" : k.name
+  if (name === "q") {
+    ui.renderer.destroy()
+    process.exit(0)
+  }
+  if (name === "r") return void refresh()
+  if (name in moves) {
+    const n = rs[Math.min(rs.length - 1, Math.max(0, moves[name]))]
+    if (n) cursor = { key: keyOf(n.b), page: n.page?.id ?? "" }
+  } else if (name in actions) actions[name](rs[c])
+  else return
+  draw()
+}
+
 async function main() {
   const argv = process.argv.slice(2)
   const fx = argv.indexOf("--fixture")
-  const fixture = fx >= 0 ? argv[fx + 1] : undefined
-  const viewer = fixture ? "" : vncViewer()
-  const load = async (): Promise<Browser[]> => (fixture ? JSON.parse(await Bun.file(fixture).text()) : scan(viewer))
-
+  fixture = fx >= 0 ? argv[fx + 1] : undefined
+  viewer = fixture ? "" : vncViewer()
   if (argv.includes("--once")) {
     console.log(snapshot(await load(), Math.max(60, process.stdout.columns ?? 120)))
     process.exit(0)
   }
-
-  const s = (text: string, color: string = theme.text, o: { bg?: string; b?: boolean } = {}): TextChunk => {
-    let c = fg(color)(text)
-    if (o.bg) c = bg(o.bg)(c)
-    return o.b ? bold(c) : c
-  }
-  const styled = (lines: TextChunk[][]) => new StyledText(lines.flatMap((l, i) => (i ? [s("\n"), ...l] : l)))
-
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const column = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%" })
-  const header = new TextRenderable(renderer, { content: "", flexShrink: 0 })
   const box = new BoxRenderable(renderer, {
     border: true, borderStyle: "rounded", borderColor: theme.border, titleColor: theme.text,
     title: " Browsers · headed and headless ", titleAlignment: "left", paddingLeft: 1, paddingRight: 1, flexGrow: 1,
   })
-  const list = new TextRenderable(renderer, { content: "" })
-  const footer = new TextRenderable(renderer, { content: "", flexShrink: 0 })
-  box.add(list)
-  column.add(header)
+  ui = {
+    renderer,
+    header: new TextRenderable(renderer, { content: "", flexShrink: 0 }),
+    list: new TextRenderable(renderer, { content: "" }),
+    footer: new TextRenderable(renderer, { content: "", flexShrink: 0 }),
+  }
+  box.add(ui.list)
+  column.add(ui.header)
   column.add(box)
-  column.add(footer)
+  column.add(ui.footer)
   renderer.root.add(column)
-
-  let browsers: Browser[] = []
-  let loaded = false
-  let updated = ""
-  let note = ""
-  let error = ""
-  const open = new Set<string>()
-  let cursor = { key: "", page: "" }
-  let top = 0
-  let confirm: { text: string; act: () => Promise<string> } | null = null
-
-  const rows = () => flatten(browsers, open)
-  const cur = (rs: Row[]) => Math.max(0, rs.findIndex(r => keyOf(r.b) === cursor.key && (r.page?.id ?? "") === cursor.page))
-
-  function draw() {
-    const W = renderer.width
-    const inner = Math.max(20, W - 4)
-    const innerH = Math.max(1, renderer.height - 2 - 2 - 2 - 1) // header, footer, box border, column titles
-    const rs = rows()
-    const c = cur(rs)
-    if (c < top) top = c
-    if (c >= top + innerH) top = c - innerH + 1
-    top = Math.max(0, Math.min(top, Math.max(0, rs.length - innerH)))
-    const headed = browsers.filter(b => b.kind === "headed").length
-    header.content = styled([
-      [s(" BROWSERS ", theme.bg, { bg: theme.accent, b: true }), s(`  ${browsers.length} running  `, theme.text, { b: true }), s(`${headed} headed`, theme.highlight), s("  ·  ", theme.muted), s(`${browsers.length - headed} headless`, theme.accent)],
-      [s(loaded ? `updated ${updated} · every ${REFRESH_MS / 1000}s${fixture ? " · fixture" : ""}` : "Scanning…", theme.muted), ...(error ? [s("  " + error, theme.error)] : [])],
-    ])
-    const lines: TextChunk[][] = [[s(columns(inner), theme.muted, { b: true })]]
-    for (let i = top; i < Math.min(rs.length, top + innerH); i++) {
-      const on = i === c
-      lines.push(rowSegs(rs[i], inner, open.has(keyOf(rs[i].b))).map(x => s(x.text, x.fg, { b: x.b || on, bg: on ? theme.border : undefined })))
-    }
-    if (loaded && !rs.length) lines.push([s("  No browsers are running.", theme.muted)])
-    list.content = styled(lines)
-    const sel = rs[c]?.b
-    const info = sel ? [s(` ${sel.name}`, theme.text, { b: true }), s(sel.port ? `  CDP http://127.0.0.1:${sel.port}` : "  no CDP port", theme.muted), ...(sel.viewer ? [s("  viewer ", theme.muted), s(sel.viewer, theme.highlight)] : [])] : [s(" ")]
-    const keys = confirm
-      ? [s(` ${confirm.text} `, theme.warn, { b: true }), s("y", theme.text, { b: true }), s(" yes  any other key no", theme.muted)]
-      : [s(" ↑↓ move  ⏎ pages  r reload  c copy CDP URL  x close page  K stop browser  q quit", theme.muted), ...(note ? [s("   " + note, theme.text, { b: true })] : [])]
-    footer.content = styled([info, keys])
-    renderer.requestRender()
-  }
-
-  let busy = false
-  async function refresh() {
-    if (busy) return
-    busy = true
-    try {
-      browsers = await load()
-      error = ""
-      loaded = true
-      updated = new Date().toLocaleTimeString("en-US", { hourCycle: "h23" })
-    } catch (e) {
-      error = (e as Error).message
-    } finally {
-      busy = false
-      draw()
-    }
-  }
-
-  // A y/n prompt guards every action that changes a browser. Fixture mode only reports what it would do.
-  function ask(text: string, act: () => Promise<string>) {
-    confirm = { text, act: fixture ? async () => "fixture: nothing sent" : act }
-    draw()
-  }
-
-  function onKey(k: { name: string; shift?: boolean }) {
-    if (confirm) {
-      const act = confirm.act
-      confirm = null
-      if (k.name !== "y") note = "cancelled"
-      else act().catch(e => `failed: ${(e as Error).message}`).then(m => { note = m }).finally(refresh)
-      return draw()
-    }
-    note = ""
-    const rs = rows()
-    const c = cur(rs)
-    const r = rs[c]
-    const go = (i: number) => {
-      const n = rs[Math.min(rs.length - 1, Math.max(0, i))]
-      if (n) cursor = { key: keyOf(n.b), page: n.page?.id ?? "" }
-    }
-    if (k.name === "q") {
-      renderer.destroy()
-      process.exit(0)
-    } else if (k.name === "k" && k.shift) {
-      if (!r) return
-      if (!r.b.pid) note = "no visible pid for this browser"
-      else {
-        const { pid, name } = r.b
-        return ask(`Stop ${name} (pid ${pid})?`, async () => { process.kill(pid, "SIGTERM"); return `sent SIGTERM to ${pid}` })
-      }
-    } else if (k.name === "down" || k.name === "j") go(c + 1)
-    else if (k.name === "up" || k.name === "k") go(c - 1)
-    else if (k.name === "pagedown") go(c + renderer.height - 8)
-    else if (k.name === "pageup") go(c - renderer.height + 8)
-    else if (k.name === "return" || k.name === "enter") {
-      if (!r) return
-      const key = keyOf(r.b)
-      if (open.has(key)) open.delete(key)
-      else open.add(key)
-      cursor = { key, page: "" }
-    } else if (k.name === "r") return void refresh()
-    else if (k.name === "c") {
-      if (!r?.b.port) note = "no CDP port"
-      else {
-        const url = `http://127.0.0.1:${r.b.port}`
-        note = renderer.copyToClipboardOSC52(url) ? `copied ${url}` : `clipboard not supported: ${url}`
-      }
-    } else if (k.name === "x") {
-      if (!r?.page || !r.b.port) note = "select a page first (⏎ opens a browser)"
-      else {
-        const { page, b } = r
-        return ask(`Close page "${clip(page.title || page.url, 40).trimEnd()}"?`, async () => {
-          // Chrome serves /json/close; Obscura drops the connection.
-          const res = await cdp(b.port!, `/json/close/${page.id}`).catch(() => null)
-          return res?.ok ? "page closed" : `close failed: ${res ? `HTTP ${res.status}` : "this browser has no /json/close"}`
-        })
-      }
-    } else return
-    draw()
-  }
-
   renderer.on("resize", draw)
   renderer.keyInput.on("keypress", onKey)
   draw()
