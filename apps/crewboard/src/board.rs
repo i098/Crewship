@@ -145,6 +145,15 @@ impl Board {
             t.evicted = old.seq;
             self.bytes -= old.line.len();
         }
+        if self.fan_out(topic, &line) {
+            self.topics.get_mut(topic).expect("topic was just published").read_seq = seq;
+        }
+        Ok(seq)
+    }
+
+    /// Delivers `line` to the matching subscribers and drops slow or closed ones.
+    /// True when a non-viewer subscriber received it.
+    fn fan_out(&mut self, topic: &str, line: &Arc<str>) -> bool {
         let dropped = &mut self.dropped;
         let mut agent_read = false;
         self.subs.retain(|s| {
@@ -164,10 +173,16 @@ impl Board {
                 Err(TrySendError::Closed(_)) => false,
             }
         });
-        if agent_read {
-            self.topics.get_mut(topic).expect("topic was just published").read_seq = seq;
+        agent_read
+    }
+
+    /// Counts the newest message of each topic matching `patterns` as read by an agent when it is above `after`.
+    fn mark_read_after(&mut self, patterns: &[String], after: u64) {
+        for (_, t) in self.topics.iter_mut().filter(|(n, _)| patterns.iter().any(|p| matches(p, n))) {
+            if let Some(newest) = t.ring.back().map(|m| m.seq).filter(|&s| s > after) {
+                t.read_seq = t.read_seq.max(newest);
+            }
         }
-        Ok(seq)
     }
 
     /// Registers a subscriber. With `since`, replays retained messages with a
@@ -197,11 +212,7 @@ impl Board {
             }
             replay.extend(msgs.into_iter().map(|m| m.line.clone()));
             if !viewer {
-                for (_, t) in self.topics.iter_mut().filter(|(n, _)| patterns.iter().any(|p| matches(p, n))) {
-                    if let Some(newest) = t.ring.back().map(|m| m.seq).filter(|&s| restarted || s > since) {
-                        t.read_seq = t.read_seq.max(newest);
-                    }
-                }
+                self.mark_read_after(&patterns, if restarted { 0 } else { since });
             }
         }
         let (tx, rx) = mpsc::channel(SUB_QUEUE);
@@ -220,11 +231,12 @@ impl Board {
         }
     }
 
-    /// Counts the newest message of `topic` as read by an agent: a `hist` reply carried it.
-    pub fn mark_read(&mut self, topic: &str) {
-        if let Some(t) = self.topics.get_mut(topic) {
+    /// A `hist` read: the last `n` messages. Unless `viewer`, it counts as an agent read of the topic.
+    pub fn read(&mut self, topic: &str, n: usize, viewer: bool) -> Vec<Arc<str>> {
+        if let Some(t) = self.topics.get_mut(topic).filter(|_| !viewer) {
             t.read_seq = t.ring.back().map_or(t.read_seq, |m| m.seq);
         }
+        self.history(topic, n)
     }
 
     /// The last `n` messages of `topic`, oldest first.
@@ -496,7 +508,9 @@ mod tests {
         b.publish("t", None, 1, "4").unwrap();
         assert_eq!(read_seq(&b), json!(4));
         b.publish("u", None, 1, "5").unwrap();
-        b.mark_read("u");
+        assert_eq!(b.read("u", 10, true).len(), 1);
+        assert_eq!(b.topics(false)[1]["read_seq"], json!(0));
+        b.read("u", 10, false);
         assert_eq!(b.topics(false)[1]["read_seq"], json!(5));
     }
 

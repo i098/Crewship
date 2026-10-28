@@ -130,14 +130,7 @@ fn answer(board: &Shared, pid: i32, req: &Value) -> String {
             },
             _ => err("bad_request"),
         },
-        Some("hist") => {
-            let topic = req["topic"].as_str().unwrap_or("");
-            let lines = b.history(topic, req["n"].as_u64().unwrap_or(50) as usize);
-            if req["viewer"] != true {
-                b.mark_read(topic);
-            }
-            return lines.concat() + "{\"end\":true}\n";
-        }
+        Some("hist") => return b.read(req["topic"].as_str().unwrap_or(""), req["n"].as_u64().unwrap_or(50) as usize, req["viewer"] == true).concat() + "{\"end\":true}\n",
         Some("topics") => b.topics(req["summary"] == true),
         Some("summary") => match (req["topic"].as_str(), req["summary"].as_str()) {
             (Some(topic), Some(text)) => match b.set_summary(topic, text, req["seq"].as_u64()) {
