@@ -1,3 +1,5 @@
+// Credit: the same design as the long-chat memory in https://github.com/VictorTaelin/UniiChat (Apache-2.0) by Victor
+// Taelin. This file is our own synchronous implementation of it; UniiChat's Memory.ts is not usable as a library.
 // The front desk's memory: one chat that never ends, after https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449
 // Every message is logged whole. In the background the compaction model compresses the log into a binary tree of
 // one-line summaries, and each desk turn sees the view: lines covering the whole chat, fine when recent, coarse
