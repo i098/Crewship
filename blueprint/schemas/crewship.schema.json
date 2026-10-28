@@ -183,6 +183,9 @@
             "crewboard_tab": {
               "type": "boolean"
             },
+            "browsers_tab": {
+              "type": "boolean"
+            },
             "theme": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]+$"

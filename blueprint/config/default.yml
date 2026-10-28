@@ -45,6 +45,7 @@ crewship:
     schedules_tab: true
     usage_tab: true
     crewboard_tab: true
+    browsers_tab: true
     # Sidebar layouts; docs/herdr.md explains each line. The omp extension
     # feeds the Agents $ tokens and the herdr-spaces reporter timer the Spaces
     # ones.
