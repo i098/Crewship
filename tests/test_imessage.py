@@ -30,13 +30,14 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 
 
 @pytest.mark.parametrize("backend", ["instagrapi", "graph"])
+@pytest.mark.parametrize("desk_v2", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
     ("fm-imessage", "bun", ["bridge.ts"]),
     ("fm-cards-tunnel", "cloudflared", [
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
 ])
-def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend):
+def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend, desk_v2):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
     local_bin.mkdir(parents=True)
@@ -52,11 +53,13 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     env = Environment()
     env.filters["comment"] = lambda text: "# " + text
     env.filters["dirname"] = os.path.dirname
+    env.filters["ternary"] = lambda value, yes, no: yes if value else no
     rendered = env.from_string(
         (ROOT / f"blueprint/ansible/templates/{unit}.service.j2").read_text()
     ).render(
         ansible_managed="test",
-        crewship_cfg={"imessage": {"owner": "", "cards": {"url": "https://cards.example.com"}}},
+        crewship_cfg={"imessage": {"owner": "", "cards": {"url": "https://cards.example.com"},
+                                   **({} if desk_v2 is None else {"desk_v2": desk_v2})}},
         crewship_local_bin=str(local_bin), crewship_imessage_dir=str(home),
         crewship_firstmate_dir=str(home), crewship_imessage_desk_provider="omp",
         crewship_imessage_desk_model="test", crewship_imessage_desk_reasoning="off",
@@ -92,6 +95,8 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
         "fake token value" if binary == "cloudflared" else None, args,
     ]
     assert result.stderr == ""
+    if unit == "fm-imessage":
+        assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
 
 
 def send(tmp_path, *args):
@@ -1523,6 +1528,7 @@ def load_ship():
         (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3"), "imessage"),
         (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3", desk_reasoning="off"), "imessage"),
         (lambda f: f["imessage"].update(desk_reasoning="instant"), "imessage"),
+        (lambda f: f["imessage"].update(desk_v2="true"), "imessage"),
     ],
 )
 def test_config_rejects_a_bridge_it_cannot_run(change, error):
@@ -1532,6 +1538,15 @@ def test_config_rejects_a_bridge_it_cannot_run(change, error):
     change(document["crewship"])
     with pytest.raises(ValueError, match=error):
         load_ship().validate_config(document)
+
+
+@pytest.mark.parametrize("desk_v2", [None, False, True])
+def test_config_selects_the_desk_loop(desk_v2):
+    document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+    document["crewship"]["imessage"] = {"owner": "+10000000000"}
+    if desk_v2 is not None:
+        document["crewship"]["imessage"]["desk_v2"] = desk_v2
+    load_ship().validate_config(document)
 
 
 @pytest.mark.parametrize(

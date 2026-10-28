@@ -284,7 +284,11 @@ Delayed handoffs follow the [deadline rules](#what-it-does).
 
 ## V2 front desk
 
-Set `FM_IMESSAGE_DESK_V2=true` to replace the desk routing above with the V2 front desk. The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
+Set `crewship.imessage.desk_v2: true` in `.local/host.yml` to select the V2 front desk.
+The setting defaults to `false`; omit it or set it to `false` to keep the legacy loop for rollback.
+The service renders this setting as `FM_IMESSAGE_DESK_V2=true` or `false`.
+The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
+Deployment and a one-week trial require separate authorization.
 The front picks one of three results: social, dispatch, or relay.
 A purely social text gets one tapback and no text.
 Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
@@ -646,6 +650,7 @@ crewship:
     desk_provider: omp              # optional; this is the default; or inception
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
+    desk_v2: false                 # optional; select the V2 loop with true
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
 
