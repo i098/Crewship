@@ -234,6 +234,8 @@ btop draws nothing in a pane smaller than its shown boxes need; it shows `Termin
 
 `./ship.sh launch` installs the latest btop release as `~/.local/bin/btop-bin`, [`blueprint/config/btop.conf`](../blueprint/config/btop.conf) as `~/.config/btop/btop.conf`, and [`blueprint/maintenance/btop.sh`](../blueprint/maintenance/btop.sh) as `~/.local/bin/btop`. The launcher starts btop with preset 0 (all four boxes) in a pane of at least 80x24, and otherwise with preset 4 (processes only, which needs 44x16). When a phone attaches to the same session and the pane crosses 80x24, the launcher restarts btop with the other preset. Quitting btop ends the launcher.
 
+Herdr stops reading the pty of a tab nobody views. A btop that cannot write for about 5 seconds stops repainting its boxes for good, and only the clock moves. The launcher kills a btop blocked in a tty write for 3 seconds, waits until the pty is read again, and starts a fresh btop.
+
 btop saves its config on exit, including the last preset's boxes; the launcher always passes a preset, so that never changes what it shows. Every apply rewrites the config, so make lasting changes in `blueprint/config/btop.conf`, and keep preset 4 there.
 
 ## Viewing from another machine
