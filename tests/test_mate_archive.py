@@ -27,7 +27,13 @@ def line(obj):
 
 
 def msg(role, text, n=0):
-    return line({"type": "message", "timestamp": f"2026-10-2{n}T00:00:00Z", "message": {"role": role, "content": [{"type": "text", "text": text}]}})
+    return line(
+        {
+            "type": "message",
+            "timestamp": f"2026-10-2{n}T00:00:00Z",
+            "message": {"role": role, "content": [{"type": "text", "text": text}]},
+        }
+    )
 
 
 def write_session(ma, name, sid, texts, mode="w"):
@@ -69,12 +75,23 @@ def test_search_ranks_denser_match_first_and_filters(ma, capsys):
 def test_zoom_returns_window_around_turn(ma, capsys):
     write_session(ma, "a", "sess-a", [f"line number {i}" for i in range(1, 8)])
     out = run(ma, capsys, "zoom", "sess-", "4", "--before", "2", "--after", "1")
-    assert [f"turn {n}" for n in (2, 3, 4, 5)] == [f"turn {l.split(' turn ')[1].split()[0]}" for l in out.splitlines() if l.startswith("---")]
+    assert [f"turn {n}" for n in (2, 3, 4, 5)] == [
+        f"turn {ln.split(' turn ')[1].split()[0]}"
+        for ln in out.splitlines()
+        if ln.startswith("---")
+    ]
     assert "line number 4" in out and "line number 6" not in out
 
 
 def test_secret_lines_are_masked_and_db_is_private(ma, capsys):
-    write_session(ma, "a", "sess-a", ["keep this\nAPI_KEY=hunter2hunter2\nPASSWORD: swordfish\nused sk-abcdefghijklmnop1234 here\nplain end"])
+    write_session(
+        ma,
+        "a",
+        "sess-a",
+        [
+            "keep this\nAPI_KEY=hunter2hunter2\nPASSWORD: swordfish\nused sk-abcdefghijklmnop1234 here\nplain end"
+        ],
+    )
     assert run(ma, capsys, "search", "hunter2hunter2") == "no match\n"
     assert run(ma, capsys, "search", "swordfish") == "no match\n"
     out = run(ma, capsys, "zoom", "sess-a", "1")
