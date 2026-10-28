@@ -17,10 +17,11 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
-- [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`instagram-dm`](instagram-dm/SKILL.md): read the agent Instagram DMs with `instagrapi` (session reuse, email-code login), normalise shared posts to `/reel/` URLs for yt-dlp, wake the agent within seconds on a new DM from the operator, reply with `fm-insta-reply`, and curate a few worthwhile reels a day with `reel_curator.py`.
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
+- [`floorplan`](floorplan/SKILL.md): a third-party plugin that maps and explains a codebase, supports onboarding, and shows what a change touched.
+- [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`mobile-app-first-build`](mobile-app-first-build/SKILL.md): validate an idea with a mobile web prototype, choose a platform, map flows, write requirements, build, test, and release (credits u/olenami's Reddit guide).
 - [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.
 - [`openmontage`](openmontage/SKILL.md): make a video, reel or explainer clip with OpenMontage; renders mp4 into a 1-day-pruned cache, spring motion, beat-locked synthesized sound, a self-review pass; poster frame sendable with `fm-imessage --image`.
