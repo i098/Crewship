@@ -11,7 +11,7 @@ or a git URL fetched at --private-ref, default HEAD), its skills (<name>/ or <gr
 and the rules in its rules/ folder are first copied into blueprint/skills/private/
 and blueprint/rules/private/; without it, the items an earlier fill added are removed
 from there. Each item is then copied into every root of its kind in KINDS. Skills in
-UPSTREAM (vision) install on every host, public or not, from the newest default-branch commit of
+UPSTREAM (vision, security-audit) install on every host, public or not, from the newest default-branch commit of
 their repo, never pinned; a private skill of the same name wins, and the result lists each commit
 SHA. --no-upstream only skips their fetch; copies an earlier run installed stay. A
 manifest records the names this script installed, so an item the operator put
@@ -57,7 +57,13 @@ KINDS = {
 }
 # Skills installed from the newest default-branch commit of a public repo, never pinned:
 # name: (git URL, the skill's folder in that repo). Install as private ones do, below a private skill of the same name.
-UPSTREAM = {"vision": ("https://github.com/kunchenguid/vision.git", "skills/vision")}
+UPSTREAM = {
+    "vision": ("https://github.com/kunchenguid/vision.git", "skills/vision"),
+    "security-audit": (
+        "https://github.com/cloudflare/security-audit-skill.git",
+        "skills/security-audit",
+    ),
+}
 MANIFEST = ".local/share/crewship/skills.json"
 CACHE = ".cache/crewship/private-skills"
 UPSTREAM_CACHE = ".cache/crewship/upstream-skills"
