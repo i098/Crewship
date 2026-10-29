@@ -43,20 +43,26 @@ const textOf = (c: unknown): string =>
 
 export default function (pi: any) {
   let mem: any;
-  let dir = `${ROOT_DIR}/main`; // memory.ts is the one writer of a directory, so each session gets its own
+  let dir = "";
   let pending = false; // a compaction happened and the view is not in the session yet
-  const get = () => (mem ??= new Memory(dir, haikuChat, (e: unknown) => console.error("[unii]", e)));
 
-  pi.on("session_start", (_e: any, ctx: any) => {
+  // memory.ts is the one writer of a directory, so each session gets its own; /new and resume rebind it.
+  const bind = (_e: any, ctx: any) => {
     if (ctx.agent?.kind === "sub") return;
-    dir = `${ROOT_DIR}/${ctx.sessionManager.getSessionId()}`;
-    get();
-    // After a relaunch: a compaction with no view message after it still owes the view.
+    const next = `${ROOT_DIR}/${ctx.sessionManager.getSessionId()}`;
+    if (next !== dir) {
+      dir = next;
+      mem = new Memory(dir, haikuChat, (e: unknown) => console.error("[unii]", e));
+    }
+    // A compaction with no view message after it still owes the view (relaunch, resume).
+    pending = false;
     for (const en of ctx.sessionManager.getBranch()) {
       if (en.type === "compaction") pending = true;
       else if (en.type === "custom_message" && en.customType === VIEW_TAG) pending = false;
     }
-  });
+  };
+  pi.on("session_start", bind);
+  pi.on("session_switch", bind);
 
   pi.on("message_end", (e: any, ctx: any) => {
     if (ctx.agent?.kind === "sub" || !mem) return;
@@ -85,7 +91,8 @@ export default function (pi: any) {
     description: "Open a line id+n of the conversation memory into the two lines under it, or for n=1 the message whole.",
     parameters: pi.zod.object({ id: pi.zod.number().int(), n: pi.zod.number().int() }),
     async execute(_id: string, p: { id: number; n: number }) {
-      const m = get();
+      const m = mem;
+      if (!m) return { content: [{ type: "text", text: "conversation memory is not active in this session" }], details: {} };
       return { content: [{ type: "text", text: zoom(m.msgs, m.nodes, p.id, p.n) }], details: {} };
     },
   });
