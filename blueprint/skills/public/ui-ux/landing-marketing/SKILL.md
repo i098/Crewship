@@ -33,3 +33,8 @@ Work in HSL with one hue. Light source = highest saturation and lightness. Ancho
 background: linear-gradient(135deg, hsl(250 90% 70%), hsl(250 70% 45%), hsl(250 60% 20%));
 ```
 Check: hue constant across stops.
+
+## 5. Test marketing ideas with repeatable systems [DfDgu1Ry-Gb]
+Build reusable workflows for ad tests, landing-page variants, and buyer-question content. Turn one source asset or a keyword dataset into multiple drafts, then review each draft before publishing.
+For paid ads, compare performance against a chosen metric and pause weak ads only when the evidence supports that choice. Check tracking before using results to make decisions.
+Check: does each workflow create reviewable variants, use a defined success measure, and preserve human approval before publication or spend changes?
