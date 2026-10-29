@@ -26,7 +26,7 @@ curl -X POST 127.0.0.1:4610/agent/demo -d '{"tool":"set_style","args":{"tokens":
 | Resize a card | drag the corner grip (width and height) | `resize {w,h}` on drop |
 | Link two cards | drag a card's link glyph onto another card | `link {to}` |
 | Pin a card | tap `pin` | `pin {pinned}` |
-| Choose who wins a move | header toggle `agent wins` / `user wins` | `input {field:"wins",value}` on `header` |
+| Choose who wins a move | header `wins` pill (tap to switch) | `input {field:"wins",value}` on `header` |
 | Ask the agent | type in the input box, Enter | `input {text}` on `input` |
 | Undo | Ctrl+Z or Cmd+Z | `undo` |
 | Draw | the pen button, or shift-drag; Esc clears | none (local only) |
@@ -70,6 +70,22 @@ The canvas ports the frozen design's engine (`docs/genui/design/index.html`, `la
 Types come from `@crewship/genui-spec` (`packages/genui-spec/src/wire.ts`). The canvas draws `type: "card"` components from these props: `title`, `flag`, `kpi {value,unit}`, `steps {items,at}`, `body`, `items`, `pinned`, `hidden`. A child with no `rect` is drawn inside its parent. The `header` and `input` ids dock at the top and bottom unless the spec gives them a `rect`.
 
 Style uses tokens only. `spec.tokens` sets CSS variables on the page (for example `bg`, `ink`, `accent`); a component's `style` sets them on that component. `safeStyle` keeps a token only when its name is lower-case and its value has no URL, no `#`, `rgb` or other non-HSL colour, and no `;{}<>\`. Changing numbers use tabular digits.
+
+## Shell
+
+`src/shell.ts` draws the header, the bottom bar and the action log; `paintShell(spec, ctx)` runs on every paint. All of it comes from the spec:
+
+| Part | Spec source | A tap sends |
+|---|---|---|
+| Header line | `header.props.title`; `*starred words*` show amber | none |
+| Host stats | `header.props.stats {cpu,mem,disk,net: number[]}` (0-100 samples; `net` in MB/s) | `input {text,open:"sys"}` on `header` |
+| Terminal pills | `header.props.tuis [{name,proj}]`; the dot is `spec.projects[proj].hsl` | `input {text,open:"tui-<name>"}` on `header` |
+| Chips | `input.props.chips: string[]` | `input {text}` on `input` (same as typing it) |
+| Placeholder | `input.props.placeholder`; a selection or the full view use their own copy | none |
+| Up next | cards with `need` (Decide), `claim` (claimed) or a `next` string | `ctx.cam.bring([id])` |
+| Action log | `log.props.items [{at,text,proj,seq?,rwd?}]`, `at` in seconds | `input {rewind: seq}` on `log` |
+
+The nav pill switches the hint row between hotkeys and buttons and keeps the choice in `localStorage`. ◎ calls `ctx.cam.home()`, ⊞ calls `ctx.cam.spread()`, and ＋ opens the hidden `#file` input.
 
 ## Fixed rule: the sketch layer is on top
 
