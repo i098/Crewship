@@ -1,6 +1,6 @@
 // UniiChat memory for a second mate's primary session, kept outside the omp session file so compaction
 // (snapcompact included) cannot lose it. Reuses code-factory's apps/imessage/memory.ts for the log and the
-// summary tree. Each user and assistant turn is appended to <home>/state/unii/; after a compaction the next turn
+// summary tree. Each user and assistant turn is appended to <home>/state/unii/<session id>/; after a compaction the next turn
 // gets the view (summaries over the whole chat) as a hidden message, and unii_zoom opens any line.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +11,7 @@ const MEMORY_TS = process.env.UNII_MEMORY_TS || new URL("./fm-unii-memory/memory
 const { Memory, zoom } = await import(MEMORY_TS);
 
 const home = process.env.FM_HOME || homedir();
-const DIR = process.env.UNII_DIR || `${home}/state/unii`;
+const ROOT_DIR = process.env.UNII_DIR || `${home}/state/unii`;
 const MODEL = process.env.UNII_MODEL || "anthropic/claude-haiku-5-5";
 const VIEW_TAG = "unii-view";
 
@@ -43,11 +43,13 @@ const textOf = (c: unknown): string =>
 
 export default function (pi: any) {
   let mem: any;
+  let dir = `${ROOT_DIR}/main`; // memory.ts is the one writer of a directory, so each session gets its own
   let pending = false; // a compaction happened and the view is not in the session yet
-  const get = () => (mem ??= new Memory(DIR, haikuChat, (e: unknown) => console.error("[unii]", e)));
+  const get = () => (mem ??= new Memory(dir, haikuChat, (e: unknown) => console.error("[unii]", e)));
 
   pi.on("session_start", (_e: any, ctx: any) => {
     if (ctx.agent?.kind === "sub") return;
+    dir = `${ROOT_DIR}/${ctx.sessionManager.getSessionId()}`;
     get();
     // After a relaunch: a compaction with no view message after it still owes the view.
     for (const en of ctx.sessionManager.getBranch()) {

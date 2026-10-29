@@ -21,7 +21,7 @@ def test_view_returns_after_compaction(tmp_path):
 import ext from {json.dumps(str(ext))};
 const h = {{}};
 ext({{ on: (n, f) => (h[n] = f), registerTool: () => {{}}, zod: {{ object: () => ({{}}), number: () => ({{ int: () => ({{}}) }}) }} }});
-const ctx = {{ agent: {{ kind: "main" }}, sessionManager: {{ getBranch: () => [] }} }};
+const ctx = {{ agent: {{ kind: "main" }}, sessionManager: {{ getBranch: () => [], getSessionId: () => "s1" }} }};
 h.session_start({{}}, ctx);
 h.message_end({{ message: {{ role: "user", content: "the vault code is PLUM-4471" }} }}, ctx);
 const before = await h.before_agent_start({{}}, ctx);
@@ -33,3 +33,4 @@ console.log(JSON.stringify({{ before: before ?? null, view: after?.message?.cont
     got = json.loads(out.stdout)
     assert got["before"] is None
     assert "PLUM-4471" in got["view"]
+    assert any((tmp_path / "home/state/unii/s1").glob("**/*.jsonl")), "the log must sit in a per-session directory"
