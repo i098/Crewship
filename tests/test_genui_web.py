@@ -4,11 +4,16 @@ from pathlib import Path
 
 import pytest
 
-APP = Path(__file__).parents[1] / "apps/genui-web"
+ROOT = Path(__file__).parents[1]
+SUITES = ["apps/genui-web", "apps/genui-server", "packages/genui-agent-kit", "packages/genui-spec"]
 
 
-@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-def test_genui_web_canvas_suite():
-    # CI runs pytest only; the canvas model and mock-server contract tests live in bun.
-    run = subprocess.run(["bun", "test"], cwd=APP, capture_output=True, text=True, timeout=180)
+@pytest.mark.parametrize("suite", SUITES)
+def test_genui_bun_suite(suite):
+    # CI runs pytest only, so every genui bun suite is run from here.
+    if not shutil.which("bun"):
+        print(f"skipped {suite}: bun is not on PATH")
+        pytest.skip("needs bun")
+    subprocess.run(["bun", "install", "--frozen-lockfile"], cwd=ROOT / suite, check=True, capture_output=True, timeout=180)
+    run = subprocess.run(["bun", "test"], cwd=ROOT / suite, capture_output=True, text=True, timeout=180)
     assert run.returncode == 0, run.stdout + run.stderr

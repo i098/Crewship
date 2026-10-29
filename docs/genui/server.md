@@ -49,3 +49,7 @@ Header toggle: `components.header.props.wins` (`"user"`, otherwise agent wins), 
 ## Identity
 
 `src/identity.ts` is the only auth seam. The stub trusts everyone, except agent calls must send `Authorization: Bearer $GENUI_AGENT_TOKEN` when that var is set. CF Access and tailnet checks replace it later with the same signature.
+
+## Agent token limit
+
+`GENUI_AGENT_TOKEN` is enforced by the server, but the agent kit sends no token in this phase. Keep it unset until the P6 auth work. While it is unset, any client can claim `role=agent`.

@@ -5,7 +5,9 @@ const unescape = (s: string) => s.replace(/~1/g, "/").replace(/~0/g, "~");
 function parse(path: string): string[] {
   if (path === "") return [];
   if (path[0] !== "/") throw new Error(`bad pointer: ${path}`);
-  return path.slice(1).split("/").map(unescape);
+  const keys = path.slice(1).split("/").map(unescape);
+  if (keys.includes("__proto__")) throw new Error(`bad pointer: ${path}`);
+  return keys;
 }
 
 type Container = Record<string, unknown> | unknown[];
@@ -14,7 +16,7 @@ function walk(doc: unknown, keys: string[], path: string): Container {
   let cur = doc;
   for (const k of keys) {
     if (cur === null || typeof cur !== "object") throw new Error(`no such path: ${path}`);
-    const next = (cur as Record<string, unknown>)[k];
+    const next = Object.hasOwn(cur, k) ? (cur as Record<string, unknown>)[k] : undefined;
     if (next === undefined) throw new Error(`no such path: ${path}`);
     cur = next;
   }

@@ -15,10 +15,11 @@ const isContainer = (v: unknown): v is Container => v !== null && typeof v === "
 function walk(doc: unknown, path: string): { parent: Container; key: string } {
   const parts = path.split("/").slice(1).map(unescape);
   if (!parts.length) throw new Error("patch on the document root");
+  if (parts.includes("__proto__")) throw new Error(`bad path ${path}`);
   let node: unknown = doc;
   for (const p of parts.slice(0, -1)) {
     if (!isContainer(node)) break;
-    node = Array.isArray(node) ? node[Number(p)] : node[p];
+    node = Array.isArray(node) ? node[Number(p)] : Object.hasOwn(node, p) ? node[p] : undefined;
   }
   if (!isContainer(node)) throw new Error(`no path ${path}`);
   return { parent: node, key: parts[parts.length - 1] };
@@ -98,7 +99,7 @@ const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.i
 
 /** The spec change an intent asks for. The client shows it at once; the server makes it real. */
 export function intentPatch(spec: BoardSpec, kind: IntentKind, targetId: string, payload: Record<string, unknown>): PatchOp[] {
-  const c: Component | undefined = spec.components[targetId];
+  const c: Component | undefined = Object.hasOwn(spec.components, targetId) ? spec.components[targetId] : undefined;
   if (!c) throw new Error(`unknown component ${targetId}`);
   const base = `/components/${esc(targetId)}`;
   const r = c.rect ?? DEFAULT_RECT;

@@ -1,6 +1,8 @@
 // Board wire contract shared by genui-server (P2), genui-web (P3) and genui-agent-kit (P4).
 // The board is a flat component map; every change is an op with its inverse (undo, rewind).
-import type { PatchOp } from "./index";
+export type PatchOp =
+  | { op: "add" | "replace"; path: string; value: unknown }
+  | { op: "remove"; path: string };
 
 export type Rect = { x: number; y: number; w: number; h: number };
 

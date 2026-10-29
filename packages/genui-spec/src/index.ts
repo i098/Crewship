@@ -1,6 +1,7 @@
 // Contract shared by genui-agent-kit, genui-server and genui-web.
 // Wire = AG-UI event shapes (type + fields) carrying json-render style spec patches.
 import { z } from "zod";
+import type { PatchOp } from "./wire";
 export * from "./wire";
 
 // ---- style tokens: HSL only, whitelisted CSS vars, no raw CSS ----
@@ -69,7 +70,6 @@ export const patchOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("replace"), path: z.string(), value: z.unknown() }),
   z.object({ op: z.literal("remove"), path: z.string() }),
 ]);
-export type PatchOp = z.infer<typeof patchOp>;
 
 // ---- AG-UI event shapes (event format only, no AG-UI runtime) ----
 const base = { timestamp: z.number().optional() };
@@ -108,9 +108,10 @@ export function applyPatch<T>(doc: T, ops: PatchOp[]): T {
   let cur: unknown = structuredClone(doc);
   for (const o of ops) {
     const keys = o.path.split("/").slice(1).map(unesc);
+    if (keys.includes("__proto__")) throw new Error(`bad path ${o.path}`);
     if (!keys.length) { if (o.op !== "remove") cur = o.value; continue; }
     let p: unknown = cur;
-    for (const k of keys.slice(0, -1)) p = isNode(p) ? (p as Record<string, unknown>)[k] : undefined;
+    for (const k of keys.slice(0, -1)) p = isNode(p) && (Array.isArray(p) || Object.hasOwn(p, k)) ? (p as Record<string, unknown>)[k] : undefined;
     if (!isNode(p)) throw new Error(`bad path ${o.path}`);
     const last = keys[keys.length - 1];
     if (Array.isArray(p)) {

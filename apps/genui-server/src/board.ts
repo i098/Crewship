@@ -1,4 +1,5 @@
 import { type AgentCall, type Actor, type ClientMsg, type Op, type PatchOp, type Rect, type BoardSpec, emptyBoard } from "@crewship/genui-spec";
+import { guardPatch } from "./guard";
 import { applyPatch, pointer, validatePatch } from "./patch";
 import type { Store } from "./store";
 
@@ -46,18 +47,14 @@ export class Board {
       default: throw new Error(`unknown tool: ${(call as AgentCall).tool}`);
     }
     // Pinned cards always keep their placement; under "user wins" so does anything the user moved.
-    const user = this.moveWins === "user";
-    if (call.tool !== "reset") patch = patch.filter((p) => {
-      const m = rectPath.exec(p.path);
-      return !(m && (this.spec.components[m[1]]?.props?.pinned === true || (user && this.rectWriter.get(m[1]) === "user")));
-    });
+    if (call.tool !== "reset") patch = this.guard(patch, call.tool !== "pin");
     return patch.length || call.tool === "reset" ? [this.commit("agent", cause, patch)] : [];
   }
 
   intent(m: Intent): Op[] {
     if (m.kind === "input" && !("field" in m.payload)) return []; // {text}: forwarded to the agent, no spec change
     const id = m.targetId;
-    if (!this.spec.components[id]) throw new Error(`no such component: ${id}`);
+    this.component(id);
     if (m.kind === "move" || m.kind === "resize") {
       if (this.moveWins === "agent" && m.baseSeq !== undefined && (this.agentRectSeq.get(id) ?? 0) > m.baseSeq) {
         throw new Error("agent moved this component; agent wins");
@@ -98,6 +95,13 @@ export class Board {
         if (op.actor === "agent") this.agentRectSeq.set(m[1], op.seq);
       }
     }
+  }
+
+  private guard(patch: PatchOp[], keepPin: boolean): PatchOp[] {
+    const user = this.moveWins === "user";
+    const components = this.spec.components;
+    const rectLocked = (id: string) => (Object.hasOwn(components, id) && components[id].props?.pinned === true) || (user && this.rectWriter.get(id) === "user");
+    return guardPatch({ components, rectLocked, keepPin }, patch);
   }
 
   private emitPatch(a: Record<string, unknown>): PatchOp[] {
@@ -167,7 +171,7 @@ export class Board {
   }
 
   private component(id: string) {
-    const c = this.spec.components[id];
+    const c = Object.hasOwn(this.spec.components, id) ? this.spec.components[id] : undefined;
     if (!c) throw new Error(`no such component: ${id}`);
     return c;
   }

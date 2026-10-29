@@ -163,3 +163,25 @@ test("user intents: bad target and bad payload throw; input is a no-op", () => {
   expect(() => b.intent({ t: "intent", id: "x", kind: "move", targetId: "a", payload: { x: "1" } })).toThrow();
   expect(b.intent({ t: "intent", id: "y", kind: "input", targetId: "a", payload: { text: "hi" } })).toEqual([]);
 });
+
+test("__proto__ paths and targets never touch Object.prototype", () => {
+  const b = new Board(new MemoryStore());
+  seed(b);
+  expect(() => b.intent({ t: "intent", id: "p", kind: "pin", targetId: "__proto__", payload: {} })).toThrow();
+  expect(() => b.agent({ tool: "emit_view", args: { patch: [{ op: "add", path: "/components/__proto__/props", value: { polluted: 1 } }] } })).toThrow();
+  expect(() => b.agent({ tool: "emit_view", args: { patch: [{ op: "add", path: "/components/constructor/prototype/polluted", value: 1 }] } })).toThrow();
+  expect(({} as Record<string, unknown>).props).toBeUndefined();
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+});
+
+test("agent whole-component and whole-map writes keep a pinned card's rect and pin", () => {
+  const b = new Board(new MemoryStore());
+  seed(b);
+  b.agent({ tool: "pin", args: { id: "a" } });
+  b.agent({ tool: "emit_view", args: { patch: [{ op: "add", path: "/components/a", value: { type: "card", props: { t: 2 } } }] } });
+  expect(b.spec.components.a).toMatchObject({ props: { t: 2, pinned: true }, rect: card.rect });
+  b.agent({ tool: "emit_view", args: { event: { snapshot: { components: { a: { type: "card", props: {} } } } } } });
+  expect(b.spec.components.a).toMatchObject({ props: { pinned: true }, rect: card.rect });
+  b.agent({ tool: "pin", args: { id: "a", pinned: false } });
+  expect(b.spec.components.a.props.pinned).toBe(false);
+});

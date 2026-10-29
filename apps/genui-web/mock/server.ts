@@ -85,7 +85,7 @@ function onAgent(boardId: string, call: AgentCall): number {
   const r = room(boardId);
   const a = call.args ?? {};
   let patch: PatchOp[] = [];
-  if (call.tool === "emit_view") patch = filterAgentPatch(r.spec, (a.patch as PatchOp[]) ?? [], r.placed);
+  if (call.tool === "emit_view") patch = filterAgentPatch(r.spec, ((a.event as { delta?: PatchOp[] } | undefined)?.delta ?? a.patch ?? []) as PatchOp[], r.placed);
   else if (call.tool === "set_style") {
     const id = typeof a.id === "string" ? a.id : undefined;
     const tokens = safeStyle(a.tokens as Record<string, unknown>);

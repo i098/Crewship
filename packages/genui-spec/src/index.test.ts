@@ -28,3 +28,9 @@ test("applyPatch add/replace/remove on arrays; bad path throws", () => {
   expect(applyPatch(s, [{ op: "replace", path: "/l/1", value: 9 }])).toEqual({ l: [1, 9] });
   expect(() => applyPatch(s, [{ op: "add", path: "/x/y", value: 1 }])).toThrow();
 });
+
+test("applyPatch does not walk inherited keys into Object.prototype", async () => {
+  const { applyPatch } = await import("./index");
+  expect(() => applyPatch({ components: {} }, [{ op: "add", path: "/components/constructor/prototype/polluted", value: 1 }])).toThrow();
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+});

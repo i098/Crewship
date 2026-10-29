@@ -125,3 +125,7 @@ P2, P3 and P4 run in parallel after P1.
 | [json-render](https://github.com/vercel-labs/json-render) | SpecStream turns model output chunks into JSON patches |
 | [AG-UI](https://github.com/ag-ui-protocol/ag-ui) | Event shapes on any transport |
 | [A2UI](https://github.com/a2ui-project/a2ui) | Flat component list with small updates |
+
+## Spec package: two models
+
+`packages/genui-spec/src/wire.ts` (`BoardSpec`) is the live model used by the server, web app and agent kit. The zod model in `src/index.ts` (`catalog`, `spec`, `opRow`) is used only by `apps/genui-server/spike`. Consolidation into one model is planned.

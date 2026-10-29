@@ -17,7 +17,7 @@ const off = g.onIntent((i) => console.log(i.kind, i.targetId, i.payload));
 
 | Method | Wire call |
 |---|---|
-| `emitView(spec \| patch)` | `POST /agent/:boardId` `{tool:"emit_view",args:{event}}`. A full `Spec` sends `STATE_SNAPSHOT`. An RFC 6902 array sends `STATE_DELTA`. |
+| `emitView(spec \| patch)` | `POST /agent/:boardId` `{tool:"emit_view",args:{event}}`. A full `BoardSpec` (`wire.ts`) sends `STATE_SNAPSHOT`. An RFC 6902 array sends `STATE_DELTA`. |
 | `setStyle(id, tokens)` | `{tool:"set_style",args:{id,tokens}}` |
 | `link(from, to)` | `{tool:"link",args:{from,to}}` |
 | `pin(id)` | `{tool:"pin",args:{id}}` |
@@ -39,3 +39,7 @@ tail -F state/*.status | bun packages/genui-agent-kit/bin/genui-bridge.ts --url 
 ## Test
 
 `cd packages/genui-agent-kit && bun test` runs against a local mock server. No P2 server is needed.
+
+## Auth
+
+The kit sends no token in this phase. Keep `GENUI_AGENT_TOKEN` unset on the server until the P6 auth work. With the token set, every kit and bridge call gets 401. With the token unset, any client can claim `role=agent` with `?role=agent` and receive forwarded intents.
