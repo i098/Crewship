@@ -9,12 +9,13 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 STUBS = {
-    "df": 'case "$*" in *pcent*) echo Use%; echo "${DISK_PCT}%" ;; *) echo Mounted; echo / ;; esac',
-    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; esac',
+    "df": 'case "$*" in *pcent*) echo Use%; if [ -e "$STUB/pruned" ]; then echo "${DISK_AFTER:-$DISK_PCT}%"; else echo "${DISK_PCT}%"; fi ;; *) echo Mounted; echo / ;; esac',
+    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; image) touch "$STUB/pruned" ;; esac',
     "lsof": 'case "$3" in *busy*) exit 0 ;; *) exit 1 ;; esac',
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
     "pgrep": 'exit 1',
+    "text": 'echo "$*" >> "$STUB/texts"',
     "wall": 'cat >> "$STUB/alerts"',
 }
 
@@ -40,6 +41,7 @@ def run(tmp_path):
             "DISK_PCT": str(disk),
             "PRESSURE_MEMINFO": str(mem),
             "PRESSURE_TMP_ROOT": str(tmp),
+            "PRESSURE_TEXT_CMD": str(stub / "bin" / "text"),
             "PRESSURE_STATE_DIR": str(tmp_path / "state"),
             "HOME": str(tmp_path),
             **{k: str(v) for k, v in env.items()},
@@ -50,6 +52,7 @@ def run(tmp_path):
         )
         calls = (stub / "calls").read_text() if (stub / "calls").exists() else ""
         alerts = (stub / "alerts").read_text() if (stub / "alerts").exists() else ""
+        go.texts = (stub / "texts").read_text() if (stub / "texts").exists() else ""
         return r, calls, alerts
 
     go.tmp = tmp
@@ -71,7 +74,8 @@ def test_below_threshold_does_nothing(run):
 @pytest.mark.parametrize("disk,ram", [(71, 10), (10, 71)])
 def test_either_resource_over_threshold_prunes_and_alerts(run, disk, ram):
     r, calls, alerts = run(disk=disk, ram=ram)
-    assert "builder prune -f" in calls and "image prune -f" in calls
+    assert "builder prune -af" in calls and "image prune -af" in calls
+    assert "uv cache prune" in calls and "bun pm cache rm" in calls
     assert "volume" not in calls
     assert "over 70%" in alerts
 
@@ -98,3 +102,10 @@ def test_alert_repeats_only_after_the_interval(run):
     _, _, first = run(disk=90)
     _, _, second = run(disk=90)
     assert first and second == first
+
+
+def test_owner_is_texted_only_when_prunes_cannot_get_under_the_threshold(run):
+    run(disk=90, DISK_AFTER=50)
+    assert run.texts == ""
+    r, _, alerts = run(disk=90, DISK_AFTER=80, PRESSURE_STATE_DIR=run.tmp / "other-state")
+    assert "Still over 70%" in alerts and "still over 70%" in run.texts

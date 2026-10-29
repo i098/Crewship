@@ -147,13 +147,15 @@ remove. `tests/test_worktree_prune.py` runs it against real git repositories.
 It measures the filesystems that hold `/`, the home and Docker's data root, and RAM (`MemTotal` minus `MemAvailable`).
 When any reading exceeds `crewship_pressure_guard_pct` (default 70), it prunes only these targets:
 
-- Docker build cache, dangling images, and unused images created more than `crewship_pressure_guard_image_age_hours` (168) ago.
+- All Docker build cache and all unused images (`docker builder prune -af`, `docker image prune -af`).
 - `/tmp/pytest-of-*` dirs idle for 60 minutes, with no open file under them (`lsof +D`) and no `.git` inside.
-- The uv and bun caches, only while no `uv` or `bun` process runs.
+- The uv and bun caches (`uv cache prune`, `bun pm cache rm`), only while no `uv` or `bun` process runs.
 
 It never runs `docker volume prune`, and never touches worktrees, git checkouts or any file held open.
 It then alerts through `fm-inbox.sh note`, falling back to `notify-master.sh` and `wall`, at most every `crewship_pressure_guard_repeat_min` (30) minutes.
 The alert says when a reading is still over the threshold after the prune.
+In that case the guard also texts the owner one sentence with `fm-imessage` (`PRESSURE_TEXT_CMD` replaces it).
+On this host the uv and bun caches already live on another disk through symlinks, so the guard moves nothing.
 The guard changes nothing below the threshold, so repeated runs are safe.
 
 `pressure-guard.sh --dry-run` prints each step it would take and prunes, writes and alerts nothing.

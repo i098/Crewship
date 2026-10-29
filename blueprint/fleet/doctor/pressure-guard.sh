@@ -2,18 +2,20 @@
 # Prune regenerable data and alert when disk or RAM use exceeds PRESSURE_PCT (70).
 # Disk: the filesystems holding /, the home and Docker's data root. RAM: used =
 # MemTotal - MemAvailable. Above the threshold, only these safe targets go:
-#   docker builder cache, dangling images, unused images older than
-#   PRESSURE_IMAGE_AGE_HOURS; finished /tmp/pytest-of-* dirs (idle for
+#   all docker builder cache and all unused images (builder prune -af, image
+#   prune -af); finished /tmp/pytest-of-* dirs (idle for
 #   PRESSURE_SCRATCH_MIN_AGE_MIN minutes, nothing holding an open file under them,
-#   no .git inside); the uv and bun caches while no uv or bun process runs.
+#   no .git inside); uv cache prune and bun pm cache rm while no uv or bun process runs.
 # Never: docker volume prune, worktrees, git checkouts, anything with an open fd.
 # Then one alert (fm-inbox note, else notify-master.sh, else wall), repeated at
-# most every PRESSURE_REPEAT_MIN minutes while pressure lasts.
+# most every PRESSURE_REPEAT_MIN minutes while pressure lasts. When a reading is
+# still over after every prune, it also texts the owner one sentence through
+# PRESSURE_TEXT_CMD (default fm-imessage).
 # --dry-run prints what would run and writes, deletes and alerts nothing.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 THRESH=${PRESSURE_PCT:-70}
-AGE_H=${PRESSURE_IMAGE_AGE_HOURS:-168}
+TEXT_CMD=${PRESSURE_TEXT_CMD:-fm-imessage}
 SCRATCH_MIN=${PRESSURE_SCRATCH_MIN_AGE_MIN:-60}
 REPEAT_MIN=${PRESSURE_REPEAT_MIN:-30}
 TMP_ROOT=${PRESSURE_TMP_ROOT:-/tmp}
@@ -26,7 +28,7 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in THRESH AGE_H SCRATCH_MIN REPEAT_MIN; do
+for v in THRESH SCRATCH_MIN REPEAT_MIN; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "pressure-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 { [ "$THRESH" -ge 1 ] && [ "$THRESH" -le 100 ]; } || { echo "pressure-guard: PRESSURE_PCT must be 1-100" >&2; exit 2; }
@@ -59,9 +61,8 @@ step() {  # <label> <command...>
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if have docker; then
-  step "docker builder cache" docker builder prune -f
-  step "dangling images" docker image prune -f
-  step "unused images older than ${AGE_H}h" docker image prune -af --filter "until=${AGE_H}h"
+  step "docker builder cache" docker builder prune -af
+  step "unused images" docker image prune -af
 fi
 
 if have lsof; then
@@ -75,7 +76,7 @@ if have lsof; then
   done
 fi
 
-for c in "uv|uv cache clean" "bun|bun pm cache rm"; do
+for c in "uv|uv cache prune" "bun|bun pm cache rm"; do
   tool=${c%%|*}; cmd=${c#*|}
   have "$tool" || continue
   ! pgrep -x "$tool" >/dev/null || continue  # a running uv or bun holds the cache
@@ -89,7 +90,8 @@ after=$(readings)
 pruned=nothing
 ((${#done_steps[@]})) && { pruned=$(printf '%s, ' "${done_steps[@]}"); pruned=${pruned%, }; }
 msg="pressure-guard: over ${THRESH}%: $hot. Pruned: $pruned. Now: $(tr '\n' ' ' <<<"$after")"
-over <<<"$after" >/dev/null && msg+="still over ${THRESH}%: needs a human."
+still=0
+if over <<<"$after" >/dev/null; then still=1; msg+=" Still over ${THRESH}%: needs a human."; fi
 
 umask 077
 mkdir -p "$STATE" 2>/dev/null || STATE=
@@ -106,4 +108,8 @@ if { [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] && FM_HOME=${fm%/} timeout -k 
   || { [ -x "$HERE/notify-master.sh" ] && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" pressure-guard; } \
   || printf '%s\n' "$msg" | timeout -k 1 3 wall -n -t 2; then
   [ -z "$STATE" ] || date +%s > "$STATE/last-alert"
+fi
+if [ "$still" = 1 ]; then
+  timeout 15 "$TEXT_CMD" -- "Disk or RAM is still over ${THRESH}% after pruning; needs you." >/dev/null 2>&1 \
+    || echo "pressure-guard: owner text failed" >&2
 fi

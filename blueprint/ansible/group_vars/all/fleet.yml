@@ -21,10 +21,9 @@ crewship_storage_guard_repeat_min: 30
 crewship_storage_guard_worktree_age_days: 7
 
 # Above this disk or RAM use (percent) the pressure guard prunes safe targets
-# (Docker build cache and images, finished /tmp/pytest-of-* dirs, uv and bun
+# (all Docker build cache and unused images, finished /tmp/pytest-of-* dirs, uv and bun
 # caches) and alerts, through blueprint/fleet/doctor/pressure-guard.sh.
 crewship_pressure_guard_pct: 70
-crewship_pressure_guard_image_age_hours: 168
 crewship_pressure_guard_repeat_min: 30
 
 crewship_fleet_guard_units:

@@ -13,7 +13,6 @@ Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/s
 Environment=FM_HOME={{ crewship_firstmate_dir }}
 Environment="STORAGE_DATA_DIR={{ crewship_data_dir }}"
 Environment=PRESSURE_PCT={{ crewship_pressure_guard_pct }}
-Environment=PRESSURE_IMAGE_AGE_HOURS={{ crewship_pressure_guard_image_age_hours }}
 Environment=PRESSURE_REPEAT_MIN={{ crewship_pressure_guard_repeat_min }}
 ExecStart={{ crewship_fleet_doctor_dir }}/pressure-guard.sh
 TimeoutStartSec=1800
