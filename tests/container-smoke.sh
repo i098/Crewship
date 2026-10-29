@@ -850,6 +850,7 @@ check_agent_gate() {
         "${HOME}/.no-mistakes/config.yaml" "${HOME}/.no-mistakes/omp-as-pi/omp-as-pi" || fail "~/.no-mistakes/config.yaml makes neither omp-as-pi nor acp:omp the gate agent"
     "${HOME}/.no-mistakes/omp-as-pi/omp-as-pi" --omp-as-pi-check || fail "the omp-as-pi preflight failed"
     [ -f "${HOME}/.omp/agent/extensions/fm-no-pattern-kill.ts" ] || fail "the pattern-kill guard omp extension is not installed"
+    [ -f "${HOME}/.omp/agent/extensions/fm-unii-memory.ts" ] && [ -f "${HOME}/.omp/agent/extensions/fm-unii-memory/memory.ts" ] || fail "the UniiChat memory omp extension is not installed"
     [ -f "${HOME}/.omp/agent/extensions/crewship-quality-gate.ts" ] || fail "the quality gate omp extension is not installed"
     jq -e '.agents.omp.command == "omp acp"' "${HOME}/.acpx/config.json" >/dev/null || fail "~/.acpx/config.json does not map omp to omp acp"
     [ -x "${HOME}/.local/bin/acpx" ] || fail "acpx is not installed in ~/.local/bin"

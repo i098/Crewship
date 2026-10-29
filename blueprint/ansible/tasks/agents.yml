@@ -259,6 +259,31 @@
     remote_src: true
   become: true
 
+# UniiChat memory outside the session file, so compaction cannot lose it. It reuses
+# apps/imessage/memory.ts, the memory the iMessage front desk already runs on
+# (apps/imessage/bridge.ts). Managed: every apply rewrites both files.
+- name: Ensure the UniiChat memory module directory
+  ansible.builtin.file:
+    path: "{{ crewship_omp_unii_memory_dir }}"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+  become: true
+
+- name: Install the UniiChat memory omp extension
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+  loop:
+    - {src: "{{ crewship_blueprint }}/config/omp-unii-memory.ts", dest: "{{ crewship_omp_unii_memory_extension }}"}
+    - {src: "{{ crewship_repo }}/apps/imessage/memory.ts", dest: "{{ crewship_omp_unii_memory_dir }}/memory.ts"}
+
 - name: Install the opt-in gluttony omp extension
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/config/fm-gluttony.ts"
