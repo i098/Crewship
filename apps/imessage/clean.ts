@@ -15,7 +15,7 @@ const STRIP: RegExp[] = [
   /decision stuck after \d+ attempts[.,:;]?/gi,
 ];
 const READER = /(?<![\w/.`-])the (owner|captain)(?:('s)|(?![\w/`-]|\.\w))/gi; // third-person phrase for the reader
-const COLON = /^\s*:(?:\s+|$)/; // a bare leading colon, not an emoticon
+const COLON = /^[ \t]*:(?:[ \t]+|$)/gm; // a bare colon at the start of any line, not an emoticon
 const MARK = "\x01";
 const EMPTY_BRACKETS = /\[[\x01\s]*\x01[\x01\s]*\]|\([\x01\s]*\x01[\x01\s]*\)/g;
 const MARK_RUN = /[ \t]*(?:\x01[ \t]*)+/g;

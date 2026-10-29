@@ -66,6 +66,11 @@ def test_leading_colon_and_reader_word(text, want):
     assert clean(text) == want
 
 
+def test_leading_colon_is_dropped_on_every_line():
+    assert clean("done: x\n: child run\n: idle sweep\n:) ok\n  : last") == "x\nchild run\nidle sweep\n:) ok\nlast"
+    assert clean("hello\n: child") == "hello\nchild"
+
+
 def test_text_without_slop_stays_byte_exact():
     assert clean("  a  b \n\n\n\nc ") == "  a  b \n\n\n\nc "
 
