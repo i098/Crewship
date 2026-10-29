@@ -7,6 +7,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@chenglou/pretext": "^1.0.0",
     "@crewship/genui-agent-kit": "file:../../packages/genui-agent-kit",
     "@crewship/genui-spec": "file:../../packages/genui-spec"
   }

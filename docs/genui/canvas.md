@@ -55,10 +55,10 @@ The header's `props.wins` holds the rule; the default is agent wins.
 The canvas ports the frozen design's engine (`docs/genui/design/index.html`, `layout()` and `drawLinks()`):
 
 - **Clusters** (`src/layout.ts`): cards group by `props.proj` into one frosted-glass panel per project, coloured from `spec.projects[proj].hsl`, with a header pill that says how many cards need you.
-- **Priority:** the cluster with the highest `props.priority` sits in front; the others fan out behind it, smaller, dimmed and blurred. A cluster that the front one links to steps out beside it, and the rest fade to 30%. `done` cards rank last; `removed` cards leave.
-- **Tiling:** two 380 px columns (one on a phone). With an odd count the top card takes a full row; each row is as tall as its tallest card, and every card grows down to the card under it, so no empty space is left. A `rect` width and height act only as a user-set size floor; `rect.x/y` places a card only when it is pinned.
+- **Priority:** the cluster with the highest `props.priority` takes the middle of the board; the others sit around it, ring by ring, with 120 px of clear space between clusters. The grid follows the screen's shape: more columns on a wide screen, fewer on a phone. In focus a cluster is smaller the further out its ring is, dimmed and blurred; in spread all are full size. A cluster that the front one links to takes the next spot beside it, and the rest fade to 30%. `done` cards rank last; `removed` cards leave.
+- **Cards in a cluster:** the top card takes the middle cell of a 380 px grid, and the next cards take the nearest cells, right, below, left, above, then the corners. A column is as wide as its widest card and a row as tall as its tallest; each card leans toward the middle card. A `rect` width and height act only as a user-set size; `rect.x/y` places a card only when it is pinned.
 - **Links** (`src/links.ts`): a line joins a card in the front cluster to the card it affects in another cluster, with right-angle routes, a dot at each end, a `label` pill, and a ring on both cards. Lines are drawn in screen space every frame; a line undraws while its cards move and draws again after.
-- **Camera:** fits the front cluster to 48% of a wide screen (the full width on a phone) between the header and the ask bar. `ctx.cam` gives `home()`, `spread()`, `cycle(±1)`, `open(proj)` and `toWorld()` to the shell and the overlays. The spread view lays every cluster out at a glance.
+- **Camera:** fits the front cluster to 72% of a wide screen between the header and the ask bar; on a phone it fits the front cluster's top card to the full width, and the cards around it show at the edges. `ctx.cam` gives `home()`, `spread()`, `cycle(±1)`, `open(proj)` and `toWorld()` to the shell and the overlays. The spread view lays every cluster out at a glance.
 
 ## Feeder
 
@@ -80,7 +80,7 @@ Style uses tokens only. `spec.tokens` sets CSS variables on the page (for exampl
 
 | Part | Spec source | A tap sends |
 |---|---|---|
-| Header line | `header.props.title`; `*starred words*` show amber | none |
+| Header line | `header.props.title`; `*starred words*` show amber. It is one line with an ellipsis; hover shows the full text, and a tap opens it in a popover | none |
 | Host stats | `header.props.stats {cpu,mem,disk,net: number[]}` (0-100 samples; `net` in MB/s) | `input {text,open:"sys"}` on `header` |
 | Terminal pills | `header.props.tuis [{name,proj}]`; the dot is `spec.projects[proj].hsl` | `input {text,open:"tui-<name>"}` on `header` |
 | Chips | `input.props.chips: string[]` | `input {text}` on `input` (same as typing it) |
@@ -88,7 +88,7 @@ Style uses tokens only. `spec.tokens` sets CSS variables on the page (for exampl
 | Up next | cards with `need` (Decide), `claim` (claimed) or a `next` string | `ctx.cam.bring([id])` |
 | Action log | `log.props.items [{at,text,proj,seq?,rwd?}]`, `at` in seconds | `input {rewind: seq}` on `log` |
 
-The nav pill switches the hint row between hotkeys and buttons and keeps the choice in `localStorage`. ◎ calls `ctx.cam.home()`, ⊞ calls `ctx.cam.spread()`, and ＋ opens the hidden `#file` input.
+The header has a fixed height: one row on a wide screen, two rows at 760 px wide or less. Nothing in it wraps, so it never pushes the board down. The host stats and terminal pills are one row that scrolls sideways; ‹ folds that row away and › shows it again. The nav pill switches the hint row between hotkeys and buttons. The nav and fold choices stay in `localStorage`. ◎ calls `ctx.cam.home()`, ⊞ calls `ctx.cam.spread()`, and ＋ opens the hidden `#file` input.
 
 ## Fixed rule: the sketch layer is on top
 

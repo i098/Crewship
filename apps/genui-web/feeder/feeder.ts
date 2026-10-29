@@ -7,7 +7,7 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, tuiLines, type Pending } from "../fleet/cards";
+import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, tuiLines, type Open, type Pending } from "../fleet/cards";
 import { FleetSource } from "../fleet/data";
 import { chat } from "../fleet/chat";
 
@@ -153,7 +153,7 @@ function lineOf(id: string, p: P): string {
     case "pipeline": return `${p.title} is at *${(p.stages as string[])[Number(p.at)]}.*`;
     case "crew": return `*${(p.members as unknown[]).length} crew threads* are active.`;
     case "tui": return `*${p.agent}* live.`;
-    case "ask": return p.ready === true && Array.isArray(p.about) && p.about.length ? `${p.about.at(-1)}` : `*You asked:* ${p.q}`;
+    case "ask": return p.ready === true && Array.isArray(p.about) && p.about.length ? String(p.about.at(-1)).split(/(?<=[.?!])\s/)[0] : `*You asked:* ${p.q}`;
     default: return `*${p.title ?? id}*`;
   }
 }
@@ -233,21 +233,46 @@ async function call(tool: string, args: P) {
   if (!r.ok) console.error(`${tool}: ${r.status} ${await r.text()}`);
 }
 
-async function publish(s: Sources, cause = "feeder:sources") {
-  const want = { ...chrome(s, log), ...cards(s), ...(fleet ? fleetCards(fleet.fleet, pending) : {}), ...extra };
-  // cards the chat brought forward for the current question hold the front until the next question
-  for (const id of focused) if (want[id]?.type === "card") want[id] = { ...want[id], props: { ...want[id].props, asked: true } };
-  for (const id of unfocused) if (!focused.has(id) && want[id]?.type === "card" && want[id].props.asked !== true) want[id] = { ...want[id], props: { ...want[id].props, asked: false } };
+/** Chat focus: the cards brought forward for the current question hold the front until the next question. */
+function focus(want: Record<string, Component>) {
+  const lift = (id: string, asked: boolean) => (want[id] = { ...want[id], props: { ...want[id].props, asked } });
+  for (const id of focused) if (want[id]?.type === "card") lift(id, true);
+  for (const id of unfocused) if (!focused.has(id) && want[id]?.type === "card" && want[id].props.asked !== true) lift(id, false);
+}
+
+/** A card the sources want again comes back unless the owner closed it with ✕. */
+function revive(want: Record<string, Component>) {
   for (const [id, c] of Object.entries(want)) if (c.type === "card" && !dismissed.has(id) && c.props.removed === undefined) want[id] = { ...c, props: { ...c.props, removed: false } };
-  // cards left by an earlier feeder run are ours too, so the board drops what the fleet no longer has; the owner's own stay
+}
+
+/** Cards left by an earlier feeder run are ours too, so the board drops what the fleet no longer has; the owner's own stay. */
+function adopt(want: Record<string, Component>) {
   if (!owned.size) for (const [id, c] of Object.entries(spec.components)) if (c.type === "card" && (c.props.proj !== "me" || id.startsWith("ai-"))) owned.add(id);
   for (const id of Object.keys(want)) if (want[id].type === "card") owned.add(id);
+}
+
+/** An open terminal or host card follows its source while it stays open. */
+function liveExtras() {
+  if (extra.sys && last) extra.sys = { ...extra.sys, props: { ...extra.sys.props, series: last.host } };
+  for (const id of Object.keys(extra)) {
+    const lines = id.startsWith("tui-") && fleet ? tuiLines(fleet.fleet, id.slice(4)) : undefined;
+    if (lines) extra[id] = { ...extra[id], props: { ...extra[id].props, lines } };
+  }
+}
+
+async function publish(s: Sources, cause = "feeder:sources") {
+  liveExtras();
+  const want = { ...chrome(s, log), ...cards(s), ...(fleet ? fleetCards(fleet.fleet, pending, open) : {}), ...extra };
+  focus(want);
+  revive(want);
+  adopt(want);
   const patch = diff(spec, want, owned);
   if (patch.length) await call("emit_view", { event: { delta: patch }, cause });
 }
 
 const note = (text: string, proj = "me") => log.push({ at: Math.round((Date.now() - t0) / 1000), text, proj });
 const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
+const failed = (e: unknown) => `failed: ${(e as Error).message}`;
 
 /** The fleet card a typed text is for: a selected or open ask, crew card or crew terminal, else the ask picked to answer. */
 function fleetTarget(about: unknown): Component | undefined {
@@ -266,92 +291,126 @@ function ask(a: Pending) {
   pending.set(id, { ...a, id });
 }
 
-/** The owner's intents, forwarded by the board to agent sockets. */
-async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
-  const p = m.payload, c = spec.components[m.targetId]?.props ?? {};
-  if (m.kind !== "input") return;
-  if (typeof p.open === "string") {
-    const id = p.open;
-    // removed and done are cleared, so a card closed with its X opens again from its pill
-    const again = { asked: true, removed: false, done: false };
-    if (id === "sys") extra.sys = card("sys", "host", 60, { title: "This host", series: last?.host ?? {}, ...again });
-    else if (id.startsWith("tui-")) {
-      const name = id.slice(4);
-      const fl = fleet && tuiLines(fleet.fleet, name);
-      const lines = fl ? fl.join("\n") : await run(["crewboard", "tail", `task/${name}`, "-n", "14", "--viewer"]).catch((e) => `crewboard: ${(e as Error).message}`);
-      extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), ...again });
-    }
-  } else if (fleet && typeof p.text === "string" && p.text.trim() && fleetTarget(p.about)) {
-    const to = fleetTarget(p.about)!;
-    try {
-      ask(to.props.key ? answer(fleet, to.props, p.text) : steer(fleet, String(to.props.task ?? to.props.agent), p.text));
-    } catch (e) {
-      note(`Not sent: ${(e as Error).message}`);
-    }
+/** Puts an action up for confirming, or says why it cannot run. */
+function offer(make: () => Pending, refused: string) {
+  try {
+    ask(make());
+  } catch (e) {
+    note(`${refused}: ${(e as Error).message}`);
+  }
+}
+
+type Intent = Extract<ServerMsg, { t: "intent" }>;
+// what the owner has open: the cluster the camera is on and the cards in full view; only these load detail
+const open: Open = { cluster: null, cards: new Set() };
+// removed and done are cleared, so a card closed with its X opens again from its pill
+const again = { asked: true, removed: false, done: false };
+
+/** Opens host stats or a crew terminal from a header pill. */
+async function openExtra(id: string) {
+  if (id === "sys") return void (extra.sys = card("sys", "host", 60, { title: "This host", series: last?.host ?? {}, ...again }));
+  if (!id.startsWith("tui-")) return;
+  const name = id.slice(4), fl = fleet && tuiLines(fleet.fleet, name);
+  const lines = fl ? fl.join("\n") : await run(["crewboard", "tail", `task/${name}`, "-n", "14", "--viewer"]).catch((e) => `crewboard: ${(e as Error).message}`);
+  extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), ...again });
+}
+
+/** What the owner opens and closes: a pill, the full view, the cluster in front, a card closed with ✕. True when handled. */
+async function onView(p: P, id: string): Promise<boolean> {
+  if (typeof p.open === "string") await openExtra(p.open);
+  else if (typeof p.view === "string") void (p.on === true ? open.cards.add(p.view) : open.cards.delete(p.view));
+  else if ("cluster" in p) open.cluster = typeof p.cluster === "string" ? p.cluster : null;
+  else if (p.field !== "removed") return false;
+  else {
+    dismissed.add(id);
+    delete extra[id];
+    pending.delete(id);
+    open.cards.delete(id);
+  }
+  return true;
+}
+
+/** Yes or Cancel on a confirm card. */
+async function confirm(m: Intent, fl: FleetSource) {
+  const act = pending.get(m.targetId)!;
+  pending.delete(m.targetId);
+  if (m.payload.value !== "yes") return void note(`Cancelled: ${act.q}`);
+  note(`${act.q} Running…`);
+  if (last) await publish(last, m.id);
+  const r = await act.run().catch((e) => ({ ok: false, text: String(e) }));
+  note(r.text, r.ok ? "me" : "ask");
+  void fl.refreshLocal().catch(() => {});
+}
+
+/** Free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands. */
+function startChat(m: Intent, q: string, fl: FleetSource) {
+  const said: string[] = [];
+  focused.forEach((id) => unfocused.add(id));
+  focused.clear();
+  // the last answer's cards step back so the new question owns the front and the header
+  for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
+  extra["ai-q"] = card("ask", "me", 90, { q, ready: false, about: said, asked: true, removed: false });
+  void chat({
+    text: q, about: m.payload.about, fleet: fl.fleet, board: { ...spec.components, ...extra },
+    apply: async (e) => {
+      if ("say" in e) {
+        if (!e.done) said.push(e.say);
+        extra["ai-q"] = card("ask", "me", 90, { q, ready: e.done, about: said.length ? [...said] : [e.say], asked: true, removed: false });
+      } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
+      else if ("upsert" in e) extra[e.upsert] = e.card;
+      else delete extra[e.drop];
+      kick(m.id);
+    },
+  }).catch((e) => note(`Chat failed: ${(e as Error).message}`));
+}
+
+/** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, or chat. True when handled. */
+async function onFleet(m: Intent, c: P, fl: FleetSource): Promise<boolean> {
+  const p = m.payload, text = typeof p.text === "string" ? p.text.trim() : "", to = text ? fleetTarget(p.about) : undefined;
+  const pick = p.field === "pick" ? p.value : undefined;
+  if (to) {
+    offer(() => (to.props.key ? answer(fl, to.props, text) : steer(fl, String(to.props.task ?? to.props.agent), text)), "Not sent");
     answering = undefined;
-  } else if (fleet && p.field === "pick" && pending.has(m.targetId)) {
-    const act = pending.get(m.targetId)!;
-    pending.delete(m.targetId);
-    if (p.value === "yes") {
-      note(`${act.q} Running…`);
-      if (last) await publish(last, m.id);
-      const r = await act.run().catch((e) => ({ ok: false, text: String(e) }));
-      note(r.text, r.ok ? "me" : "ask");
-      void fleet.refreshLocal().catch(() => {});
-    } else note(`Cancelled: ${act.q}`);
-  } else if (fleet && p.field === "pick" && c.key) {
-    if (p.value === "answer") answering = { id: m.targetId, task: String(c.task) };
-    else if (p.value === "open" && typeof c.task === "string") return onIntent({ ...m, payload: { open: `tui-${c.task}` } });
-  } else if (fleet && p.field === "pick" && c.prUrl) {
-    if (p.value === "merge") {
-      try {
-        ask(merge(fleet, c.prUrl));
-      } catch (e) {
-        note(`Not merged: ${(e as Error).message}`);
-      }
-    } else await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
-  } else if (fleet && typeof p.text === "string" && p.text.trim()) {
-    // free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands
-    const q = p.text.trim(), said: string[] = [];
-    focused.forEach((id) => unfocused.add(id));
-    focused.clear();
-    // the last answer's cards step back so the new question owns the front and the header
-    for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
-    extra["ai-q"] = card("ask", "me", 90, { q, ready: false, about: said, asked: true, removed: false });
-    void chat({
-      text: q, about: p.about, fleet: fleet.fleet, board: { ...spec.components, ...extra },
-      apply: async (e) => {
-        if ("say" in e) {
-          if (!e.done) said.push(e.say);
-          extra["ai-q"] = card("ask", "me", 90, { q, ready: e.done, about: said.length ? [...said] : [e.say], asked: true, removed: false });
-        } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
-        else if ("upsert" in e) extra[e.upsert] = e.card;
-        else delete extra[e.drop];
-        kick(m.id);
-      },
-    }).catch((e) => note(`Chat failed: ${(e as Error).message}`));
-  } else if (typeof p.text === "string" && p.text.trim()) {
+  } else if (pick !== undefined && pending.has(m.targetId)) await confirm(m, fl);
+  else if (pick === "answer" && c.key) answering = { id: m.targetId, task: String(c.task) };
+  else if (pick === "open" && c.key && typeof c.task === "string") await openExtra(`tui-${c.task}`);
+  else if (pick === "merge" && c.prUrl) offer(() => merge(fl, c.prUrl), "Not merged");
+  else if (pick !== undefined && c.prUrl) await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
+  else if (text) startChat(m, text, fl);
+  else return pick !== undefined && !!c.key;
+  return true;
+}
+
+/** Without the fleet: asks and decisions go to the crewboard topic for the crew to read; nothing runs here. */
+async function onBoard(m: Intent, c: P) {
+  const p = m.payload;
+  if (typeof p.text === "string" && p.text.trim()) {
     // the ask goes to every crew agent that reads the genui topic; no reply is made up here
     const id = `ask${m.id}`;
-    const r = await pub({ ask: p.text, id, about: p.about ?? null, reply: `crewboard pub ${TOPIC} '{"to":"${id}","reply":"…"}'` }).catch((e) => `failed: ${(e as Error).message}`);
+    const r = await pub({ ask: p.text, id, about: p.about ?? null, reply: `crewboard pub ${TOPIC} '{"to":"${id}","reply":"…"}'` }).catch(failed);
     extra[id] = card("ask", "me", 90, { q: p.text, ready: false, asked: true });
     note(`Sent to the crewboard topic ${TOPIC}: ${p.text} (seq ${r.trim()})`);
   } else if (p.field === "act" && p.value === "claim" && c.url) {
     // claiming is a record on the crewboard that the crew reads; nothing runs on the repo
     const pr = Number(m.targetId.slice(2));
-    const r = await pub({ claim: pr, url: c.url, checks: c.items }).catch((e) => `failed: ${(e as Error).message}`);
+    const r = await pub({ claim: pr, url: c.url, checks: c.items }).catch(failed);
     note(`You claimed the fix for #${pr}; recorded on ${TOPIC} (seq ${r.trim()})`, "repo");
     await call("emit_view", { event: { delta: [setProp(m.targetId, "claim", "you")] }, cause: m.id });
-  } else if (p.field === "pick" && c.kind === "decision") {
-    const pr = Number(m.targetId.slice(2));
-    const r = await pub({ decision: p.value, pr, url: c.url, ...(p.value === "approve" ? { draft: `gh pr merge ${pr}` } : {}) }).catch((e) => `failed: ${(e as Error).message}`);
-    note(`${p.value === "approve" ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${p.value === "approve" ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
-    await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
-  } else if (p.field === "removed") {
-    dismissed.add(m.targetId);
-    delete extra[m.targetId];
-    pending.delete(m.targetId);
-  }
+  } else if (p.field === "pick" && c.kind === "decision") await decide(m, c);
+}
+
+async function decide(m: Intent, c: P) {
+  const pr = Number(m.targetId.slice(2)), yes = m.payload.value === "approve";
+  const r = await pub({ decision: m.payload.value, pr, url: c.url, ...(yes ? { draft: `gh pr merge ${pr}` } : {}) }).catch(failed);
+  note(`${yes ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${yes ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
+  await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
+}
+
+/** The owner's intents, forwarded by the board to agent sockets. */
+async function onIntent(m: Intent) {
+  if (m.kind !== "input") return;
+  const c = spec.components[m.targetId]?.props ?? {};
+  if (!(await onView(m.payload, m.targetId)) && !(fleet && (await onFleet(m, c, fleet)))) await onBoard(m, c);
   // the reply carries the intent's id as its cause, so one z rewinds the action and the reply together
   if (last) await publish(last, m.id);
 }

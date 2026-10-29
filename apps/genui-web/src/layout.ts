@@ -1,5 +1,5 @@
-// Priority layout from the design (docs/genui/design, layout()): one glass cluster per project,
-// the top cluster in front, the rest fanned out behind it; cards tile in two columns with no empty space.
+// Priority layout from the design (docs/genui/design, layout()): one glass cluster per project. Clusters sit apart
+// around the top one, and inside a cluster the cards sit around its top card, ring by ring.
 // No DOM here: card heights come from `fit`, so the tests run it with fake heights.
 import type { Rect } from "@crewship/genui-spec";
 
@@ -41,7 +41,7 @@ export type Layout = {
   cam: { x: number; y: number; k: number };
 };
 
-export const P = 22, HD = 48, GAP = 16, CW0 = 380;
+export const P = 22, HD = 48, GAP = 16, CW0 = 380, CGAP = 120;
 
 type Fit = (id: string, w: number) => number;
 type Group = { proj: string; ts: Item[]; p: number };
@@ -53,13 +53,15 @@ const live = (a: Item | undefined, b: Item | undefined): a is Item => !!a && !!b
 const want = (sc: Scope, a: string, b: string) => !sc.vg || sc.vg.proj !== "all" || sc.picked.has(a) || sc.picked.has(b);
 
 export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit: Fit): Layout {
-  const { W, H } = vp, one = W < 600, W2 = one ? CW0 : 2 * CW0 + GAP; // phones stack one column
+  const { W, H } = vp;
   const gs = groups(items, st.order);
   const vg = gs.find((g) => g.proj === st.view) ?? gs[0];
   const SP = st.spread && gs.length > 1;
   const sc: Scope = { byId: new Map(items.map((t) => [t.id, t])), vg, picked: st.picked };
   const tiles = pinned(items, fit);
-  const { clusters, gOf, V0 } = place(gs, vg, pulled(rels, gs, sc), tiles, { W2, one, SP, wide: W / H > 1.1, fit });
+  // the clusters' grid follows the screen's shape: wide screens get more columns, phones a stack
+  const cols = Math.max(1, Math.round(Math.sqrt(gs.length * (W / H))));
+  const { clusters, gOf } = place(gs, vg, pulled(rels, gs, sc), tiles, { SP, cols, fit });
   return {
     clusters,
     tiles,
@@ -68,8 +70,14 @@ export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit:
     center: gs[0]?.ts[0]?.id,
     order: gs.map((g) => g.proj),
     spread: SP,
-    cam: fitCam(clusters, tiles, SP ? undefined : V0, vp, SP),
+    cam: fitCam(clusters, tiles, SP ? undefined : focusOf(clusters[0], tiles, W < 600), vp, SP),
   };
+}
+
+/** What the camera fits in focus: the front cluster, or on a phone its top card so it reads at full size. */
+function focusOf(V: ClusterBox | undefined, tiles: Record<string, TileBox>, one: boolean): Rect | undefined {
+  const t = V && tiles[V.ids[0]];
+  return one && t ? { x: t.x - GAP, y: t.y - GAP, w: t.w + 2 * GAP, h: t.h + 2 * GAP } : V;
 }
 
 /** Loose cards by project, most important project first. Cards you moved keep the order you gave them; new ones still come in on top by priority. */
@@ -104,73 +112,76 @@ function pulled(rels: Rel[], gs: Group[], sc: Scope): Set<string> {
   return new Set(rels.flatMap((r) => [...other(r.from, r.to), ...other(r.to, r.from)]).filter((p) => gs.some((g) => g.proj === p && g !== sc.vg)));
 }
 
-type PlaceOpts = { W2: number; one: boolean; SP: boolean; wide: boolean; fit: Fit };
+type PlaceOpts = { SP: boolean; cols: number; fit: Fit };
 
-/** Focus: the open cluster sits in front; the rest fan out behind it, right then left, smaller and further the less they matter. */
+/** The open cluster takes the middle; a cluster it links to takes the next spot, then the rest by priority, ring by ring.
+ * In focus the ones around are smaller the further out they sit; in spread all are full size. */
 function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Record<string, TileBox>, o: PlaceOpts) {
-  const colY: number[] = Array(Math.max(1, Math.ceil(Math.sqrt(gs.length * (o.wide ? 1.6 : 0.7))))).fill(0);
+  const rest = gs.filter((g) => g !== vg);
+  const ord = vg ? [vg, ...rest.filter((g) => pull.has(g.proj)), ...rest.filter((g) => !pull.has(g.proj))] : [];
+  const inner = ord.map((g) => tile(g.ts, o.fit));
+  const grid = cellsAround(ord.length, o.cols);
+  const s = grid.ring.map((d) => (o.SP ? 1 : 0.9 ** d));
+  const spot = around(inner.map((b, i) => [b.w * s[i], b.h * s[i]]), grid, CGAP);
   const clusters: ClusterBox[] = [];
   const gOf = new Map<string, ClusterBox>();
-  let V0: Rect | undefined, rank = 0, pr = 0;
-  for (const g of vg ? [vg, ...gs.filter((x) => x !== vg)] : []) {
-    const local = tile(g.ts, o.W2, o.one, o.fit);
-    const w = o.W2 + 2 * P, h = Math.max(...local.map((r) => r[1] + r[3])) + P;
-    const front = o.SP || g === vg, out = !front && pull.has(g.proj), far = !front && pull.size > 0 && !out;
-    const k = front ? 0 : out ? pr++ : pull.size + rank++, side = front ? 0 : k % 2 ? -1 : 1, d = front ? 0 : (k >> 1) + 1, s = 0.9 ** d;
-    const { x, y } = o.SP ? spreadSpot(colY, w, h) : V0 ? behindSpot(V0, out, side, d, w * s, h * s) : { x: 0, y: 0 };
-    if (g === vg) V0 = { x, y, w: w * s, h: h * s };
-    const box: ClusterBox = { proj: g.proj, x, y, w, h, s, z: 30 - 3 * d, front, far, right: side > 0, ids: g.ts.map((t) => t.id) };
+  ord.forEach((g, i) => {
+    const front = o.SP || i === 0, d = front ? 0 : grid.ring[i], far = !front && pull.size > 0 && !pull.has(g.proj);
+    const [x, y] = spot.at[i], box: ClusterBox = { proj: g.proj, x, y, w: inner[i].w, h: inner[i].h, s: s[i], z: 30 - 3 * d, front, far, right: x > spot.at[0][0], ids: g.ts.map((t) => t.id) };
     clusters.push(box);
-    g.ts.forEach((t, i) => {
-      const r = local[i];
+    g.ts.forEach((t, j) => {
+      const r = inner[i].local[j];
       gOf.set(t.id, box);
-      tiles[t.id] = { x: x + r[0] * s, y: y + r[1] * s, w: r[2], h: r[3], s, z: 31 - 3 * d, away: !front, far, center: g === gs[0] && i === 0, proj: g.proj };
+      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d, away: !front, far, center: g === gs[0] && j === 0, proj: g.proj };
     });
-  }
-  return { clusters, gOf, V0 };
+  });
+  return { clusters, gOf };
 }
 
-/** Spread: clusters drop into the shortest column. */
-function spreadSpot(colY: number[], w: number, h: number) {
-  const c = colY.indexOf(Math.min(...colY)), y = colY[c];
-  colY[c] += h + 56;
-  return { x: c * (w + 56), y };
+/** Cards around the cluster's top card: [x, y, w, h] per card inside the cluster, and the cluster's size. */
+function tile(ts: Item[], fit: Fit) {
+  const sz = ts.map((t) => {
+    const w = t.size?.w ? Math.max(200, Math.min(2 * CW0, t.size.w)) : CW0;
+    return [w, Math.max(fit(t.id, w), t.size?.h ?? 0)];
+  });
+  const spot = around(sz, cellsAround(ts.length, Math.ceil(Math.sqrt(ts.length))), GAP);
+  return { local: sz.map((s, i) => [P + spot.at[i][0], HD + spot.at[i][1], s[0], s[1]]), w: spot.w + 2 * P, h: HD + spot.h + P };
 }
 
-/** A cluster behind the front one `V0`: a pulled-out one sits close beside it, the rest further and lower with each step `d`. */
-function behindSpot(V0: Rect, out: boolean, side: number, d: number, ws: number, hs: number) {
-  const y = V0.y + (V0.h - hs) / 2;
-  if (out) return { x: side > 0 ? V0.x + V0.w + 56 : V0.x - 56 - ws, y };
-  return { x: side > 0 ? V0.x + V0.w + 300 + (d - 1) * 110 - ws : V0.x - 300 - (d - 1) * 110, y: y + (d - 1) * 28 };
+type Grid = { cells: number[][]; cx: number; cy: number; ring: number[] };
+
+/** Grid cells for `n` boxes: the first takes the middle cell, the next ones the nearest cells, right, below, left, above. */
+function cellsAround(n: number, cols: number): Grid {
+  const rows = Math.ceil(n / cols), cx = (cols - 1) >> 1, cy = (rows - 1) >> 1;
+  const key = ([c, r]: number[]) => {
+    const dx = c - cx, dy = r - cy;
+    return [Math.max(Math.abs(dx), Math.abs(dy)), dx * dx + dy * dy, (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI)];
+  };
+  const cmp = (a: number[], b: number[]) => a.map((v, i) => v - b[i]).find((v) => Math.abs(v) > 1e-9) ?? 0;
+  const cells = Array.from({ length: cols * rows }, (_, i) => [i % cols, Math.floor(i / cols)]).sort((a, b) => cmp(key(a), key(b))).slice(0, n);
+  return { cells, cx, cy, ring: cells.map((c) => key(c)[0]) };
 }
 
-/** Window-manager tiling: the top item takes a full row when the count is odd, the rest pair up,
- * and each row is as tall as its tallest item so the edges line up. Cells are [x, y, w, h] inside the cluster. */
-function tile(ts: Item[], W2: number, one: boolean, fit: Fit): number[][] {
-  const CW = one ? W2 : (W2 - GAP) / 2;
-  const fitT = (i: number, w: number) => Math.max(fit(ts[i].id, w), ts[i].size?.h ?? 0);
-  const clW = (v: number) => Math.max(200, Math.min(W2 - GAP - 200, v));
-  const colW = (a: Item, b: Item) => (a.size?.w ? clW(a.size.w) : b.size?.w ? W2 - GAP - clW(b.size.w) : CW);
-  const local: number[][] = [];
-  let yy = HD;
-  for (let j = 0; j < ts.length; ) {
-    const n = one || (ts.length - j) % 2 ? 1 : 2, row = [j, j + 1].slice(0, n);
-    const wa = n === 1 ? W2 : colW(ts[j], ts[j + 1]), ws = [wa, W2 - GAP - wa], h = Math.max(...row.map((i, c) => fitT(i, ws[c])));
-    row.forEach((i, c) => (local[i] = [P + c * (wa + GAP), yy, ws[c], h]));
-    yy += h + GAP;
-    j += n;
-  }
-  return fillDown(local);
+/** Boxes `sz` ([w, h]) in their cells: a column is as wide as its widest box, a row as tall as its tallest,
+ * empty ones take no room, and each box leans toward the middle cell. Returns [x, y] per box and the total size. */
+function around(sz: number[][], g: Grid, gap: number) {
+  const X = lanes(g.cells.map((c) => c[0]), sz.map((s) => s[0]), gap), Y = lanes(g.cells.map((c) => c[1]), sz.map((s) => s[1]), gap);
+  const lean = (d: number, at: number, cell: number, len: number) => at + (d < 0 ? cell - len : d > 0 ? 0 : (cell - len) / 2);
+  const at = g.cells.map(([c, r], i) => [lean(c - g.cx, X.start[c], X.size[c], sz[i][0]), lean(r - g.cy, Y.start[r], Y.size[r], sz[i][1])]);
+  return { at, w: X.total, h: Y.total };
 }
 
-/** No empty gap: every card grows down to the card under it, or to the cluster's floor. */
-function fillDown(local: number[][]) {
-  const IB = Math.max(...local.map((r) => r[1] + r[3]));
-  for (const r of local) {
-    const under = local.filter((q) => q !== r && q[1] > r[1] + 4 && q[0] < r[0] + r[2] && q[0] + q[2] > r[0]).map((q) => q[1] - GAP);
-    r[3] = Math.max(r[3], Math.min(IB, ...under) - r[1]);
-  }
-  return local;
+/** Where each lane (a column or a row) starts; `lane[i]` is box i's lane and `len[i]` its length. */
+function lanes(lane: number[], len: number[], gap: number) {
+  const size: number[] = [], start: number[] = [];
+  lane.forEach((l, i) => (size[l] = Math.max(size[l] ?? 0, len[i])));
+  let at = 0;
+  for (let l = 0; l < size.length; l++)
+    if (size[l] !== undefined) {
+      start[l] = at;
+      at += size[l] + gap;
+    }
+  return { start, size, total: Math.max(0, at - gap) };
 }
 
 /** A line joins a card in the front cluster `V` to the card it affects in a cluster behind.
@@ -186,13 +197,13 @@ function linesOf(rels: Rel[], gOf: Map<string, ClusterBox>, V: ClusterBox | unde
   return lines;
 }
 
-/** Fits the front cluster between the top line and the composer, with a strip of the ones behind showing; never past real size.
+/** Fits the front cluster between the top line and the composer, with a strip of the ones around showing; never past real size.
  * With no `focus` (spread) it fits the box round every cluster instead. */
 function fitCam(clusters: ClusterBox[], tiles: Record<string, TileBox>, focus: Rect | undefined, vp: Viewport, SP: boolean) {
   const { W, H } = vp, wide = W / H > 1.1;
   const all = [...clusters.map((c) => ({ x: c.x, y: c.y, w: c.w * c.s, h: c.h * c.s })), ...Object.values(tiles).filter((t) => !t.proj)];
   const bb = all.reduce((q, p) => [Math.min(q[0], p.x), Math.min(q[1], p.y), Math.max(q[2], p.x + p.w), Math.max(q[3], p.y + p.h)], [1e9, 1e9, -1e9, -1e9]);
   const o = focus ?? (all.length ? { x: bb[0], y: bb[1], w: bb[2] - bb[0], h: bb[3] - bb[1] } : { x: 0, y: 0, w: W, h: H });
-  const k = Math.max(0.1, Math.min(1, (SP ? W - 40 : wide ? W * 0.48 : W - 56) / o.w, ((H - vp.topH - vp.botH - 30) * (SP ? 0.96 : 0.88)) / o.h));
+  const k = Math.max(0.02, Math.min(1, (SP ? W - 40 : wide ? W * 0.72 : W - 56) / o.w, ((H - vp.topH - vp.botH - 30) * (SP ? 0.96 : 0.88)) / o.h));
   return { x: o.x + o.w / 2, y: o.y + o.h / 2 + (vp.botH - vp.topH) / 2 / k, k };
 }

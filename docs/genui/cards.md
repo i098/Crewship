@@ -21,11 +21,11 @@ Buttons carry `data-act` and `data-id`, and `data-k` when there is a choice: `fu
 
 | Kind | Props |
 |---|---|
-| `decision` | `q`, `opts [{ k, b, rec, preview }]`, `pick`, `done`. `preview` is `{ [cardId]: props }`: hovering the option shows those props on those cards. |
+| `decision` | `q` (short: who and the ask), `body` (the detail), `opts [{ k, b, rec, preview }]`, `pick`, `done`. `preview` is `{ [cardId]: props }`: hovering the option shows those props on those cards. |
 | `conflict` | `title`, `doneTitle`, `files[]`, `branch`, `done` |
 | `pipeline` | `title`, `stages[]`, `at`, `kpi { value, unit }`, `done` |
 | `timeline` | `subject`, `ship`, `days[]`, `rows [{ name, hsl, from, len }]` (days from `days[0]`), `now`, `shipAt`, `shipRow` |
-| `crew` | `title`, `members [{ name, hsl, doing }]` |
+| `crew` | `title`, `body`, `members [{ name, hsl, doing }]` |
 | `shipped` | `total`, `bars[]` (PRs per day, oldest first) |
 | `plan` | `title`, `kpi`, `fields [{ name, label, opts [[value, label]] }]`, `done` |
 | `embed` | `type` (`site`, `board`, `pdf`, `image`, `diagram`, `video`, `audio`, `text`, `file`), `title`, `src`, `nat` (`"W/H"`), `ar`, `text`, `size` |
@@ -39,4 +39,12 @@ Every kind also reads `need`, `pinned` (shows the project pill from `spec.projec
 
 ## Chrome
 
-Cards have no border, a 22 px radius and a solid fill that lightens on hover. A thin light runs round the edge on hover. The title (20 px) shares the top row with the flag, the KPI and the bare ⤢ and ✕ glyphs. The live stamp sits bottom left, and the L-shaped resize corner bottom right. Pin and link sit beside it and show on hover; a pinned card always shows its pin.
+Cards have no border, a 22 px radius and a solid fill that lightens on hover. A thin light runs round the edge on hover. The title (20 px) shares the top row with the flag, the KPI and the bare ⤢ and ✕ glyphs. On a narrow card (500 px or less) the header takes the top row alone and the title uses the full width under it. The live stamp sits bottom left, and the L-shaped resize corner bottom right. Pin and link sit beside it and show on hover; a pinned card always shows its pin.
+
+## Fit
+
+Text never runs out of its card. A title shows two lines at most and a `body` four, with an ellipsis; the full view shows all of it. Long words and URLs break anywhere. After each layout, and once a second, `fitCards` (`src/fit.ts`) checks every card:
+
+1. It measures the title with [pretext](https://github.com/chenglou/pretext) and steps its size down (20, 18, 16, 14 px) until it fits two lines.
+2. It finds each element wider than its box (`scrollWidth > clientWidth + 1`) or outside the card's rect, and lets that text wrap anywhere (`.ovf`).
+3. It cuts what still runs out with an ellipsis (`.cut`) and logs the card ids as `card fit:` warnings.

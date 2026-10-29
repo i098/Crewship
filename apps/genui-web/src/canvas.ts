@@ -2,6 +2,7 @@
 // and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
 import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
+import { fitCards } from "./fit";
 import { layout, type Item, type Layout } from "./layout";
 import { startLinks } from "./links";
 import { paintShell } from "./shell";
@@ -50,6 +51,7 @@ function intent(kind: IntentKind, targetId: string, payload: Record<string, unkn
   send(board.propose(kind, targetId, payload));
   paint();
 }
+let sentView: string | null = null; // the cluster the feeder was last told the camera is on
 
 function connect(delay = 1000) {
   ws = new WebSocket(wsUrl);
@@ -306,10 +308,13 @@ function paint() {
     const rels = spec.links.map((l) => ({ from: l.from, to: l.to, label: typeof l.label === "string" ? l.label : "" }));
     L = layout(items(), rels, viewport(), { view: cam.view, spread: cam.spreading, picked, order }, fit);
     if (cam.view && !L.order.includes(cam.view)) cam.view = null;
+    // the feeder loads a cluster's detail only while the camera is on it
+    if (cam.view !== sentView && spec.components.header) intent("input", "header", { cluster: (sentView = cam.view) });
     cam.spreading = L.spread;
     document.body.classList.toggle("spread", L.spread);
     paintClusters(spec, L);
     paintTiles(spec, L);
+    fitCards(world);
     if (!cam.free) Object.assign(cam, L.cam);
     place();
     // first paint lands in place at once; the canvas shows only after it is laid out
@@ -504,6 +509,7 @@ ask.form!.addEventListener("submit", (e) => {
   intent("input", "input", { text, about: ctx.about?.() });
   ask.value = "";
 });
-setInterval(() => tickStamps(world), 1000);
+// the tick also re-fits cards whose text arrived after the paint (build-in) or whose size was mid-transition
+setInterval(() => (tickStamps(world), fitCards(world)), 1000);
 paint();
 connect();

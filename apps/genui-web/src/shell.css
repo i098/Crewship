@@ -2,19 +2,25 @@
 /* Rules that styles.css also sets start with `body`: Bun may emit the two sheets in either order. */
 :root { --pink: hsl(320 90% 66%); }
 
-/* header: one line that floats on the canvas, with no band behind it */
-body .top { position: fixed; z-index: 50; top: 0; left: 0; right: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 14px; padding: 14px 18px 10px; background: none; pointer-events: none; }
+/* header: one fixed-height row that floats on the canvas, with no band behind it; nothing in it wraps, so it never pushes the board down */
+body .top { position: fixed; z-index: 50; top: 0; left: 0; right: 0; height: 54px; display: flex; flex-wrap: nowrap; align-items: center; gap: 14px; padding: 12px 18px; background: none; pointer-events: none; }
 .top > * { pointer-events: auto; }
 body .orb { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--hair); border-top-color: var(--vio); }
 body .orb.busy { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(1turn); } }
-body .line { flex: 1; min-width: min(440px, 32vw); margin: 0; font-size: clamp(15px, 1.6vw, 19px); font-weight: 550; letter-spacing: -.02em; }
-.line .w { display: inline-block; animation: word .5s var(--spring) both; }
+body .line { flex: 0 1 auto; max-width: 50%; min-width: 0; margin: 0; font-size: clamp(15px, 1.6vw, 19px); line-height: 1.3; font-weight: 550; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+body .top.folded .line { flex-grow: 1; max-width: none; }
+.line .w, .linep .w { display: inline-block; animation: word .5s var(--spring) both; }
 @keyframes word { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } }
-.line em { font-style: normal; color: var(--amber); }
+.line em, .linep em { font-style: normal; color: var(--amber); }
+/* a tap on the line shows all of it here, over the board, so nothing reflows */
+.linep { inset: auto; top: 50px; left: 12px; max-width: min(720px, calc(100vw - 24px)); margin: 0; padding: 12px 16px; border-radius: 16px; border: 1px solid var(--hair); background: hsl(240 24% 6% / .9); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); color: var(--ink); font-size: 16px; font-weight: 550; line-height: 1.45; }
 
-/* stats row: host numbers and agent terminals; it scrolls, so the toggle, nav and log pills stay on screen */
-.stats { flex: 0 1 auto; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+/* pills row: host numbers and agent terminals; one row that scrolls sideways, and ‹ folds it away */
+.stats { flex: 1 1 0; min-width: 0; display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, hsl(0 0% 0%) calc(100% - 28px), transparent); mask-image: linear-gradient(to right, hsl(0 0% 0%) calc(100% - 28px), transparent); }
+.stats::-webkit-scrollbar { display: none; }
+.top.folded .stats { display: none; }
+body .st.fold { justify-content: center; min-width: 30px; padding: 5px 8px; color: var(--mute); }
 body .st { flex: none; display: flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 99px; border: 1px solid var(--hair); background: var(--glass); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .st:hover { color: var(--ink); border-color: hsl(188 95% 58% / .5); }
 .st b { color: var(--ink); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .08em; }
@@ -66,22 +72,22 @@ body.keys #recenter { display: none; }
 .rw { padding: 2px 9px; border-radius: 99px; border: 1px solid var(--hair); background: var(--glass); color: var(--ink); font-size: 12px; }
 .rw:hover { border-color: var(--cyan); }
 
-/* a laptop is too narrow for the line and all eight pills on one row: the pills take a full second row, so none scrolls off */
-@media (min-width: 1101px) and (max-width: 1800px) {
-  body .top { flex-wrap: wrap; }
-  .stats { order: 1; flex: 1 0 100%; }
-}
-@media (max-width: 1100px) {
-  body .top { flex-wrap: wrap; }
-  body .line { flex-basis: calc(100% - 50px); }
-  .stats { flex: 1 1 auto; }
+/* a phone gets two fixed rows: the line with log and wins, then ‹, the pills and nav; folding keeps the height */
+@media (max-width: 760px) {
+  body .top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "orb line log wins" "fold stats stats nav"; gap: 8px 10px; height: 88px; padding: 10px 12px; }
+  body .orb { grid-area: orb; justify-self: center; }
+  body .line { grid-area: line; max-width: none; }
+  body .st.fold { grid-area: fold; }
+  .stats { grid-area: stats; }
+  body .st.nav { grid-area: nav; }
+  body .st.logbtn { grid-area: log; }
+  body .st.wins { grid-area: wins; }
+  .linep { top: 84px; }
 }
 @media (max-width: 640px) {
-  body .top { gap: 14px; padding: 12px 12px 8px; }
-  .stats { flex-basis: 100%; }
   .hint { display: none; }
   .bottom { padding: 8px 10px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .line .w, .qi, .logp li, .orb.busy { animation: none; }
+  .line .w, .linep .w, .qi, .logp li, .orb.busy { animation: none; }
 }

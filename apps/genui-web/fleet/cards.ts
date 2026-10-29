@@ -38,47 +38,83 @@ const last = (t: Task) => t.lines.at(-1);
 const askId = (a: Ask) => `ask-${a.task}-${a.key}`.slice(0, 64);
 const prId = (p: Pr) => `pr-${p.repo.replace("/", "-")}-${p.number}`.slice(0, 64);
 
+/** A short title: who, then the first sentence cut to `n` words; the full text goes in the card body. */
+export function short(who: string, text: string, n = 8): string {
+  const w = (text.split(/(?<=[.?!])\s/)[0] ?? "").split(/\s+/).filter(Boolean);
+  return `${who}: ${w.slice(0, n).join(" ")}${w.length > n ? "…" : ""}`;
+}
+
 /** An action the owner asked for, shown as a confirm card until they pick Yes or Cancel. */
 export type Pending = { id: string; q: string; why: string; run: () => Promise<{ ok: boolean; text: string }> };
 
-// The plan shows a few readable cards per cluster; the rest of a cluster is one list card, so the camera never zooms out to a wall.
-const SHOWN = 4;
+/** What the owner has open: the cluster the camera is on and the cards in full view. Only these load detail. */
+export type Open = { cluster?: string | null; cards: Set<string> };
 
-export function fleetCards(f: Fleet, pending: Map<string, Pending>): Record<string, Component> {
-  const out: Record<string, Component> = {};
-  const groups = new Map<string, { id: string; c: Component; line: string }[]>();
-  const add = (g: string, id: string, c: Component, line: string) => (groups.get(g) ?? groups.set(g, []).get(g)!).push({ id, c, line });
-  for (const a of f.asks)
-    add(clusterOf(f, a.home, a.task), askId(a), card("decision", "", 90, {
-      need: true, q: `${a.task}: ${cut(a.note, 120)}`, why: a.key, task: a.task, home: a.home, key: a.key,
+type Item = { id: string; g: string; c: Component; line: string };
+
+// The overview is each mate's crew card, its newest ask and a count; an open cluster shows up to DETAIL cards.
+const OVERVIEW = 2, DETAIL = 8;
+
+function askItem(f: Fleet, a: Ask, open: Open): Item {
+  const id = askId(a), full = open.cards.has(id);
+  return {
+    id, g: clusterOf(f, a.home, a.task), line: `ask ${a.task}: ${cut(a.note, 80)}`,
+    c: card("decision", "", 90, {
+      need: true, q: short(a.task, a.note), body: cut(a.note, full ? MAX_TEXT : 240), why: a.key, task: a.task, home: a.home, key: a.key,
       opts: [{ k: "answer", b: "Answer", rec: true }, { k: "open", b: "Show worker" }],
-    }), `ask ${a.task}: ${cut(a.note, 80)}`);
-  for (const m of [{ id: "fm", lines: [] as Task["lines"], home: f.main }, ...f.mates]) {
-    const crew = f.workers.filter((w) => (w.mate ?? "fm") === m.id);
-    if (m.id === "fm" && !crew.length) continue;
-    const busy = crew.filter((w) => w.busy === "busy").length;
-    add(m.id, `crew-${m.id}`.slice(0, 64), card("crew", "", busy ? 45 : 25, {
-      title: m.id === "fm" ? `First mate · ${busy} of ${crew.length} busy` : `${m.id} · ${last(m as Task)?.state ?? "no status"}`, task: m.id === "fm" ? undefined : m.id, home: m.home,
-      members: crew.map((w) => ({ name: w.id, hsl: w.busy === "busy" ? "hsl(152 72% 56%)" : "hsl(232 10% 44%)", doing: `${last(w)?.state ?? ""} · ${cut(last(w)?.text ?? "", 110)}` })),
-    }), "");
-  }
+    }),
+  };
+}
+
+function crewItem(f: Fleet, m: Pick<Task, "id" | "home" | "lines">, open: Open): Item | undefined {
+  const crew = f.workers.filter((w) => (w.mate ?? "fm") === m.id);
+  if (m.id === "fm" && !crew.length) return;
+  const id = `crew-${m.id}`.slice(0, 64), full = open.cards.has(id) || open.cluster === m.id;
+  const busy = crew.filter((w) => w.busy === "busy").length, now = last(m as Task);
+  return {
+    id, g: m.id, line: "",
+    c: card("crew", "", busy ? 45 : 25, {
+      title: m.id === "fm" ? `First mate · ${busy} of ${crew.length} busy` : `${m.id} · ${now?.state ?? "no status"}`,
+      body: full ? m.lines.slice(-6).map((l) => `${l.state}: ${l.text}`).join("\n") : cut(now?.text ?? "", 160),
+      task: m.id === "fm" ? undefined : m.id, home: m.home,
+      members: crew.map((w) => ({ name: w.id, hsl: w.busy === "busy" ? "hsl(152 72% 56%)" : "hsl(232 10% 44%)", doing: `${last(w)?.state ?? ""} · ${cut(last(w)?.text ?? "", full ? 110 : 40)}` })),
+    }),
+  };
+}
+
+function prItem(f: Fleet, p: Pr): Item {
+  const why = mergeBlock(f, p), c = p.checks, g = p.owner ? clusterOf(f, p.owner.home, p.owner.task) : "fm";
+  const line = `PR ${p.repo}#${p.number} ${c ? `${c.ok}✓ ${c.bad}✗ ${c.pending}…` : "…"} ${cut(p.title, 50)}`;
+  if (!why) return { id: prId(p), g, line, c: card("decision", "", 70, { need: true, q: `Merge ${p.repo}#${p.number}?`, body: `${p.title}\n${c?.ok} checks green · ${p.owner?.task}`, url: p.url, prUrl: p.url, opts: [{ k: "merge", b: "Merge", rec: true }, { k: "later", b: "Not now" }] }) };
+  if (c?.bad) return { id: prId(p), g, line, c: card("note", "", 60, { title: `${p.repo}#${p.number}: ${c.bad} failing`, flag: "failing", url: p.url, items: [cut(p.title, 90)] }) };
+  return { id: prId(p), g, line, c: card("pipeline", "", 40, { title: `${p.repo}#${p.number}`, url: p.url, stages: ["Open", "Checks", "Review", "Merge"], at: !c ? 0 : c.pending ? 1 : 2, kpi: { value: c ? `${c.ok}/${c.ok + c.bad + c.pending}` : "…", unit: "checks" } }) };
+}
+
+function items(f: Fleet, open: Open): Item[] {
   const own = f.prs.filter((p) => p.repo.startsWith(`${f.login}/`) && !p.draft);
   // ready to merge first, then failing, then the rest
   const rank = (p: Pr) => (!mergeBlock(f, p) ? 0 : p.checks?.bad ? 1 : 2);
-  for (const p of [...own].sort((a, b) => rank(a) - rank(b))) {
-    const why = mergeBlock(f, p), c = p.checks, g = p.owner ? clusterOf(f, p.owner.home, p.owner.task) : "fm";
-    add(g, prId(p), !why
-      ? card("decision", "", 70, { need: true, q: `Merge ${p.repo}#${p.number} ${cut(p.title, 80)}?`, why: `${c?.ok} checks green · ${p.owner?.task}`, url: p.url, prUrl: p.url, opts: [{ k: "merge", b: "Merge", rec: true }, { k: "later", b: "Not now" }] })
-      : c?.bad
-        ? card("note", "", 60, { title: `${p.repo}#${p.number}: ${c.bad} check${c.bad > 1 ? "s" : ""} failing`, flag: "failing", url: p.url, items: [cut(p.title, 90)] })
-        : card("pipeline", "", 40, { title: `${p.repo}#${p.number} ${cut(p.title, 60)}`, url: p.url, stages: ["Open", "Checks", "Review", "Merge"], at: !c ? 0 : c.pending ? 1 : 2, kpi: { value: c ? `${c.ok}/${c.ok + c.bad + c.pending}` : "…", unit: "checks" } }),
-      `PR ${p.repo}#${p.number} ${c ? `${c.ok}✓ ${c.bad}✗ ${c.pending}…` : "…"} ${cut(p.title, 50)}`);
-  }
-  for (const [g, list] of groups) {
-    list.sort((a, b) => Number(b.id.startsWith("crew-")) - Number(a.id.startsWith("crew-")));
-    for (const x of list.slice(0, SHOWN - 1)) out[x.id] = { ...x.c, props: { ...x.c.props, proj: g } };
-    if (list.length >= SHOWN) out[`more-${g}`.slice(0, 64)] = card("note", g, 15, { title: `${list.length - SHOWN + 1} more`, items: list.slice(SHOWN - 1, SHOWN + 13).map((x) => x.line).filter(Boolean) });
-  }
+  const crews = [{ id: "fm", lines: [] as Task["lines"], home: f.main }, ...f.mates].map((m) => crewItem(f, m, open));
+  return [...crews.filter((x): x is Item => !!x), ...f.asks.map((a) => askItem(f, a, open)), ...own.sort((a, b) => rank(a) - rank(b)).map((p) => prItem(f, p))];
+}
+
+/** A cluster's cards: the overview shows a few, the open cluster more; an open card always shows; the rest is one count card. */
+function place(out: Record<string, Component>, g: string, list: Item[], open: Open) {
+  const n = open.cluster === g ? DETAIL : OVERVIEW;
+  const shown = list.filter((x, i) => i < n || open.cards.has(x.id)), rest = list.filter((x) => !shown.includes(x));
+  for (const x of shown) out[x.id] = { ...x.c, props: { ...x.c.props, proj: g } };
+  if (!rest.length) return;
+  const asks = rest.filter((x) => x.id.startsWith("ask-")).length;
+  out[`more-${g}`.slice(0, 64)] = card("note", g, 15, {
+    title: `${rest.length} more${asks ? ` · ${asks} asks` : ""}`,
+    items: open.cluster === g || open.cards.has(`more-${g}`.slice(0, 64)) ? rest.slice(0, 14).map((x) => x.line).filter(Boolean) : [],
+  });
+}
+
+export function fleetCards(f: Fleet, pending: Map<string, Pending>, open: Open = { cards: new Set() }): Record<string, Component> {
+  const out: Record<string, Component> = {}, groups = new Map<string, Item[]>();
+  for (const x of items(f, open)) (groups.get(x.g) ?? groups.set(x.g, []).get(x.g)!).push(x);
+  for (const [g, list] of groups) place(out, g, list, open);
   for (const p of pending.values())
     out[p.id] = card("decision", "fm", 300, { need: true, q: p.q, why: p.why, opts: [{ k: "yes", b: "Yes, do it", rec: true }, { k: "cancel", b: "Cancel" }] });
   return out;

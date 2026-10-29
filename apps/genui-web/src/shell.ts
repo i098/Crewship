@@ -92,9 +92,34 @@ function follow() {
   $<HTMLButtonElement>("#recenter").disabled = !(cam.free || cam.view || cam.spreading);
   const id = document.querySelector<HTMLElement>(".tile[id].center")?.dataset.id;
   const line = id && spec.components[id]?.props.line;
-  if (typeof line !== "string") return void put($(".line"), lineHtml(String(spec.components.header?.props.title ?? "")));
+  if (typeof line !== "string") return setLine(String(spec.components.header?.props.title ?? ""));
   const more = Object.entries(spec.components).filter(([k, c]) => k !== id && c.props.need === true && c.props.done !== true && c.props.removed !== true).length;
-  put($(".line"), lineHtml(line + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : "")));
+  setLine(line + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : ""));
+}
+
+/** The line stays one row with an ellipsis; hover shows the full text, a tap opens it in a popover. */
+function setLine(s: string) {
+  const el = $<HTMLElement>(".line");
+  if (put(el, lineHtml(s)) === false) return;
+  el.title = s.replace(/\*/g, "");
+  if ($(".linep").matches(":popover-open")) $(".linep").innerHTML = el.innerHTML;
+}
+
+function showLine(open: boolean) {
+  const p = $<HTMLElement>(".linep");
+  if (open) p.innerHTML = $(".line").innerHTML;
+  p.togglePopover(open);
+}
+
+let folded = false;
+function setFold(f: boolean) {
+  folded = f;
+  try { localStorage.setItem("genui-pills", f ? "folded" : "open"); } catch {}
+  $(".top").classList.toggle("folded", f);
+  const b = $(".fold");
+  b.textContent = f ? "›" : "‹";
+  b.setAttribute("aria-expanded", String(!f));
+  b.setAttribute("aria-label", f ? "Show the pills" : "Hide the pills");
 }
 
 function paintBottom(input: Component | undefined) {
@@ -158,6 +183,13 @@ function bind() {
   try { saved = localStorage.getItem("genui-nav"); } catch {}
   setNav(saved === "keys" || saved === "buttons" ? saved : matchMedia("(pointer: fine)").matches ? "keys" : "buttons");
   $(".nav").addEventListener("click", () => setNav(nav === "keys" ? "buttons" : "keys"));
+  let pills: string | null = null;
+  try { pills = localStorage.getItem("genui-pills"); } catch {}
+  setFold(pills === "folded");
+  $(".fold").addEventListener("click", () => setFold(!folded));
+  $(".line").addEventListener("click", () => showLine(!$(".linep").matches(":popover-open")));
+  addEventListener("pointerdown", (e) => !(e.target as Element).closest?.(".line, .linep") && showLine(false));
+  addEventListener("keydown", (e) => e.key === "Escape" && showLine(false));
   $(".wins").addEventListener("click", () => ctx.intent("input", "header", { field: "wins", value: spec.components.header?.props.wins === "user" ? "agent" : "user" }));
   // A tap on a stat or a terminal asks for a live view of it.
   $(".stats").addEventListener("click", (e) => {

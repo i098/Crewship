@@ -18,7 +18,10 @@ export function start(port = PORT) {
     routes: { "/": page },
     fetch(req, server) {
       const m = /^\/ws\/([A-Za-z0-9_-]{1,64})$/.exec(new URL(req.url).pathname);
-      if (m && ALLOW && !ALLOW.includes(req.headers.get("tailscale-user-login") ?? "")) return new Response("forbidden", { status: 403 });
+      if (m && ALLOW && !ALLOW.includes(req.headers.get("tailscale-user-login") ?? "")) {
+        console.error(`refused /ws/${m[1]}: tailscale login "${req.headers.get("tailscale-user-login") ?? ""}"`);
+        return new Response("forbidden", { status: 403 });
+      }
       if (m && server.upgrade(req, { data: { boardId: m[1], queue: [] } })) return;
       return new Response("not found", { status: 404 });
     },

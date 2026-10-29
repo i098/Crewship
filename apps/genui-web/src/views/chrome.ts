@@ -56,6 +56,8 @@ function tools(i: string, pinned: boolean) {
 }
 
 export const title = (html: string) => `<div class="title">${html}</div>`;
+/** Optional detail under the title, clamped to four lines on a card. */
+export const body = (v: unknown) => (v ? `<p class="body">${esc(v)}</p>` : "");
 
 /** Action buttons `[{ k, b, pri }]`; the first `pri` one is filled. */
 export const acts = (id: string, items: { k?: unknown; b?: unknown; pri?: unknown }[], act = "act") =>

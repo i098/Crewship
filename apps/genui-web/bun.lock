@@ -5,12 +5,15 @@
     "": {
       "name": "@crewship/genui-web",
       "dependencies": {
+        "@chenglou/pretext": "^1.0.0",
         "@crewship/genui-agent-kit": "file:../../packages/genui-agent-kit",
         "@crewship/genui-spec": "file:../../packages/genui-spec",
       },
     },
   },
   "packages": {
+    "@chenglou/pretext": ["@chenglou/pretext@1.0.0", "", {}, "sha512-BxKiDMxWJhyzL8asvcgg3T9YnUU7OUFsKO8oRaR2SYAPX4Sh2wM9gqTBjrBaZ4fnl84cEQ8czC0Q1M83z3chsA=="],
+
     "@crewship/genui-agent-kit": ["@crewship/genui-agent-kit@file:../../packages/genui-agent-kit", { "dependencies": { "@crewship/genui-spec": "file:../genui-spec" }, "bin": { "genui-bridge": "bin/genui-bridge.ts" } }],
 
     "@crewship/genui-spec": ["@crewship/genui-spec@file:../../packages/genui-spec", { "dependencies": { "zod": "^4.6.7" } }],

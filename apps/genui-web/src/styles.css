@@ -50,8 +50,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .links circle { stroke: var(--bg); stroke-width: 3; }
 .links text { font-size: 13px; fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 7px; }
 
-/* one glass layer per project: the cluster is frosted glass; the cards on it are solid */
-.cluster { position: absolute; z-index: 0; transform-origin: 0 0; transform: scale(var(--s, 1)); border-radius: 34px; -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6); box-shadow: inset 0 1px 1px hsl(0 0% 100% / .2), inset 0 -1px 2px hsl(0 0% 0% / .35), 0 40px 80px -30px hsl(0 0% 0% / .5); transition: left .9s var(--spring), top .9s var(--spring), transform .9s var(--spring), width .9s var(--spring), height .9s var(--spring), box-shadow .3s, opacity .5s; }
+/* one glass layer per project: a static tint, not a backdrop blur, which recomposited every cluster on each frame (render speed, item 8) */
+.cluster { position: absolute; z-index: 0; transform-origin: 0 0; transform: scale(var(--s, 1)); border-radius: 34px; background: hsl(240 30% 100% / .04); box-shadow: inset 0 1px 1px hsl(0 0% 100% / .2), inset 0 -1px 2px hsl(0 0% 0% / .35), 0 40px 80px -30px hsl(0 0% 0% / .5); transition: left .9s var(--spring), top .9s var(--spring), transform .9s var(--spring), width .9s var(--spring), height .9s var(--spring), box-shadow .3s, opacity .5s; }
+/* cards off screen skip paint; their size is set inline, so nothing jumps when they come back */
+.tile { content-visibility: auto; }
 .cluster.away { cursor: pointer; }
 body.spread .cluster { cursor: zoom-in; }
 .cluster.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); pointer-events: none; transition: opacity .4s ease, transform .4s ease !important; }

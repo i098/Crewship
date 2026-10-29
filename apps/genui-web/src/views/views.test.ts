@@ -21,6 +21,15 @@ describe("card views", () => {
     expect(renderCard(spec, spec.components.c)).toContain('<p class="body">there</p>');
   });
 
+  test("decision and crew cards show an escaped body under the title", () => {
+    const spec = board({
+      d: { type: "card", props: { kind: "decision", q: "Merge #224?", body: "a <b> detail", opts: [{ k: "y", b: "Merge" }] } },
+      c: { type: "card", props: { kind: "crew", title: "Crew", body: "two at work", members: [] } },
+    });
+    expect(renderCard(spec, spec.components.d)).toContain('Merge #224?</div><p class="body">a &#60;b&#62; detail</p>');
+    expect(renderCard(spec, spec.components.c)).toContain('Crew</div><p class="body">two at work</p>');
+  });
+
   test("the pipeline labels only the current stage until the card is wide", () => {
     const spec = board({ p: { type: "card", props: { kind: "pipeline", title: "#209", stages: ["Code", "Build", "Preview"], at: 2 } } });
     const narrow = renderCard(spec, spec.components.p, "narrow"), wide = renderCard(spec, spec.components.p, "wide");

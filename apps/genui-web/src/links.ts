@@ -123,7 +123,11 @@ type Part = [string, string | null, string | null];
 function part(ls: Layers, fr: Frame, run: Set<unknown>, fbx: HTMLElement, { f, o, label, proj, g }: Line, col: string): Part {
   const FB = (g && byId(`g-${g}`)) || fbx, ea = byId(`t-${f}`), eb = byId(`t-${o}`), key = `${f}>${o}`;
   if (!ea || !eb) return [key, "", ""];
-  for (const e of [ea, eb]) e.classList.add("lk"), e.style.setProperty("--lk", col);
+  // set only on change: rewriting a class or a property every frame forces a style pass over the board
+  for (const e of [ea, eb]) {
+    if (!e.classList.contains("lk")) e.classList.add("lk");
+    if (e.style.getPropertyValue("--lk") !== col) e.style.setProperty("--lk", col);
+  }
   if ([ea, eb, FB, ls.world].some((e) => run.has(e))) {
     if (ls.LP[key]) ls.LP[key].back = true;
     return [key, null, null];
@@ -173,8 +177,10 @@ export function startLinks(svg: SVGSVGElement, get: () => LinkSource) {
     const { lines, front, spread, k, colour } = get();
     const fbx = front ? byId(`g-${front}`) : null, cv = canvas.getBoundingClientRect();
     const bar = document.querySelector(".bottom, .composer")?.getBoundingClientRect();
-    for (const e of document.querySelectorAll<HTMLElement>(".tile.lk")) e.classList.remove("lk");
-    if (!fbx) return sync(ls, []);
+    const linked = new Set(lines.flatMap((l) => [byId(`t-${l.f}`), byId(`t-${l.o}`)]));
+    for (const e of document.querySelectorAll<HTMLElement>(".tile.lk")) if (!fbx || !linked.has(e)) e.classList.remove("lk");
+    // no line to draw: skip measuring every card, which is most of a frame on a large board
+    if (!fbx || !lines.length) return sync(ls, []);
     const fr: Frame = { cv, bottom: bar?.height ? bar.top : cv.bottom, boxes: tileBoxes(cv), lane: { 1: 0, "-1": 0 }, k, spread, ms: performance.now() };
     const run = moving();
     sync(ls, lines.map((l) => part(ls, fr, run, fbx, l, colour(l.proj))));

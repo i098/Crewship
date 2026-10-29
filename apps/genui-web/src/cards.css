@@ -3,7 +3,7 @@
 :root { --pink: hsl(320 90% 66%); --red: hsl(0 90% 66%); --pop: cubic-bezier(.34, 1.56, .64, 1); }
 
 /* cards are solid with no border; a hover lights the border with a running ring */
-.tile { position: absolute; z-index: 21; display: flex; flex-direction: column; padding: 16px 16px 28px; border-radius: 22px; background: hsl(240 24% 7% / .95); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08); transform-origin: 0 0; transform: scale(var(--s, 1)); transition: left .9s var(--spring), top .9s var(--spring), width .9s var(--spring), height .9s var(--spring), transform .9s var(--spring), opacity .5s, filter .6s, background .3s, box-shadow .3s, translate .45s var(--spring); cursor: pointer; font-family: var(--font); }
+.tile { position: absolute; z-index: 21; display: flex; flex-direction: column; padding: 16px 16px 28px; border-radius: 22px; background: hsl(240 24% 7% / .95); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08); transform-origin: 0 0; transform: scale(var(--s, 1)); transition: left .9s var(--spring), top .9s var(--spring), width .9s var(--spring), height .9s var(--spring), transform .9s var(--spring), opacity .5s, filter .6s, background .3s, box-shadow .3s, translate .45s var(--spring); cursor: pointer; font-family: var(--font); container-type: inline-size; }
 .tile:not(.away):hover { background: hsl(240 24% 9% / .97); }
 .tile.done { opacity: .45; filter: saturate(.3); }
 /* dismiss: the card and everything in it shrink back and fade as one piece */
@@ -25,13 +25,29 @@
 
 /* the main view takes all spare height; title and header share the top row */
 .core { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); align-content: start; column-gap: 12px; row-gap: 10px; }
-.core > * { grid-column: 1 / -1; }
+.core > * { grid-column: 1 / -1; min-width: 0; }
 .core > .title { grid-column: 1; grid-row: 1; }
 .core > .hd { grid-column: 2; grid-row: 1; align-self: start; margin-top: 2px; }
+/* a detail line under the title takes a row of its own, so the view under it still gets the spare height */
+.core:has(> .body + :is(.fork, .viz)) { grid-template-rows: auto auto minmax(0, 1fr); }
+/* a narrow card has no room beside its header, so the header takes the top row and the title the full width under it */
+@container (max-width: 500px) {
+  .core { grid-template-rows: auto auto minmax(0, 1fr); }
+  .core:has(> .body + :is(.fork, .viz)) { grid-template-rows: auto auto auto minmax(0, 1fr); }
+  .core > .hd { grid-column: 1 / -1; justify-self: end; margin-top: 0; }
+  .core > .title { grid-column: 1 / -1; grid-row: 2; }
+}
 .core > .mw { width: 100%; max-width: 100%; }
 .core > .viz { display: grid; }
 .tile:not(.away) .core > .title, .tile:not(.away) .core > .hd { cursor: grab; touch-action: none; }
-.title { font-size: 20px; font-weight: 620; letter-spacing: -.03em; line-height: 1.2; color: var(--ink); }
+/* long words and URLs break anywhere instead of running out of the card */
+.core { overflow-wrap: anywhere; }
+/* a title is two lines at most; src/fit.ts steps the size down before it would need a third */
+.title { font-size: 20px; font-weight: 620; letter-spacing: -.03em; line-height: 1.2; color: var(--ink); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.fullc .title, .fullc .body { -webkit-line-clamp: unset; }
+/* src/fit.ts marks text it finds wider than its box, and cuts what still runs out of the card */
+.ovf { white-space: normal !important; overflow-wrap: anywhere; }
+.cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap !important; max-width: 100%; }
 .hd { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
 .proj { padding: 2px 8px; border-radius: 99px; color: var(--bg); font-weight: 700; letter-spacing: .06em; }
 .flag { margin-left: auto; padding: 2px 8px; border-radius: 99px; background: hsl(38 98% 62% / .16); color: var(--amber); font-weight: 700; }
@@ -43,7 +59,7 @@
 /* important numbers are big, never a small tag */
 .kpi { font-size: 26px; font-weight: 650; letter-spacing: -.03em; line-height: 1; color: var(--ink); text-transform: none; font-variant-numeric: tabular-nums; }
 .kpi small { margin-left: 5px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--mute); }
-.body { margin: 0; color: var(--mute); }
+.body { margin: 0; color: var(--mute); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
 .items { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .items li { padding: 8px 10px; border-radius: 12px; background: hsl(240 30% 100% / .08); }
 
@@ -65,7 +81,7 @@
 .tile.away .tools { display: none; }
 /* each tool says what it does: a small pill under it on hover, or after a tap on touch (the tap focuses it) */
 .tools .ib { position: relative; }
-.tools .ib::after { content: attr(data-tip); position: absolute; right: -6px; top: calc(100% + 6px); z-index: 2; padding: 5px 9px; border-radius: 8px; background: hsl(240 24% 14% / .96); box-shadow: inset 0 0 0 1px var(--hair); color: var(--ink); font: 500 11.5px/1 var(--font); letter-spacing: 0; text-transform: none; white-space: nowrap; pointer-events: none; opacity: 0; translate: 0 -3px; transition: opacity .2s, translate .2s; }
+.tools .ib::after { content: attr(data-tip); position: absolute; right: 0; top: calc(100% + 6px); z-index: 2; padding: 5px 9px; border-radius: 8px; background: hsl(240 24% 14% / .96); box-shadow: inset 0 0 0 1px var(--hair); color: var(--ink); font: 500 11.5px/1 var(--font); letter-spacing: 0; text-transform: none; white-space: nowrap; pointer-events: none; opacity: 0; translate: 0 -3px; transition: opacity .2s, translate .2s; }
 .tools .ib:hover::after, .tools .ib:focus-visible::after { opacity: 1; translate: 0 0; }
 @media (hover: none) { .tools .ib:focus::after { opacity: 1; translate: 0 0; } }
 
@@ -78,12 +94,12 @@
 @keyframes draw { to { stroke-dashoffset: 0; } }
 @keyframes gx { from { transform: scaleX(0); } }
 @keyframes gy { from { transform: scaleY(0); } }
-.fork { display: grid; grid-template-columns: minmax(60px, 22%) 1fr; align-items: stretch; flex: 1; min-height: 0; }
+.fork { display: grid; grid-template-columns: minmax(60px, 22%) minmax(0, 1fr); align-items: stretch; flex: 1; min-height: 0; }
 .fork svg { width: 100%; height: 100%; overflow: visible; }
 .opts { display: flex; flex-direction: column; justify-content: space-around; gap: 8px; }
-.opt { display: flex; align-items: center; justify-content: space-between; text-align: left; min-height: 44px; }
-.opt b { font-size: 15px; letter-spacing: -.02em; }
-.opt.rec::after { content: "AI pick"; font-size: 10.5px; font-weight: 600; color: var(--cyan); }
+.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; min-height: 44px; min-width: 0; padding-block: 6px; }
+.opt b { min-width: 0; font-size: 15px; letter-spacing: -.02em; line-height: 1.25; }
+.opt.rec::after { content: "AI pick"; flex: none; font-size: 10.5px; font-weight: 600; color: var(--cyan); }
 .opt.chosen { background: hsl(188 95% 58% / .2); }
 .opt.lost { opacity: .25; }
 .files { display: flex; flex-wrap: wrap; gap: 6px; }

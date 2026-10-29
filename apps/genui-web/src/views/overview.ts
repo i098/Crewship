@@ -1,5 +1,5 @@
 // Overview views across projects: when things land, who is working, what shipped.
-import { C, esc, hd, hsl, list, num, title, wide, type View } from "./chrome";
+import { body, C, esc, hd, hsl, list, num, title, wide, type View } from "./chrome";
 
 type Row = { name?: unknown; hsl?: unknown; from?: unknown; len?: unknown };
 
@@ -22,7 +22,7 @@ ${p.shipAt != null ? `<text x="0" y="${28 + row * 38}" text-anchor="end" class="
 
 type Member = { name?: unknown; hsl?: unknown; doing?: unknown };
 
-// Props: title, members [{ name, hsl, doing }]. A wide card also lists what each one is doing.
+// Props: title, body, members [{ name, hsl, doing }]. A wide card also lists what each one is doing.
 export const crew: View = (p, id, tier, spec) => {
   const m = list<Member>(p.members), wd = wide(tier);
   // every row fits the 200-unit box, and the "doing" column starts after the longest name (mono glyph ~8.6 units)
@@ -37,7 +37,7 @@ export const crew: View = (p, id, tier, spec) => {
   const doing = wd
     ? m.map((a, i) => { const y = 20 + step * (i + 0.5); return `<circle cx="330" cy="${y.toFixed(1)}" r="5" fill="${hsl(a.hsl, C.mute)}"/><text x="345" y="${(y + 5).toFixed(1)}">${esc(short(a.name, 20))}</text><text x="${dx.toFixed(1)}" y="${(y + 5).toFixed(1)}" class="m">${esc(short(a.doing ?? "idle", Math.max(8, Math.floor((700 - dx) / 7.6))))}</text>`; }).join("")
     : "";
-  return `${hd(p, id, spec, undefined, `${m.length}<small>active</small>`)}${title(esc(p.title ?? "Crew right now"))}<div class="viz"><svg viewBox="0 0 ${wd ? 700 : 300} 200" preserveAspectRatio="xMidYMid meet">
+  return `${hd(p, id, spec, undefined, `${m.length}<small>active</small>`)}${title(esc(p.title ?? "Crew right now"))}${body(p.body)}<div class="viz"><svg viewBox="0 0 ${wd ? 700 : 300} 200" preserveAspectRatio="xMidYMid meet">
 <circle cx="150" cy="100" r="20" fill="hsl(262 92% 70% / .2)" stroke="${C.vio}"/><text x="150" y="104" text-anchor="middle">you</text>${orbit}${doing}</svg></div>`;
 };
 

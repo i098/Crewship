@@ -55,6 +55,7 @@ type St = {
   fb: HTMLElement;
   k: number;
   open?: string;
+  told?: string; // the full-view card the feeder was last told about; it loads detail only for that one
   addAt?: Rect;
   threads: number;
   shown: string; // the full view's last html; innerHTML reads back normalised, so it cannot be compared
@@ -124,6 +125,11 @@ function sync(st: St) {
 
 function syncFull(st: St) {
   const { ctx, open, fb } = st;
+  if (st.told !== open) {
+    if (st.told) ctx.intent("input", st.told, { view: st.told, on: false });
+    if (open) ctx.intent("input", open, { view: open, on: true });
+    st.told = open;
+  }
   st.full.classList.toggle("open", !!open);
   st.body.classList.toggle("fullon", !!open);
   if (!open) {
