@@ -79,7 +79,7 @@ if have lsof; then
     [ -d "$d" ] && [ ! -L "$d" ] || continue
     [ -z "$(find "$d" -maxdepth 0 -mmin "-$SCRATCH_MIN" 2>/dev/null)" ] || continue
     [ -z "$(find "$d" -maxdepth 4 -name .git -print -quit 2>/dev/null)" ] || continue
-    ! timeout 120 lsof -t +D "$d" >/dev/null 2>&1 || continue  # open fd (or lsof failure to look) keeps it
+    [ -z "$(timeout 120 lsof -t +D "$d" 2>/dev/null)" ] || continue  # lsof exits 1 even when it lists holders: trust its output
     step "scratch $d" rm -rf --one-file-system -- "$d"
   done
 fi
@@ -125,7 +125,7 @@ window=$((REPEAT_MIN * 60)); [ "$window" -gt 0 ] || window=1
 id=pressure-guard-$(( $(date +%s) / window ))
 if { [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] && FM_HOME=${fm%/} timeout -k 2 5 "$fm/bin/fm-inbox.sh" note --request-id "$id" --json -- "$msg" >/dev/null 2>&1; } \
   || { [ -x "$HERE/notify-master.sh" ] && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" pressure-guard; } \
-  || printf '%s\n' "$msg" | timeout -k 1 3 wall -n -t 2; then
+  || printf '%s\n' "$msg" | timeout -k 1 3 wall -t 2; then
   [ -z "$STATE" ] || date +%s > "$STATE/last-alert"
 fi
 # One text per still-over state: the key is the set of over-threshold readings.

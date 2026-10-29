@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 STUBS = {
     "df": 'case "$*" in *pcent*) echo Use%; if [ -e "$STUB/pruned" ]; then echo "${DISK_AFTER:-$DISK_PCT}%"; else echo "${DISK_PCT}%"; fi ;; *) echo Mounted; echo / ;; esac',
     "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; image) touch "$STUB/pruned" ;; esac',
-    "lsof": 'case "$3" in *busy*) exit 0 ;; *) exit 1 ;; esac',
+    "lsof": 'case "$3" in *busy*) echo 123; exit 1 ;; *) exit 1 ;; esac',
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
     "du": 'printf "5242880\\t/a/b/c\\n100\\t/a/b\\n"',
