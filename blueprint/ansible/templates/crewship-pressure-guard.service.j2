@@ -1,0 +1,22 @@
+{{ ansible_managed | comment }}
+# Triggered by crewship-pressure-guard.timer; not enabled on its own.
+# Above {{ crewship_pressure_guard_pct }}% disk or RAM use: prunes Docker build cache and images, finished
+# /tmp/pytest-of-* dirs and uv/bun caches, then alerts. Never volumes, worktrees or open files.
+
+[Unit]
+Description=Fleet pressure guard - prune safe targets and alert above {{ crewship_pressure_guard_pct }}% disk or RAM (Crewship managed)
+ConditionPathExists={{ crewship_fleet_doctor_dir }}/pressure-guard.sh
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=FM_HOME={{ crewship_firstmate_dir }}
+Environment="STORAGE_DATA_DIR={{ crewship_data_dir }}"
+Environment=PRESSURE_PCT={{ crewship_pressure_guard_pct }}
+Environment=PRESSURE_IMAGE_AGE_HOURS={{ crewship_pressure_guard_image_age_hours }}
+Environment=PRESSURE_REPEAT_MIN={{ crewship_pressure_guard_repeat_min }}
+ExecStart={{ crewship_fleet_doctor_dir }}/pressure-guard.sh
+TimeoutStartSec=1800
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
