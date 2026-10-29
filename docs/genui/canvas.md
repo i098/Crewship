@@ -22,15 +22,16 @@ curl -X POST 127.0.0.1:4610/agent/demo -d '{"tool":"set_style","args":{"tokens":
 
 | Action | How | Intent sent |
 |---|---|---|
-| Move a card | drag its title or top row | `move {x,y}` on drop |
+| Reorder cards | drag a card's title row onto another card in its cluster; a pinned card moves freely | none (local order); `move {x,y}` on drop for a pinned card |
 | Resize a card | drag the corner grip (width and height) | `resize {w,h}` on drop |
-| Link two cards | drag a card's `link` button onto another card | `link {to}` |
+| Link two cards | drag a card's link glyph onto another card | `link {to}` |
 | Pin a card | tap `pin` | `pin {pinned}` |
 | Choose who wins a move | header toggle `agent wins` / `user wins` | `input {field:"wins",value}` on `header` |
 | Ask the agent | type in the input box, Enter | `input {text}` on `input` |
 | Undo | Ctrl+Z or Cmd+Z | `undo` |
 | Draw | the pen button, or shift-drag; Esc clears | none (local only) |
-| Pan | drag the empty canvas | none |
+| Pan, zoom | drag the empty canvas or scroll; pinch or Ctrl/Cmd+scroll zooms 0.02–50× | none |
+| Open a cluster | tap a cluster behind, or any cluster in the spread view | none |
 
 A change shows at once and stays laid over the server state until the server acks it. An `error` reply puts the card back.
 
@@ -43,6 +44,16 @@ The header's `props.wins` holds the rule; the default is agent wins.
 - **Pinned:** a pinned card keeps its place under both rules.
 
 `src/model.ts` holds the rule (`userKeeps`, `filterAgentPatch`) and the patch code, with no DOM, so the mock server and the tests use the same code.
+
+## Layout and camera
+
+The canvas ports the frozen design's engine (`docs/genui/design/index.html`, `layout()` and `drawLinks()`):
+
+- **Clusters** (`src/layout.ts`): cards group by `props.proj` into one frosted-glass panel per project, coloured from `spec.projects[proj].hsl`, with a header pill that says how many cards need you.
+- **Priority:** the cluster with the highest `props.priority` sits in front; the others fan out behind it, smaller, dimmed and blurred. A cluster that the front one links to steps out beside it, and the rest fade to 30%. `done` cards rank last; `removed` cards leave.
+- **Tiling:** two 380 px columns (one on a phone). With an odd count the top card takes a full row; each row is as tall as its tallest card, and every card grows down to the card under it, so no empty space is left. A `rect` width and height act only as a user-set size floor; `rect.x/y` places a card only when it is pinned.
+- **Links** (`src/links.ts`): a line joins a card in the front cluster to the card it affects in another cluster, with right-angle routes, a dot at each end, a `label` pill, and a ring on both cards. Lines are drawn in screen space every frame; a line undraws while its cards move and draws again after.
+- **Camera:** fits the front cluster to 48% of a wide screen (the full width on a phone) between the header and the ask bar. `ctx.cam` gives `home()`, `spread()`, `cycle(±1)`, `open(proj)` and `toWorld()` to the shell and the overlays. The spread view lays every cluster out at a glance.
 
 ## Spec and style
 
@@ -58,4 +69,5 @@ The sketch layer is a fixed SVG at the maximum z-index, above every card, link, 
 
 - Strokes stay in this browser; they are not sent or saved.
 - A drag sends one intent on drop, not a patch per frame.
-- No zoom; on a phone, drag the canvas to pan.
+- Card order set by dragging stays in this browser only.
+- A link between two cards in one cluster is kept in the spec but not drawn, as in the design.
