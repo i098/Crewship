@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
-// Read-only viewer for the crewboard message board, tasks and the decision queue. Runs `crewboard`, `tasks-axi`, reads `state/*.status` and `state/decision-queue/*.rec`; never publishes or writes.
+// Read-only viewer for the crewboard message board, tasks, the decision queue and the iMessage front desk health. Runs `crewboard`, `tasks-axi`, `systemctl`, `journalctl`; reads `state/*.status`, `state/decision-queue/*.rec` and the front desk state folder; never publishes or writes.
 import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, type TextChunk } from "@opentui/core"
 import { theme } from "../tui-theme/theme.ts"
 import { loadQueue, queueFooter, queueHeader, queueRows, queueSnapshot, queueViewport, type QRow, type Rec } from "./queue.ts"
+import { deskFooter, deskLines, deskSnapshot, loadDesk, probe, STATE_DIR, type Desk } from "./desk.ts"
 import { fetchSummaries, type Summaries } from "./summaries.ts"
 import { buildAgents, counts, DEFAULT_STALL_SEC, flatten, type Agent, type Row as TaskRow, type View } from "./tasks-model.ts"
 import { findHomes, loadHomes } from "./tasks-source.ts"
 import { footer as tasksFooter, header as tasksHeader, snapshot, viewport, type Line } from "./tasks-view.ts"
 
-// Flags: --once (plain tasks snapshot, then exit), --tasks (open on the tasks view), --queue (open on the decision queue; with --once, its snapshot), --expand, --filter TEXT, --stall-min N, --width N; other args are firstmate home paths.
+// Flags: --once (plain tasks snapshot, then exit), --tasks (open on the tasks view), --queue (open on the decision queue; with --once, its snapshot), --desk (open on the front desk health; with --once, its snapshot), --expand, --filter TEXT, --stall-min N, --width N; other args are firstmate home paths.
 const argv = process.argv.slice(2)
 const flag = (n: string) => argv.includes(n)
 const flagVal = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined }
@@ -17,6 +18,10 @@ const homeArgs = argv.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.inclu
 const stallMin = Number(flagVal("--stall-min") ?? DEFAULT_STALL_SEC / 60)
 const REFRESH_TASKS_MS = 15_000
 
+if (flag("--once") && flag("--desk")) {
+  console.log(deskSnapshot(loadDesk(STATE_DIR, Date.now(), probe()), Date.now(), Number(flagVal("--width") ?? 100)))
+  process.exit(0)
+}
 if (flag("--once") && flag("--queue")) {
   console.log(queueSnapshot(loadQueue(findHomes(homeArgs)), Math.floor(Date.now() / 1000), Number(flagVal("--width") ?? 100)))
   process.exit(0)
@@ -175,7 +180,10 @@ tasksBox.add(tasksText)
 const queueBox = new BoxRenderable(renderer, { border: true, borderColor: theme.border, title: " Decision queue ", titleColor: theme.accent, flexGrow: 1, visible: false })
 const queueText = new TextRenderable(renderer, { content: "", fg: theme.text })
 queueBox.add(queueText)
-root.add(main); root.add(tasksBox); root.add(queueBox); root.add(footer); renderer.root.add(root)
+const deskBox = new BoxRenderable(renderer, { border: true, borderColor: theme.border, title: " Front desk ", titleColor: theme.accent, flexGrow: 1, visible: false })
+const deskText = new TextRenderable(renderer, { content: "", fg: theme.text })
+deskBox.add(deskText)
+root.add(main); root.add(tasksBox); root.add(queueBox); root.add(deskBox); root.add(footer); renderer.root.add(root)
 
 let listTop = 0
 
@@ -240,7 +248,7 @@ function drawFooter() {
   footer.content = new StyledText([
     ch(" ", theme.muted), status,
     ch(`  ${topics.size} topics  ${total} msgs${unreadAll ? `  ${unreadAll} unread` : ""}${scroll ? `  ↑${scroll} lines up` : ""}`, theme.muted),
-    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  d queue  q quit", theme.muted),
+    ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  d queue  m desk  q quit", theme.muted),
   ])
 }
 
@@ -248,8 +256,10 @@ function draw() {
   main.visible = mode === "board"
   tasksBox.visible = mode === "tasks"
   queueBox.visible = mode === "queue"
+  deskBox.visible = mode === "desk"
   if (mode === "tasks") return drawTasks()
   if (mode === "queue") return drawQueue()
+  if (mode === "desk") return drawDesk()
   const innerH = Math.max(1, renderer.height - 3) // main box minus border; footer takes 1
   const list = rows()
   if (!picked) {
@@ -270,8 +280,8 @@ function draw() {
 }
 
 // ---- tasks view ----
-type Mode = "board" | "tasks" | "queue"
-let mode: Mode = flag("--queue") ? "queue" : flag("--tasks") ? "tasks" : "board"
+type Mode = "board" | "tasks" | "queue" | "desk"
+let mode: Mode = flag("--desk") ? "desk" : flag("--queue") ? "queue" : flag("--tasks") ? "tasks" : "board"
 let allAgents: Agent[] = []
 let queuedCount = 0
 let tasksLoaded = false
@@ -314,11 +324,12 @@ function drawTasks() {
 }
 
 function setMode(m: Mode) {
-  if (m === "queue" && mode !== "queue") back = mode
+  if (m === "queue" && (mode === "board" || mode === "tasks")) back = mode
   mode = m
   clearInterval(taskTimer)
   if (m === "tasks") { reloadTasks(); taskTimer = setInterval(reloadTasks, REFRESH_TASKS_MS) }
   if (m === "queue") { queueRecs = loadQueue(findHomes(homeArgs)); taskTimer = setInterval(() => setMode("queue"), REFRESH_TASKS_MS) }
+  if (m === "desk") { desk = loadDesk(STATE_DIR, Date.now(), probe()); taskTimer = setInterval(() => setMode("desk"), REFRESH_TASKS_MS) }
   draw()
 }
 
@@ -352,12 +363,30 @@ function queueKey(k: Key) {
   const page = Math.max(1, renderer.height - 5)
   if (k.name === "q") { renderer.destroy(); process.exit(0) }
   if (k.name === "d") return setMode(back)
+  if (k.name === "m") return setMode("desk")
   if (k.name === "t") return setMode("tasks")
   if (k.name === "r") return setMode("queue")
   const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
   if (!(k.name in moves)) return
   queueSel = queueRowsNow[Math.min(queueRowsNow.length - 1, Math.max(0, moves[k.name]))]?.key ?? ""
   draw()
+}
+
+// ---- front desk health view ----
+let desk: Desk | undefined
+
+function drawDesk() {
+  deskText.content = new StyledText(chunks(desk ? deskLines(desk, Date.now(), Math.max(10, renderer.width - 2), Math.max(1, renderer.height - 3)) : []))
+  footer.content = new StyledText(chunks([deskFooter()]))
+  renderer.requestRender()
+}
+
+function deskKey(k: Key) {
+  if (k.name === "q") { renderer.destroy(); process.exit(0) }
+  if (k.name === "m") return setMode("board")
+  if (k.name === "t") return setMode("tasks")
+  if (k.name === "d") return setMode("queue")
+  if (k.name === "r") return setMode("desk")
 }
 
 type Key = { name: string; sequence?: string; shift?: boolean }
@@ -391,6 +420,7 @@ function tasksKey(k: Key) {
   if (k.name === "q") { renderer.destroy(); process.exit(0) }
   if (k.name === "t") return setMode("board")
   if (k.name === "d") return setMode("queue")
+  if (k.name === "m") return setMode("desk")
   const moves: Record<string, number> = { down: cur + 1, j: cur + 1, up: cur - 1, k: cur - 1, pagedown: cur + page, pageup: cur - page, home: 0, end: 1e9, g: k.shift ? 1e9 : 0 }
   if (k.name in moves) go(moves[k.name])
   else if (["return", "space", "right", "left"].includes(k.name)) toggleRow(taskRows[cur], k.name)
@@ -419,8 +449,10 @@ renderer.on("resize", draw)
 renderer.keyInput.on("keypress", (k: { name: string; sequence?: string; shift?: boolean }) => {
   if (mode === "tasks") return tasksKey(k)
   if (mode === "queue") return queueKey(k)
+  if (mode === "desk") return deskKey(k)
   if (k.name === "t") return setMode("tasks")
   if (k.name === "d") return setMode("queue")
+  if (k.name === "m") return setMode("desk")
   const page = Math.max(1, renderer.height - 5)
   switch (k.name) {
     case "q": renderer.destroy(); process.exit(0)

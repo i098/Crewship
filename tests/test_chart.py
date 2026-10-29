@@ -687,7 +687,7 @@ print(json.dumps({{"result": result}}))
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
     pane_commands = ["usage-tui", "crewboard-tui", "browser-tui"]
-    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "crewboard-tui --queue"]  # the decision-queue tab adds --queue
+    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "crewboard-tui --queue", "crewboard-tui --desk"]  # the decision-queue and frontdesk tabs add a flag
     pane_labels = ["usage-tui", "crewboard-tui", "browsers"]
     pane_log = tmp_path / "panes.log"
     for name in pane_commands:
@@ -745,12 +745,12 @@ print(json.dumps({{"result": result}}))
         assert not viewer_call.exists()
     elif mode == "update":
         # An installed host that only has the schedules tab gains each new pane once.
-        assert [t["label"] for t in actual["tabs"]] == ["custom", "schedules", *pane_labels, "decision-queue"]
-        assert len(actual["runs"]) == 4
+        assert [t["label"] for t in actual["tabs"]] == ["custom", "schedules", *pane_labels, "decision-queue", "frontdesk"]
+        assert len(actual["runs"]) == 5
         assert pane_log.read_text().splitlines() == pane_runs
     elif mode == "all":
-        assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue"]
-        assert len(actual["runs"]) == 5
+        assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue", "frontdesk"]
+        assert len(actual["runs"]) == 6
         assert pane_log.read_text().splitlines() == pane_runs
         assert "changed=0" in result.stdout
     else:
