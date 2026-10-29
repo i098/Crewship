@@ -20,7 +20,7 @@ const status=document.getElementById("status"),root=document.getElementById("roo
 let doc={root:"",elements:{},style:{},links:[]},seq=0;const t0=performance.now();
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function apply(ops){for(const o of ops){const k=o.path.split("/").slice(1).map(s=>s.replace(/~1/g,"/").replace(/~0/g,"~"));
- if(!k.length){doc=o.value;continue}if(k.some(x=>x==="__proto__"||x==="constructor"||x==="prototype"))continue;let p=doc;for(const x of k.slice(0,-1))p=p[x];const l=k.at(-1);o.op==="remove"?delete p[l]:p[l]=o.value}}
+ if(!k.length){doc=o.value;continue}let p=doc;for(const x of k.slice(0,-1)){if(x==="__proto__"||x==="constructor"||x==="prototype"||p===null||typeof p!=="object"||!Object.hasOwn(p,x)){p=null;break}p=p[x]}const l=k.at(-1);if(p===null||typeof p!=="object"||l==="__proto__"||l==="constructor"||l==="prototype")continue;o.op==="remove"?delete p[l]:Object.defineProperty(p,l,{value:o.value,writable:true,enumerable:true,configurable:true})}}
 function node(id){const e=doc.elements[id];if(!e)return"";const p=e.props,c=(e.children||[]).map(node).join("");
  switch(e.type){
  case"Stack":return`<div class="stack ${esc(p.dir||"column")}">${c}</div>`;

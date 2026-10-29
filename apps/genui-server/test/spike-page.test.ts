@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 // Runs the spike page's inline script against stub browser globals and feeds it socket frames.
 function runPage() {
   const html = readFileSync(new URL("../spike/page.html", import.meta.url), "utf8");
-  const code = /<script>([\s\S]*)<\/script>/.exec(html)![1];
+  const start = html.indexOf("<script>") + "<script>".length;
+  const code = html.slice(start, html.lastIndexOf("</script>"));
   const els: Record<string, { textContent: string; innerHTML: string }> = {
     status: { textContent: "", innerHTML: "" },
     root: { textContent: "", innerHTML: "" },
