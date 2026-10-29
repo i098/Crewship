@@ -40,8 +40,9 @@ export function brief(e: unknown): string {
 }
 
 // A durable FIFO queue in `dir`: one JSON file per item, named by a rising sequence number and written atomically
-// (fsync, then rename), so an item survives a crash or a restart once add() returns. One loop delivers the oldest
-// item. When that fails, the loop logs one line, waits one backoff step (at most 60 × `retryMs`) and tries the same
+// (fsync, then rename), so an item survives a crash or a restart once add() returns. One loop per lane (`lane`;
+// default: one lane for all) delivers the oldest item of its lane, so a slow or failing send holds only its own lane.
+// When that fails, the loop logs one line, waits one backoff step (at most 60 × `retryMs`) and tries the same
 // item again, so the order holds. Only an item that is provably bad (see `permanent`, or a file that does not
 // parse) moves to `${dir}-dead/`; the loop logs one line and goes on with the next item.
 // See docs/imessage.md#upstream-outages before manually removing or replaying an item.
@@ -50,7 +51,8 @@ export function brief(e: unknown): string {
 // Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
   private next: number;
-  private busy = false;
+  private busy = new Set<string>();
+  private laneBySeq = new Map<number, string>();
   private keys = new Set<string>();
 
   constructor(
@@ -60,6 +62,7 @@ export class Queue<T> {
     private retryMs: number,
     private lost?: (item: T) => void,
     private key?: (item: T) => string | undefined,
+    private lane?: (item: T) => string,
   ) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.next = (this.seqs().at(-1) ?? 0) + 1;
@@ -67,21 +70,37 @@ export class Queue<T> {
       mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
       for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) this.restoreKeys(folder, key);
     }
-    void this.drain();
+    this.drainAll();
   }
 
   add(item: T) {
     const id = this.key?.(item);
     if (id && this.keys.has(id)) this.syncDir();
     else {
-      try { this.write(this.next++, item); }
+      try { this.write(this.next, item); this.laneBySeq.set(this.next++, this.lane?.(item) ?? ""); }
       catch (e) {
         if (id && this.key) this.restoreKeys(this.dir, this.key);
         throw e;
       }
       if (id) this.keys.add(id);
     }
-    void this.drain();
+    this.drainAll();
+  }
+
+  // One drain loop per lane that has pending items; a running lane's loop picks up its new items itself.
+  private drainAll() {
+    for (const lane of new Set(this.seqs().map((seq) => this.laneOf(seq)))) void this.drain(lane);
+  }
+
+  private laneOf(seq: number): string {
+    if (!this.lane) return "";
+    let lane = this.laneBySeq.get(seq);
+    if (lane === undefined) {
+      try { lane = this.lane(JSON.parse(readFileSync(this.file(seq), "utf8"))); }
+      catch { lane = ""; } // the drain buries an unreadable file
+      this.laneBySeq.set(seq, lane);
+    }
+    return lane;
   }
 
   private restoreKeys(folder: string, key: (item: T) => string | undefined) {
@@ -135,6 +154,7 @@ export class Queue<T> {
       const dead = `${this.dir}-dead`;
       mkdirSync(dead, { recursive: true, mode: 0o700 });
       renameSync(this.file(seq), `${dead}/${Date.now()}-${seq}.json`);
+      this.laneBySeq.delete(seq);
       console.error(`fm-imessage: ${this.name} ${seq} cannot be delivered, moved to ${dead}/: ${brief(e)}`);
       return true;
     } catch (x) {
@@ -143,13 +163,14 @@ export class Queue<T> {
     }
   }
 
-  private async drain() {
-    if (this.busy) return;
-    this.busy = true;
+  private async drain(lane: string) {
+    if (this.busy.has(lane)) return;
+    this.busy.add(lane);
+    const first = () => this.seqs().find((seq) => this.laneOf(seq) === lane);
     let head: number | undefined;
     let attempt = 0;
     try {
-      for (let seq = this.seqs()[0]; seq !== undefined; seq = this.seqs()[0]) {
+      for (let seq = first(); seq !== undefined; seq = first()) {
         if (seq !== head) [head, attempt] = [seq, 0];
         let item: T | undefined;
         try {
@@ -164,6 +185,7 @@ export class Queue<T> {
           });
           if (this.key?.(item as T)) renameSync(this.file(seq), `${this.dir}-done/${seq}.json`);
           else unlinkSync(this.file(seq));
+          this.laneBySeq.delete(seq);
         } catch (e) {
           if (permanent(e) && this.bury(seq, e)) {
             if (item !== undefined) try { this.lost?.(item); } catch (x) { console.error(`fm-imessage: ${this.name} ${seq} lost notice failed: ${brief(x)}`); }
@@ -176,7 +198,7 @@ export class Queue<T> {
         }
       }
     } finally {
-      this.busy = false;
+      this.busy.delete(lane);
     }
   }
 }

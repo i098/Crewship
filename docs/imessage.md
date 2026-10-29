@@ -346,7 +346,8 @@ Desk cancellation and restart exceptions follow the [routing recovery contract](
   A failed directory sync can leave a renamed packet on disk.
   A keyed retry syncs the directory without adding another packet.
   During a transient outage, an active desk answer stays queued without a supervisor handoff.
-- **Delivery.** One loop sends the oldest file.
+- **Delivery.** One loop per lane sends the oldest file of its lane.
+  A lane is one chat on one line; the front desk ack has its own lane.
   It archives keyed direct answers in `outbox-done/` and deletes other completed items.
   A failed send retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
   Unknown errors also retry, so the queue keeps its order.
@@ -369,7 +370,7 @@ Retry only unkeyed items by moving their files back to the queue directory under
 Never requeue a direct desk answer by hand; follow the [routing recovery contract](#what-it-does).
 Delete an unkeyed item's file to drop it by hand.
 Keep keyed receipts with the journal as [routing recovery](#what-it-does) requires.
-An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds the queue in order while it retries.
+An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds its lane in order while it retries.
 The log shows each try.
 `FM_IMESSAGE_RETRY_MS` sets the first wait in milliseconds (default 1000); the longest wait is 60 times that value.
 
