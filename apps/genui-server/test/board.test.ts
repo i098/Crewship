@@ -156,12 +156,16 @@ test("pinned card keeps its placement against agent rect patches; reset override
   expect(b.spec.components.a.rect!.x).toBe(3);
 });
 
-test("user intents: bad target and bad payload throw; input is a no-op", () => {
+test("user intents: bad target and bad payload throw; z rewinds an ask together with the agent's reply", () => {
   const b = new Board(new MemoryStore());
   seed(b);
   expect(() => b.intent(move("nope", 1))).toThrow("no such component");
   expect(() => b.intent({ t: "intent", id: "x", kind: "move", targetId: "a", payload: { x: "1" } })).toThrow();
-  expect(b.intent({ t: "intent", id: "y", kind: "input", targetId: "a", payload: { text: "hi" } })).toEqual([]);
+  expect(b.intent({ t: "intent", id: "y", kind: "input", targetId: "a", payload: { text: "open host stats" } })[0]).toMatchObject({ actor: "user", cause: "y", patch: [] });
+  b.agent({ tool: "emit_view", args: { cause: "y", patch: [{ op: "add", path: "/components/sys", value: { type: "card", props: {} } }] } });
+  b.undo();
+  expect(b.spec.components.sys).toBeUndefined();
+  expect(b.spec.components.a).toBeDefined();
 });
 
 test("__proto__ paths and targets never touch Object.prototype", () => {

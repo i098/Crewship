@@ -52,7 +52,8 @@ export class Board {
   }
 
   intent(m: Intent): Op[] {
-    if (m.kind === "input" && !("field" in m.payload)) return []; // {text}: forwarded to the agent, no spec change
+    // {text} is forwarded to the agent and changes no spec; an empty user op is the anchor that z rewinds with the agent's reply
+    if (m.kind === "input" && !("field" in m.payload)) return [this.commit("user", m.id, [])];
     const id = m.targetId;
     this.component(id);
     if (m.kind === "move" || m.kind === "resize") {
