@@ -55,6 +55,16 @@ The canvas ports the frozen design's engine (`docs/genui/design/index.html`, `la
 - **Links** (`src/links.ts`): a line joins a card in the front cluster to the card it affects in another cluster, with right-angle routes, a dot at each end, a `label` pill, and a ring on both cards. Lines are drawn in screen space every frame; a line undraws while its cards move and draws again after.
 - **Camera:** fits the front cluster to 48% of a wide screen (the full width on a phone) between the header and the ask bar. `ctx.cam` gives `home()`, `spread()`, `cycle(±1)`, `open(proj)` and `toWorld()` to the shell and the overlays. The spread view lays every cluster out at a glance.
 
+## Mock world
+
+`mock/world.ts` ports the design's world, so the mock board looks and moves like `docs/genui/design/index.html`:
+
+- **Seed:** 11 items in 4 projects (`spec.projects`), with the design's labelled relations as links. Items carry `kind`, `proj` and `priority` and no `rect`; the canvas places them by project and priority.
+- **Live script:** #209 walks its stages, cf-bill claims and fixes a failed refunds test (15-32 s), a new decision arrives at 38 s, and a 6 s clock ticks the timeline and ETAs.
+- **Derived props:** `derive()` keeps the stages, ship day, header line (`header.props.title`, `*…*` marks the emphasised words) and each item's own `line` in step with the rest of the spec.
+- **Agent answers:** an act on a card (`input {field:"pick"|"merge"|"fly"|"dismiss"|"send"}`) settles it. A typed ask with "or" or "should we" becomes a decision; "compare", "when" or "who" brings that card forward; any other ask adds an answer card at the front of the cluster in `payload.about` (`of`, `ids`, or a drawn box `at`).
+- **Media:** `/media/:file` serves the embeds from `mock/media/`.
+
 ## Spec and style
 
 Types come from `@crewship/genui-spec` (`packages/genui-spec/src/wire.ts`). The canvas draws `type: "card"` components from these props: `title`, `flag`, `kpi {value,unit}`, `steps {items,at}`, `body`, `items`, `pinned`, `hidden`. A child with no `rect` is drawn inside its parent. The `header` and `input` ids dock at the top and bottom unless the spec gives them a `rect`.

@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Op, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import { applyPatch, Board, filterAgentPatch, invertPatch, safeStyle } from "../src/model";
-import { seedSpec, start } from "../mock/server";
+import { start } from "../mock/server";
+import { seedSpec, World } from "../mock/world";
 
 const op = (seq: number, actor: Op["actor"], patch: Op["patch"]): ServerMsg => ({ t: "ops", ops: [{ seq, actor, cause: "t", patch, inverse: [] }] });
-const agentMove = (seq: number, x: number): ServerMsg => op(seq, "agent", [{ op: "add", path: "/components/feed/rect", value: { x, y: 0, w: 300, h: 200 } }]);
+const agentMove = (seq: number, x: number): ServerMsg => op(seq, "agent", [{ op: "add", path: "/components/p1/rect", value: { x, y: 0, w: 300, h: 200 } }]);
 
 function boardWith(spec: BoardSpec = seedSpec()) {
   const b = new Board();
@@ -36,27 +37,27 @@ describe("patch", () => {
 describe("move rule", () => {
   test("agent wins: an agent move drops the user's pending move", () => {
     const b = boardWith();
-    b.propose("move", "feed", { x: 500, y: 500 });
-    expect(b.view().components.feed.rect?.x).toBe(500);
+    b.propose("move", "p1", { x: 500, y: 500 });
+    expect(b.view().components.p1.rect?.x).toBe(500);
     b.receive(agentMove(2, 7));
-    expect(b.view().components.feed.rect?.x).toBe(7);
+    expect(b.view().components.p1.rect?.x).toBe(7);
   });
 
   test("user wins, or a pinned card: the user's pending move stays on top", () => {
-    for (const patch of [{ op: "add", path: "/components/header/props/wins", value: "user" }, { op: "add", path: "/components/feed/props/pinned", value: true }] as const) {
+    for (const patch of [{ op: "add", path: "/components/header/props/wins", value: "user" }, { op: "add", path: "/components/p1/props/pinned", value: true }] as const) {
       const b = boardWith(applyPatch(seedSpec(), [patch]));
-      b.propose("move", "feed", { x: 500, y: 500 });
+      b.propose("move", "p1", { x: 500, y: 500 });
       b.receive(agentMove(2, 7));
-      expect(b.view().components.feed.rect?.x).toBe(500);
+      expect(b.view().components.p1.rect?.x).toBe(500);
     }
   });
 
   test("an error drops the pending intent; an old seq is ignored", () => {
     const b = boardWith();
-    const i = b.propose("resize", "feed", { w: 10, h: 10 });
-    expect(b.view().components.feed.rect).toMatchObject({ w: 160, h: 96 });
+    const i = b.propose("resize", "p1", { w: 10, h: 10 });
+    expect(b.view().components.p1.rect).toMatchObject({ w: 160, h: 96 });
     expect(b.receive({ t: "error", id: i.id, msg: "no" })).toBe("no");
-    expect(b.view().components.feed.rect?.w).toBe(460);
+    expect(b.view().components.p1.rect).toBeUndefined();
     b.receive(agentMove(1, 7));
     expect(b.seq).toBe(1);
   });
@@ -64,14 +65,52 @@ describe("move rule", () => {
   test("the server drops agent rect changes on pinned cards, and on placed cards while the user wins", () => {
     const spec = applyPatch(seedSpec(), [{ op: "add", path: "/components/header/props/wins", value: "user" }]);
     const patch = [
-      { op: "add" as const, path: "/components/feed/rect", value: {} },
-      { op: "add" as const, path: "/components/feed/props/title", value: "t" },
-      { op: "add" as const, path: "/components/cpu/rect", value: {} },
+      { op: "add" as const, path: "/components/p1/rect", value: {} },
+      { op: "add" as const, path: "/components/p1/props/title", value: "t" },
+      { op: "add" as const, path: "/components/k1/rect", value: {} },
     ];
-    expect(filterAgentPatch(spec, patch, new Set(["feed"])).map((o) => o.path)).toEqual(["/components/feed/props/title", "/components/cpu/rect"]);
-    expect(filterAgentPatch(seedSpec(), patch, new Set(["feed"]))).toHaveLength(3);
-    const pinned = applyPatch(seedSpec(), [{ op: "add", path: "/components/cpu/props/pinned", value: true }]);
-    expect(filterAgentPatch(pinned, patch, new Set()).map((o) => o.path)).toEqual(["/components/feed/rect", "/components/feed/props/title"]);
+    expect(filterAgentPatch(spec, patch, new Set(["p1"])).map((o) => o.path)).toEqual(["/components/p1/props/title", "/components/k1/rect"]);
+    expect(filterAgentPatch(seedSpec(), patch, new Set(["p1"]))).toHaveLength(3);
+    const pinned = applyPatch(seedSpec(), [{ op: "add", path: "/components/k1/props/pinned", value: true }]);
+    expect(filterAgentPatch(pinned, patch, new Set()).map((o) => o.path)).toEqual(["/components/p1/rect", "/components/p1/props/title"]);
+  });
+});
+
+describe("mock world", () => {
+  function world() {
+    let spec = seedSpec();
+    const w = new World(() => spec, (_cause, patch) => (spec = applyPatch(spec, patch)));
+    return { w, spec: () => spec };
+  }
+
+  test("the seed is the design's 11 items; the header follows the top item and counts the rest that need you", () => {
+    const spec = seedSpec();
+    expect(Object.values(spec.components).filter((c) => c.props.kind)).toHaveLength(11);
+    expect(spec.components.header.props.title).toBe("*Needs you:* Store swaps in Postgres or SQLite? *+2 more* need you.");
+    expect(spec.links.map((l) => l.label)).toEqual(["adds a migrate step", "Postgres adds a migrate day", "sets the ship time", "cf-auth waits on this"]);
+  });
+
+  test("picking Postgres settles the decision and adds the migrate day everywhere it shows", () => {
+    const { w, spec } = world();
+    w.change("user pick", [{ op: "add", path: "/components/d1/props/pick", value: "pg" }]); // the server commits the pick, then the world reacts
+    w.react("d1", "pick");
+    expect(spec().components.d1.props).toMatchObject({ done: true, priority: 5 });
+    expect(spec().components.p1.props.stages).toEqual(["Code", "Build", "Tests", "Migrate", "Preview", "Merge"]);
+    expect(spec().components.t1.props.ship).toBe("Sat 14:00");
+    w.stop();
+  });
+
+  test("an answer lands at the front of the cluster it is about, never at a fixed spot", () => {
+    const { w, spec } = world();
+    w.answer("why is this slow?");
+    const free = Object.values(spec().components).find((c) => c.props.kind === "ask")!;
+    expect(free.rect).toBeUndefined();
+    expect(free.props).toMatchObject({ proj: "me", asked: true, priority: 295 });
+    w.answer("what does this need?", { ids: ["c1"] });
+    expect(Object.values(spec().components).filter((c) => c.props.kind === "ask")[1].props).toMatchObject({ proj: "crew", about: ["#212 auth refresh hit a conflict"] });
+    w.answer("put it here", { at: { x: 10, y: 20, w: 100, h: 50 } });
+    expect(Object.values(spec().components).filter((c) => c.props.kind === "ask")[2]).toMatchObject({ rect: { x: 134, y: 20 }, props: { pinned: true } });
+    w.stop();
   });
 });
 
@@ -113,13 +152,13 @@ describe("mock server contract", () => {
     const snap = await next("snapshot");
     expect(snap.t === "snapshot" && snap.spec.components.header.props.wins).toBe("agent");
 
-    ws.send(JSON.stringify({ t: "intent", id: "i1", kind: "move", targetId: "feed", payload: { x: 5, y: 6 } }));
+    ws.send(JSON.stringify({ t: "intent", id: "i1", kind: "move", targetId: "p1", payload: { x: 5, y: 6 } }));
     const moved = await next("ops");
     expect(moved.t === "ops" && moved.ops[0]).toMatchObject({ seq: 1, actor: "user", patch: [{ value: { x: 5, y: 6 } }] });
     expect(await next("ack")).toEqual({ t: "ack", id: "i1", seq: 1 });
 
     // Agent wins by default, so the agent may move a card the user placed.
-    const move = { patch: [{ op: "add", path: "/components/feed/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
+    const move = { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
     const res = await fetch(`${server.url}agent/${boardId}`, { method: "POST", body: JSON.stringify({ tool: "emit_view", args: move }) });
     expect(await res.json()).toEqual({ seq: 2 });
     const byAgent = await next("ops");
@@ -139,10 +178,10 @@ describe("mock server contract", () => {
     ws.send(JSON.stringify({ t: "hello", boardId, clientId: "c" }));
     await next("snapshot");
     ws.send(JSON.stringify({ t: "intent", id: "w", kind: "input", targetId: "header", payload: { field: "wins", value: "user" } }));
-    ws.send(JSON.stringify({ t: "intent", id: "m", kind: "move", targetId: "feed", payload: { x: 5, y: 6 } }));
+    ws.send(JSON.stringify({ t: "intent", id: "m", kind: "move", targetId: "p1", payload: { x: 5, y: 6 } }));
     await next("ack");
     await next("ack");
-    const move = { patch: [{ op: "add", path: "/components/feed/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
+    const move = { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
     const res = await fetch(`${server.url}agent/${boardId}`, { method: "POST", body: JSON.stringify({ tool: "emit_view", args: move }) });
     expect(await res.json()).toEqual({ seq: 2 });
     ws.close();

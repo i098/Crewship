@@ -3,38 +3,23 @@
 import type { ServerWebSocket } from "bun";
 import page from "../index.html";
 import type { Actor, AgentCall, ClientMsg, Op, PatchOp, ServerMsg, BoardSpec } from "@crewship/genui-spec";
-import { applyPatch, esc, filterAgentPatch, intentPatch, invertPatch, safeStyle } from "../src/model";
+import { applyPatch, filterAgentPatch, intentPatch, invertPatch, safeStyle } from "../src/model";
+import { type About, seedSpec, World } from "./world";
 
-export const seedSpec = (): BoardSpec => ({
-  components: {
-    header: { type: "header", props: { title: "#209 is on stage 4, nothing needs you there. +3 more need you.", wins: "agent" } },
-    input: { type: "input", props: { placeholder: "Ask anything, tell the AI what to do, or draw" } },
-    feed: {
-      type: "card",
-      props: { title: "#209 swap feed: preview", flag: "swapapp", kpi: { value: 12, unit: "min" }, steps: { items: ["Code", "Build", "Tests", "Preview", "Merge"], at: 3 } },
-      rect: { x: 40, y: 20, w: 460, h: 220 },
-    },
-    decide: {
-      type: "card",
-      props: { title: "Store swaps in Postgres or SQLite?", flag: "needs you", items: ["Postgres · AI pick", "SQLite"] },
-      rect: { x: 560, y: 20, w: 320, h: 240 },
-    },
-    cpu: { type: "card", props: { title: "CPU", kpi: { value: 66, unit: "%" }, body: "Host load over the last minute." }, rect: { x: 40, y: 290, w: 240, h: 180 }, style: { accent: "hsl(188 95% 58%)" } },
-    ship: { type: "card", props: { title: "swapapp ships Fri 14:00", body: "Postgres adds a migrate day." }, rect: { x: 560, y: 280, w: 320, h: 140 } },
-  },
-  links: [
-    { from: "feed", to: "decide" },
-    { from: "decide", to: "ship" },
-  ],
-  tokens: {},
-});
-
-type Room = { spec: BoardSpec; seq: number; undo: Op[]; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>> };
+type Room = { spec: BoardSpec; seq: number; undo: Op[]; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>>; world: World };
 const rooms = new Map<string, Room>();
 
 const room = (id: string) => {
   let r = rooms.get(id);
-  if (!r) rooms.set(id, (r = { spec: seedSpec(), seq: 0, undo: [], placed: new Set(), sockets: new Set() }));
+  if (!r) {
+    const made: Room = {
+      spec: seedSpec(), seq: 0, undo: [], placed: new Set(), sockets: new Set(),
+      // world changes are the agent's, and not on your undo stack
+      world: new World(() => made.spec, (cause, patch) => commit(made, "agent", cause, patch, false)),
+    };
+    rooms.set(id, (r = made));
+    made.world.start();
+  }
   return r;
 };
 
@@ -50,12 +35,16 @@ function commit(r: Room, actor: Actor, cause: string, patch: PatchOp[], undoable
   return op;
 }
 
-/** The mock agent answers a typed question with a new card linked to the input box. */
-function answer(r: Room, text: string) {
-  const id = `ask-${r.seq + 1}`;
-  commit(r, "agent", `input:${id}`, [
-    { op: "add", path: `/components/${esc(id)}`, value: { type: "card", props: { title: "You asked", body: text.slice(0, 400) }, rect: { x: 300, y: 470, w: 300, h: 130 } } },
-  ]);
+/** Only well-formed parts of the client's `about` reach the world. */
+function aboutOf(v: unknown): About {
+  if (!v || typeof v !== "object") return {};
+  const a = v as Record<string, unknown>; // client JSON, checked field by field below
+  const at = a.at && typeof a.at === "object" ? (a.at as About["at"]) : undefined;
+  return {
+    of: typeof a.of === "string" ? a.of : undefined,
+    ids: Array.isArray(a.ids) ? a.ids.filter((i): i is string => typeof i === "string") : [],
+    at,
+  };
 }
 
 function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
@@ -67,6 +56,7 @@ function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
   if (msg.t === "undo") {
     const last = r.undo.pop();
     if (last) commit(r, "user", `undo:${last.seq}`, last.inverse, false);
+    r.world.change("world:undo");
     return;
   }
   try {
@@ -75,7 +65,10 @@ function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
     // Ops go out before the ack, so the client never shows the card back at its old place.
     commit(r, "user", `intent:${msg.id}`, patch);
     send(ws, { t: "ack", id: msg.id, seq: r.seq });
-    if (msg.kind === "input" && typeof msg.payload.text === "string" && msg.payload.text.trim()) answer(r, msg.payload.text);
+    if (msg.kind !== "input") return;
+    const text = msg.payload.text;
+    if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
+    else r.world.react(msg.targetId, msg.payload.field);
   } catch (e) {
     send(ws, { t: "error", id: msg.id, msg: (e as Error).message });
   }
@@ -94,6 +87,7 @@ function onAgent(boardId: string, call: AgentCall): number {
   else if (call.tool === "pin") patch = intentPatch(r.spec, "pin", String(a.id), { pinned: a.pinned !== false });
   else if (call.tool === "reset") r.placed.clear(); // the agent takes the layout back
   commit(r, "agent", `tool:${call.tool}`, patch);
+  r.world.change("world:agent");
   return r.seq;
 }
 
@@ -103,6 +97,11 @@ export function start(port = Number(process.env.PORT ?? 4610)) {
     port,
     routes: {
       "/": page,
+      // the design's media for the seed world's embeds
+      "/media/:file": (req: Bun.BunRequest<"/media/:file">) => {
+        const f = req.params.file;
+        return /^[\w-]+\.(svg|mp4|html)$/.test(f) ? new Response(Bun.file(new URL(`./media/${f}`, import.meta.url))) : new Response("not found", { status: 404 });
+      },
       "/agent/:boardId": {
         POST: async (req: Bun.BunRequest<"/agent/:boardId">) => {
           try {
