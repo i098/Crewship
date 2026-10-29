@@ -1,0 +1,62 @@
+/* Overlays from the design (docs/genui/design, round 28): selection, ink, uploads, full view. HSL only. */
+:root { --sel: hsl(0 0% 96%); }
+
+/* selection: a white ring and a "locked" tag; ring width divides by the zoom so it never drops below one screen pixel */
+.tile.sel { box-shadow: 0 0 0 calc(2px / var(--k, 1)) var(--sel); }
+.tile.sel::after { content: "locked"; position: absolute; right: 14px; bottom: 8px; font-size: 10.5px; color: var(--sel); }
+.tile:not(.sel) iframe.media { pointer-events: none; } /* a tap on a preview selects it; once selected it takes clicks */
+
+/* the selection bar floats over the canvas above the ask box, so selecting never changes the composer height */
+.selbar { display: none; position: absolute; left: 14px; right: 14px; bottom: 100%; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; pointer-events: none; }
+.selbar > * { pointer-events: auto; }
+.selbar.show { display: flex; }
+.selbar b { color: var(--sel); font-weight: 600; margin-right: 4px; padding: 6px 12px; border-radius: 99px; background: var(--glass); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+
+/* the pen draws plain white ink on top of everything; the layer follows the board camera, so strokes move and zoom with the board */
+.pen[aria-pressed="true"] { background: var(--sel); color: var(--bg); border-color: transparent; }
+body.inking .canvas { cursor: crosshair; }
+.inkl { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2147483647; overflow: visible; pointer-events: none; }
+.inkl g { transform-origin: 0 0; }
+.inkl path { fill: none; stroke: var(--sel); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+/* uploads: a world-space layer over the canvas and under the shell */
+body.dropping .canvas { outline: 2px dashed var(--sel); outline-offset: -8px; }
+.upl { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.uplw { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.uptile { position: absolute; width: 320px; pointer-events: auto; }
+.uptile .core > .title { cursor: grab; touch-action: none; }
+.uptile .media { display: block; width: 100%; max-height: 360px; border: 0; border-radius: 12px; }
+.uptile iframe.media { height: 360px; }
+.dl { justify-self: start; align-self: start; padding: 7px 13px; border-radius: 99px; border: 1px solid var(--hair); background: var(--glass); font-size: 12.5px; color: var(--ink); text-decoration: none; }
+.txt { margin: 0; max-height: 320px; overflow: auto; padding: 12px; border-radius: 12px; background: hsl(240 30% 2% / .6); font: 12px/1.5 var(--font); color: var(--ink); white-space: pre-wrap; word-break: break-word; -webkit-user-select: text; user-select: text; }
+
+/* full view: a card opened large and fully usable */
+.full { position: fixed; z-index: 7; inset: 0; display: grid; place-items: center; padding: 4vmin; background: hsl(240 24% 3% / .6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 0; pointer-events: none; transition: opacity .35s; }
+.full.open { opacity: 1; pointer-events: auto; }
+/* the window drags by any empty spot and resizes from its corner grip; the preview grows with its height (--fh) */
+.fullc { position: relative; display: flex; flex-direction: column; width: min(1200px, 100%); max-width: 100%; max-height: 100%; min-width: 320px; min-height: 180px; overflow: hidden; padding: 22px; border-radius: 26px; background: hsl(240 24% 7% / .9); box-shadow: inset 0 1px 1px hsl(0 0% 100% / .15), 0 40px 120px -20px hsl(0 0% 0% / .8); transform: scale(.96); transition: transform .45s var(--spring); cursor: grab; }
+.full.open .fullc { transform: none; }
+.fullc > .core { flex: 1; min-height: 0; overflow: auto; display: grid; align-content: start; }
+.fullc.mv { cursor: grabbing; }
+.fullc :is(button, input, textarea, a, label, .mw, .media) { cursor: auto; }
+.fullc button, .fullc label { cursor: pointer; }
+.fullc > .grip { position: absolute; right: 8px; bottom: 8px; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none; border-radius: 0 0 14px 0; background: linear-gradient(135deg, transparent 45%, var(--mute) 45% 52%, transparent 52% 64%, var(--mute) 64% 71%, transparent 71%); opacity: .6; }
+.fullc > .grip:hover { opacity: 1; }
+/* the preview keeps its ratio: as wide as fits, never taller than the screen allows */
+.fullc .mw { width: min(100%, calc(var(--fh, min(72vh, 760px)) * var(--r, 1.6))); justify-self: center; resize: none; }
+.fullc .viz svg { max-height: 60vh; }
+.fullc .term { height: 60vh; font-size: 14px; }
+.fullc .fork { height: 50vh; }
+/* the window's own ✕ closes, so the card's expand and remove buttons hide */
+.fullc > .ib { position: absolute; right: 14px; top: 21px; z-index: 1; }
+.fullc [data-act="full"], .fullc > .core > .hd [data-act="drop"] { display: none; }
+.fullc .core > .hd { margin-right: 36px; }
+.thr { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; }
+/* the ask box stays on top of the full view; answers sit under the card */
+body.fullon .bottom { z-index: 8; }
+body.fullon .full { padding-bottom: calc(4vmin + 130px); }
+body.fullon .chips { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .full, .fullc { transition: none; }
+}
