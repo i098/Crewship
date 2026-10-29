@@ -14,6 +14,7 @@ STUBS = {
     "lsof": 'case "$3" in *busy*) exit 0 ;; *) exit 1 ;; esac',
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
+    "du": 'printf "5242880\\t/a/b/c\\n100\\t/a/b\\n"',
     "pgrep": 'exit 1',
     "text": 'echo "$*" >> "$STUB/texts"',
     "wall": 'cat >> "$STUB/alerts"',
@@ -109,3 +110,13 @@ def test_owner_is_texted_only_when_prunes_cannot_get_under_the_threshold(run):
     assert run.texts == ""
     r, _, alerts = run(disk=90, DISK_AFTER=80, PRESSURE_STATE_DIR=run.tmp / "other-state")
     assert "Still over 70%" in alerts and "still over 70%" in run.texts
+
+
+def test_owner_text_is_sent_once_per_still_over_state_and_rearms_after_recovery(run):
+    s = {"PRESSURE_REPEAT_MIN": 0}
+    run(disk=90, DISK_AFTER=80, **s)
+    run(disk=90, DISK_AFTER=80, **s)
+    assert run.texts.count("still over") == 1
+    run(disk=90, DISK_AFTER=50, **s)
+    run(disk=90, DISK_AFTER=80, **s)
+    assert run.texts.count("still over") == 2

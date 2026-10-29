@@ -33,12 +33,17 @@ for v in THRESH SCRATCH_MIN REPEAT_MIN; do
 done
 { [ "$THRESH" -ge 1 ] && [ "$THRESH" -le 100 ]; } || { echo "pressure-guard: PRESSURE_PCT must be 1-100" >&2; exit 2; }
 
+# Plain docker when the account may use the socket, else passwordless sudo.
+DOCKER=(docker)
+if command -v docker >/dev/null 2>&1 && ! timeout 20 docker info >/dev/null 2>&1 \
+  && timeout 20 sudo -n docker info >/dev/null 2>&1; then DOCKER=(sudo -n docker); fi
+
 ram_pct() { awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { if (t > 0) printf "%d", (t - a) * 100 / t }' "$MEMINFO"; }
 disk_pct() { df --output=pcent -- "$1" 2>/dev/null | awk 'NR == 2 { sub(/%/, ""); print $1 + 0 }'; }
 # "label pct" lines: each distinct filesystem once, plus RAM.
 readings() {
   local p root seen=" " m
-  root=$(timeout 20 docker info -f '{{.DockerRootDir}}' 2>/dev/null) || root=
+  root=$(timeout 20 "${DOCKER[@]}" info -f '{{.DockerRootDir}}' 2>/dev/null) || root=
   for p in / "$HOME" ${root:+"$root"}; do
     m=$(df --output=target -- "$p" 2>/dev/null | awk 'NR == 2') || continue
     [ -n "$m" ] && [[ $seen != *" $m "* ]] || continue
@@ -49,7 +54,10 @@ readings() {
 over() { awk -v t="$THRESH" '$2 + 0 > t { printf "%s%s %s%%", (n++ ? ", " : ""), $1, $2 } END { exit !n }'; }
 
 before=$(readings)
-hot=$(over <<<"$before") || { [ "$DRY" = 1 ] && echo "pressure-guard: below ${THRESH}%: $(tr '\n' ' ' <<<"$before")"; exit 0; }
+hot=$(over <<<"$before") || {
+  if [ "$DRY" = 1 ]; then echo "pressure-guard: below ${THRESH}%: $(tr '\n' ' ' <<<"$before")"; else rm -f "$STATE/last-text"; fi  # recovered: re-arm the text
+  exit 0
+}
 [ "$DRY" = 1 ] && echo "pressure-guard --dry-run: over ${THRESH}%: $hot"
 
 done_steps=()
@@ -61,8 +69,8 @@ step() {  # <label> <command...>
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if have docker; then
-  step "docker builder cache" docker builder prune -af
-  step "unused images" docker image prune -af
+  step "docker builder cache" "${DOCKER[@]}" builder prune -af
+  step "unused images" "${DOCKER[@]}" image prune -af
 fi
 
 if have lsof; then
@@ -91,7 +99,16 @@ pruned=nothing
 ((${#done_steps[@]})) && { pruned=$(printf '%s, ' "${done_steps[@]}"); pruned=${pruned%, }; }
 msg="pressure-guard: over ${THRESH}%: $hot. Pruned: $pruned. Now: $(tr '\n' ' ' <<<"$after")"
 still=0
-if over <<<"$after" >/dev/null; then still=1; msg+=" Still over ${THRESH}%: needs a human."; fi
+if over <<<"$after" >/dev/null; then
+  still=1; msg+=" Still over ${THRESH}%: needs a human."
+  # Biggest entries three levels under each full filesystem, to say what fills it.
+  for mnt in $(over <<<"$after" | grep -o 'disk:[^ ]*' | cut -d: -f2-); do
+    top=$(nice -n 10 ionice -c3 timeout 120 du -xk -d3 -- "$mnt" 2>/dev/null | awk -v b="$(tr -dc / <<<"${mnt%/}" | wc -c)" \
+      '{ n = gsub(/\//, "/", $2) } n == b + 3 { print }' | sort -rn | head -3 \
+      | awk '{ k = $1; $1 = ""; printf "%s%s %.1fG", (i++ ? ", " : ""), substr($0, 2), k / 1048576 }')
+    [ -z "$top" ] || msg+=" Top under $mnt: $top."
+  done
+fi
 
 umask 077
 mkdir -p "$STATE" 2>/dev/null || STATE=
@@ -103,13 +120,17 @@ if [ -n "$STATE" ]; then
 fi
 echo "$msg"
 fm=${FM_HOME:-}
-id=pressure-guard-$(( $(date +%s) / (REPEAT_MIN * 60) ))
+window=$((REPEAT_MIN * 60)); [ "$window" -gt 0 ] || window=1
+id=pressure-guard-$(( $(date +%s) / window ))
 if { [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] && FM_HOME=${fm%/} timeout -k 2 5 "$fm/bin/fm-inbox.sh" note --request-id "$id" --json -- "$msg" >/dev/null 2>&1; } \
   || { [ -x "$HERE/notify-master.sh" ] && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" pressure-guard; } \
   || printf '%s\n' "$msg" | timeout -k 1 3 wall -n -t 2; then
   [ -z "$STATE" ] || date +%s > "$STATE/last-alert"
 fi
-if [ "$still" = 1 ]; then
+# One text per still-over state: the key is the set of over-threshold readings.
+key=$(over <<<"$after" | tr -dc 'a-z:/ ,' | tr -c 'A-Za-z0-9\n' _)
+if [ "$still" = 1 ] && [ -z "$STATE" ] || [ "$(cat "$STATE/last-text" 2>/dev/null)" != "$key" ]; then
   timeout 15 "$TEXT_CMD" -- "Disk or RAM is still over ${THRESH}% after pruning; needs you." >/dev/null 2>&1 \
+    && { [ -z "$STATE" ] || printf '%s\n' "$key" > "$STATE/last-text"; } \
     || echo "pressure-guard: owner text failed" >&2
 fi

@@ -154,7 +154,8 @@ When any reading exceeds `crewship_pressure_guard_pct` (default 70), it prunes o
 It never runs `docker volume prune`, and never touches worktrees, git checkouts or any file held open.
 It then alerts through `fm-inbox.sh note`, falling back to `notify-master.sh` and `wall`, at most every `crewship_pressure_guard_repeat_min` (30) minutes.
 The alert says when a reading is still over the threshold after the prune.
-In that case the guard also texts the owner one sentence with `fm-imessage` (`PRESSURE_TEXT_CMD` replaces it).
+In that case the alert names the top three entries under each full filesystem, and the guard texts the owner one sentence with `fm-imessage` (`PRESSURE_TEXT_CMD` replaces it), once per still-over state until a run finds it below the threshold.
+Docker runs as `sudo -n docker` when the account cannot use the socket directly.
 On this host the uv and bun caches already live on another disk through symlinks, so the guard moves nothing.
 The guard changes nothing below the threshold, so repeated runs are safe.
 
