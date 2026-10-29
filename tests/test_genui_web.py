@@ -14,6 +14,14 @@ def test_genui_bun_suite(suite):
     if not shutil.which("bun"):
         print(f"skipped {suite}: bun is not on PATH")
         pytest.skip("needs bun")
-    subprocess.run(["bun", "install", "--frozen-lockfile"], cwd=ROOT / suite, check=True, capture_output=True, timeout=180)
-    run = subprocess.run(["bun", "test"], cwd=ROOT / suite, capture_output=True, text=True, timeout=180)
+    subprocess.run(
+        ["bun", "install", "--frozen-lockfile"],
+        cwd=ROOT / suite,
+        check=True,
+        capture_output=True,
+        timeout=180,
+    )
+    run = subprocess.run(
+        ["bun", "test"], cwd=ROOT / suite, capture_output=True, text=True, timeout=180
+    )
     assert run.returncode == 0, run.stdout + run.stderr
