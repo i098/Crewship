@@ -20,6 +20,12 @@ crewship_storage_guard_repeat_min: 30
 # days, through blueprint/fleet/doctor/worktree-prune.sh (found with find; sizes from fdu when installed).
 crewship_storage_guard_worktree_age_days: 7
 
+# Above this disk or RAM use (percent) the pressure guard prunes safe targets
+# (all Docker build cache and unused images, finished /tmp/pytest-of-* dirs, uv and bun
+# caches) and alerts, through blueprint/fleet/doctor/pressure-guard.sh.
+crewship_pressure_guard_pct: 70
+crewship_pressure_guard_repeat_min: 30
+
 crewship_fleet_guard_units:
   - crewship-docker-guard.service
   - crewship-docker-guard.timer
@@ -27,12 +33,15 @@ crewship_fleet_guard_units:
   - crewship-dev-server-reaper.timer
   - crewship-storage-guard.service
   - crewship-storage-guard.timer
+  - crewship-pressure-guard.service
+  - crewship-pressure-guard.timer
   - crewship-devtools-bridge-reaper.service
   - crewship-devtools-bridge-reaper.timer
 crewship_fleet_guard_enabled_units:
   - { unit: crewship-docker-guard.timer, wants: timers.target.wants }
   - { unit: crewship-dev-server-reaper.timer, wants: timers.target.wants }
   - { unit: crewship-storage-guard.timer, wants: timers.target.wants }
+  - { unit: crewship-pressure-guard.timer, wants: timers.target.wants }
   - { unit: crewship-devtools-bridge-reaper.timer, wants: timers.target.wants }
 # Only selected units reach rendering, retirement, enablement and handlers.
 crewship_fleet_units: "{{ crewship_fleet_guard_units if (crewship_cfg.profiles.fleet_guards | bool) else [] }}"
