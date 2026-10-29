@@ -95,13 +95,6 @@ const cam = {
     ctx.sel.clear();
     paint();
   },
-  /** Brings cards to the centre for a while: what you asked for holds the centre over new events. */
-  bring(ids: string[]) {
-    asked.clear();
-    ids.forEach((id, i) => asked.set(id, performance.now() + 25_000 - i));
-    ctx.sel.clear();
-    cam.home();
-  },
   toWorld(cx: number, cy: number) {
     const r = canvas.getBoundingClientRect();
     return { x: (cx - r.left - r.width / 2) / cam.k + cam.x, y: (cy - r.top - r.height / 2) / cam.k + cam.y };
@@ -111,7 +104,25 @@ const cam = {
   },
 };
 
-const ctx = { board, send, intent, cam, sel: new Set<string>(), paint };
+const ctx = {
+  board,
+  send,
+  intent,
+  cam,
+  sel: new Set<string>(),
+  paint,
+  /** A card's wide view, for the full view window. */
+  html: (id: string) => (spec.components[id] ? renderCard(spec, spec.components[id], "wide") : ""),
+  /** Brings cards to the centre for a while: what you asked for holds the centre over new events. */
+  bring(ids: string[]) {
+    asked.clear();
+    ids.forEach((id, i) => asked.set(id, performance.now() + 25_000 - i));
+    ctx.sel.clear();
+    cam.home();
+  },
+  /** Set by the overlays: what an ask is about (open card, selection, drawn spot). */
+  about: undefined as undefined | (() => unknown),
+};
 
 function place() {
   const tx = canvas.clientWidth / 2 - cam.x * cam.k, ty = canvas.clientHeight / 2 - cam.y * cam.k;
@@ -180,7 +191,7 @@ function items(): Item[] {
   const nested = new Set(Object.values(spec.components).flatMap((c) => c.children ?? []));
   const now = performance.now();
   return Object.entries(spec.components)
-    .filter(([id]) => !SHELL.has(id) && !nested.has(id))
+    .filter(([id, c]) => !SHELL.has(id) && !nested.has(id) && c.props.removed !== true)
     .map(([id, c]) => {
       const p = c.props, r = c.rect, h = held.get(id);
       const done = p.done === true, boost = (asked.get(id) ?? 0) > now ? 200 : 0;
@@ -288,6 +299,7 @@ function paint() {
     place();
     // first paint lands in place at once; the canvas shows only after it is laid out
     if (canvas.classList.contains("boot") && Object.keys(L.tiles).length) requestAnimationFrame(() => requestAnimationFrame(() => canvas.classList.remove("boot")));
+    overlays.sync();
   });
 }
 
@@ -376,15 +388,14 @@ canvas.addEventListener("pointerdown", (e) => {
   const mode = !el ? undefined : t.closest('[data-act="link"]') ? "link" : t.closest(".tgrip") ? "size" : t.closest(".core>.title, .core>.hd") && !t.closest("button") ? "card" : undefined;
   if (el && mode && L?.tiles[el.dataset.id!]) {
     e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
     return startCard(e, el, mode);
   }
   if (t.closest(IA)) return;
-  canvas.setPointerCapture(e.pointerId);
+  // no pointer capture: it would retarget the click to the canvas, and taps on cards and clusters need their own target
   ptr.set(e.pointerId, [e.clientX, e.clientY]);
 });
 
-canvas.addEventListener("pointermove", (e) => {
+addEventListener("pointermove", (e) => {
   if (gesture) return gesture.move(e);
   const p = ptr.get(e.pointerId);
   if (!p) return;
@@ -419,8 +430,8 @@ const endPtr = (e: PointerEvent) => {
   ptr.delete(e.pointerId);
   if (!ptr.size) canvas.classList.remove("drag");
 };
-canvas.addEventListener("pointerup", endPtr);
-canvas.addEventListener("pointercancel", endPtr);
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
 
 canvas.addEventListener(
   "wheel",
@@ -457,6 +468,6 @@ canvas.addEventListener("click", (e) => {
   if (g?.id) cam.open(g.id.slice(2));
 });
 
-initOverlays(ctx);
+const overlays = initOverlays(ctx);
 paint();
 connect();
