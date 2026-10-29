@@ -508,3 +508,11 @@ def test_configured_identity_metadata_reaches_voice_validation(tmp_path):
     ]}
     result = run_subagent(tmp_path, reply=reply, request="What model are you?", voice=model)
     assert result["result"] == {"kind": "answer", "bubbles": [model], "tools": {}}
+
+
+def test_subagent_answer_is_cleaned_of_tags_and_paths(tmp_path):
+    quote = "[D039b88] The build is paused."
+    tools = {"read-1": {"name": "read", "text": quote}}
+    reply = {"kind": "sources", "sources": [{"tool": 1, "line": 1}]}
+    result = run_subagent(tmp_path, reply=reply, tools=tools, voice=quote, request="Quote the output exactly.")
+    assert result["result"] == {"kind": "answer", "bubbles": ["The build is paused."], "tools": tools}

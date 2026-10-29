@@ -2,6 +2,7 @@ import {
   authorizedWritePath, basicAnswer, deskInput, type DeskEvidence, type DeskProc,
   readDesk, spawnDesk, voiceAnswer, voicePrompt, type VoiceSource,
 } from "./desk.ts";
+import { cleanText } from "./clean.ts";
 import type { DeskReadResult } from "./desk.ts";
 import type { Msg } from "./memory.ts";
 
@@ -87,7 +88,8 @@ Set target to the 1-based request number being answered. Do not return prose, ac
     if (!current()) return;
     if (!voiced.ok) return { kind: "handoff", reason: "failed", tools };
     const bubbles = voiceAnswer(answer, result.question, voiced.ok, voiced.drafted, true);
-    return bubbles ? { kind: "answer", bubbles, target: answer.target, tools }
+    // The outbound filter runs after verification, so it cannot change what the facts check saw.
+    return bubbles ? { kind: "answer", bubbles: bubbles.map(cleanText), target: answer.target, tools }
       : { kind: "handoff", reason: "unverified", tools };
   } catch {
     if (current()) return { kind: "handoff", reason: "failed", tools };

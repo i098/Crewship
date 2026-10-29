@@ -832,6 +832,14 @@ The bubble opens on his phone, so the page listener needs a public HTTPS address
 
 Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which runs the tunnel with the token from `~/super.env`, and sets the card variables in the bridge unit. The tunnel reaches only the page listener. To turn cards off, remove the block, run `./ship.sh launch`, then run `systemctl --user disable --now fm-cards-tunnel` and delete its unit.
 
+## Outbound text filter
+
+`fm-imessage` cleans each text and photo caption before it sends (`apps/imessage/clean.ts`, run with bun). Sub-agent answers pass the same filter in `subagent.ts`.
+The filter removes `[Dxxxx]` decision tags, `[key=...]`, `key=` and `corr=` tags, mate ids (`<x>-mate-<y>` always; `cf-<word>` and `sm-<word>` only in backticks or as a leading `label:`), absolute paths with two or more segments (`/a/b`) and `~/...` paths, `state/` and `data/` paths that end in a file extension, and a status prefix (`working:`, `done:`, `needs-decision:`, `paused:`) at the start of a line.
+A line that starts with "decision stuck after N attempts" is dropped whole; inline, only the phrase is removed.
+URLs stay as they are. Text with none of these stays byte-exact. If nothing is left, the original is sent.
+Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
+
 ## Plain messages and the shared line
 
 See [Commands](#commands) for plain sends and explicit replies.

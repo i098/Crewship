@@ -25,7 +25,7 @@
     dest: "{{ crewship_imessage_dir }}/{{ item }}"
     mode: "0644"
     remote_src: true
-  loop: [bridge.ts, bluebubbles.ts, cards.ts, desk.ts, desk-tools.yml, dispatch-policy.ts, front.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, relay.ts, subagent.ts, transcribe.ts, zoom.ts]
+  loop: [bridge.ts, bluebubbles.ts, cards.ts, clean.ts, desk.ts, desk-tools.yml, dispatch-policy.ts, front.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, relay.ts, subagent.ts, transcribe.ts, zoom.ts]
   notify: restart fm-imessage
 
 - name: Install the iMessage commands
@@ -34,7 +34,7 @@
     dest: "{{ crewship_local_bin }}/{{ item }}"
     mode: "0755"
     remote_src: true
-  loop: [fm-imessage, fm-location]
+  loop: [fm-imessage, fm-location, clean.ts]
 
 - name: Read the installed spectrum-ts version
   ansible.builtin.slurp:
