@@ -28,8 +28,13 @@ curl -X POST 127.0.0.1:4610/agent/demo -d '{"tool":"set_style","args":{"tokens":
 | Pin a card | tap `pin` | `pin {pinned}` |
 | Choose who wins a move | header `wins` pill (tap to switch) | `input {field:"wins",value}` on `header` |
 | Ask the agent | type in the input box, Enter | `input {text}` on `input` |
-| Undo | Ctrl+Z or Cmd+Z | `undo` |
-| Draw | the pen button, or shift-drag; Esc clears | none (local only) |
+| Undo | Ctrl+Z or Cmd+Z; plain `z` in hotkeys mode | `undo` |
+| Select | tap a card: white ring and a `locked` tag; the bar shows "N selected · Bring to center · Clear"; double tap brings it to the centre | none; the next ask carries `about.ids` |
+| Full view | `⤢` on a card: a window over the board; drag it by any empty spot, resize it from the corner grip; the ask box stays on top and answers (`props.of`) sit under the card | the next ask carries `about.of` |
+| Remove a card | `✕` | `input {field:"removed",value:true}` |
+| Draw | the pen button (white when on), or shift-drag on the board; white ink; the bar shows "Your drawing · Clear" | none; the next ask carries `about.at` (the drawing's box) |
+| Upload | `＋`, or drop files anywhere: image, video and audio play; text, JSON and HTML show as escaped text; a PDF opens in a frame; other files get a Download link | none (local only) |
+| Hotkeys | `0` back, `[` `]` clusters, `/` ask, `L` log, `z` rewind, space spread, Esc closes (full view, log, selection, spread); any letter types into the ask box | as the button they press |
 | Pan, zoom | drag the empty canvas or scroll; pinch or Ctrl/Cmd+scroll zooms 0.02–50× | none |
 | Open a cluster | tap a cluster behind, or any cluster in the spread view | none |
 
@@ -89,11 +94,11 @@ The nav pill switches the hint row between hotkeys and buttons and keeps the cho
 
 ## Fixed rule: the sketch layer is on top
 
-The sketch layer is a fixed SVG at the maximum z-index, above every card, link, header and input box. No spec, token or style can move a component above it. While the pen is on, the layer takes all pointer input; a tap on the pen's spot turns it off.
+The ink layer is a fixed SVG at the maximum z-index, above every card, link, header, full view and input box. No spec, token or style can move a component above it. It copies the board camera's transform, so strokes pan and zoom with the board. `src/overlays.ts` owns it with the selection, the full view, uploads and hotkeys.
 
 ## Limits
 
-- Strokes stay in this browser; they are not sent or saved.
+- Strokes and uploaded files stay in this browser; they are not sent or saved. Upload cards float on the board in world space, outside the cluster layout.
 - A drag sends one intent on drop, not a patch per frame.
 - Card order set by dragging stays in this browser only.
 - A link between two cards in one cluster is kept in the spec but not drawn, as in the design.
