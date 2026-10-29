@@ -399,7 +399,7 @@ if (existsSync(ROUTING_LOG)) {
   if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
   else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
 }
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId);
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
@@ -491,7 +491,9 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
-    return queue({ ...destination, image, bubbles: parts,
+    // A caller that retries sends X-Request-Id; the outbox then delivers that request once.
+    const sent = req.headers.get("x-request-id");
+    return queue({ ...destination, image, bubbles: parts, ...(sent && !image ? { requestId: `send-${sent}` } : {}),
       ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
         : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
       reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
@@ -750,6 +752,12 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     if (Object.keys(maybe).length) save({ ...o, maybe, since });
     throw e;
   }
+}
+
+// Each chat has one lane for its answers, so their bubbles stay in order, and one for the front desk's ack, so a slow
+// send never holds the ack of a new text. Other chats never wait on this chat.
+function outLane(o: Out): string {
+  return `${o.line ?? "photon"}|${o.space}|${o.front ? "front" : ""}`;
 }
 
 // Desk responses stay on their queued chat's transport, even during retries.
