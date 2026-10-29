@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { countChecks, parseBacklog, type Fleet, type Pr } from "../fleet/data";
 import { mergeBlock } from "../fleet/cards";
+import { countChecks, type Fleet, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
 const pr = (o: Partial<Pr>): Pr => ({
@@ -43,4 +43,16 @@ help[1]:
     { id: "fleet-cutover-c7", state: "queued", kind: "ship", title: "phases 2-4: drain laptop fleet, snapshot ", held: true },
     { id: "fm-merge-local-branch-naming-b6", state: "in_flight", kind: "ship", title: "fm-merge-local.sh assumes the branch is always fm/<task-id>", held: false },
   ]);
+});
+
+test("an ask's time is the at= stamp of the last line carrying its key", () => {
+  const text = [
+    "needs-decision [at=100] [key=a]: first",
+    "working [at=150]: other",
+    "needs-decision [at=200] [key=a]: asked again",
+    "blocked [at=300] [key=b]: stuck",
+  ].join("\n");
+  expect(raisedAt(text, "a")).toBe(200);
+  expect(raisedAt(text, "b")).toBe(300);
+  expect(raisedAt(text, "missing")).toBe(0);
 });

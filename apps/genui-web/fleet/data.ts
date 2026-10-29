@@ -4,7 +4,8 @@ import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, st
 import { parseStatusLine, type StatusLine } from "@crewship/genui-agent-kit";
 
 export type Task = { id: string; home: string; mate?: string; meta: Record<string, string>; lines: StatusLine[]; busy: string };
-export type Ask = { home: string; task: string; key: string; verb: string; note: string };
+/** `at` is the epoch second on the status line that raised the ask, so the newest ask sorts first across files. */
+export type Ask = { home: string; task: string; key: string; verb: string; note: string; at: number };
 export type BacklogRow = { id: string; state: string; kind: string; title: string; held: boolean };
 export type Checks = { ok: number; bad: number; pending: number };
 export type Pr = {
@@ -86,10 +87,20 @@ export function readCrew(main: string): { mates: Task[]; workers: Task[] } {
 export async function openAsks(home: string, task: string): Promise<Ask[]> {
   const { out, code } = await run(["bash", "-c", '. "$1/bin/fm-classify-lib.sh" && status_own_open_decisions "$2"', "fold", home, `${home}/state/${task}.status`], home);
   if (code !== 0) return [];
+  const text = await Bun.file(`${home}/state/${task}.status`)
+    .text()
+    .catch(() => "");
   return out.split("\n").flatMap((l) => {
     const [key, verb, ...note] = l.split("\t");
-    return key && verb ? [{ home, task, key, verb, note: note.join("\t") }] : [];
+    return key && verb ? [{ home, task, key, verb, note: note.join("\t"), at: raisedAt(text, key) }] : [];
   });
+}
+
+/** The at= stamp of the last status line carrying `[key=<key>]`. */
+export function raisedAt(text: string, key: string): number {
+  let at = 0;
+  for (const l of text.split("\n")) if (l.includes(`[key=${key}]`)) at = Number(/\[at=(\d+)\]/.exec(l)?.[1] ?? at);
+  return at;
 }
 
 /** One TOON row: comma separated, double-quoted cells may hold commas. */
@@ -199,24 +210,23 @@ export class FleetSource {
       this.changed();
     }
     // The fold reads whole status files (seconds each), so it runs only for a file that changed.
-    // newest status file first, so a cluster's few visible ask cards are the asks raised last
-    const found: { mt: number; asks: Ask[] }[] = [];
+    const found: Ask[][] = [];
     for (const t of [...mates, ...workers]) {
       const file = `${t.home}/state/${t.id}.status`;
-      let sig = "", mt = 0;
+      let sig = "";
       try {
         const s = statSync(file);
         sig = `${s.size}:${s.mtimeMs}`;
-        mt = s.mtimeMs;
       } catch {
         continue;
       }
       const k = `${t.home}\0${t.id}`;
       let f = this.folds.get(k);
       if (f?.sig !== sig) this.folds.set(k, (f = { sig, asks: await openAsks(t.home, t.id) }));
-      found.push({ mt, asks: f.asks });
+      found.push(f.asks);
     }
-    const asks = found.sort((a, b) => b.mt - a.mt).flatMap((x) => x.asks);
+    // newest ask first, so a cluster's few visible ask cards are the asks raised last
+    const asks = found.flat().sort((a, b) => b.at - a.at);
     const first = !this.fleet.asksAt;
     this.fleet.asksAt = Date.now();
     if (first || JSON.stringify(asks) !== JSON.stringify(this.fleet.asks)) {
