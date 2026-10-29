@@ -1,0 +1,17 @@
+{
+  "name": "@crewship/genui-server-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --persist-to .wrangler-state --port 8787",
+    "emit": "bun emit-view.ts",
+    "measure": "bun measure.ts"
+  },
+  "dependencies": {
+    "@crewship/genui-spec": "../../../packages/genui-spec"
+  },
+  "devDependencies": {
+    "wrangler": "^4.155.0"
+  }
+}
