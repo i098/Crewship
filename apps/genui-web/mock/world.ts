@@ -40,7 +40,7 @@ const item = (kind: string, proj: string, base: number, props: Record<string, un
 const ITEMS = {
   i1: () =>
     item("incident", "bill", 70, {
-      urgent: true, claim: "cf-bill", att: 1, title: "Refunds test failed on main", doneTitle: "Refunds test is green again",
+      urgent: true, claim: "cf-bill", att: 1, title: "Refunds test failed on main", doneTitle: "Refunds test is green again", boost: true,
       fix: { from: "refund = amount × 0.1", to: "refund = cents(amount, 10%)" },
     }),
   d2: () =>
@@ -52,12 +52,17 @@ const ITEMS = {
     item("compare", "swap", 45, {
       title: "Vercel vs Fly for swapapp", a: "Vercel", b: "Fly", subject: "swapapp", verdict: "Fly wins 2 of 4 · cheaper, more regions",
       metrics: [["Cost / mo", 20, 12], ["Cold start", 9, 14], ["Deploy speed", 16, 11], ["Regions", 10, 18]],
-      acts: [{ k: "fly", b: "Go with Fly", pri: true }, { k: "dismiss", b: "Dismiss" }],
+      acts: [{ k: "fly", b: "Move to Fly", pri: true }, { k: "dismiss", b: "Keep Vercel" }],
     }),
 };
 
 /** The design's ask chips. */
 const CHIPS = ["Compare Vercel vs Fly for swapapp", "When does swapapp ship?", "Who's working on what?", "What's going on?", "Open the first plan board"];
+
+/** Labels of the conflict card's merge choices (src/views/work.ts), for the log. */
+const MERGES: Record<string, string> = { ai: "Keep both", theirs: "Take main", mine: "Keep mine" };
+
+const name = (p: Record<string, unknown>) => String(p.q ?? p.title ?? p.kind);
 
 /** 30 host samples per stat (0-100), the design's sample() curves without its noise. */
 function hostStats(): Record<string, number[]> {
@@ -96,6 +101,8 @@ export function seedSpec(): BoardSpec {
     tokens: {},
     projects: PROJECTS,
   };
+  const news = Object.values(spec.components).filter((c) => c.props.kind).map((c) => ({ at: 0, text: `New: ${name(c.props)}`, proj: String(c.props.proj) }));
+  spec.components.log = { type: "log", props: { items: news } };
   return applyPatch(spec, derive(spec, 0));
 }
 
@@ -114,7 +121,8 @@ function lineOf(spec: BoardSpec, p: P): string {
     case "pipeline": return `#209 is on *stage ${Number(p.at) + 1},* nothing needs you there.`;
     case "timeline": return `swapapp ships *${props(spec, "d2")?.pick === "mon" ? "Monday" : "Friday"}.*`;
     case "plan": return "*Needs you:* plan the build.";
-    case "embed": return `*${p.title}*`;
+    case "sys": { const s = props(spec, "header")?.stats as Record<string, number[]> | undefined; return `Host: *cpu ${s?.cpu.at(-1)}%,* mem ${s?.mem.at(-1)}%.`; }
+    case "tui": return `*${p.agent}* live.`;
     case "ask": return p.ready ? "Here is *what I found.*" : "Looking into *your question…*";
     default: return "*4 agents* are working right now.";
   }
@@ -129,15 +137,17 @@ function statusProps(spec: BoardSpec, tick: number): Record<string, P> {
   if (p1) {
     const k = Math.min(Number(p1.at) || 0, stages.length - 1);
     const eta = Math.max(1, (stages.length - 1 - k) * 12 + (pg ? 25 : 0) - (tick % 2) * 6);
-    want.p1 = { stages, at: k, kpi: { value: `~${eta}`, unit: "min" } };
+    want.p1 = { stages, at: k, kpi: { value: `~${eta}`, unit: "min" }, next: k < stages.length - 1 ? `#209 → ${stages[k + 1]}` : false };
   }
   // one day is 25 units: Postgres's migrate day moves the ship from Fri to Sat; waiting for Monday covers it.
   // the view takes days, so every unit value is divided by 25
   const shift = mon ? 46 : pg ? 25 : 0;
+  const ship = mon ? "Mon 10:00" : pg ? "Sat 14:00" : "Fri 14:00";
   if (props(spec, "t1"))
     want.t1 = {
       subject: "swapapp",
-      ship: mon ? "Mon 10:00" : pg ? "Sat 14:00" : "Fri 14:00",
+      ship,
+      next: `swapapp ships ${ship}`,
       shipAt: (54 + shift) / 25,
       shipRow: 1,
       now: Math.min(70, 13 + tick * 2) / 25,
@@ -152,12 +162,31 @@ function statusProps(spec: BoardSpec, tick: number): Record<string, P> {
   return want;
 }
 
+/** Each open decision's options carry what picking them would change: option.preview = { [cardId]: props } (design pv()). */
+function previewProps(spec: BoardSpec, tick: number): Record<string, P> {
+  const want: Record<string, P> = {};
+  const now = statusProps(spec, tick);
+  for (const [id, c] of Object.entries(spec.components)) {
+    const p = c.props;
+    if (p.kind !== "decision" || !Array.isArray(p.opts) || !live(p)) continue;
+    want[id] = {
+      opts: (p.opts as CardOpt[]).map(({ preview: _, ...o }) => {
+        if (p.pick !== undefined || p.done === true) return o;
+        const alt = statusProps(applyPatch(spec, [{ op: "add", path: `/components/${esc(id)}/props/pick`, value: o.k }]), tick);
+        const preview = Object.fromEntries(Object.entries(alt).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(now[k])));
+        return Object.keys(preview).length ? { ...o, preview } : o;
+      }),
+    };
+  }
+  return want;
+}
+
 /** Each live item's priority and line, and the header: the top item's line plus how many others wait on you. */
 function lineProps(spec: BoardSpec): Record<string, P> {
   const want: Record<string, P> = {};
   const items = Object.entries(spec.components).filter(([, c]) => c.type === "card" && c.props.kind && live(c.props));
   for (const [id, { props: p }] of items)
-    want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0), line: lineOf(spec, p) };
+    want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.boost === true ? 100 : 0) + (p.asked === true ? 200 : 0), line: lineOf(spec, p) };
   const top = items.reduce<string | undefined>((a, [id]) => (!a || Number(want[id].priority) > Number(want[a].priority) ? id : a), undefined);
   if (!top || !spec.components.header) return want;
   const more = items.filter(([id, c]) => id !== top && c.props.need === true && c.props.done !== true).length;
@@ -176,10 +205,10 @@ function linksOf(spec: BoardSpec) {
 
 /** Props that follow from the rest of the spec: stages, ship day, lines, priority, header, links. */
 export function derive(spec: BoardSpec, tick: number): PatchOp[] {
-  const status = statusProps(spec, tick), lines = lineProps(spec);
+  const status = statusProps(spec, tick), lines = lineProps(spec), previews = previewProps(spec, tick);
   const patch: PatchOp[] = [];
-  for (const id of new Set([...Object.keys(status), ...Object.keys(lines)]))
-    for (const [k, v] of Object.entries({ ...status[id], ...lines[id] }))
+  for (const id of new Set([...Object.keys(status), ...Object.keys(lines), ...Object.keys(previews)]))
+    for (const [k, v] of Object.entries({ ...status[id], ...lines[id], ...previews[id] }))
       if (JSON.stringify(spec.components[id].props[k]) !== JSON.stringify(v)) patch.push({ op: "add", path: `/components/${esc(id)}/props/${k}`, value: v });
   const links = linksOf(spec);
   if (JSON.stringify(links) !== JSON.stringify(spec.links)) patch.push({ op: "replace", path: "/links", value: links });
@@ -203,6 +232,7 @@ const ASK: [RegExp, (w: World) => PatchOp[]][] = [
 
 /** One board's live world: the design's script on a clock, and the agent's replies to what you do. */
 export class World {
+  private t0 = Date.now();
   tick = 0;
   private n = 0;
   private timers: Timer[] = [];
@@ -212,10 +242,15 @@ export class World {
     private commit: (cause: string, patch: PatchOp[]) => void,
   ) {}
 
-  /** Apply `patch` and everything that follows from it, as one agent op. */
+  /** Apply `patch` and everything that follows from it, as one agent op; a new card logs "New: …" (design T()). */
   change(cause: string, patch: PatchOp[] = []) {
-    const next = patch.length ? applyPatch(this.spec(), patch) : this.spec();
-    const all = [...patch, ...derive(next, this.tick)];
+    const news = patch.flatMap((o) => {
+      const c = o.op === "add" && /^\/components\/[^/]+$/.test(o.path) ? (o.value as Component) : undefined;
+      return c?.props.kind ? this.log(`New: ${name(c.props)}`, c.props.proj) : [];
+    });
+    const mine = [...patch, ...news];
+    const next = mine.length ? applyPatch(this.spec(), mine) : this.spec();
+    const all = [...mine, ...derive(next, this.tick)];
     if (all.length) this.commit(cause, all);
   }
 
@@ -233,27 +268,42 @@ export class World {
     this.timers.push(t);
   }
 
+  /** One action-log row (design logA), timed from when the world started. */
+  private log(text: string, proj: unknown): PatchOp[] {
+    const at = Math.round((Date.now() - this.t0) / 1000);
+    return this.spec().components.log ? [{ op: "add", path: "/components/log/props/items/-", value: { at, text, proj: String(proj ?? "me") } }] : [];
+  }
+
   private finish(id: string) {
-    this.change(`world:done:${id}`, set(id, { done: true }));
+    const p = props(this.spec(), id)!;
+    this.change(`world:done:${id}`, [...set(id, { done: true }), ...this.log(`Done: ${name(p)}`, p.proj)]);
     this.at(2.5, () => this.change(`world:gone:${id}`, set(id, { removed: true })));
   }
 
   /** The scripted live world (design `script` and the 6 s clock). */
   start() {
-    const step = (k: number) => () => this.change("world:stage", set("p1", { at: k }));
-    this.at(6, step(3));
-    this.at(15, () => this.change("world:i1", add("i1", ITEMS.i1())));
-    this.at(21, () => this.change("world:i1", set("i1", { att: 2 })));
-    this.at(27, () => this.change("world:i1", set("i1", { att: 3 })));
+    const step = (k: number) => {
+      const st = props(this.spec(), "p1")?.stages as string[];
+      this.change("world:stage", [...set("p1", { at: k }), ...this.log(`#209 moved to ${st[Math.min(k, st.length - 1)].toLowerCase()}`, "swap")]);
+    };
+    this.at(6, () => step(3));
+    // the incident is boosted to the front for its first 9 s (design boost: now() + 9)
+    this.at(15, () => {
+      this.change("world:i1", add("i1", ITEMS.i1()));
+      this.change("world:i1", this.log("cf-bill claimed: Refunds test failed on main", "bill"));
+    });
+    this.at(24, () => this.has("i1") && this.change("world:i1", set("i1", { boost: false })));
+    this.at(21, () => this.change("world:i1", [...set("i1", { att: 2 }), ...this.log("cf-bill: fix attempt 2", "bill")]));
+    this.at(27, () => this.change("world:i1", [...set("i1", { att: 3 }), ...this.log("cf-bill: fix attempt 3", "bill")]));
     this.at(32, () => this.finish("i1"));
     this.at(38, () => this.change("world:d2", add("d2", ITEMS.d2())));
-    this.at(44, step(4));
+    this.at(44, () => step(4));
     const clock = setInterval(() => {
       this.tick++;
       const p1 = props(this.spec(), "p1");
       if (this.tick >= 8 && this.tick % 2 === 0 && p1 && p1.done !== true) {
         const last = (p1.stages as string[]).length - 1;
-        if (Number(p1.at) < last) return this.change("world:stage", set("p1", { at: Number(p1.at) + 1 }));
+        if (Number(p1.at) < last) return step(Number(p1.at) + 1);
         this.finish("p1");
         return this.change("world:shipped", set("sh", { shipped: Number(props(this.spec(), "sh")?.shipped) + 1 }));
       }
@@ -268,8 +318,19 @@ export class World {
     for (const t of this.timers) clearTimeout(t);
   }
 
-  /** After a user's input intent: a card act settles its item. */
+  /** After a user's input intent: a card act is logged and settles its item; a removed card is logged. */
   react(id: string, field: unknown) {
+    const p = props(this.spec(), id);
+    const v = p && typeof field === "string" ? p[field] : undefined;
+    const label = (list: unknown) => (Array.isArray(list) ? (list as CardOpt[]).find((o) => o.k === v)?.b : undefined) ?? String(v);
+    const text = !p ? undefined
+      : field === "pick" ? `You picked ${label(p.opts)}: ${name(p)}`
+      : field === "act" ? `You chose: ${label(p.acts)}`
+      : field === "merge" ? `You chose ${MERGES[String(v)] ?? v} on ${p.branch ?? name(p)}`
+      : field === "send" ? `You sent the plan: ${name(p)}`
+      : field === "removed" && v === true ? `You removed: ${name(p)}`
+      : undefined;
+    if (text) this.change(`world:${id}`, this.log(text, p?.proj));
     if (typeof field === "string" && SETTLES.test(field) && this.has(id)) this.finish(id);
     else this.change(`world:${id}`);
   }
@@ -282,11 +343,16 @@ export class World {
       i < 0
         ? item("sys", "host", 95, { title: "This host", series: props(this.spec(), "header")?.stats ?? hostStats() })
         : item("tui", ["crew", "swap", "bill", "all"][i], 95, { title: CREW[i].name, agent: CREW[i].name, lines: [`00:00  ${CREW[i].doing}`] });
-    this.change(`open:${what}`, [...(this.has(what) ? set(what, { removed: false, done: false }) : add(what, card)), ...this.front(what)]);
+    this.change(`open:${what}`, [
+      ...(this.has(what) ? set(what, { removed: false, done: false }) : add(what, card)),
+      ...this.log(`You opened ${i < 0 ? "host stats" : CREW[i].name}`, "host"),
+      ...this.front(what),
+    ]);
   }
 
   /** The agent's answer to a typed ask (design agentChoose, run(ASK), askAbout). */
   answer(text: string, about: About = {}) {
+    this.change("ask", this.log(`You asked: ${text.trim().slice(0, 200)}`, "me"));
     const spec = this.spec();
     const ids = (about.ids ?? []).filter((i) => live(props(spec, i)));
     const ctx = about.of && live(props(spec, about.of)) ? about.of : ids[0];
