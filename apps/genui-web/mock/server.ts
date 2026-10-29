@@ -2,10 +2,10 @@
 // Run: bun apps/genui-web/mock/server.ts  (PORT defaults to 4610)
 import type { ServerWebSocket } from "bun";
 import page from "../index.html";
-import type { Actor, AgentCall, ClientMsg, Op, PatchOp, ServerMsg, Spec } from "../src/contract";
+import type { Actor, AgentCall, ClientMsg, Op, PatchOp, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import { applyPatch, esc, filterAgentPatch, intentPatch, invertPatch, safeStyle } from "../src/model";
 
-export const seedSpec = (): Spec => ({
+export const seedSpec = (): BoardSpec => ({
   components: {
     header: { type: "header", props: { title: "#209 is on stage 4, nothing needs you there. +3 more need you.", wins: "agent" } },
     input: { type: "input", props: { placeholder: "Ask anything, tell the AI what to do, or draw" } },
@@ -29,7 +29,7 @@ export const seedSpec = (): Spec => ({
   tokens: {},
 });
 
-type Room = { spec: Spec; seq: number; undo: Op[]; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>> };
+type Room = { spec: BoardSpec; seq: number; undo: Op[]; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>> };
 const rooms = new Map<string, Room>();
 
 const room = (id: string) => {

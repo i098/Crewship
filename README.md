@@ -101,7 +101,7 @@ For how a host gets set up, see the [setup flow](SETUP.md#setup-flow). This is w
 ## Repository layout
 
 - [`blueprint/`](blueprint/): what provisions a host: the Ansible playbook, seeds, skills, and guards.
-- [`apps/`](apps/): services Crewship runs: crew board, iMessage bridge, secrets Worker, and the generative UI server spike.
+- [`apps/`](apps/): services Crewship runs: crew board, iMessage bridge, secrets Worker, and the generative UI board server and canvas.
 - [`packages/`](packages/): shared libraries: `genui-spec`, the generative UI contract.
 - [`tools/`](tools/): stand-alone helpers: the `crewship` launcher and schedule viewer, `herdr-patch`, `dia-debug`, and the `lavish-tui` board view with `lavish-keep`.
 - [`scripts/`](scripts/): the `ship.sh` CLI code, the release artifact build, and secrets helpers.

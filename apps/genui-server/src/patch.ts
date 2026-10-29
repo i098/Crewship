@@ -1,4 +1,4 @@
-import type { PatchOp, Spec } from "./contract";
+import type { PatchOp, BoardSpec } from "@crewship/genui-spec";
 
 const unescape = (s: string) => s.replace(/~1/g, "/").replace(/~0/g, "~");
 
@@ -31,7 +31,7 @@ function index(arr: unknown[], key: string, allowEnd: boolean, path: string): nu
 }
 
 /** Apply a patch to a deep copy of spec; return the new spec and the inverse patch. */
-export function applyPatch(spec: Spec, patch: PatchOp[]): { spec: Spec; inverse: PatchOp[] } {
+export function applyPatch(spec: BoardSpec, patch: PatchOp[]): { spec: BoardSpec; inverse: PatchOp[] } {
   const doc = structuredClone(spec);
   const inverse: PatchOp[] = [];
   for (const op of patch) {

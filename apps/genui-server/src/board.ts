@@ -1,4 +1,4 @@
-import { type AgentCall, type Actor, type ClientMsg, type Op, type PatchOp, type Rect, type Spec, emptySpec } from "./contract";
+import { type AgentCall, type Actor, type ClientMsg, type Op, type PatchOp, type Rect, type BoardSpec, emptyBoard } from "@crewship/genui-spec";
 import { applyPatch, pointer, validatePatch } from "./patch";
 import type { Store } from "./store";
 
@@ -10,7 +10,7 @@ const rectPath = /^\/components\/([^/]+)\/rect(\/|$)/;
 
 /** Board state machine: sequencing, op log, snapshots, undo, move conflicts. No I/O beyond Store. */
 export class Board {
-  spec: Spec = emptySpec();
+  spec: BoardSpec = emptyBoard();
   seq = 0;
   private rectWriter = new Map<string, Actor>();
   private agentRectSeq = new Map<string, number>();
@@ -101,15 +101,16 @@ export class Board {
   }
 
   private emitPatch(a: Record<string, unknown>): PatchOp[] {
-    // AG-UI shape: { event: { type: "STATE_DELTA", delta: [...] } }; also accept { patch } or a full { spec }.
-    const ev = a.event as { delta?: unknown } | undefined;
+    // AG-UI shape: { event: STATE_DELTA {delta} | STATE_SNAPSHOT {snapshot} }; also accept { patch } or a full { spec }.
+    const ev = a.event as { delta?: unknown; snapshot?: unknown } | undefined;
     if (ev?.delta !== undefined) return validatePatch(ev.delta);
     if (a.patch !== undefined) return validatePatch(a.patch);
-    if (a.spec && typeof a.spec === "object") {
-      const s = { ...emptySpec(), ...(a.spec as Partial<Spec>) };
+    const full = ev?.snapshot ?? a.spec;
+    if (full && typeof full === "object") {
+      const s = { ...emptyBoard(), ...(full as Partial<BoardSpec>) };
       return (["components", "links", "tokens"] as const).map((k) => ({ op: "add", path: "/" + k, value: s[k] }));
     }
-    throw new Error("emit_view needs event.delta, patch or spec");
+    throw new Error("emit_view needs event.delta, event.snapshot, patch or spec");
   }
 
   private stylePatch(id: string | undefined, tokens: Record<string, unknown>): PatchOp[] {

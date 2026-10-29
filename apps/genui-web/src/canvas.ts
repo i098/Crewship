@@ -1,5 +1,5 @@
 // The genui web canvas: draws the spec, sends user intents, and keeps the sketch layer on top.
-import type { ClientMsg, Component, IntentKind, Rect, ServerMsg, Spec } from "./contract";
+import type { ClientMsg, Component, IntentKind, Rect, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 
 const q = new URLSearchParams(location.search);
@@ -67,7 +67,7 @@ function tokens(el: HTMLElement, c: Component | undefined) {
 }
 
 let rootKeys: string[] = [];
-function rootTokens(spec: Spec) {
+function rootTokens(spec: BoardSpec) {
   const root = document.documentElement.style;
   for (const k of rootKeys) root.removeProperty(`--${k}`);
   const t = safeStyle(spec.tokens);
@@ -99,7 +99,7 @@ function paintInput(c: Component | undefined) {
   if (c?.rect) Object.assign(composer.style, { left: `${c.rect.x}px`, top: `${c.rect.y}px`, width: `${c.rect.w}px`, bottom: "auto", right: "auto" });
 }
 
-function body(spec: Spec, c: Component, depth = 0): string {
+function body(spec: BoardSpec, c: Component, depth = 0): string {
   const p = c.props;
   const kpi = p.kpi as { value?: unknown; unit?: unknown } | undefined;
   const steps = p.steps as { items?: unknown[]; at?: number } | undefined;
@@ -117,7 +117,7 @@ function body(spec: Spec, c: Component, depth = 0): string {
   return h;
 }
 
-function cardHtml(spec: Spec, c: Component): string {
+function cardHtml(spec: BoardSpec, c: Component): string {
   const pinned = c.props.pinned === true;
   return `<div class="hd">${c.props.flag ? `<span class="flag">${escHtml(c.props.flag)}</span>` : ""}
 <button type="button" class="ib" data-act="pin" aria-pressed="${pinned}" title="${pinned ? "Unpin" : "Pin in place"}">${pinned ? "pinned" : "pin"}</button>
@@ -127,12 +127,12 @@ function cardHtml(spec: Spec, c: Component): string {
 }
 
 /** Numbers only: rects come from the agent's spec and end up in SVG markup and styles. */
-function rectOf(spec: Spec, id: string): Rect | undefined {
+function rectOf(spec: BoardSpec, id: string): Rect | undefined {
   const r = drag?.id === id ? drag.rect : spec.components[id]?.rect;
   return r && { x: Number(r.x) || 0, y: Number(r.y) || 0, w: Number(r.w) || 0, h: Number(r.h) || 0 };
 }
 
-function paintLinks(spec: Spec) {
+function paintLinks(spec: BoardSpec) {
   // Side by side: right edge to left edge. Stacked (the two overlap in x): bottom edge to top edge.
   const edge = (a: Rect, b: Rect) => {
     if (a.x < b.x + b.w && b.x < a.x + a.w) {

@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import type { Op, ServerMsg, Spec } from "../src/contract";
+import type { Op, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import { applyPatch, Board, filterAgentPatch, invertPatch, safeStyle } from "../src/model";
 import { seedSpec, start } from "../mock/server";
 
 const op = (seq: number, actor: Op["actor"], patch: Op["patch"]): ServerMsg => ({ t: "ops", ops: [{ seq, actor, cause: "t", patch, inverse: [] }] });
 const agentMove = (seq: number, x: number): ServerMsg => op(seq, "agent", [{ op: "add", path: "/components/feed/rect", value: { x, y: 0, w: 300, h: 200 } }]);
 
-function boardWith(spec: Spec = seedSpec()) {
+function boardWith(spec: BoardSpec = seedSpec()) {
   const b = new Board();
   b.receive({ t: "snapshot", seq: 1, spec });
   return b;

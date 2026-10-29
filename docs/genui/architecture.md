@@ -24,10 +24,10 @@ The agent controls every component, including the header and the input box.
 | Path | Holds |
 |---|---|
 | `docs/genui/design/` | Frozen design board, fonts and media. Read only |
-| [`packages/genui-spec/`](../../packages/genui-spec/src/index.ts) | Zod catalog, style tokens, AG-UI event types, op log row, `applyPatch`. Every other part imports it |
-| `packages/genui-agent-kit/` | Agent tools: `emit_view`, `set_style`, `link`, `size`, `pin`, `reset` (P4) |
-| `apps/genui-server/` | Worker + DO: validate, sequence, store, WebSocket, intents, auth (P2). [`spike/`](../../apps/genui-server/spike/) holds the P0 spike |
-| `apps/genui-web/` | Next.js PWA: canvas, clusters, renderer, motion (P3) |
+| [`packages/genui-spec/`](../../packages/genui-spec/src/index.ts) | Zod catalog, style tokens, AG-UI event types, op log row, `applyPatch`, and the board wire types in `src/wire.ts`. Every other part imports it |
+| `packages/genui-agent-kit/` | Agent client (`emit_view`, `set_style`, `link`, `pin`, `reset`, `onIntent`) and the Firstmate status bridge. See [agent-kit.md](agent-kit.md) |
+| `apps/genui-server/` | Worker + DO: op log, snapshots, undo, move conflicts, WebSocket, identity seam. See [server.md](server.md). [`spike/`](../../apps/genui-server/spike/) holds the P0 spike |
+| `apps/genui-web/` | Canvas page and a mock server for local work. See [canvas.md](canvas.md) |
 | `data/genui/` | Local runtime data only: `board.sqlite`, `media/` |
 
 ## What the agent controls
@@ -98,6 +98,10 @@ Measured on 2026-10-29 (workerd from wrangler 4.155, local host; times are WebSo
 The page drew the same spec at 1280, 768 and 390 px with no horizontal overflow and no page errors.
 Limits: these are local workerd numbers, not edge numbers.
 In-DO timers stay frozen while synchronous code runs, so the DO cannot time its own boot; `measure.ts` measures from the client.
+
+## Integration check
+
+With `wrangler dev --local` running in `apps/genui-server/` and the `apps/genui-web` mock serving the page, open `http://127.0.0.1:4610/?ws=ws://127.0.0.1:8787/ws/<board>`. The page then draws the real server's board. One run used the agent kit for `emitView` (full spec, then a patch), `setStyle` and `link`. The page drew both cards and the link at 1280 and 390 px with no page errors. A user `input` intent reached the agent's `onIntent` handler.
 
 ## Build order
 

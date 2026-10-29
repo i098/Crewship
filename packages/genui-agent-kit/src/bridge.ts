@@ -1,5 +1,5 @@
 import type { GenuiClient } from "./client";
-import type { PatchOp } from "./contract";
+import type { PatchOp } from "@crewship/genui-spec";
 
 export type StatusLine = { state: string; at?: number; text: string };
 

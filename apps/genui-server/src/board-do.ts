@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { Board } from "./board";
-import type { AgentCall, ClientMsg, Op, ServerMsg, Spec } from "./contract";
+import type { AgentCall, ClientMsg, Op, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import type { Store } from "./store";
 
 class SqlStore implements Store {
@@ -19,16 +19,16 @@ class SqlStore implements Store {
   }
   latestSnapshot() {
     const r = this.sql.exec(`SELECT seq, spec FROM snapshots ORDER BY seq DESC LIMIT 1`).toArray()[0];
-    return r ? { seq: r.seq as number, spec: JSON.parse(r.spec as string) as Spec } : null;
+    return r ? { seq: r.seq as number, spec: JSON.parse(r.spec as string) as BoardSpec } : null;
   }
-  saveSnapshot(seq: number, spec: Spec) { this.sql.exec(`INSERT OR REPLACE INTO snapshots VALUES (?,?)`, seq, JSON.stringify(spec)); }
+  saveSnapshot(seq: number, spec: BoardSpec) { this.sql.exec(`INSERT OR REPLACE INTO snapshots VALUES (?,?)`, seq, JSON.stringify(spec)); }
 }
 
 /** One Durable Object per board. Hibernating WebSockets; socket role lives in the attachment. */
 export class BoardDO extends DurableObject {
   private board: Board;
 
-  constructor(ctx: DurableObjectState, env: unknown) {
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
     this.board = new Board(new SqlStore(ctx.storage.sql));
   }

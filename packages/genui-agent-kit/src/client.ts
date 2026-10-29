@@ -1,12 +1,12 @@
 import type {
-  AgentReply, AgentRequest, AgentTool, ClientFrame, Intent, PatchOp, ServerFrame, Spec, ViewEvent,
-} from "./contract";
+  AgentReply, AgentCall, AgentTool, ClientMsg, Intent, PatchOp, ServerMsg, BoardSpec, ViewEvent,
+} from "@crewship/genui-spec";
 
 export type GenuiClientOptions = { url: string; boardId: string; clientId?: string };
 export type IntentHandler = (intent: Intent) => void;
 
 export type GenuiClient = {
-  emitView(specOrPatch: Spec | PatchOp[]): Promise<AgentReply>;
+  emitView(specOrPatch: BoardSpec | PatchOp[]): Promise<AgentReply>;
   setStyle(id: string, tokens: Record<string, string | number>): Promise<AgentReply>;
   link(from: string, to: string): Promise<AgentReply>;
   pin(id: string): Promise<AgentReply>;
@@ -24,7 +24,7 @@ export function createGenuiClient(opts: GenuiClientOptions): GenuiClient {
   let ws: WebSocket | undefined;
 
   async function call(tool: AgentTool, args: Record<string, unknown>): Promise<AgentReply> {
-    const body: AgentRequest = { tool, args };
+    const body: AgentCall = { tool, args };
     const res = await fetch(`${base}/agent/${board}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -35,14 +35,15 @@ export function createGenuiClient(opts: GenuiClientOptions): GenuiClient {
   }
 
   function connect() {
-    const sock = new WebSocket(`${base.replace(/^http/, "ws")}/ws/${board}`);
+    // role=agent: the server forwards user intents only to agent sockets.
+    const sock = new WebSocket(`${base.replace(/^http/, "ws")}/ws/${board}?role=agent`);
     ws = sock;
     sock.onopen = () => {
-      const hello: ClientFrame = { t: "hello", boardId: opts.boardId, clientId };
+      const hello: ClientMsg = { t: "hello", boardId: opts.boardId, clientId };
       sock.send(JSON.stringify(hello));
     };
     sock.onmessage = (ev) => {
-      let frame: ServerFrame;
+      let frame: ServerMsg;
       try {
         frame = JSON.parse(String(ev.data));
       } catch {

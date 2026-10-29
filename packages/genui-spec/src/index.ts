@@ -1,6 +1,7 @@
 // Contract shared by genui-agent-kit, genui-server and genui-web.
 // Wire = AG-UI event shapes (type + fields) carrying json-render style spec patches.
 import { z } from "zod";
+export * from "./wire";
 
 // ---- style tokens: HSL only, whitelisted CSS vars, no raw CSS ----
 const hsl = z.string().regex(/^hsl\(\s*\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%(\s*\/\s*[\d.]+%?)?\s*\)$/, "HSL color only");

@@ -28,6 +28,12 @@ test("bad patch is rejected and leaves the log untouched", () => {
   expect(store.ops).toHaveLength(0);
 });
 
+test("emit_view accepts the kit's AG-UI STATE_SNAPSHOT event", () => {
+  const b = new Board(new MemoryStore());
+  b.agent({ tool: "emit_view", args: { event: { type: "STATE_SNAPSHOT", snapshot: { components: { a: card } } } } });
+  expect(b.spec).toEqual({ components: { a: card }, links: [], tokens: {} });
+});
+
 test("seq is dense and every op stores patch and inverse", () => {
   const b = new Board(new MemoryStore());
   const ops = [...seed(b), ...b.agent({ tool: "link", args: { from: "a", to: "b" } })];

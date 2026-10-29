@@ -17,7 +17,7 @@ No deploy, account or credential is used.
 | `GET /ws/:boardId` (upgrade) | Canvas socket. Add `?role=agent` for an agent socket. |
 | `POST /agent/:boardId` | Agent tool call `{tool, args}`; reply `{seq}`. |
 
-Types live in `src/contract.ts` (stub copy of the P1 `@crewship/genui-spec` types).
+Types come from `@crewship/genui-spec` (`packages/genui-spec/src/wire.ts`).
 
 ## WebSocket frames (JSON text)
 
@@ -27,7 +27,7 @@ Types live in `src/contract.ts` (stub copy of the P1 `@crewship/genui-spec` type
 
 ## Agent tools
 
-`emit_view` (`args.event.delta`, `args.patch` or `args.spec`), `set_style {id?, tokens}`, `link {from, to}`, `pin {id, pinned?}`, `reset {id?, rect?}`. Any tool accepts `args.cause`. A bad call returns HTTP 400 and writes nothing.
+`emit_view` (`args.event` as AG-UI `STATE_DELTA {delta}` or `STATE_SNAPSHOT {snapshot}`, `args.patch` or `args.spec`), `set_style {id?, tokens}`, `link {from, to}`, `pin {id, pinned?}`, `reset {id?, rect?}`. Any tool accepts `args.cause`. A bad call returns HTTP 400 and writes nothing.
 
 ## Op log
 

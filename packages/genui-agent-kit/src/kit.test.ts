@@ -12,7 +12,8 @@ beforeAll(() => {
     port: 0,
     async fetch(req, srv) {
       const u = new URL(req.url);
-      if (u.pathname.startsWith("/ws/")) return srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
+      // Like genui-server: only ?role=agent sockets receive forwarded intents.
+      if (u.pathname.startsWith("/ws/")) return u.searchParams.get("role") === "agent" && srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
       if (req.method === "POST" && u.pathname.startsWith("/agent/")) {
         const body = await req.json();
         posts.push({ path: u.pathname, body });

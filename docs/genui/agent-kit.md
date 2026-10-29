@@ -1,6 +1,6 @@
 # Generative UI agent kit
 
-`packages/genui-agent-kit` lets an agent drive a Generative UI board. It talks to the board server over the stub contract in `src/contract.ts`. After P1 lands, that file becomes an import from `@crewship/genui-spec`.
+`packages/genui-agent-kit` lets an agent drive a Generative UI board. It talks to the board server over the wire types in `@crewship/genui-spec` (`packages/genui-spec/src/wire.ts`). Its intent socket connects with `?role=agent`, because the server forwards user intents only to agent sockets.
 
 ## Client
 

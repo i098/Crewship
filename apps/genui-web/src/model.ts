@@ -1,12 +1,10 @@
 // Pure board state for the canvas: JSON patches, intents, and the agent-vs-user move rule.
 // No DOM here, so the mock server and the tests use the same code.
-import type { Component, Intent, IntentKind, Op, PatchOp, Rect, ServerMsg, Spec } from "./contract";
+import { emptyBoard, type Component, type IntentMsg, type IntentKind, type Op, type PatchOp, type Rect, type ServerMsg, type BoardSpec } from "@crewship/genui-spec";
 
 export const MIN_W = 160;
 export const MIN_H = 96;
 const DEFAULT_RECT: Rect = { x: 40, y: 40, w: 300, h: 180 };
-
-export const emptySpec = (): Spec => ({ components: {}, links: [], tokens: {} });
 
 const unescape = (s: string) => s.replace(/~1/g, "/").replace(/~0/g, "~");
 export const esc = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
@@ -74,11 +72,11 @@ export function rectId(path: string, whole = false): string | undefined {
 }
 
 /** True when a user move of `id` must survive an agent move: "user wins" in the header, or the card is pinned. */
-export const userKeeps = (spec: Spec, id: string) =>
+export const userKeeps = (spec: BoardSpec, id: string) =>
   spec.components.header?.props.wins === "user" || spec.components[id]?.props.pinned === true;
 
 /** Server side of the move rule: drop agent rect changes on a pinned card, and on a card the user placed while the user wins. */
-export const filterAgentPatch = (spec: Spec, patch: PatchOp[], placed: Set<string>) =>
+export const filterAgentPatch = (spec: BoardSpec, patch: PatchOp[], placed: Set<string>) =>
   patch.filter((o) => {
     const id = rectId(o.path);
     return !(id && (spec.components[id]?.props.pinned === true || (placed.has(id) && userKeeps(spec, id))));
@@ -99,7 +97,7 @@ export function safeStyle(tokens: Record<string, unknown> | undefined): Record<s
 const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fallback);
 
 /** The spec change an intent asks for. The client shows it at once; the server makes it real. */
-export function intentPatch(spec: Spec, kind: IntentKind, targetId: string, payload: Record<string, unknown>): PatchOp[] {
+export function intentPatch(spec: BoardSpec, kind: IntentKind, targetId: string, payload: Record<string, unknown>): PatchOp[] {
   const c: Component | undefined = spec.components[targetId];
   if (!c) throw new Error(`unknown component ${targetId}`);
   const base = `/components/${esc(targetId)}`;
@@ -131,7 +129,7 @@ type Pending = { targetId: string; patch: PatchOp[] };
 
 /** Confirmed server state plus the user's not-yet-acked intents laid over it. */
 export class Board {
-  spec: Spec = emptySpec();
+  spec: BoardSpec = emptyBoard();
   seq = 0;
   pending = new Map<string, Pending>();
 
@@ -145,7 +143,7 @@ export class Board {
       for (const op of msg.ops) if (op.seq > this.seq) this.applyOp(op);
     } else if (msg.t === "ack") {
       this.pending.delete(msg.id);
-    } else {
+    } else if (msg.t === "error") {
       this.pending.delete(msg.id);
       return msg.msg;
     }
@@ -162,7 +160,7 @@ export class Board {
   }
 
   /** Lays an intent over the view at once; returns it ready to send. */
-  propose(kind: IntentKind, targetId: string, payload: Record<string, unknown>): Intent {
+  propose(kind: IntentKind, targetId: string, payload: Record<string, unknown>): IntentMsg {
     const id = crypto.randomUUID();
     const patch = intentPatch(this.view(), kind, targetId, payload);
     if (patch.length) this.pending.set(id, { targetId, patch });
@@ -170,7 +168,7 @@ export class Board {
   }
 
   /** The spec to draw: confirmed state plus pending intents that still apply. */
-  view(): Spec {
+  view(): BoardSpec {
     let s = this.spec;
     for (const p of this.pending.values()) {
       try {
