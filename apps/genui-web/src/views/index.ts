@@ -37,9 +37,10 @@ export function renderCard(spec: BoardSpec, component: Component, widthTier: Wid
   if (p.kind === "embed" && !p.nat && natural.has(id)) p.nat = natural.get(id);
   const view = typeof p.kind === "string" && Object.hasOwn(VIEWS, p.kind) ? VIEWS[p.kind as CardKind] : note;
   const i = esc(id), pinned = p.pinned === true;
-  const tools = `<span class="tools"><button type="button" class="ib" data-act="pin" data-id="${i}" aria-pressed="${pinned}" aria-label="${pinned ? "Unpin" : "Pin in place"}">${
+  const pinTip = pinned ? "Unpin" : "Pin in place", linkTip = "Link: drag onto another card";
+  const tools = `<span class="tools"><button type="button" class="ib" data-act="pin" data-id="${i}" aria-pressed="${pinned}" aria-label="${pinTip}" title="${pinTip}" data-tip="${pinTip}">${
     pinned ? "◉" : "○"
-  }</button><button type="button" class="ib" data-act="link" data-id="${i}" aria-label="Drag to another card to link">⤳</button></span>`;
+  }</button><button type="button" class="ib" data-act="link" data-id="${i}" aria-label="${linkTip}" title="${linkTip}" data-tip="${linkTip}">⤳</button></span>`;
   return `<div class="core">${view(p, id, widthTier, spec)}</div><i class="tgrip" data-act="resize" aria-hidden="true"></i><span class="ago"></span>${tools}`;
 }
 

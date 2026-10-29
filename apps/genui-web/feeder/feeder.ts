@@ -222,11 +222,13 @@ async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
   if (m.kind !== "input") return;
   if (typeof p.open === "string") {
     const id = p.open;
-    if (id === "sys") extra.sys = card("sys", "host", 60, { title: "This host", series: last?.host ?? {}, asked: true });
+    // removed and done are cleared, so a card closed with its X opens again from its pill
+    const again = { asked: true, removed: false, done: false };
+    if (id === "sys") extra.sys = card("sys", "host", 60, { title: "This host", series: last?.host ?? {}, ...again });
     else if (id.startsWith("tui-")) {
       const name = id.slice(4);
       const lines = await run(["crewboard", "tail", `task/${name}`, "-n", "14", "--viewer"]).catch((e) => `crewboard: ${(e as Error).message}`);
-      extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), asked: true });
+      extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), ...again });
     }
   } else if (typeof p.text === "string" && p.text.trim()) {
     // the ask goes to every crew agent that reads the genui topic; no reply is made up here
