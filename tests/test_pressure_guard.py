@@ -115,23 +115,12 @@ def test_owner_is_texted_only_when_prunes_cannot_get_under_the_threshold(run):
     assert "Still over 70%" in alerts and "still over 70%" in run.texts
 
 
-def test_owner_text_is_sent_once_per_still_over_state_and_rearms_after_recovery(run):
+def test_owner_text_is_sent_at_most_once_per_hour_even_when_alerts_repeat(run):
     s = {"PRESSURE_REPEAT_MIN": 0}
     run(disk=90, DISK_AFTER=80, **s)
     run(disk=90, DISK_AFTER=80, **s)
     assert run.texts.count("still over") == 1
-    run(disk=90, DISK_AFTER=50, **s)
+    stamp = run.tmp.parent / "state" / "last-text"
+    stamp.write_text(str(int(time.time()) - 3601))
     run(disk=90, DISK_AFTER=80, **s)
-    assert run.texts.count("still over") == 2
-
-
-def test_cleared_pressure_drops_stale_text_key_even_inside_alert_window(run):
-    run(disk=80, DISK_AFTER=80, PRESSURE_REPEAT_MIN=0)
-    assert run.texts.count("still over") == 1
-    (run.tmp.parent / "stub" / "pruned").unlink()
-    r, _, _ = run(disk=80, DISK_AFTER=10)
-    assert r.returncode == 0 and run.texts.count("still over") == 1
-    assert not (run.tmp.parent / "state" / "last-text").exists()
-    (run.tmp.parent / "stub" / "pruned").unlink()
-    run(disk=80, DISK_AFTER=80, PRESSURE_REPEAT_MIN=0)
     assert run.texts.count("still over") == 2

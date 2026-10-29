@@ -18,6 +18,7 @@ THRESH=${PRESSURE_PCT:-70}
 TEXT_CMD=${PRESSURE_TEXT_CMD:-fm-imessage}
 SCRATCH_MIN=${PRESSURE_SCRATCH_MIN_AGE_MIN:-60}
 REPEAT_MIN=${PRESSURE_REPEAT_MIN:-30}
+TEXT_REPEAT_MIN=${PRESSURE_TEXT_REPEAT_MIN:-60}
 TMP_ROOT=${PRESSURE_TMP_ROOT:-/tmp}
 MEMINFO=${PRESSURE_MEMINFO:-/proc/meminfo}
 STATE=${PRESSURE_STATE_DIR:-${STORAGE_DATA_DIR:+$STORAGE_DATA_DIR/pressure-guard}}
@@ -28,7 +29,7 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in THRESH SCRATCH_MIN REPEAT_MIN; do
+for v in THRESH SCRATCH_MIN REPEAT_MIN TEXT_REPEAT_MIN; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "pressure-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 { [ "$THRESH" -ge 1 ] && [ "$THRESH" -le 100 ]; } || { echo "pressure-guard: PRESSURE_PCT must be 1-100" >&2; exit 2; }
@@ -55,7 +56,7 @@ over() { awk -v t="$THRESH" '$2 + 0 > t { printf "%s%s %s%%", (n++ ? ", " : ""),
 
 before=$(readings)
 hot=$(over <<<"$before") || {
-  if [ "$DRY" = 1 ]; then echo "pressure-guard: below ${THRESH}%: $(tr '\n' ' ' <<<"$before")"; else rm -f "$STATE/last-text"; fi  # recovered: re-arm the text
+  [ "$DRY" != 1 ] || echo "pressure-guard: below ${THRESH}%: $(tr '\n' ' ' <<<"$before")"
   exit 0
 }
 [ "$DRY" = 1 ] && echo "pressure-guard --dry-run: over ${THRESH}%: $hot"
@@ -112,9 +113,20 @@ fi
 
 umask 077
 mkdir -p "$STATE" 2>/dev/null || STATE=
-[ "$still" = 1 ] || { [ -z "$STATE" ] || rm -f "$STATE/last-text"; }
 if [ -n "$STATE" ]; then
   exec 9>>"$STATE/lock"; flock -n 9 || exit 0
+fi
+# Owner text when still over after every prune: at most once per TEXT_REPEAT_MIN, on its own clock.
+if [ "$still" = 1 ]; then
+  last=$(cat "$STATE/last-text" 2>/dev/null || echo 0)
+  [[ $last =~ ^[0-9]+$ ]] || last=0
+  if [ $(( $(date +%s) - last )) -ge $((TEXT_REPEAT_MIN * 60)) ]; then
+    timeout 15 "$TEXT_CMD" -- "Disk or RAM is still over ${THRESH}% after pruning; needs you." >/dev/null 2>&1 \
+      && { [ -z "$STATE" ] || date +%s > "$STATE/last-text"; } \
+      || echo "pressure-guard: owner text failed" >&2
+  fi
+fi
+if [ -n "$STATE" ]; then
   last=$(cat "$STATE/last-alert" 2>/dev/null || echo 0)
   [[ $last =~ ^[0-9]+$ ]] || last=0
   [ $(( $(date +%s) - last )) -ge $((REPEAT_MIN * 60)) ] || { echo "$msg"; exit 0; }
@@ -127,11 +139,4 @@ if { [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] && FM_HOME=${fm%/} timeout -k 
   || { [ -x "$HERE/notify-master.sh" ] && timeout -k 1 3 "$HERE/notify-master.sh" "$msg" pressure-guard; } \
   || printf '%s\n' "$msg" | timeout -k 1 3 wall -t 2; then
   [ -z "$STATE" ] || date +%s > "$STATE/last-alert"
-fi
-# One text per still-over state: the key is the set of over-threshold readings.
-key=$(over <<<"$after" | tr -dc 'a-z:/ ,' | tr -c 'A-Za-z0-9\n' _)
-if [ "$still" = 1 ] && { [ -z "$STATE" ] || [ "$(cat "$STATE/last-text" 2>/dev/null)" != "$key" ]; }; then
-  timeout 15 "$TEXT_CMD" -- "Disk or RAM is still over ${THRESH}% after pruning; needs you." >/dev/null 2>&1 \
-    && { [ -z "$STATE" ] || printf '%s\n' "$key" > "$STATE/last-text"; } \
-    || echo "pressure-guard: owner text failed" >&2
 fi
