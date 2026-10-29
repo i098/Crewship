@@ -14,6 +14,7 @@ const STRIP: RegExp[] = [
   /^[ \t\x01]*decision stuck after \d+ attempts[^\n\0]*\n?/gim,
   /decision stuck after \d+ attempts[.,:;]?/gi,
 ];
+const READER = /(?<![\w-])(the )?(owner|captain)(?:('s)|(?![\w-]))/gi; // third-person word for the reader
 const MARK = "\x01";
 const EMPTY_BRACKETS = /\[[\x01\s]*\x01[\x01\s]*\]|\([\x01\s]*\x01[\x01\s]*\)/g;
 const MARK_RUN = /[ \t]*(?:\x01[ \t]*)+/g;
@@ -22,13 +23,17 @@ export function cleanText(text: string): string {
   const held: string[] = [];
   let out = text.replace(HOLD, (m) => `\0${held.push(m) - 1}\0`);
   const held0 = out;
+  out = out.replace(READER, (m, _the, _word, poss) => {
+    const you = poss ? "your" : "you";
+    return m[0] === m[0].toUpperCase() ? you[0].toUpperCase() + you.slice(1) : you;
+  });
   for (const re of STRIP) out = out.replace(re, MARK);
   if (out === held0) return text; // no slop found: leave the text byte-exact
   out = out.replace(EMPTY_BRACKETS, MARK).replace(MARK_RUN, (m, off: number, s: string) => {
     const next = s[off + m.length];
     return off === 0 || "\n([".includes(s[off - 1]) || next === undefined || "\n,.;:!?".includes(next) ? "" : " ";
   });
-  out = out.replace(/\0(\d+)\0/g, (_, i) => held[+i]).trim();
+  out = out.replace(/\0(\d+)\0/g, (_, i) => held[+i]).trim().replace(/^:\s*/, ""); // a stripped prefix can leave a bare colon
   return out || text; // never turn a send into nothing
 }
 

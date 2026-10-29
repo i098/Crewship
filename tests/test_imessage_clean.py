@@ -50,6 +50,17 @@ def test_urls_are_untouched():
     assert clean(text) == text
 
 
+@pytest.mark.parametrize("text,want", [
+    ("done: : hi", "hi"),
+    ("[D039b88]: hi", "hi"),
+    ("The owner asked and the captain agreed; owner's call.", "You asked and you agreed; your call."),
+    ("Ask the Owner. Owner-only and ownership stay.", "Ask you. Owner-only and ownership stay."),
+    ("Tell the owner https://x.com/the-owner/captain now", "Tell you https://x.com/the-owner/captain now"),
+])
+def test_leading_colon_and_reader_word(text, want):
+    assert clean(text) == want
+
+
 def test_text_without_slop_stays_byte_exact():
     assert clean("  a  b \n\n\n\nc ") == "  a  b \n\n\n\nc "
 
