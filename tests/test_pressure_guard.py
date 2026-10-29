@@ -120,3 +120,15 @@ def test_owner_text_is_sent_once_per_still_over_state_and_rearms_after_recovery(
     run(disk=90, DISK_AFTER=50, **s)
     run(disk=90, DISK_AFTER=80, **s)
     assert run.texts.count("still over") == 2
+
+
+def test_cleared_pressure_drops_stale_text_key_even_inside_alert_window(run):
+    run(disk=80, DISK_AFTER=80, PRESSURE_REPEAT_MIN=0)
+    assert run.texts.count("still over") == 1
+    (run.tmp.parent / "stub" / "pruned").unlink()
+    r, _, _ = run(disk=80, DISK_AFTER=10)
+    assert r.returncode == 0 and run.texts.count("still over") == 1
+    assert not (run.tmp.parent / "state" / "last-text").exists()
+    (run.tmp.parent / "stub" / "pruned").unlink()
+    run(disk=80, DISK_AFTER=80, PRESSURE_REPEAT_MIN=0)
+    assert run.texts.count("still over") == 2

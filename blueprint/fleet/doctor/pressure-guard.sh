@@ -112,6 +112,7 @@ fi
 
 umask 077
 mkdir -p "$STATE" 2>/dev/null || STATE=
+[ "$still" = 1 ] || { [ -z "$STATE" ] || rm -f "$STATE/last-text"; }
 if [ -n "$STATE" ]; then
   exec 9>>"$STATE/lock"; flock -n 9 || exit 0
   last=$(cat "$STATE/last-alert" 2>/dev/null || echo 0)
@@ -129,7 +130,7 @@ if { [ -n "$fm" ] && [ -x "$fm/bin/fm-inbox.sh" ] && FM_HOME=${fm%/} timeout -k 
 fi
 # One text per still-over state: the key is the set of over-threshold readings.
 key=$(over <<<"$after" | tr -dc 'a-z:/ ,' | tr -c 'A-Za-z0-9\n' _)
-if [ "$still" = 1 ] && [ -z "$STATE" ] || [ "$(cat "$STATE/last-text" 2>/dev/null)" != "$key" ]; then
+if [ "$still" = 1 ] && { [ -z "$STATE" ] || [ "$(cat "$STATE/last-text" 2>/dev/null)" != "$key" ]; }; then
   timeout 15 "$TEXT_CMD" -- "Disk or RAM is still over ${THRESH}% after pruning; needs you." >/dev/null 2>&1 \
     && { [ -z "$STATE" ] || printf '%s\n' "$key" > "$STATE/last-text"; } \
     || echo "pressure-guard: owner text failed" >&2
