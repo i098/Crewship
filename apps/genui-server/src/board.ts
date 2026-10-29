@@ -1,4 +1,4 @@
-import { type AgentCall, type Actor, type ClientMsg, type MoveWins, type Op, type PatchOp, type Rect, type Spec, emptySpec } from "./contract";
+import { type AgentCall, type Actor, type ClientMsg, type Op, type PatchOp, type Rect, type Spec, emptySpec } from "./contract";
 import { applyPatch, pointer, validatePatch } from "./patch";
 import type { Store } from "./store";
 
@@ -12,7 +12,6 @@ const rectPath = /^\/components\/([^/]+)\/rect(\/|$)/;
 export class Board {
   spec: Spec = emptySpec();
   seq = 0;
-  moveWins: MoveWins = "agent";
   private rectWriter = new Map<string, Actor>();
   private agentRectSeq = new Map<string, number>();
   private undone = new Set<number>();
@@ -20,7 +19,6 @@ export class Board {
   private agentOps: Op[] = [];
 
   constructor(private store: Store) {
-    this.moveWins = store.getPolicy() ?? "agent";
     const snap = store.latestSnapshot();
     if (snap) { this.spec = snap.spec; this.seq = snap.seq; }
     // shortcut: bookkeeping replays the whole log on load; fine for one board, add a snapshot of it if logs get huge.
@@ -30,10 +28,9 @@ export class Board {
     }
   }
 
-  setPolicy(p: MoveWins) {
-    if (p !== "agent" && p !== "user") throw new Error("bad policy");
-    this.moveWins = p;
-    this.store.setPolicy(p);
+  /** "User wins" is components.header.props.wins === "user" (default: agent wins). */
+  get moveWins(): "agent" | "user" {
+    return this.spec.components.header?.props?.wins === "user" ? "user" : "agent";
   }
 
   agent(call: AgentCall): Op[] {
@@ -48,12 +45,17 @@ export class Board {
       case "reset": patch = this.resetPatch(a); break;
       default: throw new Error(`unknown tool: ${(call as AgentCall).tool}`);
     }
-    if (this.moveWins === "user") patch = patch.filter((p) => { const m = rectPath.exec(p.path); return !(m && this.rectWriter.get(m[1]) === "user"); });
+    // Pinned cards always keep their placement; under "user wins" so does anything the user moved.
+    const user = this.moveWins === "user";
+    if (call.tool !== "reset") patch = patch.filter((p) => {
+      const m = rectPath.exec(p.path);
+      return !(m && (this.spec.components[m[1]]?.props?.pinned === true || (user && this.rectWriter.get(m[1]) === "user")));
+    });
     return patch.length || call.tool === "reset" ? [this.commit("agent", cause, patch)] : [];
   }
 
   intent(m: Intent): Op[] {
-    if (m.kind === "input") return []; // forwarded to the agent by the host, no spec change
+    if (m.kind === "input" && !("field" in m.payload)) return []; // {text}: forwarded to the agent, no spec change
     const id = m.targetId;
     if (!this.spec.components[id]) throw new Error(`no such component: ${id}`);
     if (m.kind === "move" || m.kind === "resize") {
@@ -152,6 +154,10 @@ export class Board {
         const to = str(p.to, "payload.to");
         this.component(to);
         return [{ op: "add", path: "/links/-", value: { from: id, to } }];
+      }
+      case "input": {
+        const field = str(p.field, "payload.field");
+        return [{ op: "add", path: pointer("components", id, "props"), value: { ...c.props, [field]: p.value } }];
       }
       case "pin": return this.pinPatch(id, p.pinned !== false);
       case "style": return this.stylePatch(id, obj(p.tokens ?? p, "payload.tokens"));

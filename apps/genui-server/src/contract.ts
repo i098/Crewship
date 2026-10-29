@@ -39,19 +39,15 @@ export type ClientMsg =
   | { t: "hello"; boardId: string; clientId: string }
   // baseSeq (optional): the seq the client's view was at when the user acted; drives move conflicts.
   | { t: "intent"; id: string; kind: IntentKind; targetId: string; payload: Record<string, unknown>; baseSeq?: number }
-  | { t: "undo" }
-  // Header toggle: who wins a move conflict. Default "agent".
-  | { t: "policy"; moveWins: MoveWins };
+  | { t: "undo" };
 
 export type ServerMsg =
-  | { t: "snapshot"; seq: number; spec: Spec; moveWins: MoveWins }
+  | { t: "snapshot"; seq: number; spec: Spec }
   | { t: "ops"; ops: Op[] }
   | { t: "ack"; id: string; seq: number }
   | { t: "error"; id: string; msg: string }
   // Sent only to sockets opened with ?role=agent.
   | { t: "intent"; id: string; kind: IntentKind; targetId: string; payload: Record<string, unknown> };
-
-export type MoveWins = "agent" | "user";
 
 export type AgentCall = {
   tool: "emit_view" | "set_style" | "link" | "pin" | "reset";

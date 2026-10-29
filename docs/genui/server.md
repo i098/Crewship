@@ -21,8 +21,8 @@ Types live in `src/contract.ts` (stub copy of the P1 `@crewship/genui-spec` type
 
 ## WebSocket frames (JSON text)
 
-- Client: `hello`, `intent {id, kind, targetId, payload, baseSeq?}`, `undo`, `policy {moveWins}`.
-- Server: `snapshot {seq, spec, moveWins}` (on connect and `hello`), `ops {ops}`, `ack {id, seq}`, `error {id, msg}`.
+- Client: `hello`, `intent {id, kind, targetId, payload, baseSeq?}` (`input` takes `{text}`, forwarded to agents with no spec change, or `{field,value}`, which sets `props[field]`), `undo`.
+- Server: `snapshot {seq, spec}` (on connect and `hello`), `ops {ops}`, `ack {id, seq}`, `error {id, msg}`.
 - Agent sockets also get every user `intent` frame (this is how `input` reaches the agent).
 
 ## Agent tools
@@ -40,9 +40,11 @@ Limit: inverses are positional. Undoing an op that a later, unrelated op overwro
 
 ## Move conflicts
 
-Header toggle `policy.moveWins`, default `agent`, stored per board.
+Header toggle: `components.header.props.wins` (`"user"`, otherwise agent wins), set by an `input {field:"wins", value}` intent on `header`.
 - `agent`: a user move or resize is rejected (`error`) when `baseSeq` is older than the last agent write to that rect.
 - `user`: user moves apply; agent patches to a rect the user last moved are dropped until the agent calls `reset` (which clears the user mark).
+- Either way, agent rect patches to a pinned card (`props.pinned`) are dropped; `reset` with a `rect` still applies.
+- Ops are broadcast before the `ack`.
 
 ## Identity
 

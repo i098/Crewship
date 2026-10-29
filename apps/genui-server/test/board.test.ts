@@ -115,7 +115,8 @@ test("agent wins: stale user move is rejected, fresh one applies", () => {
 test("user wins: user move conflicts apply, agent rect patches are dropped until reset", () => {
   const b = new Board(new MemoryStore());
   seed(b);
-  b.setPolicy("user");
+  b.agent({ tool: "emit_view", args: { patch: [{ op: "add", path: "/components/header", value: { type: "header", props: { wins: "agent" } } }] } });
+  b.intent({ t: "intent", id: "w", kind: "input", targetId: "header", payload: { field: "wins", value: "user" } });
   const stale = b.seq;
   b.agent({ tool: "emit_view", args: { patch: [{ op: "replace", path: "/components/a/rect", value: { x: 9, y: 9, w: 1, h: 1 } }] } });
   b.intent(move("a", 50, stale)); // not rejected under user wins
@@ -128,11 +129,25 @@ test("user wins: user move conflicts apply, agent rect patches are dropped until
   expect(b.spec.components.a.rect!.x).toBe(2);
 });
 
-test("policy persists across reload; default is agent", () => {
+test("header.props.wins toggle persists in the spec across reload; default is agent", () => {
   const store = new MemoryStore();
-  expect(new Board(store).moveWins).toBe("agent");
-  new Board(store).setPolicy("user");
+  const b = new Board(store);
+  seed(b);
+  expect(b.moveWins).toBe("agent");
+  b.agent({ tool: "emit_view", args: { patch: [{ op: "add", path: "/components/header", value: { type: "header", props: {} } }] } });
+  b.intent({ t: "intent", id: "w", kind: "input", targetId: "header", payload: { field: "wins", value: "user" } });
   expect(new Board(store).moveWins).toBe("user");
+});
+
+test("pinned card keeps its placement against agent rect patches; reset overrides", () => {
+  const b = new Board(new MemoryStore());
+  seed(b);
+  b.agent({ tool: "pin", args: { id: "a" } });
+  const before = b.seq;
+  expect(b.agent({ tool: "emit_view", args: { patch: [{ op: "replace", path: "/components/a/rect", value: { x: 9, y: 9, w: 1, h: 1 } }] } })).toEqual([]);
+  expect(b.seq).toBe(before);
+  b.agent({ tool: "reset", args: { id: "a", rect: { x: 3, y: 3, w: 1, h: 1 } } });
+  expect(b.spec.components.a.rect!.x).toBe(3);
 });
 
 test("user intents: bad target and bad payload throw; input is a no-op", () => {

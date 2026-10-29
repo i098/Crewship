@@ -1,13 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import { Board } from "./board";
-import type { AgentCall, ClientMsg, MoveWins, Op, ServerMsg, Spec } from "./contract";
+import type { AgentCall, ClientMsg, Op, ServerMsg, Spec } from "./contract";
 import type { Store } from "./store";
 
 class SqlStore implements Store {
   constructor(private sql: SqlStorage) {
     sql.exec(`CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, actor TEXT NOT NULL, cause TEXT NOT NULL, patch TEXT NOT NULL, inverse TEXT NOT NULL)`);
     sql.exec(`CREATE TABLE IF NOT EXISTS snapshots (seq INTEGER PRIMARY KEY, spec TEXT NOT NULL)`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
   }
   append(o: Op) {
     this.sql.exec(`INSERT INTO ops VALUES (?,?,?,?,?)`, o.seq, o.actor, o.cause, JSON.stringify(o.patch), JSON.stringify(o.inverse));
@@ -23,11 +22,6 @@ class SqlStore implements Store {
     return r ? { seq: r.seq as number, spec: JSON.parse(r.spec as string) as Spec } : null;
   }
   saveSnapshot(seq: number, spec: Spec) { this.sql.exec(`INSERT OR REPLACE INTO snapshots VALUES (?,?)`, seq, JSON.stringify(spec)); }
-  getPolicy() {
-    const r = this.sql.exec(`SELECT v FROM meta WHERE k='moveWins'`).toArray()[0];
-    return (r?.v as MoveWins | undefined) ?? null;
-  }
-  setPolicy(p: MoveWins) { this.sql.exec(`INSERT OR REPLACE INTO meta VALUES ('moveWins', ?)`, p); }
 }
 
 /** One Durable Object per board. Hibernating WebSockets; socket role lives in the attachment. */
@@ -65,9 +59,6 @@ export class BoardDO extends DurableObject {
       m = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data));
       switch (m.t) {
         case "hello": return this.send(ws, this.snapshotMsg());
-        case "policy":
-          this.board.setPolicy(m.moveWins);
-          return this.broadcastAll(this.snapshotMsg());
         case "undo": return this.broadcast(this.board.undo());
         case "intent": {
           id = m.id;
@@ -85,7 +76,7 @@ export class BoardDO extends DurableObject {
     }
   }
 
-  private snapshotMsg(): ServerMsg { return { t: "snapshot", seq: this.board.seq, spec: this.board.spec, moveWins: this.board.moveWins }; }
+  private snapshotMsg(): ServerMsg { return { t: "snapshot", seq: this.board.seq, spec: this.board.spec }; }
   private send(ws: WebSocket, m: ServerMsg) { ws.send(JSON.stringify(m)); }
   private broadcast(ops: Op[]) { if (ops.length) this.broadcastAll({ t: "ops", ops }); }
   private broadcastAll(m: ServerMsg) { for (const s of this.ctx.getWebSockets()) this.send(s, m); }
