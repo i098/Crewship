@@ -6,16 +6,16 @@ import type { Actor, AgentCall, ClientMsg, Op, PatchOp, ServerMsg, BoardSpec } f
 import { applyPatch, filterAgentPatch, intentPatch, invertPatch, safeStyle } from "../src/model";
 import { type About, seedSpec, World } from "./world";
 
-type Room = { spec: BoardSpec; seq: number; undo: Op[]; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>>; world: World };
+type Room = { spec: BoardSpec; seq: number; undo: Op[]; byUser: boolean; placed: Set<string>; sockets: Set<ServerWebSocket<{ boardId: string }>>; world: World };
 const rooms = new Map<string, Room>();
 
 const room = (id: string) => {
   let r = rooms.get(id);
   if (!r) {
     const made: Room = {
-      spec: seedSpec(), seq: 0, undo: [], placed: new Set(), sockets: new Set(),
-      // world changes are the agent's, and not on your undo stack
-      world: new World(() => made.spec, (cause, patch) => commit(made, "agent", cause, patch, false)),
+      spec: seedSpec(), seq: 0, undo: [], byUser: false, placed: new Set(), sockets: new Set(),
+      // the world's own changes are the agent's and not on your undo stack; what it does at once for your action is
+      world: new World(() => made.spec, (cause, patch) => commit(made, "agent", cause, patch, made.byUser)),
     };
     rooms.set(id, (r = made));
     made.world.start();
@@ -62,14 +62,23 @@ function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
   try {
     const patch = intentPatch(r.spec, msg.kind, msg.targetId, msg.payload ?? {});
     if (msg.kind === "move" || msg.kind === "resize") r.placed.add(msg.targetId);
+    const mark = r.undo.length;
     // Ops go out before the ack, so the client never shows the card back at its old place.
     commit(r, "user", `intent:${msg.id}`, patch);
     send(ws, { t: "ack", id: msg.id, seq: r.seq });
     if (msg.kind !== "input") return;
     const text = msg.payload.text, open = msg.payload.open;
-    if (typeof open === "string") r.world.open(open);
-    else if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
-    else r.world.react(msg.targetId, msg.payload.field);
+    r.byUser = true;
+    try {
+      if (typeof open === "string") r.world.open(open);
+      else if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
+      else r.world.react(msg.targetId, msg.payload.field);
+    } finally {
+      r.byUser = false;
+    }
+    // one action is one step back: fold the intent and the world's reply into one undo entry
+    const ops = r.undo.splice(mark);
+    if (ops.length) r.undo.push({ ...ops.at(-1)!, patch: ops.flatMap((o) => o.patch), inverse: ops.toReversed().flatMap((o) => o.inverse) });
   } catch (e) {
     send(ws, { t: "error", id: msg.id, msg: (e as Error).message });
   }
