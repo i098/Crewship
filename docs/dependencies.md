@@ -129,7 +129,7 @@ Bun output stays in one labeled block per package, including command failures.
   Apply warms the code and text models; a failed warmup warns without failing the apply.
   Without this profile, apply skips the sgrep build and model downloads.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
-- Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
+- Always: node, the newest stable release (pre-releases are skipped) in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
   The installer keeps the complete `nvim-linux-<arch>` tree and links `~/.local/bin/nvim` to its executable.
 - `agents` profile, native: gh ([cli/cli](https://github.com/cli/cli/releases/latest)), treehouse ([kunchenguid/treehouse](https://github.com/kunchenguid/treehouse/releases/latest)), verified against the GitHub release-asset digest.
