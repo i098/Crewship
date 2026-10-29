@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BoardSpec } from "@crewship/genui-spec";
-import { renderCard } from "../src/views";
+import { renderCard } from "./index";
 
 const board = (components: BoardSpec["components"]): BoardSpec => ({ components, links: [], tokens: {} });
 

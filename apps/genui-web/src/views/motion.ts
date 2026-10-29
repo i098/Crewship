@@ -44,36 +44,42 @@ function grow(n: Node) {
   n.addEventListener("animationend", (e) => e.target === n && n.classList.remove("grow"));
 }
 
+/** A node with no old counterpart: text types in, an element wipes in. */
+function add(a: Node, n: Node) {
+  const v = n.nodeValue ?? "";
+  a.appendChild(n);
+  if (n.nodeType !== 3 || !/\S/.test(v)) return grow(n);
+  n.nodeValue = "";
+  type(n, v);
+}
+
+/** Moves the old element's attributes to the new ones; SVG geometry tweens, a running wipe-in is kept. */
+function syncAttrs(o: Element, n: Element) {
+  for (const { name } of [...o.attributes]) if (!n.hasAttribute(name)) o.removeAttribute(name);
+  for (const { name, value } of [...n.attributes]) {
+    const v = o.getAttribute(name);
+    if (v === value) continue;
+    if (name === "class") o.setAttribute("class", value + (o.classList.contains("grow") ? " grow" : ""));
+    else if (o instanceof SVGElement && GEO.test(name) && v != null) tween(o, name, v, value);
+    else o.setAttribute(name, value);
+  }
+}
+
+/** Turns the old node `o` into `n` in place. */
+function update(o: ChildNode, n: Node) {
+  if (o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) return void (o.replaceWith(n), grow(n));
+  const v = n.nodeValue ?? "";
+  if (n.nodeType === 3) {
+    if (o.nodeValue !== v) /\S/.test(v) && v.length < 90 && !reduced() ? type(o, v) : (o.nodeValue = v);
+  } else if (o instanceof Element && n instanceof Element) {
+    syncAttrs(o, n);
+    patch(o, n);
+  }
+}
+
 function patch(a: Node, b: Node) {
   const ac = [...a.childNodes], bc = [...b.childNodes];
-  bc.forEach((n, i) => {
-    const o = ac[i];
-    if (!o) {
-      if (n.nodeType === 3 && /\S/.test(n.nodeValue ?? "")) {
-        const v = n.nodeValue ?? "";
-        n.nodeValue = "";
-        a.appendChild(n);
-        type(n, v);
-      } else (a.appendChild(n), grow(n));
-      return;
-    }
-    if (o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) return void (o.replaceWith(n), grow(n));
-    if (n.nodeType === 3) {
-      const v = n.nodeValue ?? "";
-      if (o.nodeValue !== v) /\S/.test(v) && v.length < 90 && !reduced() ? type(o, v) : (o.nodeValue = v);
-      return;
-    }
-    if (!(o instanceof Element) || !(n instanceof Element)) return;
-    for (const { name } of [...o.attributes]) if (!n.hasAttribute(name)) o.removeAttribute(name);
-    for (const { name, value } of [...n.attributes]) {
-      const v = o.getAttribute(name);
-      if (v === value) continue;
-      if (name === "class") o.setAttribute("class", value + (o.classList.contains("grow") ? " grow" : ""));
-      else if (o instanceof SVGElement && GEO.test(name) && v != null) tween(o, name, v, value);
-      else o.setAttribute(name, value);
-    }
-    patch(o, n);
-  });
+  bc.forEach((n, i) => (ac[i] ? update(ac[i], n) : add(a, n)));
   ac.slice(bc.length).forEach((o) => o.remove());
 }
 
