@@ -66,6 +66,11 @@ body.keys #recenter { display: none; }
 .rw { padding: 2px 9px; border-radius: 99px; border: 1px solid var(--hair); background: var(--glass); color: var(--ink); font-size: 12px; }
 .rw:hover { border-color: var(--cyan); }
 
+/* a laptop is too narrow for the line and all eight pills on one row: the pills take a full second row, so none scrolls off */
+@media (min-width: 1101px) and (max-width: 1800px) {
+  body .top { flex-wrap: wrap; }
+  .stats { order: 1; flex: 1 0 100%; }
+}
 @media (max-width: 1100px) {
   body .top { flex-wrap: wrap; }
   body .line { flex-basis: calc(100% - 50px); }
