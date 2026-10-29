@@ -6,6 +6,8 @@ import page from "./index.html";
 
 const PORT = Number(process.env.PORT ?? 4610);
 const UPSTREAM = process.env.GENUI_SERVER ?? "http://127.0.0.1:8787";
+// Behind `tailscale serve`, only these Tailscale logins may open a board socket; unset means no check (local dev).
+const ALLOW = process.env.GENUI_ALLOW_LOGINS?.split(",").filter(Boolean);
 
 type Pipe = { boardId: string; up?: WebSocket; queue: string[] };
 
@@ -16,6 +18,7 @@ export function start(port = PORT) {
     routes: { "/": page },
     fetch(req, server) {
       const m = /^\/ws\/([A-Za-z0-9_-]{1,64})$/.exec(new URL(req.url).pathname);
+      if (m && ALLOW && !ALLOW.includes(req.headers.get("tailscale-user-login") ?? "")) return new Response("forbidden", { status: 403 });
       if (m && server.upgrade(req, { data: { boardId: m[1], queue: [] } })) return;
       return new Response("not found", { status: 404 });
     },

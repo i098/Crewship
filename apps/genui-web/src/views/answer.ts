@@ -27,12 +27,11 @@ const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) %
 
 // Props: q (your words), about[] (what it looked at), ready. A dithered skeleton until the answer is ready.
 export const ask: View = (p, id, _tier, spec) => {
-  const about = list(p.about).map(String);
+  const about = list(p.about).map(String), row = (a: string, i: number) => `<div class="ar"><span>${esc(a)}</span><i style="width:${35 + (hash(a) % 60)}%;animation-delay:${i * 0.1}s"></i></div>`;
+  // while the model works, each step it has streamed shows above the skeleton
   const body = p.ready
-    ? `<div class="ans">${(about.length ? about : ["New view for this spot"])
-        .map((a, i) => `<div class="ar"><span>${esc(a)}</span><i style="width:${35 + (hash(a) % 60)}%;animation-delay:${i * 0.1}s"></i></div>`)
-        .join("")}</div>`
-    : '<div class="skel"><i></i><i></i><i></i></div>';
+    ? `<div class="ans">${(about.length ? about : ["New view for this spot"]).map(row).join("")}</div>`
+    : `${about.length ? `<div class="ans">${about.map(row).join("")}</div>` : ""}<div class="skel"><i></i><i></i><i></i></div>`;
   return `${hd(p, id, spec, p.ready ? { text: "answer", cls: "g" } : { text: "working" })}${title(esc(p.q))}${body}`;
 };
 

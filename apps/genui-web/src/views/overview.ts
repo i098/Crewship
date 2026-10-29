@@ -25,14 +25,17 @@ type Member = { name?: unknown; hsl?: unknown; doing?: unknown };
 // Props: title, members [{ name, hsl, doing }]. A wide card also lists what each one is doing.
 export const crew: View = (p, id, tier, spec) => {
   const m = list<Member>(p.members), wd = wide(tier);
+  // every row fits the 200-unit box, and the "doing" column starts after the longest name (mono glyph ~8.6 units)
+  const step = Math.min(40, 180 / Math.max(1, m.length)), short = (s: unknown, n: number) => { const t = String(s ?? ""); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  const nameN = Math.min(20, Math.max(0, ...m.map((a) => String(a.name ?? "").length))), dx = 345 + nameN * 8.6 + 16;
   const orbit = m
     .map((a, i) => {
       const t = (i / m.length) * 2 * Math.PI - Math.PI / 4, x = 150 + 74 * Math.cos(t), y = 100 + 74 * Math.sin(t), col = hsl(a.hsl, C.mute);
-      return `<line x1="${(150 + 22 * Math.cos(t)).toFixed(1)}" y1="${(100 + 22 * Math.sin(t)).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${col}" stroke-opacity=".4"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="${col}"/><text x="${x.toFixed(1)}" y="${(y + (y > 100 ? 24 : -14)).toFixed(1)}" text-anchor="middle" style="font-size:11px">${esc(a.name)}</text>`;
+      return `<line x1="${(150 + 22 * Math.cos(t)).toFixed(1)}" y1="${(100 + 22 * Math.sin(t)).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${col}" stroke-opacity=".4"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="${col}"/><text x="${x.toFixed(1)}" y="${(y + (y > 100 ? 24 : -14)).toFixed(1)}" text-anchor="middle" style="font-size:11px">${esc(short(a.name, 14))}</text>`;
     })
     .join("");
   const doing = wd
-    ? m.map((a, i) => `<circle cx="330" cy="${40 + i * 40}" r="5" fill="${hsl(a.hsl, C.mute)}"/><text x="345" y="${45 + i * 40}">${esc(a.name)}</text><text x="430" y="${45 + i * 40}" class="m">${esc(String(a.doing ?? "idle").slice(0, 30))}</text>`).join("")
+    ? m.map((a, i) => { const y = 20 + step * (i + 0.5); return `<circle cx="330" cy="${y.toFixed(1)}" r="5" fill="${hsl(a.hsl, C.mute)}"/><text x="345" y="${(y + 5).toFixed(1)}">${esc(short(a.name, 20))}</text><text x="${dx.toFixed(1)}" y="${(y + 5).toFixed(1)}" class="m">${esc(short(a.doing ?? "idle", Math.max(8, Math.floor((700 - dx) / 7.6))))}</text>`; }).join("")
     : "";
   return `${hd(p, id, spec, undefined, `${m.length}<small>active</small>`)}${title(esc(p.title ?? "Crew right now"))}<div class="viz"><svg viewBox="0 0 ${wd ? 700 : 300} 200" preserveAspectRatio="xMidYMid meet">
 <circle cx="150" cy="100" r="20" fill="hsl(262 92% 70% / .2)" stroke="${C.vio}"/><text x="150" y="104" text-anchor="middle">you</text>${orbit}${doing}</svg></div>`;

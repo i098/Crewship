@@ -30,18 +30,13 @@ function preview(spec: BoardSpec, id: string): Props | undefined {
   return pv && typeof pv === "object" ? (pv as Props) : undefined;
 }
 
-/** The inner HTML of one card tile: its view, the resize grip, the live stamp, and the pin and link tools. */
+/** The inner HTML of one card tile: its view (whose header holds the pin and link tools), the resize grip and the live stamp. */
 export function renderCard(spec: BoardSpec, component: Component, widthTier: WidthTier = "narrow"): string {
   const id = idOf(spec, component);
   const p: Props = { ...component.props, ...preview(spec, id) };
   if (p.kind === "embed" && !p.nat && natural.has(id)) p.nat = natural.get(id);
   const view = typeof p.kind === "string" && Object.hasOwn(VIEWS, p.kind) ? VIEWS[p.kind as CardKind] : note;
-  const i = esc(id), pinned = p.pinned === true;
-  const pinTip = pinned ? "Unpin" : "Pin in place", linkTip = "Link: drag onto another card";
-  const tools = `<span class="tools"><button type="button" class="ib" data-act="pin" data-id="${i}" aria-pressed="${pinned}" aria-label="${pinTip}" title="${pinTip}" data-tip="${pinTip}">${
-    pinned ? "◉" : "○"
-  }</button><button type="button" class="ib" data-act="link" data-id="${i}" aria-label="${linkTip}" title="${linkTip}" data-tip="${linkTip}">⤳</button></span>`;
-  return `<div class="core">${view(p, id, widthTier, spec)}</div><i class="tgrip" data-act="resize" aria-hidden="true"></i><span class="ago"></span>${tools}`;
+  return `<div class="core">${view(p, id, widthTier, spec)}</div><i class="tgrip" data-act="resize" aria-hidden="true"></i><span class="ago"></span>`;
 }
 
 /**

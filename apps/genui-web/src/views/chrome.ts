@@ -42,9 +42,17 @@ export function hd(p: Props, id: string, spec: BoardSpec, flag?: Flag, k = "", f
   const i = esc(id);
   return `<div class="hd">${pr ? `<span class="proj" style="background:${pr.hsl}">${esc(pr.name)}</span>` : ""}${
     flag?.text ? `<span class="flag ${flag.cls ?? ""}">${flag.cls === "ico" ? flag.text : esc(flag.text)}</span>` : ""
-  }${k ? `<span class="kpi">${k}</span>` : ""}${
+  }${k ? `<span class="kpi">${k}</span>` : ""}${tools(i, p.pinned === true)}${
     full ? `<button type="button" class="ib" data-act="full" data-id="${i}" aria-label="Open full view">⤢</button>` : ""
   }<button type="button" class="ib" data-act="drop" data-id="${i}" aria-label="Remove">✕</button></div>`;
+}
+
+/** Pin and link sit beside full view and remove in the top row, where the reference places a card's buttons. */
+function tools(i: string, pinned: boolean) {
+  const pinTip = pinned ? "Unpin" : "Pin in place", linkTip = "Link: drag onto another card";
+  return `<span class="tools"><button type="button" class="ib" data-act="pin" data-id="${i}" aria-pressed="${pinned}" aria-label="${pinTip}" title="${pinTip}" data-tip="${pinTip}">${
+    pinned ? "◉" : "○"
+  }</button><button type="button" class="ib" data-act="link" data-id="${i}" aria-label="${linkTip}" title="${linkTip}" data-tip="${linkTip}">⤳</button></span>`;
 }
 
 export const title = (html: string) => `<div class="title">${html}</div>`;

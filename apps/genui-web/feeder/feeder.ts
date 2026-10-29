@@ -7,6 +7,9 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
+import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, tuiLines, type Pending } from "../fleet/cards";
+import { FleetSource } from "../fleet/data";
+import { chat } from "../fleet/chat";
 
 const SERVER = process.env.GENUI_SERVER ?? "http://127.0.0.1:8787";
 const BOARD = process.env.BOARD ?? "demo";
@@ -21,6 +24,12 @@ export const PROJECTS = {
   cost: { name: "usage", hsl: "hsl(38 98% 62%)" },
   me: { name: "you added", hsl: "hsl(48 96% 60%)" },
 };
+
+// With GENUI_FM_MAIN set, the owner's fleet (asks, second mates, workers, every owned PR) replaces the one-repo PR cards.
+const FM_MAIN = process.env.GENUI_FM_MAIN;
+const fleet = FM_MAIN ? new FleetSource(FM_MAIN) : undefined;
+const pending = new Map<string, Pending>(); // actions waiting for the owner's Yes
+let answering: { id: string; task: string } | undefined; // the ask the next typed text answers
 
 type P = Record<string, unknown>;
 export type Pr = { n: number; title: string; url: string; draft: boolean; checks: { total: number; done: number; failed: string[] } };
@@ -99,7 +108,7 @@ export async function gather(): Promise<Sources> {
     try { return await f(); } catch (e) { gaps.push(`${name}: ${(e as Error).message}`); return null; }
   };
   sampleHost();
-  const [p, m, c, u] = await Promise.all([get("pull requests", prs), get("merged PRs", merged), get("crewboard", crew), get("usage", usage)]);
+  const [p, m, c, u] = await Promise.all([fleet ? null : get("pull requests", prs), get("merged PRs", merged), get("crewboard", crew), get("usage", usage)]);
   return { prs: p, merged: m, crew: c, usage: u, host: { ...host }, gaps };
 }
 
@@ -144,7 +153,7 @@ function lineOf(id: string, p: P): string {
     case "pipeline": return `${p.title} is at *${(p.stages as string[])[Number(p.at)]}.*`;
     case "crew": return `*${(p.members as unknown[]).length} crew threads* are active.`;
     case "tui": return `*${p.agent}* live.`;
-    case "ask": return `*Sent to the crew:* ${p.q}`;
+    case "ask": return p.ready === true && Array.isArray(p.about) && p.about.length ? `${p.about.at(-1)}` : `*You asked:* ${p.q}`;
     default: return `*${p.title ?? id}*`;
   }
 }
@@ -166,7 +175,8 @@ const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add"
 /** The patch that brings `spec` to the wanted cards without touching what the owner set. */
 export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Set<string>): PatchOp[] {
   const patch: PatchOp[] = [];
-  if (!spec.projects) patch.push({ op: "add", path: "/projects", value: PROJECTS });
+  const projects = { ...PROJECTS, ...(fleet ? fleetProjects(fleet.fleet) : {}) };
+  if (JSON.stringify(spec.projects) !== JSON.stringify(projects)) patch.push({ op: "add", path: "/projects", value: projects });
   for (const [id, c] of Object.entries(want)) {
     const have = spec.components[id];
     if (!have) { patch.push({ op: "add", path: `/components/${esc(id)}`, value: c }); continue; }
@@ -183,8 +193,8 @@ export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Se
 /** The board's chrome: header with host stats and crew pills, the ask bar, and the action log. */
 function chrome(s: Sources, log: P[]): Record<string, Component> {
   return {
-    header: { type: "header", props: { wins: "agent", stats: s.host, tuis: (s.crew ?? []).map((c) => ({ name: c.name, proj: "crew" })) } },
-    input: { type: "input", props: { placeholder: "Ask the crew anything; it goes to the crewboard", chips: [] } },
+    header: { type: "header", props: { wins: "agent", stats: s.host, tuis: fleet ? fleetTuis(fleet.fleet) : (s.crew ?? []).map((c) => ({ name: c.name, proj: "crew" })) } },
+    input: { type: "input", props: { placeholder: answering ? `Your answer to ${answering.task}` : fleet ? "Select a crew card and type to steer it, or ask the crew" : "Ask the crew anything; it goes to the crewboard", chips: [] } },
     log: { type: "log", props: { items: log } },
   };
 }
@@ -197,6 +207,23 @@ let last: Sources | undefined;
 const log: P[] = [];
 const owned = new Set<string>();
 const extra: Record<string, Component> = {}; // cards the owner opened: host stats, a crew terminal, an ask
+const focused = new Set<string>(), unfocused = new Set<string>(); // board cards the chat brought forward, now and before
+// cards the owner closed with ✕; any other card the sources want again (a PR back after a GitHub gap) returns.
+// shortcut: memory only, so a feeder restart brings back fleet cards he closed; persist it if that bothers him
+const dismissed = new Set<string>();
+
+/** Publishes once more after the one in flight, so a burst of chat edits costs at most two board round trips. */
+let inFlight: Promise<void> | undefined, queued: string | undefined;
+function kick(cause: string) {
+  if (inFlight) return void (queued = cause);
+  if (!last) return;
+  inFlight = publish(last, cause)
+    .catch((e) => console.error("publish:", (e as Error).message))
+    .finally(() => {
+      inFlight = undefined;
+      if (queued) (cause = queued, queued = undefined, kick(cause));
+    });
+}
 
 async function call(tool: string, args: P) {
   const r = await fetch(`${SERVER}/agent/${BOARD}`, {
@@ -207,7 +234,13 @@ async function call(tool: string, args: P) {
 }
 
 async function publish(s: Sources, cause = "feeder:sources") {
-  const want = { ...chrome(s, log), ...cards(s), ...extra };
+  const want = { ...chrome(s, log), ...cards(s), ...(fleet ? fleetCards(fleet.fleet, pending) : {}), ...extra };
+  // cards the chat brought forward for the current question hold the front until the next question
+  for (const id of focused) if (want[id]?.type === "card") want[id] = { ...want[id], props: { ...want[id].props, asked: true } };
+  for (const id of unfocused) if (!focused.has(id) && want[id]?.type === "card" && want[id].props.asked !== true) want[id] = { ...want[id], props: { ...want[id].props, asked: false } };
+  for (const [id, c] of Object.entries(want)) if (c.type === "card" && !dismissed.has(id) && c.props.removed === undefined) want[id] = { ...c, props: { ...c.props, removed: false } };
+  // cards left by an earlier feeder run are ours too, so the board drops what the fleet no longer has; the owner's own stay
+  if (!owned.size) for (const [id, c] of Object.entries(spec.components)) if (c.type === "card" && (c.props.proj !== "me" || id.startsWith("ai-"))) owned.add(id);
   for (const id of Object.keys(want)) if (want[id].type === "card") owned.add(id);
   const patch = diff(spec, want, owned);
   if (patch.length) await call("emit_view", { event: { delta: patch }, cause });
@@ -215,6 +248,23 @@ async function publish(s: Sources, cause = "feeder:sources") {
 
 const note = (text: string, proj = "me") => log.push({ at: Math.round((Date.now() - t0) / 1000), text, proj });
 const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
+
+/** The fleet card a typed text is for: a selected or open ask, crew card or crew terminal, else the ask picked to answer. */
+function fleetTarget(about: unknown): Component | undefined {
+  const a = (about ?? {}) as { of?: unknown; ids?: unknown };
+  const ids = [a.of, ...(Array.isArray(a.ids) ? a.ids : [])].filter((x): x is string => typeof x === "string");
+  for (const id of ids) {
+    const c = spec.components[id] ?? extra[id];
+    if (c && (c.props.key || c.props.task || (c.props.kind === "tui" && c.props.agent))) return c;
+  }
+  return answering ? spec.components[answering.id] : undefined;
+}
+
+/** Puts an action on the board as a confirm card; it runs only when the owner picks Yes. */
+function ask(a: Pending) {
+  const id = `confirm-${Date.now().toString(36)}`;
+  pending.set(id, { ...a, id });
+}
 
 /** The owner's intents, forwarded by the board to agent sockets. */
 async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
@@ -227,9 +277,59 @@ async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
     if (id === "sys") extra.sys = card("sys", "host", 60, { title: "This host", series: last?.host ?? {}, ...again });
     else if (id.startsWith("tui-")) {
       const name = id.slice(4);
-      const lines = await run(["crewboard", "tail", `task/${name}`, "-n", "14", "--viewer"]).catch((e) => `crewboard: ${(e as Error).message}`);
+      const fl = fleet && tuiLines(fleet.fleet, name);
+      const lines = fl ? fl.join("\n") : await run(["crewboard", "tail", `task/${name}`, "-n", "14", "--viewer"]).catch((e) => `crewboard: ${(e as Error).message}`);
       extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), ...again });
     }
+  } else if (fleet && typeof p.text === "string" && p.text.trim() && fleetTarget(p.about)) {
+    const to = fleetTarget(p.about)!;
+    try {
+      ask(to.props.key ? answer(fleet, to.props, p.text) : steer(fleet, String(to.props.task ?? to.props.agent), p.text));
+    } catch (e) {
+      note(`Not sent: ${(e as Error).message}`);
+    }
+    answering = undefined;
+  } else if (fleet && p.field === "pick" && pending.has(m.targetId)) {
+    const act = pending.get(m.targetId)!;
+    pending.delete(m.targetId);
+    if (p.value === "yes") {
+      note(`${act.q} Running…`);
+      if (last) await publish(last, m.id);
+      const r = await act.run().catch((e) => ({ ok: false, text: String(e) }));
+      note(r.text, r.ok ? "me" : "ask");
+      void fleet.refreshLocal().catch(() => {});
+    } else note(`Cancelled: ${act.q}`);
+  } else if (fleet && p.field === "pick" && c.key) {
+    if (p.value === "answer") answering = { id: m.targetId, task: String(c.task) };
+    else if (p.value === "open" && typeof c.task === "string") return onIntent({ ...m, payload: { open: `tui-${c.task}` } });
+  } else if (fleet && p.field === "pick" && c.prUrl) {
+    if (p.value === "merge") {
+      try {
+        ask(merge(fleet, c.prUrl));
+      } catch (e) {
+        note(`Not merged: ${(e as Error).message}`);
+      }
+    } else await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
+  } else if (fleet && typeof p.text === "string" && p.text.trim()) {
+    // free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands
+    const q = p.text.trim(), said: string[] = [];
+    focused.forEach((id) => unfocused.add(id));
+    focused.clear();
+    // the last answer's cards step back so the new question owns the front and the header
+    for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
+    extra["ai-q"] = card("ask", "me", 90, { q, ready: false, about: said, asked: true, removed: false });
+    void chat({
+      text: q, about: p.about, fleet: fleet.fleet, board: { ...spec.components, ...extra },
+      apply: async (e) => {
+        if ("say" in e) {
+          if (!e.done) said.push(e.say);
+          extra["ai-q"] = card("ask", "me", 90, { q, ready: e.done, about: said.length ? [...said] : [e.say], asked: true, removed: false });
+        } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
+        else if ("upsert" in e) extra[e.upsert] = e.card;
+        else delete extra[e.drop];
+        kick(m.id);
+      },
+    }).catch((e) => note(`Chat failed: ${(e as Error).message}`));
   } else if (typeof p.text === "string" && p.text.trim()) {
     // the ask goes to every crew agent that reads the genui topic; no reply is made up here
     const id = `ask${m.id}`;
@@ -247,7 +347,11 @@ async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
     const r = await pub({ decision: p.value, pr, url: c.url, ...(p.value === "approve" ? { draft: `gh pr merge ${pr}` } : {}) }).catch((e) => `failed: ${(e as Error).message}`);
     note(`${p.value === "approve" ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${p.value === "approve" ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
     await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
-  } else if (p.field === "removed") delete extra[m.targetId];
+  } else if (p.field === "removed") {
+    dismissed.add(m.targetId);
+    delete extra[m.targetId];
+    pending.delete(m.targetId);
+  }
   // the reply carries the intent's id as its cause, so one z rewinds the action and the reply together
   if (last) await publish(last, m.id);
 }
@@ -294,6 +398,12 @@ async function replies() {
 const synced = Promise.withResolvers<void>();
 if (import.meta.main) {
   connect();
+  if (fleet) {
+    fleet.start();
+    let t: Timer | undefined;
+    // fleet files change often; one publish per second at most
+    fleet.onChange(() => { clearTimeout(t); t = setTimeout(() => { if (last) publish(last).catch((e) => console.error("publish:", (e as Error).message)); }, 1000); });
+  }
   await synced.promise;
   replies().catch((e) => console.error("replies:", (e as Error).message));
   for (;;) {
