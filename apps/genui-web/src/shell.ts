@@ -7,7 +7,7 @@ export type ShellCtx = {
   board: Board;
   send: (msg: ClientMsg) => void;
   intent: (kind: IntentKind, targetId: string, payload: Record<string, unknown>) => void;
-  cam: { home(): void; spread(): boolean; bring(ids: string[]): void };
+  cam: { home(): void; spread(): boolean; bring(ids: string[]): void; free: boolean; view: string | null; spreading: boolean; onChange(fn: () => void): void };
   sel: Set<string>;
   /** What an ask is about (set by the overlays). */
   about?: () => unknown;
@@ -63,7 +63,7 @@ function paintHeader(c: Component | undefined) {
   tokens(top, c);
   if (!c) return;
   $(".orb").classList.toggle("busy", ctx.board.pending.size > 0);
-  put($(".line"), lineHtml(String(c.props.title ?? "")));
+  follow();
   const stats = (c.props.stats ?? {}) as Record<string, number[]>;
   const tuis = (Array.isArray(c.props.tuis) ? c.props.tuis : []) as { name: string; proj?: string }[];
   // Pills are built once per set; a tick only moves the sparkline and the number.
@@ -84,6 +84,17 @@ function paintHeader(c: Component | undefined) {
   const wins = c.props.wins === "user" ? "user" : "agent";
   put($(".wins"), `<b>wins</b><span>${wins}</span>`);
   $(".wins").setAttribute("aria-label", `${wins} wins a move; tap for ${wins === "user" ? "agent" : "user"} wins`);
+}
+
+/** Runs after every layout and camera move: the line speaks for the centre card (design say()), and ◎ is off while you are home. */
+function follow() {
+  const { cam } = ctx;
+  $<HTMLButtonElement>("#recenter").disabled = !(cam.free || cam.view || cam.spreading);
+  const id = document.querySelector<HTMLElement>(".tile[id].center")?.dataset.id;
+  const line = id && spec.components[id]?.props.line;
+  if (typeof line !== "string") return void put($(".line"), lineHtml(String(spec.components.header?.props.title ?? "")));
+  const more = Object.entries(spec.components).filter(([k, c]) => k !== id && c.props.need === true && c.props.done !== true && c.props.removed !== true).length;
+  put($(".line"), lineHtml(line + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : "")));
 }
 
 function paintBottom(input: Component | undefined) {
@@ -171,6 +182,7 @@ function bind() {
   });
   $("#attach").addEventListener("click", () => $<HTMLInputElement>("#file").click());
   $("#recenter").addEventListener("click", () => ctx.cam.home());
+  ctx.cam.onChange(follow);
   $("#spread").addEventListener("click", () => $("#spread").setAttribute("aria-pressed", String(ctx.cam.spread())));
 }
 
