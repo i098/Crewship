@@ -63,12 +63,14 @@ function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
     const patch = intentPatch(r.spec, msg.kind, msg.targetId, msg.payload ?? {});
     if (msg.kind === "move" || msg.kind === "resize") r.placed.add(msg.targetId);
     // Ops go out before the ack, so the client never shows the card back at its old place.
-    commit(r, "user", `intent:${msg.id}`, patch);
+    const op = commit(r, "user", `intent:${msg.id}`, patch);
     send(ws, { t: "ack", id: msg.id, seq: r.seq });
     if (msg.kind !== "input") return;
-    const text = msg.payload.text;
-    if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
-    else r.world.react(msg.targetId, msg.payload.field);
+    const { text, open, rewind } = msg.payload;
+    if (typeof open === "string") r.world.open(open);
+    else if (typeof rewind === "number") r.world.rewind(rewind, (seq) => r.undo.find((o) => o.seq === seq)?.inverse);
+    else if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
+    else r.world.react(msg.targetId, msg.payload.field, msg.payload.value, op?.seq);
   } catch (e) {
     send(ws, { t: "error", id: msg.id, msg: (e as Error).message });
   }

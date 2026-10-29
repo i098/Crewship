@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import type { Op, ServerMsg, BoardSpec } from "@crewship/genui-spec";
+import type { Op, PatchOp, ServerMsg, BoardSpec } from "@crewship/genui-spec";
 import { applyPatch, Board, filterAgentPatch, invertPatch, safeStyle } from "../src/model";
 import { start } from "../mock/server";
 import { seedSpec, World } from "../mock/world";
@@ -90,13 +90,31 @@ describe("mock world", () => {
     expect(spec.links.map((l) => l.label)).toEqual(["adds a migrate step", "Postgres adds a migrate day", "sets the ship time", "cf-auth waits on this"]);
   });
 
-  test("picking Postgres settles the decision and adds the migrate day everywhere it shows", () => {
+  test("picking Postgres settles the decision, adds the migrate day everywhere, and a rewind takes it back", () => {
     const { w, spec } = world();
-    w.change("user pick", [{ op: "add", path: "/components/d1/props/pick", value: "pg" }]); // the server commits the pick, then the world reacts
-    w.react("d1", "pick");
+    const pick: PatchOp[] = [{ op: "add", path: "/components/d1/props/pick", value: "pg" }];
+    w.change("user pick", pick); // the server commits the pick as user op 7, then the world reacts
+    w.react("d1", "pick", "pg", 7);
     expect(spec().components.d1.props).toMatchObject({ done: true, priority: 5 });
     expect(spec().components.p1.props.stages).toEqual(["Code", "Build", "Tests", "Migrate", "Preview", "Merge"]);
     expect(spec().components.t1.props.ship).toBe("Sat 14:00");
+    const row = (spec().components.log.props.items as { seq: number; text: string }[]).at(-1)!;
+    expect(row.text).toBe("You picked Postgres: Store swaps in Postgres or SQLite?");
+    w.rewind(row.seq, (op) => (op === 7 ? [{ op: "remove", path: "/components/d1/props/pick" }] : undefined));
+    expect(spec().components.d1.props).toMatchObject({ done: false, removed: false });
+    expect(spec().components.d1.props.pick).toBeUndefined();
+    expect(spec().components.t1.props.ship).toBe("Fri 14:00");
+    w.stop();
+  });
+
+  test("a tap on a terminal pill opens its live card once, with the terminal's lines", () => {
+    const { w, spec } = world();
+    w.open("tui-cf-auth");
+    w.open("tui-cf-auth");
+    w.open("tui-nope");
+    expect(Object.keys(spec().components).filter((k) => k.startsWith("tui-"))).toEqual(["tui-cf-auth"]);
+    expect(spec().components["tui-cf-auth"].props).toMatchObject({ asked: true, proj: "host" });
+    expect((spec().components["tui-cf-auth"].props.lines as string[]).at(-1)).toMatch(/^00:\d\d  /);
     w.stop();
   });
 

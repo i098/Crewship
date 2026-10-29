@@ -49,10 +49,12 @@ The header's `props.wins` holds the rule; the default is agent wins.
 `mock/world.ts` ports the design's world, so the mock board looks and moves like `docs/genui/design/index.html`:
 
 - **Seed:** 11 items in 4 projects (`spec.projects`), with the design's labelled relations as links. Items carry `kind`, `proj` and `priority` and no `rect`; the canvas places them by project and priority.
-- **Live script:** #209 walks its stages, cf-bill claims and fixes a failed refunds test (15-32 s), a new decision arrives at 38 s, and a 6 s clock ticks the timeline and ETAs.
+- **Live script:** #209 walks its stages, cf-bill claims and fixes a failed refunds test (15-32 s), a new decision arrives at 38 s, and a 6 s clock ticks the timeline and ETAs. Each second the host sampler updates `header.props.stats`, the crew card and any open terminal card.
+- **Shell data:** `header.props.tuis` lists the four crew terminals, `input.props.chips` holds the design's ask chips, and `log.props.items` gets a row for each arrival, act, ask and finish. Card props `next` feed the up-next row.
 - **Derived props:** `derive()` keeps the stages, ship day, header line (`header.props.title`, `*…*` marks the emphasised words) and each item's own `line` in step with the rest of the spec.
-- **Agent answers:** an act on a card (`input {field:"pick"|"merge"|"fly"|"dismiss"|"send"}`) settles it. A typed ask with "or" or "should we" becomes a decision; "compare", "when" or "who" brings that card forward; any other ask adds an answer card at the front of the cluster in `payload.about` (`of`, `ids`, or a drawn box `at`).
-- **Media:** `/media/:file` serves the embeds from `mock/media/`.
+- **Agent answers:** an act on a card (`input {field:"pick"|"merge"|"fly"|"dismiss"|"send"}`) settles it. A typed ask with "or" or "should we" becomes a decision; a chip ("compare", "when", "who", "what's going on", "plan board") brings that card forward; any other ask adds an answer card at the front of the cluster in `payload.about` (`of`, `ids`, or a drawn box `at`).
+- **Opens and rewind:** `input {open:"sys"|"tui-<name>"}` on `header` brings a host or terminal card to the front. `input {rewind: seq}` on `log` takes back that row's user op and reopens its card, or removes the card it made.
+- **Media:** `/media/:file` serves the embeds from `mock/media/`, including the plan board `plan.html`.
 
 ## Spec and style
 

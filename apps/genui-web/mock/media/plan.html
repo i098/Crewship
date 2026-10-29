@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en" data-lavish-annotate="off"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Generative UI app: plan</title>
+<style>
+@font-face{font-family:Geist;src:url(fonts/geist-sans.woff2) format("woff2");font-weight:100 900}
+@font-face{font-family:GeistMono;src:url(fonts/geist-mono.woff2) format("woff2");font-weight:100 900}
+:root{--bg:hsl(240 24% 4%);--ink:hsl(230 30% 96%);--mute:hsl(232 12% 64%);--dim:hsl(232 10% 46%);--glass:hsl(240 30% 100% / .045);--hair:hsl(240 40% 100% / .09);--vio:hsl(262 92% 70%);--cyan:hsl(188 95% 58%);--pink:hsl(320 90% 66%);--ok:hsl(152 72% 56%);--amber:hsl(38 98% 62%);--spring:cubic-bezier(.32,.72,0,1);--pop:cubic-bezier(.34,1.56,.64,1)}
+*{box-sizing:border-box;margin:0}
+body{font:13px/1.4 Geist,system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:16px 20px;min-height:100vh;letter-spacing:-.005em;overflow-x:hidden}
+.aurora{position:fixed;inset:-20%;z-index:-1;pointer-events:none;filter:blur(80px);opacity:.6}
+.aurora i{position:absolute;border-radius:50%;width:44vmax;height:44vmax;animation:drift 20s var(--spring) infinite alternate}
+.aurora i:nth-child(1){background:radial-gradient(circle,hsl(262 90% 55% / .5),transparent 65%);left:-5%;top:-10%}
+.aurora i:nth-child(2){background:radial-gradient(circle,hsl(188 95% 45% / .35),transparent 65%);right:-5%;top:20%;animation-delay:-8s}
+.aurora i:nth-child(3){background:radial-gradient(circle,hsl(320 90% 55% / .22),transparent 65%);left:30%;bottom:-20%;animation-delay:-14s}
+@keyframes drift{to{transform:translate(6vmax,-5vmax) scale(1.12)}}
+.top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:12px}
+h1{font-size:26px;font-weight:650;letter-spacing:-.04em;background:linear-gradient(90deg,var(--ink) 30%,var(--vio),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent;background-size:200% 100%;animation:sheenText 6s ease-in-out infinite alternate}
+@keyframes sheenText{to{background-position:100% 0}}
+.sum{color:var(--mute);font-size:13px;line-height:1.5}
+.sum b{color:var(--ink);font-weight:600}
+h2{font:500 10.5px GeistMono,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:10px}
+.panel{position:relative;background:linear-gradient(180deg,hsl(240 30% 100% / .06),hsl(240 30% 100% / .02));border:1px solid var(--hair);border-radius:20px;padding:14px;min-width:0;box-shadow:inset 0 1px 0 hsl(0 0% 100% / .07);backdrop-filter:blur(20px);animation:enter .9s var(--pop) both;animation-delay:calc(var(--i,0) * 90ms)}
+@keyframes enter{from{opacity:0;transform:translateY(22px) scale(.97);filter:blur(8px)}}
+.mocks{display:flex;gap:18px;align-items:flex-end;justify-content:space-between}
+.dev{display:flex;flex-direction:column;gap:8px;align-items:center}
+.dev span{font-size:11.5px;color:var(--mute)}.dev span b{color:var(--ink);font-weight:600}
+.frame{overflow:hidden;border:1px solid hsl(0 0% 100% / .14);background:var(--bg);position:relative;box-shadow:0 0 0 5px hsl(240 20% 10%),0 0 0 6px hsl(0 0% 100% / .08),0 24px 50px -20px hsl(262 90% 60% / .55);transition:transform .6s var(--spring)}
+.frame:hover{transform:translateY(-4px)}
+.frame iframe{border:0;transform-origin:0 0;position:absolute;left:0;top:0;pointer-events:none}
+.grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px}
+.ph{width:121px;height:258px;border-radius:18px}.ph iframe{width:390px;height:839px;transform:scale(.3051)}
+.tb{width:180px;height:258px;border-radius:12px}.tb iframe{width:820px;height:1179px;transform:scale(.2171)}
+.dt{width:410px;height:258px;border-radius:9px}.dt iframe{width:1440px;height:904px;transform:scale(.2833)}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.05fr);gap:14px;margin-top:14px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td,th{padding:5px 6px;border-bottom:1px solid hsl(0 0% 100% / .06);text-align:left;vertical-align:middle}
+th{font:500 10px GeistMono,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+tr:last-child td{border-bottom:0}
+.pick td{background:hsl(262 80% 60% / .1)}.pick td:first-child{border-radius:8px 0 0 8px}.pick td:last-child{border-radius:0 8px 8px 0}
+.tag{display:inline-block;padding:1px 7px;border-radius:99px;font:600 10px GeistMono,monospace}
+.t-ok{background:hsl(152 72% 56% / .15);color:var(--ok)}.t-mid{background:hsl(38 98% 62% / .15);color:var(--amber)}.t-no{background:hsl(0 0% 100% / .07);color:var(--dim)}
+svg .m{fill:var(--mute);font-size:10.5px}
+.flow{stroke-dasharray:4 5;animation:flow 1.2s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-18}}
+.bar{transform-box:fill-box;transform-origin:left;animation:grow 1.1s var(--spring) both;animation-delay:calc(.5s + var(--i) * 140ms)}
+@keyframes grow{from{transform:scaleX(0)}}
+svg text{fill:var(--ink);font:12px Geist,system-ui;word-spacing:.18em}
+.now{animation:sweep 2.4s var(--spring) .6s both}
+@keyframes sweep{from{transform:translateX(-270px);opacity:0}}
+fieldset{border:0;padding:0;margin:0 0 9px}
+legend{font-weight:600;font-size:12.5px;margin-bottom:4px;padding:0}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+label{position:relative;display:inline-flex;gap:6px;align-items:center;font-size:12px;padding:5px 11px;border-radius:99px;border:1px solid var(--hair);background:var(--glass);cursor:pointer;transition:all .35s var(--spring)}
+label:hover{border-color:hsl(262 92% 70% / .5)}
+label input{position:absolute;opacity:0;pointer-events:none}
+label:has(input:checked){background:linear-gradient(135deg,hsl(262 92% 70% / .9),hsl(188 95% 58% / .9));color:var(--bg);border-color:transparent;font-weight:600;box-shadow:0 0 20px -4px hsl(262 92% 70% / .7)}
+label:has(input:focus-visible){outline:2px solid var(--cyan);outline-offset:2px}
+label i{font:600 9.5px GeistMono,monospace;font-style:normal;opacity:.75}
+input[type=text]{width:100%;background:hsl(240 30% 2% / .5);border:1px solid var(--hair);border-radius:99px;color:var(--ink);padding:7px 14px;font:12px Geist;margin-top:6px}
+.send{position:relative;overflow:hidden;margin-top:2px;width:100%;padding:11px;border:0;border-radius:99px;background:linear-gradient(135deg,var(--vio),var(--cyan));color:var(--bg);font:700 14px Geist;cursor:pointer;box-shadow:0 12px 30px -10px hsl(262 92% 70% / .8);transition:transform .4s var(--spring)}
+.send:hover{transform:translateY(-2px) scale(1.01)}
+.send::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,hsl(0 0% 100% / .5) 50%,transparent 70%);transform:translateX(-120%);animation:sheen 3s 1.5s infinite}
+@keyframes sheen{40%,100%{transform:translateX(120%)}}
+.send[disabled]{background:var(--ok)}
+.reel{font-size:12px;color:var(--mute);margin-top:4px}.reel b{color:var(--ink)}
+@media (max-width:1100px){.grid,.row2{grid-template-columns:minmax(0,1fr)}.mocks{flex-wrap:wrap;justify-content:center}}
+@media (max-width:560px){.dt{width:300px;height:190px}.dt iframe{width:1440px;height:909px;transform:scale(.2069)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style></head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<div class="top">
+ <h1>Generative UI app: plan</h1>
+ <div class="sum">A web app that replaces iMessage: <b>you ask, the AI picks the best view</b> and <b>shows what it is working on live</b>.<br>Every view <b>springs in and morphs</b> into the next; one shell changes shape for phone, tablet and desktop.</div>
+</div>
+
+<div class="grid">
+ <div class="panel" style="--i:0"><h2>Live mocks · same page at 3 real widths · looping</h2>
+  <div class="mocks">
+   <div class="dev"><div class="frame ph"><iframe src="mock.html" title="phone mock" tabindex="-1"></iframe></div><span><b>Phone</b> 390 · live pill</span></div>
+   <div class="dev"><div class="frame tb"><iframe src="mock.html" title="tablet mock" tabindex="-1"></iframe></div><span><b>Tablet</b> 820 · view + rail</span></div>
+   <div class="dev"><div class="frame dt"><iframe src="mock.html" title="desktop mock" tabindex="-1"></iframe></div><span><b>Desktop</b> 1440 · thread · view · rail</span></div>
+  </div>
+ </div>
+ <div class="panel" style="--i:1"><h2>Approach</h2>
+  <svg viewBox="0 0 470 196" width="100%" role="img" aria-label="Flow: ask, plan, pick view, stream spec, render with motion per screen; progress steps stream to the work rail">
+   <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="hsl(188 95% 58%)"/></marker>
+    <linearGradient id="gv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(262 92% 70% / .35)"/><stop offset="1" stop-color="hsl(188 95% 58% / .2)"/></linearGradient></defs>
+   <g class="flow" stroke="hsl(188 95% 58%)" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <path d="M78 34H100"/><path d="M188 34H210"/><path d="M298 34H320"/><path d="M382 52V84"/><path d="M144 52V124"/><path d="M188 142H320"/>
+   </g>
+   <g stroke-width="1" stroke="hsl(0 0% 100% / .14)">
+    <rect x="4" y="16" width="74" height="36" rx="18" fill="hsl(0 0% 100% / .05)"/>
+    <rect x="100" y="16" width="88" height="36" rx="18" fill="url(#gv)" stroke="hsl(262 92% 70% / .6)"/>
+    <rect x="210" y="16" width="88" height="36" rx="18" fill="url(#gv)" stroke="hsl(262 92% 70% / .6)"/>
+    <rect x="320" y="16" width="146" height="36" rx="18" fill="hsl(0 0% 100% / .05)"/>
+    <rect x="300" y="84" width="166" height="40" rx="20" fill="hsl(188 95% 58% / .12)" stroke="hsl(188 95% 58% / .6)"/>
+    <rect x="100" y="124" width="88" height="36" rx="18" fill="hsl(38 98% 62% / .12)" stroke="hsl(38 98% 62% / .55)"/>
+    <rect x="320" y="128" width="146" height="30" rx="15" fill="hsl(38 98% 62% / .12)" stroke="hsl(38 98% 62% / .55)"/>
+   </g>
+   <text x="41" y="38" text-anchor="middle">You ask</text>
+   <text x="144" y="38" text-anchor="middle">Model plans</text>
+   <text x="254" y="38" text-anchor="middle">Pick a view</text>
+   <text x="393" y="32" text-anchor="middle">Stream JSON spec</text><text class="m" x="393" y="45" text-anchor="middle">catalog-only, zod-checked</text>
+   <text x="383" y="101" text-anchor="middle">Render + Motion</text><text class="m" x="383" y="116" text-anchor="middle">spring in · morph · per screen</text>
+   <text x="144" y="146" text-anchor="middle">Step events</text>
+   <text x="393" y="147" text-anchor="middle">“Working on” rail</text>
+   <text class="m" x="200" y="70">view = f(data shape, screen)</text>
+   <text class="m" x="4" y="186">Catalog v1: board · table · timeline · diff · chart · checklist · form · text</text>
+  </svg>
+  <div class="reel">Reel: <b>“Generative UI #2: Merge conflicts”</b> (Phil Pitus, via @mudasirdevv): agent draws a commit list, a conflict diff with Resolve, then checks + Merge.</div>
+ </div>
+</div>
+
+<div class="row2">
+ <div class="panel" style="--i:2"><h2>Reuse first · checked</h2>
+  <table>
+   <tr><th>Project · ★</th><th>Lic.</th><th>Fit</th></tr>
+   <tr class="pick"><td><b>json-render</b> 18.8k</td><td>Apache</td><td><span class="tag t-ok">USE</span> safe catalog, streams</td></tr>
+   <tr class="pick"><td><b>AI SDK</b> 27.6k</td><td>Apache</td><td><span class="tag t-ok">USE</span> stream + step events</td></tr>
+   <tr class="pick"><td><b>Motion</b> 34.6k</td><td>MIT</td><td><span class="tag t-ok">USE</span> springs, layout morph</td></tr>
+   <tr><td>CopilotKit/AG-UI 38k</td><td>MIT</td><td><span class="tag t-mid">ALT</span> heavier runtime</td></tr>
+   <tr><td>A2UI 16.9k</td><td>Apache</td><td><span class="tag t-mid">ALT</span> preview v0.9</td></tr>
+   <tr><td>OpenUI 14.4k</td><td>MIT</td><td><span class="tag t-no">SKIP</span> own DSL</td></tr>
+   <tr><td>assistant-ui 12.8k</td><td>MIT</td><td><span class="tag t-no">SKIP</span> chat-only shell</td></tr>
+  </table>
+ </div>
+ <div class="panel" style="--i:3"><h2>Timeline · ~10 h wall · agents in parallel</h2>
+  <svg viewBox="0 0 408 196" width="100%" role="img" aria-label="Gantt chart, 10 hours">
+   <defs><linearGradient id="b1"><stop offset="0" stop-color="hsl(262 92% 70%)"/><stop offset="1" stop-color="hsl(188 95% 58%)"/></linearGradient></defs>
+   <g><text class="m" x="122" y="12" text-anchor="middle">0h</text><text class="m" x="176" y="12" text-anchor="middle">2</text><text class="m" x="230" y="12" text-anchor="middle">4</text><text class="m" x="284" y="12" text-anchor="middle">6</text><text class="m" x="338" y="12" text-anchor="middle">8</text><text class="m" x="392" y="12" text-anchor="middle">10h</text></g>
+   <g stroke="hsl(0 0% 100% / .06)"><path d="M122 18V180M176 18V180M230 18V180M284 18V180M338 18V180M392 18V180"/></g>
+   <text x="0" y="33">Spike</text><rect class="bar" style="--i:0" x="122" y="23" width="54" height="13" rx="6.5" fill="hsl(262 92% 70%)"/>
+   <text x="0" y="57">View catalog (8)</text><rect class="bar" style="--i:1" x="176" y="47" width="108" height="13" rx="6.5" fill="url(#b1)"/>
+   <text x="0" y="81">Responsive shell</text><rect class="bar" style="--i:2" x="176" y="71" width="81" height="13" rx="6.5" fill="url(#b1)"/>
+   <text x="0" y="105">Planner + steps</text><rect class="bar" style="--i:3" x="176" y="95" width="81" height="13" rx="6.5" fill="url(#b1)"/>
+   <text x="0" y="129">Firstmate bridge</text><rect class="bar" style="--i:4" x="284" y="119" width="54" height="13" rx="6.5" fill="hsl(38 98% 62%)"/>
+   <text x="0" y="153">Motion + polish</text><rect class="bar" style="--i:5" x="284" y="143" width="54" height="13" rx="6.5" fill="hsl(320 90% 66%)"/>
+   <text x="0" y="177">QA: 3 screens, a11y</text><rect class="bar" style="--i:6" x="338" y="167" width="54" height="13" rx="6.5" fill="hsl(152 72% 56%)"/>
+   <rect class="now" x="122" y="18" width="1.5" height="162" fill="hsl(188 95% 58%)"/>
+   <text class="m" x="0" y="194">Critical path 2 + 4 + 2 + 2 h · 18 h of agent work</text>
+  </svg>
+ </div>
+ <form class="panel" id="f" style="--i:4" data-lavish-question="cf-genui-build">
+  <h2>Your calls · defaults pre-picked</h2>
+  <fieldset><legend>1 · Render stack</legend><div class="opts">
+   <label><input type="radio" name="stack" value="jsonrender" checked>json-render + AI SDK <i>REC</i></label>
+   <label><input type="radio" name="stack" value="copilotkit">CopilotKit + AG-UI</label>
+   <label><input type="radio" name="stack" value="a2ui">A2UI</label></div></fieldset>
+  <fieldset><legend>2 · First thing it talks to</legend><div class="opts">
+   <label><input type="radio" name="source" value="fleet" checked>Firstmate + crew <i>REC</i></label>
+   <label><input type="radio" name="source" value="general">Any question</label></div></fieldset>
+  <fieldset><legend>3 · Your message cut off: “…and there's n…”</legend><div class="opts">
+   <label><input type="radio" name="cutoff" value="nofixedscreens" checked>No fixed screens <i>REC</i></label>
+   <label><input type="radio" name="cutoff" value="nochatlog">No chat log</label>
+   <label><input type="radio" name="cutoff" value="noapp">No install</label></div>
+   <input type="text" name="note" maxlength="300" placeholder="Or type the rest of your sentence"></fieldset>
+  <button class="send" type="submit">Send</button>
+ </form>
+</div>
+
+<script>
+document.getElementById('f').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(e.currentTarget), s = f.get('stack'), src = f.get('source'), c = f.get('cutoff'), note = (f.get('note') || '').trim();
+  const labels = {jsonrender:'json-render + AI SDK',copilotkit:'CopilotKit + AG-UI',a2ui:'A2UI',fleet:'Firstmate + crew first',general:'general chat first',nofixedscreens:'no fixed screens, AI picks every view',nochatlog:'no chat log, canvas only',noapp:'no install, web/PWA only'};
+  const text = `Stack: ${labels[s]} · Source: ${labels[src]} · Cut-off: ${labels[c]}` + (note ? ` · Rest of message: ${note}` : '');
+  if (!window.lavish) { alert(text); return; }
+  window.lavish.queuePrompt('Genui plan answers. ' + text + '. Plan the build with these choices.', {
+    tag: 'choice', text, element: e.currentTarget, queueKey: 'cf-genui-build',
+    data: { schema: 'fm-bearings-answer.v1', question: 'cf-genui-build', selection: `${s}.${src}.${c}`, note: note.slice(0, 500), close: 'release' }
+  });
+  window.lavish.sendQueuedPrompts();
+  e.submitter.disabled = true; e.submitter.textContent = 'Sent ✓';
+});
+</script>
+</body></html>
