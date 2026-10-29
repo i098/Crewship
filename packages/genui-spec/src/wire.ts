@@ -6,20 +6,44 @@ export type PatchOp =
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
+/** What a card shows; the web picks its view from this. */
+export type CardKind =
+  | "decision" | "conflict" | "pipeline" | "timeline" | "crew" | "shipped" | "plan"
+  | "embed" | "incident" | "compare" | "ask" | "sys" | "tui";
+
+/** One choice on a decision card: key, button text, one-line consequence, recommended. */
+export type CardOpt = { k: string; b: string; s?: string; rec?: boolean };
+
+/** Typed card props; other props stay free-form. */
+export type CardProps = {
+  proj?: string; // key into BoardSpec.projects
+  kind?: CardKind;
+  priority?: number; // 0-100, higher sits nearer the front
+  need?: boolean; // waits on the user
+  claim?: string; // agent that claimed it, e.g. "cf-bill"
+  opts?: CardOpt[];
+  stages?: string[];
+  at?: number; // index of the current stage in `stages`
+};
+
 export type Component = {
   type: string;
-  props: Record<string, unknown>;
+  props: CardProps & Record<string, unknown>;
   children?: string[];
   style?: Record<string, unknown>; // web turns only safe tokens into CSS variables (safeStyle)
   rect?: Rect;
 };
 
-export type Link = { from: string; to: string };
+export type Link = { from: string; to: string; label?: string };
+
+/** A project: display name and its colour, e.g. "hsl(188 95% 58%)". */
+export type Project = { name: string; hsl: string };
 
 export type BoardSpec = {
   components: Record<string, Component>;
   links: Link[];
   tokens: Record<string, unknown>;
+  projects?: Record<string, Project>;
 };
 
 export const emptyBoard = (): BoardSpec => ({ components: {}, links: [], tokens: {} });
