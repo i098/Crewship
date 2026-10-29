@@ -491,9 +491,7 @@ Bun.serve({
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
-    // A caller that retries sends X-Request-Id; the outbox then delivers that request once.
-    const sent = req.headers.get("x-request-id");
-    return queue({ ...destination, image, bubbles: parts, ...(sent && !image ? { requestId: `send-${sent}` } : {}),
+    return queue({ ...destination, image, bubbles: parts,
       ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
         : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
       reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
