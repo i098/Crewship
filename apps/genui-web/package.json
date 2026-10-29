@@ -1,0 +1,9 @@
+{
+  "name": "@crewship/genui-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot mock/server.ts",
+    "test": "bun test"
+  }
+}
