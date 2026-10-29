@@ -110,21 +110,20 @@ function lineOf(spec: BoardSpec, p: P): string {
   }
 }
 
-/** Props that follow from the rest of the spec: stages, ship day, lines, priority, header, links. */
-export function derive(spec: BoardSpec, tick: number): PatchOp[] {
+/** Pipeline, timeline and shipped props from the picks, the script state and the clock. */
+function statusProps(spec: BoardSpec, tick: number): Record<string, P> {
   const want: Record<string, P> = {};
-  const d1 = props(spec, "d1"), d2 = props(spec, "d2"), c1 = props(spec, "c1"), i1 = props(spec, "i1");
-  const pg = d1?.pick === "pg", mon = d2?.pick === "mon";
+  const c1 = props(spec, "c1"), i1 = props(spec, "i1"), p1 = props(spec, "p1"), sh = props(spec, "sh");
+  const pg = props(spec, "d1")?.pick === "pg", mon = props(spec, "d2")?.pick === "mon";
   const stages = ["Code", "Build", "Tests", ...(pg ? ["Migrate"] : []), "Preview", "Merge"];
-  const p1 = props(spec, "p1");
   if (p1) {
     const k = Math.min(Number(p1.at) || 0, stages.length - 1);
     const eta = Math.max(1, (stages.length - 1 - k) * 12 + (pg ? 25 : 0) - (tick % 2) * 6);
     want.p1 = { stages, at: k, kpi: { value: `~${eta}`, unit: "min" } };
   }
-  if (props(spec, "t1")) {
-    // one day is 25 units: Postgres's migrate day moves the ship from Fri to Sat; waiting for Monday covers it
-    const shift = mon ? 46 : pg ? 25 : 0;
+  // one day is 25 units: Postgres's migrate day moves the ship from Fri to Sat; waiting for Monday covers it
+  const shift = mon ? 46 : pg ? 25 : 0;
+  if (props(spec, "t1"))
     want.t1 = {
       ship: mon ? "Mon 10:00" : pg ? "Sat 14:00" : "Fri 14:00",
       shipX: 54 + shift,
@@ -135,34 +134,41 @@ export function derive(spec: BoardSpec, tick: number): PatchOp[] {
         { name: "billing", hsl: PROJECTS.bill.hsl, x: 20, w: 40 + (i1 && i1.done !== true ? 10 : 0) },
       ],
     };
-  }
-  const sh = props(spec, "sh");
-  if (sh) {
-    const n = Number(sh.shipped) || 0;
-    want.sh = { kpi: { value: n, unit: "PRs" }, days: [3, 5, 2, 6, 4, 0, 1, 7, 5, 8, 6, 4, 9, 7 + n - 67] };
-  }
+  const n = Number(sh?.shipped) || 0;
+  if (sh) want.sh = { kpi: { value: n, unit: "PRs" }, days: [3, 5, 2, 6, 4, 0, 1, 7, 5, 8, 6, 4, 9, 7 + n - 67] };
+  return want;
+}
+
+/** Each live item's priority and line, and the header: the top item's line plus how many others wait on you. */
+function lineProps(spec: BoardSpec): Record<string, P> {
+  const want: Record<string, P> = {};
   const items = Object.entries(spec.components).filter(([, c]) => c.type === "card" && c.props.kind && live(c.props));
-  for (const [id, c] of items) {
-    const p = c.props as P;
-    const priority = p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0);
-    want[id] = { ...want[id], priority, line: lineOf(spec, p) };
-  }
-  // header: the line of the top item, plus how many others wait on you
-  const top = items.reduce<[string, Component] | undefined>((a, b) => (!a || Number(want[b[0]].priority) > Number(want[a[0]].priority) ? b : a), undefined);
-  if (top && spec.components.header) {
-    const more = items.filter(([id, c]) => id !== top[0] && c.props.need === true && c.props.done !== true).length;
-    want.header = { title: String(want[top[0]].line) + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : "") };
-  }
-  const patch: PatchOp[] = [];
-  for (const [id, w] of Object.entries(want))
-    for (const [k, v] of Object.entries(w))
-      if (JSON.stringify(spec.components[id].props[k]) !== JSON.stringify(v)) patch.push({ op: "add", path: `/components/${esc(id)}/props/${k}`, value: v });
-  // relations show while both ends are on the board; links you drew stay as they are
+  for (const [id, { props: p }] of items)
+    want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0), line: lineOf(spec, p) };
+  const top = items.reduce<string | undefined>((a, [id]) => (!a || Number(want[id].priority) > Number(want[a].priority) ? id : a), undefined);
+  if (!top || !spec.components.header) return want;
+  const more = items.filter(([id, c]) => id !== top && c.props.need === true && c.props.done !== true).length;
+  want.header = { title: String(want[top].line) + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : "") };
+  return want;
+}
+
+/** Relations show while both ends are on the board; links you drew stay as they are. */
+function linksOf(spec: BoardSpec) {
   const rel = (l: { from: string; to: string; label?: string }) => REL.some(([a, b]) => a === l.from && b === l.to && l.label);
-  const links = [
+  return [
     ...spec.links.filter((l) => !rel(l)),
     ...REL.filter(([a, b]) => live(props(spec, a)) && live(props(spec, b))).map(([from, to, label]) => ({ from, to, label })),
   ];
+}
+
+/** Props that follow from the rest of the spec: stages, ship day, lines, priority, header, links. */
+export function derive(spec: BoardSpec, tick: number): PatchOp[] {
+  const status = statusProps(spec, tick), lines = lineProps(spec);
+  const patch: PatchOp[] = [];
+  for (const id of new Set([...Object.keys(status), ...Object.keys(lines)]))
+    for (const [k, v] of Object.entries({ ...status[id], ...lines[id] }))
+      if (JSON.stringify(spec.components[id].props[k]) !== JSON.stringify(v)) patch.push({ op: "add", path: `/components/${esc(id)}/props/${k}`, value: v });
+  const links = linksOf(spec);
   if (JSON.stringify(links) !== JSON.stringify(spec.links)) patch.push({ op: "replace", path: "/links", value: links });
   return patch;
 }
@@ -262,13 +268,8 @@ export class World {
     const ctx = about.of && live(props(spec, about.of)) ? about.of : ids[0];
     const proj = String((ctx && props(spec, ctx)?.proj) ?? "me");
     const s = text.trim().replace(/[?.!]+$/, "").slice(0, 400);
-    // anything with two readings comes back as a choice to tap, not a guess
-    const parts = s.replace(/^(should|shall|do|can|would|will)\s+(we|i|you|it)\s+/i, "").split(/,?\s+or\s+/i).map((p) => p.trim()).filter(Boolean);
-    const yn = /^(should|shall)\s+(we|i)\b/i.test(s);
-    if (parts.length > 1 || yn) {
-      const opts: CardOpt[] = parts.length > 1
-        ? parts.slice(0, 4).map((p, i) => ({ k: `o${i}`, b: p[0].toUpperCase() + p.slice(1, 40), rec: !i }))
-        : [{ k: "y", b: "Yes", rec: true }, { k: "n", b: "No" }];
+    const opts = choiceOpts(s);
+    if (opts) {
       const id = `q${++this.n}`;
       return this.change(`ask:${id}`, [...add(id, item("decision", proj, 95, { need: true, q: text.slice(0, 200), opts, of: about.of })), ...this.front(id)]);
     }
@@ -283,4 +284,11 @@ export class World {
     this.change(`ask:${id}`, [...add(id, { ...c, ...extra }), ...(about.at || about.of ? [] : this.front(id))]);
     this.at(2.2, () => this.has(id) && this.change(`ask:${id}:ready`, set(id, { ready: true })));
   }
+}
+
+/** Anything with two readings comes back as a choice to tap, not a guess: "a or b", or a yes/no "should we". */
+function choiceOpts(s: string): CardOpt[] | undefined {
+  const parts = s.replace(/^(should|shall|do|can|would|will)\s+(we|i|you|it)\s+/i, "").split(/,?\s+or\s+/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) return parts.slice(0, 4).map((p, i) => ({ k: `o${i}`, b: p[0].toUpperCase() + p.slice(1, 40), rec: !i }));
+  if (/^(should|shall)\s+(we|i)\b/i.test(s)) return [{ k: "y", b: "Yes", rec: true }, { k: "n", b: "No" }];
 }
