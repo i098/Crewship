@@ -184,7 +184,8 @@ function fit(id: string, w: number) {
     meter = document.createElement("div");
     meter.className = "tile";
     meter.setAttribute("aria-hidden", "true");
-    Object.assign(meter.style, { transition: "none", left: "-99999px", top: "0", visibility: "hidden" });
+    // off screen on purpose, so it must not skip its content the way an off-screen card does
+    Object.assign(meter.style, { transition: "none", left: "-99999px", top: "0", visibility: "hidden", contentVisibility: "visible" });
     world.append(meter);
   }
   meter.style.width = `${w}px`;
