@@ -113,7 +113,7 @@ export function cards(s: Sources): Record<string, Component> {
     const stages = ["Open", "Checks", "Review", "Merge"];
     const at = p.draft ? 0 : done < total || failed.length ? 1 : 2;
     out[`pr${p.n}`] = failed.length
-      ? card("note", "repo", 70, { title: `#${p.n}: ${failed.length} check${failed.length > 1 ? "s" : ""} failed`, flag: "failing", url: p.url, items: failed })
+      ? card("note", "repo", 70, { title: `#${p.n}: ${failed.length} check${failed.length > 1 ? "s" : ""} failed`, flag: "failing", url: p.url, items: failed, acts: [{ k: "claim", b: "Claim the fix", pri: true }] })
       : card("pipeline", "repo", 50, { title: `#${p.n} ${p.title}`, url: p.url, stages, at, kpi: { value: `${done}/${total}`, unit: "checks" } });
     out[`ok${p.n}`] = card("decision", "repo", failed.length ? 40 : 80, {
       need: true, q: `Approve #${p.n} ${p.title}?`, why: p.draft ? "Draft PR" : `${done}/${total} checks done`, url: p.url,
@@ -124,6 +124,9 @@ export function cards(s: Sources): Record<string, Component> {
       ],
     });
   }
+  // GitHub's own preview image of the newest open PR
+  const top = s.prs?.[0];
+  if (top) out.e1 = card("embed", "repo", 25, { type: "image", title: `#${top.n} on GitHub`, src: `https://opengraph.githubassets.com/genui/${REPO}/pull/${top.n}`, nat: "1200/600" });
   if (s.prs && !s.prs.length) out.prs = card("note", "repo", 10, { title: "No open pull requests", items: [] });
   out.k1 = card("crew", "crew", 34, { title: s.crew?.length ? "Crew right now" : "No crew threads on the crewboard", members: (s.crew ?? []).map((c) => ({ ...c, hsl: PROJECTS.crew.hsl })) });
   if (s.merged) out.sh = card("shipped", "repo", 20, { title: "Merged PRs", ...s.merged });
@@ -227,12 +230,19 @@ async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
     }
   } else if (typeof p.text === "string" && p.text.trim()) {
     // the ask goes to every crew agent that reads the genui topic; no reply is made up here
-    const r = await pub({ ask: p.text, about: p.about ?? null }).catch((e) => `failed: ${(e as Error).message}`);
-    extra[`ask${m.id}`] = card("ask", "me", 90, { q: p.text, ready: false, asked: true });
+    const id = `ask${m.id}`;
+    const r = await pub({ ask: p.text, id, about: p.about ?? null, reply: `crewboard pub ${TOPIC} '{"to":"${id}","reply":"…"}'` }).catch((e) => `failed: ${(e as Error).message}`);
+    extra[id] = card("ask", "me", 90, { q: p.text, ready: false, asked: true });
     note(`Sent to the crewboard topic ${TOPIC}: ${p.text} (seq ${r.trim()})`);
+  } else if (p.field === "act" && p.value === "claim" && c.url) {
+    // claiming is a record on the crewboard that the crew reads; nothing runs on the repo
+    const pr = Number(m.targetId.slice(2));
+    const r = await pub({ claim: pr, url: c.url, checks: c.items }).catch((e) => `failed: ${(e as Error).message}`);
+    note(`You claimed the fix for #${pr}; recorded on ${TOPIC} (seq ${r.trim()})`, "repo");
+    await call("emit_view", { event: { delta: [setProp(m.targetId, "claim", "you")] }, cause: `intent:${m.id}` });
   } else if (p.field === "pick" && c.kind === "decision") {
     const pr = Number(m.targetId.slice(2));
-    const r = await pub({ decision: p.value, pr, url: c.url }).catch((e) => `failed: ${(e as Error).message}`);
+    const r = await pub({ decision: p.value, pr, url: c.url, ...(p.value === "approve" ? { draft: `gh pr merge ${pr}` } : {}) }).catch((e) => `failed: ${(e as Error).message}`);
     note(`${p.value === "approve" ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${p.value === "approve" ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
     await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: `intent:${m.id}` });
   } else if (p.field === "removed") delete extra[m.targetId];
@@ -250,11 +260,34 @@ function connect() {
   ws.onclose = () => setTimeout(connect, 2000); // the dev server restarts; reconnect
 }
 
+/** Crew replies to asks: `{"to":"ask…","reply":"…"}` on the genui topic fills that ask's card. */
+async function replies() {
+  const sub = Bun.spawn(["crewboard", "sub", TOPIC, "--json", "--viewer"], { stdout: "pipe", stderr: "ignore" });
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { sub.kill(); process.exit(0); });
+  let buf = "";
+  for await (const chunk of sub.stdout.pipeThrough(new TextDecoderStream())) {
+    buf += chunk;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      let msg: { from?: string; body?: string }, body: { to?: unknown; reply?: unknown };
+      try { msg = JSON.parse(line); body = JSON.parse(msg.body ?? ""); } catch { continue; }
+      const ask = typeof body.to === "string" ? extra[body.to] : undefined;
+      if (!ask || typeof body.reply !== "string") continue;
+      ask.props = { ...ask.props, ready: true, about: body.reply.split("\n").filter(Boolean), from: msg.from ?? "crew" };
+      note(`${msg.from ?? "crew"} answered: ${body.reply}`);
+      if (last) await publish(last);
+    }
+  }
+}
+
 // the first snapshot must land before any diff, or the feeder would overwrite what the owner set
 const synced = Promise.withResolvers<void>();
 if (import.meta.main) {
   connect();
   await synced.promise;
+  replies().catch((e) => console.error("replies:", (e as Error).message));
   for (;;) {
     last = await gather();
     if (last.gaps.length) console.error("gaps:", last.gaps.join("; "));

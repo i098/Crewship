@@ -1,20 +1,31 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { Op, ServerMsg, BoardSpec } from "@crewship/genui-spec";
-import { applyPatch, Board, filterAgentPatch, invertPatch, safeStyle } from "../src/model";
-import { start } from "../mock/server";
-import { seedSpec, World } from "../mock/world";
+import { applyPatch, Board, safeStyle } from "../src/model";
 
 const op = (seq: number, actor: Op["actor"], patch: Op["patch"]): ServerMsg => ({ t: "ops", ops: [{ seq, actor, cause: "t", patch, inverse: [] }] });
 const agentMove = (seq: number, x: number): ServerMsg => op(seq, "agent", [{ op: "add", path: "/components/p1/rect", value: { x, y: 0, w: 300, h: 200 } }]);
 
-function boardWith(spec: BoardSpec = seedSpec()) {
+/** A header and two cards: the least a board needs for the move rule. */
+const seed = (): BoardSpec => ({
+  components: {
+    header: { type: "header", props: { wins: "agent" } },
+    p1: { type: "card", props: { kind: "pipeline", title: "p1" } },
+    k1: { type: "card", props: { kind: "crew", title: "k1" } },
+  },
+  links: [],
+  tokens: {},
+});
+
+function boardWith(spec: BoardSpec = seed()) {
   const b = new Board();
   b.receive({ t: "snapshot", seq: 1, spec });
   return b;
 }
 
 describe("patch", () => {
-  test("invert undoes add, replace and remove, on objects and arrays", () => {
+  test("add, replace and remove apply to objects and arrays without touching the input", () => {
     const doc: Record<string, unknown> = { a: { b: 1 }, list: [1, 2, 3] };
     const patch = [
       { op: "add", path: "/a/c", value: 2 },
@@ -22,9 +33,7 @@ describe("patch", () => {
       { op: "remove", path: "/list/0" },
       { op: "add", path: "/list/-", value: 4 },
     ] as const;
-    const after = applyPatch(doc, [...patch]);
-    expect(after).toEqual({ a: { b: 9, c: 2 }, list: [2, 3, 4] });
-    expect(applyPatch(after, invertPatch(doc, [...patch]))).toEqual(doc);
+    expect(applyPatch(doc, [...patch])).toEqual({ a: { b: 9, c: 2 }, list: [2, 3, 4] });
     expect(doc).toEqual({ a: { b: 1 }, list: [1, 2, 3] });
   });
 
@@ -45,7 +54,7 @@ describe("move rule", () => {
 
   test("user wins, or a pinned card: the user's pending move stays on top", () => {
     for (const patch of [{ op: "add", path: "/components/header/props/wins", value: "user" }, { op: "add", path: "/components/p1/props/pinned", value: true }] as const) {
-      const b = boardWith(applyPatch(seedSpec(), [patch]));
+      const b = boardWith(applyPatch(seed(), [patch]));
       b.propose("move", "p1", { x: 500, y: 500 });
       b.receive(agentMove(2, 7));
       expect(b.view().components.p1.rect?.x).toBe(500);
@@ -61,70 +70,6 @@ describe("move rule", () => {
     b.receive(agentMove(1, 7));
     expect(b.seq).toBe(1);
   });
-
-  test("the server drops agent rect changes on pinned cards, and on placed cards while the user wins", () => {
-    const spec = applyPatch(seedSpec(), [{ op: "add", path: "/components/header/props/wins", value: "user" }]);
-    const patch = [
-      { op: "add" as const, path: "/components/p1/rect", value: {} },
-      { op: "add" as const, path: "/components/p1/props/title", value: "t" },
-      { op: "add" as const, path: "/components/k1/rect", value: {} },
-    ];
-    expect(filterAgentPatch(spec, patch, new Set(["p1"])).map((o) => o.path)).toEqual(["/components/p1/props/title", "/components/k1/rect"]);
-    expect(filterAgentPatch(seedSpec(), patch, new Set(["p1"]))).toHaveLength(3);
-    const pinned = applyPatch(seedSpec(), [{ op: "add", path: "/components/k1/props/pinned", value: true }]);
-    expect(filterAgentPatch(pinned, patch, new Set()).map((o) => o.path)).toEqual(["/components/p1/rect", "/components/p1/props/title"]);
-  });
-});
-
-describe("mock world", () => {
-  function world() {
-    let spec = seedSpec();
-    const w = new World(() => spec, (_cause, patch) => (spec = applyPatch(spec, patch)));
-    return { w, spec: () => spec };
-  }
-
-  test("the seed is the design's 11 items; the header follows the top item and counts the rest that need you", () => {
-    const spec = seedSpec();
-    expect(Object.values(spec.components).filter((c) => c.props.kind)).toHaveLength(11);
-    expect(spec.components.header.props.title).toBe("*Needs you:* Store swaps in Postgres or SQLite? *+2 more* need you.");
-    expect(spec.links.map((l) => l.label)).toEqual(["adds a migrate step", "Postgres adds a migrate day", "sets the ship time", "cf-auth waits on this"]);
-  });
-
-  test("picking Postgres settles the decision and adds the migrate day everywhere it shows", () => {
-    const { w, spec } = world();
-    w.change("user pick", [{ op: "add", path: "/components/d1/props/pick", value: "pg" }]); // the server commits the pick, then the world reacts
-    w.react("d1", "pick");
-    expect(spec().components.d1.props).toMatchObject({ done: true, priority: 5 });
-    expect(spec().components.p1.props.stages).toEqual(["Code", "Build", "Tests", "Migrate", "Preview", "Merge"]);
-    expect(spec().components.t1.props.ship).toBe("Sat 14:00");
-    w.stop();
-  });
-
-  test("an answer lands at the front of the cluster it is about, never at a fixed spot", () => {
-    const { w, spec } = world();
-    w.answer("why is this slow?");
-    const free = Object.values(spec().components).find((c) => c.props.kind === "ask")!;
-    expect(free.rect).toBeUndefined();
-    expect(free.props).toMatchObject({ proj: "me", asked: true, priority: 295 });
-    w.answer("what does this need?", { ids: ["c1"] });
-    expect(Object.values(spec().components).filter((c) => c.props.kind === "ask")[1].props).toMatchObject({ proj: "crew", about: ["#212 auth refresh hit a conflict"] });
-    w.answer("put it here", { at: { x: 10, y: 20, w: 100, h: 50 } });
-    expect(Object.values(spec().components).filter((c) => c.props.kind === "ask")[2]).toMatchObject({ rect: { x: 134, y: 20 }, props: { pinned: true } });
-    w.stop();
-  });
-
-  test("a header pill opens host stats or an agent's terminal in front, once, and ignores unknown names", () => {
-    const { w, spec } = world();
-    w.open("sys");
-    w.open("tui-cf-bill");
-    w.open("sys");
-    w.open("tui-nobody");
-    const cs = spec().components;
-    expect(cs.sys.props).toMatchObject({ kind: "sys", proj: "host", series: cs.header.props.stats, asked: true });
-    expect(cs["tui-cf-bill"].props).toMatchObject({ kind: "tui", proj: "bill", agent: "cf-bill", asked: false });
-    expect(Object.keys(cs).filter((k) => k.startsWith("tui-"))).toEqual(["tui-cf-bill"]);
-    w.stop();
-  });
 });
 
 test("style keeps HSL tokens and drops other colours, URLs and bad keys", () => {
@@ -134,12 +79,37 @@ test("style keeps HSL tokens and drops other colours, URLs and bad keys", () => 
   });
 });
 
-describe("mock server contract", () => {
-  const server = start(0);
-  afterAll(() => server.stop(true));
+// The contract runs against the real genui-server (Worker plus BoardDO) under `wrangler dev --local`.
+describe("genui-server contract", () => {
+  const port = 18000 + Math.floor(Math.random() * 2000);
+  const base = `http://127.0.0.1:${port}`;
+  const persist = `${tmpdir()}/genui-test-${port}`;
+  let server: Bun.Subprocess | undefined;
+
+  beforeAll(async () => {
+    server = Bun.spawn(["bunx", "wrangler", "dev", "--local", "--port", String(port), "--persist-to", persist], {
+      cwd: new URL("../../genui-server/", import.meta.url).pathname, stdout: "ignore", stderr: "ignore",
+    });
+    // wrangler prints no machine-readable ready signal, so poll its port until the Worker answers
+    for (let i = 0; i < 120; i++) {
+      if (await fetch(`${base}/agent/up`).then((r) => r.status === 405, () => false)) return;
+      await Bun.sleep(500);
+    }
+    throw new Error("genui-server did not start");
+  }, 70_000);
+  afterAll(async () => {
+    server?.kill();
+    await server?.exited;
+    rmSync(persist, { recursive: true, force: true });
+  });
+
+  const agent = async (boardId: string, tool: string, args: Record<string, unknown>) =>
+    (await fetch(`${base}/agent/${boardId}`, { method: "POST", body: JSON.stringify({ tool, args }) })).json();
 
   async function open() {
-    const ws = new WebSocket(`ws://${server.url.host}/ws/t-${crypto.randomUUID()}`);
+    const boardId = `t-${crypto.randomUUID()}`;
+    await agent(boardId, "emit_view", { spec: seed() });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${boardId}`);
     const inbox: ServerMsg[] = [];
     let wake = () => {};
     ws.onmessage = (e) => (inbox.push(JSON.parse(String(e.data))), wake());
@@ -156,7 +126,8 @@ describe("mock server contract", () => {
         await arrived.promise;
       }
     };
-    return { ws, next, boardId: new URL(ws.url).pathname.split("/").pop()! };
+    await next("snapshot"); // the server sends one on connect
+    return { ws, next, boardId };
   }
 
   test("hello, intent, agent call and undo round trip", async () => {
@@ -167,13 +138,11 @@ describe("mock server contract", () => {
 
     ws.send(JSON.stringify({ t: "intent", id: "i1", kind: "move", targetId: "p1", payload: { x: 5, y: 6 } }));
     const moved = await next("ops");
-    expect(moved.t === "ops" && moved.ops[0]).toMatchObject({ seq: 1, actor: "user", patch: [{ value: { x: 5, y: 6 } }] });
-    expect(await next("ack")).toEqual({ t: "ack", id: "i1", seq: 1 });
+    expect(moved.t === "ops" && moved.ops[0]).toMatchObject({ seq: 2, actor: "user", patch: [{ value: { x: 5, y: 6 } }] });
+    expect(await next("ack")).toEqual({ t: "ack", id: "i1", seq: 2 });
 
     // Agent wins by default, so the agent may move a card the user placed.
-    const move = { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
-    const res = await fetch(`${server.url}agent/${boardId}`, { method: "POST", body: JSON.stringify({ tool: "emit_view", args: move }) });
-    expect(await res.json()).toEqual({ seq: 2 });
+    expect(await agent(boardId, "emit_view", { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] })).toEqual({ seq: 3 });
     const byAgent = await next("ops");
     expect(byAgent.t === "ops" && byAgent.ops[0].actor).toBe("agent");
 
@@ -182,21 +151,20 @@ describe("mock server contract", () => {
 
     ws.send(JSON.stringify({ t: "undo" }));
     const undo = await next("ops");
-    expect(undo.t === "ops" && undo.ops[0].patch[0]).toMatchObject({ value: { x: 5, y: 6 } });
+    expect(undo.t === "ops" && undo.ops[0]).toMatchObject({ actor: "user", cause: "undo:2" });
     ws.close();
-  });
+  }, 15_000);
 
   test("user wins: the server keeps the user's placement against the agent", async () => {
     const { ws, next, boardId } = await open();
-    ws.send(JSON.stringify({ t: "hello", boardId, clientId: "c" }));
-    await next("snapshot");
     ws.send(JSON.stringify({ t: "intent", id: "w", kind: "input", targetId: "header", payload: { field: "wins", value: "user" } }));
-    ws.send(JSON.stringify({ t: "intent", id: "m", kind: "move", targetId: "p1", payload: { x: 5, y: 6 } }));
+    ws.send(JSON.stringify({ t: "intent", id: "m", kind: "move", targetId: "p1", payload: { x: 5, y: 6, w: 300, h: 200 } }));
     await next("ack");
     await next("ack");
-    const move = { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] };
-    const res = await fetch(`${server.url}agent/${boardId}`, { method: "POST", body: JSON.stringify({ tool: "emit_view", args: move }) });
-    expect(await res.json()).toEqual({ seq: 2 });
+    await agent(boardId, "emit_view", { patch: [{ op: "add", path: "/components/p1/rect", value: { x: 1, y: 1, w: 200, h: 200 } }] });
+    ws.send(JSON.stringify({ t: "hello", boardId, clientId: "c" }));
+    const snap = await next("snapshot");
+    expect(snap.t === "snapshot" && snap.spec.components.p1.rect).toMatchObject({ x: 5, y: 6 });
     ws.close();
-  });
+  }, 15_000);
 });
