@@ -1,34 +1,41 @@
-// The genui web canvas: draws the spec, sends user intents, and keeps the sketch layer on top.
-import type { ClientMsg, Component, IntentKind, Rect, ServerMsg, BoardSpec } from "@crewship/genui-spec";
+// The genui web canvas: draws the spec as the design's project clusters, owns the camera and the card gestures,
+// and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
+import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
+import { layout, type Item, type Layout } from "./layout";
+import { startLinks } from "./links";
+import { paintShell } from "./shell";
+import { renderCard } from "./views/index";
+import { initOverlays } from "./overlays";
 
 const q = new URLSearchParams(location.search);
 const boardId = q.get("board") ?? "demo";
 const wsUrl = q.get("ws") ?? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/${encodeURIComponent(boardId)}`;
 const clientId = crypto.randomUUID();
 
-const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T;
-const header = $<HTMLElement>(".top");
-const canvas = $<HTMLElement>(".canvas");
-const world = $<HTMLElement>(".world");
-const links = $<SVGSVGElement>(".links");
-const composer = $<HTMLFormElement>(".composer");
-const field = $<HTMLInputElement>(".composer input");
-const sketch = $<SVGSVGElement>(".sketch");
+const canvas = document.querySelector<HTMLElement>(".canvas")!;
+const world = canvas.querySelector<HTMLElement>(".world")!;
+// lines are drawn in screen space, so their layer sits on the canvas, not in the world
+const linkSvg = document.querySelector<SVGSVGElement>("svg.links") ?? document.createElementNS("http://www.w3.org/2000/svg", "svg");
+linkSvg.setAttribute("class", "links");
+canvas.append(linkSvg);
+canvas.classList.add("boot");
+
+const SHELL = new Set(["header", "input"]);
+const FALLBACK = "hsl(188 95% 58%)";
+const IA = "button,form,video,audio,input,textarea,select,a,.mw";
 
 const board = new Board();
 let ws: WebSocket | undefined;
 let live = false;
-let notice = "";
-let pan = { x: 0, y: 0 };
-// One gesture at a time; its rect is drawn until the drop sends the intent.
-let drag: { id: string; mode: "move" | "resize"; rect: Rect; x0: number; y0: number; r0: Rect } | undefined;
-let linking: { from: string; x: number; y: number } | undefined;
-const cards = new Map<string, { el: HTMLElement; html: string }>();
-const SHELL = new Set(["header", "input"]);
-const SVGNS = "http://www.w3.org/2000/svg";
-
-const escHtml = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+let spec: BoardSpec = board.view();
+let L: Layout | undefined;
+/** Cluster order you set by dragging cards, and the ask boost that brings cards to the centre. */
+const order: Record<string, string[]> = {};
+const asked = new Map<string, number>();
+/** A size or spot shown while you drag, before the intent lands. */
+const held = new Map<string, { w?: number; h?: number; x?: number; y?: number }>();
+const listeners: ((transform: string, k: number) => void)[] = [];
 
 function send(msg: ClientMsg) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -36,6 +43,9 @@ function send(msg: ClientMsg) {
 
 function intent(kind: IntentKind, targetId: string, payload: Record<string, unknown>) {
   if (!live) return paint();
+  // a card you pin stays where it is on screen now, out of the tiling
+  const t = L?.tiles[targetId];
+  if (kind === "pin" && payload.pinned === true && t) send(board.propose("move", targetId, { x: t.x, y: t.y }));
   send(board.propose(kind, targetId, payload));
   paint();
 }
@@ -48,8 +58,7 @@ function connect(delay = 1000) {
     send({ t: "hello", boardId, clientId });
   };
   ws.onmessage = (e) => {
-    // An error shows until the next server message.
-    notice = board.receive(JSON.parse(String(e.data)) as ServerMsg) ?? "";
+    board.receive(JSON.parse(String(e.data)) as ServerMsg);
     paint();
   };
   ws.onclose = () => {
@@ -59,15 +68,80 @@ function connect(delay = 1000) {
   };
 }
 
+const cam = {
+  x: 0,
+  y: 0,
+  k: 1,
+  /** True once you pan or zoom; the camera then stops following the layout until you go home. */
+  free: false,
+  view: null as string | null,
+  spreading: false,
+  home() {
+    Object.assign(cam, { free: false, view: null, spreading: false });
+    paint();
+  },
+  spread(on = !cam.spreading) {
+    Object.assign(cam, { free: false, spreading: on });
+    ctx.sel.clear();
+    paint();
+  },
+  cycle(dir: number) {
+    const o = L?.order ?? [];
+    if (!o.length) return;
+    cam.open(o[(o.indexOf(L?.front ?? o[0]) + dir + o.length) % o.length]);
+  },
+  open(proj: string) {
+    Object.assign(cam, { free: false, view: proj, spreading: false });
+    ctx.sel.clear();
+    paint();
+  },
+  /** Brings cards to the centre for a while: what you asked for holds the centre over new events. */
+  bring(ids: string[]) {
+    asked.clear();
+    ids.forEach((id, i) => asked.set(id, performance.now() + 25_000 - i));
+    ctx.sel.clear();
+    cam.home();
+  },
+  toWorld(cx: number, cy: number) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (cx - r.left - r.width / 2) / cam.k + cam.x, y: (cy - r.top - r.height / 2) / cam.k + cam.y };
+  },
+  onChange(fn: (transform: string, k: number) => void) {
+    listeners.push(fn);
+  },
+};
+
+const ctx = { board, send, intent, cam, sel: new Set<string>(), paint };
+
+function place() {
+  const tx = canvas.clientWidth / 2 - cam.x * cam.k, ty = canvas.clientHeight / 2 - cam.y * cam.k;
+  const transform = `translate(${tx}px,${ty}px) scale(${cam.k})`;
+  world.style.transform = transform;
+  world.style.setProperty("--k", String(cam.k));
+  // dot spacing repeats every doubling, so zoom never runs out of grid
+  const g = 30 * cam.k * 2 ** -Math.floor(Math.log2(cam.k));
+  Object.assign(canvas.style, { backgroundPosition: `${tx}px ${ty}px`, backgroundSize: `${g}px ${g}px` });
+  for (const fn of listeners) fn(transform, cam.k);
+}
+
+const zoomAt = (k2: number, mx: number, my: number) => {
+  const r = canvas.getBoundingClientRect(), dx = mx - r.left - r.width / 2, dy = my - r.top - r.height / 2;
+  k2 = Math.max(0.02, Math.min(50, k2));
+  cam.x += dx / cam.k - dx / k2;
+  cam.y += dy / cam.k - dy / k2;
+  cam.k = k2;
+  cam.free = true;
+  place();
+};
+
 /** Sets a component's safe tokens as CSS variables; style keys never reach plain CSS properties. */
-function tokens(el: HTMLElement, c: Component | undefined) {
-  el.removeAttribute("style");
-  for (const [k, v] of Object.entries(safeStyle(c?.style))) el.style.setProperty(`--${k}`, v);
-  el.hidden = c?.props.hidden === true;
+function tokens(el: HTMLElement, c: Component) {
+  for (const k of [...el.style]) if (k.startsWith("--") && k !== "--s" && k !== "--lk" && k !== "--ring") el.style.removeProperty(k);
+  for (const [k, v] of Object.entries(safeStyle(c.style))) el.style.setProperty(`--${k}`, v);
 }
 
 let rootKeys: string[] = [];
-function rootTokens(spec: BoardSpec) {
+function rootTokens() {
   const root = document.documentElement.style;
   for (const k of rootKeys) root.removeProperty(`--${k}`);
   const t = safeStyle(spec.tokens);
@@ -75,84 +149,122 @@ function rootTokens(spec: BoardSpec) {
   rootKeys = Object.keys(t);
 }
 
-let headerHtml = "";
-function paintHeader(c: Component | undefined) {
-  tokens(header, c);
-  if (!c) return void (header.hidden = true);
-  const wins = c.props.wins === "user" ? "user" : "agent";
-  const status = live ? `live · seq <b class="num">${board.seq}</b>` : "reconnecting";
-  const html = `<i class="orb${board.pending.size ? " busy" : ""}"></i>
-<h1 class="line">${escHtml(c.props.title)}</h1>
-<span class="st${live ? " on" : ""}" role="status">${status}${notice ? ` · ${escHtml(notice)}` : ""}</span>
-<div class="seg" role="group" aria-label="When you and the agent both move a card">
-<button type="button" data-wins="agent" aria-pressed="${wins === "agent"}">agent wins</button>
-<button type="button" data-wins="user" aria-pressed="${wins === "user"}">user wins</button></div>`;
-  // Rebuild only on change, so a click that spans a repaint still lands on its button.
-  if (html !== headerHtml) header.innerHTML = headerHtml = html;
-  if (c.rect) Object.assign(header.style, { left: `${c.rect.x}px`, top: `${c.rect.y}px`, width: `${c.rect.w}px`, right: "auto" });
-}
+const colour = (proj: string) => spec.projects?.[proj]?.hsl ?? FALLBACK;
+const tierOf = (w: number) => (w > 500 ? "wide" : "narrow");
+const tileEl = (id: string) => document.getElementById(`t-${id}`);
 
-function paintInput(c: Component | undefined) {
-  tokens(composer, c);
-  composer.hidden ||= !c;
-  field.placeholder = String(c?.props.placeholder ?? "Ask anything");
-  if (c?.rect) Object.assign(composer.style, { left: `${c.rect.x}px`, top: `${c.rect.y}px`, width: `${c.rect.w}px`, bottom: "auto", right: "auto" });
-}
-
-function body(spec: BoardSpec, c: Component, depth = 0): string {
-  const p = c.props;
-  const kpi = p.kpi as { value?: unknown; unit?: unknown } | undefined;
-  const steps = p.steps as { items?: unknown[]; at?: number } | undefined;
-  let h = "";
-  if (kpi) h += `<div class="kpi num">${escHtml(kpi.value)}<small>${escHtml(kpi.unit)}</small></div>`;
-  if (Array.isArray(steps?.items))
-    h += `<ol class="steps">${steps.items.map((s, i) => `<li class="${i < (steps.at ?? 0) ? "done" : i === steps.at ? "at" : ""}">${escHtml(s)}</li>`).join("")}</ol>`;
-  if (p.body) h += `<p>${escHtml(p.body)}</p>`;
-  if (Array.isArray(p.items)) h += `<ul class="items">${p.items.map((s) => `<li>${escHtml(s)}</li>`).join("")}</ul>`;
-  // Children without their own rect sit inside the parent; depth stops a cycle in a bad spec.
-  for (const id of depth < 4 ? (c.children ?? []) : []) {
-    const k = spec.components[id];
-    if (k && !k.rect) h += `<div class="kid"><b>${escHtml(k.props.title)}</b>${body(spec, k, depth + 1)}</div>`;
+// a card's height is read from a hidden copy at the target width, so a card in a move keeps moving
+const fits = new Map<string, number>();
+let meter: HTMLElement | undefined;
+function fit(id: string, w: number) {
+  const html = renderCard(spec, spec.components[id], tierOf(w)), key = `${id}|${w}|${html}`;
+  const hit = fits.get(key);
+  if (hit !== undefined) return hit;
+  if (!meter) {
+    meter = document.createElement("div");
+    meter.className = "tile";
+    meter.setAttribute("aria-hidden", "true");
+    Object.assign(meter.style, { transition: "none", left: "-99999px", top: "0", visibility: "hidden" });
+    world.append(meter);
   }
+  meter.style.width = `${w}px`;
+  meter.innerHTML = html;
+  meter.querySelectorAll("iframe,video").forEach((x) => x.replaceWith(Object.assign(document.createElement("div"), { className: x.className })));
+  const h = meter.offsetHeight;
+  if (fits.size > 500) fits.clear();
+  fits.set(key, h);
   return h;
 }
 
-function cardHtml(spec: BoardSpec, c: Component): string {
-  const pinned = c.props.pinned === true;
-  return `<div class="hd">${c.props.flag ? `<span class="flag">${escHtml(c.props.flag)}</span>` : ""}
-<button type="button" class="ib" data-act="pin" aria-pressed="${pinned}" title="${pinned ? "Unpin" : "Pin in place"}">${pinned ? "pinned" : "pin"}</button>
-<button type="button" class="ib" data-act="link" title="Drag to another card to link">link</button></div>
-<div class="title">${escHtml(c.props.title ?? c.type)}</div>
-<div class="core">${body(spec, c)}</div><i class="grip" data-act="resize" aria-hidden="true"></i>`;
+function items(): Item[] {
+  const nested = new Set(Object.values(spec.components).flatMap((c) => c.children ?? []));
+  const now = performance.now();
+  return Object.entries(spec.components)
+    .filter(([id]) => !SHELL.has(id) && !nested.has(id))
+    .map(([id, c]) => {
+      const p = c.props, r = c.rect, h = held.get(id);
+      const done = p.done === true, boost = (asked.get(id) ?? 0) > now ? 200 : 0;
+      const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
+      const pin = p.pinned === true && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
+      return { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin, size };
+    });
 }
 
-/** Numbers only: rects come from the agent's spec and end up in SVG markup and styles. */
-function rectOf(spec: BoardSpec, id: string): Rect | undefined {
-  const r = drag?.id === id ? drag.rect : spec.components[id]?.rect;
-  return r && { x: Number(r.x) || 0, y: Number(r.y) || 0, w: Number(r.w) || 0, h: Number(r.h) || 0 };
-}
-
-function paintLinks(spec: BoardSpec) {
-  // Side by side: right edge to left edge. Stacked (the two overlap in x): bottom edge to top edge.
-  const edge = (a: Rect, b: Rect) => {
-    if (a.x < b.x + b.w && b.x < a.x + a.w) {
-      const [t, u] = a.y <= b.y ? [a, b] : [b, a];
-      const x1 = t.x + t.w / 2, y1 = t.y + t.h, x2 = u.x + u.w / 2, y2 = u.y, bend = Math.max(30, (y2 - y1) / 2);
-      return `M${x1} ${y1}C${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`;
-    }
-    const [l, r] = a.x <= b.x ? [a, b] : [b, a];
-    const x1 = l.x + l.w, y1 = l.y + l.h / 2, x2 = r.x, y2 = r.y + r.h / 2, bend = Math.max(30, (x2 - x1) / 2);
-    return `M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2} ${y2}`;
+function viewport() {
+  const top = document.querySelector<HTMLElement>(".top"), bottom = document.querySelector<HTMLElement>(".bottom") ?? document.querySelector<HTMLElement>(".composer");
+  return {
+    W: canvas.clientWidth,
+    H: canvas.clientHeight,
+    topH: top && !top.hidden ? top.getBoundingClientRect().bottom : 0,
+    botH: bottom && !bottom.hidden ? canvas.clientHeight - bottom.getBoundingClientRect().top : 0,
   };
-  let h = "";
-  for (const l of spec.links) {
-    const a = rectOf(spec, l.from), b = rectOf(spec, l.to);
-    if (a && b) h += `<path class="case" d="${edge(a, b)}"/><path d="${edge(a, b)}"/>`;
-  }
-  const a = linking && rectOf(spec, linking.from);
-  if (linking && a) h += `<path class="tmp" d="${edge(a, { x: linking.x, y: linking.y, w: 0, h: 0 })}"/>`;
-  links.innerHTML = h;
 }
+
+function fade(el: Element) {
+  el.removeAttribute("id");
+  el.classList.add("gone");
+  setTimeout(() => el.remove(), 450);
+}
+
+function paintClusters(spec: BoardSpec, lay: Layout) {
+  for (const b of lay.clusters) {
+    let box = document.getElementById(`g-${b.proj}`);
+    if (!box) {
+      box = document.createElement("div");
+      box.id = `g-${b.proj}`;
+      box.className = "cluster";
+      box.innerHTML = '<div class="cl-hd"></div>';
+      world.prepend(box);
+    }
+    const col = colour(b.proj), cs = b.ids.map((id) => spec.components[id].props);
+    const need = cs.filter((p) => p.need && p.done !== true).length, claimed = cs.find((p) => p.claim && p.done !== true)?.claim;
+    const say = need ? `${need} need${need > 1 ? "" : "s"} you` : claimed ? `${claimed} is on it` : cs.every((p) => p.done === true) ? "all done" : "nothing needs you";
+    const name = spec.projects?.[b.proj]?.name ?? b.proj;
+    const hd = `<b style="background:${col}">${esc(name)}</b>${esc(say)}`;
+    if (box.firstElementChild!.innerHTML !== hd) box.firstElementChild!.innerHTML = hd;
+    box.classList.toggle("away", !b.front);
+    box.classList.toggle("r", b.right);
+    box.classList.toggle("far", b.far);
+    Object.assign(box.style, {
+      left: `${b.x}px`,
+      top: `${b.y}px`,
+      width: `${b.w}px`,
+      height: `${b.h}px`,
+      zIndex: String(b.z),
+      background: `linear-gradient(160deg,${col.replace(")", " / .08)")},hsl(240 30% 100% / .01) 45%,${col.replace(")", " / .04)")})`,
+    });
+    box.style.setProperty("--s", String(b.s));
+    box.style.setProperty("--ring", col);
+  }
+  // a cluster with nothing left fades out instead of vanishing
+  for (const box of world.querySelectorAll(".cluster[id]")) if (!lay.clusters.some((b) => `g-${b.proj}` === box.id)) fade(box);
+}
+
+function paintTiles(spec: BoardSpec, lay: Layout) {
+  for (const [id, t] of Object.entries(lay.tiles)) {
+    const c = spec.components[id];
+    let el = tileEl(id);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = `t-${id}`;
+      el.className = "tile";
+      el.dataset.id = id;
+      world.append(el);
+    }
+    const html = renderCard(spec, c, tierOf(t.w));
+    if (el.dataset.html !== html && !el.classList.contains("held")) (el.innerHTML = html), (el.dataset.html = html);
+    tokens(el, c);
+    Object.assign(el.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px`, zIndex: String(t.z) });
+    el.style.setProperty("--s", String(t.s));
+    if (t.proj) el.style.setProperty("--ring", colour(t.proj));
+    for (const [k, on] of [["away", t.away], ["far", t.far], ["center", t.center], ["sel", ctx.sel.has(id)], ["done", c.props.done === true], ["pinned", c.props.pinned === true]] as const) el.classList.toggle(k, on);
+    // a card behind is not usable until its cluster is opened
+    el.inert = t.away;
+  }
+  for (const el of world.querySelectorAll<HTMLElement>(".tile[id]")) if (!lay.tiles[el.dataset.id!]) fade(el);
+}
+
+const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 let queued = false;
 function paint() {
@@ -160,136 +272,191 @@ function paint() {
   queued = true;
   requestAnimationFrame(() => {
     queued = false;
-    const spec = board.view();
-    rootTokens(spec);
-    paintHeader(spec.components.header);
-    paintInput(spec.components.input);
-    const nested = new Set(Object.values(spec.components).flatMap((c) => c.children ?? []));
-    const ids = Object.keys(spec.components).filter((id) => !SHELL.has(id) && !(nested.has(id) && !spec.components[id].rect));
-    for (const [id, c] of cards) if (!ids.includes(id)) (c.el.remove(), cards.delete(id));
-    for (const id of ids) {
-      const c = spec.components[id];
-      let card = cards.get(id);
-      if (!card) {
-        const el = document.createElement("section");
-        el.className = "card";
-        el.dataset.id = id;
-        world.append(el);
-        cards.set(id, (card = { el, html: "" }));
-      }
-      const html = cardHtml(spec, c);
-      if (html !== card.html) card.el.innerHTML = card.html = html;
-      tokens(card.el, c);
-      const r = rectOf(spec, id) ?? { x: 40, y: 40, w: 300, h: 180 };
-      Object.assign(card.el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
-      card.el.classList.toggle("held", drag?.id === id);
-      card.el.classList.toggle("pinned", c.props.pinned === true);
-    }
-    paintLinks(spec);
-    world.style.transform = `translate(${pan.x}px,${pan.y}px)`;
+    spec = board.view();
+    rootTokens();
+    paintShell(spec, ctx); // first: the shell's height sets the camera fit
+    for (const id of ctx.sel) if (!spec.components[id]) ctx.sel.delete(id);
+    const picked = new Set([...ctx.sel, ...[...asked].filter(([, t]) => t > performance.now()).map(([id]) => id)]);
+    const rels = spec.links.map((l) => ({ from: l.from, to: l.to, label: typeof l.label === "string" ? l.label : "" }));
+    L = layout(items(), rels, viewport(), { view: cam.view, spread: cam.spreading, picked, order }, fit);
+    if (cam.view && !L.order.includes(cam.view)) cam.view = null;
+    cam.spreading = L.spread;
+    document.body.classList.toggle("spread", L.spread);
+    paintClusters(spec, L);
+    paintTiles(spec, L);
+    if (!cam.free) Object.assign(cam, L.cam);
+    place();
+    // first paint lands in place at once; the canvas shows only after it is laid out
+    if (canvas.classList.contains("boot") && Object.keys(L.tiles).length) requestAnimationFrame(() => requestAnimationFrame(() => canvas.classList.remove("boot")));
   });
 }
 
-// World coordinates of a pointer event.
-const at = (e: PointerEvent) => {
-  const b = canvas.getBoundingClientRect();
-  return { x: e.clientX - b.left - pan.x, y: e.clientY - b.top - pan.y };
-};
+startLinks(linkSvg, () => ({ lines: L?.lines ?? [], front: L?.front, spread: L?.spread ?? false, k: cam.k, colour }));
+new ResizeObserver(() => paint()).observe(canvas);
 
-let stroke: SVGPolylineElement | undefined;
-function startStroke(e: PointerEvent) {
-  stroke = document.createElementNS(SVGNS, "polyline");
-  stroke.setAttribute("points", `${e.clientX},${e.clientY}`);
-  sketch.append(stroke);
+// ---------- gestures: pan, zoom, card drag, resize, link ----------
+const ptr = new Map<number, [number, number]>();
+let moved = 0;
+type Gesture = { move(e: PointerEvent): void; end(e: PointerEvent): void };
+let gesture: Gesture | undefined;
+let linkTmp: SVGPathElement | undefined;
+
+function startCard(e: PointerEvent, el: HTMLElement, mode: "size" | "card" | "link") {
+  const id = el.dataset.id!, t = L!.tiles[id], k = cam.k * t.s, x0 = e.clientX, y0 = e.clientY, r0 = el.getBoundingClientRect();
+  const pinned = spec.components[id]?.props.pinned === true;
+  let on = false, last: string | undefined;
+  gesture = {
+    move(ev) {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0;
+      moved = Math.abs(dx) + Math.abs(dy);
+      if (!on) {
+        if (moved <= 5) return;
+        on = true;
+        cam.free = true;
+        if (mode === "card") el.classList.add("held");
+        else if (mode === "size") document.body.classList.add("sizing");
+      }
+      if (mode === "link") {
+        linkTmp ??= linkSvg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
+        const c = canvas.getBoundingClientRect(), r = el.getBoundingClientRect();
+        linkTmp.setAttribute("class", "tmp");
+        linkTmp.setAttribute("d", `M${r.left + r.width / 2 - c.left} ${r.top + r.height / 2 - c.top}L${ev.clientX - c.left} ${ev.clientY - c.top}`);
+        return;
+      }
+      if (mode === "size") {
+        held.set(id, { ...held.get(id), w: Math.max(MIN_W, t.w + dx / k), h: Math.max(MIN_H, t.h + dy / k) });
+        return paint();
+      }
+      if (pinned) {
+        held.set(id, { ...held.get(id), x: t.x + dx / cam.k, y: t.y + dy / cam.k });
+        return paint();
+      }
+      // the card under the pointer trades places with the held one; the held card follows the pointer from its new slot
+      const proj = L!.tiles[id].proj!, ids = L!.clusters.find((b) => b.proj === proj)!.ids;
+      const b = ids.find((o) => {
+        if (o === id) return false;
+        const r = tileEl(o)?.getBoundingClientRect();
+        return !!r && ev.clientX > r.left && ev.clientX < r.right && ev.clientY > r.top && ev.clientY < r.bottom;
+      });
+      if (b && b !== last) {
+        const a = [...ids], i = a.indexOf(id), j = a.indexOf(b);
+        [a[i], a[j]] = [a[j], a[i]];
+        order[proj] = a;
+        paint();
+      }
+      last = b;
+      const r = el.getBoundingClientRect(), [tx, ty] = (el.style.translate || "0px 0px").split(" ").map((v) => parseFloat(v) || 0);
+      el.style.translate = `${(r0.left + dx - r.left) / k + tx}px ${(r0.top + dy - r.top) / k + ty}px`;
+    },
+    end(ev) {
+      document.body.classList.remove("sizing");
+      el.classList.remove("held");
+      el.style.translate = "";
+      const h = held.get(id);
+      held.delete(id);
+      if (!on) return;
+      moved = 99;
+      if (mode === "link") {
+        linkTmp?.remove();
+        linkTmp = undefined;
+        const to = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".tile")?.dataset.id;
+        if (to && to !== id) intent("link", id, { to });
+      } else if (mode === "size" && h) intent("resize", id, { w: Math.round(h.w!), h: Math.round(h.h!) });
+      else if (pinned && h) intent("move", id, { x: Math.round(h.x!), y: Math.round(h.y!) });
+      else paint();
+    },
+  };
 }
 
 canvas.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
-  const t = e.target as Element;
-  if (e.shiftKey) return (canvas.setPointerCapture(e.pointerId), startStroke(e));
-  if (t.closest("button:not([data-act=link])")) return;
-  const el = t.closest<HTMLElement>(".card");
-  const id = el?.dataset.id;
+  moved = 0;
+  // the pen and shift-drag belong to the ink layer
+  if (e.button !== 0 || e.shiftKey || document.body.classList.contains("pen")) return;
+  const t = e.target as Element, el = t.closest<HTMLElement>(".tile:not(.away)");
+  const mode = !el ? undefined : t.closest('[data-act="link"]') ? "link" : t.closest(".tgrip") ? "size" : t.closest(".core>.title, .core>.hd") && !t.closest("button") ? "card" : undefined;
+  if (el && mode && L?.tiles[el.dataset.id!]) {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    return startCard(e, el, mode);
+  }
+  if (t.closest(IA)) return;
   canvas.setPointerCapture(e.pointerId);
-  const p = at(e);
-  if (!id) return void (drag = { id: "", mode: "move", rect: { x: pan.x, y: pan.y, w: 0, h: 0 }, x0: e.clientX, y0: e.clientY, r0: { ...pan, w: 0, h: 0 } });
-  if (t.closest('[data-act="link"]')) return void (linking = { from: id, ...p });
-  const mode = t.closest('[data-act="resize"]') ? "resize" : t.closest(".hd, .title") ? "move" : undefined;
-  const r0 = rectOf(board.view(), id);
-  if (mode && r0) drag = { id, mode, rect: { ...r0 }, x0: e.clientX, y0: e.clientY, r0 };
+  ptr.set(e.pointerId, [e.clientX, e.clientY]);
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  if (stroke) return void stroke.setAttribute("points", `${stroke.getAttribute("points")} ${e.clientX},${e.clientY}`);
-  if (linking) return (Object.assign(linking, at(e)), paint());
-  if (!drag) return;
-  const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0, r = drag.r0;
-  if (!drag.id) pan = { x: r.x + dx, y: r.y + dy };
-  else drag.rect = drag.mode === "move" ? { ...r, x: r.x + dx, y: r.y + dy } : { ...r, w: Math.max(MIN_W, r.w + dx), h: Math.max(MIN_H, r.h + dy) };
-  paint();
-});
-
-canvas.addEventListener("pointerup", (e) => {
-  stroke = undefined;
-  if (linking) {
-    const to = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>(".card")?.dataset.id;
-    const from = linking.from;
-    linking = undefined;
-    if (to && to !== from) intent("link", from, { to });
-    return paint();
+  if (gesture) return gesture.move(e);
+  const p = ptr.get(e.pointerId);
+  if (!p) return;
+  if (ptr.size === 2) {
+    // pinch zooms round the point between the two fingers
+    const [a, b] = [...ptr.values()], d0 = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    ptr.set(e.pointerId, [e.clientX, e.clientY]);
+    const [c, d] = [...ptr.values()];
+    zoomAt((cam.k * Math.hypot(c[0] - d[0], c[1] - d[1])) / d0, (c[0] + d[0]) / 2, (c[1] + d[1]) / 2);
+    moved = 99;
+    canvas.classList.add("drag");
+    return;
   }
-  const d = drag;
-  drag = undefined;
-  if (!d?.id) return;
-  const r = d.rect;
-  if (r.x !== d.r0.x || r.y !== d.r0.y || r.w !== d.r0.w || r.h !== d.r0.h)
-    intent(d.mode, d.id, d.mode === "move" ? { x: r.x, y: r.y } : { w: r.w, h: r.h });
-  else paint();
-});
-canvas.addEventListener("pointercancel", () => ((drag = linking = stroke = undefined), paint()));
-
-world.addEventListener("click", (e) => {
-  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-act="pin"]');
-  const id = b?.closest<HTMLElement>(".card")?.dataset.id;
-  if (id) intent("pin", id, { pinned: b.getAttribute("aria-pressed") !== "true" });
+  const dx = e.clientX - p[0], dy = e.clientY - p[1];
+  ptr.set(e.pointerId, [e.clientX, e.clientY]);
+  moved += Math.abs(dx) + Math.abs(dy);
+  if (moved > 5) {
+    canvas.classList.add("drag");
+    cam.x -= dx / cam.k;
+    cam.y -= dy / cam.k;
+    cam.free = true;
+    place();
+  }
 });
 
-header.addEventListener("click", (e) => {
-  const wins = (e.target as Element).closest<HTMLElement>("[data-wins]")?.dataset.wins;
-  if (wins) intent("input", "header", { field: "wins", value: wins });
-});
+const endPtr = (e: PointerEvent) => {
+  if (gesture) {
+    const g = gesture;
+    gesture = undefined;
+    return g.end(e);
+  }
+  ptr.delete(e.pointerId);
+  if (!ptr.size) canvas.classList.remove("drag");
+};
+canvas.addEventListener("pointerup", endPtr);
+canvas.addEventListener("pointercancel", endPtr);
 
-composer.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const text = field.value.trim();
-  if (!text) return;
-  intent("input", "input", { text });
-  field.value = "";
-});
-
-// The pen turns the whole window into the sketch layer; shift-drag draws without it.
-const pen = $<HTMLButtonElement>(".composer .pen");
-pen.addEventListener("click", () => pen.setAttribute("aria-pressed", String(document.body.classList.toggle("pen"))));
-sketch.addEventListener("pointerdown", (e) => {
-  // The sketch covers the pen button while drawing, so a tap on that spot still turns the pen off.
-  const b = pen.getBoundingClientRect();
-  if (e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom) return pen.click();
-  sketch.setPointerCapture(e.pointerId);
-  startStroke(e);
-});
-sketch.addEventListener("pointermove", (e) => stroke && stroke.setAttribute("points", `${stroke.getAttribute("points")} ${e.clientX},${e.clientY}`));
-sketch.addEventListener("pointerup", () => (stroke = undefined));
-
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    sketch.replaceChildren();
-    document.body.classList.remove("pen");
-    pen.setAttribute("aria-pressed", "false");
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "z" && document.activeElement !== field) {
+canvas.addEventListener(
+  "wheel",
+  (e) => {
     e.preventDefault();
-    send({ t: "undo" });
-  }
+    if (e.ctrlKey || e.metaKey) return zoomAt(cam.k * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    canvas.classList.add("drag");
+    clearTimeout(wheelEnd);
+    wheelEnd = window.setTimeout(() => canvas.classList.remove("drag"), 150);
+    cam.x += e.deltaX / cam.k;
+    cam.y += e.deltaY / cam.k;
+    cam.free = true;
+    place();
+  },
+  { passive: false },
+);
+let wheelEnd = 0;
+
+// a drag must not also count as a tap on what is under the pointer
+document.addEventListener("click", (e) => void (moved > 5 && (e.stopPropagation(), e.preventDefault(), (moved = 0))), true);
+
+// a tap on a cluster behind opens it, also where it shows through the glass of the one in front; in spread any cluster opens
+canvas.addEventListener("click", (e) => {
+  const t = e.target as HTMLElement;
+  const behind = t.classList.contains("cluster") && !t.classList.contains("away")
+    ? [...world.querySelectorAll<HTMLElement>(".cluster.away")]
+        .filter((c) => {
+          const r = c.getBoundingClientRect();
+          return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        })
+        .sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0]
+    : undefined;
+  const g = t.closest<HTMLElement>(".cluster.away") ?? behind ?? (cam.spreading ? t.closest<HTMLElement>(".cluster") : null);
+  if (g?.id) cam.open(g.id.slice(2));
 });
 
+initOverlays(ctx);
 paint();
 connect();
