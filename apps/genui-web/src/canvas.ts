@@ -34,7 +34,8 @@ let L: Layout | undefined;
 const order: Record<string, string[]> = {};
 const asked = new Map<string, number>();
 /** A size or spot shown while you drag, before the intent lands. */
-const held = new Map<string, { w?: number; h?: number; x?: number; y?: number }>();
+type Held = { w?: number; h?: number; x?: number; y?: number };
+const held = new Map<string, Held>();
 const listeners: ((transform: string, k: number) => void)[] = [];
 
 function send(msg: ClientMsg) {
@@ -192,13 +193,16 @@ function items(): Item[] {
   const now = performance.now();
   return Object.entries(spec.components)
     .filter(([id, c]) => !SHELL.has(id) && !nested.has(id) && c.props.removed !== true)
-    .map(([id, c]) => {
-      const p = c.props, r = c.rect, h = held.get(id);
-      const done = p.done === true, boost = (asked.get(id) ?? 0) > now ? 200 : 0;
-      const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
-      const pin = p.pinned === true && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
-      return { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin, size };
-    });
+    .map(([id, c]) => item(id, c, now));
+}
+
+/** A card as the layout sees it: your size and pinned spot win over the spec's, and an ask boost lifts it to the front. */
+function item(id: string, c: Component, now: number): Item {
+  const p = c.props, r = c.rect, h = held.get(id);
+  const done = p.done === true, boost = (asked.get(id) ?? 0) > now ? 200 : 0;
+  const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
+  const pin = p.pinned === true && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
+  return { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin, size };
 }
 
 function viewport() {
@@ -328,13 +332,7 @@ function startCard(e: PointerEvent, el: HTMLElement, mode: "size" | "card" | "li
         if (mode === "card") el.classList.add("held");
         else if (mode === "size") document.body.classList.add("sizing");
       }
-      if (mode === "link") {
-        linkTmp ??= linkSvg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
-        const c = canvas.getBoundingClientRect(), r = el.getBoundingClientRect();
-        linkTmp.setAttribute("class", "tmp");
-        linkTmp.setAttribute("d", `M${r.left + r.width / 2 - c.left} ${r.top + r.height / 2 - c.top}L${ev.clientX - c.left} ${ev.clientY - c.top}`);
-        return;
-      }
+      if (mode === "link") return linkPreview(el, ev);
       if (mode === "size") {
         held.set(id, { ...held.get(id), w: Math.max(MIN_W, t.w + dx / k), h: Math.max(MIN_H, t.h + dy / k) });
         return paint();
@@ -343,20 +341,7 @@ function startCard(e: PointerEvent, el: HTMLElement, mode: "size" | "card" | "li
         held.set(id, { ...held.get(id), x: t.x + dx / cam.k, y: t.y + dy / cam.k });
         return paint();
       }
-      // the card under the pointer trades places with the held one; the held card follows the pointer from its new slot
-      const proj = L!.tiles[id].proj!, ids = L!.clusters.find((b) => b.proj === proj)!.ids;
-      const b = ids.find((o) => {
-        if (o === id) return false;
-        const r = tileEl(o)?.getBoundingClientRect();
-        return !!r && ev.clientX > r.left && ev.clientX < r.right && ev.clientY > r.top && ev.clientY < r.bottom;
-      });
-      if (b && b !== last) {
-        const a = [...ids], i = a.indexOf(id), j = a.indexOf(b);
-        [a[i], a[j]] = [a[j], a[i]];
-        order[proj] = a;
-        paint();
-      }
-      last = b;
+      last = swapUnder(id, ev, last);
       const r = el.getBoundingClientRect(), [tx, ty] = (el.style.translate || "0px 0px").split(" ").map((v) => parseFloat(v) || 0);
       el.style.translate = `${(r0.left + dx - r.left) / k + tx}px ${(r0.top + dy - r.top) / k + ty}px`;
     },
@@ -368,16 +353,45 @@ function startCard(e: PointerEvent, el: HTMLElement, mode: "size" | "card" | "li
       held.delete(id);
       if (!on) return;
       moved = 99;
-      if (mode === "link") {
-        linkTmp?.remove();
-        linkTmp = undefined;
-        const to = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".tile")?.dataset.id;
-        if (to && to !== id) intent("link", id, { to });
-      } else if (mode === "size" && h) intent("resize", id, { w: Math.round(h.w!), h: Math.round(h.h!) });
-      else if (pinned && h) intent("move", id, { x: Math.round(h.x!), y: Math.round(h.y!) });
-      else paint();
+      drop(id, mode, pinned, h, ev);
     },
   };
+}
+
+function linkPreview(el: HTMLElement, ev: PointerEvent) {
+  linkTmp ??= linkSvg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
+  const c = canvas.getBoundingClientRect(), r = el.getBoundingClientRect();
+  linkTmp.setAttribute("class", "tmp");
+  linkTmp.setAttribute("d", `M${r.left + r.width / 2 - c.left} ${r.top + r.height / 2 - c.top}L${ev.clientX - c.left} ${ev.clientY - c.top}`);
+}
+
+/** The card under the pointer trades places with the held one `id`; returns the card under the pointer, so one hover swaps once. */
+function swapUnder(id: string, ev: PointerEvent, last: string | undefined) {
+  const proj = L!.tiles[id].proj!, ids = L!.clusters.find((b) => b.proj === proj)!.ids;
+  const b = ids.find((o) => {
+    if (o === id) return false;
+    const r = tileEl(o)?.getBoundingClientRect();
+    return !!r && ev.clientX > r.left && ev.clientX < r.right && ev.clientY > r.top && ev.clientY < r.bottom;
+  });
+  if (b && b !== last) {
+    const a = [...ids], i = a.indexOf(id), j = a.indexOf(b);
+    [a[i], a[j]] = [a[j], a[i]];
+    order[proj] = a;
+    paint();
+  }
+  return b;
+}
+
+/** A gesture's one intent, sent on drop: link, resize or a pinned card's move; a reorder stays local. */
+function drop(id: string, mode: "size" | "card" | "link", pinned: boolean, h: Held | undefined, ev: PointerEvent) {
+  if (mode === "link") {
+    linkTmp?.remove();
+    linkTmp = undefined;
+    const to = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".tile")?.dataset.id;
+    if (to && to !== id) intent("link", id, { to });
+  } else if (mode === "size" && h) intent("resize", id, { w: Math.round(h.w!), h: Math.round(h.h!) });
+  else if (pinned && h) intent("move", id, { x: Math.round(h.x!), y: Math.round(h.y!) });
+  else paint();
 }
 
 canvas.addEventListener("pointerdown", (e) => {
