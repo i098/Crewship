@@ -76,7 +76,7 @@ fn stores_a_summary_and_lists_it_only_on_request() {
     assert!(run(s, &["pub", "t", "two"]).status.success());
 
     let plain: Value = serde_json::from_slice(&run(s, &["topics"]).stdout).unwrap();
-    assert_eq!(plain, json!([{"topic": "t", "count": 2, "oldest": 1, "newest": 2}]));
+    assert_eq!(plain, json!([{"topic": "t", "count": 2, "oldest": 1, "newest": 2, "read_seq": 0}]));
     assert_eq!(topics(s)[0]["summary"], json!(""));
     assert_eq!(topics(s)[0]["summary_seq"], json!(0));
 
