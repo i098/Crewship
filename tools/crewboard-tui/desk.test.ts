@@ -96,6 +96,15 @@ test("turns carry the inbound text, the route (desk, main, mate by plan, pending
   ])
 })
 
+test("a legacy desk turn handed to a mate through handoffNote shows that mate", () => {
+  const log = [
+    rin("L1", 1000, "check the queue"),
+    JSON.stringify({ at: 1001, ids: ["L1"], route: "handoff" }),
+    JSON.stringify({ at: 1002, ids: ["L1"], route: "done", handoffNote: "routed to mate-7" }),
+  ].join("\n")
+  expect(parseTurns(log)[0].route).toBe("mate mate-7")
+})
+
 test("the snapshot lists the newest turns first, flattens and cuts text to the width, and fits the height", () => {
   const empty = mkdtempSync(join(tmpdir(), "cbdesk-"))
   dirs.push(empty)
