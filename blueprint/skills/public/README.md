@@ -11,6 +11,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`clean-code-functions`](clean-code-functions/SKILL.md): function size, one job, argument count, flags, side effects, switch statements, duplication (credits `@s4.codes` reels).
 - [`clean-code-naming`](clean-code-naming/SKILL.md): names that reveal intent, no abbreviations or magic numbers (credits `@s4.codes` reels).
 - [`clean-code-tests`](clean-code-tests/SKILL.md): F.I.R.S.T, one concept per test, build-operate-check, TDD (credits `@s4.codes` reels).
+- [`claude-account-onboarding`](claude-account-onboarding/SKILL.md): checklist to onboard a new Claude account without suspension (clean IP, one device, slow ramp, random logout means a watch period); community reports, not verified.
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
 - [`credentials`](credentials/SKILL.md): search every secrets file before you call a key absent, pass a process one variable and never the whole file, verify the process environment.
