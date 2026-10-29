@@ -262,6 +262,13 @@
 # UniiChat memory outside the session file, so compaction cannot lose it. It reuses
 # apps/imessage/memory.ts, the memory the iMessage front desk already runs on
 # (apps/imessage/bridge.ts). Managed: every apply rewrites both files.
+- name: Inspect the UniiChat memory module directory
+  ansible.builtin.stat:
+    path: "{{ crewship_omp_unii_memory_dir }}"
+    get_checksum: false
+  become: true
+  register: crewship_omp_unii_memory_dir_stat
+
 - name: Ensure the UniiChat memory module directory
   ansible.builtin.file:
     path: "{{ crewship_omp_unii_memory_dir }}"
@@ -270,6 +277,7 @@
     group: "{{ crewship_group }}"
     mode: "0755"
   become: true
+  check_mode: "{{ ansible_check_mode and crewship_omp_unii_memory_dir_stat.stat.exists }}"
 
 - name: Install the UniiChat memory omp extension
   ansible.builtin.copy:
