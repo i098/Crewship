@@ -32,7 +32,8 @@ export function startLinks(svg: SVGSVGElement, get: () => LinkSource) {
     const { lines, front, spread, k, colour } = get();
     const fbx = front ? byId(`g-${front}`) : null, cv = canvas.getBoundingClientRect(), ms = performance.now();
     const lane: Record<string, number> = { 1: 0, "-1": 0 };
-    const bottom = document.querySelector(".bottom, .composer")?.getBoundingClientRect().top ?? cv.bottom;
+    const bar = document.querySelector(".bottom, .composer")?.getBoundingClientRect();
+    const bottom = bar?.height ? bar.top : cv.bottom;
     for (const e of document.querySelectorAll<HTMLElement>(".tile.lk")) e.classList.remove("lk");
     // every card on screen: a label pill should cover none; if it must, it covers a blurred card behind (weight 1, not 10)
     const boxes: number[][] = !fbx ? [] : [...document.querySelectorAll(".tile:not(.gone)")].map((e) => {
