@@ -738,7 +738,7 @@ def upstream(monkeypatch, unverified=None, seen=None):
                 assert repo != "kunchenguid/no-mistakes", "no-mistakes is on the prerelease channel"
                 body = release(*RELEASES[repo])
         elif url == "https://nodejs.org/dist/index.json":
-            body = [{"version": "v9.99.0"}, {"version": "v30.1.0"}]
+            body = [{"version": "v9.99.0"}, {"version": "v30.1.0"}, {"version": "v27.0.0-alpha.0.0.0"}, {"version": "v99.0.0-alpha.0.0.0"}]
         elif url == "https://nodejs.org/dist/v30.1.0/SHASUMS256.txt":
             sums = "" if unverified == "node" else "b" * 64 + "  node-v30.1.0-linux-x64.tar.xz\n"
             return Download(("c" * 64 + "  node-v30.1.0-linux-arm64.tar.xz\n" + sums).encode())
