@@ -1,5 +1,6 @@
 // The genui web canvas: draws the spec, sends user intents, and keeps the sketch layer on top.
 import type { ClientMsg, Component, IntentKind, Rect, ServerMsg, BoardSpec } from "@crewship/genui-spec";
+import { buildHeader } from "./header";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 
 const q = new URLSearchParams(location.search);
@@ -75,20 +76,18 @@ function rootTokens(spec: BoardSpec) {
   rootKeys = Object.keys(t);
 }
 
-let headerHtml = "";
+let headerKey = "";
 function paintHeader(c: Component | undefined) {
   tokens(header, c);
   if (!c) return void (header.hidden = true);
   const wins = c.props.wins === "user" ? "user" : "agent";
-  const status = live ? `live · seq <b class="num">${board.seq}</b>` : "reconnecting";
-  const html = `<i class="orb${board.pending.size ? " busy" : ""}"></i>
-<h1 class="line">${escHtml(c.props.title)}</h1>
-<span class="st${live ? " on" : ""}" role="status">${status}${notice ? ` · ${escHtml(notice)}` : ""}</span>
-<div class="seg" role="group" aria-label="When you and the agent both move a card">
-<button type="button" data-wins="agent" aria-pressed="${wins === "agent"}">agent wins</button>
-<button type="button" data-wins="user" aria-pressed="${wins === "user"}">user wins</button></div>`;
+  const key = JSON.stringify([c.props.title, wins, live, board.seq, board.pending.size > 0, notice]);
   // Rebuild only on change, so a click that spans a repaint still lands on its button.
-  if (html !== headerHtml) header.innerHTML = headerHtml = html;
+  if (key !== headerKey) {
+    headerKey = key;
+    const nodes = buildHeader(document, { title: c.props.title, wins, live, seq: board.seq, busy: board.pending.size > 0, notice });
+    header.replaceChildren(...nodes);
+  }
   if (c.rect) Object.assign(header.style, { left: `${c.rect.x}px`, top: `${c.rect.y}px`, width: `${c.rect.w}px`, right: "auto" });
 }
 

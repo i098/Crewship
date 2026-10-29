@@ -71,6 +71,21 @@ test("parseStatusLine", () => {
   expect(parseStatusLine("working [at=12]: building")).toEqual({ state: "working", at: 12, text: "building" });
   expect(parseStatusLine("done [at=5] [key=x]: PR https://x/1")?.text).toBe("PR https://x/1");
   expect(parseStatusLine("random text")).toBeUndefined();
+  expect(parseStatusLine("done [url=https://x/1] [at=3]: ok")).toEqual({ state: "done", at: 3, text: "ok" });
+});
+
+test("parseStatusLine rejects pathological input in linear time", () => {
+  const t = performance.now();
+  expect(parseStatusLine(`a${" [".repeat(50000)}`)).toBeUndefined();
+  expect(parseStatusLine(`a${"[x]".repeat(50000)}`)).toBeUndefined();
+  expect(parseStatusLine("a [x] junk: t")).toBeUndefined();
+  expect(performance.now() - t).toBeLessThan(500);
+});
+
+test("client url tolerates many trailing slashes", async () => {
+  posts.length = 0;
+  await createGenuiClient({ url: `${url}${"/".repeat(50000)}`, boardId: "b" }).reset();
+  expect(posts.length).toBe(1);
 });
 
 test("bridge maps tail headers and lines to emit_view patches", async () => {

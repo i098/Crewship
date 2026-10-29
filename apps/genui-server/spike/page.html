@@ -20,14 +20,14 @@ const status=document.getElementById("status"),root=document.getElementById("roo
 let doc={root:"",elements:{},style:{},links:[]},seq=0;const t0=performance.now();
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function apply(ops){for(const o of ops){const k=o.path.split("/").slice(1).map(s=>s.replace(/~1/g,"/").replace(/~0/g,"~"));
- if(!k.length){doc=o.value;continue}let p=doc;for(const x of k.slice(0,-1))p=p[x];const l=k.at(-1);o.op==="remove"?delete p[l]:p[l]=o.value}}
+ if(!k.length){doc=o.value;continue}if(k.some(x=>x==="__proto__"||x==="constructor"||x==="prototype"))continue;let p=doc;for(const x of k.slice(0,-1))p=p[x];const l=k.at(-1);o.op==="remove"?delete p[l]:p[l]=o.value}}
 function node(id){const e=doc.elements[id];if(!e)return"";const p=e.props,c=(e.children||[]).map(node).join("");
  switch(e.type){
- case"Stack":return`<div class="stack ${p.dir||"column"}">${c}</div>`;
+ case"Stack":return`<div class="stack ${esc(p.dir||"column")}">${c}</div>`;
  case"Card":return`<section class="card">${p.title?`<h3>${esc(p.title)}</h3>`:""}${c}</section>`;
- case"Text":return`<p class="text ${p.tone||"normal"}">${esc(p.text)}</p>`;
+ case"Text":return`<p class="text ${esc(p.tone||"normal")}">${esc(p.text)}</p>`;
  case"Metric":return`<div class="metric"><span class="text muted">${esc(p.label)}</span><br><b>${esc(p.value)}</b><small>${esc(p.unit||"")}</small></div>`;
- case"Badge":return`<span class="badge ${p.tone||"info"}">${esc(p.text)}</span>`;
+ case"Badge":return`<span class="badge ${esc(p.tone||"info")}">${esc(p.text)}</span>`;
  default:return`<div class="text muted">[${esc(e.type)}]</div>`}}
 const render=()=>{root.innerHTML=doc.root?node(doc.root):""};
 const ws=new WebSocket((location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/ws");

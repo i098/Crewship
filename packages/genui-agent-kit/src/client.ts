@@ -16,8 +16,14 @@ export type GenuiClient = {
   close(): void;
 };
 
+function trimSlashes(u: string) {
+  let end = u.length;
+  while (end > 0 && u[end - 1] === "/") end--;
+  return u.slice(0, end);
+}
+
 export function createGenuiClient(opts: GenuiClientOptions): GenuiClient {
-  const base = opts.url.replace(/\/+$/, "");
+  const base = trimSlashes(opts.url);
   const board = encodeURIComponent(opts.boardId);
   const clientId = opts.clientId ?? `agent-${crypto.randomUUID()}`;
   const handlers = new Set<IntentHandler>();

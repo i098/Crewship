@@ -3,14 +3,26 @@ import type { PatchOp } from "@crewship/genui-spec";
 
 export type StatusLine = { state: string; at?: number; text: string };
 
-const LINE = /^([a-z][a-z-]*)((?:\s*\[[^\]]*\])*):\s*(.*)$/;
+const NAME = /^[a-z][a-z-]*/;
 
-/** Parses `state [at=epoch]: text`. Returns undefined for any other line. */
+/** Parses `state [at=epoch]: text`. Returns undefined for any other line. Linear time: no nested quantifiers. */
 export function parseStatusLine(line: string): StatusLine | undefined {
-  const m = LINE.exec(line.trim());
-  if (!m) return undefined;
-  const at = /\[at=(\d+)\]/.exec(m[2]);
-  return { state: m[1], at: at ? Number(at[1]) : undefined, text: m[3] };
+  const t = line.trim();
+  const name = NAME.exec(t);
+  if (!name) return undefined;
+  let i = name[0].length;
+  const tags: string[] = [];
+  for (;;) {
+    while (t[i] === " " || t[i] === "\t") i++;
+    if (t[i] !== "[") break;
+    const end = t.indexOf("]", i);
+    if (end < 0) return undefined;
+    tags.push(t.slice(i, end + 1));
+    i = end + 1;
+  }
+  if (t[i] !== ":") return undefined;
+  const at = /\[at=(\d+)\]/.exec(tags.join(""));
+  return { state: name[0], at: at ? Number(at[1]) : undefined, text: t.slice(i + 1).trim() };
 }
 
 /** Component id for a crewmate task; `/` and `~` are escaped for the JSON pointer. */
