@@ -2,7 +2,7 @@
 import type { BoardSpec, CardKind, Component } from "@crewship/genui-spec";
 import "../cards.css";
 import { ask, compare, plan } from "./answer";
-import { esc, hd, idOf, list, title, type Props, type View, type WidthTier } from "./chrome";
+import { acts, esc, hd, idOf, list, title, type Props, type View, type WidthTier } from "./chrome";
 import { decision } from "./decision";
 import { embed } from "./embed";
 import { sys, tui } from "./host";
@@ -14,11 +14,11 @@ export { dropCard, morph, mountCard, reveal, tickStamps } from "./motion";
 
 const VIEWS: Record<CardKind, View> = { decision, conflict, pipeline, timeline, crew, shipped, plan, embed, incident, compare, ask, sys, tui };
 
-// A component with no known kind: title, body text and a list.
+// A component with no known kind: title, body text, a list and optional actions.
 const note: View = (p, id, _tier, spec) =>
   `${hd(p, id, spec, p.flag ? { text: String(p.flag) } : undefined)}${title(esc(p.title))}${p.body ? `<p class="body">${esc(p.body)}</p>` : ""}${
     Array.isArray(p.items) ? `<ul class="items">${list(p.items).map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""
-  }`;
+  }${Array.isArray(p.acts) ? acts(id, p.acts) : ""}`;
 
 // While you hover a decision option, the cards it changes show that outcome: option.preview = { [cardId]: props }.
 let hover: { id: string; k: string } | undefined;

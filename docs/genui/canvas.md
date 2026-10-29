@@ -5,17 +5,17 @@
 ## Run it
 
 ```sh
-bun apps/genui-web/mock/server.ts   # http://127.0.0.1:4610/  (PORT to change)
-(cd apps/genui-web && bun test)    # model and mock-server contract tests
+(cd apps/genui-web && bun run dev)  # http://127.0.0.1:4610/  (PORT to change)
+(cd apps/genui-web && bun test)     # model, feeder, and genui-server contract tests
 ```
 
-The mock server stands in for `apps/genui-server`. It serves the page, speaks the WebSocket contract at `/ws/:boardId`, and takes agent calls at `POST /agent/:boardId`. Open `?board=<id>` for another board, or `?ws=<url>` to point the page at a real server.
+`bun run dev` starts `apps/genui-server` under `wrangler dev --local` (port 8787, `GENUI_SERVER` to change), a page server that serves the canvas and passes `/ws/:boardId` through to it, and the feeder. Agent calls go to the board server at `POST /agent/:boardId`. Open `?board=<id>` for another board, or `?ws=<url>` to point the page at another server.
 
 Try an agent call:
 
 ```sh
-curl -X POST 127.0.0.1:4610/agent/demo -d '{"tool":"emit_view","args":{"patch":[{"op":"add","path":"/components/header/props/title","value":"Hello from the agent"}]}}'
-curl -X POST 127.0.0.1:4610/agent/demo -d '{"tool":"set_style","args":{"tokens":{"accent":"hsl(320 90% 66%)"}}}'
+curl -X POST 127.0.0.1:8787/agent/demo -d '{"tool":"emit_view","args":{"patch":[{"op":"add","path":"/components/header/props/title","value":"Hello from the agent"}]}}'
+curl -X POST 127.0.0.1:8787/agent/demo -d '{"tool":"set_style","args":{"tokens":{"accent":"hsl(320 90% 66%)"}}}'
 ```
 
 ## What the user can do
@@ -48,7 +48,7 @@ The header's `props.wins` holds the rule; the default is agent wins.
 - **User wins:** a card the user placed stays where the user put it; the server drops the agent's rect changes to it until the agent calls `reset`.
 - **Pinned:** a pinned card keeps its place under both rules.
 
-`src/model.ts` holds the rule (`userKeeps`, `filterAgentPatch`) and the patch code, with no DOM, so the mock server and the tests use the same code.
+`src/model.ts` holds the client side of the rule (`userKeeps`) and the patch code, with no DOM; `apps/genui-server/src/guard.ts` holds the server side.
 
 ## Layout and camera
 
@@ -60,15 +60,13 @@ The canvas ports the frozen design's engine (`docs/genui/design/index.html`, `la
 - **Links** (`src/links.ts`): a line joins a card in the front cluster to the card it affects in another cluster, with right-angle routes, a dot at each end, a `label` pill, and a ring on both cards. Lines are drawn in screen space every frame; a line undraws while its cards move and draws again after.
 - **Camera:** fits the front cluster to 48% of a wide screen (the full width on a phone) between the header and the ask bar. `ctx.cam` gives `home()`, `spread()`, `cycle(±1)`, `open(proj)` and `toWorld()` to the shell and the overlays. The spread view lays every cluster out at a glance.
 
-## Mock world
+## Feeder
 
-`mock/world.ts` ports the design's world, so the mock board looks and moves like `docs/genui/design/index.html`:
+`feeder/feeder.ts` is the agent that fills the board with real state, as `emit_view` calls on an agent socket (`/ws/:boardId?role=agent`). Nothing in it is invented: a source it cannot read shows in a "Sources not read" card.
 
-- **Seed:** 11 items in 4 projects (`spec.projects`), with the design's labelled relations as links. Items carry `kind`, `proj` and `priority` and no `rect`; the canvas places them by project and priority.
-- **Live script:** #209 walks its stages, cf-bill claims and fixes a failed refunds test (15-32 s), a new decision arrives at 38 s, and a 6 s clock ticks the timeline and ETAs.
-- **Derived props:** `derive()` keeps the stages, ship day, header line (`header.props.title`, `*…*` marks the emphasised words) and each item's own `line` in step with the rest of the spec.
-- **Agent answers:** an act on a card (`input {field:"pick"|"merge"|"fly"|"dismiss"|"send"}`) settles it. A typed ask with "or" or "should we" becomes a decision; "compare", "when" or "who" brings that card forward; any other ask adds an answer card at the front of the cluster in `payload.about` (`of`, `ids`, or a drawn box `at`).
-- **Media:** `/media/:file` serves the embeds from `mock/media/`.
+- **Sources:** open PRs and their checks and merged PRs per day (`gh api`), crew threads (`crewboard topics --summary`), today's model cost (`~/.omp/stats.db`, read-only), and this host's CPU, memory and disk, sampled by the feeder. It polls every 60 s. The newest open PR also shows GitHub's preview image as an embed.
+- **Derived props:** each card's `priority` and `line`, and the header line (`header.props.title`, `*…*` marks the emphasised words) from the top card plus how many others need you.
+- **Actions:** approve or decline on a PR, and "Claim the fix" on a PR with failed checks, write a record to the crewboard topic `genui`. A merge is never run: the approve record carries the `gh pr merge` command as a draft for the owner. A typed ask goes to the same topic with an id; a crew agent answers with `crewboard pub genui '{"to":"<id>","reply":"…"}'`, and the reply fills the ask card. A header pill opens host stats or that agent's `crewboard tail` lines.
 
 ## Spec and style
 

@@ -48,24 +48,6 @@ export function applyPatch<T>(doc: T, patch: PatchOp[]): T {
   return out;
 }
 
-/** The patch that undoes `patch` when applied after it. */
-export function invertPatch(doc: unknown, patch: PatchOp[]): PatchOp[] {
-  const work = structuredClone(doc);
-  const inverse: PatchOp[] = [];
-  for (const o of patch) {
-    const { parent, key } = walk(work, o.path);
-    if (Array.isArray(parent)) {
-      const i = key === "-" ? parent.length : Number(key);
-      const at = o.path.slice(0, o.path.lastIndexOf("/") + 1) + i;
-      if (o.op === "add") inverse.push({ op: "remove", path: at });
-      else inverse.push({ op: o.op === "remove" ? "add" : "replace", path: at, value: structuredClone(parent[i]) });
-    } else if (o.op === "add" && !(key in parent)) inverse.push({ op: "remove", path: o.path });
-    else inverse.push({ op: o.op === "remove" ? "add" : "replace", path: o.path, value: structuredClone(parent[key]) });
-    applyOne(work, o);
-  }
-  return inverse.reverse();
-}
-
 /** The component id when `path` changes its rect (or the whole component, with `whole`). */
 export function rectId(path: string, whole = false): string | undefined {
   const m = /^\/components\/([^/]+)(\/rect(?:\/.*)?)?$/.exec(path);
@@ -75,13 +57,6 @@ export function rectId(path: string, whole = false): string | undefined {
 /** True when a user move of `id` must survive an agent move: "user wins" in the header, or the card is pinned. */
 export const userKeeps = (spec: BoardSpec, id: string) =>
   spec.components.header?.props.wins === "user" || spec.components[id]?.props.pinned === true;
-
-/** Server side of the move rule: drop agent rect changes on a pinned card, and on a card the user placed while the user wins. */
-export const filterAgentPatch = (spec: BoardSpec, patch: PatchOp[], placed: Set<string>) =>
-  patch.filter((o) => {
-    const id = rectId(o.path);
-    return !(id && (spec.components[id]?.props.pinned === true || (placed.has(id) && userKeeps(spec, id))));
-  });
 
 const STYLE_KEY = /^[a-z][a-z0-9-]{0,40}$/;
 // HSL only, and nothing that loads a URL or breaks out of a declaration.
