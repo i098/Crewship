@@ -66,10 +66,7 @@ body.spread .cluster { cursor: zoom-in; }
 @keyframes ring { to { --ang: 360deg; } }
 
 /* card placement and motion; the chrome is in cards.css */
-.tile { position: absolute; z-index: 21; transform-origin: 0 0; transform: scale(var(--s, 1)); transition: left .9s var(--spring), top .9s var(--spring), width .9s var(--spring), height .9s var(--spring), transform .9s var(--spring), opacity .5s, filter .6s, background .3s, box-shadow .3s, translate .45s var(--spring); }
-.tile.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); filter: blur(8px); pointer-events: none; transition: opacity .4s ease, transform .4s ease, filter .4s ease !important; }
 .tile.held { transition: none !important; z-index: 40 !important; cursor: grabbing; box-shadow: 0 24px 60px -12px hsl(0 0% 0% / .7); }
-.tile.done { opacity: .45; filter: saturate(.3); }
 /* focus: cards in clusters behind are smaller, dimmer and blurred; unlinked clusters fade back */
 .tile.away, .tile.away * { pointer-events: none; }
 .tile.away { filter: blur(3px) brightness(.5); }

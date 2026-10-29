@@ -5,8 +5,8 @@ import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { layout, type Item, type Layout } from "./layout";
 import { startLinks } from "./links";
 import { paintShell } from "./shell";
-import { renderCard } from "./views/index";
-import { initOverlays } from "./overlays";
+import { bindCards, dropCard, mountCard, renderCard, tickStamps } from "./views/index";
+import { initOverlays, type About } from "./overlays";
 
 const q = new URLSearchParams(location.search);
 const boardId = q.get("board") ?? "demo";
@@ -69,6 +69,8 @@ function connect(delay = 1000) {
   };
 }
 
+/** Cards you selected; the overlays draw the selection bar from it. */
+const sel = new Set<string>();
 const cam = {
   x: 0,
   y: 0,
@@ -81,10 +83,13 @@ const cam = {
     Object.assign(cam, { free: false, view: null, spreading: false });
     paint();
   },
-  spread(on = !cam.spreading) {
+  /** Turns the spread view on or off (default: toggle); returns whether it is on. */
+  spread(on?: boolean): boolean {
+    on ??= !cam.spreading;
     Object.assign(cam, { free: false, spreading: on });
-    ctx.sel.clear();
+    sel.clear();
     paint();
+    return on;
   },
   cycle(dir: number) {
     const o = L?.order ?? [];
@@ -93,8 +98,15 @@ const cam = {
   },
   open(proj: string) {
     Object.assign(cam, { free: false, view: proj, spreading: false });
-    ctx.sel.clear();
+    sel.clear();
     paint();
+  },
+  /** Brings cards to the centre for a while: what you asked for holds the centre over new events. */
+  bring(ids: string[]) {
+    asked.clear();
+    ids.forEach((id, i) => asked.set(id, performance.now() + 25_000 - i));
+    sel.clear();
+    cam.home();
   },
   toWorld(cx: number, cy: number) {
     const r = canvas.getBoundingClientRect();
@@ -110,19 +122,13 @@ const ctx = {
   send,
   intent,
   cam,
-  sel: new Set<string>(),
+  sel,
   paint,
   /** A card's wide view, for the full view window. */
   html: (id: string) => (spec.components[id] ? renderCard(spec, spec.components[id], "wide") : ""),
-  /** Brings cards to the centre for a while: what you asked for holds the centre over new events. */
-  bring(ids: string[]) {
-    asked.clear();
-    ids.forEach((id, i) => asked.set(id, performance.now() + 25_000 - i));
-    ctx.sel.clear();
-    cam.home();
-  },
+  bring: cam.bring,
   /** Set by the overlays: what an ask is about (open card, selection, drawn spot). */
-  about: undefined as undefined | (() => unknown),
+  about: undefined as undefined | (() => About),
 };
 
 function place() {
@@ -267,16 +273,21 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       world.append(el);
     }
     const html = renderCard(spec, c, tierOf(t.w));
-    if (el.dataset.html !== html && !el.classList.contains("held")) (el.innerHTML = html), (el.dataset.html = html);
+    // the first card after boot builds in from a skeleton; later changes morph in place
+    if (!el.classList.contains("held")) mountCard(el, html, !canvas.classList.contains("boot"));
     tokens(el, c);
     Object.assign(el.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px`, zIndex: String(t.z) });
     el.style.setProperty("--s", String(t.s));
     if (t.proj) el.style.setProperty("--ring", colour(t.proj));
-    for (const [k, on] of [["away", t.away], ["far", t.far], ["center", t.center], ["sel", ctx.sel.has(id)], ["done", c.props.done === true], ["pinned", c.props.pinned === true]] as const) el.classList.toggle(k, on);
+    for (const [k, on] of [["away", t.away], ["far", t.far], ["center", t.center], ["sel", sel.has(id)], ["done", c.props.done === true], ["pinned", c.props.pinned === true]] as const) el.classList.toggle(k, on);
     // a card behind is not usable until its cluster is opened
     el.inert = t.away;
   }
-  for (const el of world.querySelectorAll<HTMLElement>(".tile[id]")) if (!lay.tiles[el.dataset.id!]) fade(el);
+  for (const el of world.querySelectorAll<HTMLElement>(".tile[id]"))
+    if (!lay.tiles[el.dataset.id!]) {
+      el.removeAttribute("id");
+      dropCard(el);
+    }
 }
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -290,8 +301,8 @@ function paint() {
     spec = board.view();
     rootTokens();
     paintShell(spec, ctx); // first: the shell's height sets the camera fit
-    for (const id of ctx.sel) if (!spec.components[id]) ctx.sel.delete(id);
-    const picked = new Set([...ctx.sel, ...[...asked].filter(([, t]) => t > performance.now()).map(([id]) => id)]);
+    for (const id of sel) if (!spec.components[id]) sel.delete(id);
+    const picked = new Set([...sel, ...[...asked].filter(([, t]) => t > performance.now()).map(([id]) => id)]);
     const rels = spec.links.map((l) => ({ from: l.from, to: l.to, label: typeof l.label === "string" ? l.label : "" }));
     L = layout(items(), rels, viewport(), { view: cam.view, spread: cam.spreading, picked, order }, fit);
     if (cam.view && !L.order.includes(cam.view)) cam.view = null;
@@ -483,5 +494,16 @@ canvas.addEventListener("click", (e) => {
 });
 
 const overlays = initOverlays(ctx);
+bindCards(world, paint);
+// the ask: what you typed, plus what it is about (open card, selection, drawn box)
+const ask = document.querySelector<HTMLInputElement>(".composer input[name=ask]")!;
+ask.form!.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = ask.value.trim();
+  if (!text) return;
+  intent("input", "input", { text, about: ctx.about?.() });
+  ask.value = "";
+});
+setInterval(() => tickStamps(world), 1000);
 paint();
 connect();

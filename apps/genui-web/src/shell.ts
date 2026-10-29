@@ -9,6 +9,8 @@ export type ShellCtx = {
   intent: (kind: IntentKind, targetId: string, payload: Record<string, unknown>) => void;
   cam: { home(): void; spread(): boolean; bring(ids: string[]): void };
   sel: Set<string>;
+  /** What an ask is about (set by the overlays). */
+  about?: () => unknown;
 };
 
 type LogItem = { at?: number; text?: string; proj?: string; seq?: number; rwd?: boolean };
@@ -100,7 +102,7 @@ function paintBottom(input: Component | undefined) {
 function paintQueue() {
   const items: [key: string, id: string, kind: string, text: string][] = [];
   const live = Object.entries(spec.components).filter(([, c]) => !c.props.hidden && !c.props.done);
-  for (const [id, c] of live) if (c.props.need) items.push([`n${id}`, id, "decide", `Decide: ${c.props.title ?? id}`]);
+  for (const [id, c] of live) if (c.props.need) items.push([`n${id}`, id, "decide", `Decide: ${c.props.q ?? c.props.title ?? id}`]);
   for (const [id, c] of live) if (c.props.claim) items.push([`c${id}`, id, "claimed", `${c.props.claim} claimed: ${c.props.title ?? id}`]);
   for (const [id, c] of live) if (typeof c.props.next === "string") items.push([`x${id}${c.props.next}`, id, "next", c.props.next]);
   const q = $(".queue"), keys = new Set(items.map((i) => i[0]));
@@ -161,7 +163,7 @@ function bind() {
   addEventListener("keydown", (e) => e.key === "Escape" && $(".logp").classList.contains("open") && toggleLog(false));
   $(".chips").addEventListener("click", (e) => {
     const c = (e.target as Element).closest(".chip");
-    if (c) ctx.intent("input", "input", { text: c.textContent });
+    if (c) ctx.intent("input", "input", { text: c.textContent, about: ctx.about?.() });
   });
   $(".queue").addEventListener("click", (e) => {
     const id = (e.target as Element).closest<HTMLElement>(".qi")?.dataset.id;

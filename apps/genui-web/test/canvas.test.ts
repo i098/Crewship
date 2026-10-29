@@ -112,6 +112,19 @@ describe("mock world", () => {
     expect(Object.values(spec().components).filter((c) => c.props.kind === "ask")[2]).toMatchObject({ rect: { x: 134, y: 20 }, props: { pinned: true } });
     w.stop();
   });
+
+  test("a header pill opens host stats or an agent's terminal in front, once, and ignores unknown names", () => {
+    const { w, spec } = world();
+    w.open("sys");
+    w.open("tui-cf-bill");
+    w.open("sys");
+    w.open("tui-nobody");
+    const cs = spec().components;
+    expect(cs.sys.props).toMatchObject({ kind: "sys", proj: "host", series: cs.header.props.stats, asked: true });
+    expect(cs["tui-cf-bill"].props).toMatchObject({ kind: "tui", proj: "bill", agent: "cf-bill", asked: false });
+    expect(Object.keys(cs).filter((k) => k.startsWith("tui-"))).toEqual(["tui-cf-bill"]);
+    w.stop();
+  });
 });
 
 test("style keeps HSL tokens and drops other colours, URLs and bad keys", () => {

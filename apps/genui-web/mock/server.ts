@@ -66,8 +66,9 @@ function onClient(ws: ServerWebSocket<{ boardId: string }>, msg: ClientMsg) {
     commit(r, "user", `intent:${msg.id}`, patch);
     send(ws, { t: "ack", id: msg.id, seq: r.seq });
     if (msg.kind !== "input") return;
-    const text = msg.payload.text;
-    if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
+    const text = msg.payload.text, open = msg.payload.open;
+    if (typeof open === "string") r.world.open(open);
+    else if (typeof text === "string" && text.trim()) r.world.answer(text, aboutOf(msg.payload.about));
     else r.world.react(msg.targetId, msg.payload.field);
   } catch (e) {
     send(ws, { t: "error", id: msg.id, msg: (e as Error).message });
@@ -101,6 +102,12 @@ export function start(port = Number(process.env.PORT ?? 4610)) {
       "/media/:file": (req: Bun.BunRequest<"/media/:file">) => {
         const f = req.params.file;
         return /^[\w-]+\.(svg|mp4|html)$/.test(f) ? new Response(Bun.file(new URL(`./media/${f}`, import.meta.url))) : new Response("not found", { status: 404 });
+      },
+      // the sandboxed site embed has origin null, so its fonts need CORS
+      "/media/fonts/:file": (req: Bun.BunRequest<"/media/fonts/:file">) => {
+        const f = req.params.file;
+        if (!/^geist-(sans|mono)\.woff2$/.test(f)) return new Response("not found", { status: 404 });
+        return new Response(Bun.file(new URL(`./media/fonts/${f}`, import.meta.url)), { headers: { "access-control-allow-origin": "*" } });
       },
       "/agent/:boardId": {
         POST: async (req: Bun.BunRequest<"/agent/:boardId">) => {

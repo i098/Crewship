@@ -50,16 +50,26 @@ const ITEMS = {
     }),
   cmp: () =>
     item("compare", "swap", 45, {
-      title: "Vercel vs Fly for swapapp", a: "Vercel", b: "Fly", verdict: "Fly wins 2 of 4 · cheaper, more regions",
-      rows: [{ name: "Cost / mo", a: 20, b: 12 }, { name: "Cold start", a: 9, b: 14 }, { name: "Deploy speed", a: 16, b: 11 }, { name: "Regions", a: 10, b: 18 }],
+      title: "Vercel vs Fly for swapapp", a: "Vercel", b: "Fly", subject: "swapapp", verdict: "Fly wins 2 of 4 · cheaper, more regions",
+      metrics: [["Cost / mo", 20, 12], ["Cold start", 9, 14], ["Deploy speed", 16, 11], ["Regions", 10, 18]],
+      acts: [{ k: "fly", b: "Go with Fly", pri: true }, { k: "dismiss", b: "Dismiss" }],
     }),
 };
+
+/** The design's ask chips. */
+const CHIPS = ["Compare Vercel vs Fly for swapapp", "When does swapapp ship?", "Who's working on what?", "What's going on?", "Open the first plan board"];
+
+/** 30 host samples per stat (0-100), the design's sample() curves without its noise. */
+function hostStats(): Record<string, number[]> {
+  const at = (f: (c: number) => number) => Array.from({ length: 30 }, (_, i) => Math.round(Math.max(1, Math.min(99, f(i + 1)))));
+  return { cpu: at((c) => 47 + 22 * Math.sin(c / 4)), mem: at((c) => 61 + 4 * Math.sin(c / 15)), disk: at((c) => 72 + c / 400), net: at((c) => 26 + 12 * Math.sin(c / 3)) };
+}
 
 export function seedSpec(): BoardSpec {
   const spec: BoardSpec = {
     components: {
-      header: { type: "header", props: { title: "", wins: "agent" } },
-      input: { type: "input", props: { placeholder: "Ask anything, tell the AI what to do, or draw" } },
+      header: { type: "header", props: { title: "", wins: "agent", stats: hostStats(), tuis: CREW.map((c, i) => ({ name: c.name, proj: ["crew", "swap", "bill", "all"][i] })) } },
+      input: { type: "input", props: { placeholder: "Ask anything, tell the AI what to do, ✎ draw or ＋ upload", chips: CHIPS } },
       d1: item("decision", "swap", 90, {
         need: true, q: "Store swaps in Postgres or SQLite?", why: "Blocks the swap feed migration",
         opts: [{ k: "pg", b: "Postgres", s: "Safe at scale · +1 day before ship", rec: true }, { k: "lite", b: "SQLite", s: "Ship today · migrate later (~6 h)" }],
@@ -67,14 +77,14 @@ export function seedSpec(): BoardSpec {
       c1: item("conflict", "crew", 84, { need: true, title: "#212 auth refresh hit a conflict", doneTitle: "#212 is merged", branch: "#212", files: ["auth.ts", "middleware.ts"] }),
       p1: item("pipeline", "swap", 55, { title: "#209 swap feed", at: 2 }),
       t1: item("timeline", "all", 42, { title: "When things land", days: ["Wed", "Thu", "Fri", "Sat", "Mon"] }),
-      k1: item("crew", "all", 34, { title: "Crew right now", crew: CREW, kpi: { value: CREW.length, unit: "active" } }),
+      k1: item("crew", "all", 34, { title: "Crew right now", members: CREW }),
       sh: item("shipped", "all", 20, { title: "Shipped in 14 days", shipped: 67 }),
       pl: item("plan", "plan", 60, {
-        need: true, q: "Plan the build", kpi: { value: "~10", unit: "h build" },
+        need: true, title: "Plan the build", kpi: { value: "~10", unit: "h build" },
         fields: [
-          { name: "stack", legend: "Render stack", opts: [{ v: "jsonrender", b: "json-render + AI SDK" }, { v: "copilotkit", b: "CopilotKit" }, { v: "a2ui", b: "A2UI" }] },
-          { name: "source", legend: "Talks to first", opts: [{ v: "fleet", b: "Firstmate + crew" }, { v: "general", b: "Any question" }] },
-          { name: "cutoff", legend: "“…and there's n…”", opts: [{ v: "nobubbles", b: "No chat bubbles" }, { v: "nofixedscreens", b: "No fixed screens" }, { v: "noapp", b: "No install" }] },
+          { name: "stack", label: "Render stack", opts: [["jsonrender", "json-render + AI SDK"], ["copilotkit", "CopilotKit"], ["a2ui", "A2UI"]] },
+          { name: "source", label: "Talks to first", opts: [["fleet", "Firstmate + crew"], ["general", "Any question"]] },
+          { name: "cutoff", label: "“…and there's n…”", opts: [["nobubbles", "No chat bubbles"], ["nofixedscreens", "No fixed screens"], ["noapp", "No install"]] },
         ],
       }),
       e1: item("embed", "swap", 50, { type: "site", title: "#209 preview", src: "/media/mock.html" }),
@@ -121,21 +131,24 @@ function statusProps(spec: BoardSpec, tick: number): Record<string, P> {
     const eta = Math.max(1, (stages.length - 1 - k) * 12 + (pg ? 25 : 0) - (tick % 2) * 6);
     want.p1 = { stages, at: k, kpi: { value: `~${eta}`, unit: "min" } };
   }
-  // one day is 25 units: Postgres's migrate day moves the ship from Fri to Sat; waiting for Monday covers it
+  // one day is 25 units: Postgres's migrate day moves the ship from Fri to Sat; waiting for Monday covers it.
+  // the view takes days, so every unit value is divided by 25
   const shift = mon ? 46 : pg ? 25 : 0;
   if (props(spec, "t1"))
     want.t1 = {
+      subject: "swapapp",
       ship: mon ? "Mon 10:00" : pg ? "Sat 14:00" : "Fri 14:00",
-      shipX: 54 + shift,
-      now: Math.min(70, tick * 2),
+      shipAt: (54 + shift) / 25,
+      shipRow: 1,
+      now: Math.min(70, 13 + tick * 2) / 25,
       rows: [
-        { name: "crewship", hsl: PROJECTS.crew.hsl, x: 0, w: 28 + (c1?.done ? -6 : 0) },
-        { name: "swapapp", hsl: PROJECTS.swap.hsl, x: 8, w: 46 + shift },
-        { name: "billing", hsl: PROJECTS.bill.hsl, x: 20, w: 40 + (i1 && i1.done !== true ? 10 : 0) },
+        { name: "crewship", hsl: PROJECTS.crew.hsl, from: 0, len: (28 + (c1?.done ? -6 : 0)) / 25 },
+        { name: "swapapp", hsl: PROJECTS.swap.hsl, from: 8 / 25, len: (46 + shift) / 25 },
+        { name: "billing", hsl: PROJECTS.bill.hsl, from: 20 / 25, len: (40 + (i1 && i1.done !== true ? 10 : 0)) / 25 },
       ],
     };
   const n = Number(sh?.shipped) || 0;
-  if (sh) want.sh = { kpi: { value: n, unit: "PRs" }, days: [3, 5, 2, 6, 4, 0, 1, 7, 5, 8, 6, 4, 9, 7 + n - 67] };
+  if (sh) want.sh = { total: n, bars: [3, 5, 2, 6, 4, 0, 1, 7, 5, 8, 6, 4, 9, 7 + n - 67] };
   return want;
 }
 
@@ -177,7 +190,7 @@ const set = (id: string, kv: P): PatchOp[] => Object.entries(kv).map(([k, value]
 const add = (id: string, c: Component): PatchOp[] => [{ op: "add", path: `/components/${esc(id)}`, value: c }];
 
 /** Card acts that settle an item (data-act on a view, sent as an input intent field). */
-const SETTLES = /^(pick|merge|fly|dismiss|send)$/;
+const SETTLES = /^(pick|merge|act|send)$/;
 
 /** Where an ask came from: the card open in full view, the selection, or a box drawn on the board. */
 export type About = { of?: string; ids?: string[]; at?: { x: number; y: number; w: number; h: number } };
@@ -259,6 +272,17 @@ export class World {
   react(id: string, field: unknown) {
     if (typeof field === "string" && SETTLES.test(field) && this.has(id)) this.finish(id);
     else this.change(`world:${id}`);
+  }
+
+  /** A header pill opens the host stats ("sys") or an agent's terminal ("tui-<name>") as a card in front. */
+  open(what: string) {
+    const i = CREW.findIndex((c) => `tui-${c.name}` === what);
+    if (what !== "sys" && i < 0) return;
+    const card =
+      i < 0
+        ? item("sys", "host", 95, { title: "This host", series: props(this.spec(), "header")?.stats ?? hostStats() })
+        : item("tui", ["crew", "swap", "bill", "all"][i], 95, { title: CREW[i].name, agent: CREW[i].name, lines: [`00:00  ${CREW[i].doing}`] });
+    this.change(`open:${what}`, [...(this.has(what) ? set(what, { removed: false, done: false }) : add(what, card)), ...this.front(what)]);
   }
 
   /** The agent's answer to a typed ask (design agentChoose, run(ASK), askAbout). */
