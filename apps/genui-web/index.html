@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Crewship genui canvas</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <header class="top" hidden></header>
+    <main class="canvas" aria-label="Canvas">
+      <div class="world"><svg class="links" aria-hidden="true"></svg></div>
+    </main>
+    <form class="composer" hidden>
+      <button type="button" class="pen" aria-pressed="false" aria-label="Draw on the sketch layer" title="Draw (Esc clears)">✎</button>
+      <input name="ask" autocomplete="off" aria-label="Ask the agent" />
+      <button type="submit" class="go" aria-label="Send">↑</button>
+    </form>
+    <svg class="sketch" aria-hidden="true"></svg>
+    <script type="module" src="./src/canvas.ts"></script>
+  </body>
+</html>
