@@ -15,7 +15,7 @@ STUBS = {
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
     "du": 'printf "5242880\\t/a/b/c\\n100\\t/a/b\\n"',
-    "pgrep": 'exit 1',
+    "pgrep": "exit 1",
     "text": 'echo "$*" >> "$STUB/texts"',
     "wall": 'cat >> "$STUB/alerts"',
 }
@@ -49,7 +49,10 @@ def run(tmp_path):
         }
         r = subprocess.run(
             [str(ROOT / "blueprint/fleet/doctor/pressure-guard.sh"), *args],
-            env=e, capture_output=True, text=True, check=False,
+            env=e,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         calls = (stub / "calls").read_text() if (stub / "calls").exists() else ""
         alerts = (stub / "alerts").read_text() if (stub / "alerts").exists() else ""
