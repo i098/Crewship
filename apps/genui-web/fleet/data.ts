@@ -96,6 +96,10 @@ export async function openAsks(home: string, task: string): Promise<Ask[]> {
   });
 }
 
+const MAX_AGE_S = Number(process.env.GENUI_ASK_MAX_AGE_H ?? 48) * 3600;
+/** An ask raised within the last two days (GENUI_ASK_MAX_AGE_H); one with no stamp is never live. */
+export const isLive = (a: Pick<Ask, "at">, now = Date.now() / 1000) => a.at > 0 && now - a.at <= MAX_AGE_S;
+
 /** The at= stamp of the last status line carrying `[key=<key>]`. */
 export function raisedAt(text: string, key: string): number {
   let at = 0;
@@ -225,8 +229,12 @@ export class FleetSource {
       if (f?.sig !== sig) this.folds.set(k, (f = { sig, asks: await openAsks(t.home, t.id) }));
       found.push(f.asks);
     }
-    // newest ask first, so a cluster's few visible ask cards are the asks raised last
-    const asks = found.flat().sort((a, b) => b.at - a.at);
+    // newest ask first, so a cluster's few visible ask cards are the asks raised last.
+    // Only live asks: the fold keeps an ask open until a resolved line lands, so a days-old one (a pool freeze since lifted) is stale.
+    const asks = found
+      .flat()
+      .filter((a) => isLive(a))
+      .sort((a, b) => b.at - a.at);
     const first = !this.fleet.asksAt;
     this.fleet.asksAt = Date.now();
     if (first || JSON.stringify(asks) !== JSON.stringify(this.fleet.asks)) {

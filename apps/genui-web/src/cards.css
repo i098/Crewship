@@ -61,11 +61,14 @@
 .kpi small { margin-left: 5px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--mute); }
 /* four lines on a card that fits its content; src/fit.ts gives a card stretched by its row more lines, so it needs a set line height */
 .body { margin: 0; color: var(--mute); line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+/* a decision's why: one short plain line, written to fit, so it wraps instead of clipping */
+.why { margin: 0; color: var(--mute); font-size: 14px; line-height: 1.4; }
 .items { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .items li { padding: 8px 10px; border-radius: 12px; background: hsl(240 30% 100% / .08); }
 
 /* one button style everywhere: same height, radius and type; the main action is filled */
-.acts { display: flex; flex-wrap: wrap; gap: 8px; }
+/* buttons keep their height when a row stretches the card */
+.acts { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: 8px; }
 .act, .opt, .ro label, .send, .tile .ib { min-height: 36px; padding: 0 14px; border-radius: 12px; border: 0; background: hsl(240 30% 100% / .08); color: var(--ink); font: 600 13.5px/1 var(--font); letter-spacing: -.02em; transition: background .25s, color .25s, opacity .4s; }
 .act:hover, .opt:hover, .ro label:hover { background: hsl(240 30% 100% / .14); }
 .act.pri, .send { background: var(--vio); color: var(--bg); }

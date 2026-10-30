@@ -2,6 +2,7 @@
 // workers, owned PRs are pipelines or merge decisions. Actions run the fleet's own scripts, and only after
 // a second "confirm" decision card the owner picks.
 import type { Component } from "@crewship/genui-spec";
+import { briefOf } from "./brief";
 import { type Ask, type Fleet, type FleetSource, green, isSlug, type Pr, run, type Task } from "./data";
 
 type P = Record<string, unknown>;
@@ -119,24 +120,30 @@ export function askOpts(note: string): Opt[] {
 function askItem(f: Fleet, a: Ask, open: Open): Item {
   const id = askId(a),
     full = open.cards.has(id),
-    g = clusterOf(f, a.home, a.task);
+    g = clusterOf(f, a.home, a.task),
+    brief = briefOf(a),
+    parsed = askOpts(a.note);
+  // a mate's own ask sits in its own cluster, whose label already names it
+  const who = g === a.task ? "" : a.task;
   return {
     id,
     g,
     topic: "asks",
-    line: `ask ${a.task}: ${cut(a.note, 80)}`,
+    line: `ask ${a.task}: ${brief?.what ?? cut(a.note, 80)}`,
     c: card("decision", "", 90, {
       need: true,
-      // a mate's own ask sits in its own cluster, whose label already names it
-      q: short(g === a.task ? "" : a.task, clean(a.note)),
-      // one line on the board; the full text only in the full view
+      // the brief is written to fit; until it lands, the note's first words stand in
+      q: brief ? `${who ? `${who}: ` : ""}${brief.what}` : short(who, clean(a.note)),
+      ...(brief?.why ? { why: brief.why } : {}),
+      // the raw note only in the full view, one tap away
       ...(full ? { body: cut(a.note, MAX_TEXT) } : {}),
       ...(a.note.match(URL_RE) ? { url: a.note.match(URL_RE)![0] } : {}),
       task: a.task,
       home: a.home,
       key: a.key,
       free: true,
-      opts: askOpts(a.note),
+      // the label is the whole answer: the brief can reorder the note's choices, so no pairing with the parsed ones
+      opts: brief ? brief.opts.map((o, i) => ({ k: `o${i + 1}`, b: o.b, say: "", rec: o.rec })) : parsed,
     }),
   };
 }

@@ -1,5 +1,5 @@
 // Decision fork: an amber origin dot with one curve to each option; the AI pick carries a cyan tag.
-// Props: q | title, body, url (a link icon), opts [{ k, b, rec, preview }], free (a free-text answer box), pick, done.
+// Props: q | title, why (one line on why it matters now), body, url (a link icon), opts [{ k, b, rec, preview }], free (a free-text answer box), pick, done.
 // A decision with no options draws no fork: it is answered in words only.
 import { body, C, esc, hd, list, title, type View } from "./chrome";
 
@@ -39,7 +39,8 @@ export const decision: View = (p, id, _tier, spec) => {
     p.free === true && !done
       ? `<form class="freef" data-act="answer" data-id="${esc(id)}"><input name="text" maxlength="4000" autocomplete="off" placeholder="Answer in your words" aria-label="Your answer"><button class="send" type="submit">Send</button></form>`
       : "";
-  return `${hd(p, id, spec, done ? { text: "decided", cls: "g" } : { text: "needs you" })}${title(esc(p.q ?? p.title) + link(p.url))}${body(p.body)}${
+  const why = typeof p.why === "string" && p.why ? `<p class="why">${esc(p.why)}</p>` : "";
+  return `${hd(p, id, spec, done ? { text: "decided", cls: "g" } : { text: "needs you" })}${title(esc(p.q ?? p.title) + link(p.url))}${why}${body(p.body)}${
     opts.length ? fork(p, id, opts) : ""
   }${free}`;
 };

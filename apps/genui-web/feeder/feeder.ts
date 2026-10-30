@@ -8,8 +8,9 @@ import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
 import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
+import { briefAsks } from "../fleet/brief";
 import { FleetSource } from "../fleet/data";
-import { chat } from "../fleet/chat";
+import { chat, stream } from "../fleet/chat";
 
 const SERVER = process.env.GENUI_SERVER ?? "http://127.0.0.1:8787";
 const BOARD = process.env.BOARD ?? "demo";
@@ -427,7 +428,7 @@ function startChat(m: Intent, q: string, fl: FleetSource) {
 /** An ask's option: its full text is the answer, sent after the owner confirms. */
 function pickOpt(c: P, k: unknown, fl: FleetSource) {
   const o = (Array.isArray(c.opts) ? (c.opts as Opt[]) : []).find((o) => o.k === k);
-  if (o) offer(() => answer(fl, c, `${o.b}: ${o.say}`), "Not sent");
+  if (o) offer(() => answer(fl, c, o.say ? `${o.b}: ${o.say}` : o.b), "Not sent");
 }
 
 /** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, a cluster's next page, or chat. True when handled. */
@@ -524,8 +525,18 @@ if (import.meta.main) {
   if (fleet) {
     fleet.start();
     let t: Timer | undefined;
-    // fleet files change often; one publish per second at most
-    fleet.onChange(() => { clearTimeout(t); t = setTimeout(() => { if (last) publish(last).catch((e) => console.error("publish:", (e as Error).message)); }, 1000); });
+    let briefing = false;
+    const republish = () => { if (last) publish(last).catch((e) => console.error("publish:", (e as Error).message)); };
+    // fleet files change often; one publish per second at most. New asks get briefed, one run at a time.
+    fleet.onChange(() => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        republish();
+        if (briefing) return;
+        briefing = true;
+        briefAsks(fleet.fleet.asks, republish, stream).finally(() => (briefing = false));
+      }, 1000);
+    });
   }
   await synced.promise;
   replies().catch((e) => console.error("replies:", (e as Error).message));

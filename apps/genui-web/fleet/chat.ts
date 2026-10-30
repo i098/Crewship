@@ -94,9 +94,9 @@ export function parse(l: string): Part | undefined {
 }
 
 /** Streams the model's text deltas from `omp -p --mode json`. */
-async function* stream(prompt: string, timeoutMs = 90_000): AsyncGenerator<string> {
+export async function* stream(prompt: string, timeoutMs = 90_000, system = SYSTEM + CATALOG): AsyncGenerator<string> {
   const p = Bun.spawn(
-    ["omp", "-p", "--mode", "json", "--no-tools", "--no-session", "--no-lsp", "--model", CHAT_MODEL, "--system-prompt", SYSTEM + CATALOG, prompt],
+    ["omp", "-p", "--mode", "json", "--no-tools", "--no-session", "--no-lsp", "--model", CHAT_MODEL, "--system-prompt", system, prompt],
     { cwd: tmpdir(), stdout: "pipe", stderr: "pipe" }, // tmpdir: no repo context files get loaded into the prompt
   );
   const timer = setTimeout(() => p.kill(), timeoutMs);

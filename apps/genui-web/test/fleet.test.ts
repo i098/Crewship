@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { askOpts, fleetCards, mergeBlock } from "../fleet/cards";
-import { countChecks, type Fleet, type Pr, parseBacklog, raisedAt } from "../fleet/data";
+import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
 const pr = (o: Partial<Pr>): Pr => ({
@@ -55,6 +55,13 @@ test("an ask's time is the at= stamp of the last line carrying its key", () => {
   expect(raisedAt(text, "a")).toBe(200);
   expect(raisedAt(text, "b")).toBe(300);
   expect(raisedAt(text, "missing")).toBe(0);
+});
+
+test("only an ask raised in the last two days is live", () => {
+  const now = 1_000_000;
+  expect(isLive({ at: now - 48 * 3600 }, now)).toBe(true);
+  expect(isLive({ at: now - 48 * 3600 - 1 }, now)).toBe(false);
+  expect(isLive({ at: 0 }, now)).toBe(false);
 });
 
 test("an ask shows the options it names, the one it recommends, or none when it is open", () => {
