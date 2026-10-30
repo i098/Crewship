@@ -44,14 +44,13 @@ export function cleanText(text: string): string {
 
 // A status line is internal detail, not a text for the owner. Returns why a paragraph is one, or undefined for prose.
 const STATUS: [string, RegExp][] = [
-  ["starts with a PR number or link", /^(?:pr|pull request)[ \t]*#?(?:\d+\b|https?:\/\/)/i],
-  ["bare link", /^<?https?:\/\/\S+>?$/],
   ["starts with a task or mate id", /^[ \t\x01]*(?:(?:cf|sm)-[a-z0-9][a-z0-9-]*|[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+)\b/i],
-  ["starts with a sweep or status label", /^(?:idle sweep|sweep|status|child [a-z0-9-]+ (?:working|done|failed|blocked|paused))\b[ \t]*[:(-]/i],
-  ["key= tokens", /(?<![\w-])(?:key|corr|pr|head|task|mode|yolo)=\S/],
-  ["run of commit hashes", /(?=[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b)/],
+  ["key= tokens", /(?<![\w-])(?:key|corr)=\S/],
+  ["commit hashes in a detail clause", /:[ \t]+[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/],
 ];
+const BARE_PR_LINK = /^(?:(?:pr|pull request)[ \t]*)?<?https?:\/\/\S+\/pull\/\d+\S*>?$/i;
 export function statusLine(text: string): string | undefined {
+  if (BARE_PR_LINK.test(text.trim())) return "bare PR link";
   for (const para of text.split(/\n\s*\n/)) {
     const p = para.trim();
     const hit = p && STATUS.find(([, re]) => re.test(p));
