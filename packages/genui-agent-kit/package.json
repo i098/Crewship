@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "genui-bridge": "bin/genui-bridge.ts"
+    "genui-bridge": "bin/genui-bridge.ts",
+    "genui-window": "bin/genui-window.ts"
   },
   "scripts": {
     "test": "bun test"

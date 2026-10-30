@@ -95,6 +95,18 @@ test("a plan's layout: a wide card takes the row alone, a stacked card peeks out
   }
 });
 
+test("floating windows keep their spot and stack by layer: the highest layer is on top", () => {
+  const wins: Item[] = [
+    { ...it("wa", "me", 0), pin: { x: 0, y: 0 }, layer: 9 },
+    { ...it("wb", "me", 0), pin: { x: 50, y: 50 }, layer: -3 },
+    { ...it("wc", "me", 0), pin: { x: 90, y: 90 } },
+  ];
+  const t = layout([...items, ...wins], rels, desk, st, fit).tiles;
+  expect([t.wa.x, t.wb.y]).toEqual([0, 50]);
+  expect(t.wb.z).toBeLessThan(t.wc.z);
+  expect(t.wc.z).toBeLessThan(t.wa.z);
+});
+
 test("clusters sit apart with clear space; a phone stacks them and fits the top card on screen", () => {
   for (const vp of [desk, { W: 390, H: 844, topH: 110, botH: 170 }]) {
     const L = layout(items, rels, vp, { ...st, spread: true }, fit);

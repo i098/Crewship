@@ -8,8 +8,10 @@ export type Item = {
   proj: string;
   prio: number;
   done: boolean;
-  /** A free spot (a pinned card); it stays out of the clusters. */
+  /** A free spot (a floating window); it stays out of the clusters. */
   pin?: { x: number; y: number };
+  /** A floating window's stacking order: a higher layer sits on top. */
+  layer?: number;
   /** A size the user gave; the width sets its column in a two-up row, the height is a floor. */
   size?: { w?: number; h?: number };
   /** A full row of its own (a plan's large card). */
@@ -99,14 +101,25 @@ function groups(items: Item[], order: State["order"]): Group[] {
   return [...by].map(([proj, ts]) => (ts.sort((a, b) => rk(proj, a) - rk(proj, b)), { proj, ts, p: Math.max(...ts.map((t) => t.prio)) })).sort((a, b) => b.p - a.p);
 }
 
-/** Items you placed stay where you put them. */
+/** Items you placed stay where you put them; a higher layer sits on top of a lower one. */
 function pinned(items: Item[], fit: Fit): Record<string, TileBox> {
   const tiles: Record<string, TileBox> = {};
-  for (const t of items)
-    if (t.pin) {
-      const w = t.size?.w || CW0;
-      tiles[t.id] = { x: t.pin.x, y: t.pin.y, w, h: Math.max(fit(t.id, w), t.size?.h ?? 0), s: 1, z: 32, away: false, far: false, center: false, proj: null };
-    }
+  const free = items.filter((t) => t.pin).sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
+  free.forEach((t, i) => {
+    const w = t.size?.w || CW0;
+    tiles[t.id] = {
+      x: t.pin!.x,
+      y: t.pin!.y,
+      w,
+      h: Math.max(fit(t.id, w), t.size?.h ?? 0),
+      s: 1,
+      z: 32 + i,
+      away: false,
+      far: false,
+      center: false,
+      proj: null,
+    };
+  });
   return tiles;
 }
 

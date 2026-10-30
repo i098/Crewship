@@ -220,9 +220,29 @@ function item(id: string, c: Component, now: number): Item {
   const done = p.done === true,
     boost = (asked.get(id) ?? 0) > now ? 200 : 0;
   const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
-  const pin = p.pinned === true && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
-  const plain = { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin };
+  const pin = floats(p) && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
+  const plain = {
+    id,
+    proj: typeof p.proj === "string" ? p.proj : "board",
+    prio: done ? 5 : (Number(p.priority) || 0) + boost,
+    done,
+    pin,
+    layer: Number(p.layer) || 0,
+  };
   return { ...plain, ...planShape(p, size) };
+}
+
+/** A floating window: one you pinned, or one an agent opened with float. It keeps its own spot over any layout. */
+const floats = (p: Component["props"]) => p.pinned === true || p.float === true;
+
+/** Grabbing a floating window brings it to the top of the windows, as `genui-window raise` does. */
+function raise(id: string) {
+  const layers = Object.values(spec.components)
+    .filter((c) => floats(c.props))
+    .map((c) => Number(c.props.layer) || 0);
+  const mine = Number(spec.components[id]?.props.layer) || 0;
+  // another window is level with it or above it
+  if (layers.filter((l) => l >= mine).length > 1) intent("input", id, { field: "layer", value: Math.max(...layers) + 1 });
 }
 
 /** A plan's shape for a card: l takes a full row, s a narrow column, plus its stack and edge; a size you gave wins. */
@@ -392,7 +412,8 @@ function startCard(e: PointerEvent, el: HTMLElement, mode: "size" | "card" | "li
     x0 = e.clientX,
     y0 = e.clientY,
     r0 = el.getBoundingClientRect();
-  const pinned = spec.components[id]?.props.pinned === true;
+  const pinned = floats(spec.components[id]?.props ?? {});
+  if (pinned) raise(id);
   let on = false,
     last: string | undefined;
   gesture = {

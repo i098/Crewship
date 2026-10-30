@@ -206,7 +206,7 @@ function derived(spec: BoardSpec): Record<string, P> {
 
 const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add", path: `/components/${esc(id)}/props/${esc(k)}`, value });
 
-const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "claim", "priority", "line", "reply"]);
+const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "float", "layer", "claim", "priority", "line", "reply"]);
 
 /** The ops that bring one existing card's props to the wanted ones. */
 function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
@@ -285,7 +285,7 @@ function planned(): { open: Open; shown: Set<Topic> } {
 /** A card of his from an earlier feeder run is on the board but not in `want`: keep it as his, so a plan can set it aside too. */
 function adoptLeftovers(want: Record<string, Component>) {
   for (const [id, c] of Object.entries(spec.components))
-    if (!want[id] && c.type === "card" && c.props.removed !== true && c.props.proj === "me" && !id.startsWith("ai-")) {
+    if (!want[id] && c.props.proj === "me" && !id.startsWith("ai-") && goesAside(id, c)) {
       const { aside, size, under, edge, ...props } = c.props;
       want[id] = extra[id] = { ...c, props };
     }
@@ -309,8 +309,13 @@ export function applyPlan(want: Record<string, Component>, pl = plan) {
     }),
   );
   if (want["ai-q"]) lift("ai-q", { base: 800 });
-  for (const [id, c] of Object.entries(want))
-    if (c.type === "card" && c.props.removed !== true && id !== "ai-q" && !keep.includes(id) && !pl.own.has(id) && !pending.has(id)) lift(id, { aside: true });
+  for (const [id, c] of Object.entries(want)) if (!keep.includes(id) && !pl.own.has(id) && goesAside(id, c)) lift(id, { aside: true });
+}
+
+/** A card a plan may set aside: not the answer, not one waiting on his Yes, and not a floating window (those stay over any layout). */
+function goesAside(id: string, c: Component): boolean {
+  const p = c.props;
+  return c.type === "card" && p.removed !== true && id !== "ai-q" && !pending.has(id) && p.pinned !== true && p.float !== true;
 }
 
 /** Publishes once more after the one in flight, so a burst of chat edits costs at most two board round trips. */
