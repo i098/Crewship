@@ -7,7 +7,7 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
+import { answer, contextOf, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { briefAsks } from "../fleet/brief";
 import { FleetSource } from "../fleet/data";
 import { chat, stream } from "../fleet/chat";
@@ -206,7 +206,7 @@ function derived(spec: BoardSpec): Record<string, P> {
 
 const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add", path: `/components/${esc(id)}/props/${esc(k)}`, value });
 
-const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "claim", "priority", "line"]);
+const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "claim", "priority", "line", "reply"]);
 
 /** The ops that bring one existing card's props to the wanted ones. */
 function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
@@ -469,6 +469,34 @@ async function confirm(m: Intent, fl: FleetSource) {
   void fl.refreshLocal().catch(() => {});
 }
 
+/** The selected or open card a composer ask is about: the full-view card first, then the selection. */
+function selected(about: unknown): string | undefined {
+  const a = (about ?? {}) as { of?: unknown; ids?: unknown };
+  return [a.of, ...(Array.isArray(a.ids) ? a.ids : [])].find((x): x is string => typeof x === "string" && !!(spec.components[x] ?? extra[x]));
+}
+
+/** An ask about one card answers inside that card: its real facts at once, then the model's answer under them. No new card. */
+function answerInPlace(m: Intent, id: string, q: string, fl: FleetSource) {
+  const c = spec.components[id] ?? extra[id];
+  const facts = contextOf(fl.fleet, c.props);
+  const said: string[] = [];
+  const put = (ready: boolean) => call("emit_view", { event: { delta: [setProp(id, "reply", { q, lines: [...facts, ...said], ready })] }, cause: m.id });
+  void put(false);
+  void chat({
+    text: q,
+    about: { card: id, facts },
+    fleet: fl.fleet,
+    board: { ...spec.components, ...extra },
+    // only the words land; cards the model would draw are not made, so nothing new appears
+    apply: async (e) => {
+      if (!("say" in e)) return;
+      if (!e.done) said.push(e.say);
+      else if (!said.length) said.push(e.say);
+      void put(e.done);
+    },
+  }).catch((e) => (said.push(`Not answered: ${(e as Error).message}`), void put(true)));
+}
+
 /** Free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands. */
 function startChat(m: Intent, q: string, fl: FleetSource) {
   const said: string[] = [];
@@ -502,22 +530,43 @@ function pickOpt(c: P, k: unknown, fl: FleetSource, of: string) {
   if (o) offer(() => answer(fl, c, o.say ? `${o.b}: ${o.say}` : o.b), "Not sent", of);
 }
 
-/** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, a cluster's next page, or chat. True when handled. */
-async function onFleet(m: Intent, c: P, fl: FleetSource): Promise<boolean> {
-  const p = m.payload, text = typeof p.text === "string" ? p.text.trim() : "", to = text ? fleetTarget(p.about) : undefined;
-  const pick = p.field === "pick" ? p.value : undefined;
-  if (to)
+// shortcut: a question is told from an instruction by its words, so "fix the test" steers and "why did the test fail" asks; upgrade to a model call if it misreads
+const QUESTION =
+  /\?\s*$|^(what|why|how|who|when|where|which|is|are|was|does|did|do|can|could|should|will|explain|tell|show|give|more|context|details?|status)\b/i;
+
+/** The card a composer ask is answered in: the selected or open card, unless it is a crew card given a plain instruction (a steer). */
+function inPlaceOf(m: Intent, text: string): string | undefined {
+  const sel = text && m.targetId === "input" ? selected(m.payload.about) : undefined;
+  if (!sel) return undefined;
+  const s = (spec.components[sel] ?? extra[sel]).props;
+  return !s.key && (s.kind === "tui" || !!s.task) && !QUESTION.test(text) ? undefined : sel;
+}
+
+/** Owner text: answered in the card it is about, else sent to the ask or crew card it names (after a confirm), else a chat. */
+function onText(m: Intent, text: string, fl: FleetSource) {
+  const inPlace = inPlaceOf(m, text);
+  const to = inPlace ? undefined : fleetTarget(m.payload.about);
+  if (inPlace) answerInPlace(m, inPlace, text, fl);
+  else if (to)
     offer(
       () => (to.c.props.key ? answer(fl, to.c.props, text) : steer(fl, String(to.c.props.task ?? to.c.props.agent), text)),
       "Not sent",
       to.c.props.key ? to.id : undefined,
     );
+  else startChat(m, text, fl);
+}
+
+/** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, a cluster's next page, or chat. True when handled. */
+async function onFleet(m: Intent, c: P, fl: FleetSource): Promise<boolean> {
+  const p = m.payload,
+    text = typeof p.text === "string" ? p.text.trim() : "";
+  const pick = p.field === "pick" ? p.value : undefined;
+  if (text) onText(m, text, fl);
   else if (pick !== undefined && pending.has(m.targetId)) await confirm(m, fl);
   else if (pick !== undefined && c.key) pickOpt(c, pick, fl, m.targetId);
   else if (pick === "merge" && c.prUrl) offer(() => merge(fl, c.prUrl), "Not merged", m.targetId);
   else if (pick !== undefined && c.prUrl) await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
   else if (p.field === "act" && p.value === "page" && typeof c.proj === "string") open.page.set(c.proj, (open.page.get(c.proj) ?? 0) + 1);
-  else if (text) startChat(m, text, fl);
   else return false;
   return true;
 }

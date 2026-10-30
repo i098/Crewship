@@ -36,7 +36,15 @@ export function renderCard(spec: BoardSpec, component: Component, widthTier: Wid
   const p: Props = { ...component.props, ...preview(spec, id) };
   if (p.kind === "embed" && !p.nat && natural.has(id)) p.nat = natural.get(id);
   const view = typeof p.kind === "string" && Object.hasOwn(VIEWS, p.kind) ? VIEWS[p.kind as CardKind] : note;
-  return `<div class="core">${view(p, id, widthTier, spec)}</div><i class="tgrip" data-act="resize" aria-hidden="true"></i><span class="ago"></span>`;
+  return `<div class="core">${view(p, id, widthTier, spec)}${reply(p.reply)}</div><i class="tgrip" data-act="resize" aria-hidden="true"></i><span class="ago"></span>`;
+}
+
+/** An ask about this card, answered inside it: the question, the facts, then the answer as it streams. */
+function reply(r: unknown): string {
+  if (!r || typeof r !== "object") return "";
+  const { q, lines, ready } = r as { q?: unknown; lines?: unknown; ready?: unknown };
+  const ls = list(lines).filter((l): l is string => typeof l === "string");
+  return `<div class="reply" role="status"><p class="rq">${esc(String(q ?? ""))}</p>${ls.map((l) => `<p>${esc(l)}</p>`).join("")}${ready === true ? "" : `<p class="rw">Reading…</p>`}</div>`;
 }
 
 /**

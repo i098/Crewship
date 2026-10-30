@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askOpts, askRef, fleetCards, mergeBlock } from "../fleet/cards";
+import { askOpts, askRef, contextOf, fleetCards, mergeBlock } from "../fleet/cards";
 import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
@@ -115,4 +115,13 @@ test("nothing is drawn until asked; asked-for asks page so every one is reachabl
     for (const id of on) expect(out[id].props).toMatchObject({ kind: "decision", free: true, opts: [] });
   }
   expect(seen.size).toBe(5);
+});
+
+test("asking about a failing PR card shows its checks, though only a green PR's card carries prUrl", () => {
+  const f = { ...fleet, mates: [], workers: [], asks: [], prs: [pr({ url: "https://x/1", title: "Fix login", checks: { ok: 2, bad: 1, pending: 0 } })] };
+  expect(contextOf(f, { kind: "note", url: "https://x/1", title: "i098/app#1: 1 failing" })).toEqual([
+    "i098/app#1: Fix login",
+    "Checks: 2 passed, 1 failed, 0 running",
+  ]);
+  expect(contextOf(f, { kind: "note", title: "No PR here" })).toEqual(["No PR here"]);
 });

@@ -117,6 +117,33 @@ export function askOpts(note: string): Opt[] {
   return rec ? [{ ...opt(0, rec), rec: true }] : [];
 }
 
+/** The real facts behind one card, shown at once when the owner asks about it: an ask's full note, its task's latest lines, a PR's checks, else the card's own text. */
+export function contextOf(f: Fleet, c: P): string[] {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+  const flat = (s: string) => s.replace(/\s+/g, " ");
+  const task = str(c.task) || str(c.agent);
+  const a = c.key ? f.asks.find((x) => x.key === c.key && x.task === task) : undefined;
+  const t = [...f.mates, ...f.workers].find((x) => x.id === task && (!c.home || x.home === c.home));
+  const facts = [
+    str(c.ref),
+    str(c.why),
+    a ? `The full note: ${flat(a.note)}` : "",
+    ...(t?.lines.slice(-3).map((l) => `${t.id} ${l.state}: ${flat(l.text)}`) ?? []),
+    ...prFacts(f, c.prUrl ?? c.url),
+  ].filter(Boolean);
+  // a card with no fleet facts behind it shows its own text
+  const own = [str(c.title) || str(c.q), str(c.body), ...(Array.isArray(c.items) ? c.items : []).map(str)].filter(Boolean);
+  return [...new Set(facts.length ? facts : own)].slice(0, 8).map((s) => cut(s, 1200));
+}
+
+/** An open PR's title and checks, for a card that carries its link (a green PR as `prUrl`, any other as `url`). */
+function prFacts(f: Fleet, url: unknown): string[] {
+  const pr = f.prs.find((p) => p.url === url);
+  if (!pr) return [];
+  const c = pr.checks;
+  return [`${pr.repo}#${pr.number}: ${pr.title}${pr.draft ? " (draft)" : ""}`, ...(c ? [`Checks: ${c.ok} passed, ${c.bad} failed, ${c.pending} running`] : [])];
+}
+
 const PR_LINK = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/;
 
 /** The exact thing an ask is about: the open PR it links or names, else the brief's own ref, else the task and its project. */
