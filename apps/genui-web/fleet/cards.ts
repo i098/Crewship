@@ -54,8 +54,8 @@ export function short(who: string, text: string, n = 8): string {
   return `${who ? `${who}: ` : ""}${w.slice(0, n).join(" ")}${w.length > n ? "…" : ""}`;
 }
 
-/** An action the owner asked for, shown as a confirm card until they pick Yes or Cancel. */
-export type Pending = { id: string; q: string; why: string; run: () => Promise<{ ok: boolean; text: string }> };
+/** An action the owner asked for, shown as a confirm card until they pick Yes or Cancel; `of` is the card it acts on, `state` its run. */
+export type Pending = { id: string; q: string; why: string; of?: string; state?: "running" | "sent"; run: () => Promise<{ ok: boolean; text: string }> };
 
 /** What the owner has open: the cluster the camera is on, the cards in full view, and each cluster's page. Only these load detail. */
 export type Open = { cluster?: string | null; cards: Set<string>; page?: Map<string, number> };
@@ -117,6 +117,23 @@ export function askOpts(note: string): Opt[] {
   return rec ? [{ ...opt(0, rec), rec: true }] : [];
 }
 
+const PR_LINK = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/;
+
+/** The exact thing an ask is about: the open PR it links or names, else the brief's own ref, else the task and its project. */
+export function askRef(f: Fleet, a: Ask, said = ""): string {
+  const m = PR_LINK.exec(a.note),
+    n = m ? Number(m[2]) : Number(/\bPR ?#?(\d{1,6})\b/.exec(a.note)?.[1] ?? 0);
+  const same = f.prs.filter((p) => p.number === n && (!m || p.repo === m[1]));
+  // a bare number is the task's own PR, or the one open PR with that number
+  const p = same.find((p) => m || p.owner?.task === a.task) ?? (same.length === 1 ? same[0] : undefined);
+  if (p) return `PR ${p.repo}#${p.number} · ${cut(p.title, 70)}`;
+  if (m) return `PR ${m[1]}#${m[2]}`;
+  if (said) return said;
+  const t = [...f.mates, ...f.workers].find((t) => t.id === a.task && t.home === a.home);
+  const proj = t?.meta.projects ?? t?.meta.project?.split("/").pop();
+  return proj ? `${a.task} · ${proj}` : a.task;
+}
+
 function askItem(f: Fleet, a: Ask, open: Open): Item {
   const id = askId(a),
     full = open.cards.has(id),
@@ -139,6 +156,7 @@ function askItem(f: Fleet, a: Ask, open: Open): Item {
       ...(full ? { body: cut(a.note, MAX_TEXT) } : {}),
       ...(a.note.match(URL_RE) ? { url: a.note.match(URL_RE)![0] } : {}),
       task: a.task,
+      ref: askRef(f, a, brief?.ref),
       home: a.home,
       key: a.key,
       free: true,
@@ -260,9 +278,10 @@ export function fleetCards(f: Fleet, pending: Map<string, Pending>, open: Open =
   for (const [g, list] of groups) place(out, g, list, open);
   for (const p of pending.values())
     out[p.id] = card("decision", "fm", 300, {
-      need: true,
+      need: !p.state,
       q: p.q,
-      why: p.why,
+      why: p.state === "running" ? "Sending…" : p.why,
+      ...(p.state ? { done: true, pick: "yes", sent: p.state === "sent" } : {}),
       opts: [
         { k: "yes", b: "Yes, do it", rec: true },
         { k: "cancel", b: "Cancel" },

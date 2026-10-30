@@ -9,17 +9,18 @@ import type { Ask } from "./data";
 // the model runner comes in as a parameter: chat imports cards, which imports this file
 type Run = (prompt: string, timeoutMs: number, system: string) => AsyncIterable<string>;
 
-export type Brief = { what: string; why: string; opts: { b: string; rec: boolean }[] };
+export type Brief = { what: string; ref: string; why: string; opts: { b: string; rec: boolean }[] };
 
-const FILE = process.env.GENUI_BRIEFS ?? `${homedir()}/.cache/crewship-genui/briefs.json`;
+// v2 adds `ref`; the v1 cache has none, so it is not read
+const FILE = process.env.GENUI_BRIEFS ?? `${homedir()}/.cache/crewship-genui/briefs-v2.json`;
 
 /** A brief from untrusted model or file JSON, or undefined when any field is off. */
 export function asBrief(j: unknown): Brief | undefined {
   if (!j || typeof j !== "object") return;
-  const { what, why, opts } = j as Record<string, unknown>;
-  if (typeof what !== "string" || !what || typeof why !== "string" || !Array.isArray(opts)) return;
+  const { what, ref, why, opts } = j as Record<string, unknown>;
+  if (typeof what !== "string" || !what || typeof ref !== "string" || typeof why !== "string" || !Array.isArray(opts)) return;
   if (!opts.every((o) => o && typeof o.b === "string" && o.b && typeof o.rec === "boolean")) return;
-  return { what, why, opts: opts.map((o) => ({ b: o.b, rec: o.rec })) };
+  return { what, ref, why, opts: opts.map((o) => ({ b: o.b, rec: o.rec })) };
 }
 
 export const briefKey = (a: Ask) => `${a.home}|${a.task}|${a.key}|${a.at}`;
@@ -35,8 +36,9 @@ try {
 export const briefOf = (a: Ask): Brief | undefined => cache.get(briefKey(a));
 
 const SYSTEM = `You brief a busy owner on decisions his agents wait on. For each input line "<id> | <agent>: <the agent's raw note>", write one JSON line:
-{"id": "<id>", "what": "...", "why": "...", "opts": [{"b": "...", "rec": true|false}]}
+{"id": "<id>", "what": "...", "ref": "...", "why": "...", "opts": [{"b": "...", "rec": true|false}]}
 what: plain English, at most 9 words: what it is and what he picks. No ids, hashes, file paths, URLs or jargon.
+ref: the exact thing it is about, at most 10 words, with the note's own names: the repo and PR or issue number and its title when the note names one (like "oven-sh/bun #46920: install race fix"), else the project, product or form name. Empty string if the note names none.
 why: plain English, at most 14 words: why it matters now (what is blocked or at risk). Empty string if the note does not say.
 opts: only the choices the note itself names, in its order, each a full label of at most 5 words; rec true for the one the note recommends. [] when the note names no choices.
 Use only facts in the note. Write JSON lines only, nothing else.`;

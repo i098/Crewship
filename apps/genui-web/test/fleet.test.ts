@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askOpts, fleetCards, mergeBlock } from "../fleet/cards";
+import { askOpts, askRef, fleetCards, mergeBlock } from "../fleet/cards";
 import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
@@ -62,6 +62,21 @@ test("only an ask raised in the last two days is live", () => {
   expect(isLive({ at: now - 48 * 3600 }, now)).toBe(true);
   expect(isLive({ at: now - 48 * 3600 - 1 }, now)).toBe(false);
   expect(isLive({ at: 0 }, now)).toBe(false);
+});
+
+test("an ask names its PR (linked, or by number among its task's PRs), else its task and project", () => {
+  const f = {
+    ...fleet,
+    prs: [pr({ repo: "i098/app", number: 7, title: "Fix login", owner: { home: "/h", task: "w1" } })],
+    mates: [],
+    workers: [{ id: "w1", home: "/h", meta: { project: "/p/projects/app" }, lines: [], busy: "" }],
+  } as unknown as Fleet;
+  const ask = (note: string) => ({ home: "/h", task: "w1", key: "k", verb: "needs-decision", note, at: 0 });
+  expect(askRef(f, ask("see https://github.com/i098/app/pull/7 now"))).toBe("PR i098/app#7 · Fix login");
+  expect(askRef(f, ask("PR7 is green"))).toBe("PR i098/app#7 · Fix login");
+  expect(askRef(f, ask("https://github.com/x/y/pull/3"))).toBe("PR x/y#3");
+  expect(askRef(f, ask("pick a font"))).toBe("w1 · app");
+  expect(askRef(f, ask("pick a font"), "TreeHacks form")).toBe("TreeHacks form");
 });
 
 test("an ask shows the options it names, the one it recommends, or none when it is open", () => {

@@ -24,7 +24,9 @@ const BARE: Record<string, (src: string, name: string, p: Record<string, unknown
 function boxed(type: string, src: string, name: string, full: boolean) {
   if (type === "image" || type === "diagram") return `<img class="media" src="${src}" alt="${name}">`;
   if (type === "video") return `<video class="media" src="${src}" autoplay muted loop playsinline${full ? " controls" : ""}></video>`;
-  return `<iframe class="media" src="${src}" loading="lazy" title="${name}" sandbox="allow-scripts allow-forms allow-popups"></iframe>`;
+  // a foreign site keeps its own origin (a board needs its storage); a same-origin or blob frame never does, or it could escape the sandbox
+  const own = /^https?:\/\//i.test(src) && new URL(src).origin !== globalThis.location?.origin ? " allow-same-origin" : "";
+  return `<iframe class="media" src="${src}" loading="lazy" title="${name}" sandbox="allow-scripts allow-forms allow-popups${own}"></iframe>`;
 }
 
 export const embed: View = (p, id, tier, spec) => {

@@ -59,6 +59,7 @@ type St = {
   addAt?: Rect;
   threads: number;
   shown: string; // the full view's last html; innerHTML reads back normalised, so it cannot be compared
+  want?: string; // a window card asked for: it opens in the full view once the feeder draws it
 };
 
 export function initOverlays(ctx: OverlayCtx) {
@@ -113,6 +114,7 @@ const live = (st: St, id: string) => {
 
 function sync(st: St) {
   const { ctx, selbar, addAt } = st;
+  if (st.want && live(st, st.want)) (st.open = st.want), (st.want = undefined);
   if (st.open && !live(st, st.open)) st.open = undefined;
   const n = ctx.sel.size;
   selbar.classList.toggle("show", n > 0 || !!addAt);
@@ -156,12 +158,25 @@ function clear(st: St) {
   refresh(st);
 }
 
+/** The card id of a link's window: the same link always opens the same window. */
+export const winId = (url: string) => {
+  let h = 5381;
+  for (const ch of url) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return `win-${h.toString(36)}`;
+};
+
 /** Tile data-acts: full view, remove, pin, and any other card action as an input intent. */
 function act(st: St, b: HTMLElement, id: string) {
   const { ctx } = st;
   const a = b.dataset.act!;
   if (a === "link" || b.tagName === "FORM") return; // the canvas owns link drags; a form acts on submit
   if (a === "full") return void ((st.open = id), refresh(st));
+  // a link opens as a window inside the board, never a new tab
+  if (a === "window" && b.dataset.k) {
+    st.want = winId(b.dataset.k);
+    ctx.intent("input", id, { field: "window", value: b.dataset.k, win: st.want });
+    return refresh(st);
+  }
   if (a === "drop") {
     ctx.sel.delete(id);
     if (st.open === id) st.open = undefined;

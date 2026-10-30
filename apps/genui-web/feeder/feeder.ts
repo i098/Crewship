@@ -51,6 +51,8 @@ const run = async (cmd: string[]): Promise<string> => {
   return out;
 };
 const gh = async (path: string) => JSON.parse(await run(["gh", "api", path]));
+type PrDetail = { title: string; state: string; merged: boolean; body: string | null; user: { login: string }; head: { ref: string }; base: { ref: string }; additions: number; deletions: number; changed_files: number };
+const PR_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 
 async function prs(): Promise<Pr[]> {
   const open = (await gh(`repos/${REPO}/pulls?state=open&per_page=8`)) as { number: number; title: string; html_url: string; draft: boolean; head: { sha: string } }[];
@@ -204,7 +206,7 @@ function derived(spec: BoardSpec): Record<string, P> {
 
 const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add", path: `/components/${esc(id)}/props/${esc(k)}`, value });
 
-const KEEP = new Set(["pick", "done", "removed", "asked", "pinned", "claim", "priority", "line"]);
+const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "claim", "priority", "line"]);
 
 /** The ops that bring one existing card's props to the wanted ones. */
 function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
@@ -331,26 +333,26 @@ const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
 const failed = (e: unknown) => `failed: ${(e as Error).message}`;
 
 /** The fleet card a typed text is for: a selected or open ask, crew card or crew terminal, else the ask picked to answer. */
-function fleetTarget(about: unknown): Component | undefined {
+function fleetTarget(about: unknown): { id: string; c: Component } | undefined {
   const a = (about ?? {}) as { of?: unknown; ids?: unknown };
   const ids = [a.of, ...(Array.isArray(a.ids) ? a.ids : [])].filter((x): x is string => typeof x === "string");
   for (const id of ids) {
     const c = spec.components[id] ?? extra[id];
-    if (c && (c.props.key || c.props.task || (c.props.kind === "tui" && c.props.agent))) return c;
+    if (c && (c.props.key || c.props.task || (c.props.kind === "tui" && c.props.agent))) return { id, c };
   }
   return undefined;
 }
 
 /** Puts an action on the board as a confirm card; it runs only when the owner picks Yes. */
-function ask(a: Pending) {
+function ask(a: Pending, of?: string) {
   const id = `confirm-${Date.now().toString(36)}`;
-  pending.set(id, { ...a, id });
+  pending.set(id, { ...a, id, of });
 }
 
-/** Puts an action up for confirming, or says why it cannot run. */
-function offer(make: () => Pending, refused: string) {
+/** Puts an action up for confirming, or says why it cannot run; `of` is the card it acts on. */
+function offer(make: () => Pending, refused: string, of?: string) {
   try {
-    ask(make());
+    ask(make(), of);
   } catch (e) {
     note(`${refused}: ${(e as Error).message}`);
   }
@@ -371,9 +373,63 @@ async function openExtra(id: string) {
   extra[id] = card("tui", "crew", 60, { agent: name, lines: lines.trimEnd().split("\n"), ...again });
 }
 
+/** False when the page forbids frames; redirects are followed with their cookies, as a browser would (a Lavish board sets its cookie first). */
+async function frameable(url: string): Promise<boolean> {
+  let u = url,
+    cookie = "";
+  for (let i = 0; i < 4; i++) {
+    const r = await fetch(u, { redirect: "manual", headers: cookie ? { cookie } : {}, signal: AbortSignal.timeout(8000) });
+    const to = r.headers.get("location");
+    if (r.status >= 300 && r.status < 400 && to) {
+      cookie = [cookie, ...r.headers.getSetCookie().map((c) => c.split(";")[0])].filter(Boolean).join("; ");
+      u = new URL(to, u).href;
+      continue;
+    }
+    void r.body?.cancel();
+    return !r.headers.has("x-frame-options") && !/frame-ancestors(?![^;]*\*)/i.test(r.headers.get("content-security-policy") ?? "");
+  }
+  return false;
+}
+
+/** A link as a window card: a PR read through the GitHub API (github.com refuses frames), a page framed when it allows it. */
+async function openWindow(win: string, url: string) {
+  if (!/^win-[a-z0-9]{1,16}$/.test(win) || !/^https?:\/\//.test(url)) return;
+  const pr = PR_URL.exec(url),
+    host = new URL(url).host;
+  if (!pr) {
+    const ok = await frameable(url).catch(() => true); // unknown: let the browser try
+    extra[win] = ok
+      ? card("embed", "me", 80, { type: "site", title: host, src: url, ar: "4/3", ...again })
+      : card("note", "me", 80, {
+          title: host,
+          flag: "blocked",
+          items: ["This page refuses to be shown inside another page (its own frame-ancestors setting)."],
+          ...again,
+        });
+    return;
+  }
+  const [, repo, n] = pr;
+  const d = await (gh(`repos/${repo}/pulls/${n}`) as Promise<PrDetail>).catch((e) => (e as Error).message);
+  if (typeof d === "string") return void (extra[win] = card("note", "me", 80, { title: `${repo}#${n}`, flag: "failing", items: [`Not read: ${d}`], ...again }));
+  const c = fleet?.fleet.prs.find((p) => p.url.replace(/\/$/, "") === url.replace(/\/$/, ""))?.checks;
+  extra[win] = card("note", "me", 80, {
+    title: `${repo}#${n}: ${d.title}`,
+    items: [
+      `${d.merged ? "merged" : d.state} · by ${d.user.login} · ${d.head.ref} → ${d.base.ref}`,
+      `${d.changed_files} files · +${d.additions} −${d.deletions}`,
+      ...(c ? [`checks: ${c.ok} passed, ${c.bad} failed, ${c.pending} running`] : []),
+    ],
+    body: (d.body ?? "").slice(0, 4000),
+    ...again,
+  });
+}
+
 /** What the owner opens and closes: a pill, the full view, the cluster in front, a card closed with ✕. True when handled. */
 async function onView(p: P, id: string): Promise<boolean> {
   if (typeof p.open === "string") await openExtra(p.open);
+  // only the link the card itself carries opens, so a client cannot make the feeder fetch any URL
+  else if (p.field === "window" && typeof p.win === "string" && typeof p.value === "string" && spec.components[id]?.props.url === p.value)
+    await openWindow(p.win, p.value);
   else if (typeof p.view === "string") void (p.on === true ? open.cards.add(p.view) : open.cards.delete(p.view));
   else if ("cluster" in p) open.cluster = typeof p.cluster === "string" ? p.cluster : null;
   else if (p.field !== "removed") return false;
@@ -386,15 +442,30 @@ async function onView(p: P, id: string): Promise<boolean> {
   return true;
 }
 
+const SENT_MS = 2500;
+
 /** Yes or Cancel on a confirm card. */
 async function confirm(m: Intent, fl: FleetSource) {
   const act = pending.get(m.targetId)!;
-  pending.delete(m.targetId);
-  if (m.payload.value !== "yes") return void note(`Cancelled: ${act.q}`);
-  note(`${act.q} Running…`);
+  if (act.state) return; // a second tap while it runs
+  if (m.payload.value !== "yes") return void (pending.delete(m.targetId), note(`Cancelled: ${act.q}`));
+  // the card he tapped stays where it is and says what happens: sending, then sent, then it leaves
+  pending.set(m.targetId, { ...act, state: "running" });
   if (last) await publish(last, m.id);
   const r = await act.run().catch((e) => ({ ok: false, text: String(e) }));
   note(r.text, r.ok ? "me" : "ask");
+  if (!r.ok) pending.delete(m.targetId);
+  else {
+    pending.set(m.targetId, { ...act, state: "sent", why: r.text });
+    if (act.of) dismissed.add(act.of); // a publish before the source drops it cannot bring the card back
+    const done = act.of ? [setProp(act.of, "done", true), setProp(act.of, "sent", true)] : [];
+    if (done.length) await call("emit_view", { event: { delta: done }, cause: m.id });
+    setTimeout(() => {
+      pending.delete(m.targetId);
+      if (act.of) void call("emit_view", { event: { delta: [setProp(act.of, "removed", true)] }, cause: m.id });
+      if (last) void publish(last, m.id).catch(() => {});
+    }, SENT_MS);
+  }
   void fl.refreshLocal().catch(() => {});
 }
 
@@ -426,19 +497,24 @@ function startChat(m: Intent, q: string, fl: FleetSource) {
 }
 
 /** An ask's option: its full text is the answer, sent after the owner confirms. */
-function pickOpt(c: P, k: unknown, fl: FleetSource) {
+function pickOpt(c: P, k: unknown, fl: FleetSource, of: string) {
   const o = (Array.isArray(c.opts) ? (c.opts as Opt[]) : []).find((o) => o.k === k);
-  if (o) offer(() => answer(fl, c, o.say ? `${o.b}: ${o.say}` : o.b), "Not sent");
+  if (o) offer(() => answer(fl, c, o.say ? `${o.b}: ${o.say}` : o.b), "Not sent", of);
 }
 
 /** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, a cluster's next page, or chat. True when handled. */
 async function onFleet(m: Intent, c: P, fl: FleetSource): Promise<boolean> {
   const p = m.payload, text = typeof p.text === "string" ? p.text.trim() : "", to = text ? fleetTarget(p.about) : undefined;
   const pick = p.field === "pick" ? p.value : undefined;
-  if (to) offer(() => (to.props.key ? answer(fl, to.props, text) : steer(fl, String(to.props.task ?? to.props.agent), text)), "Not sent");
+  if (to)
+    offer(
+      () => (to.c.props.key ? answer(fl, to.c.props, text) : steer(fl, String(to.c.props.task ?? to.c.props.agent), text)),
+      "Not sent",
+      to.c.props.key ? to.id : undefined,
+    );
   else if (pick !== undefined && pending.has(m.targetId)) await confirm(m, fl);
-  else if (pick !== undefined && c.key) pickOpt(c, pick, fl);
-  else if (pick === "merge" && c.prUrl) offer(() => merge(fl, c.prUrl), "Not merged");
+  else if (pick !== undefined && c.key) pickOpt(c, pick, fl, m.targetId);
+  else if (pick === "merge" && c.prUrl) offer(() => merge(fl, c.prUrl), "Not merged", m.targetId);
   else if (pick !== undefined && c.prUrl) await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
   else if (p.field === "act" && p.value === "page" && typeof c.proj === "string") open.page.set(c.proj, (open.page.get(c.proj) ?? 0) + 1);
   else if (text) startChat(m, text, fl);

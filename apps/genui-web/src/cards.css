@@ -63,6 +63,8 @@
 .body { margin: 0; color: var(--mute); line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
 /* a decision's why: one short plain line, written to fit, so it wraps instead of clipping */
 .why { margin: 0; color: var(--mute); font-size: 14px; line-height: 1.4; }
+/* the exact thing a decision is about: PR repo#number and title, or task and project */
+.ref { margin: 0 0 4px; color: var(--vio); font: 600 12.5px/1.35 var(--font); overflow-wrap: anywhere; }
 .items { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .items li { padding: 8px 10px; border-radius: 12px; background: hsl(240 30% 100% / .08); }
 

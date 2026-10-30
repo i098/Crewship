@@ -5,9 +5,10 @@ import { body, C, esc, hd, list, title, type View } from "./chrome";
 
 type Opt = { k?: unknown; b?: unknown; rec?: unknown };
 
-const link = (url: unknown) =>
+// a link opens as a window inside the board (src/overlays.ts), never a new tab
+const link = (url: unknown, id: string) =>
   typeof url === "string" && /^https?:\/\//.test(url)
-    ? ` <a class="ib lnk" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="Open link" title="Open link">↗</a>`
+    ? ` <button type="button" class="ib lnk" data-act="window" data-id="${esc(id)}" data-k="${esc(url)}" aria-label="Open in a window" title="Open in a window">↗</button>`
     : "";
 
 function fork(p: Record<string, unknown>, id: string, opts: Opt[]) {
@@ -40,7 +41,8 @@ export const decision: View = (p, id, _tier, spec) => {
       ? `<form class="freef" data-act="answer" data-id="${esc(id)}"><input name="text" maxlength="4000" autocomplete="off" placeholder="Answer in your words" aria-label="Your answer"><button class="send" type="submit">Send</button></form>`
       : "";
   const why = typeof p.why === "string" && p.why ? `<p class="why">${esc(p.why)}</p>` : "";
-  return `${hd(p, id, spec, done ? { text: "decided", cls: "g" } : { text: "needs you" })}${title(esc(p.q ?? p.title) + link(p.url))}${why}${body(p.body)}${
-    opts.length ? fork(p, id, opts) : ""
-  }${free}`;
+  // the exact thing it is about: a PR's repo, number and title, or the task and its project
+  const ref = typeof p.ref === "string" && p.ref ? `<p class="ref">${esc(p.ref)}</p>` : "";
+  const badge = p.sent === true ? { text: "sent ✓", cls: "g" } : done ? { text: "decided", cls: "g" } : { text: "needs you" };
+  return `${hd(p, id, spec, badge)}${ref}${title(esc(p.q ?? p.title) + link(p.url, id))}${why}${body(p.body)}${opts.length ? fork(p, id, opts) : ""}${free}`;
 };
