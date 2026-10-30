@@ -168,8 +168,9 @@ function tile(ts: Item[], fit: Fit, one: boolean) {
   const byId = new Map(ts.map((t) => [t.id, t]));
   // a stack is one deep: the front card must be in this cluster and not itself behind another
   const behind = (t: Item) => !!t.under && t.under !== t.id && !!byId.get(t.under) && !byId.get(t.under)!.under;
-  const flow = ts.filter((t) => !behind(t) && !t.edge),
-    edge = ts.filter((t) => !behind(t) && t.edge);
+  // a phone has no room for a side column, so an edge card joins the one column
+  const flow = ts.filter((t) => !behind(t) && (one || !t.edge)),
+    edge = one ? [] : ts.filter((t) => !behind(t) && t.edge);
   const rows = flow.length ? rowsOf(flow, one ? 1 : Math.ceil(Math.sqrt(flow.length))) : [];
   const W2 = Math.max(0, ...rows.map(natural));
   const at = new Map<string, number[]>();

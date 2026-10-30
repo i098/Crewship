@@ -93,6 +93,10 @@ test("a plan's layout: a wide card takes the row alone, a stacked card peeks out
     expect(x.x + x.w).toBeLessThanOrEqual(c.x + c.w);
     expect(x.y + x.h).toBeLessThanOrEqual(c.y + c.h);
   }
+  // a phone has one column: the edge card goes below, not beside
+  const ph = layout(plan, [], { W: 390, H: 844, topH: 110, botH: 170 }, st, tall).tiles;
+  expect(ph.m4.x).toBeCloseTo(ph.m0.x);
+  expect(ph.m4.y).toBeGreaterThan(ph.m2.y + ph.m2.h);
 });
 
 test("floating windows keep their spot and stack by layer: the highest layer is on top", () => {
