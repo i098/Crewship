@@ -34,7 +34,13 @@ background: linear-gradient(135deg, hsl(250 90% 70%), hsl(250 70% 45%), hsl(250 
 ```
 Check: hue constant across stops.
 
-## 5. Test marketing ideas with repeatable systems [DfDgu1Ry-Gb]
+## 5. Photo backgrounds for text [DdJUXdkB3RG]
+Why: gradients and overlays can hide the details that make a photo useful.
+Do: adjust exposure, offset (black point), and gamma correction (tonal curve) to make a busy photo work behind light text.
+Source: https://www.instagram.com/reel/DdJUXdkB3RG/
+Check: is the text readable while the photo still shows its subtle details?
+
+## 6. Test marketing ideas with repeatable systems [DfDgu1Ry-Gb]
 Build reusable workflows for ad tests, landing-page variants, and buyer-question content. Turn one source asset or a keyword dataset into multiple drafts, then review each draft before publishing.
 For paid ads, compare performance against a chosen metric and pause weak ads only when the evidence supports that choice. Check tracking before using results to make decisions.
 Check: does each workflow create reviewable variants, use a defined success measure, and preserve human approval before publication or spend changes?
