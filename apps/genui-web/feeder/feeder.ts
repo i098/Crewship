@@ -285,7 +285,7 @@ function planned(): { open: Open; shown: Set<Topic> } {
 /** A card of his from an earlier feeder run is on the board but not in `want`: keep it as his, so a plan can set it aside too. */
 function adoptLeftovers(want: Record<string, Component>) {
   for (const [id, c] of Object.entries(spec.components))
-    if (!want[id] && c.props.proj === "me" && !id.startsWith("ai-") && goesAside(id, c)) {
+    if (!want[id] && c.props.proj === "me" && !FEEDER_MADE.test(id) && goesAside(id, c)) {
       const { aside, size, under, edge, ...props } = c.props;
       want[id] = extra[id] = { ...c, props };
     }
@@ -351,9 +351,11 @@ function revive(want: Record<string, Component>) {
   for (const [id, c] of Object.entries(want)) if (c.type === "card" && !dismissed.has(id) && c.props.removed === undefined) want[id] = { ...c, props: { ...c.props, removed: false } };
 }
 
-/** Cards left by an earlier feeder run are ours too, so the board drops what the fleet no longer has; the owner's own stay. */
+/** Cards left by an earlier feeder run are ours too, so the board drops what the fleet no longer has; the owner's own stay.
+ * A fleet card a plan lifted to "me" and an ask's context window are still ours, so a restart does not leave them in front. */
+const FEEDER_MADE = /^(ai|pr|crew|ask|more|ctx)-/;
 function adopt(want: Record<string, Component>) {
-  if (!owned.size) for (const [id, c] of Object.entries(spec.components)) if (c.type === "card" && (c.props.proj !== "me" || id.startsWith("ai-"))) owned.add(id);
+  if (!owned.size) for (const [id, c] of Object.entries(spec.components)) if (c.type === "card" && (c.props.proj !== "me" || FEEDER_MADE.test(id))) owned.add(id);
   for (const id of Object.keys(want)) if (want[id].type === "card") owned.add(id);
 }
 
