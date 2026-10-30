@@ -22,6 +22,7 @@
 // Instagram: with INSTAGRAM_DM_BACKEND=graph, that listener also takes Meta's DM webhook on /instagram/webhook
 //   (instagram-webhook.ts).
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
+import { cleanText, statusLine } from "./clean.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -479,7 +480,10 @@ Bun.serve({
     const form = url.pathname === "/image" ? await req.formData().catch(() => new FormData()) : undefined;
     const photo = form && await photoOf(form);
     if (photo instanceof Response) return photo;
-    const parts = bubbles(form ? String(form.get("caption") ?? "") : await req.text());
+    const raw = form ? String(form.get("caption") ?? "") : await req.text();
+    const status = statusLine(raw);
+    if (status) return new Response(`nothing queued: this is a status line (${status}); write one plain-prose sentence for the owner\n`, { status: 422 });
+    const parts = bubbles(cleanText(raw));
     if (!parts.length && !photo) return new Response("empty message", { status: 400 });
     // ?reply=N targets his Nth latest text. ?no-thread forces plain, even with an explicit target.
     const replyTo = Number(url.searchParams.get("reply") ?? 0);
