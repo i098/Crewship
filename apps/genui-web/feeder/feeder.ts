@@ -547,10 +547,8 @@ function selected(about: unknown): string | undefined {
 function answerInPlace(m: Intent, id: string, q: string, fl: FleetSource) {
   const facts = contextOf(fl.fleet, (spec.components[id] ?? extra[id]).props);
   const win = `ctx-${id}`.slice(0, 64);
-  // one context window at a time: the last ask's window closes as this one opens
-  for (const k of Object.keys(extra)) if (k.startsWith("ctx-")) delete extra[k];
-  extra[win] = card("note", "me", 80, { title: "Context", items: facts, float: true, near: id, layer: Math.floor(Date.now() / 1000), removed: false });
   startChat(m, q, fl, { card: id, facts }, [id]);
+  extra[win] = card("note", "me", 80, { title: "Context", items: facts, float: true, near: id, layer: Math.floor(Date.now() / 1000), removed: false });
 }
 
 /**
@@ -567,6 +565,8 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
   // shows that card large at once, before the model's plan reshapes the rest
   plan = first.length ? { p: { keep: first, size: { [first[0]]: "l" }, under: {}, edge: [] }, cause: m.id, back: [], own } : undefined;
   planSeqs.clear();
+  // one context window at a time: every new ask closes the last ask's window (an ask about a card then opens its own)
+  for (const k of Object.keys(extra)) if (k.startsWith("ctx-")) delete extra[k];
   // the last answer's cards step back so the new question owns the front and the header
   for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
   const topics = (answerTopics = new Set<Topic>());
