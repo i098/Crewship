@@ -115,10 +115,9 @@ export async function gather(): Promise<Sources> {
 
 const card = (kind: string, proj: string, base: number, props: P): Component => ({ type: "card", props: { kind, proj, base, ...props } });
 
-/** The cards the sources call for and the owner asked to see, by id. Owner-set props (pick, done, removed, asked) are never part of this. */
-export function cards(s: Sources, show: Set<Topic> = new Set(TOPICS)): Record<string, Component> {
-  const out: Record<string, Component> = {};
-  for (const p of show.has("prs") ? (s.prs ?? []) : []) {
+/** Each open PR as a pipeline (or a failing note) plus its approve decision, and GitHub's preview of the newest. */
+function prCards(prs: Pr[], out: Record<string, Component>) {
+  for (const p of prs) {
     const { total, done, failed } = p.checks;
     const stages = ["Open", "Checks", "Review", "Merge"];
     const at = p.draft ? 0 : done < total || failed.length ? 1 : 2;
@@ -135,7 +134,7 @@ export function cards(s: Sources, show: Set<Topic> = new Set(TOPICS)): Record<st
     });
   }
   // GitHub's own preview image of the newest open PR
-  const top = show.has("prs") ? s.prs?.[0] : undefined;
+  const top = prs[0];
   if (top)
     out.e1 = card("embed", "repo", 25, {
       type: "image",
@@ -143,7 +142,13 @@ export function cards(s: Sources, show: Set<Topic> = new Set(TOPICS)): Record<st
       src: `https://opengraph.githubassets.com/genui/${REPO}/pull/${top.n}`,
       nat: "1200/600",
     });
-  if (show.has("prs") && s.prs && !s.prs.length) out.prs = card("note", "repo", 10, { title: "No open pull requests", items: [] });
+  else out.prs = card("note", "repo", 10, { title: "No open pull requests", items: [] });
+}
+
+/** The cards the sources call for and the owner asked to see, by id. Owner-set props (pick, done, removed, asked) are never part of this. */
+export function cards(s: Sources, show: Set<Topic> = new Set(TOPICS)): Record<string, Component> {
+  const out: Record<string, Component> = {};
+  if (show.has("prs") && s.prs) prCards(s.prs, out);
   if (show.has("crew"))
     out.k1 = card("crew", "crew", 34, {
       title: s.crew?.length ? "Crew right now" : "No crew threads on the crewboard",
@@ -200,6 +205,17 @@ const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add"
 
 const KEEP = new Set(["pick", "done", "removed", "asked", "pinned", "claim", "priority", "line"]);
 
+/** The ops that bring one existing card's props to the wanted ones. */
+function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
+  const patch: PatchOp[] = [];
+  for (const [k, v] of Object.entries(c.props)) if (JSON.stringify(have.props[k]) !== JSON.stringify(v)) patch.push(setProp(id, k, v));
+  // a prop the card no longer has (an old paging card's list) is cleared; owner-set and derived props stay.
+  // null, not remove: a publish computed before the last one lands would remove a missing path, and the board rejects that
+  if (c.type === "card")
+    for (const k of Object.keys(have.props)) if (!(k in c.props) && !KEEP.has(k) && have.props[k] != null) patch.push(setProp(id, k, null));
+  return patch;
+}
+
 /** The patch that brings `spec` to the wanted cards without touching what the owner set. */
 export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Set<string>): PatchOp[] {
   const patch: PatchOp[] = [];
@@ -207,12 +223,8 @@ export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Se
   if (JSON.stringify(spec.projects) !== JSON.stringify(projects)) patch.push({ op: "add", path: "/projects", value: projects });
   for (const [id, c] of Object.entries(want)) {
     const have = spec.components[id];
-    if (!have) { patch.push({ op: "add", path: `/components/${esc(id)}`, value: c }); continue; }
-    for (const [k, v] of Object.entries(c.props)) if (JSON.stringify(have.props[k]) !== JSON.stringify(v)) patch.push(setProp(id, k, v));
-    // a prop the card no longer has (an old paging card's list) is cleared; owner-set and derived props stay.
-    // null, not remove: a publish computed before the last one lands would remove a missing path, and the board rejects that
-    if (c.type === "card")
-      for (const k of Object.keys(have.props)) if (!(k in c.props) && !KEEP.has(k) && have.props[k] != null) patch.push(setProp(id, k, null));
+    if (have) patch.push(...cardPatch(id, have, c));
+    else patch.push({ op: "add", path: `/components/${esc(id)}`, value: c });
   }
   // a card the sources no longer report (a closed PR) leaves the board
   for (const id of owned) if (!want[id] && spec.components[id] && spec.components[id].props.removed !== true) patch.push(setProp(id, "removed", true));
