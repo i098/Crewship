@@ -1,0 +1,12 @@
+{
+  "name": "@crewship/genui-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot mock/server.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@crewship/genui-spec": "file:../../packages/genui-spec"
+  }
+}
