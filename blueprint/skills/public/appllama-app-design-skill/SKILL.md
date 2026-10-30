@@ -237,6 +237,8 @@ Screens that feel great are screens whose state is boring:
 - Uncontrolled `TextInput`s for high-frequency typing surfaces; controlled
   inputs are a top-3 cause of typing jank.
 - Persist tiny client state in MMKV, not AsyncStorage, when latency shows.
+- **Prefetch likely next screens** on a navigation intent, such as pointer hover. Use the destination's query key and function so TanStack Query can reuse the cached result.
+- Prefetch only likely next steps, not every link. Source: https://www.instagram.com/reel/DfILiMLkoz1/
 
 ## Perceived performance
 
