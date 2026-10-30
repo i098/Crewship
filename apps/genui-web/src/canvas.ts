@@ -2,7 +2,7 @@
 // and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
 import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { fitCards } from "./fit";
-import { type Item, type Layout, layout } from "./layout";
+import { CW0, type Item, type Layout, layout } from "./layout";
 import { startLinks } from "./links";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { type About, initOverlays } from "./overlays";
@@ -220,7 +220,7 @@ function item(id: string, c: Component, now: number): Item {
   const done = p.done === true,
     boost = (asked.get(id) ?? 0) > now ? 200 : 0;
   const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
-  const pin = floats(p) && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
+  const pin = floats(p) ? (r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : nearSpot(p)) : undefined;
   const plain = {
     id,
     proj: typeof p.proj === "string" ? p.proj : "board",
@@ -234,6 +234,13 @@ function item(id: string, c: Component, now: number): Item {
 
 /** A floating window: one you pinned, or one an agent opened with float. It keeps its own spot over any layout. */
 const floats = (p: Component["props"]) => p.pinned === true || p.float === true;
+
+/** A window opened about a card (`near`) and not yet moved sits over that card's right part, so its title and first lines show;
+ * on a narrow card (a phone) it starts near the left edge so it stays on screen. */
+function nearSpot(p: Component["props"]): Item["pin"] {
+  const t = typeof p.near === "string" ? L?.tiles[p.near] : undefined;
+  return t && { x: Math.max(t.x + 24, t.x + t.w - CW0), y: t.y + 56 };
+}
 
 /** Grabbing a floating window brings it to the top of the windows, as `genui-window raise` does. */
 function raise(id: string) {
@@ -347,8 +354,11 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       ["sel", sel.has(id)],
       ["done", c.props.done === true],
       ["pinned", c.props.pinned === true],
+      ["float", c.props.float === true],
     ] as const)
       el.classList.toggle(k, on);
+    // a floating window is capped in height and scrolls, so long context never covers the board or the ask bar
+    el.toggleAttribute("data-scrolls", c.props.float === true);
     // a card behind is not usable until its cluster is opened
     el.inert = t.away;
   }

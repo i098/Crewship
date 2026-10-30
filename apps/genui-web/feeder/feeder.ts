@@ -7,7 +7,7 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, contextOf, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
+import { answer, contextOf, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, topicRows, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { briefAsks } from "../fleet/brief";
 import { FleetSource } from "../fleet/data";
 import { boardIds, chat, type Plan, stream } from "../fleet/chat";
@@ -206,7 +206,7 @@ function derived(spec: BoardSpec): Record<string, P> {
 
 const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add", path: `/components/${esc(id)}/props/${esc(k)}`, value });
 
-const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "float", "layer", "claim", "priority", "line", "reply"]);
+const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "float", "layer", "claim", "priority", "line"]);
 
 /** The ops that bring one existing card's props to the wanted ones. */
 function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
@@ -357,9 +357,15 @@ function adopt(want: Record<string, Component>) {
   for (const id of Object.keys(want)) if (want[id].type === "card") owned.add(id);
 }
 
+/** What the current answer showed (asks, PRs, crew): its real rows go in the answer card. */
+let answerTopics = new Set<Topic>();
+
 /** An open terminal or host card follows its source while it stays open. */
 function liveExtras() {
   if (extra.sys && last) extra.sys = { ...extra.sys, props: { ...extra.sys.props, series: last.host } };
+  // a finished answer's lists follow the fleet, so a source that loads after the answer still fills them
+  const a = extra["ai-q"];
+  if (a?.props.ready === true && fleet) extra["ai-q"] = { ...a, props: { ...a.props, rows: topicRows(fleet.fleet, answerTopics) } };
   for (const id of Object.keys(extra)) {
     const lines = id.startsWith("tui-") && fleet ? tuiLines(fleet.fleet, id.slice(4)) : undefined;
     if (lines) extra[id] = { ...extra[id], props: { ...extra[id].props, lines } };
@@ -534,58 +540,65 @@ function selected(about: unknown): string | undefined {
   return [a.of, ...(Array.isArray(a.ids) ? a.ids : [])].find((x): x is string => typeof x === "string" && !!(spec.components[x] ?? extra[x]));
 }
 
-/** An ask about one card answers inside that card: its real facts at once, then the model's answer under them. No new card. */
+/**
+ * An ask about one card: its real facts open at once in a floating window over it (GenUI rule: extra context goes in a
+ * window, the card's own content is never rewritten), and the chat reshapes the whole board around the card.
+ */
 function answerInPlace(m: Intent, id: string, q: string, fl: FleetSource) {
-  const c = spec.components[id] ?? extra[id];
-  const facts = contextOf(fl.fleet, c.props);
-  const said: string[] = [];
-  const put = (ready: boolean) => call("emit_view", { event: { delta: [setProp(id, "reply", { q, lines: [...facts, ...said], ready })] }, cause: m.id });
-  void put(false);
-  void chat({
-    text: q,
-    about: { card: id, facts },
-    fleet: fl.fleet,
-    board: { ...spec.components, ...extra },
-    // only the words land; cards the model would draw are not made, so nothing new appears
-    apply: async (e) => {
-      if (!("say" in e)) return;
-      if (!e.done) said.push(e.say);
-      else if (!said.length) said.push(e.say);
-      void put(e.done);
-    },
-  }).catch((e) => (said.push(`Not answered: ${(e as Error).message}`), void put(true)));
+  const facts = contextOf(fl.fleet, (spec.components[id] ?? extra[id]).props);
+  const win = `ctx-${id}`.slice(0, 64);
+  // one context window at a time: the last ask's window closes as this one opens
+  for (const k of Object.keys(extra)) if (k.startsWith("ctx-")) delete extra[k];
+  extra[win] = card("note", "me", 80, { title: "Context", items: facts, float: true, near: id, layer: Math.floor(Date.now() / 1000), removed: false });
+  startChat(m, q, fl, { card: id, facts }, [id]);
 }
 
-/** Free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands. */
-function startChat(m: Intent, q: string, fl: FleetSource) {
+/**
+ * Free text: the chat model streams board edits, each applied as it lands. `about` is the card he asked about;
+ * `first` are cards every plan of this answer keeps in front (the card he asked about).
+ */
+function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.payload.about, first: string[] = []) {
   const said: string[] = [];
   let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
-  // each question rebuilds the board from the overview; one with no plan: line keeps the overview
-  plan = undefined;
-  planSeqs.clear();
   const own = new Set<string>();
+  // each question rebuilds the board from the overview; one with no plan: line keeps the overview, an ask about a card
+  // shows that card large at once, before the model's plan reshapes the rest
+  plan = first.length ? { p: { keep: first, size: { [first[0]]: "l" }, under: {}, edge: [] }, cause: m.id, back: [], own } : undefined;
+  planSeqs.clear();
   // the last answer's cards step back so the new question owns the front and the header
   for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
-  extra["ai-q"] = card("ask", "me", 90, { q, ready: false, about: said, asked: true, removed: false });
-  void chat({
-    text: q, about: m.payload.about, fleet: fl.fleet, board: { ...spec.components, ...extra },
-    apply: async (e) => {
-      if ("say" in e) {
-        if (!e.done) said.push(e.say);
-        extra["ai-q"] = card("ask", "me", 90, { q, ready: e.done, about: said.length ? [...said] : [e.say], asked: true, removed: false });
-      } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
-      else if ("show" in e) {
-        if (!drew) shown.clear(), open.page.clear();
-        drew = true;
-        e.show.forEach((t) => shown.add(t));
-      } else if ("upsert" in e) (extra[e.upsert] = e.card), own.add(e.upsert);
-      else if ("plan" in e) plan = { p: e.plan, cause: m.id, back: [], own };
-      else delete extra[e.drop];
-      kick(m.id);
-    },
-  }).catch((e) => note(`Chat failed: ${(e as Error).message}`));
+  const topics = (answerTopics = new Set<Topic>());
+  // base 100: the answer sits above the decision cards it lists, so a phone shows it first
+  const ask = (ready: boolean, about: string[]) =>
+    card("ask", "me", 100, { q, ready, about, rows: ready ? topicRows(fl.fleet, topics) : [], asked: true, removed: false });
+  extra["ai-q"] = ask(false, said);
+  // the model reads the fleet once, so it waits up to a minute for asks and PRs to load instead of answering "still loading"
+  const loaded = async () => {
+    for (let i = 0; i < 60 && !(fl.fleet.asksAt && fl.fleet.prsAt); i++) await Bun.sleep(1000);
+  };
+  void loaded()
+    .then(() =>
+      chat({
+        text: q, about, fleet: fl.fleet, board: { ...spec.components, ...extra },
+        apply: async (e) => {
+          if ("say" in e) {
+            if (!e.done) said.push(e.say);
+            extra["ai-q"] = ask(e.done, said.length ? [...said] : [e.say]);
+          } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
+          else if ("show" in e) {
+            if (!drew) shown.clear(), open.page.clear();
+            drew = true;
+            e.show.forEach((t) => (shown.add(t), topics.add(t)));
+          } else if ("upsert" in e) (extra[e.upsert] = e.card), own.add(e.upsert);
+          else if ("plan" in e) plan = { p: { ...e.plan, keep: [...new Set([...first, ...e.plan.keep])] }, cause: m.id, back: [], own };
+          else delete extra[e.drop];
+          kick(m.id);
+        },
+      }),
+    )
+    .catch((e) => note(`Chat failed: ${(e as Error).message}`));
 }
 
 /** An ask's option: its full text is the answer, sent after the owner confirms. */

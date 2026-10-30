@@ -65,6 +65,46 @@ export type Open = { cluster?: string | null; cards: Set<string>; page?: Map<str
 export const TOPICS = ["asks", "prs", "crew", "usage", "merged", "host"] as const;
 export type Topic = (typeof TOPICS)[number];
 
+/** One section of an answer card's real list: a heading and its rows. */
+export type Rows = { h: string; rows: string[] };
+
+const ROWS = 8;
+// the first sentence of a status line: a whole thought, so the row is not cut mid-word
+const sentence = (s: string) =>
+  s
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.;:])\s/)[0]
+    .slice(0, 160);
+
+/** The real lists behind an answer's shown topics (asks, PRs, crew), so the answer card itself lists them on any screen. */
+export function topicRows(f: Fleet, topics: Iterable<Topic>): Rows[] {
+  const out: Rows[] = [];
+  const more = (all: string[], h: string) =>
+    out.push({ h: `${h} (${all.length})`, rows: all.length > ROWS ? [...all.slice(0, ROWS), `${all.length - ROWS} more on the board`] : all });
+  for (const t of new Set(topics)) {
+    if (t === "asks")
+      more(
+        f.asks.map((a) => `${a.task}: ${sentence(a.note)}`),
+        "Decisions waiting on you",
+      );
+    else if (t === "prs") {
+      if (!f.prsAt) out.push({ h: "Open PRs", rows: ["Still loading from GitHub; ask again in a minute"] });
+      const own = (p: Pr) => p.repo.startsWith(`${f.login}/`);
+      const checks = (p: Pr) => (p.checks ? ` · ${p.checks.bad ? `${p.checks.bad} failing` : p.checks.pending ? `${p.checks.pending} running` : "green"}` : "");
+      if (f.prsAt)
+        more(
+          [...f.prs].sort((a, b) => Number(own(b)) - Number(own(a))).map((p) => `${p.repo}#${p.number}${p.draft ? " draft" : ""} ${p.title}${checks(p)}`),
+          "Open PRs",
+        );
+    } else if (t === "crew")
+      more(
+        f.mates.map((m) => `${m.id} · ${m.lines.at(-1)?.state ?? "idle"}: ${sentence(m.lines.at(-1)?.text ?? "no status yet")}`),
+        "Crew",
+      );
+  }
+  return out;
+}
+
 type Item = { id: string; g: string; c: Component; line: string; topic: Topic };
 
 // The overview is each mate's crew card, its newest ask and a count; an open cluster shows up to DETAIL cards.

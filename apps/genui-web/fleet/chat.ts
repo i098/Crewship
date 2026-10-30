@@ -59,11 +59,13 @@ card: {"id": "<short-name>", "kind": "...", "proj": "<a cluster from the board l
 drop: <id of a card of yours that no longer helps>
 Start with say:. Decisions, asks, PRs, crew, usage and merges are ALWAYS drawn with show:, never with card: (a decision card of yours is refused).
 Add a card only for what no show: topic covers. Never add a card, of any kind, that lists asks, decisions, PRs or workers: show: already draws them. No URLs in card text. At most 3 cards, at most 12 list rows each.
+Large text or extra context goes in a floating window (a card with "float": true and "near": "<the card it is about>"); never rewrite or append to a card's own content to hold it.
 Pick each card's kind from the catalog below; use kind "note" with props title, body, items[] when no kind fits. Colours are plain hsl(...).
 plan: {"keep": [ids], "layout": "grid|focus", "size": {"<id>": "s|m|l"}, "stack": {"front": "<id>", "behind": [ids]}, "edge": [ids]}
   Rebuilds the whole board for this question, in one line, after any card: lines. keep = the cards that answer it, most important first: ids from the board list, card= ids from the fleet summary (drawn even without show:), or ids of your own cards. Every other card, including what show: draws, is set aside in a rail he can tap to bring a card back. Your own cards from this answer stay.
   layout: focus = the first kept card large and the rest small; grid = even tiles. size overrides one card (l = a full row). stack puts related cards behind a front card. edge pins a card beside the others.
   Send plan: when the question is about some cards and not the whole fleet, such as one PR, one mate, or what is blocked. Leave it out for an overview.
+  When the owner selected a card, ALWAYS send plan: reshape the board around it. Keep it first; bring the cards tied to it (its mate, its workers, its PR, its asks) with card= ids; stack or set aside the rest; add a card of yours for what the board lacks (a timeline, a compare). Its facts already open in a floating window beside it; do not repeat them.
 
 `;
 

@@ -6,6 +6,9 @@
 .tile { position: absolute; z-index: 21; display: flex; flex-direction: column; padding: 16px 16px 28px; border-radius: 22px; background: hsl(240 24% 7% / .95); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08); transform-origin: 0 0; transform: scale(var(--s, 1)); transition: left .9s var(--spring), top .9s var(--spring), width .9s var(--spring), height .9s var(--spring), transform .9s var(--spring), opacity .5s, filter .6s, background .3s, box-shadow .3s, translate .45s var(--spring); cursor: pointer; font-family: var(--font); container-type: inline-size; }
 .tile:not(.away):hover { background: hsl(240 24% 9% / .97); }
 .tile.done { opacity: .45; filter: saturate(.3); }
+/* a floating window: capped in height, its content scrolls, a shadow lifts it off the board */
+.tile.float { max-height: 46vh; box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08), 0 18px 48px hsl(240 30% 2% / .6); }
+.tile.float .core { flex: 1; min-height: 0; overflow: auto; }
 /* dismiss: the card and everything in it shrink back and fade as one piece */
 .tile.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); filter: blur(8px); pointer-events: none; transition: opacity .4s ease, transform .4s ease, filter .4s ease !important; }
 .tile.gone *, .tile.gone::before { transition: none !important; animation: none !important; }
@@ -65,11 +68,6 @@
 .why { margin: 0; color: var(--mute); font-size: 14px; line-height: 1.4; }
 /* the exact thing a decision is about: PR repo#number and title, or task and project */
 .ref { margin: 0 0 4px; color: var(--vio); font: 600 12.5px/1.35 var(--font); overflow-wrap: anywhere; }
-/* an ask about this card, answered inside it; long answers scroll inside the card instead of growing it */
-.reply { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: hsl(262 92% 76% / .1); border-left: 3px solid var(--vio); display: grid; gap: 6px; max-height: 40vh; overflow: auto; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
-.reply p { margin: 0; }
-.reply .rq { color: var(--vio); font-weight: 600; }
-.reply .rw { color: var(--mute); }
 .items { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .items li { padding: 8px 10px; border-radius: 12px; background: hsl(240 30% 100% / .08); }
 
@@ -121,6 +119,11 @@
 .ar { display: grid; grid-template-columns: minmax(0, 1fr) 45%; gap: 10px; align-items: center; font-size: 13px; }
 .ar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ar i { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--vio), var(--cyan)); transform-origin: left; animation: gx .9s var(--spring) both; }
+/* a finished answer: its words in full, then the real lists it showed; long answers scroll inside the card */
+.ansd { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; }
+.ansd > * { flex: none; }
+.ansd p { margin: 0; }
+.arh { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--vio); }
 
 /* plan form */
 .planf fieldset { border: 0; padding: 0; margin: 0 0 12px; }

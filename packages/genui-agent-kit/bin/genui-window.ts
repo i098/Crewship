@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Usage: genui-window --url <server> --board <id> <open|move|raise|lower|float|sink|close> <window-id>
-//          [--title T] [--body B | --src URL] [--at x,y[,w,h]]
+//          [--title T] [--body B | --src URL] [--at x,y[,w,h]] [--near <card-id>]
+// Rule: large text or extra context opens a window here (open --near <card>); never rewrite a card's own content to hold it.
 import { agentClient } from "../src/client";
 import { parseAt, WINDOW_CMDS, type WindowCmd, windowPatch } from "../src/window";
 
@@ -14,14 +15,17 @@ const board = opt("board") ?? process.env.GENUI_BOARD;
 const title = opt("title"),
   body = opt("body"),
   src = opt("src"),
-  at = opt("at");
+  at = opt("at"),
+  near = opt("near");
 const [cmd, id] = args;
 if (!url || !board || !WINDOW_CMDS.includes(cmd as WindowCmd) || !id) {
-  console.error(`usage: genui-window --url <server> --board <id> <${WINDOW_CMDS.join("|")}> <window-id> [--title T] [--body B | --src URL] [--at x,y[,w,h]]`);
+  console.error(
+    `usage: genui-window --url <server> --board <id> <${WINDOW_CMDS.join("|")}> <window-id> [--title T] [--body B | --src URL] [--at x,y[,w,h]] [--near <card-id>]`,
+  );
   process.exit(2);
 }
 try {
-  const delta = windowPatch(cmd as WindowCmd, id, { title, body, src, at: at ? parseAt(at) : undefined });
+  const delta = windowPatch(cmd as WindowCmd, id, { title, body, src, near, at: at ? parseAt(at) : undefined });
   const reply = await agentClient(url, board, process.env.GENUI_AGENT_TOKEN).call("emit_view", { event: { delta }, cause: `window:${cmd}` });
   console.log(JSON.stringify(reply));
 } catch (e) {

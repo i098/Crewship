@@ -1,10 +1,14 @@
 import type { PatchOp, Rect } from "@crewship/genui-spec";
 
-/** Scriptable floating windows over the board, like Rex's floating layers: open, move, raise, lower, float, sink, close. */
+/**
+ * Scriptable floating windows over the board, like Rex's floating layers: open, move, raise, lower, float, sink, close.
+ * GenUI rule: large text or extra context opens a floating window (`open --near <card>`); never rewrite a card's own content to hold it.
+ */
 export type WindowCmd = "open" | "move" | "raise" | "lower" | "float" | "sink" | "close";
 export const WINDOW_CMDS: readonly WindowCmd[] = ["open", "move", "raise", "lower", "float", "sink", "close"];
 
-export type WindowOpts = { title?: string; body?: string; src?: string; at?: Partial<Rect>; now?: number };
+/** `near` opens the window over that card, until a move gives it its own spot (a full x,y,w,h). */
+export type WindowOpts = { title?: string; body?: string; src?: string; at?: Partial<Rect>; near?: string; now?: number };
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -26,8 +30,8 @@ export function windowPatch(cmd: WindowCmd, id: string, o: WindowOpts = {}): Pat
   switch (cmd) {
     case "open": {
       const look = o.src ? { kind: "embed", type: "site", src: o.src, ar: "4/3" } : { kind: "note", body: o.body ?? "" };
-      const props = { ...look, proj: "me", base: 80, title: o.title ?? id, float: true, layer: stamp, removed: false };
-      return [{ op: "add", path: at, value: { type: "card", props, rect } }];
+      const props = { ...look, proj: "me", base: 80, title: o.title ?? id, float: true, layer: stamp, removed: false, ...(o.near ? { near: o.near } : {}) };
+      return [{ op: "add", path: at, value: { type: "card", props, ...(o.near && !o.at ? {} : { rect }) } }];
     }
     case "move":
       if (!o.at) throw new Error("move needs --at x,y[,w,h]");

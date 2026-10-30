@@ -40,10 +40,11 @@ const outside = (e: Element, box: DOMRect) => {
   return r.width > 0 && (r.left < box.left - 1 || r.right > box.right + 1 || r.top < box.top - 1 || r.bottom > box.bottom + 1);
 };
 
-/** The parts of a card's view that run out of their box or the card; SVG insides scale with their viewBox. */
+/** The parts of a card's view that run out of their box or the card; SVG insides scale with their viewBox,
+ * and the insides of a `data-scrolls` area scroll instead of being cut. */
 export function overflows(tile: HTMLElement) {
   const box = tile.getBoundingClientRect();
-  return [...tile.querySelectorAll<HTMLElement>(".core *")].filter((e) => !e.parentElement?.closest("svg") && (wider(e) || outside(e, box)));
+  return [...tile.querySelectorAll<HTMLElement>(".core *")].filter((e) => !e.parentElement?.closest("svg, [data-scrolls]") && (wider(e) || outside(e, box)));
 }
 
 /** A card taller than its content (its row grew to a taller neighbour) shows more body lines instead of blank room

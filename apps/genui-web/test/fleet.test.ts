@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { askOpts, askRef, contextOf, fleetCards, mergeBlock } from "../fleet/cards";
+import { askOpts, askRef, contextOf, fleetCards, mergeBlock, topicRows } from "../fleet/cards";
 import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
 const pr = (o: Partial<Pr>): Pr => ({
   url: "u", repo: "i098/app", number: 1, title: "t", draft: false, updated: "",
   checks: { ok: 3, bad: 0, pending: 0 }, owner: { home: "/h", task: "t1" }, ...o,
+});
+
+test("an answer card lists the real PRs it showed, his own first, and says when the list is still loading", () => {
+  const f = { ...fleet, prsAt: 1, prs: [pr({ repo: "x/y", number: 9 }), pr({ number: 2, checks: { ok: 0, bad: 1, pending: 0 } })] } as Fleet;
+  expect(topicRows(f, ["prs"])).toEqual([{ h: "Open PRs (2)", rows: ["i098/app#2 t · 1 failing", "x/y#9 t · green"] }]);
+  expect(topicRows({ ...f, prsAt: 0 }, ["prs"])[0].rows[0]).toMatch(/Still loading/);
 });
 
 describe("merge guard", () => {

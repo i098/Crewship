@@ -25,12 +25,22 @@ export const compare: View = (p, id, tier, spec) => {
 
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 9973, 7);
 
-// Props: q (your words), about[] (what it looked at), ready. A dithered skeleton until the answer is ready.
+// Props: q (your words), about[] (what it said, step by step), rows[] ({ h, rows[] }: the real lists it showed), ready.
+// A dithered skeleton until the answer is ready; then the answer in full and the real rows, never bars or cut text.
 export const ask: View = (p, id, _tier, spec) => {
-  const about = list(p.about).map(String), row = (a: string, i: number) => `<div class="ar"><span>${esc(a)}</span><i style="width:${35 + (hash(a) % 60)}%;animation-delay:${i * 0.1}s"></i></div>`;
+  const about = list(p.about).map(String),
+    row = (a: string, i: number) => `<div class="ar"><span>${esc(a)}</span><i style="width:${35 + (hash(a) % 60)}%;animation-delay:${i * 0.1}s"></i></div>`;
+  const rows = list<{ h?: unknown; rows?: unknown }>(p.rows)
+    .map(
+      (s) =>
+        `<h4 class="arh">${esc(s.h)}</h4><ul class="items">${list(s.rows)
+          .map((r) => `<li>${esc(r)}</li>`)
+          .join("")}</ul>`,
+    )
+    .join("");
   // while the model works, each step it has streamed shows above the skeleton
   const body = p.ready
-    ? `<div class="ans">${(about.length ? about : ["New view for this spot"]).map(row).join("")}</div>`
+    ? `<div class="ansd" data-scrolls>${about.map((a) => `<p>${esc(a)}</p>`).join("")}${rows}</div>`
     : `${about.length ? `<div class="ans">${about.map(row).join("")}</div>` : ""}<div class="skel"><i></i><i></i><i></i></div>`;
   return `${hd(p, id, spec, p.ready ? { text: "answer", cls: "g" } : { text: "working" })}${title(esc(p.q))}${body}`;
 };
