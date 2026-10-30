@@ -42,6 +42,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`signal-chunks`](signal-chunks/SKILL.md): plan a week with one shipping goal and a timezoned deadline, eighteen-hour chunks, three to five signal tasks, named noise, an eighty-percent effort target, and CHUNK status with a verdict (Jobs-inspired method, not a claim about Jobs' own schedule).
 - [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): relay Slack messages to iMessage; see the skill for filtering rules and setup.
+- [`subscription-dark-patterns`](subscription-dark-patterns/SKILL.md): identify coercive subscription pricing and cancellation patterns, and choose fair retention design.
 - [`service-resilience`](service-resilience/SKILL.md): protect service calls from stalled or failing dependencies with timeouts, circuit breakers and safe fallbacks.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
 - [`third-party-signups`](third-party-signups/SKILL.md): act on an owner's standing authorization for signups, email codes and app approvals, with the bounds that always hold.

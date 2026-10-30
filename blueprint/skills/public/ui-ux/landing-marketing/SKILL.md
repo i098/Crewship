@@ -44,3 +44,7 @@ Check: is the text readable while the photo still shows its subtle details?
 Build reusable workflows for ad tests, landing-page variants, and buyer-question content. Turn one source asset or a keyword dataset into multiple drafts, then review each draft before publishing.
 For paid ads, compare performance against a chosen metric and pause weak ads only when the evidence supports that choice. Check tracking before using results to make decisions.
 Check: does each workflow create reviewable variants, use a defined success measure, and preserve human approval before publication or spend changes?
+## 7. Spoken script rhythm [De0mgVbtXE-]
+Alternate long and short sentences to vary pace. Keep short sentences to five words or fewer.
+Check: does a short sentence break up each long section?
+Source: https://www.instagram.com/reel/De0mgVbtXE-/
