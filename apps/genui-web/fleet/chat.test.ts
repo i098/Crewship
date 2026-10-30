@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parse } from "./chat";
+import { boardIds, parse } from "./chat";
 
 test("parse turns each model line into one board edit", () => {
   expect(parse("say: two are blocked")).toEqual({ say: "two are blocked" });
@@ -19,4 +19,14 @@ test("fleet cards come from show:, and a decision card the model makes is refuse
   expect(parse("show: Asks, prs, nonsense")).toEqual({ show: ["asks", "prs"] });
   // the owner's bug: "Decide these 12 (of 117)" with no options rendered as a bare bar
   expect(parse('card: {"kind":"decision","props":{"q":"Decide these 12 (of 117)","opts":[]}}')).toHaveProperty("bad");
+});
+
+test("a plan line becomes sizes, a stack and an edge; ids not on the board are the model's own cards", () => {
+  const p = parse(
+    'plan: {"keep":["pr-x","sum","ask-y"],"layout":"focus","size":{"ask-y":"l"},"stack":{"front":"pr-x","behind":["ask-y","pr-x"]},"edge":["sum"]}',
+  );
+  expect(p).toEqual({ plan: { keep: ["pr-x", "sum", "ask-y"], size: { "pr-x": "l", sum: "s", "ask-y": "l" }, under: { "ask-y": "pr-x" }, edge: ["sum"] } });
+  if (!p || !("plan" in p)) throw new Error("no plan");
+  expect(boardIds(p.plan, { "pr-x": {}, "ask-y": {} })).toMatchObject({ keep: ["pr-x", "ai-sum", "ask-y"], edge: ["ai-sum"] });
+  expect(parse("plan: [1]")).toHaveProperty("bad");
 });

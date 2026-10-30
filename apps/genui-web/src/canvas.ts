@@ -208,7 +208,7 @@ function items(): Item[] {
   const nested = new Set(Object.values(spec.components).flatMap((c) => c.children ?? []));
   const now = performance.now();
   return Object.entries(spec.components)
-    .filter(([id, c]) => !SHELL.has(id) && !nested.has(id) && c.props.removed !== true)
+    .filter(([id, c]) => !SHELL.has(id) && !nested.has(id) && c.props.removed !== true && c.props.aside !== true)
     .map(([id, c]) => item(id, c, now));
 }
 
@@ -221,7 +221,15 @@ function item(id: string, c: Component, now: number): Item {
     boost = (asked.get(id) ?? 0) > now ? 200 : 0;
   const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
   const pin = p.pinned === true && r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : undefined;
-  return { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin, size };
+  const plain = { id, proj: typeof p.proj === "string" ? p.proj : "board", prio: done ? 5 : (Number(p.priority) || 0) + boost, done, pin };
+  return { ...plain, ...planShape(p, size) };
+}
+
+/** A plan's shape for a card: l takes a full row, s a narrow column, plus its stack and edge; a size you gave wins. */
+function planShape(p: Component["props"], size: Item["size"]): Partial<Item> {
+  const stack = { under: typeof p.under === "string" ? p.under : undefined, edge: p.edge === true };
+  if (size) return { ...stack, size };
+  return { ...stack, wide: p.size === "l", size: p.size === "s" ? { w: 260 } : undefined };
 }
 
 function viewport() {
@@ -284,7 +292,16 @@ function paintClusters(spec: BoardSpec, lay: Layout) {
   for (const box of world.querySelectorAll(".cluster[id]")) if (!lay.clusters.some((b) => `g-${b.proj}` === box.id)) fade(box);
 }
 
+/** Motion order when cards leave (an answer's plan rebuilds the board): the header has already changed, the leaving cards
+ * shrink out first, the staying cards move after them, and new cards build in last, so the eye follows to the answer. */
+const MOVE_AFTER = 0.35,
+  ARRIVE_AFTER = 0.8;
+let unstage = 0;
+
 function paintTiles(spec: BoardSpec, lay: Layout) {
+  const leaving = [...world.querySelectorAll<HTMLElement>(".tile[id]")].filter((el) => !lay.tiles[el.dataset.id!]);
+  const staged = leaving.length > 0 && !matchMedia("(prefers-reduced-motion:reduce)").matches;
+  if (staged) clearTimeout(unstage);
   for (const [id, t] of Object.entries(lay.tiles)) {
     const c = spec.components[id];
     let el = tileEl(id);
@@ -293,8 +310,9 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       el.id = `t-${id}`;
       el.className = "tile";
       el.dataset.id = id;
+      if (staged) el.style.animationDelay = `${ARRIVE_AFTER}s`;
       world.append(el);
-    }
+    } else if (staged) el.style.transitionDelay = `${MOVE_AFTER}s`;
     const html = renderCard(spec, c, tierOf(t.w));
     // the first card after boot builds in from a skeleton; later changes morph in place
     if (!el.classList.contains("held")) mountCard(el, html, !canvas.classList.contains("boot"));
@@ -314,11 +332,15 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
     // a card behind is not usable until its cluster is opened
     el.inert = t.away;
   }
-  for (const el of world.querySelectorAll<HTMLElement>(".tile[id]"))
-    if (!lay.tiles[el.dataset.id!]) {
-      el.removeAttribute("id");
-      dropCard(el);
-    }
+  for (const el of leaving) {
+    el.removeAttribute("id");
+    dropCard(el);
+  }
+  // the delays hold for this change only; later changes move at once
+  if (staged)
+    unstage = window.setTimeout(() => {
+      for (const el of world.querySelectorAll<HTMLElement>(".tile")) el.style.transitionDelay = el.style.animationDelay = "";
+    }, 1500);
 }
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

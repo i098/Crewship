@@ -70,6 +70,31 @@ test("a user size wins: its width sets its column and its height is a floor the 
   ).toEqual({ gap: 0, overlap: 0, outside: 0 });
 });
 
+test("a plan's layout: a wide card takes the row alone, a stacked card peeks out behind its front, an edge card sits beside", () => {
+  const plan: Item[] = [
+    { ...it("m0", "swap", 90), wide: true },
+    it("m1", "swap", 80),
+    it("m2", "swap", 70),
+    { ...it("m3", "swap", 60), under: "m1" },
+    { ...it("m4", "swap", 50), edge: true },
+  ];
+  const L = layout(plan, [], desk, st, tall);
+  const [c, t] = [L.clusters[0], L.tiles];
+  expect(c.s).toBe(1);
+  expect(t.m0.w).toBeCloseTo(t.m1.w + GAP + t.m2.w);
+  expect(t.m1.y).toBeGreaterThan(t.m0.y + t.m0.h);
+  expect(t.m3.x).toBeGreaterThan(t.m1.x);
+  expect(t.m3.y).toBeGreaterThan(t.m1.y);
+  expect(t.m3.z).toBeLessThan(t.m1.z);
+  expect(t.m4.x).toBeGreaterThan(t.m0.x + t.m0.w);
+  const flat = ["m0", "m1", "m2", "m4"].map((id) => t[id]);
+  for (const a of flat) for (const b of flat) if (a !== b) expect(overlap(a, b)).toBe(false);
+  for (const x of Object.values(t)) {
+    expect(x.x + x.w).toBeLessThanOrEqual(c.x + c.w);
+    expect(x.y + x.h).toBeLessThanOrEqual(c.y + c.h);
+  }
+});
+
 test("clusters sit apart with clear space; a phone stacks them and fits the top card on screen", () => {
   for (const vp of [desk, { W: 390, H: 844, topH: 110, botH: 170 }]) {
     const L = layout(items, rels, vp, { ...st, spread: true }, fit);

@@ -10,7 +10,7 @@ import { applyPatch, esc } from "../src/model";
 import { answer, contextOf, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { briefAsks } from "../fleet/brief";
 import { FleetSource } from "../fleet/data";
-import { chat, stream } from "../fleet/chat";
+import { boardIds, chat, type Plan, stream } from "../fleet/chat";
 
 const SERVER = process.env.GENUI_SERVER ?? "http://127.0.0.1:8787";
 const BOARD = process.env.BOARD ?? "demo";
@@ -269,6 +269,49 @@ const focused = new Set<string>(), unfocused = new Set<string>(); // board cards
 // cards the owner closed with ✕; any other card the sources want again (a PR back after a GitHub gap) returns.
 // shortcut: memory only, so a feeder restart brings back fleet cards he closed; persist it if that bothers him
 const dismissed = new Set<string>();
+// the board rebuilt for the current question (chat plan:): `back` holds cards he tapped back from the rail, `own` the model's new cards
+let plan: { p: Plan; cause: string; back: string[]; own: Set<string> } | undefined;
+const planSeqs = new Set<number>(); // the board ops of the plan's question, so undoing one of them drops the plan
+const TOPIC_OF: Record<string, Topic> = { ask: "asks", pr: "prs", crew: "crew" };
+
+/** The fleet cards a plan keeps are drawn whatever topic or page is showing. */
+function planned(): { open: Open; shown: Set<Topic> } {
+  if (!plan) return { open, shown };
+  const ids = [...plan.p.keep, ...plan.back];
+  const topics = ids.map((id) => TOPIC_OF[id.split("-")[0]]).filter(Boolean);
+  return { open: { ...open, cards: new Set([...open.cards, ...ids]) }, shown: new Set([...shown, ...topics]) };
+}
+
+/** A card of his from an earlier feeder run is on the board but not in `want`: keep it as his, so a plan can set it aside too. */
+function adoptLeftovers(want: Record<string, Component>) {
+  for (const [id, c] of Object.entries(spec.components))
+    if (!want[id] && c.type === "card" && c.props.removed !== true && c.props.proj === "me" && !id.startsWith("ai-")) {
+      const { aside, size, under, edge, ...props } = c.props;
+      want[id] = extra[id] = { ...c, props };
+    }
+}
+
+/** Applies the plan: the kept cards go to one cluster in the plan's order and size; every other card is set aside to the rail. */
+export function applyPlan(want: Record<string, Component>, pl = plan) {
+  if (!pl) return;
+  adoptLeftovers(want);
+  const p = boardIds(pl.p, want);
+  const keep = [...new Set([...p.keep, ...pl.back, ...Object.keys(p.under), ...p.edge])].filter((id) => want[id]?.type === "card");
+  const lift = (id: string, props: P) => (want[id] = { ...want[id], props: { ...want[id].props, ...props } });
+  keep.forEach((id, i) =>
+    lift(id, {
+      proj: "me",
+      base: 700 - i,
+      asked: true, // all kept cards get the same ask boost, so the plan's order holds
+      ...(p.size[id] ? { size: p.size[id] } : {}),
+      ...(p.under[id] ? { under: p.under[id] } : {}),
+      ...(p.edge.includes(id) ? { edge: true } : {}),
+    }),
+  );
+  if (want["ai-q"]) lift("ai-q", { base: 800 });
+  for (const [id, c] of Object.entries(want))
+    if (c.type === "card" && c.props.removed !== true && id !== "ai-q" && !keep.includes(id) && !pl.own.has(id) && !pending.has(id)) lift(id, { aside: true });
+}
 
 /** Publishes once more after the one in flight, so a burst of chat edits costs at most two board round trips. */
 let inFlight: Promise<void> | undefined, queued: string | undefined;
@@ -320,9 +363,11 @@ function liveExtras() {
 
 async function publish(s: Sources, cause = "feeder:sources") {
   liveExtras();
-  const want = { ...chrome(s, log), ...cards(s, shown), ...(fleet ? fleetCards(fleet.fleet, pending, open, shown) : {}), ...extra };
+  const pl = planned();
+  const want = { ...chrome(s, log), ...cards(s, pl.shown), ...(fleet ? fleetCards(fleet.fleet, pending, pl.open, pl.shown) : {}), ...extra };
   focus(want);
   revive(want);
+  applyPlan(want);
   adopt(want);
   const patch = diff(spec, want, owned);
   if (patch.length) await call("emit_view", { event: { delta: patch }, cause });
@@ -424,8 +469,17 @@ async function openWindow(win: string, url: string) {
   });
 }
 
+/** The rail: a tap brings one card back into the plan; Reset drops the plan and the overview returns. True when handled. */
+function onRail(p: P, id: string): boolean {
+  if (p.field === "aside") void (plan && !plan.back.includes(id) && plan.back.push(id));
+  else if (p.field === "plan") plan = undefined;
+  else return false;
+  return true;
+}
+
 /** What the owner opens and closes: a pill, the full view, the cluster in front, a card closed with ✕. True when handled. */
 async function onView(p: P, id: string): Promise<boolean> {
+  if (onRail(p, id)) return true;
   if (typeof p.open === "string") await openExtra(p.open);
   // only the link the card itself carries opens, so a client cannot make the feeder fetch any URL
   else if (p.field === "window" && typeof p.win === "string" && typeof p.value === "string" && spec.components[id]?.props.url === p.value)
@@ -503,6 +557,10 @@ function startChat(m: Intent, q: string, fl: FleetSource) {
   let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
+  // each question rebuilds the board from the overview; one with no plan: line keeps the overview
+  plan = undefined;
+  planSeqs.clear();
+  const own = new Set<string>();
   // the last answer's cards step back so the new question owns the front and the header
   for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
   extra["ai-q"] = card("ask", "me", 90, { q, ready: false, about: said, asked: true, removed: false });
@@ -517,7 +575,8 @@ function startChat(m: Intent, q: string, fl: FleetSource) {
         if (!drew) shown.clear(), open.page.clear();
         drew = true;
         e.show.forEach((t) => shown.add(t));
-      } else if ("upsert" in e) extra[e.upsert] = e.card;
+      } else if ("upsert" in e) (extra[e.upsert] = e.card), own.add(e.upsert);
+      else if ("plan" in e) plan = { p: e.plan, cause: m.id, back: [], own };
       else delete extra[e.drop];
       kick(m.id);
     },
@@ -615,6 +674,8 @@ function connect() {
         spec = applyPatch(spec, o.patch);
         // an undone open or ask stays gone: forget the card so the next publish does not add it back
         if (o.cause.startsWith("undo:")) for (const q of o.patch) if (q.op === "remove") delete extra[q.path.split("/")[2]];
+        if (plan && o.cause === plan.cause) planSeqs.add(o.seq);
+        else if (o.cause.startsWith("undo:") && planSeqs.has(Number(o.cause.slice(5)))) plan = undefined; // undoing the question takes its plan back too
       }
     else if (m.t === "intent") onIntent(m).catch((err) => console.error("intent:", err));
   };

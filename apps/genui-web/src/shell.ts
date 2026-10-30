@@ -155,6 +155,26 @@ function paintQueue() {
   }
 }
 
+/** The rail: cards the last answer set aside, then Reset; the cards keep their order, so a repaint changes nothing on screen. */
+function paintRail() {
+  const aside = Object.entries(spec.components).filter(([, c]) => c.props.aside === true && c.props.removed !== true);
+  const label = (id: string, c: Component) => String(c.props.title ?? c.props.q ?? id).slice(0, 80);
+  put(
+    $(".rail"),
+    aside.length
+      ? `<span class="ql">Set aside</span>${aside.map(([id, c]) => `<button type="button" class="ri" data-id="${esc(id)}">${esc(label(id, c))}</button>`).join("")}<button type="button" class="ri reset">Reset</button>`
+      : "",
+  );
+}
+
+/** A rail tap: Reset drops the plan, a card comes back onto the board. */
+function onRailTap(e: Event) {
+  const b = (e.target as Element).closest<HTMLElement>(".ri");
+  if (!b) return;
+  if (b.classList.contains("reset")) ctx.intent("input", "header", { field: "plan", value: null });
+  else if (b.dataset.id && spec.components[b.dataset.id]) ctx.intent("input", b.dataset.id, { field: "aside", value: false });
+}
+
 function paintLog() {
   const items = (spec.components.log?.props.items ?? []) as LogItem[];
   $(".logbtn .num").textContent = String(items.length);
@@ -212,6 +232,7 @@ function bind() {
     const id = (e.target as Element).closest<HTMLElement>(".qi")?.dataset.id;
     if (id && spec.components[id]) ctx.cam.bring([id]);
   });
+  $(".rail").addEventListener("click", onRailTap);
   $("#attach").addEventListener("click", () => $<HTMLInputElement>("#file").click());
   $("#recenter").addEventListener("click", () => ctx.cam.home());
   ctx.cam.onChange(follow);
@@ -226,5 +247,6 @@ export function paintShell(s: BoardSpec, c: ShellCtx) {
   paintHeader(s.components.header);
   paintBottom(s.components.input);
   paintQueue();
+  paintRail();
   paintLog();
 }

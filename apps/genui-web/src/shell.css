@@ -38,6 +38,13 @@ body .st { flex: none; display: flex; align-items: center; gap: 7px; padding: 5p
 .chip { flex: none; padding: 7px 13px; border-radius: 99px; border: 1px solid var(--hair); background: var(--glass); font-size: 12.5px; color: var(--mute); transition: all .3s var(--spring); }
 .chip:hover { color: var(--ink); border-color: hsl(188 95% 58% / .5); }
 body.fullon .chips { display: none; }
+/* the rail: cards the last answer set aside; a tap brings one back, Reset returns the overview */
+.rail { display: flex; gap: 8px; align-items: center; overflow-x: auto; scrollbar-width: none; }
+.rail:empty { display: none; }
+.rail .ri { flex: none; max-width: 220px; padding: 6px 12px; border-radius: 12px; border: 1px dashed var(--hair); background: hsl(240 24% 8% / .85); font-size: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: qin .8s var(--spring) both; }
+.rail .ri:hover { color: var(--ink); border-style: solid; }
+.rail .reset { color: var(--ink); border-style: solid; border-color: hsl(262 92% 76% / .5); }
+body.fullon .rail { display: none; }
 
 body .bar { position: static; display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 99px; background: hsl(240 30% 100% / .07); border: 1px solid var(--hair); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
 body .bar input { flex: 1; min-width: 0; padding: 0; background: none; border: 0; outline: 0; color: var(--ink); font: 15px var(--font); user-select: text; -webkit-user-select: text; }

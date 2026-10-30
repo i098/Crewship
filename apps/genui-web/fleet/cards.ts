@@ -45,8 +45,9 @@ export function mergeBlock(f: Fleet, p: Pr): string | undefined {
 }
 
 const last = (t: Task) => t.lines.at(-1);
-const askId = (a: Ask) => `ask-${a.task}-${a.key}`.slice(0, 64);
-const prId = (p: Pr) => `pr-${p.repo.replace("/", "-")}-${p.number}`.slice(0, 64);
+export const askId = (a: Ask) => `ask-${a.task}-${a.key}`.slice(0, 64);
+export const prId = (p: Pr) => `pr-${p.repo.replace("/", "-")}-${p.number}`.slice(0, 64);
+export const crewId = (mate: string) => `crew-${mate}`.slice(0, 64);
 
 /** A short title: who, then the first sentence cut to `n` words; the full text goes in the card body. */
 export function short(who: string, text: string, n = 8): string {
@@ -196,7 +197,7 @@ function askItem(f: Fleet, a: Ask, open: Open): Item {
 function crewItem(f: Fleet, m: Pick<Task, "id" | "home" | "lines">, open: Open): Item | undefined {
   const crew = f.workers.filter((w) => (w.mate ?? "fm") === m.id);
   if (m.id === "fm" && !crew.length) return;
-  const id = `crew-${m.id}`.slice(0, 64),
+  const id = crewId(m.id),
     full = open.cards.has(id) || open.cluster === m.id;
   const busy = crew.filter((w) => w.busy === "busy").length,
     now = last(m as Task);

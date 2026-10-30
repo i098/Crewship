@@ -12,6 +12,12 @@ export type Item = {
   pin?: { x: number; y: number };
   /** A size the user gave; the width sets its column in a two-up row, the height is a floor. */
   size?: { w?: number; h?: number };
+  /** A full row of its own (a plan's large card). */
+  wide?: boolean;
+  /** The card it stacks behind, in the same cluster. */
+  under?: string;
+  /** Pinned in a column beside the cluster's rows. */
+  edge?: boolean;
 };
 export type Rel = { from: string; to: string; label: string };
 export type Viewport = { W: number; H: number; topH: number; botH: number };
@@ -42,6 +48,8 @@ export type Layout = {
 };
 
 export const P = 22, HD = 48, GAP = 16, CW0 = 380, CGAP = 120;
+export const STEP = 22; // how far each stacked card peeks out from behind the one in front
+export const EW = 260; // the width of the edge column
 
 type Fit = (id: string, w: number) => number;
 type Group = { proj: string; ts: Item[]; p: number };
@@ -133,7 +141,7 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
     g.ts.forEach((t, j) => {
       const r = inner[i].local[j];
       gOf.set(t.id, box);
-      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d, away: !front, far, center: g === gs[0] && j === 0, proj: g.proj };
+      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj };
     });
   });
   return { clusters, gOf };
@@ -141,42 +149,75 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
 
 /** Window-manager tiling (the design's layout(), plan rounds 8 and 27): rows of up to `cols` cards, and the top row takes
  * the odd ones out, so the top card is the widest. Every row is as wide as the widest row and as tall as its tallest card,
- * so the cards fill the cluster with no hole. Returns [x, y, w, h] per card inside the cluster, and the cluster's size. */
+ * so the cards fill the cluster with no hole. A wide card takes a row alone, an edge card a column on the right, and a
+ * stacked card sits behind its front card, peeking out lower right. Returns [x, y, w, h, dz] per card and the cluster's size. */
 function tile(ts: Item[], fit: Fit, one: boolean) {
-  const rows = rowsOf(ts, one ? 1 : Math.ceil(Math.sqrt(ts.length)));
-  const W2 = Math.max(...rows.map(natural));
-  const local: number[][] = [];
+  const byId = new Map(ts.map((t) => [t.id, t]));
+  // a stack is one deep: the front card must be in this cluster and not itself behind another
+  const behind = (t: Item) => !!t.under && t.under !== t.id && !!byId.get(t.under) && !byId.get(t.under)!.under;
+  const flow = ts.filter((t) => !behind(t) && !t.edge),
+    edge = ts.filter((t) => !behind(t) && t.edge);
+  const rows = flow.length ? rowsOf(flow, one ? 1 : Math.ceil(Math.sqrt(flow.length))) : [];
+  const W2 = Math.max(0, ...rows.map(natural));
+  const at = new Map<string, number[]>();
   let y = HD;
   for (const row of rows) {
     const ws = widths(row, W2),
       h = Math.max(...row.map((t, i) => Math.max(fit(t.id, ws[i]), t.size?.h ?? 0)));
     let x = P;
-    row.forEach((_, i) => {
-      local.push([x, y, ws[i], h]);
+    row.forEach((t, i) => {
+      at.set(t.id, [x, y, ws[i], h]);
       x += ws[i] + GAP;
     });
     y += h + GAP;
   }
-  return { local, w: W2 + 2 * P, h: y - GAP + P };
+  let ey = HD;
+  const ex = P + (W2 ? W2 + GAP : 0);
+  for (const t of edge) {
+    const h = Math.max(fit(t.id, EW), t.size?.h ?? 0);
+    at.set(t.id, [ex, ey, EW, h]);
+    ey += h + GAP;
+  }
+  const depth = new Map<string, number>();
+  let peek = 0;
+  for (const t of ts.filter(behind)) {
+    const k = (depth.get(t.under!) ?? 0) + 1,
+      [x, fy, w, h] = at.get(t.under!)!;
+    depth.set(t.under!, k);
+    peek = Math.max(peek, k * STEP);
+    at.set(t.id, [x + k * STEP, fy + k * STEP, w, h, -Math.min(k, 2)]);
+  }
+  return { local: ts.map((t) => at.get(t.id)!), w: ex - P + (edge.length ? EW : -GAP) + 2 * P + peek, h: Math.max(y, ey) - GAP + P + peek };
 }
 
+/** Rows of up to `cols` cards, the top row taking the odd ones out; a wide card is a row of its own. */
 function rowsOf(ts: Item[], cols: number) {
-  const first = ts.length % cols || cols,
-    rows = [ts.slice(0, first)];
-  for (let i = first; i < ts.length; i += cols) rows.push(ts.slice(i, i + cols));
+  const rows: Item[][] = [];
+  let run: Item[] = [];
+  const flush = () => {
+    const first = run.length % cols || cols;
+    if (run.length) rows.push(run.slice(0, first));
+    for (let i = first; i < run.length; i += cols) rows.push(run.slice(i, i + cols));
+    run = [];
+  };
+  for (const t of ts)
+    if (t.wide) flush(), rows.push([t]);
+    else run.push(t);
+  flush();
   return rows;
 }
 
 /** The width a user gave a card (kept between 200 px and two columns), or 0 when it has none. */
 const own = (t: Item) => (t.size?.w ? Math.max(200, Math.min(2 * CW0, t.size.w)) : 0);
-/** A row's width with each card at its own width or one column. */
-const natural = (row: Item[]) => row.reduce((s, t) => s + (own(t) || CW0), (row.length - 1) * GAP);
+/** A card's width before the row shares its spare room: its own width, else one column, two for a wide card. */
+const base = (t: Item) => own(t) || (t.wide ? 2 * CW0 + GAP : CW0);
+const natural = (row: Item[]) => row.reduce((s, t) => s + base(t), (row.length - 1) * GAP);
 
 /** Card widths that fill a row to `W2`: cards with no user width share the spare room; when all have one, all share it. */
 function widths(row: Item[], W2: number) {
   const free = row.filter((t) => !own(t)).length,
     extra = W2 - natural(row);
-  return row.map((t) => (own(t) || CW0) + (free === 0 ? extra / row.length : own(t) ? 0 : extra / free));
+  return row.map((t) => base(t) + (free === 0 ? extra / row.length : own(t) ? 0 : extra / free));
 }
 
 type Grid = { cells: number[][]; cx: number; cy: number; ring: number[] };
