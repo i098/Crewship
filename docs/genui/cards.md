@@ -21,7 +21,7 @@ Buttons carry `data-act` and `data-id`, and `data-k` when there is a choice: `fu
 
 | Kind | Props |
 |---|---|
-| `decision` | `q` (short: who and the ask), `body` (the detail), `opts [{ k, b, rec, preview }]`, `pick`, `done`. `preview` is `{ [cardId]: props }`: hovering the option shows those props on those cards. |
+| `decision` | `q` (short: who and the ask), `body` (the detail), `url` (drawn as a link icon), `opts [{ k, b, rec, preview }]`, `free` (an answer box for free text), `pick`, `done`. `preview` is `{ [cardId]: props }`: hovering the option shows those props on those cards. With no options it draws no fork. |
 | `conflict` | `title`, `doneTitle`, `files[]`, `branch`, `done` |
 | `pipeline` | `title`, `stages[]`, `at`, `kpi { value, unit }`, `done` |
 | `timeline` | `subject`, `ship`, `days[]`, `rows [{ name, hsl, from, len }]` (days from `days[0]`), `now`, `shipAt`, `shipRow` |

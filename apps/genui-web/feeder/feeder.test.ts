@@ -22,4 +22,9 @@ test("the feed keeps the owner's pick and removes a card whose PR closed", () =>
   spec = applyPatch(spec, diff(spec, cards(src([pr(1)])), owned));
   expect(spec.components.ok1.props.pick).toBe("approve");
   expect(spec.components.pr2.props.removed).toBe(true);
+  // a prop the source stopped sending leaves the card: the old paging card kept its long list
+  spec = applyPatch(spec, [{ op: "add", path: "/components/ok1/props/items", value: ["stale"] }]);
+  spec = applyPatch(spec, diff(spec, cards(src([pr(1)])), owned));
+  expect(spec.components.ok1.props.items).toBeNull();
+  expect(spec.components.ok1.props.pick).toBe("approve");
 });

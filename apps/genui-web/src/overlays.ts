@@ -160,7 +160,7 @@ function clear(st: St) {
 function act(st: St, b: HTMLElement, id: string) {
   const { ctx } = st;
   const a = b.dataset.act!;
-  if (a === "link") return; // the canvas owns link drags
+  if (a === "link" || b.tagName === "FORM") return; // the canvas owns link drags; a form acts on submit
   if (a === "full") return void ((st.open = id), refresh(st));
   if (a === "drop") {
     ctx.sel.delete(id);
@@ -204,6 +204,17 @@ function wireTaps(st: St) {
     ctx.sel.delete(tile.dataset.id!);
     ctx.bring([tile.dataset.id!]);
     refresh(st);
+  });
+  // a card's answer box: the text goes to the agent with the card it answers, never into the spec
+  document.addEventListener("submit", (e) => {
+    const f = (e.target as Element).closest<HTMLFormElement>('form[data-act="answer"]');
+    if (!f) return;
+    e.preventDefault();
+    const input = f.querySelector("input")!,
+      text = input.value.trim();
+    if (!text) return;
+    ctx.intent("input", f.dataset.id!, { text, about: { of: f.dataset.id } });
+    input.value = "";
   });
   // an ask about the selection or the drawing takes them with it
   st.q.form?.addEventListener(

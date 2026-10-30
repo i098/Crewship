@@ -1,8 +1,16 @@
 import { expect, test } from "bun:test";
-import { layout, type Item, type Rel } from "../src/layout";
+import { GAP, type Item, layout, packCheck, type Rel } from "../src/layout";
 
 const it = (id: string, proj: string, prio: number): Item => ({ id, proj, prio, done: false });
-const items = [it("d1", "swap", 90), it("p1", "swap", 60), it("t1", "swap", 50), it("c1", "crew", 80), it("k1", "crew", 40), it("i1", "bill", 70), it("h1", "host", 10)];
+const items = [
+  it("d1", "swap", 90),
+  it("p1", "swap", 60),
+  it("t1", "swap", 50),
+  it("c1", "crew", 80),
+  it("k1", "crew", 40),
+  it("i1", "bill", 70),
+  it("h1", "host", 10),
+];
 const rels: Rel[] = [{ from: "d1", to: "c1", label: "blocks" }];
 const desk = { W: 1280, H: 800, topH: 60, botH: 150 };
 const st = { view: null, spread: false, picked: new Set<string>(), order: {} };
@@ -21,17 +29,45 @@ test("the top cluster sits in the middle; a linked cluster takes the next spot, 
   expect(L.lines).toEqual([{ f: "d1", o: "c1", label: "blocks", proj: "swap", g: null }]);
 });
 
-test("cards in a cluster sit around its top card with no overlap", () => {
-  const many = Array.from({ length: 9 }, (_, i) => it(`m${i}`, "swap", 90 - i));
-  const L = layout(many, [], desk, st, fit);
-  const ts = many.map((t) => L.tiles[t.id]);
-  for (const a of ts) for (const b of ts) if (a !== b) expect(overlap(a, b)).toBe(false);
-  const mid = (t: (typeof ts)[0]) => [t.x + t.w / 2, t.y + t.h / 2];
-  const [cx, cy] = mid(ts[0]);
-  expect(new Set(ts.map((t) => t.y)).size).toBeGreaterThan(1); // not one row
-  // the next four take the sides: right, below, left, above
-  const [r, d, l, u] = ts.slice(1, 5).map(mid);
-  expect([r[0] > cx, d[1] > cy, l[0] < cx, u[1] < cy]).toEqual([true, true, true, true]);
+// mixed heights per card, so the packing has to close the holes a short card leaves
+const H: Record<string, number> = { m0: 80, m1: 300, m2: 140, m3: 60, m4: 220 };
+const mixed = Object.keys(H).map((id, i) => it(id, "swap", 90 - i));
+const tall = (id: string) => H[id] ?? 120;
+
+test("a cluster packs cards of mixed height with no overlap, no hole and nothing outside its frame", () => {
+  for (const vp of [desk, { W: 390, H: 844, topH: 110, botH: 170 }]) {
+    const L = layout(mixed, [], vp, st, tall);
+    const c = L.clusters[0];
+    const ts = mixed.map((t) => L.tiles[t.id]);
+    // the front cluster is at scale 1, so its cards and frame share one space
+    expect(c.s).toBe(1);
+    expect(packCheck(c, ts)).toEqual({ gap: 0, overlap: 0, outside: 0 });
+    for (const t of mixed) expect(L.tiles[t.id].h).toBeGreaterThanOrEqual(H[t.id]);
+    // the frame wraps the cards: the bottom card ends one padding above the frame floor
+    expect(Math.max(...ts.map((t) => t.y + t.h))).toBeCloseTo(c.y + c.h - 22);
+  }
+});
+
+test("the packing check sees a hole wider than the gutter, an overlap and a card that leaves its cluster", () => {
+  const c = { x: 0, y: 0, w: 22 * 2 + 400, h: 48 + 22 + 200 };
+  const a = { x: 22, y: 48, w: 192, h: 200 };
+  expect(packCheck(c, [a, { x: 22 + 192 + GAP, y: 48, w: 192, h: 200 }])).toEqual({ gap: 0, overlap: 0, outside: 0 });
+  expect(packCheck(c, [a, { x: 22 + 192 + GAP, y: 48, w: 192, h: 100 }]).gap).toBeGreaterThan(0);
+  expect(packCheck(c, [a, { x: 400, y: 48, w: 192, h: 200 }]).outside).toBeGreaterThan(0);
+  expect(packCheck(c, [a, { ...a, x: 100 }]).overlap).toBeGreaterThan(0);
+});
+
+test("a user size wins: its width sets its column and its height is a floor the row grows to", () => {
+  const sized = mixed.map((t) => (t.id === "m1" ? { ...t, size: { w: 500, h: 400 } } : t));
+  const L = layout(sized, [], desk, st, tall);
+  expect(L.tiles.m1.w).toBe(500);
+  expect(L.tiles.m1.h).toBe(400);
+  expect(
+    packCheck(
+      L.clusters[0],
+      sized.map((t) => L.tiles[t.id]),
+    ),
+  ).toEqual({ gap: 0, overlap: 0, outside: 0 });
 });
 
 test("clusters sit apart with clear space; a phone stacks them and fits the top card on screen", () => {

@@ -7,7 +7,7 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, tuiLines, type Open, type Pending } from "../fleet/cards";
+import { answer, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { FleetSource } from "../fleet/data";
 import { chat } from "../fleet/chat";
 
@@ -29,7 +29,8 @@ export const PROJECTS = {
 const FM_MAIN = process.env.GENUI_FM_MAIN;
 const fleet = FM_MAIN ? new FleetSource(FM_MAIN) : undefined;
 const pending = new Map<string, Pending>(); // actions waiting for the owner's Yes
-let answering: { id: string; task: string } | undefined; // the ask the next typed text answers
+// what the owner asked the chat to draw; with the fleet the canvas starts empty, without it there is no chat, so all shows
+const shown = new Set<Topic>(fleet ? [] : TOPICS);
 
 type P = Record<string, unknown>;
 export type Pr = { n: number; title: string; url: string; draft: boolean; checks: { total: number; done: number; failed: string[] } };
@@ -114,10 +115,10 @@ export async function gather(): Promise<Sources> {
 
 const card = (kind: string, proj: string, base: number, props: P): Component => ({ type: "card", props: { kind, proj, base, ...props } });
 
-/** The cards the sources call for, by id. Owner-set props (pick, done, removed, asked) are never part of this. */
-export function cards(s: Sources): Record<string, Component> {
+/** The cards the sources call for and the owner asked to see, by id. Owner-set props (pick, done, removed, asked) are never part of this. */
+export function cards(s: Sources, show: Set<Topic> = new Set(TOPICS)): Record<string, Component> {
   const out: Record<string, Component> = {};
-  for (const p of s.prs ?? []) {
+  for (const p of show.has("prs") ? (s.prs ?? []) : []) {
     const { total, done, failed } = p.checks;
     const stages = ["Open", "Checks", "Review", "Merge"];
     const at = p.draft ? 0 : done < total || failed.length ? 1 : 2;
@@ -134,15 +135,35 @@ export function cards(s: Sources): Record<string, Component> {
     });
   }
   // GitHub's own preview image of the newest open PR
-  const top = s.prs?.[0];
-  if (top) out.e1 = card("embed", "repo", 25, { type: "image", title: `#${top.n} on GitHub`, src: `https://opengraph.githubassets.com/genui/${REPO}/pull/${top.n}`, nat: "1200/600" });
-  if (s.prs && !s.prs.length) out.prs = card("note", "repo", 10, { title: "No open pull requests", items: [] });
-  out.k1 = card("crew", "crew", 34, { title: s.crew?.length ? "Crew right now" : "No crew threads on the crewboard", members: (s.crew ?? []).map((c) => ({ ...c, hsl: PROJECTS.crew.hsl })) });
-  if (s.merged) out.sh = card("shipped", "repo", 20, { title: "Merged PRs", ...s.merged });
-  out.use = card("note", "cost", 30, s.usage
-    ? { title: `$${s.usage.cost.toFixed(2)} spent today`, body: `${s.usage.msgs} model calls since 00:00 UTC`, items: s.usage.models.map(([m, c]) => `${m}: $${c.toFixed(2)}`) }
-    : { title: "Usage unavailable", items: s.gaps.filter((g) => g.startsWith("usage")) });
-  if (s.gaps.length) out.gaps = card("note", "host", 15, { title: "Sources not read", items: s.gaps });
+  const top = show.has("prs") ? s.prs?.[0] : undefined;
+  if (top)
+    out.e1 = card("embed", "repo", 25, {
+      type: "image",
+      title: `#${top.n} on GitHub`,
+      src: `https://opengraph.githubassets.com/genui/${REPO}/pull/${top.n}`,
+      nat: "1200/600",
+    });
+  if (show.has("prs") && s.prs && !s.prs.length) out.prs = card("note", "repo", 10, { title: "No open pull requests", items: [] });
+  if (show.has("crew"))
+    out.k1 = card("crew", "crew", 34, {
+      title: s.crew?.length ? "Crew right now" : "No crew threads on the crewboard",
+      members: (s.crew ?? []).map((c) => ({ ...c, hsl: PROJECTS.crew.hsl })),
+    });
+  if (show.has("merged") && s.merged) out.sh = card("shipped", "repo", 20, { title: "Merged PRs", ...s.merged });
+  if (show.has("usage"))
+    out.use = card(
+      "note",
+      "cost",
+      30,
+      s.usage
+        ? {
+            title: `$${s.usage.cost.toFixed(2)} spent today`,
+            body: `${s.usage.msgs} model calls since 00:00 UTC`,
+            items: s.usage.models.map(([m, c]) => `${m}: $${c.toFixed(2)}`),
+          }
+        : { title: "Usage unavailable", items: s.gaps.filter((g) => g.startsWith("usage")) },
+    );
+  if (show.has("host") && s.gaps.length) out.gaps = card("note", "host", 15, { title: "Sources not read", items: s.gaps });
   return out;
 }
 
@@ -164,13 +185,20 @@ function derived(spec: BoardSpec): Record<string, P> {
   const items = Object.entries(spec.components).filter(([, c]) => c.type === "card" && c.props.removed !== true);
   for (const [id, { props: p }] of items) want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0), line: lineOf(id, p) };
   const top = items.reduce<string | undefined>((a, [id]) => (!a || Number(want[id].priority) > Number(want[a].priority) ? id : a), undefined);
-  if (!top) return want;
-  const more = items.filter(([id, c]) => id !== top && c.props.need === true && c.props.done !== true).length;
+  // an empty canvas still says what waits on him, so the header never reads as "nothing" while asks are open
+  if (!top) {
+    const n = fleet?.fleet.asks.length ?? 0;
+    return { ...want, header: { title: n ? `*${n} asks* need you. Ask to see them.` : "Ask for decisions, PRs, crew or usage." } };
+  }
+  // paging cards carry how many asks off their page still need him, so the header matches the full list
+  const more = items.reduce((n, [id, c]) => n + (id !== top && c.props.need === true && c.props.done !== true ? 1 : 0) + Number(c.props.unseen ?? 0), 0);
   want.header = { title: String(want[top].line) + (more ? ` *+${more} more* need${more > 1 ? "" : "s"} you.` : "") };
   return want;
 }
 
 const setProp = (id: string, k: string, value: unknown): PatchOp => ({ op: "add", path: `/components/${esc(id)}/props/${esc(k)}`, value });
+
+const KEEP = new Set(["pick", "done", "removed", "asked", "pinned", "claim", "priority", "line"]);
 
 /** The patch that brings `spec` to the wanted cards without touching what the owner set. */
 export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Set<string>): PatchOp[] {
@@ -181,6 +209,10 @@ export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Se
     const have = spec.components[id];
     if (!have) { patch.push({ op: "add", path: `/components/${esc(id)}`, value: c }); continue; }
     for (const [k, v] of Object.entries(c.props)) if (JSON.stringify(have.props[k]) !== JSON.stringify(v)) patch.push(setProp(id, k, v));
+    // a prop the card no longer has (an old paging card's list) is cleared; owner-set and derived props stay.
+    // null, not remove: a publish computed before the last one lands would remove a missing path, and the board rejects that
+    if (c.type === "card")
+      for (const k of Object.keys(have.props)) if (!(k in c.props) && !KEEP.has(k) && have.props[k] != null) patch.push(setProp(id, k, null));
   }
   // a card the sources no longer report (a closed PR) leaves the board
   for (const id of owned) if (!want[id] && spec.components[id] && spec.components[id].props.removed !== true) patch.push(setProp(id, "removed", true));
@@ -193,8 +225,19 @@ export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Se
 /** The board's chrome: header with host stats and crew pills, the ask bar, and the action log. */
 function chrome(s: Sources, log: P[]): Record<string, Component> {
   return {
-    header: { type: "header", props: { wins: "agent", stats: s.host, tuis: fleet ? fleetTuis(fleet.fleet) : (s.crew ?? []).map((c) => ({ name: c.name, proj: "crew" })) } },
-    input: { type: "input", props: { placeholder: answering ? `Your answer to ${answering.task}` : fleet ? "Select a crew card and type to steer it, or ask the crew" : "Ask the crew anything; it goes to the crewboard", chips: [] } },
+    header: {
+      type: "header",
+      props: { wins: "agent", stats: s.host, tuis: fleet ? fleetTuis(fleet.fleet) : (s.crew ?? []).map((c) => ({ name: c.name, proj: "crew" })) },
+    },
+    input: {
+      type: "input",
+      props: {
+        placeholder: fleet
+          ? "Ask for decisions, PRs, crew or usage; select a crew card and type to steer it"
+          : "Ask the crew anything; it goes to the crewboard",
+        chips: [],
+      },
+    },
     log: { type: "log", props: { items: log } },
   };
 }
@@ -262,7 +305,7 @@ function liveExtras() {
 
 async function publish(s: Sources, cause = "feeder:sources") {
   liveExtras();
-  const want = { ...chrome(s, log), ...cards(s), ...(fleet ? fleetCards(fleet.fleet, pending, open) : {}), ...extra };
+  const want = { ...chrome(s, log), ...cards(s, shown), ...(fleet ? fleetCards(fleet.fleet, pending, open, shown) : {}), ...extra };
   focus(want);
   revive(want);
   adopt(want);
@@ -282,7 +325,7 @@ function fleetTarget(about: unknown): Component | undefined {
     const c = spec.components[id] ?? extra[id];
     if (c && (c.props.key || c.props.task || (c.props.kind === "tui" && c.props.agent))) return c;
   }
-  return answering ? spec.components[answering.id] : undefined;
+  return undefined;
 }
 
 /** Puts an action on the board as a confirm card; it runs only when the owner picks Yes. */
@@ -302,7 +345,7 @@ function offer(make: () => Pending, refused: string) {
 
 type Intent = Extract<ServerMsg, { t: "intent" }>;
 // what the owner has open: the cluster the camera is on and the cards in full view; only these load detail
-const open: Open = { cluster: null, cards: new Set() };
+const open: Required<Open> = { cluster: null, cards: new Set(), page: new Map() };
 // removed and done are cleared, so a card closed with its X opens again from its pill
 const again = { asked: true, removed: false, done: false };
 
@@ -345,6 +388,7 @@ async function confirm(m: Intent, fl: FleetSource) {
 /** Free text not aimed at a fleet card: the chat model streams board edits, each applied as it lands. */
 function startChat(m: Intent, q: string, fl: FleetSource) {
   const said: string[] = [];
+  let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
   // the last answer's cards step back so the new question owns the front and the header
@@ -357,27 +401,35 @@ function startChat(m: Intent, q: string, fl: FleetSource) {
         if (!e.done) said.push(e.say);
         extra["ai-q"] = card("ask", "me", 90, { q, ready: e.done, about: said.length ? [...said] : [e.say], asked: true, removed: false });
       } else if ("focus" in e) e.focus.forEach((id) => focused.add(id));
-      else if ("upsert" in e) extra[e.upsert] = e.card;
+      else if ("show" in e) {
+        if (!drew) shown.clear(), open.page.clear();
+        drew = true;
+        e.show.forEach((t) => shown.add(t));
+      } else if ("upsert" in e) extra[e.upsert] = e.card;
       else delete extra[e.drop];
       kick(m.id);
     },
   }).catch((e) => note(`Chat failed: ${(e as Error).message}`));
 }
 
-/** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, or chat. True when handled. */
+/** An ask's option: its full text is the answer, sent after the owner confirms. */
+function pickOpt(c: P, k: unknown, fl: FleetSource) {
+  const o = (Array.isArray(c.opts) ? (c.opts as Opt[]) : []).find((o) => o.k === k);
+  if (o) offer(() => answer(fl, c, `${o.b}: ${o.say}`), "Not sent");
+}
+
+/** The owner's fleet intents: text to a card, a confirm, an ask's or a PR's options, a cluster's next page, or chat. True when handled. */
 async function onFleet(m: Intent, c: P, fl: FleetSource): Promise<boolean> {
   const p = m.payload, text = typeof p.text === "string" ? p.text.trim() : "", to = text ? fleetTarget(p.about) : undefined;
   const pick = p.field === "pick" ? p.value : undefined;
-  if (to) {
-    offer(() => (to.props.key ? answer(fl, to.props, text) : steer(fl, String(to.props.task ?? to.props.agent), text)), "Not sent");
-    answering = undefined;
-  } else if (pick !== undefined && pending.has(m.targetId)) await confirm(m, fl);
-  else if (pick === "answer" && c.key) answering = { id: m.targetId, task: String(c.task) };
-  else if (pick === "open" && c.key && typeof c.task === "string") await openExtra(`tui-${c.task}`);
+  if (to) offer(() => (to.props.key ? answer(fl, to.props, text) : steer(fl, String(to.props.task ?? to.props.agent), text)), "Not sent");
+  else if (pick !== undefined && pending.has(m.targetId)) await confirm(m, fl);
+  else if (pick !== undefined && c.key) pickOpt(c, pick, fl);
   else if (pick === "merge" && c.prUrl) offer(() => merge(fl, c.prUrl), "Not merged");
   else if (pick !== undefined && c.prUrl) await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
+  else if (p.field === "act" && p.value === "page" && typeof c.proj === "string") open.page.set(c.proj, (open.page.get(c.proj) ?? 0) + 1);
   else if (text) startChat(m, text, fl);
-  else return pick !== undefined && !!c.key;
+  else return false;
   return true;
 }
 

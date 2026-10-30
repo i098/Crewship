@@ -137,7 +137,7 @@ function paintBottom(input: Component | undefined) {
 /** Up next: decisions waiting on you, claimed work, then what lands next; oldest left, new ones slide in from the right. */
 function paintQueue() {
   const items: [key: string, id: string, kind: string, text: string][] = [];
-  const live = Object.entries(spec.components).filter(([, c]) => !c.props.hidden && !c.props.done);
+  const live = Object.entries(spec.components).filter(([, c]) => !c.props.hidden && !c.props.done && c.props.removed !== true);
   for (const [id, c] of live) if (c.props.need) items.push([`n${id}`, id, "decide", `Decide: ${c.props.q ?? c.props.title ?? id}`]);
   for (const [id, c] of live) if (c.props.claim) items.push([`c${id}`, id, "claimed", `${c.props.claim} claimed: ${c.props.title ?? id}`]);
   for (const [id, c] of live) if (typeof c.props.next === "string") items.push([`x${id}${c.props.next}`, id, "next", c.props.next]);

@@ -2,6 +2,7 @@
 // A title steps its size down until it fits two lines, measured with pretext. Text wider than its box wraps anywhere,
 // and what still runs out of the card is cut with an ellipsis. Each run starts over, so a card that grew gets its text back.
 import { layout, prepare } from "@chenglou/pretext";
+import { packCheck } from "./layout";
 
 const SIZES = [20, 18, 16, 14];
 const sized = new Map<string, number>();
@@ -45,9 +46,20 @@ export function overflows(tile: HTMLElement) {
   return [...tile.querySelectorAll<HTMLElement>(".core *")].filter((e) => !e.parentElement?.closest("svg") && (wider(e) || outside(e, box)));
 }
 
-/** Fits one card: title size, then wrap, then ellipsis. Returns what still runs out. */
+/** A card taller than its content (its row grew to a taller neighbour) shows more body lines instead of blank room
+ * under four; the clamp is a whole number of lines, so no line is cut through. */
+function fillBody(tile: HTMLElement) {
+  for (const b of tile.querySelectorAll<HTMLElement>(".core > .body")) {
+    b.style.removeProperty("-webkit-line-clamp");
+    const n = Math.floor((b.clientHeight + 1) / parseFloat(getComputedStyle(b).lineHeight));
+    if (n > 4) b.style.setProperty("-webkit-line-clamp", String(n));
+  }
+}
+
+/** Fits one card: body lines, title size, then wrap, then ellipsis. Returns what still runs out. */
 function fitCard(tile: HTMLElement) {
   for (const e of tile.querySelectorAll(".cut")) e.classList.remove("cut");
+  fillBody(tile);
   const t = tile.querySelector<HTMLElement>(".core > .title");
   if (t) fitTitle(t);
   const bad = overflows(tile);
@@ -75,3 +87,29 @@ export function fitCards(root: ParentNode) {
   if (left.length) console.warn("card fit: text still runs out of", left.map((t) => t.id).join(", "));
   return left.length;
 }
+
+/** The packing check of `packCheck` for every cluster on the page, in world px, plus the parts of its cards that run out.
+ * For headless runs it is also `globalThis.genuiCheck()`. */
+export function checkClusters(root: ParentNode = document) {
+  const tiles = [...root.querySelectorAll<HTMLElement>(".tile[id]:not(.pinned)")];
+  return [...root.querySelectorAll<HTMLElement>(".cluster[id]")].map((box) => {
+    const c = box.getBoundingClientRect(),
+      q = c.width / box.offsetWidth;
+    const mine = tiles.filter((t) => {
+      const r = t.getBoundingClientRect();
+      return r.left + r.width / 2 > c.left && r.left + r.width / 2 < c.right && r.top + r.height / 2 > c.top && r.top + r.height / 2 < c.bottom;
+    });
+    const local = mine.map((t) => {
+      const r = t.getBoundingClientRect();
+      return { x: (r.left - c.left) / q, y: (r.top - c.top) / q, w: r.width / q, h: r.height / q };
+    });
+    const frame = { x: 0, y: 0, w: box.offsetWidth, h: box.offsetHeight };
+    return {
+      id: box.id,
+      cards: mine.length,
+      ...packCheck(frame, local),
+      overflow: mine.flatMap((t) => overflows(t).map((e) => `${t.id}:${e.className || e.tagName}`)),
+    };
+  });
+}
+Object.assign(globalThis, { genuiCheck: checkClusters });

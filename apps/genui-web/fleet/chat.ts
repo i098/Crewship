@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { CardKind, Component } from "@crewship/genui-spec";
+import { TOPICS, type Topic } from "./cards";
 import type { Fleet, Task } from "./data";
 
 export const CHAT_MODEL = process.env.GENUI_CHAT_MODEL ?? "anthropic/claude-haiku-5-5";
@@ -32,39 +33,51 @@ export function summary(f: Fleet): string {
   const backlog = Object.entries(f.backlog).map(([home, rows]) => `${home}: ${rows.length} tasks, ${rows.filter((r) => r.held).length} held`);
   return [
     `now=${Math.floor(Date.now() / 1000)} (epoch s)`,
-    `Second mates (${f.mates.length}):`, ...f.mates.map(line),
-    `Workers (${f.workers.length}, newest ${workers.length}):`, ...workers.map(line),
-    `Open asks (${f.asks.length}):`, ...f.asks.slice(0, 30).map((a) => `${a.task} key=${a.key} ${a.verb}: ${a.note.slice(0, 160)}`),
-    `Open PRs (${f.prs.length}):`, ...prs,
+    `Second mates (${f.mates.length}):`,
+    ...f.mates.map(line),
+    `Workers (${f.workers.length}, newest ${workers.length}):`,
+    ...workers.map(line),
+    // before the first fold an empty list is not "no asks"; the model said "0 open asks" while 123 were loading
+    f.asksAt ? `Open asks (${f.asks.length}):` : "Open asks: still loading; do not say how many",
+    ...f.asks.slice(0, 30).map((a) => `${a.task} key=${a.key} ${a.verb}: ${a.note.slice(0, 160)}`),
+    `Open PRs (${f.prs.length}):`,
+    ...prs,
     `Backlog: ${backlog.join("; ") || "not loaded"}`,
     ...(f.error ? [`Reader error: ${f.error.msg}`] : []),
   ].join("\n");
 }
 
-const SYSTEM = `You drive a generative UI canvas that shows the owner's agent fleet. He asks a question; you change the board so he sees what he needs.
+const SYSTEM = `You drive a generative UI canvas that shows the owner's agent fleet. The canvas is empty until he asks; you draw what he asks for.
 Use only facts from the fleet summary and the board list. Never invent names or numbers.
 Write plain lines only, one edit per line. Each line is applied to the board the moment you finish it, so put the most useful edit first:
 say: <the answer in one sentence, at most 25 words>
+show: <fleet cards to draw, comma separated, from: ${TOPICS.join(", ")}>  (asks = every open decision or question waiting on him, each with its real options and an answer box; prs = his open PRs with checks; crew = second mates and their workers; usage = model spend today; merged = PRs merged per day; host = sources that failed)
 focus: <ids of existing board cards that answer the question, comma separated; they move to the front>
 card: {"id": "<short-name>", "kind": "...", "proj": "<a cluster from the board list, or me>", "props": {...}}  (adds or replaces a card of yours)
 drop: <id of a card of yours that no longer helps>
-Start with say:. Prefer focus on existing cards; add a card only when no card on the board shows the answer. At most 3 cards, at most 12 list rows each.
+Start with say:. Decisions, asks, PRs, crew, usage and merges are ALWAYS drawn with show:, never with card: (a decision card of yours is refused).
+Add a card only for what no show: topic covers. Never add a card, of any kind, that lists asks, decisions, PRs or workers: show: already draws them. No URLs in card text. At most 3 cards, at most 12 list rows each.
 Pick each card's kind from the catalog below; use kind "note" with props title, body, items[] when no kind fits. Colours are plain hsl(...).
 
 `;
 
 /** One board edit from the model's stream; complete lines only. */
-export type Part = { say: string } | { focus: string[] } | { card: Component & { id: string } } | { drop: string } | { bad: string };
+export type Part = { say: string } | { show: Topic[] } | { focus: string[] } | { card: Component & { id: string } } | { drop: string } | { bad: string };
 
 const AI = (id: string) => `ai-${id.replace(/^ai-/, "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40)}`;
 
 /** Parses one output line. A card with an unknown kind becomes a note; its id always carries the `ai-` prefix. */
 export function parse(l: string): Part | undefined {
-  const m = /^(say|focus|card|drop):\s*(.*)$/i.exec(l.trim());
+  const m = /^(say|show|focus|card|drop):\s*(.*)$/i.exec(l.trim());
   if (!m) return undefined;
   const tag = m[1].toLowerCase(), rest = m[2].trim();
   if (tag === "say") return { say: rest };
-  if (tag === "focus") return { focus: rest.split(",").map((s) => s.trim()).filter(Boolean) };
+  const names = rest
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (tag === "show") return { show: names.map((s) => s.toLowerCase()).filter((s): s is Topic => (TOPICS as readonly string[]).includes(s)) };
+  if (tag === "focus") return { focus: names };
   if (tag === "drop") return { drop: AI(rest) };
   let j: { id?: unknown; kind?: unknown; proj?: unknown; props?: unknown };
   try {
@@ -75,6 +88,8 @@ export function parse(l: string): Part | undefined {
   if (!j || typeof j !== "object") return { bad: "the model's card was not an object" };
   const props = typeof j.props === "object" && j.props && !Array.isArray(j.props) ? (j.props as Record<string, unknown>) : {};
   const kind = typeof j.kind === "string" && Object.hasOwn(KINDS, j.kind) ? j.kind : "note";
+  // the owner's bug: a model-made decision card had no real options, only a count and a bare bar
+  if (kind === "decision") return { bad: "decisions come from show: asks, not from a card" };
   return { card: { id: AI(typeof j.id === "string" && j.id ? j.id : kind), ...card(kind, { ...props, proj: typeof j.proj === "string" && j.proj ? j.proj : "me" }) } };
 }
 
@@ -119,7 +134,7 @@ export function boardList(board: Record<string, Component>): string {
 }
 
 /** The board edits a question makes, applied by the feeder as each one arrives. */
-export type Edit = { say: string; done: boolean } | { focus: string[] } | { upsert: string; card: Component } | { drop: string };
+export type Edit = { say: string; done: boolean } | { show: Topic[] } | { focus: string[] } | { upsert: string; card: Component } | { drop: string };
 
 /** Answers one free-text question by streaming board edits, then one final `say` with done set. */
 export async function chat(o: { text: string; about?: unknown; fleet: Fleet; board: Record<string, Component>; apply: (e: Edit) => Promise<void> }): Promise<void> {
@@ -132,7 +147,7 @@ export async function chat(o: { text: string; about?: unknown; fleet: Fleet; boa
     if ("say" in part) (said.push(part.say), await o.apply({ say: part.say, done: false }));
     else if ("focus" in part) await o.apply({ focus: part.focus.filter((id) => o.board[id]) });
     else if ("card" in part) { const { id, ...c } = part.card; await o.apply({ upsert: id, card: c }); }
-    else if ("drop" in part) await o.apply({ drop: part.drop });
+    else if ("drop" in part || "show" in part) await o.apply(part);
     else bad = part.bad;
   };
   try {

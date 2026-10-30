@@ -14,3 +14,9 @@ test("parse turns each model line into one board edit", () => {
   expect(parse("card: null")).toHaveProperty("bad");
   expect(parse("card: {oops")).toHaveProperty("bad");
 });
+
+test("fleet cards come from show:, and a decision card the model makes is refused", () => {
+  expect(parse("show: Asks, prs, nonsense")).toEqual({ show: ["asks", "prs"] });
+  // the owner's bug: "Decide these 12 (of 117)" with no options rendered as a bare bar
+  expect(parse('card: {"kind":"decision","props":{"q":"Decide these 12 (of 117)","opts":[]}}')).toHaveProperty("bad");
+});

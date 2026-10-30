@@ -1,5 +1,5 @@
 // Priority layout from the design (docs/genui/design, layout()): one glass cluster per project. Clusters sit apart
-// around the top one, and inside a cluster the cards sit around its top card, ring by ring.
+// around the top one; inside a cluster the cards tile in rows like a window manager, with no hole between them.
 // No DOM here: card heights come from `fit`, so the tests run it with fake heights.
 import type { Rect } from "@crewship/genui-spec";
 
@@ -61,7 +61,7 @@ export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit:
   const tiles = pinned(items, fit);
   // the clusters' grid follows the screen's shape: wide screens get more columns, phones a stack
   const cols = Math.max(1, Math.round(Math.sqrt(gs.length * (W / H))));
-  const { clusters, gOf } = place(gs, vg, pulled(rels, gs, sc), tiles, { SP, cols, fit });
+  const { clusters, gOf } = place(gs, vg, pulled(rels, gs, sc), tiles, { SP, cols, fit, one: W < 600 });
   return {
     clusters,
     tiles,
@@ -112,14 +112,15 @@ function pulled(rels: Rel[], gs: Group[], sc: Scope): Set<string> {
   return new Set(rels.flatMap((r) => [...other(r.from, r.to), ...other(r.to, r.from)]).filter((p) => gs.some((g) => g.proj === p && g !== sc.vg)));
 }
 
-type PlaceOpts = { SP: boolean; cols: number; fit: Fit };
+/** `one`: a phone, where each cluster stacks its cards in one column. */
+type PlaceOpts = { SP: boolean; cols: number; fit: Fit; one: boolean };
 
 /** The open cluster takes the middle; a cluster it links to takes the next spot, then the rest by priority, ring by ring.
  * In focus the ones around are smaller the further out they sit; in spread all are full size. */
 function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Record<string, TileBox>, o: PlaceOpts) {
   const rest = gs.filter((g) => g !== vg);
   const ord = vg ? [vg, ...rest.filter((g) => pull.has(g.proj)), ...rest.filter((g) => !pull.has(g.proj))] : [];
-  const inner = ord.map((g) => tile(g.ts, o.fit));
+  const inner = ord.map((g) => tile(g.ts, o.fit, o.one));
   const grid = cellsAround(ord.length, o.cols);
   const s = grid.ring.map((d) => (o.SP ? 1 : 0.9 ** d));
   const spot = around(inner.map((b, i) => [b.w * s[i], b.h * s[i]]), grid, CGAP);
@@ -138,14 +139,44 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
   return { clusters, gOf };
 }
 
-/** Cards around the cluster's top card: [x, y, w, h] per card inside the cluster, and the cluster's size. */
-function tile(ts: Item[], fit: Fit) {
-  const sz = ts.map((t) => {
-    const w = t.size?.w ? Math.max(200, Math.min(2 * CW0, t.size.w)) : CW0;
-    return [w, Math.max(fit(t.id, w), t.size?.h ?? 0)];
-  });
-  const spot = around(sz, cellsAround(ts.length, Math.ceil(Math.sqrt(ts.length))), GAP);
-  return { local: sz.map((s, i) => [P + spot.at[i][0], HD + spot.at[i][1], s[0], s[1]]), w: spot.w + 2 * P, h: HD + spot.h + P };
+/** Window-manager tiling (the design's layout(), plan rounds 8 and 27): rows of up to `cols` cards, and the top row takes
+ * the odd ones out, so the top card is the widest. Every row is as wide as the widest row and as tall as its tallest card,
+ * so the cards fill the cluster with no hole. Returns [x, y, w, h] per card inside the cluster, and the cluster's size. */
+function tile(ts: Item[], fit: Fit, one: boolean) {
+  const rows = rowsOf(ts, one ? 1 : Math.ceil(Math.sqrt(ts.length)));
+  const W2 = Math.max(...rows.map(natural));
+  const local: number[][] = [];
+  let y = HD;
+  for (const row of rows) {
+    const ws = widths(row, W2),
+      h = Math.max(...row.map((t, i) => Math.max(fit(t.id, ws[i]), t.size?.h ?? 0)));
+    let x = P;
+    row.forEach((_, i) => {
+      local.push([x, y, ws[i], h]);
+      x += ws[i] + GAP;
+    });
+    y += h + GAP;
+  }
+  return { local, w: W2 + 2 * P, h: y - GAP + P };
+}
+
+function rowsOf(ts: Item[], cols: number) {
+  const first = ts.length % cols || cols,
+    rows = [ts.slice(0, first)];
+  for (let i = first; i < ts.length; i += cols) rows.push(ts.slice(i, i + cols));
+  return rows;
+}
+
+/** The width a user gave a card (kept between 200 px and two columns), or 0 when it has none. */
+const own = (t: Item) => (t.size?.w ? Math.max(200, Math.min(2 * CW0, t.size.w)) : 0);
+/** A row's width with each card at its own width or one column. */
+const natural = (row: Item[]) => row.reduce((s, t) => s + (own(t) || CW0), (row.length - 1) * GAP);
+
+/** Card widths that fill a row to `W2`: cards with no user width share the spare room; when all have one, all share it. */
+function widths(row: Item[], W2: number) {
+  const free = row.filter((t) => !own(t)).length,
+    extra = W2 - natural(row);
+  return row.map((t) => (own(t) || CW0) + (free === 0 ? extra / row.length : own(t) ? 0 : extra / free));
 }
 
 type Grid = { cells: number[][]; cx: number; cy: number; ring: number[] };
@@ -206,4 +237,41 @@ function fitCam(clusters: ClusterBox[], tiles: Record<string, TileBox>, focus: R
   const o = focus ?? (all.length ? { x: bb[0], y: bb[1], w: bb[2] - bb[0], h: bb[3] - bb[1] } : { x: 0, y: 0, w: W, h: H });
   const k = Math.max(0.02, Math.min(1, (SP ? W - 40 : wide ? W * 0.72 : W - 56) / o.w, ((H - vp.topH - vp.botH - 30) * (SP ? 0.96 : 0.88)) / o.h));
   return { x: o.x + o.w / 2, y: o.y + o.h / 2 + (vp.botH - vp.topH) / 2 / k, k };
+}
+
+const cut = (a: Rect, b: Rect) =>
+  Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+/** Area of `box` that no rect in `rs` covers, cut on every rect edge so each cell is all in or all out. */
+function uncovered(box: Rect, rs: Rect[]) {
+  const edges = (lo: number, len: number, a: (r: Rect) => number[]) =>
+    [...new Set([lo, lo + len, ...rs.flatMap(a).map((v) => Math.min(lo + len, Math.max(lo, v)))])].sort((p, q) => p - q);
+  const xs = edges(box.x, box.w, (r) => [r.x, r.x + r.w]),
+    ys = edges(box.y, box.h, (r) => [r.y, r.y + r.h]);
+  let area = 0;
+  for (let i = 1; i < xs.length; i++)
+    for (let j = 1; j < ys.length; j++) {
+      const mx = (xs[i - 1] + xs[i]) / 2,
+        my = (ys[j - 1] + ys[j]) / 2;
+      if (!rs.some((r) => mx > r.x && mx < r.x + r.w && my > r.y && my < r.y + r.h)) area += (xs[i] - xs[i - 1]) * (ys[j] - ys[j - 1]);
+    }
+  return area;
+}
+
+/** How badly one cluster `c` packs its cards `ts` (px², 0 is right): empty room wider than the gutter inside the frame,
+ * cards on top of each other, and card area outside the frame. A pixel of slack absorbs the browser's rounding. */
+export function packCheck(c: Rect, ts: Rect[]) {
+  const inner = { x: c.x + P, y: c.y + HD, w: c.w - 2 * P, h: c.h - HD - P },
+    g = GAP / 2 + 1,
+    room = { x: inner.x - 1, y: inner.y - 1, w: inner.w + 2, h: inner.h + 2 };
+  return {
+    gap: Math.round(
+      uncovered(
+        inner,
+        ts.map((t) => ({ x: t.x - g, y: t.y - g, w: t.w + 2 * g, h: t.h + 2 * g })),
+      ),
+    ),
+    overlap: Math.round(ts.reduce((s, a, i) => s + ts.slice(i + 1).reduce((q, b) => q + cut(a, b), 0), 0)),
+    outside: Math.round(ts.reduce((s, t) => s + t.w * t.h - cut(t, room), 0)),
+  };
 }

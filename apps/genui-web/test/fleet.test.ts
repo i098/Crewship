@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeBlock } from "../fleet/cards";
+import { askOpts, fleetCards, mergeBlock } from "../fleet/cards";
 import { countChecks, type Fleet, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
@@ -55,4 +55,42 @@ test("an ask's time is the at= stamp of the last line carrying its key", () => {
   expect(raisedAt(text, "a")).toBe(200);
   expect(raisedAt(text, "b")).toBe(300);
   expect(raisedAt(text, "missing")).toBe(0);
+});
+
+test("an ask shows the options it names, the one it recommends, or none when it is open", () => {
+  const n = askOpts("Push denied. Options: (1) fork to i098 and open the PRs (recommended); (2) keep the commits local; (3) use another account.");
+  expect(n.map((o) => [o.k, o.b, o.rec])).toEqual([
+    ["o1", "Fork to i098 and open…", true],
+    ["o2", "Keep the commits local", false],
+    ["o3", "Use another account", false],
+  ]);
+  expect(askOpts("Decide: A) authorize one more attempt; B) stop the debugger route. Recommend A.").map((o) => o.b)).toEqual([
+    "Authorize one more attempt",
+    "Stop the debugger route",
+  ]);
+  expect(askOpts("Options: he signs in once himself (recommended), another Apple ID, or skip iOS. No build queued.").map((o) => [o.b, o.rec])).toEqual([
+    ["He signs in once himself", true],
+    ["Another Apple ID", false],
+    ["Skip iOS", false],
+  ]);
+  expect(askOpts("PR 874 is green, see https://x.y/z. Recommend OK.")).toMatchObject([{ b: "OK", rec: true }]);
+  expect(askOpts("Who are the others? Send names and I add them.")).toEqual([]);
+});
+
+test("nothing is drawn until asked; asked-for asks page so every one is reachable and counted", () => {
+  const asks = Array.from({ length: 5 }, (_, i) => ({ home: "/h", task: "t1", key: `k${i}`, verb: "needs-decision", note: `Question ${i}?`, at: i }));
+  const f = { ...fleet, main: "/h", mates: [], workers: [], prs: [], asks } as unknown as Fleet;
+  expect(fleetCards(f, new Map())).toEqual({});
+  const seen = new Set<string>();
+  const page = new Map<string, number>();
+  for (let p = 0; p < 3; p++) {
+    page.set("fm", p);
+    const out = fleetCards(f, new Map(), { cards: new Set(), page }, new Set(["asks"]));
+    const on = Object.keys(out).filter((id) => id.startsWith("ask-"));
+    on.forEach((id) => seen.add(id));
+    // the cards on this page plus the paging card's count always make the full list
+    expect(on.length + Number(out["more-fm"].props.unseen)).toBe(5);
+    for (const id of on) expect(out[id].props).toMatchObject({ kind: "decision", free: true, opts: [] });
+  }
+  expect(seen.size).toBe(5);
 });
