@@ -9,6 +9,8 @@ const STRIP: RegExp[] = [
   /^[ \t\x01]*(?:working|done|needs-decision|paused)[ \t]*:[ \t]*/gim,
   /\b[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+\b/gi,
   /`(?:cf|sm)-[a-z0-9][a-z0-9-]*`/gi,
+  /^[ \t\x01]*(?:supervisor[ \t]*:[ \t]*)?child[ \t]+[a-z0-9][a-z0-9-]*[ \t]+(?:working|done|failed|blocked|paused|needs-decision)[ \t]*:[ \t]*/gim,
+  /(?<![\w-])(?:pr|mode|yolo|head|task)=[^\s)\]]*/g,
   /(?<![\w/.:~-])(?:~(?:\/[\w.@-]+)+|(?:\/[\w.@-]+){2,})\/?/g,
   /(?<![\w/.-])(?:state|data)\/[\w./-]*\.[A-Za-z0-9]+/g,
   /^[ \t\x01]*decision stuck after \d+ attempts[^\n\0]*\n?/gim,
@@ -38,6 +40,22 @@ export function cleanText(text: string): string {
   });
   out = out.replace(/\0(\d+)\0/g, (_, i) => held[+i]).trim().replace(COLON, ""); // a stripped prefix can leave a bare colon
   return out || text.replace(COLON, "") || text; // never turn a send into nothing
+}
+
+// A status line is internal detail, not a text for the owner. Returns why a paragraph is one, or undefined for prose.
+const STATUS: [string, RegExp][] = [
+  ["starts with a task or mate id", /^[ \t\x01]*(?:(?:cf|sm)-[a-z0-9][a-z0-9-]*|[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+)\b/i],
+  ["key= tokens", /(?<![\w-])(?:key|corr)=\S/],
+  ["commit hashes in a detail clause", /:[ \t]+[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b[^\n]*\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/],
+];
+const BARE_PR_LINK = /^(?:(?:pr|pull request)[ \t]*)?<?https?:\/\/\S+\/pull\/\d+\S*>?$/i;
+export function statusLine(text: string): string | undefined {
+  if (BARE_PR_LINK.test(text.trim())) return "bare PR link";
+  for (const para of text.split(/\n\s*\n/)) {
+    const p = para.trim();
+    const hit = p && STATUS.find(([, re]) => re.test(p));
+    if (hit) return hit[0];
+  }
 }
 
 if (import.meta.main) process.stdout.write(cleanText(await Bun.stdin.text()));
