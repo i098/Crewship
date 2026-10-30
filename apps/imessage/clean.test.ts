@@ -21,6 +21,7 @@ test("plain prose passes", () => {
     "The build finished and nothing needs you.",
     "Deploy is live; I checked the page and it loads.",
     "I changed the retry to 3 and the tests pass.",
+    "The Codex effort picker is merged because it passed the pixel check, and you can compare the original app with ours on this slider page: https://pub-c548cd7bc64c41ae8ce0d860578f3b6f.r2.dev/cgx-effort-picker/1db80615e84d17724bd32ddb/index.html",
   ]) expect(statusLine(t), t).toBeUndefined();
 });
 
