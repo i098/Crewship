@@ -27,3 +27,11 @@ test("plain prose passes", () => {
 test("cleanText still strips prefixes", () => {
   expect(cleanText("done: it works")).toBe("it works");
 });
+
+test("cleanText strips a child status prefix", () => {
+  expect(cleanText("child abc-1 working: it runs")).toBe("it runs");
+});
+
+test("cleanText strips pr, mode, yolo, head and task tokens", () => {
+  expect(cleanText("ok pr=12 mode=dark yolo=1 head=ab task=x end")).toBe("ok end");
+});
