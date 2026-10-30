@@ -336,6 +336,9 @@ def main():
         while time.time() < deadline:
             m = json.loads(recv(ws))
             if m.get("method") == "Network.responseReceived" and WANT in m["params"]["response"]["url"]:
+                status = m["params"]["response"].get("status", 0)
+                if not 200 <= status < 300:
+                    raise OSError("HTTP %s from %s" % (status, WANT))
                 body = call(ws, 5, "Network.getResponseBody", {"requestId": m["params"]["requestId"]})["result"]["body"]
                 return json.loads(body)
         raise OSError("request not seen")
@@ -384,7 +387,10 @@ function heldCdp<B, T>(url: string, want: string, pick: (body: B) => T): () => P
 }
 
 export const deepseek = heldCdp("https://platform.deepseek.com/usage", "/api/v0/users/get_user_summary", (b: { data: { biz_data: DeepseekSummary } }): DeepseekSummary => ({ normal_wallets: b.data.biz_data.normal_wallets }))
-export const deepseekPlans = heldCdp("https://deepseekv4pro.com/dashboard/api-keys", "/api/quota/me", (b: DeepseekPlans): DeepseekPlans => ({ plans: b.plans }))
+export const deepseekPlans = heldCdp("https://deepseekv4pro.com/dashboard/api-keys", "/api/quota/me", (b: DeepseekPlans): DeepseekPlans => {
+  if (!Array.isArray(b.plans)) throw new Error("no plans in response")
+  return { plans: b.plans }
+})
 
 // ---- DeepSeek reseller loader -------------------------------------------------
 const RESELLER_URL = "https://api.deepseekv4pro.com/v1/chat/completions"
