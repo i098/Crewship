@@ -109,6 +109,24 @@ export function resellerRow(json: ResellerSpend): QuotaRow {
   return { account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note }
 }
 
+// ---- DeepSeek coding plans: 5h and 7d credit windows, per plan ------------------
+// The reseller site's dashboard loads GET /api/quota/me for the signed-in owner; one entry per plan.
+type PlanWindow = { limitCredits?: number; usedCredits?: number; resetAt?: string }
+export type DeepseekPlans = { plans?: { planName?: string; quotaStatus?: string; quota?: { fiveHour?: PlanWindow; sevenDay?: PlanWindow } }[] }
+
+export function deepseekPlanRows(json: DeepseekPlans): QuotaRow[] {
+  return (json.plans ?? []).flatMap(p => {
+    const account = `ds ${(p.planName ?? "plan").replace(/^DeepSeek\s+/i, "").toLowerCase()}`
+    if (!p.quota) return [{ account, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: p.quotaStatus ?? "no quota reported" }]
+    return (["fiveHour", "sevenDay"] as const).map(k => {
+      const w = p.quota?.[k]
+      const m = leftOf(w?.usedCredits as number, w?.limitCredits as number)
+      const reset = Date.parse(w?.resetAt ?? "")
+      return { account, window: k === "fiveHour" ? "5h" : "7d", usedPct: m?.usedPct ?? null, leftPct: m?.leftPct ?? null, resetsAt: Number.isNaN(reset) ? null : reset }
+    })
+  })
+}
+
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
@@ -120,6 +138,8 @@ export type QuotaInput = {
   mercuryError?: string
   deepseek?: DeepseekSummary
   deepseekError?: string
+  deepseekPlans?: DeepseekPlans
+  deepseekPlansError?: string
   reseller?: ResellerSpend
   resellerError?: string
 }
@@ -133,6 +153,8 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
+  if (inp.deepseekPlans) rows.push(...deepseekPlanRows(inp.deepseekPlans))
+  else rows.push({ account: "deepseek plans", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekPlansError ? `unavailable: ${inp.deepseekPlansError}` : "not reported" })
   if (inp.deepseek) rows.push(deepseekRow(inp.deepseek))
   else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `unavailable: ${inp.deepseekError}` : "not reported" })
   if (inp.reseller) rows.push(resellerRow(inp.reseller))
@@ -252,7 +274,7 @@ function mercuryKeyIds(): number[] {
 // site's own request, and CDP hands back that response body, so no cookie or token ever leaves Dia.
 const DEEPSEEK_CDP = String.raw`
 import base64, json, os, socket, struct, sys, time, urllib.request
-PORT, WANT = 9222, "/api/v0/users/get_user_summary"
+PORT, URL, WANT = 9222, sys.argv[1], sys.argv[2]
 def get(p):
     return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}{p}", timeout=10))
 def open_ws(url):
@@ -299,7 +321,7 @@ def call(s, i, method, params):
             return m
 def main():
     browser = open_ws(get("/json/version")["webSocketDebuggerUrl"])
-    target = call(browser, 1, "Target.createTarget", {"url": "https://platform.deepseek.com/usage", "background": True})["result"]["targetId"]
+    target = call(browser, 1, "Target.createTarget", {"url": URL, "background": True})["result"]["targetId"]
     try:
         deadline, page = time.time() + 20, None
         while time.time() < deadline and not page:
@@ -314,25 +336,25 @@ def main():
         while time.time() < deadline:
             m = json.loads(recv(ws))
             if m.get("method") == "Network.responseReceived" and WANT in m["params"]["response"]["url"]:
+                status = m["params"]["response"].get("status", 0)
+                if not 200 <= status < 300:
+                    raise OSError("HTTP %s from %s" % (status, WANT))
                 body = call(ws, 5, "Network.getResponseBody", {"requestId": m["params"]["requestId"]})["result"]["body"]
-                return json.loads(body)["data"]["biz_data"]
-        raise OSError("balance request not seen")
+                return json.loads(body)
+        raise OSError("request not seen")
     finally:
         call(browser, 6, "Target.closeTarget", {"targetId": target})
 try:
-    biz = main()
-    print(json.dumps({"normal_wallets": biz.get("normal_wallets")}))
+    print(json.dumps(main()))
 except Exception as e:
     print(str(e), file=sys.stderr)
     sys.exit(1)
 `
 
 const DEEPSEEK_MIN_MS = 10 * 60_000
-let deepseekAt = 0
-let deepseekLast: { value?: DeepseekSummary; error?: string } = {}
 
-async function fetchDeepseek(): Promise<DeepseekSummary> {
-  const p = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "mac", "python3", "-"], {
+async function fetchCdp<B>(url: string, want: string): Promise<B> {
+  const p = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "mac", "python3", "-", url, want], {
     stdin: new Blob([DEEPSEEK_CDP]),
     stdout: "pipe",
     stderr: "pipe",
@@ -345,20 +367,30 @@ async function fetchDeepseek(): Promise<DeepseekSummary> {
   if (code !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
   const line = out.split("\n").findLast(l => l.trimStart().startsWith("{"))
   if (!line) throw new Error("no JSON in the CDP output")
-  return JSON.parse(line) as DeepseekSummary
+  return JSON.parse(line)
 }
 
 // A read costs a background tab in the owner's browser, so any result - success or failure - holds
 // for 10 minutes: a signed-out owner must not see a tab appear and vanish every minute.
-export async function deepseek(): Promise<{ value?: DeepseekSummary; error?: string }> {
-  if (deepseekAt && Date.now() - deepseekAt < DEEPSEEK_MIN_MS) return deepseekLast
-  deepseekAt = Date.now()
-  try {
-    return (deepseekLast = { value: await fetchDeepseek() })
-  } catch (e) {
-    return (deepseekLast = { error: (e as Error).message })
+function heldCdp<B, T>(url: string, want: string, pick: (body: B) => T): () => Promise<{ value?: T; error?: string }> {
+  let at = 0
+  let last: { value?: T; error?: string } = {}
+  return async () => {
+    if (at && Date.now() - at < DEEPSEEK_MIN_MS) return last
+    at = Date.now()
+    try {
+      return (last = { value: pick(await fetchCdp<B>(url, want)) })
+    } catch (e) {
+      return (last = { error: (e as Error).message })
+    }
   }
 }
+
+export const deepseek = heldCdp("https://platform.deepseek.com/usage", "/api/v0/users/get_user_summary", (b: { data: { biz_data: DeepseekSummary } }): DeepseekSummary => ({ normal_wallets: b.data.biz_data.normal_wallets }))
+export const deepseekPlans = heldCdp("https://deepseekv4pro.com/dashboard/api-keys", "/api/quota/me", (b: DeepseekPlans): DeepseekPlans => {
+  if (!Array.isArray(b.plans)) throw new Error("no plans in response")
+  return { plans: b.plans }
+})
 
 // ---- DeepSeek reseller loader -------------------------------------------------
 const RESELLER_URL = "https://api.deepseekv4pro.com/v1/chat/completions"
@@ -402,7 +434,7 @@ export async function reseller(): Promise<{ value?: ResellerSpend; error?: strin
 
 export async function loadQuota(): Promise<QuotaInput> {
   const msg = (e: unknown) => (e as Error).message
-  const [omp, zai, mercury, ds, rs] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek(), reseller()])
+  const [omp, zai, mercury, ds, rs, dp] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek(), reseller(), deepseekPlans()])
   return {
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
@@ -414,5 +446,7 @@ export async function loadQuota(): Promise<QuotaInput> {
     deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value.error,
     reseller: rs.status === "fulfilled" ? rs.value.value : undefined,
     resellerError: rs.status === "rejected" ? msg(rs.reason) : rs.value.error,
+    deepseekPlans: dp.status === "fulfilled" ? dp.value.value : undefined,
+    deepseekPlansError: dp.status === "rejected" ? msg(dp.reason) : dp.value.error,
   }
 }
