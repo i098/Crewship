@@ -8,6 +8,7 @@ test("status lines are refused", () => {
     "PR 2267 third failure is same-on-main: head 92340ee0 and main 15a481db fail",
     "cf-text-leak: working on it",
     "x-mate-ab12 is done",
+    "see https://x/run?key=abc",
     "all good key=nm-1-ci",
   ]) expect(statusLine(t), t).toBeString();
 });

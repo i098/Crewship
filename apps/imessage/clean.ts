@@ -54,7 +54,7 @@ export function statusLine(text: string): string | undefined {
   for (const para of text.split(/\n\s*\n/)) {
     const p = para.trim();
     const bare = p.replace(/https?:\/\/\S+/g, "<url>");
-    const hit = p && STATUS.find(([, re]) => re.test(bare));
+    const hit = p && STATUS.find(([name, re]) => re.test(name.startsWith("commit hashes") ? bare : p));
     if (hit) return hit[0];
   }
 }
