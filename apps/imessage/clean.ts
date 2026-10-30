@@ -53,7 +53,8 @@ export function statusLine(text: string): string | undefined {
   if (BARE_PR_LINK.test(text.trim())) return "bare PR link";
   for (const para of text.split(/\n\s*\n/)) {
     const p = para.trim();
-    const hit = p && STATUS.find(([, re]) => re.test(p));
+    const bare = p.replace(/https?:\/\/\S+/g, "<url>");
+    const hit = p && STATUS.find(([name, re]) => re.test(name.startsWith("commit hashes") ? bare : p));
     if (hit) return hit[0];
   }
 }

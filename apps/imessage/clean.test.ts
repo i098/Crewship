@@ -8,6 +8,7 @@ test("status lines are refused", () => {
     "PR 2267 third failure is same-on-main: head 92340ee0 and main 15a481db fail",
     "cf-text-leak: working on it",
     "x-mate-ab12 is done",
+    "see https://x/run?key=abc",
     "all good key=nm-1-ci",
   ]) expect(statusLine(t), t).toBeString();
 });
@@ -21,6 +22,7 @@ test("plain prose passes", () => {
     "The build finished and nothing needs you.",
     "Deploy is live; I checked the page and it loads.",
     "I changed the retry to 3 and the tests pass.",
+    "The Codex effort picker is merged because it passed the pixel check, and you can compare the original app with ours on this slider page: https://pub-c548cd7bc64c41ae8ce0d860578f3b6f.r2.dev/cgx-effort-picker/1db80615e84d17724bd32ddb/index.html",
   ]) expect(statusLine(t), t).toBeUndefined();
 });
 
