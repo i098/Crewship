@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseek, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, resellerRow, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseek, deepseekPlanRows, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, resellerRow, type DeepseekPlans, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -13,6 +13,8 @@ const limit = (windowId: string, used: number, resetsAt?: number, tier?: string)
   amount: { used, limit: 100, usedFraction: used / 100 },
 })
 // Invented numbers and provider names only.
+// Recorded from the site's own /api/quota/me response; subscription ids replaced.
+const PLANS = JSON.parse(readFileSync(join(import.meta.dir, "fixtures/deepseek-quota-me.json"), "utf8")) as DeepseekPlans
 const FIXTURE: QuotaInput = {
   now: NOW,
   omp: {
@@ -25,6 +27,7 @@ const FIXTURE: QuotaInput = {
   zai: { data: { limits: [{ unit: 3, number: 5, usage: 1000, remaining: 250, nextResetTime: NOW + 60 * MIN }, { unit: 6, number: 1, usage: 8000, remaining: 8000, nextResetTime: NOW + 6 * 1440 * MIN }] } },
   mercury: { keyIds: [9, 4], tokens: { 4: 25_000_000, 9: 150_000_000 } },
   deepseek: { normal_wallets: [{ currency: "USD", balance: "12.5" }] },
+  deepseekPlans: PLANS,
 }
 
 test("leftOf computes percent left and clamps overuse", () => {
@@ -70,7 +73,8 @@ test("--once prints the fixture without starting the TUI", async () => {
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
   expect(raw.map(l => l.slice(0, 30).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek -", "deepseek (reseller) -",
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M",
+    "ds coding plan max 5h", "7d", "ds coding plan 5h", "7d", "deepseek -", "deepseek (reseller) -",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
@@ -85,6 +89,20 @@ test("deepseekRow shows the site balance labelled with its wallet currency", () 
   expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "10" }, { currency: "USD", balance: "-0.005077804" }] }).note).toBe("balance -$0.0051")
   expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: 0 }] }).note).toBe("balance $0.00")
   expect(deepseekRow({}).note).toBe("no balance reported")
+})
+
+test("deepseekPlanRows reports both plans with 5h and 7d windows from credits", () => {
+  const rows = deepseekPlanRows(PLANS)
+  expect(rows.map(r => `${r.account} ${r.window}`)).toEqual(["ds coding plan max 5h", "ds coding plan max 7d", "ds coding plan 5h", "ds coding plan 7d"])
+  expect(rows[0]).toMatchObject({ usedPct: 0, leftPct: 100, resetsAt: Date.parse("2026-10-31T01:28:25.412641Z") })
+  const used = deepseekPlanRows({ plans: [{ planName: "DeepSeek Coding Plan", quota: { fiveHour: { limitCredits: 200, usedCredits: 50, resetAt: "2026-10-31T00:00:00Z" } } }] })
+  expect(used[0]).toMatchObject({ usedPct: 25, leftPct: 75 })
+  expect(used[1]).toMatchObject({ window: "7d", usedPct: null, resetsAt: null }) // a window the site omits stays "not reported"
+  expect(deepseekPlanRows({ plans: [{ planName: "DeepSeek Coding Plan", quotaStatus: "pending" }] })[0]).toMatchObject({ leftPct: null, note: "pending" })
+})
+
+test("buildRows shows an error row when the plan read fails", () => {
+  expect(buildRows({ deepseekPlansError: "Mac not reachable" }).find(r => r.account === "deepseek plans")?.note).toBe("unavailable: Mac not reachable")
 })
 
 test("a failed DeepSeek read holds its error, so no second ssh runs within 10 minutes", async () => {
