@@ -114,7 +114,7 @@ function pinned(items: Item[], fit: Fit): Record<string, TileBox> {
       w,
       h: Math.max(fit(t.id, w), t.size?.h ?? 0),
       s: 1,
-      z: 32 + i,
+      z: 35 + i,
       away: false,
       far: false,
       center: false,
@@ -150,12 +150,13 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
   const gOf = new Map<string, ClusterBox>();
   ord.forEach((g, i) => {
     const front = o.SP || i === 0, d = front ? 0 : grid.ring[i], far = !front && pull.size > 0 && !pull.has(g.proj);
-    const [x, y] = spot.at[i], box: ClusterBox = { proj: g.proj, x, y, w: inner[i].w, h: inner[i].h, s: s[i], z: 30 - 3 * d, front, far, right: x > spot.at[0][0], ids: g.ts.map((t) => t.id) };
+    // 4 z steps per ring: a cluster's cards (front card and up to 2 stacked behind it) all sit above its own glass
+    const [x, y] = spot.at[i], box: ClusterBox = { proj: g.proj, x, y, w: inner[i].w, h: inner[i].h, s: s[i], z: 30 - 4 * d, front, far, right: x > spot.at[0][0], ids: g.ts.map((t) => t.id) };
     clusters.push(box);
     g.ts.forEach((t, j) => {
       const r = inner[i].local[j];
       gOf.set(t.id, box);
-      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj, under: (r[4] ?? 0) < 0 };
+      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 33 - 4 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj, under: (r[4] ?? 0) < 0 };
     });
   });
   return { clusters, gOf };

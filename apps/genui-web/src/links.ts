@@ -51,7 +51,7 @@ function route(fr: Frame, FB: HTMLElement, ea: HTMLElement, eb: HTMLElement): Ge
   const { p, near, far } = leave(fb, ra, side, fr.k);
   const { x1, y1, free, below, above } = arrive(fb, rb, side, gx, fr);
   // the card a line points at is lifted over the clusters between it and the front one
-  const z = !fr.spread && (free || below || above) ? "29" : "32";
+  const z = !fr.spread && (free || below || above) ? "29" : "34";
   if (eb.style.zIndex !== z) eb.style.zIndex = z;
   p.push([gx, p.at(-1)![1]], [gx, y1], [x1, y1]);
   return { pts: p.map(([x, y]): Pt => [x - fr.cv.left, y - fr.cv.top]), side, fb, rkey: [side, n, near, far, free, below, above].join() };

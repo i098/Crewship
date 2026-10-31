@@ -86,6 +86,7 @@ test("a plan's layout: a wide card takes the row alone, a stacked card peeks out
   expect(t.m3.x).toBeGreaterThan(t.m1.x);
   expect(t.m3.y).toBeGreaterThan(t.m1.y);
   expect(t.m3.z).toBeLessThan(t.m1.z);
+  expect(t.m3.z).toBeGreaterThan(c.z); // above its cluster's glass, so a tap reaches it
   expect(t.m4.x).toBeGreaterThan(t.m0.x + t.m0.w);
   const flat = ["m0", "m1", "m2", "m4"].map((id) => t[id]);
   for (const a of flat) for (const b of flat) if (a !== b) expect(overlap(a, b)).toBe(false);
