@@ -387,11 +387,13 @@ function paint() {
     for (const id of sel) if (!spec.components[id]) sel.delete(id);
     const picked = new Set([...sel, ...[...asked].filter(([, t]) => t > performance.now()).map(([id]) => id)]);
     const rels = spec.links.map((l) => ({ from: l.from, to: l.to, label: typeof l.label === "string" ? l.label : "" }));
-    L = layout(items(), rels, viewport(), { view: cam.view, spread: cam.spreading, picked, order }, fit);
+    // a plan keeps cards from several boards, each in its own cluster: all of them show at full size, like the spread view
+    const planned = Object.values(spec.components).some((c) => c.props?.aside === true);
+    L = layout(items(), rels, viewport(), { view: cam.view, spread: cam.spreading || planned, picked, order }, fit);
     if (cam.view && !L.order.includes(cam.view)) cam.view = null;
     // the feeder loads a cluster's detail only while the camera is on it
     if (cam.view !== sentView && spec.components.header) intent("input", "header", { cluster: (sentView = cam.view) });
-    cam.spreading = L.spread;
+    cam.spreading &&= L.spread;
     document.body.classList.toggle("spread", L.spread);
     paintClusters(spec, L);
     paintTiles(spec, L);

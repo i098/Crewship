@@ -47,7 +47,9 @@ export function start(port = PORT) {
 
 if (import.meta.main) {
   const kids = [
-    Bun.spawn(["bunx", "wrangler", "dev", "--local", "--port", new URL(UPSTREAM).port || "8787"], { cwd: new URL("../genui-server/", import.meta.url).pathname, stdout: "inherit", stderr: "inherit" }),
+    // GENUI_STATE moves the board's storage (e.g. to /dev/shm): on a disk under heavy write load every board write waits
+    // on fsync, and the page then waits minutes for its first snapshot. The feeder rebuilds the board if it is lost.
+    Bun.spawn(["bunx", "wrangler", "dev", "--local", "--port", new URL(UPSTREAM).port || "8787", ...(process.env.GENUI_STATE ? ["--persist-to", process.env.GENUI_STATE] : [])], { cwd: new URL("../genui-server/", import.meta.url).pathname, stdout: "inherit", stderr: "inherit" }),
     Bun.spawn(["bun", "feeder/feeder.ts"], { cwd: import.meta.dir, stdout: "inherit", stderr: "inherit", env: { ...process.env, GENUI_SERVER: UPSTREAM } }),
   ];
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { for (const k of kids) k.kill(); process.exit(0); });

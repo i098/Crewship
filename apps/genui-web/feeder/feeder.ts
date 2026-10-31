@@ -291,7 +291,8 @@ function adoptLeftovers(want: Record<string, Component>) {
     }
 }
 
-/** Applies the plan: the kept cards go to one cluster in the plan's order and size; every other card is set aside to the rail. */
+/** Applies the plan: each kept card stays in its own board's cluster (boards never mix), in the plan's order and size;
+ * every other card is set aside to the rail. */
 export function applyPlan(want: Record<string, Component>, pl = plan) {
   if (!pl) return;
   adoptLeftovers(want);
@@ -300,7 +301,6 @@ export function applyPlan(want: Record<string, Component>, pl = plan) {
   const lift = (id: string, props: P) => (want[id] = { ...want[id], props: { ...want[id].props, ...props } });
   keep.forEach((id, i) =>
     lift(id, {
-      proj: "me",
       base: 700 - i,
       asked: true, // all kept cards get the same ask boost, so the plan's order holds
       ...(p.size[id] ? { size: p.size[id] } : {}),
