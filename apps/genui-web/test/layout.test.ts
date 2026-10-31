@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GAP, type Item, layout, packCheck, type Rel } from "../src/layout";
+import { GAP, type Item, layout, packCheck, type Rel, stepCard } from "../src/layout";
 
 const it = (id: string, proj: string, prio: number): Item => ({ id, proj, prio, done: false });
 const items = [
@@ -136,4 +136,23 @@ test("an opened cluster comes to the front; a pinned card stays at its spot", ()
   const L = layout([...items, { ...it("u1", "me", 99), pin: { x: 5000, y: 7 } }], rels, desk, { ...st, view: "bill" }, fit);
   expect(L.front).toBe("bill");
   expect(L.tiles.u1).toMatchObject({ x: 5000, y: 7, proj: null });
+});
+
+test("keys walk the cards of one cluster: order wraps, an arrow picks the nearest card that way, a card behind only in order", () => {
+  const four = ["a", "b", "c", "d"].map((id, i) => it(id, "swap", 90 - i));
+  const L = layout([...four, { ...it("e", "swap", 10), under: "a" }, it("x", "crew", 5)], [], desk, st, fit);
+  const ids = L.clusters[0].ids;
+  expect(stepCard(L, undefined, "next")).toBe(ids[0]);
+  expect(stepCard(L, ids.at(-1), "next")).toBe(ids[0]);
+  expect(stepCard(L, ids[0], "prev")).toBe(ids.at(-1));
+  expect(stepCard(L, ids[2], "first")).toBe(ids[0]);
+  expect(stepCard(L, ids[0], "last")).toBe(ids.at(-1));
+  const t = L.tiles;
+  const right = stepCard(L, "a", "right");
+  expect(t[right].x).toBeGreaterThan(t.a.x);
+  expect(Math.abs(t[right].y - t.a.y)).toBeLessThan(t.a.h);
+  expect(stepCard(L, "a", "right")).not.toBe("e");
+  const down = stepCard(L, "a", "down");
+  expect(t[down].y).toBeGreaterThan(t.a.y + t.a.h - 1);
+  expect(stepCard(L, "x", "next")).toBe("x"); // its own cluster of one
 });

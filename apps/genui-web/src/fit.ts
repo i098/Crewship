@@ -48,12 +48,12 @@ export function overflows(tile: HTMLElement) {
 }
 
 /** A card taller than its content (its row grew to a taller neighbour) shows more body lines instead of blank room
- * under four; the clamp is a whole number of lines, so no line is cut through. */
+ * under six; the clamp is a whole number of lines, so no line is cut through. */
 function fillBody(tile: HTMLElement) {
   for (const b of tile.querySelectorAll<HTMLElement>(".core > .body")) {
     b.style.removeProperty("-webkit-line-clamp");
     const n = Math.floor((b.clientHeight + 1) / parseFloat(getComputedStyle(b).lineHeight));
-    if (n > 4) b.style.setProperty("-webkit-line-clamp", String(n));
+    if (n > 6) b.style.setProperty("-webkit-line-clamp", String(n));
   }
 }
 

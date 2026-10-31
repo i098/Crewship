@@ -2,7 +2,7 @@
 // and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
 import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { fitCards } from "./fit";
-import { CW0, type Item, type Layout, layout } from "./layout";
+import { CW0, type Item, type Layout, layout, type Move, stepCard } from "./layout";
 import { startLinks } from "./links";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { type About, initOverlays } from "./overlays";
@@ -97,6 +97,21 @@ const cam = {
     const o = L?.order ?? [];
     if (!o.length) return;
     cam.open(o[(o.indexOf(L?.front ?? o[0]) + dir + o.length) % o.length]);
+  },
+  /** Moves the selection one card inside its cluster (keys): the card comes to the front of its stack and into view. */
+  step(m: Move) {
+    const id = L && stepCard(L, sel.size === 1 ? [...sel][0] : undefined, m);
+    if (!id) return;
+    sel.clear();
+    sel.add(id);
+    if (L!.tiles[id]?.under) toFront(id);
+    const t = L!.tiles[id],
+      vp = viewport(),
+      sx = (x: number) => (x - cam.x) * cam.k + vp.W / 2,
+      sy = (y: number) => (y - cam.y) * cam.k + vp.H / 2;
+    const out = sx(t.x) < 0 || sx(t.x + t.w * t.s) > vp.W || sy(t.y) < vp.topH || sy(t.y + t.h * t.s) > vp.H - vp.botH;
+    if (out) Object.assign(cam, { free: true, x: t.x + (t.w * t.s) / 2, y: t.y + (t.h * t.s) / 2 });
+    paint();
   },
   open(proj: string) {
     Object.assign(cam, { free: false, view: proj, spreading: false });
@@ -228,6 +243,13 @@ function restack(ts: Item[]): Item[] {
   return ts;
 }
 
+/** Brings a card behind to the front of its stack; its plan front card puts the stack back. */
+function toFront(id: string) {
+  const f = spec.components[id]?.props.under;
+  if (fronted.has(id)) fronted.delete(id);
+  else if (typeof f === "string") fronted.set(f, id);
+}
+
 // a stack is browsable: a tap on a card behind brings it to the front, a tap on the plan's front card puts it back
 document.addEventListener(
   "click",
@@ -236,9 +258,7 @@ document.addEventListener(
     if (!id) return;
     e.stopPropagation();
     e.preventDefault();
-    const f = spec.components[id]?.props.under;
-    if (fronted.has(id)) fronted.delete(id);
-    else if (typeof f === "string") fronted.set(f, id);
+    toFront(id);
     paint();
   },
   true,
@@ -288,7 +308,7 @@ function raise(id: string) {
 function planShape(p: Component["props"], size: Item["size"]): Partial<Item> {
   const stack = { under: typeof p.under === "string" ? p.under : undefined, edge: p.edge === true };
   if (size) return { ...stack, size };
-  return { ...stack, wide: p.size === "l", size: p.size === "s" ? { w: 260 } : undefined };
+  return { ...stack, wide: p.size === "l", size: p.size === "s" ? { w: 320 } : undefined };
 }
 
 function viewport() {

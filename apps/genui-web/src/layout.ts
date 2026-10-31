@@ -50,9 +50,14 @@ export type Layout = {
   cam: { x: number; y: number; k: number };
 };
 
-export const P = 22, HD = 48, GAP = 16, CW0 = 380, CGAP = 120;
-export const STEP = 22; // how far each stacked card peeks out from behind the one in front
-export const EW = 260; // the width of the edge column
+export const P = 22,
+  HD = 48,
+  GAP = 16,
+  CW0 = 380, // a card's width on a phone, where the camera fits one card to the screen
+  CW = 460, // a card's width on a wider screen: room for more of its text, still the narrow view
+  CGAP = 120,
+  STEP = 22, // how far each stacked card peeks out from behind the one in front
+  EW = 320; // the width of the edge column
 
 type Fit = (id: string, w: number) => number;
 type Group = { proj: string; ts: Item[]; p: number };
@@ -83,6 +88,35 @@ export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit:
     spread: SP,
     cam: fitCam(clusters, tiles, SP ? undefined : focusOf(clusters[0], tiles, W < 600), vp, SP),
   };
+}
+
+export type Move = "next" | "prev" | "first" | "last" | "left" | "right" | "up" | "down";
+const DIR: Record<string, number[]> = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+
+/** The card a key moves to from `cur`, inside `cur`'s cluster (the front one when `cur` is in none): list order for
+ * next/prev/first/last, the nearest card that way for an arrow (a card behind a stack is reached only in order). */
+export function stepCard(L: Pick<Layout, "clusters" | "tiles">, cur: string | undefined, m: Move): string | undefined {
+  const ids = (L.clusters.find((b) => cur !== undefined && b.ids.includes(cur)) ?? L.clusters[0])?.ids ?? [];
+  const i = cur === undefined ? -1 : ids.indexOf(cur);
+  if (!ids.length) return undefined;
+  if (i < 0 || m === "first" || m === "last") return m === "last" || (i < 0 && m === "prev") ? ids.at(-1) : ids[0];
+  if (m === "next" || m === "prev") return ids[(i + (m === "next" ? 1 : -1) + ids.length) % ids.length];
+  return nearest(L.tiles, ids, ids[i], DIR[m]);
+}
+
+/** The card in `ids` nearest to `cur` in direction `[dx, dy]`, off-axis distance counting double; `cur` when none is that way. */
+function nearest(tiles: Record<string, TileBox>, ids: string[], cur: string, [dx, dy]: number[]) {
+  const mid = (t: TileBox) => [t.x + (t.w * t.s) / 2, t.y + (t.h * t.s) / 2];
+  const [x0, y0] = mid(tiles[cur]);
+  let best = cur,
+    bd = Infinity;
+  for (const id of ids.filter((id) => id !== cur && !tiles[id]?.under)) {
+    const [x, y] = mid(tiles[id]),
+      ahead = (x - x0) * dx + (y - y0) * dy,
+      d = ahead + 2 * Math.abs((x - x0) * dy + (y - y0) * dx);
+    if (ahead > 1 && d < bd) (bd = d), (best = id);
+  }
+  return best;
 }
 
 /** What the camera fits in focus: the front cluster, or on a phone its top card so it reads at full size. */
@@ -174,11 +208,12 @@ function tile(ts: Item[], fit: Fit, one: boolean) {
   const flow = ts.filter((t) => !behind(t) && (one || !t.edge)),
     edge = one ? [] : ts.filter((t) => !behind(t) && t.edge);
   const rows = flow.length ? rowsOf(flow, one ? 1 : Math.ceil(Math.sqrt(flow.length))) : [];
-  const W2 = Math.max(0, ...rows.map(natural));
+  const cw = one ? CW0 : CW,
+    W2 = Math.max(0, ...rows.map((r) => natural(r, cw)));
   const at = new Map<string, number[]>();
   let y = HD;
   for (const row of rows) {
-    const ws = widths(row, W2),
+    const ws = widths(row, W2, cw),
       h = Math.max(...row.map((t, i) => Math.max(fit(t.id, ws[i]), t.size?.h ?? 0)));
     let x = P;
     row.forEach((t, i) => {
@@ -229,15 +264,15 @@ function rowsOf(ts: Item[], cols: number) {
 
 /** The width a user gave a card (kept between 200 px and two columns), or 0 when it has none. */
 const own = (t: Item) => (t.size?.w ? Math.max(200, Math.min(2 * CW0, t.size.w)) : 0);
-/** A card's width before the row shares its spare room: its own width, else one column, two for a wide card. */
-const base = (t: Item) => own(t) || (t.wide ? 2 * CW0 + GAP : CW0);
-const natural = (row: Item[]) => row.reduce((s, t) => s + base(t), (row.length - 1) * GAP);
+/** A card's width before the row shares its spare room: its own width, else one column `cw`, two for a wide card. */
+const base = (t: Item, cw: number) => own(t) || (t.wide ? 2 * cw + GAP : cw);
+const natural = (row: Item[], cw: number) => row.reduce((s, t) => s + base(t, cw), (row.length - 1) * GAP);
 
 /** Card widths that fill a row to `W2`: cards with no user width share the spare room; when all have one, all share it. */
-function widths(row: Item[], W2: number) {
+function widths(row: Item[], W2: number, cw: number) {
   const free = row.filter((t) => !own(t)).length,
-    extra = W2 - natural(row);
-  return row.map((t) => base(t) + (free === 0 ? extra / row.length : own(t) ? 0 : extra / free));
+    extra = W2 - natural(row, cw);
+  return row.map((t) => base(t, cw) + (free === 0 ? extra / row.length : own(t) ? 0 : extra / free));
 }
 
 type Grid = { cells: number[][]; cx: number; cy: number; ring: number[] };

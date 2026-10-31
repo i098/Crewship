@@ -1,5 +1,6 @@
 // Overlays and gestures over the canvas: selection, the full view window, ink, uploads and hotkeys (design docs/genui/design).
 import type { ClientMsg, IntentKind, Rect } from "@crewship/genui-spec";
+import type { Move } from "./layout";
 import type { Board } from "./model";
 
 export type About = { of?: string; ids: string[]; at?: Rect };
@@ -10,6 +11,7 @@ export type OverlayCtx = {
   cam: {
     spreading: boolean;
     cycle(dir: number): void;
+    step(m: Move): void;
     toWorld(clientX: number, clientY: number): { x: number; y: number };
     onChange(fn: (transform: string, k: number) => void): void;
   };
@@ -398,21 +400,42 @@ function escape(st: St) {
   (document.activeElement as HTMLElement | null)?.blur();
 }
 
-/** The action for a hotkeys-mode key, if it has one. */
-function hotkey(st: St, key: string, t: Element): (() => void) | undefined {
-  if (key === " ") return t.closest("button") ? undefined : () => document.getElementById("spread")?.click();
-  const nav: Record<string, () => void> = {
-    "[": () => st.ctx.cam.cycle(-1),
-    "]": () => st.ctx.cam.cycle(1),
-    "0": () => document.getElementById("recenter")?.click(),
-    "/": () => st.q.focus(),
-    l: () => need(".logbtn").click(),
-    L: () => need(".logbtn").click(),
-  };
-  return nav[key];
+/** Tab and Enter on the cards: Tab walks the cluster's cards only from the page itself (inside a card or the full view
+ * it keeps moving focus), Enter opens the card the keys selected (on a button it stays the button's own). */
+function cardKey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined {
+  if (e.key === "Tab" && !st.open && !t.closest?.(IA)) return () => st.ctx.cam.step(e.shiftKey ? "prev" : "next");
+  if (e.key === "Enter" && st.ctx.sel.size === 1 && !t.closest("button,a")) return () => ((st.open = [...st.ctx.sel][0]), refresh(st));
 }
 
-/** Hotkeys mode (body.keys): 0 [ ] space / L z; any other letter types into the ask box. */
+/** The action for a hotkeys-mode key, if it has one. */
+function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined {
+  if (e.key === " ") return t.closest("button") ? undefined : () => document.getElementById("spread")?.click();
+  const step = (m: Move) => () => st.ctx.cam.step(m);
+  const nav: Record<string, () => void> = {
+    "[": step("prev"),
+    "]": step("next"),
+    h: step("left"),
+    j: step("down"),
+    k: step("up"),
+    l: step("right"),
+    ArrowLeft: step("left"),
+    ArrowDown: step("down"),
+    ArrowUp: step("up"),
+    ArrowRight: step("right"),
+    g: step("first"),
+    Home: step("first"),
+    G: step("last"),
+    End: step("last"),
+    "{": () => st.ctx.cam.cycle(-1),
+    "}": () => st.ctx.cam.cycle(1),
+    "0": () => document.getElementById("recenter")?.click(),
+    "/": () => st.q.focus(),
+    L: () => need(".logbtn").click(),
+  };
+  return cardKey(st, e, t) ?? nav[e.key];
+}
+
+/** Hotkeys mode (body.keys): cards [ ] tab h j k l arrows g G enter, clusters { }, 0 space / L z; any other letter types into the ask box. */
 function onKey(st: St, e: KeyboardEvent) {
   if (e.key === "Escape") return escape(st);
   const t = e.target as Element;
@@ -421,8 +444,8 @@ function onKey(st: St, e: KeyboardEvent) {
   const mod = e.metaKey || e.ctrlKey;
   if (e.key.toLowerCase() === "z" && (mod || keys)) return e.preventDefault(), st.ctx.send({ t: "undo" });
   if (mod) return;
-  const run = keys ? hotkey(st, e.key, t) : undefined;
-  if (run) return e.preventDefault(), run();
+  const run = keys ? hotkey(st, e, t) : undefined;
+  if (run) return (e.preventDefault(), run());
   // any other key goes to the ask box, focused before the key lands so the letter is kept
   if (e.key.length === 1 && e.key !== " ") st.q.focus();
 }

@@ -21,7 +21,10 @@ const DOT = "hsl(48 96% 60%)"; // the design's "you added" colour, for a row wit
 const SYSC: Record<string, string> = { cpu: "hsl(188 95% 58%)", mem: "hsl(262 92% 70%)", disk: "hsl(38 98% 62%)", net: "hsl(152 72% 56%)" };
 const UNIT: Record<string, string> = { net: " MB/s" };
 const NAV = {
-  keys: ["⌨ hotkeys", "0 back to what matters · space all boards · [ ] other clusters · / ask · z rewind · L log · esc close · shift-drag to draw · drop files to upload"],
+  keys: [
+    "⌨ hotkeys",
+    "[ ] tab hjkl ←↓↑→ cards · g G first, last · ↵ open · { } other clusters · 0 back to what matters · space all boards · / ask · z rewind · L log · esc close · shift-drag to draw · drop files to upload",
+  ],
   buttons: ["☝ buttons", "tap to select · ⊞ all boards · ✎ to draw · ＋ to upload · drag to move · pinch to zoom · rewind in log"],
 } as const;
 
