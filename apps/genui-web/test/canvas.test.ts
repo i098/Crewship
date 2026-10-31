@@ -155,6 +155,24 @@ describe("genui-server contract", () => {
     ws.close();
   }, 15_000);
 
+  test("z after a pill tap removes the card the agent opened for it", async () => {
+    const { ws, next, boardId } = await open();
+    const count = async () => {
+      ws.send(JSON.stringify({ t: "hello", boardId, clientId: "c" }));
+      const s = await next("snapshot");
+      return s.t === "snapshot" ? Object.keys(s.spec.components).length : -1;
+    };
+    const before = await count();
+    ws.send(JSON.stringify({ t: "intent", id: "tap", kind: "input", targetId: "header", payload: { text: "Open the k1 terminal", open: "tui-k1" } }));
+    await next("ack");
+    await agent(boardId, "emit_view", { cause: "tap", event: { delta: [{ op: "add", path: "/components/tui-k1", value: { type: "card", props: { kind: "tui" } } }] } });
+    expect(await count()).toBe(before + 1);
+    ws.send(JSON.stringify({ t: "undo" }));
+    await next("ops");
+    expect(await count()).toBe(before);
+    ws.close();
+  }, 15_000);
+
   test("user wins: the server keeps the user's placement against the agent", async () => {
     const { ws, next, boardId } = await open();
     ws.send(JSON.stringify({ t: "intent", id: "w", kind: "input", targetId: "header", payload: { field: "wins", value: "user" } }));
