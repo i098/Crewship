@@ -11,7 +11,7 @@ export type OverlayCtx = {
   cam: {
     spreading: boolean;
     cycle(dir: number): void;
-    step(m: Move): void;
+    step(m: Move, add?: boolean): void;
     toWorld(clientX: number, clientY: number): { x: number; y: number };
     onChange(fn: (transform: string, k: number) => void): void;
   };
@@ -62,6 +62,7 @@ type St = {
   threads: number;
   shown: string; // the full view's last html; innerHTML reads back normalised, so it cannot be compared
   want?: string; // a window card asked for: it opens in the full view once the feeder draws it
+  tab?: boolean; // Tab is held: card keys add to the selection
 };
 
 export function initOverlays(ctx: OverlayCtx) {
@@ -80,6 +81,9 @@ export function initOverlays(ctx: OverlayCtx) {
   wireUploads(st);
   // capture: runs before the shell's own Esc, so one Esc closes one thing
   addEventListener("keydown", (e) => onKey(st, e), true);
+  // releasing Tab keeps what it selected; a window that loses focus never sees the keyup
+  addEventListener("keyup", (e) => e.key === "Tab" && (st.tab = false));
+  addEventListener("blur", () => (st.tab = false));
   sync(st);
   return { sync: () => sync(st) };
 }
@@ -401,16 +405,17 @@ function escape(st: St) {
 }
 
 /** Tab and Enter on the cards: Tab walks the cluster's cards only from the page itself (inside a card or the full view
- * it keeps moving focus), Enter opens the card the keys selected (on a button it stays the button's own). */
+ * it keeps moving focus); while it is held, the other card keys add to the selection instead of moving it (a held
+ * Tab's repeats do nothing). Enter opens the card the keys selected (on a button it stays the button's own). */
 function cardKey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined {
-  if (e.key === "Tab" && !st.open && !t.closest?.(IA)) return () => st.ctx.cam.step(e.shiftKey ? "prev" : "next");
+  if (e.key === "Tab" && !st.open && !t.closest?.(IA)) return e.repeat ? () => {} : () => ((st.tab = true), st.ctx.cam.step(e.shiftKey ? "prev" : "next"));
   if (e.key === "Enter" && st.ctx.sel.size === 1 && !t.closest("button,a")) return () => ((st.open = [...st.ctx.sel][0]), refresh(st));
 }
 
 /** The action for a hotkeys-mode key, if it has one. */
 function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined {
   if (e.key === " ") return t.closest("button") ? undefined : () => document.getElementById("spread")?.click();
-  const step = (m: Move) => () => st.ctx.cam.step(m);
+  const step = (m: Move) => () => st.ctx.cam.step(m, !!st.tab);
   const nav: Record<string, () => void> = {
     "[": step("prev"),
     "]": step("next"),

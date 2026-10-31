@@ -98,11 +98,13 @@ const cam = {
     if (!o.length) return;
     cam.open(o[(o.indexOf(L?.front ?? o[0]) + dir + o.length) % o.length]);
   },
-  /** Moves the selection one card inside its cluster (keys): the card comes to the front of its stack and into view. */
-  step(m: Move) {
-    const id = L && stepCard(L, sel.size === 1 ? [...sel][0] : undefined, m);
+  /** Moves the selection one card inside its cluster (keys): the card comes to the front of its stack and into view.
+   * `add` (Tab held) keeps the cards already selected, so the walk builds a multi-selection. */
+  step(m: Move, add = false) {
+    const id = L && stepCard(L, [...sel].at(-1), m);
     if (!id) return;
-    sel.clear();
+    if (!add) sel.clear();
+    sel.delete(id); // the newest pick is last, so the next step starts from it
     sel.add(id);
     if (L!.tiles[id]?.under) toFront(id);
     const t = L!.tiles[id],
