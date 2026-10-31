@@ -306,6 +306,7 @@ The code is `apps/imessage/herdr-watch.ts`. It runs only `herdr agent list`, whi
 Every poll compares each worker pane with its last confirmed status. A new status counts only when it holds for the debounce time, so a status that flips back is ignored.
 One poll sends one text, with one sentence for each confirmed change. The sentence names the project and the task and has no pane id.
 The first poll only records the starting statuses. Supervisor panes are skipped: a pane with a `who` token, or one whose project folder is in the skip list.
+When a pane closes while a new status is held but not yet confirmed, the bridge sends the alert for that held status once, if the status is in the alert list.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
