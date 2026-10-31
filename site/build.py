@@ -19,7 +19,7 @@ ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
 ORIGIN = "https://crewship.si"
 MARK = "<!-- points: site/build.py fills this list from README.md and CHANGELOG.md -->"
-# Maintainer pages stay published and linked from /docs but are not offered to search engines.
+# Maintainer pages stay published and linked from /docs but are omitted from sitemap.xml.
 UNLISTED = {"/docs/default-config", "/docs/validation-postmortems", "/docs/usage"}
 
 # Each Features link maps to its scene object; unmapped docs share a summary and index link.

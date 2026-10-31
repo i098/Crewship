@@ -266,7 +266,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                         *[
                             f"https://crewship.si/docs/{p.stem}"
                             for p in sorted((ROOT / "docs").glob("*.md"))
-                            if f"/docs/{p.stem}" not in build.UNLISTED
+                            if p.stem not in {"default-config", "validation-postmortems", "usage"}
                         ],
                     ]
                 if filename == "robots.txt":
