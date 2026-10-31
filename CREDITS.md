@@ -8,6 +8,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [ponytail](https://github.com/DietrichGebert/ponytail) (`ponytail`): omp marketplace plugin, least-code rules for agents. License: MIT.
 - [i-have-adhd](https://github.com/ayghri/i-have-adhd) (`i-have-adhd`): omp marketplace plugin, short answer-first output. License: MIT.
 - [caveman](https://github.com/JuliusBrussee/caveman) (`caveman`): omp marketplace plugin, compressed agent output. License: Apache-2.0.
+- [appllama-skills](https://github.com/Appllama/appllama-skills) (`appllama-usage`, `appllama-app-design-skill`): public skills for mobile app research and design, by Antmind Ventures Private Limited, vendored unchanged at commit [`dd5caae`](https://github.com/Appllama/appllama-skills/commit/dd5caaec3d5d50ad7fc0324da238119c6b7c3707). License: MIT.
 - [code-clarity](https://github.com/Lakr233/code-clarity) (`code-clarity`): public skill for readable code, by Lakr233, vendored unchanged at commit [`a0d5802`](https://github.com/Lakr233/code-clarity/commit/a0d58020022bc2537de2b8b6673f71620fec3c45). License: MIT.
 - [Floorplan](https://github.com/haydenschmitty/floorplan): third-party Claude Code plugin, referenced by the public skill; nothing is vendored. License: MIT.
 - [github-markdown-css](https://github.com/sindresorhus/github-markdown-css) (`github-markdown-css`): the Primer Markdown CSS of the `pr-preview` public skill, by Sindre Sorhus, vendored unchanged at version 5.9.0 (`github-markdown-dark.css` and its license). License: MIT.
@@ -46,7 +47,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Ruff](https://github.com/astral-sh/ruff): lint and format. License: MIT.
 - [psutil](https://github.com/giampaolo/psutil) (`psutil`): process data for the Chrome autopruner. License: BSD-3-Clause.
 - [spectrum-ts](https://github.com/photon-hq/spectrum-ts) (`spectrum-ts`): the iMessage bridge SDK. License: MIT.
-- [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) by Victor Taelin: the design of the iMessage front desk's long-running memory (`apps/imessage/memory.ts`). License: none stated on the gist.
+- [UniiChat: one chat that never ends](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) by Victor Taelin: the design of the long-running memory of the iMessage front desk and of every omp session (`apps/imessage/memory.ts`, `blueprint/config/omp-unii-memory.ts`). License: none stated on the gist.
 - [Docker Engine](https://github.com/moby/moby): containers for the worker and the CI pool. License: Apache-2.0.
 - [Docker Compose](https://github.com/docker/compose): the worker and backing services. License: Apache-2.0.
 - [GitHub Actions Runner](https://github.com/actions/runner): the image of the self-hosted CI pool. License: MIT.

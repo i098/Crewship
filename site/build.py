@@ -19,6 +19,8 @@ ROOT = HARBOR.parent
 REPO = "https://github.com/i098/Crewship"
 ORIGIN = "https://crewship.si"
 MARK = "<!-- points: site/build.py fills this list from README.md and CHANGELOG.md -->"
+# Maintainer pages stay published and linked from /docs but are omitted from sitemap.xml.
+UNLISTED = {"/docs/default-config", "/docs/validation-postmortems", "/docs/usage"}
 
 # Each Features link maps to its scene object; unmapped docs share a summary and index link.
 SCENE = {
@@ -465,10 +467,15 @@ def build_docs(dist):
         body = render_markdown((ROOT / source).read_text(), source, routes)
         heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", body, re.S)
         title = plain_text(heading[1]) if heading else Path(source).stem
-        description = next(
-            (plain_text(p) for p in re.findall(r"<p>(.*?)</p>", body, re.S) if plain_text(p)),
-            title,
-        )
+        title = "Crewship overview" if source == "README.md" else re.sub(r"^[\W_]+", "", title)
+        paragraphs = [
+            t
+            for p in re.findall(r"<p>(.*?)</p>", body, re.S)
+            if (t := plain_text(p)) and " · " not in t
+        ]
+        description = paragraphs.pop(0) if paragraphs else title
+        while len(description) < 70 and paragraphs:  # a one-line first paragraph is too thin for a snippet
+            description += " " + paragraphs.pop(0)
         if len(description) > 160:
             description = description[:157].rsplit(" ", 1)[0] + "..."
         (dist / f"{route.lstrip('/')}.html").write_text(
@@ -483,7 +490,7 @@ def build_docs(dist):
         f"<p>{description}</p><ul>" + "\n".join(entries) + "</ul>"
     )
     (dist / "docs.html").write_text(doc_page("Documentation", description, "/docs", index))
-    urls = ["/", "/how", "/about", "/docs", *routes.values()]
+    urls = ["/", "/how", "/about", "/docs", *(r for r in routes.values() if r not in UNLISTED)]
     (dist / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'

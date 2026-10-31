@@ -451,6 +451,8 @@ VENDORED_OWNER = {
         "github.com/Ksanbal",
     ),
     "blueprint/skills/public/be-ambitious/": ("github.com/DannyMac180",),
+    "blueprint/skills/public/appllama-usage/": ("github.com/Appllama",),
+    "blueprint/skills/public/appllama-app-design-skill/": ("github.com/Appllama", "process.env"),
     "blueprint/skills/public/code-clarity/": ("github.com/Lakr233",),
     "blueprint/skills/public/pr-preview/": ("sindresorhus@gmail.com",),
 }

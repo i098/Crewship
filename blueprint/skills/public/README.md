@@ -2,8 +2,12 @@
 
 Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name>/SKILL.md`, with any helper files beside it. A folder with no `SKILL.md` of its own groups skills as `<group>/<name>/SKILL.md`: a file the skills share sits once in the group folder, with a relative symlink to it in each skill. The group installs whole, with its links, and each skill in it installs as a link `<name>` to `<group>/<name>`. With `profiles.public_skills` on, apply installs every skill here for omp (`~/.omp/agent/skills/`) and Claude Code (`~/.claude/skills/`). A skill in [`blueprint/skills/private/`](../private/README.md) with the same name wins on that host. See [Skills](../../../docs/omp.md#skills).
 
+- [`appllama-app-design-skill`](appllama-app-design-skill/SKILL.md): build native-feeling Expo and React Native screens with Apple HIG fidelity, native controls, purposeful motion and a simulator check loop (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
+- [`appllama-usage`](appllama-usage/SKILL.md): research real top-grossing mobile apps through the Appllama MCP, then build from what you learn; the skill does not configure the MCP server (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`apple-hig`](apple-hig/SKILL.md): short Apple Human Interface Guidelines rules with a link to each HIG page, plus current iOS design and SwiftUI resources (credits community skills), for iOS, macOS and mobile UI work.
+- [`ios-app-checklist`](ios-app-checklist/SKILL.md): check common App Store submission requirements described in a developer's reel.
 - [`be-ambitious`](be-ambitious/SKILL.md): deepen a prompt through expert methods, primary sources, and external verification (MIT; [Dan McAteer](https://github.com/DannyMac180), [source](https://github.com/DannyMac180/skills/tree/main/be-ambitious)).
+- [`ai-design-consistency`](ai-design-consistency/SKILL.md): keep AI-generated design consistent through a clear point of view, encoded design standards and templates, user-like inspection, and adversarial critique.
 - [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
 - [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
 - [`clean-code-errors`](clean-code-errors/SKILL.md): exceptions over error codes, catch blocks, wrapping library exceptions, the failure contract of a function (credits `@s4.codes` reels).
@@ -11,6 +15,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`clean-code-functions`](clean-code-functions/SKILL.md): function size, one job, argument count, flags, side effects, switch statements, duplication (credits `@s4.codes` reels).
 - [`clean-code-naming`](clean-code-naming/SKILL.md): names that reveal intent, no abbreviations or magic numbers (credits `@s4.codes` reels).
 - [`clean-code-tests`](clean-code-tests/SKILL.md): F.I.R.S.T, one concept per test, build-operate-check, TDD (credits `@s4.codes` reels).
+- [`ci-cd-setup`](ci-cd-setup/SKILL.md): ordered steps and a checklist to set up CI/CD for a new repository: SHA-pinned actions, read-only token, change classification, parallel jobs, required checks, PR body and changelog checks, merge commits (credits [Owen Gretzinger's article](https://x.com/owengretzinger/status/2116291924219060319)).
 - [`claude-account-onboarding`](claude-account-onboarding/SKILL.md): checklist to onboard a new Claude account without suspension (clean IP, one device, slow ramp, random logout means a watch period); community reports, not verified.
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
@@ -19,6 +24,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
 - [`instagram-dm`](instagram-dm/SKILL.md): read the agent Instagram DMs with `instagrapi` (session reuse, email-code login), normalise shared posts to `/reel/` URLs for yt-dlp, wake the agent within seconds on a new DM from the operator, reply with `fm-insta-reply`, and curate a few worthwhile reels a day with `reel_curator.py`.
+- [`break-it`](break-it/SKILL.md): after building a UI or feature, try to break it with worst-case input (long names, huge lists, unusual emails, empty and unicode data, narrow screens) and fix what breaks (idea from [Emil Kowalski's post](https://x.com/emilkowalski/status/2103516287452483885)).
 - [`ieee-documentation`](ieee-documentation/SKILL.md): IEEE 1016 design and IEEE 829 test documents, kept in proportion.
 - [`mate-archive`](mate-archive/SKILL.md): search and zoom the full text of past omp chat with `mate-archive`, for detail a compact removed from the live context.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
@@ -31,12 +37,15 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`pr-preview`](pr-preview/SKILL.md): a Lavish board that recreates the GitHub PR, issue or comment page, with the body rendered by GitHub's Markdown API (CSS vendored from `github-markdown-css`, MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`process-safety`](process-safety/SKILL.md): kill by pid, not by pattern, and keep test services and worktree ports apart.
 - [`prod-readiness`](prod-readiness/SKILL.md): run 20 evidence-backed checks before a production launch, deploy, release to users, or an "is this ready" review.
+- [`website-launch-checklist`](website-launch-checklist/SKILL.md): run 20 evidence-backed checks before a website launch; not for production infrastructure readiness or general SEO strategy.
 - [`progress-bars`](progress-bars/SKILL.md): a fixed ASCII progress-bar format with percentages from real counts.
 - [`quality-gates`](quality-gates/SKILL.md): sentrux and fallow gates and the pull-based codex advisor.
 - [`repo-readme`](repo-readme/SKILL.md): study similar repositories, then write a short README with peer-shared sections, GitHub best practices, a hero, screenshots, quick start, diagram, layout, and license.
 - [`signal-chunks`](signal-chunks/SKILL.md): plan a week with one shipping goal and a timezoned deadline, eighteen-hour chunks, three to five signal tasks, named noise, an eighty-percent effort target, and CHUNK status with a verdict (Jobs-inspired method, not a claim about Jobs' own schedule).
 - [`site-walkthrough-video`](site-walkthrough-video/SKILL.md): a smooth walk-through video of a 3D or WebGL site, driven with real keyboard and mouse-look input (planned route through open space, spring turns, a stop at each area), captured frame-exact at 1080p60 in parallel segments, reviewed per leg, framed on a desktop wallpaper with synthesized sound.
 - [`slack-relay`](slack-relay/SKILL.md): relay Slack messages to iMessage; see the skill for filtering rules and setup.
+- [`subscription-dark-patterns`](subscription-dark-patterns/SKILL.md): identify coercive subscription pricing and cancellation patterns, and choose fair retention design.
+- [`service-resilience`](service-resilience/SKILL.md): protect service calls from stalled or failing dependencies with timeouts, circuit breakers and safe fallbacks.
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
 - [`third-party-signups`](third-party-signups/SKILL.md): act on an owner's standing authorization for signups, email codes and app approvals, with the bounds that always hold.
 - [`ui-ux`](ui-ux/): two UI skills that share [`shared-basics.md`](ui-ux/shared-basics.md) (alignment, one primary button per view, relative units, accessibility): [`app-dashboard`](ui-ux/app-dashboard/SKILL.md) for app screens, dashboards, forms, dialogs and loading states, and [`landing-marketing`](ui-ux/landing-marketing/SKILL.md) for landing pages, CTA copy, entrance motion and gradients (credits Zander Whitehurst's reels).

@@ -738,7 +738,7 @@ def upstream(monkeypatch, unverified=None, seen=None):
                 assert repo != "kunchenguid/no-mistakes", "no-mistakes is on the prerelease channel"
                 body = release(*RELEASES[repo])
         elif url == "https://nodejs.org/dist/index.json":
-            body = [{"version": "v9.99.0"}, {"version": "v30.1.0"}]
+            body = [{"version": "v9.99.0"}, {"version": "v30.1.0"}, {"version": "v27.0.0-alpha.0.0.0"}, {"version": "v99.0.0-alpha.0.0.0"}]
         elif url == "https://nodejs.org/dist/v30.1.0/SHASUMS256.txt":
             sums = "" if unverified == "node" else "b" * 64 + "  node-v30.1.0-linux-x64.tar.xz\n"
             return Download(("c" * 64 + "  node-v30.1.0-linux-arm64.tar.xz\n" + sums).encode())
@@ -1594,3 +1594,54 @@ def test_sgrep_builds_from_git_links_warms_both_models_and_reports_change_only_o
     assert installer.sgrep_install(tmp_path, environment) is False
     release.write_text("2")
     assert installer.sgrep_install(tmp_path, environment) is True
+
+
+def test_vphone_clones_the_latest_tag_and_moves_to_a_newer_one(tmp_path, monkeypatch):
+    upstream = tmp_path / "upstream"
+
+    def git(*a, cwd=upstream):
+        return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+
+    upstream.mkdir()
+    git("init", "-q")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+    git("tag", "v1")
+    tag = ["v1"]
+    monkeypatch.setattr(installer, "latest_release", lambda *a: {"tag_name": tag[0]})
+    monkeypatch.setattr(installer, "VPHONE_REPOSITORY", "x/y")
+    environment = {"PATH": os.environ["PATH"], "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{upstream}.insteadOf",
+                   "GIT_CONFIG_VALUE_0": "https://github.com/x/y.git"}
+    assert installer.vphone_install(tmp_path, environment) is True
+    assert installer.vphone_install(tmp_path, environment) is False
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    git("tag", "v2")
+    tag[0] = "v2"
+    assert installer.vphone_install(tmp_path, environment) is True
+    checkout = tmp_path / ".local/share/crewship/vphone-linux"
+    assert git("describe", "--tags", cwd=checkout).stdout.strip() == b"v2"
+
+
+def test_vphone_leaves_a_dirty_checkout_on_its_tag_and_warns(tmp_path, monkeypatch, capfd):
+    upstream = tmp_path / "upstream"
+
+    def git(*a, cwd=upstream):
+        return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+
+    upstream.mkdir()
+    git("init", "-q")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+    git("tag", "v1")
+    tag = ["v1"]
+    monkeypatch.setattr(installer, "latest_release", lambda *a: {"tag_name": tag[0]})
+    monkeypatch.setattr(installer, "VPHONE_REPOSITORY", "x/y")
+    environment = {"PATH": os.environ["PATH"], "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{upstream}.insteadOf",
+                   "GIT_CONFIG_VALUE_0": "https://github.com/x/y.git"}
+    assert installer.vphone_install(tmp_path, environment) is True
+    checkout = tmp_path / ".local/share/crewship/vphone-linux"
+    (checkout / "built").write_text("x")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    git("tag", "v2")
+    tag[0] = "v2"
+    assert installer.vphone_install(tmp_path, environment) is False
+    assert "rebuild is needed" in capfd.readouterr().err
+    assert git("describe", "--tags", cwd=checkout).stdout.strip() == b"v1"

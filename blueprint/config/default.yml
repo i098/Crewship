@@ -24,6 +24,8 @@ crewship:
     jj: false
     # fdu, a fast gitignore-aware du for large worktrees (docs/configuration.md#profiles).
     fdu: false
+    # vphone-linux checkout, a virtual iPhone on Linux (docs/dependencies.md#vphone-linux).
+    vphone: false
     fleet_browsers: false
     chat: false
     # The password gateway and its Cloudflare Quick Tunnel (docs/gateway.md).

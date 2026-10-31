@@ -16,6 +16,9 @@ crewship_omp_no_pattern_kill_extension: "{{ crewship_cfg.home }}/.omp/agent/exte
 crewship_omp_opus_effort_cap_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-opus-effort-cap.ts"
 # The sentrux/fallow quality gate at the end of every omp agent turn (docs/omp.md#quality-gate).
 crewship_omp_quality_gate_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/crewship-quality-gate.ts"
+# UniiChat memory for every omp session, second mates included; memory.ts sits in the folder beside it (docs/omp.md).
+crewship_omp_unii_memory_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-unii-memory.ts"
+crewship_omp_unii_memory_dir: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-unii-memory"
 crewship_omp_gluttony_extension: "{{ crewship_cfg.home }}/.omp/agent/extensions/fm-gluttony.ts"
 # Herdr's own omp state extension; `herdr integration install omp` writes it (docs/herdr.md).
 crewship_herdr_omp_integration: "{{ crewship_cfg.home }}/.omp/agent/extensions/herdr-omp-agent-state.ts"

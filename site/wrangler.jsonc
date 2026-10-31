@@ -1,8 +1,9 @@
 // Cloudflare Workers static assets for the crewship.si landing page.
 // There is no Worker script: Cloudflare serves dist/ as it is. Run site/build.py first;
 // it copies public/ to dist/ and fills in the points of interest.
+// not_found_handling serves dist/404.html, with status 404, for any path that is not a file.
 {
   "name": "crewship",
   "compatibility_date": "2026-10-09",
-  "assets": { "directory": "./dist" }
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" }
 }

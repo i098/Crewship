@@ -55,6 +55,8 @@ The source author prefers fully native apps; this is a preference, not a require
 
 - Give the agent one flow specification, its screenshots, and its completion criteria instead of one prompt for the whole app.
 - Implement the flow, run it on the target device or simulator, and check the completion criteria before starting another flow.
+- Animate meaningful state changes with short transitions, about 0.2 seconds as a starting point. Reserve stronger motion for major user milestones.
+- Use skeleton loading when the screen layout is known. Respect reduced-motion settings, and pause decorative animation in low-power mode.
 - Check real phone behavior before release; report any device or platform that you could not test.
 - Reserve time for debugging and fixes; do not promise the source author's build times for a different app.
 
@@ -71,3 +73,4 @@ The source author prefers fully native apps; this is a preference, not a require
 
 Distilled from [u/olenami's first mobile app guide on r/vibecoding](https://www.reddit.com/r/vibecoding/comments/1x7p4xo/a_stepbystep_guide_to_your_first_mobile_app_from/).
 The author discloses a role in an app builder; this skill does not endorse that product.
+Motion guidance adapted from [Cecilia Kim's reel](https://www.instagram.com/reel/DfF2EGqSuGI/).

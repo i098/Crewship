@@ -266,6 +266,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                         *[
                             f"https://crewship.si/docs/{p.stem}"
                             for p in sorted((ROOT / "docs").glob("*.md"))
+                            if p.stem not in {"default-config", "validation-postmortems", "usage"}
                         ],
                     ]
                 if filename == "robots.txt":
@@ -396,7 +397,8 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
         titles.append(title)
         assert title.endswith(" - Crewship docs")
         assert head.links["canonical"] == f"https://crewship.si{route}"
-        assert 0 < len(head.meta["description"]) <= 160
+        assert 70 <= len(head.meta["description"]) <= 160 or route == "/docs", route
+        assert title[0].isalnum(), title
         assert head.meta["og:url"] == head.links["canonical"]
         assert (head.meta["og:title"], head.meta["og:description"]) == (title, head.meta["description"])
         assert {"/", "/about", "/docs"} <= set(head.anchors)
