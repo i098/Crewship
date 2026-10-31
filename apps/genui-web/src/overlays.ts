@@ -404,11 +404,12 @@ function escape(st: St) {
   (document.activeElement as HTMLElement | null)?.blur();
 }
 
-/** Tab and Enter on the cards: Tab walks the cluster's cards only from the page itself (inside a card or the full view
- * it keeps moving focus); while it is held, the other card keys add to the selection instead of moving it (a held
- * Tab's repeats do nothing). Enter opens the card the keys selected (on a button it stays the button's own). */
+/** Tab and Enter on the cards: Tab adds the cluster's next card to the selection, only from the page itself (inside a
+ * card or the full view it keeps moving focus); while it is held, the other card keys add too instead of moving the
+ * selection (a held Tab's repeats do nothing). Enter opens the card the keys selected (on a button it stays the button's own). */
 function cardKey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined {
-  if (e.key === "Tab" && !st.open && !t.closest?.(IA)) return e.repeat ? () => {} : () => ((st.tab = true), st.ctx.cam.step(e.shiftKey ? "prev" : "next"));
+  if (e.key === "Tab" && !st.open && !t.closest?.(IA))
+    return e.repeat ? () => {} : () => ((st.tab = true), st.ctx.cam.step(e.shiftKey ? "prev" : "next", true));
   if (e.key === "Enter" && st.ctx.sel.size === 1 && !t.closest("button,a")) return () => ((st.open = [...st.ctx.sel][0]), refresh(st));
 }
 
