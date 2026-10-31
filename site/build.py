@@ -468,7 +468,11 @@ def build_docs(dist):
         heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", body, re.S)
         title = plain_text(heading[1]) if heading else Path(source).stem
         title = "Crewship overview" if source == "README.md" else re.sub(r"^[\W_]+", "", title)
-        paragraphs = [t for p in re.findall(r"<p>(.*?)</p>", body, re.S) if (t := plain_text(p)) and " · " not in t]
+        paragraphs = [
+            t
+            for p in re.findall(r"<p>(.*?)</p>", body, re.S)
+            if (t := plain_text(p)) and " · " not in t
+        ]
         description = paragraphs.pop(0) if paragraphs else title
         while len(description) < 70 and paragraphs:  # a one-line first paragraph is too thin for a snippet
             description += " " + paragraphs.pop(0)
