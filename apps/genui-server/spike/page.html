@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>genui spike</title>
+<style>
+:root{--gu-bg:hsl(228 22% 7%);--gu-card:hsl(228 20% 11%);--gu-line:hsl(228 16% 22%);--gu-fg:hsl(220 20% 92%);--gu-muted:hsl(222 12% 62%);--gu-accent:hsl(262 80% 72%);--gu-radius:10px;--gu-gap:10px}
+*{box-sizing:border-box;margin:0}
+body{background:var(--gu-bg);color:var(--gu-fg);font:14px/1.4 system-ui,sans-serif;padding:var(--gu-gap)}
+#status{color:var(--gu-muted);font-size:12px;margin-bottom:var(--gu-gap);font-variant-numeric:tabular-nums}
+.stack{display:flex;gap:var(--gu-gap)}.stack.column{flex-direction:column}.stack.row{flex-wrap:wrap}.stack.row>*{flex:1 1 220px;min-width:0}
+.card{background:var(--gu-card);border:1px solid var(--gu-line);border-radius:var(--gu-radius);padding:12px;display:flex;flex-direction:column;gap:8px}
+.card h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--gu-muted)}
+.text.muted{color:var(--gu-muted)}.text.accent{color:var(--gu-accent)}
+.metric b{font-size:28px;font-variant-numeric:tabular-nums}.metric small{color:var(--gu-muted);margin-left:4px}
+.badge{align-self:flex-start;padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid var(--gu-line)}
+.badge.ok{color:hsl(150 55% 55%)}.badge.warn{color:hsl(38 90% 62%)}.badge.bad{color:hsl(340 75% 68%)}.badge.info{color:hsl(188 70% 58%)}
+</style></head>
+<body><div id="status">connecting…</div><div id="root"></div>
+<script>
+const status=document.getElementById("status"),root=document.getElementById("root"); // window.status (a string) shadows the named element
+let doc={root:"",elements:{},style:{},links:[]},seq=0;const t0=performance.now();
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function apply(ops){for(const o of ops){const k=o.path.split("/").slice(1).map(s=>s.replace(/~1/g,"/").replace(/~0/g,"~"));
+ if(!k.length){doc=o.value;continue}let p=doc;for(const x of k.slice(0,-1)){if(x==="__proto__"||x==="constructor"||x==="prototype"||p===null||typeof p!=="object"||!Object.hasOwn(p,x)){p=null;break}p=p[x]}const l=k.at(-1);if(p===null||typeof p!=="object"||l==="__proto__"||l==="constructor"||l==="prototype")continue;o.op==="remove"?delete p[l]:Object.defineProperty(p,l,{value:o.value,writable:true,enumerable:true,configurable:true})}}
+function node(id){const e=doc.elements[id];if(!e)return"";const p=e.props,c=(e.children||[]).map(node).join("");
+ switch(e.type){
+ case"Stack":return`<div class="stack ${esc(p.dir||"column")}">${c}</div>`;
+ case"Card":return`<section class="card">${p.title?`<h3>${esc(p.title)}</h3>`:""}${c}</section>`;
+ case"Text":return`<p class="text ${esc(p.tone||"normal")}">${esc(p.text)}</p>`;
+ case"Metric":return`<div class="metric"><span class="text muted">${esc(p.label)}</span><br><b>${esc(p.value)}</b><small>${esc(p.unit||"")}</small></div>`;
+ case"Badge":return`<span class="badge ${esc(p.tone||"info")}">${esc(p.text)}</span>`;
+ default:return`<div class="text muted">[${esc(e.type)}]</div>`}}
+const render=()=>{root.innerHTML=doc.root?node(doc.root):""};
+const ws=new WebSocket((location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/ws");
+ws.onmessage=m=>{const e=JSON.parse(m.data);
+ if(e.type==="STATE_SNAPSHOT"){doc=e.snapshot;seq=e.seq;status.textContent=`snapshot seq ${seq} after ${(performance.now()-t0).toFixed(0)} ms`}
+ else if(e.type==="STATE_DELTA"){apply(e.delta);seq=e.seq;status.textContent=`delta seq ${seq}`}
+ else if(e.type==="RUN_FINISHED")status.textContent=`run finished, seq ${seq}`;
+ render()};
+ws.onclose=()=>status.textContent="disconnected";
+</script></body></html>

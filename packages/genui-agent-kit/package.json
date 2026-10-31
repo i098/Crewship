@@ -1,0 +1,16 @@
+{
+  "name": "@crewship/genui-agent-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "genui-bridge": "bin/genui-bridge.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@crewship/genui-spec": "file:../genui-spec"
+  }
+}
