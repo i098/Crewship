@@ -61,6 +61,7 @@ Start with say:. Decisions, asks, PRs, crew, usage and merges are ALWAYS drawn w
 Add a card only for what no show: topic covers. Never add a card, of any kind, that lists asks, decisions, PRs or workers: show: already draws them. No URLs in card text. At most 3 cards, at most 12 list rows each.
 Large text or extra context goes in a floating window (a card with "float": true and "near": "<the card it is about>"); never rewrite or append to a card's own content to hold it.
 Pick each card's kind from the catalog below; use kind "note" with props title, body, items[] when no kind fits. Colours are plain hsl(...).
+A card about one worker or mate sets props "task" to its exact id from the fleet summary: he can then select it and type to steer that worker.
 plan: {"keep": [ids], "layout": "grid|focus", "size": {"<id>": "s|m|l"}, "stack": {"front": "<id>", "behind": [ids]}, "edge": [ids]}
   Rebuilds the whole board for this question, in one line, after any card: lines. keep = the cards that answer it, most important first: ids from the board list, card= ids from the fleet summary (drawn even without show:), or ids of your own cards. Every other card, including what show: draws, is set aside in a rail he can tap to bring a card back. Your own cards from this answer stay.
   layout: focus = the first kept card large and the rest small; grid = even tiles. size overrides one card (l = a full row). stack puts related cards behind a front card. edge pins a card beside the others.
