@@ -97,6 +97,8 @@ test("a plan's layout: a wide card takes the row alone, a stacked card peeks out
   const ph = layout(plan, [], { W: 390, H: 844, topH: 110, botH: 170 }, st, tall).tiles;
   expect(ph.m4.x).toBeCloseTo(ph.m0.x);
   expect(ph.m4.y).toBeGreaterThan(ph.m2.y + ph.m2.h);
+  // and a stacked card shows a tall strip under its front card, wide enough to tap
+  expect((ph.m3.y - ph.m1.y) / ph.m1.s).toBeCloseTo(66);
 });
 
 test("floating windows keep their spot and stack by layer: the highest layer is on top", () => {

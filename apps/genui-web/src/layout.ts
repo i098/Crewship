@@ -194,15 +194,19 @@ function tile(ts: Item[], fit: Fit, one: boolean) {
     ey += h + GAP;
   }
   const depth = new Map<string, number>();
-  let peek = 0;
+  // on a phone a peek of STEP is too thin to tap, so a stacked card shows a strip under its front card instead
+  const [dx, dy] = one ? [STEP / 2, 3 * STEP] : [STEP, STEP];
+  let px = 0,
+    py = 0;
   for (const t of ts.filter(behind)) {
     const k = (depth.get(t.under!) ?? 0) + 1,
       [x, fy, w, h] = at.get(t.under!)!;
     depth.set(t.under!, k);
-    peek = Math.max(peek, k * STEP);
-    at.set(t.id, [x + k * STEP, fy + k * STEP, w, h, -Math.min(k, 2)]);
+    px = Math.max(px, k * dx);
+    py = Math.max(py, k * dy);
+    at.set(t.id, [x + k * dx, fy + k * dy, w, h, -Math.min(k, 2)]);
   }
-  return { local: ts.map((t) => at.get(t.id)!), w: ex - P + (edge.length ? EW : -GAP) + 2 * P + peek, h: Math.max(y, ey) - GAP + P + peek };
+  return { local: ts.map((t) => at.get(t.id)!), w: ex - P + (edge.length ? EW : -GAP) + 2 * P + px, h: Math.max(y, ey) - GAP + P + py };
 }
 
 /** Rows of up to `cols` cards, the top row taking the odd ones out; a wide card is a row of its own. */
