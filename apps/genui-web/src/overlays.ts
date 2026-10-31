@@ -412,8 +412,8 @@ function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined 
   if (e.key === " ") return t.closest("button") ? undefined : () => document.getElementById("spread")?.click();
   const step = (m: Move) => () => st.ctx.cam.step(m);
   const nav: Record<string, () => void> = {
-    "[": step("prev"),
-    "]": step("next"),
+    "{": step("prev"),
+    "}": step("next"),
     h: step("left"),
     j: step("down"),
     k: step("up"),
@@ -426,8 +426,8 @@ function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined 
     Home: step("first"),
     G: step("last"),
     End: step("last"),
-    "{": () => st.ctx.cam.cycle(-1),
-    "}": () => st.ctx.cam.cycle(1),
+    "[": () => st.ctx.cam.cycle(-1),
+    "]": () => st.ctx.cam.cycle(1),
     "0": () => document.getElementById("recenter")?.click(),
     "/": () => st.q.focus(),
     L: () => need(".logbtn").click(),
@@ -435,7 +435,7 @@ function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined 
   return cardKey(st, e, t) ?? nav[e.key];
 }
 
-/** Hotkeys mode (body.keys): cards [ ] tab h j k l arrows g G enter, clusters { }, 0 space / L z; any other letter types into the ask box. */
+/** Hotkeys mode (body.keys): cards and stacks { } tab h j k l arrows g G enter, clusters [ ], 0 space / L z; any other letter types into the ask box. */
 function onKey(st: St, e: KeyboardEvent) {
   if (e.key === "Escape") return escape(st);
   const t = e.target as Element;

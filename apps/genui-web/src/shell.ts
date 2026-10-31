@@ -23,7 +23,7 @@ const UNIT: Record<string, string> = { net: " MB/s" };
 const NAV = {
   keys: [
     "⌨ hotkeys",
-    "[ ] tab hjkl ←↓↑→ cards · g G first, last · ↵ open · { } other clusters · 0 back to what matters · space all boards · / ask · z rewind · L log · esc close · shift-drag to draw · drop files to upload",
+    "{ } tab hjkl ←↓↑→ cards and stacks · g G first, last · ↵ open · [ ] other clusters · 0 back to what matters · space all boards · / ask · z rewind · L log · esc close · shift-drag to draw · drop files to upload",
   ],
   buttons: ["☝ buttons", "tap to select · ⊞ all boards · ✎ to draw · ＋ to upload · drag to move · pinch to zoom · rewind in log"],
 } as const;
