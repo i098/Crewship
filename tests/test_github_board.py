@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from retired_probe import GROUP_VARS, PROBE
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -243,7 +245,8 @@ def _apply(tmp_path, home, github_board):
             "hosts": "localhost",
             "connection": "local",
             "gather_facts": False,
-            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/github_board.yml")}],
+            "vars_files": GROUP_VARS,
+            "tasks": [PROBE, {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/github_board.yml")}],
             "handlers": [{"name": "Reload", "ansible.builtin.debug": {"msg": "reload"},
                           "listen": "reload user systemd"}],
         }]))

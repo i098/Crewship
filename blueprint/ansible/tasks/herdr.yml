@@ -167,10 +167,11 @@
 # host-wide link.
 - name: Remove retired herdr-mosh
   ansible.builtin.file:
-    path: "{{ crewship_local_bin }}/herdr-mosh"
+    path: "{{ crewship_herdr_mosh_path }}"
     state: absent
   become: true
   become_user: root
+  when: crewship_herdr_mosh_path in crewship_retired_found.existing
 
 # btop fitted to its pane (docs/herdr.md#btop): the launcher takes the place of
 # the btop command and runs the installer's btop-bin with a preset of this

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from retired_probe import PROBE, RETIRED
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -21,8 +23,15 @@ def apply(tmp_path, home):
             "crewship_cfg": {"home": str(home)},
             "crewship_local_bin": str(home / ".local/bin"),
             "crewship_global_bin": str(tmp_path / "usr-local-bin"),
+            "crewship_user_units": str(home / ".config/systemd/user"),
+            "crewship_path_checker": str(ROOT / "scripts/check_paths.py"),
+            "crewship_board_dir": str(home / "board"),
+            "crewship_gateway_script": str(home / "gateway"),
+            "crewship_usage_assets": str(home / "usage"),
+            "crewship_token_suggestions_assets": str(home / "token-suggestions"),
         },
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/herdr_links.yml")}],
+        "vars_files": RETIRED,
+        "tasks": [PROBE, {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/herdr_links.yml")}],
     }]))
     result = subprocess.run(
         [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook)],

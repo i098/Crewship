@@ -50,7 +50,9 @@
       when: crewship_manage_services | bool
 
 - name: Remove the GitHub board
-  when: crewship_cfg.github_board is not defined
+  when:
+    - crewship_cfg.github_board is not defined
+    - crewship_github_board_paths | intersect(crewship_retired_found.existing) | length > 0
   block:
     - name: Look for an installed GitHub board timer
       ansible.builtin.stat:
@@ -68,23 +70,9 @@
         - crewship_manage_services | bool
         - crewship_github_board_timer.stat.exists
 
-    - name: Look for the GitHub board paths
-      ansible.builtin.command:
-        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_github_board_paths | to_json }}"]
-      vars: &crewship_github_board_paths
-        crewship_github_board_paths:
-          - "{{ crewship_user_units }}/timers.target.wants/github-board.timer"
-          - "{{ crewship_user_units }}/github-board.timer"
-          - "{{ crewship_user_units }}/github-board.service"
-          - "{{ crewship_local_bin }}/github-board.py"
-      register: crewship_github_board_paths_found
-      changed_when: false
-      check_mode: false
-
     - name: Remove the GitHub board timer, unit and script
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      vars: *crewship_github_board_paths
-      loop: "{{ crewship_github_board_paths | select('in', (crewship_github_board_paths_found.stdout | from_json).existing) | list }}"
+      loop: "{{ crewship_github_board_paths | select('in', crewship_retired_found.existing) | list }}"
       notify: reload user systemd
