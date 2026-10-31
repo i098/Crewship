@@ -296,6 +296,25 @@ Relay hands the work to the owning mate or to Firstmate. An invalid front answer
 Before relay or dispatch work starts, the desk sends one short reply that names where the request goes: Firstmate, the secondmate, or a worker. It does not complete the request or stop the typing indicator.
 The typing indicator stops when a newer text replaces the running job.
 
+## Herdr status alerts
+
+The bridge can text the owner when a worker agent changes status, so the agents do not need to report it themselves.
+It is off by default. Set `FM_IMESSAGE_HERDR_ALERTS=true` in the service environment to turn it on.
+The code is `apps/imessage/herdr-watch.ts`. It runs only `herdr agent list`, which only reads status.
+
+Every poll compares each worker pane with its last confirmed status. A new status counts only when it holds for the debounce time, so a status that flips back is ignored.
+One poll sends one text, with one sentence for each confirmed change. The sentence names the project and the task and has no pane id.
+The first poll only records the starting statuses. Supervisor panes are skipped: a pane with a `who` token, or one whose project folder is in the skip list.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_IMESSAGE_HERDR_ALERTS` | `false` | `true` turns the alerts on. |
+| `FM_IMESSAGE_HERDR_STATUSES` | `done,blocked,idle` | The new statuses that send an alert. `blocked` means the agent needs input. |
+| `FM_IMESSAGE_HERDR_POLL_MS` | `15000` | Time between polls. |
+| `FM_IMESSAGE_HERDR_DEBOUNCE_MS` | `20000` | A new status must hold this long. |
+| `FM_IMESSAGE_HERDR_SKIP` | `firstmate` | Project folders that are not workers. |
+| `FM_IMESSAGE_HERDR_BIN` | `herdr` | The herdr executable. |
+
 ## Guarded front modules
 
 The repository also contains a separate front, worker, dispatch policy, and relay validator.
