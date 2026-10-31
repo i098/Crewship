@@ -16,6 +16,16 @@ describe("card views", () => {
     expect(renderCard(spec, spec.components.p)).not.toContain("url(x)");
   });
 
+  test("a framed page can lay out at its own width; images and wild widths ignore it", () => {
+    const at = (type: string, w: unknown) => {
+      const spec = board({ e: { type: "card", props: { kind: "embed", type, title: "t", src: "/x", nat: "1280/800", w } } });
+      return renderCard(spec, spec.components.e);
+    };
+    expect(at("site", 1280)).toContain('class="mw fit"');
+    expect(at("site", 1280)).toContain(";--w:1280");
+    for (const [type, w] of [["image", 1280], ["site", 50], ["site", 99999], ["site", "wide"], ["site", undefined]] as const) expect(at(type, w)).not.toContain("--w");
+  });
+
   test("an unknown or prototype kind falls back to the plain note view", () => {
     const spec = board({ c: { type: "card", props: { kind: "constructor" as never, title: "Hi", body: "there" } } });
     expect(renderCard(spec, spec.components.c)).toContain('<p class="body">there</p>');

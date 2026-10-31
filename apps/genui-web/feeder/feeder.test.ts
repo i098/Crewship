@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { BoardSpec } from "@crewship/genui-spec";
 import { applyPatch } from "../src/model";
-import { cards, diff, type Sources } from "./feeder";
+import { cards, decision, diff, type Sources } from "./feeder";
 
 const src = (prs: Sources["prs"]): Sources => ({ prs, merged: null, crew: [], usage: null, host: {}, gaps: [] });
 const pr = (n: number, failed: string[] = []) => ({ n, title: `PR ${n}`, url: `https://example.test/${n}`, draft: false, checks: { total: 3, done: 3, failed } });
@@ -22,4 +22,14 @@ test("the feed keeps the owner's pick and removes a card whose PR closed", () =>
   spec = applyPatch(spec, diff(spec, cards(src([pr(1)])), owned));
   expect(spec.components.ok1.props.pick).toBe("approve");
   expect(spec.components.pr2.props.removed).toBe(true);
+});
+
+test("a pick on any decision card records which card and question it answered", () => {
+  expect(decision("ok7", { url: "https://x/7" }, "approve")).toEqual({
+    body: { decision: "approve", pr: 7, url: "https://x/7", draft: "gh pr merge 7" }, note: "Approved #7", draft: "gh pr merge 7",
+  });
+  expect(decision("ok7", { url: "https://x/7" }, "decline").body).toEqual({ decision: "decline", pr: 7, url: "https://x/7" });
+  expect(decision("okdesign", { q: "Approve the design?" }, "approve")).toEqual({
+    body: { decision: "approve", card: "okdesign", q: "Approve the design?" }, note: "Approved Approve the design?",
+  });
 });

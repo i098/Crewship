@@ -48,10 +48,10 @@ body.dropping .canvas { outline: 2px dashed var(--sel); outline-offset: -8px; }
 .fullc .term { height: 60vh; font-size: 14px; }
 .fullc .fork { height: 50vh; }
 /* the window's own ✕ closes, so the card's expand and remove buttons hide */
-.fullc > .ib { position: absolute; right: 14px; top: 21px; z-index: 1; display: inline-grid; place-items: center; width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 12px; background: hsl(240 30% 100% / .08); color: var(--mute); font: 600 14px/1 var(--font); transition: background .25s, color .25s; }
+.fullc > .ib { position: absolute; right: 44px; top: 21px; z-index: 1; display: inline-grid; place-items: center; width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 12px; background: hsl(240 30% 100% / .08); color: var(--mute); font: 600 14px/1 var(--font); transition: background .25s, color .25s; }
 .fullc > .ib:hover { background: hsl(240 30% 100% / .14); color: var(--ink); }
 .fullc [data-act="full"], .fullc > .core > .core > .hd [data-act="drop"] { display: none; }
-.fullc .core > .hd { margin-right: 36px; }
+.fullc .core > .hd { margin-right: 66px; }
 .thr { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; }
 /* the ask box stays on top of the full view; answers sit under the card */
 body.fullon .bottom { z-index: 8; }
