@@ -216,6 +216,15 @@ async function publish(s: Sources, cause = "feeder:sources") {
 const note = (text: string, proj = "me") => log.push({ at: Math.round((Date.now() - t0) / 1000), text, proj });
 const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
 
+/** What an owner's pick on a decision card records. A PR's approval card (`ok<N>`) names the PR; any other card names itself and its question. */
+export function decision(id: string, c: P, value: string): { body: P; note: string; draft?: string } {
+  const pr = /^ok(\d+)$/.exec(id)?.[1];
+  const verb = value === "approve" ? "Approved" : "Declined";
+  if (!pr) return { body: { decision: value, card: id, q: c.q ?? null }, note: `${verb} ${c.q ?? id}` };
+  const draft = value === "approve" ? `gh pr merge ${pr}` : undefined;
+  return { body: { decision: value, pr: Number(pr), url: c.url, ...(draft ? { draft } : {}) }, note: `${verb} #${pr}`, draft };
+}
+
 /** The owner's intents, forwarded by the board to agent sockets. */
 async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
   const p = m.payload, c = spec.components[m.targetId]?.props ?? {};
@@ -243,9 +252,9 @@ async function onIntent(m: Extract<ServerMsg, { t: "intent" }>) {
     note(`You claimed the fix for #${pr}; recorded on ${TOPIC} (seq ${r.trim()})`, "repo");
     await call("emit_view", { event: { delta: [setProp(m.targetId, "claim", "you")] }, cause: m.id });
   } else if (p.field === "pick" && c.kind === "decision") {
-    const pr = Number(m.targetId.slice(2));
-    const r = await pub({ decision: p.value, pr, url: c.url, ...(p.value === "approve" ? { draft: `gh pr merge ${pr}` } : {}) }).catch((e) => `failed: ${(e as Error).message}`);
-    note(`${p.value === "approve" ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${p.value === "approve" ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
+    const d = decision(m.targetId, c, String(p.value));
+    const r = await pub(d.body).catch((e) => `failed: ${(e as Error).message}`);
+    note(`${d.note}; recorded on ${TOPIC} (seq ${r.trim()})${d.draft ? `. Merge draft, not run: ${d.draft}` : ""}`, "repo");
     await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
   } else if (p.field === "removed") delete extra[m.targetId];
   // the reply carries the intent's id as its cause, so one z rewinds the action and the reply together

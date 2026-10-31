@@ -115,6 +115,9 @@ audio.media { height: auto; }
 .tile:not(.sel) iframe.media { pointer-events: none; }
 .mw { position: relative; overflow: hidden; resize: vertical; border-radius: 12px; min-height: 60px; background: hsl(240 30% 2%); }
 .mw[style*="height"] { aspect-ratio: auto !important; }
+/* a framed page lays out at its own width (--w px) and scales to the tile: tan(atan2(a, b)) is a / b as a plain number */
+.mw.fit { container-type: inline-size; }
+.mw.fit > iframe.media { width: calc(var(--w) * 1px); height: calc(var(--w) * 1px / var(--r)); transform-origin: 0 0; scale: tan(atan2(100cqw, calc(var(--w) * 1px))); }
 .arbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--mute); }
 .arbar button { padding: 3px 9px; border: 0; border-radius: 99px; background: hsl(240 30% 100% / .06); color: var(--mute); }
 .arbar button.on { background: hsl(188 95% 58% / .16); color: var(--cyan); }
