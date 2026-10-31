@@ -289,10 +289,10 @@ def test_native_installs_overlap_and_keep_checksum_failures_fatal(tmp_path, monk
         assert not os.path.lexists(tmp_path / ".local/bin/second")
     else:
         installer.main()
-        assert json.loads(capfd.readouterr().out)["changed"]
+        assert json.loads(capsys.readouterr().out)["changed"]
         assert subprocess.check_output([tmp_path / ".local/bin/second"], text=True).strip() == "second 1.0.0"
         installer.main()
-        assert not json.loads(capfd.readouterr().out)["changed"]
+        assert not json.loads(capsys.readouterr().out)["changed"]
     assert subprocess.check_output([tmp_path / ".local/bin/first"], text=True).strip() == "first 1.0.0"
 
 
@@ -1082,7 +1082,7 @@ def resolve_without_koncreet(capsys):
     latest = installer.resolve_latest("linux-x86_64", EVERYTHING)
     assert "koncreet" not in latest
     assert {"herdr", "uv", "obscura", "node", "psutil"} <= latest.keys()
-    return capfd.readouterr().err
+    return capsys.readouterr().err
 
 
 @pytest.mark.parametrize("tag", UNSAFE_TAGS)
@@ -1099,7 +1099,7 @@ def test_koncreet_release_without_a_published_checksum_is_skipped_with_a_warning
     assert "refusing an unverified binary" in resolve_without_koncreet(capsys)
 
 
-def test_koncreet_release_without_its_asset_is_skipped_with_a_warning(monkeypatch, capfd):
+def test_koncreet_release_without_its_asset_is_skipped_with_a_warning(monkeypatch, capsys):
     monkeypatch.setitem(RELEASES, "jimididit/koncreet", ("v9.9.9", "renamed.tar.gz"))
     upstream(monkeypatch)
     assert "refusing an unverified binary" in resolve_without_koncreet(capsys)
@@ -1148,7 +1148,7 @@ def run_cli(monkeypatch, capsys, tmp_path, *argv):
         installer.sys, "argv", ["provisions.py", "--home", str(tmp_path), *argv, "--resolve"]
     )
     installer.main()
-    return json.loads(capfd.readouterr().out)
+    return json.loads(capsys.readouterr().out)
 
 
 def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
@@ -1394,10 +1394,10 @@ def test_package_installs_overlap_and_failures_prevent_success(
         with pytest.raises(ValueError, match="package download failed"):
             installer.main()
         assert not (tmp_path / ".local/share/crewship/resolved.json").exists()
-        assert capfd.readouterr().out == ""
+        assert capsys.readouterr().out == ""
     else:
         installer.main()
-        assert json.loads(capfd.readouterr().out)["changed"]
+        assert json.loads(capsys.readouterr().out)["changed"]
         assert {tool: (tmp_path / tool).read_text() for tool in packages} == {
             "first": "1.0.0", "second": "1.0.0"
         }
@@ -1477,7 +1477,7 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     with pytest.raises(SystemExit) as exit_status:
         runpy.run_path(str(SPEC.origin), run_name="__main__")
     assert exit_status.value.code == 1
-    assert "error: network down" in capfd.readouterr().err
+    assert "error: network down" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("resolution", ["highest", "lowest"])
@@ -1541,10 +1541,10 @@ def rate_limited_github(monkeypatch):
     monkeypatch.setattr(installer.time, "sleep", lambda seconds: None)
 
 
-def test_a_rate_limited_api_falls_back_to_the_public_release_pages(monkeypatch, capfd):
+def test_a_rate_limited_api_falls_back_to_the_public_release_pages(monkeypatch, capsys):
     rate_limited_github(monkeypatch)
     latest = installer.resolve_latest("linux-x86_64", EVERYTHING)
-    assert "reading github.com's release pages instead" in capfd.readouterr().err
+    assert "reading github.com's release pages instead" in capsys.readouterr().err
     assert latest["uv"]["version"] == "9.9.9"
     assert latest["uv"]["assets"]["linux-x86_64"] == {
         "url": "https://github.com/astral-sh/uv/releases/download/9.9.9/uv-x86_64-unknown-linux-gnu.tar.gz",
