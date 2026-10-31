@@ -27,6 +27,7 @@ FEATURES = {
     "crewship.profiles.project_databases": "docs/project-databases.md",
     "crewship.profiles.jj": "docs/jj.md",
     "crewship.profiles.fdu": "docs/configuration.md#profiles",
+    "crewship.profiles.vphone": "docs/dependencies.md#vphone-linux",
     "crewship.profiles.sgrep": "docs/dependencies.md#latest-releases",
     "crewship.profiles.fleet_browsers": "docs/fleet-guards.md#browser-ladder",
     "crewship.profiles.forgejo": "docs/forgejo.md",

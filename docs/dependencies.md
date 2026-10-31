@@ -129,7 +129,7 @@ Bun output stays in one labeled block per package, including command failures.
   Apply warms the code and text models; a failed warmup warns without failing the apply.
   Without this profile, apply skips the sgrep build and model downloads.
 - Always: Pyrefly ([facebook/pyrefly](https://github.com/facebook/pyrefly/releases/latest)), the static musl build for x86_64 or arm64, verified against the release's `<asset>.sha256` file.
-- Always: node, the newest release in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
+- Always: node, the newest stable release (pre-releases are skipped) in the [nodejs.org index](https://nodejs.org/dist/index.json) (not the LTS line), verified against that release's `SHASUMS256.txt`. node and its npm stay for `npx crewship`, which needs npm, and for the chrome-devtools-axi bridge, which runs under node; no tool of the host is installed with npm.
 - Always: Neovim ([neovim/neovim](https://github.com/neovim/neovim/releases/latest)), verified against the GitHub release-asset digest.
   The installer keeps the complete `nvim-linux-<arch>` tree and links `~/.local/bin/nvim` to its executable.
 - `agents` profile, native: gh ([cli/cli](https://github.com/cli/cli/releases/latest)), treehouse ([kunchenguid/treehouse](https://github.com/kunchenguid/treehouse/releases/latest)), verified against the GitHub release-asset digest.
@@ -165,6 +165,18 @@ The lookups use `GITHUB_TOKEN` from the environment that runs `./ship.sh launch`
 The token goes to the GitHub API only.
 Container builds take the token as the optional BuildKit secret `github_token` (`docker build --secret id=github_token,env=GITHUB_TOKEN ...`).
 The token never enters the image.
+
+## vphone-linux
+
+`vphone` profile.
+[vphone-linux](https://github.com/YahiaAngelo/vphone-linux) runs a virtual iPhone on Linux with QEMU, so agents test iOS apps on the host and need no Mac or iOS Simulator.
+Apply clones the latest release tag into `~/.local/share/crewship/vphone-linux` and moves a clean checkout to each newer tag, with its submodules.
+A checkout with local changes, such as your build, stays on its tag, and apply prints a warning.
+The releases publish no assets and no checksums, so git checks the tag's objects.
+Apply builds nothing and starts no VM.
+It needs an x86_64 host with a Vulkan GPU, 16 GB RAM, about 100 GB of disk and sudo.
+Run `./setup/setup.sh`, then `./setup/create-vm.sh`, in the checkout.
+See the [upstream setup](https://github.com/YahiaAngelo/vphone-linux/blob/main/docs/SETUP.md) for the steps.
 
 ## Neovim and LazyVim
 

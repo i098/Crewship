@@ -36,6 +36,7 @@ OPT_IN = {
     "gateway": ("one password for the host's web pages over a Cloudflare tunnel", ()),
     "jj": ("the Jujutsu (jj) version control tool", ()),
     "fdu": ("fdu, a fast gitignore-aware du for large worktrees", ()),
+    "vphone": ("a vphone-linux checkout, a virtual iPhone for app tests", ()),
     "fleet_guards": ("the Docker guard, reapers and storage guard", ("docker",)),
     "project_databases": ("one dev database per project", ("docker",)),
     "fleet_browsers": ("the browser ladder", ()),
@@ -51,7 +52,7 @@ INSTRUCTION_FILES = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS
 INSTRUCTION_MODES = {"skip": "leave them as they are", "overwrite": "replace them, after a timestamped .bak", "append": "add one marked block"}
 # A container worker image has no Docker, no user services, no desktop and no Firstmate.
 NOT_IN_CONTAINER = {
-    "docker", "chat", "gateway", "fleet_guards", "project_databases", "tailscale", "desktop", "board", "koncreet", "forgejo",
+    "docker", "chat", "gateway", "fleet_guards", "project_databases", "tailscale", "desktop", "board", "koncreet", "forgejo", "vphone",
 }
 
 
