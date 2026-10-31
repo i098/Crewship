@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-SUITES = ["apps/genui-web", "apps/genui-server", "packages/genui-agent-kit", "packages/genui-spec"]
+# genui-server first: the genui-web contract test spawns its wrangler, which only exists after that install.
+SUITES = ["apps/genui-server", "apps/genui-web", "packages/genui-agent-kit", "packages/genui-spec"]
 
 
 @pytest.mark.parametrize("suite", SUITES)
