@@ -33,7 +33,8 @@ export type State = {
   order: Record<string, string[]>;
 };
 export type ClusterBox = Rect & { proj: string; s: number; z: number; front: boolean; far: boolean; right: boolean; ids: string[] };
-export type TileBox = Rect & { s: number; z: number; away: boolean; far: boolean; center: boolean; proj: string | null };
+/** `under`: a stacked card behind its front card. */
+export type TileBox = Rect & { s: number; z: number; away: boolean; far: boolean; center: boolean; proj: string | null; under?: boolean };
 /** A line from a card `f` to the card `o` it affects; `g` is the cluster it leaves from in spread. */
 export type Line = { f: string; o: string; label: string; proj: string; g: string | null };
 export type Layout = {
@@ -154,7 +155,7 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
     g.ts.forEach((t, j) => {
       const r = inner[i].local[j];
       gOf.set(t.id, box);
-      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj };
+      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 31 - 3 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj, under: (r[4] ?? 0) < 0 };
     });
   });
   return { clusters, gOf };

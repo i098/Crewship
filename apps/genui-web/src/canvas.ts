@@ -207,10 +207,42 @@ document.fonts?.ready.then(() => (fits.clear(), paint()));
 function items(): Item[] {
   const nested = new Set(Object.values(spec.components).flatMap((c) => c.children ?? []));
   const now = performance.now();
-  return Object.entries(spec.components)
+  const ts = Object.entries(spec.components)
     .filter(([id, c]) => !SHELL.has(id) && !nested.has(id) && c.props.removed !== true && c.props.aside !== true)
     .map(([id, c]) => item(id, c, now));
+  return restack(ts);
 }
+
+/** A stack's front card in the plan → the card you brought in front of it. Local: the plan's stack is unchanged. */
+const fronted = new Map<string, string>();
+
+/** The cards you brought to the front of their stacks swap places with the plan's front card. */
+function restack(ts: Item[]): Item[] {
+  for (const [f, x] of fronted) {
+    if (ts.find((t) => t.id === x)?.under !== f) {
+      fronted.delete(f); // the plan changed the stack
+      continue;
+    }
+    for (const t of ts) if (t.id === f || t.under === f) t.under = t.id === x ? undefined : x;
+  }
+  return ts;
+}
+
+// a stack is browsable: a tap on a card behind brings it to the front, a tap on the plan's front card puts it back
+document.addEventListener(
+  "click",
+  (e) => {
+    const id = (e.target as Element).closest<HTMLElement>(".world .tile.under[data-id]")?.dataset.id;
+    if (!id) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const f = spec.components[id]?.props.under;
+    if (fronted.has(id)) fronted.delete(id);
+    else if (typeof f === "string") fronted.set(f, id);
+    paint();
+  },
+  true,
+);
 
 /** A card as the layout sees it: your size and pinned spot win over the spec's, and an ask boost lifts it to the front. */
 function item(id: string, c: Component, now: number): Item {
@@ -355,6 +387,7 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       ["done", c.props.done === true],
       ["pinned", c.props.pinned === true],
       ["float", c.props.float === true],
+      ["under", t.under === true],
     ] as const)
       el.classList.toggle(k, on);
     // a floating window is capped in height and scrolls, so long context never covers the board or the ask bar

@@ -9,6 +9,10 @@
 /* a floating window: capped in height, its content scrolls, a shadow lifts it off the board */
 .tile.float { max-height: 46vh; box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08), 0 18px 48px hsl(240 30% 2% / .6); }
 .tile.float .core { flex: 1; min-height: 0; overflow: auto; }
+/* a card behind in a stack is blurred and dimmed, so the front card reads clean; hover clears it, a tap brings it to the front */
+.tile.under { filter: blur(3px) brightness(.6); cursor: pointer; }
+.tile.under * { pointer-events: none; }
+.tile.under:hover { filter: brightness(.85); }
 /* dismiss: the card and everything in it shrink back and fade as one piece */
 .tile.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); filter: blur(8px); pointer-events: none; transition: opacity .4s ease, transform .4s ease, filter .4s ease !important; }
 .tile.gone *, .tile.gone::before { transition: none !important; animation: none !important; }
