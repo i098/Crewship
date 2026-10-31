@@ -884,9 +884,15 @@ def vphone_install(home, environment):
         return True
     git = ["git", "-C", checkout]
     head = subprocess.check_output([*git, "rev-parse", "HEAD"], env=environment, text=True)
-    command([*git, "fetch", "--quiet", "--depth", "1", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], environment)
+    command([*git, "fetch", "--quiet", "--depth", "1", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], environment)
+    if subprocess.check_output([*git, "rev-parse", f"{tag}^{{commit}}"], env=environment, text=True) == head:
+        return False
+    if subprocess.check_output([*git, "status", "--porcelain"], env=environment, text=True):
+        print(f"vphone-linux: {checkout} has local changes; not moving to {tag}, a rebuild is needed", file=sys.stderr)
+        return False
     command([*git, "checkout", "--quiet", "--detach", tag], environment)
-    return subprocess.check_output([*git, "rev-parse", "HEAD"], env=environment, text=True) != head
+    command([*git, "submodule", "update", "--quiet", "--init", "--recursive"], environment)
+    return True
 
 
 def fdu_install(home, environment):
