@@ -553,16 +553,12 @@ function answerInPlace(m: Intent, id: string, q: string, fl: FleetSource) {
   extra[win] = card("note", "me", 80, { title: "Context", items: facts, float: true, near: id, layer: Math.floor(Date.now() / 1000), removed: false });
 }
 
-/**
- * Free text: the chat model streams board edits, each applied as it lands. `about` is the card he asked about;
- * `first` are cards every plan of this answer keeps in front (the card he asked about).
- */
-function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.payload.about, first: string[] = []) {
-  const said: string[] = [];
-  let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
+let chats = 0;
+
+/** A new ask takes the board: the last answer's focus, context window and cards step back. Returns the ask's number. */
+function newAsk(m: Intent, first: string[], own: Set<string>): number {
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
-  const own = new Set<string>();
   // each question rebuilds the board from the overview; one with no plan: line keeps the overview, an ask about a card
   // shows that card large at once, before the model's plan reshapes the rest
   plan = first.length ? { p: { keep: first, size: { [first[0]]: "l" }, under: {}, edge: [] }, cause: m.id, back: [], own } : undefined;
@@ -571,6 +567,19 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
   for (const k of Object.keys(extra)) if (k.startsWith("ctx-")) delete extra[k];
   // the last answer's cards step back so the new question owns the front and the header
   for (const [id, c] of Object.entries(extra)) if (id.startsWith("ai-")) extra[id] = { ...c, props: { ...c.props, asked: false } };
+  return ++chats;
+}
+
+/**
+ * Free text: the chat model streams board edits, each applied as it lands. `about` is the card he asked about;
+ * `first` are cards every plan of this answer keeps in front (the card he asked about).
+ */
+function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.payload.about, first: string[] = []) {
+  const own = new Set<string>();
+  // a newer ask owns the board: edits an older chat still streams are dropped, so they cannot overwrite its answer
+  const gen = newAsk(m, first, own);
+  const said: string[] = [];
+  let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   const topics = (answerTopics = new Set<Topic>());
   // base 100: the answer sits above the decision cards it lists, so a phone shows it first
   const ask = (ready: boolean, about: string[]) =>
@@ -585,6 +594,7 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
       chat({
         text: q, about, fleet: fl.fleet, board: { ...spec.components, ...extra },
         apply: async (e) => {
+          if (gen !== chats) return;
           if ("say" in e) {
             if (!e.done) said.push(e.say);
             extra["ai-q"] = ask(e.done, said.length ? [...said] : [e.say]);
