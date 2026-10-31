@@ -170,7 +170,8 @@ The token never enters the image.
 
 `vphone` profile.
 [vphone-linux](https://github.com/YahiaAngelo/vphone-linux) runs a virtual iPhone on Linux with QEMU, so agents test iOS apps on the host and need no Mac or iOS Simulator.
-Apply clones the latest release tag into `~/.local/share/crewship/vphone-linux` and moves the checkout to each newer tag.
+Apply clones the latest release tag into `~/.local/share/crewship/vphone-linux` and moves a clean checkout to each newer tag, with its submodules.
+A checkout with local changes, such as your build, stays on its tag, and apply prints a warning.
 The releases publish no assets and no checksums, so git checks the tag's objects.
 Apply builds nothing and starts no VM.
 It needs an x86_64 host with a Vulkan GPU, 16 GB RAM, about 100 GB of disk and sudo.
