@@ -143,6 +143,7 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
 | `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |
+| `crewboard-tui --desk` (tab `frontdesk`) | iMessage front desk health and recent turns | `crewship.herdr.crewboard_tab` |
 
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 
