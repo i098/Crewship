@@ -43,6 +43,7 @@ import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
+import { HerdrWatch } from "./herdr-watch.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -527,6 +528,32 @@ if (cards || igWebhook) {
     } });
   if (cards) console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
   if (igWebhook) console.log(`fm-imessage: Instagram webhook on 127.0.0.1:${CARD_PORT}/instagram/webhook`);
+}
+// Alerts from herdr agent status (herdr-watch.ts); off unless FM_IMESSAGE_HERDR_ALERTS=true. Read-only: only `herdr agent list` runs.
+if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
+  const list = (name: string, fallback: string) => (env[name] || fallback).split(/[\s,]+/).filter(Boolean);
+  const watch = new HerdrWatch({
+    alertOn: list("FM_IMESSAGE_HERDR_STATUSES", "done,blocked,idle"),
+    debounceMs: Number(env.FM_IMESSAGE_HERDR_DEBOUNCE_MS || 20_000),
+    skip: list("FM_IMESSAGE_HERDR_SKIP", "firstmate"),
+  });
+  let polling = false;
+  setInterval(async () => {
+    if (polling || stopping) return;
+    polling = true;
+    try {
+      const run = Bun.spawn([env.FM_IMESSAGE_HERDR_BIN || "herdr", "agent", "list"], { stdout: "pipe", stderr: "ignore", timeout: 10_000 });
+      const text = watch.poll(await new Response(run.stdout).text(), Date.now());
+      const to = proactiveRef;
+      if (text && to) put({ ...to, bubbles: [text], requests: [] });
+      else if (text) console.log("fm-imessage: herdr alert dropped: no chat known yet");
+    } catch (e) {
+      log("herdr status poll")(e);
+    } finally {
+      polling = false;
+    }
+  }, Number(env.FM_IMESSAGE_HERDR_POLL_MS || 15_000));
+  console.log("fm-imessage: herdr status alerts on");
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
 if (latestRef) {
