@@ -8,7 +8,7 @@ These defaults are what the project owner personally runs. Change any of them in
 - **Gates:** the [no-mistakes pipeline](omp.md#no-mistakes-pipeline-agent) and `ponytail-review` check every change. Gates use Sonnet 5.5 at high thinking, and Opus 5.5 for hard work. Pick another model for one run with `--model`.
 - **Skills and rules:** [`blueprint/skills/`](../blueprint/skills/) and [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) serve omp, Claude Code, and Codex. Public files install only with `profiles.public_skills` (opt-in; a host that already has them keeps them); the upstream skills from GitHub install either way, and private files take precedence ([omp](omp.md#skills)). The [rules](omp.md#rules) set plain technical writing, always-on skills, and native stacked PRs.
 - **Profiles on by default:** `agents`, `firstmate`
-- **Opt-in profiles:** `development`, `sgrep`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
+- **Opt-in profiles:** `development`, `sgrep`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `vphone`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
 - **New hosts:** `./ship.sh dock` writes the core only: `agents` and `firstmate`. Pick more with the checklist `bunx crewship` shows, or `--with NAMES` ([Configuration](configuration.md)). A host config made before this keeps its own values.
 - **Firstmate backend:** see [Firstmate backend](configuration.md#firstmate-backend) for the default, alternatives, and existing-checkout behavior.
 - **Opt-in settings:** `data_dir`, `usage`, `token_suggestions`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `ci_pool`

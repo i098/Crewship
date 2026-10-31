@@ -13,7 +13,8 @@ against the integrity the registry records for the resolved version, psutil agai
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
 marketplace plugins and sgrep (built by cargo from its default branch, crates locked by
 its Cargo.lock) are the exceptions: no publisher checksums them, so they
-track each author's default branch.
+track each author's default branch. vphone-linux publishes release tags without
+assets: its latest tag is cloned and git checks the objects.
 """
 
 import argparse
@@ -177,6 +178,7 @@ DOWNLOAD_ATTEMPTS = 3
 SGREP_REPOSITORY = "https://github.com/context-dot-dev/sgrep"
 # One extension per language sgrep parses with Tree-sitter (its README).
 SGREP_LANGUAGES = ("py", "c", "cpp", "cs", "go", "java", "rs", "js", "jsx", "ts", "tsx")
+VPHONE_REPOSITORY = "YahiaAngelo/vphone-linux"
 INSTALL_OUTPUT_LOCK = Lock()
 
 
@@ -869,6 +871,30 @@ def warm_sgrep(binary, environment):
                 print(f"provisions: sgrep {model} model not warmed (exit {result.returncode})", file=sys.stderr)
 
 
+def vphone_install(home, environment):
+    """The latest vphone-linux release tag, cloned; the release has no assets or checksums, so git verifies the tag's objects.
+
+    Nothing is built or run here: the user runs setup/setup.sh from the checkout.
+    """
+    tag = latest_release(VPHONE_REPOSITORY, "vphone-linux", False)["tag_name"]
+    checkout = home / ".local/share/crewship/vphone-linux"
+    url = f"https://github.com/{VPHONE_REPOSITORY}.git"
+    if not (checkout / ".git").is_dir():
+        command(["git", "clone", "--quiet", "--depth", "1", "--branch", tag, url, checkout], environment)
+        return True
+    git = ["git", "-C", checkout]
+    head = subprocess.check_output([*git, "rev-parse", "HEAD"], env=environment, text=True)
+    command([*git, "fetch", "--quiet", "--depth", "1", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], environment)
+    if subprocess.check_output([*git, "rev-parse", f"{tag}^{{commit}}"], env=environment, text=True) == head:
+        return False
+    if subprocess.check_output([*git, "status", "--porcelain"], env=environment, text=True):
+        print(f"vphone-linux: {checkout} has local changes; not moving to {tag}, a rebuild is needed", file=sys.stderr)
+        return False
+    command([*git, "checkout", "--quiet", "--detach", tag], environment)
+    command([*git, "submodule", "update", "--quiet", "--init", "--recursive"], environment)
+    return True
+
+
 def fdu_install(home, environment):
     """The latest fdu from its PyPI wheel (no Rust toolchain), installed by uv; an apply moves it to the newest."""
     fdu = home / ".local/bin/fdu"
@@ -965,6 +991,7 @@ def main():
     parser.add_argument(
         "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
     )
+    parser.add_argument("--vphone", action="store_true", help="also clone the latest vphone-linux release")
     parser.add_argument("--fdu", action="store_true", help="also install fdu with uv (needs uv in --tools)")
     parser.add_argument(
         "--also",
@@ -1041,6 +1068,8 @@ def main():
             changed = rust_install(home, environment) or changed
         if args.sgrep:
             changed = sgrep_install(home, environment) or changed
+        if args.vphone:
+            changed = vphone_install(home, environment) or changed
         if args.fdu:
             changed = fdu_install(home, environment) or changed
         if args.resolved:

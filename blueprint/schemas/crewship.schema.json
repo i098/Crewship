@@ -139,6 +139,9 @@
             "fdu": {
               "type": "boolean"
             },
+            "vphone": {
+              "type": "boolean"
+            },
             "fleet_browsers": {
               "type": "boolean"
             },
