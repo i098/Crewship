@@ -54,8 +54,10 @@
 # earlier install keep the old copy and its link until this removes them.
 - name: Remove the retired host-wide herdr-mosh link
   ansible.builtin.file:
-    path: "{{ crewship_global_bin }}/herdr-mosh"
+    path: "{{ crewship_global_herdr_mosh_path }}"
     state: absent
   become: true
   become_user: root
-  when: "'herdr-mosh' in crewship_global_links_owned"
+  when:
+    - "'herdr-mosh' in crewship_global_links_owned"
+    - crewship_global_herdr_mosh_path in crewship_retired_found.existing

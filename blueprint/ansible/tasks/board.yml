@@ -157,7 +157,9 @@
             - not ansible_check_mode
 
 - name: Remove the crew board GitHub sink
-  when: crewship_cfg.board.github_sink is not defined
+  when:
+    - crewship_cfg.board.github_sink is not defined
+    - crewship_board_sink_paths | intersect(crewship_retired_found.existing) | length > 0
   block:
     - name: Look for an installed crew board GitHub sink unit
       ansible.builtin.stat:
@@ -175,27 +177,17 @@
         - crewship_manage_services | bool
         - crewship_board_github_sink_unit.stat.exists
 
-    - name: Look for the crew board GitHub sink paths
-      ansible.builtin.command:
-        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_board_sink_paths | to_json }}"]
-      vars: &crewship_board_sink_paths
-        crewship_board_sink_paths:
-          - "{{ crewship_user_units }}/default.target.wants/crewboard-github-sink.service"
-          - "{{ crewship_user_units }}/crewboard-github-sink.service"
-      register: crewship_board_sink_paths_found
-      changed_when: false
-      check_mode: false
-
     - name: Remove the crew board GitHub sink unit
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      vars: *crewship_board_sink_paths
-      loop: "{{ crewship_board_sink_paths | select('in', (crewship_board_sink_paths_found.stdout | from_json).existing) | list }}"
+      loop: "{{ crewship_board_sink_paths | select('in', crewship_retired_found.existing) | list }}"
       notify: reload user systemd
 
 - name: Remove the crew board
-  when: crewship_cfg.board is not defined
+  when:
+    - crewship_cfg.board is not defined
+    - crewship_board_paths | intersect(crewship_retired_found.existing) | length > 0
   block:
     - name: Look for an installed crew board unit
       ansible.builtin.stat:
@@ -213,23 +205,9 @@
         - crewship_manage_services | bool
         - crewship_board_unit.stat.exists
 
-    - name: Look for the crew board paths
-      ansible.builtin.command:
-        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_board_paths | to_json }}"]
-      vars: &crewship_board_paths
-        crewship_board_paths:
-          - "{{ crewship_user_units }}/default.target.wants/crewboard.service"
-          - "{{ crewship_user_units }}/crewboard.service"
-          - "{{ crewship_local_bin }}/crewboard"
-          - "{{ crewship_board_dir }}"
-      register: crewship_board_paths_found
-      changed_when: false
-      check_mode: false
-
     - name: Remove the crew board unit, command and build directory
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      vars: *crewship_board_paths
-      loop: "{{ crewship_board_paths | select('in', (crewship_board_paths_found.stdout | from_json).existing) | list }}"
+      loop: "{{ crewship_board_paths | select('in', crewship_retired_found.existing) | list }}"
       notify: reload user systemd

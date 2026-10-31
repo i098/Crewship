@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from retired_probe import GROUP_VARS, PROBE
 
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = ROOT / "blueprint/config/omp-usage.ts"
@@ -637,9 +638,8 @@ def usage_installation():
         play = scratch / "play.yml"
         play.write_text(yaml.safe_dump([{
             "hosts": "localhost", "connection": "local", "gather_facts": False,
-            "vars_files": [str(ROOT / "blueprint/ansible/group_vars/all" / (name + ".yml"))
-                           for name in ("base", "services", "usage")],
-            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/usage.yml")}],
+            "vars_files": GROUP_VARS,
+            "tasks": [PROBE, {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/usage.yml")}],
             "handlers": [{"name": "Reload preview", "ansible.builtin.debug": {"msg": "no runtime"},
                           "listen": "reload user systemd"}],
         }]))

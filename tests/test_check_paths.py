@@ -101,3 +101,21 @@ def test_invalid_path_lists_fail_without_a_report(value):
     )
     assert result.returncode != 0
     assert result.stdout == ""
+
+
+def test_containing_reports_only_readable_files_that_hold_the_text(tmp_path):
+    marked = tmp_path / "marked"
+    marked.write_text("a\n# BEGIN x\nb\n")
+    plain = tmp_path / "plain"
+    plain.write_text("a\n")
+    linked = tmp_path / "linked"
+    linked.symlink_to(marked)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    paths = [marked, plain, linked, directory, tmp_path / "missing"]
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), json.dumps([str(path) for path in paths]),
+         "--containing", "# BEGIN x"],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(result.stdout)["containing"] == [str(marked), str(linked)]

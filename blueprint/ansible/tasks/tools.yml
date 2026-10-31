@@ -219,8 +219,9 @@
 
 - name: Remove the superseded curses entry point
   ansible.builtin.file:
-    path: "{{ crewship_local_bin }}/crewship-schedules"
+    path: "{{ crewship_curses_path }}"
     state: absent
+  when: crewship_curses_path in crewship_retired_found.existing
 
 - name: Ensure the schedule viewer config directory
   ansible.builtin.file:
