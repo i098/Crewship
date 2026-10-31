@@ -166,6 +166,17 @@ The token goes to the GitHub API only.
 Container builds take the token as the optional BuildKit secret `github_token` (`docker build --secret id=github_token,env=GITHUB_TOKEN ...`).
 The token never enters the image.
 
+## vphone-linux
+
+`vphone` profile.
+[vphone-linux](https://github.com/YahiaAngelo/vphone-linux) runs a virtual iPhone on Linux with QEMU, so agents test iOS apps on the host and need no Mac or iOS Simulator.
+Apply clones the latest release tag into `~/.local/share/crewship/vphone-linux` and moves the checkout to each newer tag.
+The releases publish no assets and no checksums, so git checks the tag's objects.
+Apply builds nothing and starts no VM.
+It needs an x86_64 host with a Vulkan GPU, 16 GB RAM, about 100 GB of disk and sudo.
+Run `./setup/setup.sh`, then `./setup/create-vm.sh`, in the checkout.
+See the [upstream setup](https://github.com/YahiaAngelo/vphone-linux/blob/main/docs/SETUP.md) for the steps.
+
 ## Neovim and LazyVim
 
 Every host gets Neovim.
