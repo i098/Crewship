@@ -139,6 +139,9 @@
             "fdu": {
               "type": "boolean"
             },
+            "vphone": {
+              "type": "boolean"
+            },
             "fleet_browsers": {
               "type": "boolean"
             },
@@ -356,6 +359,9 @@
               "pattern": "^[^\\n`$\"\\\\%]{1,40}$"
             },
             "desk_v2": {
+              "type": "boolean"
+            },
+            "herdr_alerts": {
               "type": "boolean"
             },
             "desk_provider": {

@@ -296,6 +296,27 @@ Relay hands the work to the owning mate or to Firstmate. An invalid front answer
 Before relay or dispatch work starts, the desk sends one short reply that names where the request goes: Firstmate, the secondmate, or a worker. It does not complete the request or stop the typing indicator.
 The typing indicator stops when a newer text replaces the running job.
 
+## Herdr status alerts
+
+The bridge can text the owner when a worker agent changes status, so the agents do not need to report it themselves.
+It is off by default. Set `crewship.imessage.herdr_alerts: true` in `.local/host.yml` to turn it on.
+The service renders this setting as `FM_IMESSAGE_HERDR_ALERTS=true` or `false`.
+The code is `apps/imessage/herdr-watch.ts`. It runs only `herdr agent list`, which only reads status.
+
+Every poll compares each worker pane with its last confirmed status. A new status counts only when it holds for the debounce time, so a status that flips back is ignored.
+One poll sends one text, with one sentence for each confirmed change. The sentence names the project and the task and has no pane id.
+The first poll only records the starting statuses. Supervisor panes are skipped: a pane with a `who` token, or one whose project folder is in the skip list.
+When a pane closes while a new status is held but not yet confirmed, the bridge sends the alert for that held status once, if the status is in the alert list.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_IMESSAGE_HERDR_ALERTS` | `false` | `true` turns the alerts on; `crewship.imessage.herdr_alerts` sets it. |
+| `FM_IMESSAGE_HERDR_STATUSES` | `done,blocked,idle` | The new statuses that send an alert. `blocked` means the agent needs input. |
+| `FM_IMESSAGE_HERDR_POLL_MS` | `15000` | Time between polls. |
+| `FM_IMESSAGE_HERDR_DEBOUNCE_MS` | `20000` | A new status must hold this long. |
+| `FM_IMESSAGE_HERDR_SKIP` | `firstmate` | Project folders that are not workers. |
+| `FM_IMESSAGE_HERDR_BIN` | `herdr` | The herdr executable. |
+
 ## Guarded front modules
 
 The repository also contains a separate front, worker, dispatch policy, and relay validator.
@@ -346,7 +367,8 @@ Desk cancellation and restart exceptions follow the [routing recovery contract](
   A failed directory sync can leave a renamed packet on disk.
   A keyed retry syncs the directory without adding another packet.
   During a transient outage, an active desk answer stays queued without a supervisor handoff.
-- **Delivery.** One loop sends the oldest file.
+- **Delivery.** One loop per lane sends the oldest file of its lane.
+  A lane is one chat on one line; the front desk ack has its own lane.
   It archives keyed direct answers in `outbox-done/` and deletes other completed items.
   A failed send retries after 1 second, then 2, 4, and so on, up to 60 seconds, with jitter.
   Unknown errors also retry, so the queue keeps its order.
@@ -369,7 +391,7 @@ Retry only unkeyed items by moving their files back to the queue directory under
 Never requeue a direct desk answer by hand; follow the [routing recovery contract](#what-it-does).
 Delete an unkeyed item's file to drop it by hand.
 Keep keyed receipts with the journal as [routing recovery](#what-it-does) requires.
-An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds the queue in order while it retries.
+An error that can be systemic (for example HTTP 429 or 500, or `PERMISSION_DENIED`) holds its lane in order while it retries.
 The log shows each try.
 `FM_IMESSAGE_RETRY_MS` sets the first wait in milliseconds (default 1000); the longest wait is 60 times that value.
 
@@ -651,6 +673,7 @@ crewship:
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
     desk_v2: false                  # optional; select the V2 loop with true
+    herdr_alerts: false             # optional; true alerts you from herdr agent status
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
 
@@ -831,6 +854,15 @@ The bubble opens on his phone, so the page listener needs a public HTTPS address
    ```
 
 Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which runs the tunnel with the token from `~/super.env`, and sets the card variables in the bridge unit. The tunnel reaches only the page listener. To turn cards off, remove the block, run `./ship.sh launch`, then run `systemctl --user disable --now fm-cards-tunnel` and delete its unit.
+
+## Outbound text filter
+
+`fm-imessage` cleans each text and photo caption before it sends (`apps/imessage/clean.ts`, run with bun). The bridge refuses a text that is only a PR link, and any paragraph that starts with a task or mate id, has `key=` or `corr=` tokens, or has two or more commit hashes after a colon (hex inside a URL does not count as a hash). It answers HTTP 422 and queues nothing. Sub-agent answers pass the same filter in `subagent.ts`.
+The filter removes `[Dxxxx]` decision tags, `[key=...]`, `key=` and `corr=` tags, `pr=`, `mode=`, `yolo=`, `head=` and `task=` tokens, mate ids (`<x>-mate-<y>` always; `cf-<word>` and `sm-<word>` only in backticks or as a leading `label:`), absolute paths with two or more segments (`/a/b`) and `~/...` paths, `state/` and `data/` paths that end in a file extension, a status prefix (`working:`, `done:`, `needs-decision:`, `paused:`) at the start of a line, and a `child <id> working:` style prefix (also `done`, `failed`, `blocked`, `paused`, `needs-decision`, with an optional `supervisor:` before it).
+A line that starts with "decision stuck after N attempts" is dropped whole; inline, only the phrase is removed.
+A bare colon at the start of a line is dropped, also when the text had one before; emoticons such as ":)" stay. "the owner" and "the captain" (also `the owner's`) become "you" ("your"). A bare "owner" or "captain", "the owner of", "the captain Smith", and `owner.json` stay.
+URLs stay as they are. Text with none of these stays byte-exact, except that a bare colon at the start of a line is still dropped. If nothing is left, the original is sent without a leading colon.
+Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
 
 ## Plain messages and the shared line
 

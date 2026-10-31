@@ -8,15 +8,17 @@
 # photo with a side over 2048 px and checks it by content. Photos go over the Photon line only.
 # --typing shows the typing bubble (best effort; timing: docs/imessage.md#what-it-does); --react puts a tapback on his latest text.
 # --card sends a card, an app bubble that opens its page in Messages: JSON text, - for stdin, or a file (docs/imessage.md#cards).
+# Text and caption pass through the outbound filter (clean.ts: strips tags, ids, raw paths, status prefixes).
 # Exit 0 = queued: the bridge sends in order and retries while the upstream is down. Exit non-zero = nothing queued.
 url=http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}
 B=(curl -sS --fail-with-body --max-time 60 -H 'X-Firstmate: 1')
 q=
 image=
+here=$(dirname "$(readlink -f "$0")")
 fail() { echo "fm-imessage: $1 (nothing sent)" >&2; exit 2; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) sed -n '2,11p' "$0" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | cut -c3-; exit 0 ;;
     --typing) "${B[@]}" -X POST "$url/typing"; exit ;;
     --react) printf '%s' "${2:?emoji}" | "${B[@]}" --data-binary @- "$url/react"; exit ;;
     --card) [ -n "${2:-}" ] || fail "--card needs JSON, - or a file"
@@ -30,6 +32,15 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
+clean() { # filter stdin; send it unchanged with a warning when bun or clean.ts is missing or fails
+  local buf out
+  buf=$(cat; echo x); buf=${buf%x}
+  if command -v bun >/dev/null && [ -f "$here/clean.ts" ] && out=$(printf '%s' "$buf" | bun "$here/clean.ts" || exit 1; echo x); then
+    out=${out%x}; printf '%s' "$out"
+  else
+    echo "fm-imessage: filter unavailable or failed, sending text unfiltered" >&2; printf '%s' "$buf"
+  fi
+}
 if [ -n "$image" ]; then
   # The bridge checks the content and the size again; these checks only give the quick answer.
   [ -f "$image" ] && [ -r "$image" ] || fail "$image is not a readable file"
@@ -37,6 +48,8 @@ if [ -n "$image" ]; then
   [ "$(stat -c %s -- "$image")" -le 26214400 ] || fail "$image is over 25 MB"
   p=${image//\\/\\\\}
   p=${p//\"/\\\"}
-  exec "${B[@]}" -F "image=@\"$p\"" --form-string "caption=$*" "$url/image${q:+?$q}"
+  cap=$*
+  if [ -n "$cap" ]; then cap=$(printf '%s' "$cap" | clean; echo x); cap=${cap%x}; fi
+  exec "${B[@]}" -F "image=@\"$p\"" --form-string "caption=$cap" "$url/image${q:+?$q}"
 fi
-if [ $# -gt 0 ]; then printf '%s' "$*"; else cat; fi | "${B[@]}" --data-binary @- "$url/send${q:+?$q}"
+{ if [ $# -gt 0 ]; then printf '%s' "$*"; else cat; fi; } | clean | "${B[@]}" --data-binary @- "$url/send${q:+?$q}"

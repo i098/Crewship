@@ -31,13 +31,14 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 
 @pytest.mark.parametrize("backend", ["instagrapi", "graph"])
 @pytest.mark.parametrize("desk_v2", [None, False, True])
+@pytest.mark.parametrize("herdr_alerts", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
     ("fm-imessage", "bun", ["bridge.ts"]),
     ("fm-cards-tunnel", "cloudflared", [
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
 ])
-def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend, desk_v2):
+def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend, desk_v2, herdr_alerts):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
     local_bin.mkdir(parents=True)
@@ -59,7 +60,8 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     ).render(
         ansible_managed="test",
         crewship_cfg={"imessage": {"owner": "", "cards": {"url": "https://cards.example.com"},
-                                   **({} if desk_v2 is None else {"desk_v2": desk_v2})}},
+                                   **({} if desk_v2 is None else {"desk_v2": desk_v2}),
+                                   **({} if herdr_alerts is None else {"herdr_alerts": herdr_alerts})}},
         crewship_local_bin=str(local_bin), crewship_imessage_dir=str(home),
         crewship_firstmate_dir=str(home), crewship_imessage_desk_provider="omp",
         crewship_imessage_desk_model="test", crewship_imessage_desk_reasoning="off",
@@ -97,6 +99,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     assert result.stderr == ""
     if unit == "fm-imessage":
         assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
+        assert f'Environment="FM_IMESSAGE_HERDR_ALERTS={str(bool(herdr_alerts)).lower()}"' in rendered
 
 
 def send(tmp_path, *args):
@@ -1736,6 +1739,37 @@ process.exit(0);
     assert result["receipts"] == [{**item, "done": True}]
 
 
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_queue_lanes_do_not_block_each_other_and_keep_their_order(tmp_path):
+    queue = tmp_path / "queue"
+    result = bun(f"""
+import {{ Queue }} from {OUTBOX};
+const order = [];
+let release;
+const gate = new Promise((r) => (release = r));
+const q = new Queue({json.dumps(str(queue))}, "item", async (item) => {{
+  if (item.v === "slow") await gate;
+  order.push(item.v);
+}}, 5, undefined, (item) => item.id, (item) => item.lane);
+q.add({{ v: "slow", lane: "a", id: "1" }});
+q.add({{ v: "after-slow", lane: "a", id: "2" }});
+q.add({{ v: "ack", lane: "b", id: "3" }});
+q.add({{ v: "ack-2", lane: "b", id: "4" }});
+const end = Date.now() + 1000;
+while (order.length < 2 && Date.now() < end) await Bun.sleep(5);
+const during = [...order];
+release();
+while (order.length < 4 && Date.now() < end + 1000) await Bun.sleep(5);
+// the same request id, added again while pending and after delivery, is delivered once
+q.add({{ v: "ack", lane: "b", id: "3" }});
+await Bun.sleep(50);
+console.log(JSON.stringify({{ during, order }}));
+process.exit(0);
+""")
+    assert result["during"] == ["ack", "ack-2"]  # lane b was not held by the slow send of lane a
+    assert result["order"] == ["ack", "ack-2", "slow", "after-slow"]
+
+
 # A fake spectrum-ts for bridge.ts. Its state is in FAKE_DIR, so it outlives a bridge restart: `down` holds how
 # many more upstream calls fail with UNAVAILABLE, typing always fails while `typing-down` exists, `inbound/` holds
 # the owner's messages for the bridge to receive, `edits/` holds the line's raw message.edited events, `calls` logs
@@ -2237,8 +2271,10 @@ def test_bridge_rides_out_an_upstream_outage(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
-    sent = ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send claude-haiku-5-5", "send five"]
-    assert text(fake / "sent").splitlines() == sent
+    # The desk reply has its own lane: it lands wherever the outage lets it, while the supervisor sends keep their order.
+    delivered = text(fake / "sent").splitlines()
+    assert sorted(delivered) == sorted(["send claude-haiku-5-5", "send one", "send two", "react m1 👍", "reply m1 three", "send four", "send five"])
+    assert [d for d in delivered if d != "send claude-haiku-5-5"] == ["send one", "send two", "react m1 👍", "reply m1 three", "send four", "send five"]
     assert "typing UNAVAILABLE" in text(fake / "calls")
     saved = state / "attachments/m2-photo.jpg"
     assert saved.read_text() == "JPEG"

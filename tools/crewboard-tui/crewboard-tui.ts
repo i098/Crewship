@@ -4,7 +4,7 @@ import { BoxRenderable, TextRenderable, StyledText, RGBA, createCliRenderer, typ
 import { theme } from "../tui-theme/theme.ts"
 import { loadQueue, queueFooter, queueHeader, queueRows, queueSnapshot, queueViewport, type QRow, type Rec } from "./queue.ts"
 import { deskFooter, deskLines, deskSnapshot, loadDesk, probe, STATE_DIR, type Desk } from "./desk.ts"
-import { fetchSummaries, type Summaries } from "./summaries.ts"
+import { fetchReadSeqs, fetchSummaries, unreadCount, type ReadSeqs, type Summaries } from "./summaries.ts"
 import { buildAgents, counts, DEFAULT_STALL_SEC, flatten, type Agent, type Row as TaskRow, type View } from "./tasks-model.ts"
 import { findHomes, loadHomes } from "./tasks-source.ts"
 import { footer as tasksFooter, header as tasksHeader, snapshot, viewport, type Line } from "./tasks-view.ts"
@@ -33,19 +33,20 @@ if (flag("--once")) {
 }
 
 type Msg = { seq: number; ts: string; topic: string; from: string | null; body: string }
-type Topic = { name: string; msgs: Msg[]; unread: number; newest: number }
+type Topic = { name: string; msgs: Msg[]; newest: number }
 type Row = { kind: "head"; group: string; unread: number } | { kind: "topic"; topic: Topic } | { kind: "summary"; text: string }
 
 const TZ = "America/Los_Angeles"
 const LEFT_W = 38
 const MAX_BODY_LINES = 40
 const SUMMARY_EVERY_MS = 10_000
+const READ_EVERY_MS = 3_000
 let summaries: Summaries = new Map()
 const topics = new Map<string, Topic>()
 let connected = false
 let boot: string | null = null
 let lastSeq = 0
-let headSeq = -1 // seqs <= headSeq were history at connect time and count as read
+let readSeqs: ReadSeqs = new Map()
 let selected: string | null = null
 let picked = false // until the user moves, the selection tracks the newest topic
 let scroll = 0 // lines above the bottom; 0 follows the newest message
@@ -57,22 +58,20 @@ function ingest(line: string) {
   try { o = JSON.parse(line) } catch { return }
   if (o.boot !== undefined && o.topic === undefined) {
     if (boot !== o.boot) { boot = o.boot; lastSeq = 0 }
-    if (headSeq < 0) headSeq = o.seq
     return
   }
   if (o.topic === undefined || o.seq <= lastSeq) return
   lastSeq = o.seq
   let t = topics.get(o.topic)
-  if (!t) topics.set(o.topic, (t = { name: o.topic, msgs: [], unread: 0, newest: 0 }))
+  if (!t) topics.set(o.topic, (t = { name: o.topic, msgs: [], newest: 0 }))
   t.msgs.push(o)
   t.newest = o.seq
   total++
-  if (o.seq > headSeq && o.topic !== selected) t.unread++
 }
 
 async function follow() {
   for (;;) {
-    const args = ["crewboard", "sub", "*", "--json"]
+    const args = ["crewboard", "sub", "*", "--json", "--viewer"]
     args.push("--since", String(lastSeq))
     if (boot) args.push("--boot", boot)
     try {
@@ -101,6 +100,17 @@ async function followSummaries() {
   }
 }
 
+async function followReadSeqs() {
+  for (;;) {
+    readSeqs = await fetchReadSeqs()
+    draw()
+    await Bun.sleep(READ_EVERY_MS)
+  }
+}
+
+// Unread means unread by agents: messages above the board's read_seq. Reading here never clears it.
+const unread = (t: Topic) => unreadCount(t.msgs, readSeqs.get(t.name))
+
 // ---- model ----
 const groupOf = (name: string) => {
   const id = name.replace(/^task\//, "")
@@ -122,7 +132,7 @@ function rows(): Row[] {
     return { g, ts, newest: ts[0].newest }
   }).sort((a, b) => b.newest - a.newest)
   for (const { g, ts } of ordered) {
-    out.push({ kind: "head", group: g, unread: ts.reduce((s, t) => s + t.unread, 0) })
+    out.push({ kind: "head", group: g, unread: ts.reduce((s, t) => s + unread(t), 0) })
     for (const t of ts) {
       out.push({ kind: "topic", topic: t })
       const text = summaries.get(t.name)
@@ -200,7 +210,7 @@ function leftPane(list: Row[], innerH: number) {
       lc.push(ch("    " + clip(r.text, lw - 4), theme.muted))
     } else {
       const t = r.topic, on = t.name === selected
-      const u = t.unread ? ` ${t.unread}` : ""
+      const u = unread(t) ? ` ${unread(t)}` : ""
       const cnt = ` ${t.msgs.length}`
       const nameW = lw - 2 - u.length - cnt.length
       const bg = on ? theme.border : undefined
@@ -243,11 +253,11 @@ function rightPane(innerH: number) {
 }
 
 function drawFooter() {
-  const unreadAll = [...topics.values()].reduce((s, x) => s + x.unread, 0)
+  const unreadAll = [...topics.values()].reduce((s, x) => s + unread(x), 0)
   const status = connected ? ch("● live", theme.ok, { bold: true }) : ch("○ board off, retrying", theme.error, { bold: true })
   footer.content = new StyledText([
     ch(" ", theme.muted), status,
-    ch(`  ${topics.size} topics  ${total} msgs${unreadAll ? `  ${unreadAll} unread` : ""}${scroll ? `  ↑${scroll} lines up` : ""}`, theme.muted),
+    ch(`  ${topics.size} topics  ${total} msgs${unreadAll ? `  ${unreadAll} unread by agents` : ""}${scroll ? `  ↑${scroll} lines up` : ""}`, theme.muted),
     ch("   ↑↓/jk topic  PgUp/PgDn scroll  g/G oldest/newest  t tasks  d queue  m desk  q quit", theme.muted),
   ])
 }
@@ -266,7 +276,6 @@ function draw() {
     let best: Topic | undefined
     for (const t of topics.values()) if (!best || t.newest > best.newest) best = t
     selected = best?.name ?? null
-    if (best) best.unread = 0
   }
   const si = list.findIndex(r => r.kind === "topic" && r.topic.name === selected)
   if (si < listTop) listTop = si - (si > 0 && list[si - 1].kind === "head" ? 1 : 0)
@@ -440,7 +449,6 @@ function move(d: number) {
   if (!n) return
   picked = true
   selected = n.topic.name
-  n.topic.unread = 0
   scroll = 0
   draw()
 }
@@ -472,3 +480,4 @@ if (mode !== "board") setMode(mode)
 draw()
 follow()
 followSummaries()
+followReadSeqs()

@@ -21,6 +21,7 @@ See [Project databases](project-databases.md#worktree-environment) for the separ
 | `oss-fleet/doctor/docker-guard.sh` | Every hour: removes stopped containers that agents left behind and reports long-running ones that nothing claims. See [Docker guard](#docker-guard). |
 | `oss-fleet/doctor/dev-server-reaper.sh` | Every 2 minutes: kills `next dev`/`next-server`/`tsc --noEmit` trees in treehouse worktrees whose lane last reported `done:`/`paused:`/`blocked:`/`failed:`, has no agent process, or whose agent transcript is idle >= 30 min (`REAPER_IDLE_MIN`). A dev server is 3-4 GB and restarts in 10 s; idle ones from finished lanes are what filled swap. One `next dev` per branch is inherent - Next compiles the whole app per process - so the fix is lifetime, not sharing. |
 | `oss-fleet/doctor/storage-guard.sh` | Measures disk pressure, attempts alerts, and reclaims eligible data. See [Storage guard](#storage-guard) for delivery, retry, and reclaim rules. |
+| `oss-fleet/doctor/pressure-guard.sh` | Every 5 minutes: above 70% disk or RAM use, prunes safe targets and alerts. See [Pressure guard](#pressure-guard). |
 | `oss-fleet/doctor/devtools-bridge-reaper.sh` | Every 10 minutes: stops attached chrome-devtools-axi bridges (`CHROME_DEVTOOLS_AXI_BROWSER_URL` set) whose process tree used no CPU and whose session state files did not change for 60 min (`REAPER_IDLE_MIN`). See [Devtools-bridge reaper](#devtools-bridge-reaper). |
 | `.config/systemd/user/crewship-*.{service,timer,path}` | `fleet_guards` enables the guard and reaper timers. Apply retires only selected `flotilla-*` guard units. |
 | `/etc/docker/daemon.json` | `init: true` and `live-restore: true` merged in (tasks/docker.yml, any profile with docker). |
@@ -139,6 +140,27 @@ only for the size in each report line (`fdu --view summary`); without fdu, or
 when fdu fails, `du` gives it. fdu never decides what is removed.
 `~/oss-fleet/doctor/worktree-prune.sh --dry-run` prints what a real run would
 remove. `tests/test_worktree_prune.py` runs it against real git repositories.
+
+## Pressure guard
+
+`crewship-pressure-guard.timer` runs `pressure-guard.sh` every five minutes.
+It measures the filesystems that hold `/`, the home and Docker's data root, and RAM (`MemTotal` minus `MemAvailable`).
+When any reading exceeds `crewship_pressure_guard_pct` (default 70), it prunes only these targets:
+
+- All Docker build cache and all unused images (`docker builder prune -af`, `docker image prune -af`).
+- `/tmp/pytest-of-*` dirs idle for 60 minutes, with no open file under them (`lsof +D`) and no `.git` inside.
+- The uv and bun caches (`uv cache prune`, `bun pm cache rm`), only while no `uv` or `bun` process runs.
+
+It never runs `docker volume prune`, and never touches worktrees, git checkouts or any file held open.
+It then alerts through `fm-inbox.sh note`, falling back to `notify-master.sh` and `wall`, at most every `crewship_pressure_guard_repeat_min` (30) minutes.
+The alert says when a reading is still over the threshold after the prune.
+In that case the alert names the top three entries under each full filesystem, and the guard texts the owner one sentence with `fm-imessage` (`PRESSURE_TEXT_CMD` replaces it), at most once per hour (`PRESSURE_TEXT_REPEAT_MIN`, 60), not on every tick.
+Docker runs as `sudo -n docker` when the account cannot use the socket directly.
+On this host the uv and bun caches already live on another disk through symlinks, so the guard moves nothing.
+The guard changes nothing below the threshold, so repeated runs are safe.
+
+`pressure-guard.sh --dry-run` prints each step it would take and prunes, writes and alerts nothing.
+Force a low threshold to see it: `PRESSURE_PCT=1 pressure-guard.sh --dry-run`.
 
 ## Docker guard
 

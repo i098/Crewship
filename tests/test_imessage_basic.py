@@ -302,7 +302,9 @@ def test_voice_accepts_rewording_with_protected_facts(tmp_path, desk_clock, draf
 
 @pytest.mark.parametrize("failure", ["voice-hold", "voice-fail"])
 def test_voice_failure_hands_off_without_sending_source(tmp_path, desk_clock, monkeypatch, failure):
-    monkeypatch.setenv("FM_IMESSAGE_TEST_VOICE_MS", "100")
+    # Only the hold case needs the timeout; it must outlast fake-omp startup under load, or the process is killed before it writes voice-started.
+    if failure == "voice-hold":
+        monkeypatch.setenv("FM_IMESSAGE_TEST_VOICE_MS", "1500")
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / failure).touch()
     bridge = start(1)
@@ -899,6 +901,7 @@ def test_cancelled_desk_reconciliation_releases_supervisor(tmp_path, desk_clock,
             rig.relay_mode("")
         retry.unlink()
         wait_for(lambda: "send Supervisor answer" in read_text(rig.fake / "sent"), "the unblocked supervisor")
+        wait_for(lambda: list((rig.state / "outbox-done").glob("*.json")), "the desk receipt")
         receipt = json.loads(next((rig.state / "outbox-done").glob("*.json")).read_text())
         assert receipt.get("done", 0) == (1 if history == "accepted" else 0)
         assert bool(receipt.get("maybe")) == (history == "unavailable")
