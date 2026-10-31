@@ -358,6 +358,9 @@
             "desk_v2": {
               "type": "boolean"
             },
+            "herdr_alerts": {
+              "type": "boolean"
+            },
             "desk_provider": {
               "enum": [
                 "omp",

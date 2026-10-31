@@ -47,3 +47,11 @@ test("a pane that disappears is forgotten; bad JSON throws", () => {
   expect(w.poll(list(agent("p1", "done")), 2000)).toBeUndefined();
   expect(() => w.poll("{}", 3000)).toThrow();
 });
+
+test("a pane that closes while its done status is still held sends that alert once", () => {
+  const w = watch();
+  w.poll(list(agent("p1", "working"), agent("p2", "working")), 0);
+  w.poll(list(agent("p1", "done"), agent("p2", "working")), 1000);
+  expect(w.poll(list(agent("p2", "working")), 5000)).toBe('The agent on "Fix the login page" in code-factory is done.');
+  expect(w.poll(list(agent("p2", "working")), 40_000)).toBeUndefined();
+});

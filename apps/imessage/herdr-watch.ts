@@ -28,29 +28,45 @@ export function agentsOf(json: string, skip: string[]): Agent[] {
 
 export class HerdrWatch {
   private seen = new Map<string, string>(); // pane -> last confirmed status
-  private held = new Map<string, { status: string; since: number }>();
+  private held = new Map<string, { status: string; since: number; line: string }>();
 
   constructor(private config: HerdrConfig) {}
+
+  private alerts(status: string) {
+    return this.config.alertOn.includes(status) && SAY[status] !== undefined;
+  }
+
+  private forgetClosed(live: Set<string>): string[] {
+    const lines: string[] = [];
+    for (const id of [...this.seen.keys()]) {
+      if (live.has(id)) continue;
+      const held = this.held.get(id);
+      if (held && this.alerts(held.status)) lines.push(held.line);
+      this.seen.delete(id);
+      this.held.delete(id);
+    }
+    return lines;
+  }
 
   // Takes one `herdr agent list` output; returns the text to send, if a change is confirmed. The first poll only records.
   poll(json: string, now: number): string | undefined {
     const agents = agentsOf(json, this.config.skip);
-    const live = new Set(agents.map((a) => a.id));
-    for (const id of [...this.seen.keys()]) if (!live.has(id)) { this.seen.delete(id); this.held.delete(id); }
+    const lines = this.forgetClosed(new Set(agents.map((a) => a.id)));
     const first = this.seen.size === 0 && this.held.size === 0;
-    const lines: string[] = [];
     for (const a of agents) {
       const was = this.seen.get(a.id);
       if (was === undefined || first) { this.seen.set(a.id, a.status); continue; }
       if (a.status === was) { this.held.delete(a.id); continue; }
       const held = this.held.get(a.id);
-      if (held?.status !== a.status) { this.held.set(a.id, { status: a.status, since: now }); continue; }
+      if (held?.status !== a.status) {
+        const line = `${a.task ? `The agent on "${a.task}"` : "An agent"} in ${a.project} ${SAY[a.status] ?? ""}.`;
+        this.held.set(a.id, { status: a.status, since: now, line });
+        continue;
+      }
       if (now - held.since < this.config.debounceMs) continue;
       this.held.delete(a.id);
       this.seen.set(a.id, a.status);
-      if (this.config.alertOn.includes(a.status) && SAY[a.status]) {
-        lines.push(`${a.task ? `The agent on "${a.task}"` : "An agent"} in ${a.project} ${SAY[a.status]}.`);
-      }
+      if (this.alerts(a.status)) lines.push(held.line);
     }
     if (!lines.length) return undefined;
     return cleanText(lines.length === 1 ? lines[0]! : `${lines.length} agent updates:\n${lines.map((l) => `- ${l}`).join("\n")}`);

@@ -546,6 +546,7 @@ if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
       const text = watch.poll(await new Response(run.stdout).text(), Date.now());
       const to = proactiveRef;
       if (text && to) put({ ...to, bubbles: [text], requests: [] });
+      else if (text) console.log("fm-imessage: herdr alert dropped: no chat known yet");
     } catch (e) {
       log("herdr status poll")(e);
     } finally {
