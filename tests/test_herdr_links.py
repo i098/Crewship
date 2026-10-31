@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import yaml
-
 from retired_probe import PROBE, RETIRED
 
 ROOT = Path(__file__).parents[1]

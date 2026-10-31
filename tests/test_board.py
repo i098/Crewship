@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from retired_probe import GROUP_VARS, PROBE
 
 ROOT = Path(__file__).parents[1]
