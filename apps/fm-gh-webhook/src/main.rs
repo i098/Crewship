@@ -6,7 +6,7 @@
 //! The secret comes from the environment (the unit reads ~/super.env) and is never
 //! logged. Without it the program exits 78 and the unit stays down.
 //!
-//! Events land under GH_WEBHOOK_DIR (default ~/.local/state/crewship/gh-webhook),
+//! Events land under GH_WEBHOOK_DIR (default $XDG_STATE_HOME or ~/.local/state, plus crewship/gh-webhook),
 //! one small file each, written atomically, for the Firstmate merged-PR poll:
 //!   merged/<owner>__<repo>__<number>  empty; pull_request closed with merged true
 //!   ci/<owner>__<repo>__<sha>/<event>-<id>-<hex name>
@@ -237,12 +237,15 @@ fn main() {
         eprintln!("fm-gh-webhook: GH_WEBHOOK_SECRET is not set; add it to ~/super.env");
         process::exit(78);
     }
-    let root = env::var_os("GH_WEBHOOK_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env::var_os("HOME").unwrap_or_default())
-                .join(".local/state/crewship/gh-webhook")
-        });
+    let set = |k: &str| env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let Some(root) = set("GH_WEBHOOK_DIR").or_else(|| {
+        let state =
+            set("XDG_STATE_HOME").or_else(|| set("HOME").map(|h| h.join(".local/state")))?;
+        Some(state.join("crewship/gh-webhook"))
+    }) else {
+        eprintln!("fm-gh-webhook: set GH_WEBHOOK_DIR, XDG_STATE_HOME or HOME");
+        process::exit(78);
+    };
     let port = env::var("GH_WEBHOOK_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
