@@ -164,7 +164,11 @@ def test_home_links_published_docs_on_crewship_si(tmp_path):
     head = Head()
     head.feed((dist / "index.html").read_text())
     published = set(build.doc_routes().values())
-    assert not [a for a in head.anchors if "/blob/main/docs/" in a and a.split("/blob/main/")[1].split("#")[0] in build.doc_routes()]
+    assert not [
+        a
+        for a in head.anchors
+        if "/blob/main/docs/" in a and a.split("/blob/main/")[1].split("#")[0] in build.doc_routes()
+    ]
     for anchor in head.anchors:
         if anchor.startswith("/docs/"):
             path, _, fragment = anchor.partition("#")
@@ -207,7 +211,11 @@ def test_pages_carry_json_ld(tmp_path):
     assert set(graph) == {"WebSite", "Organization", "SoftwareApplication"}
     assert graph["WebSite"]["alternateName"] == "crewship.si"
     org = graph["Organization"]["@id"]
-    assert graph["WebSite"]["publisher"]["@id"] == graph["SoftwareApplication"]["publisher"]["@id"] == org
+    assert (
+        graph["WebSite"]["publisher"]["@id"]
+        == graph["SoftwareApplication"]["publisher"]["@id"]
+        == org
+    )
     logo = urlparse(graph["Organization"]["logo"])
     assert (logo.scheme, logo.netloc) == ("https", "crewship.si")
     assert png_size(dist / logo.path.lstrip("/")) == (180, 180)
@@ -402,7 +410,10 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
         assert 70 <= len(head.meta["description"]) <= 160 or route == "/docs", route
         assert title[0].isalnum(), title
         assert head.meta["og:url"] == head.links["canonical"]
-        assert (head.meta["og:title"], head.meta["og:description"]) == (title, head.meta["description"])
+        assert (head.meta["og:title"], head.meta["og:description"]) == (
+            title,
+            head.meta["description"],
+        )
         assert {"/", "/about", "/docs"} <= set(head.anchors)
         assert head.links["stylesheet"] == "/harbor.css"
         assert len(head.ids) == len(set(head.ids)), route
@@ -417,7 +428,11 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
     for route, head in pages.items():
         for link in head.anchors:
             parsed = urlparse(link)
-            if parsed.scheme or parsed.netloc or (parsed.path and not parsed.path.startswith("/docs")):
+            if (
+                parsed.scheme
+                or parsed.netloc
+                or (parsed.path and not parsed.path.startswith("/docs"))
+            ):
                 continue
             target = parsed.path or route
             assert target in pages, (route, link)
@@ -448,7 +463,9 @@ def test_changelog_page_shows_fragments_then_released_versions_with_issue_links(
 
     headings = re.findall(r"<h2 [^>]*>(.*?)</h2>", page)
     assert [re.sub(r"<[^>]+>", " ", h).split() for h in headings] == [
-        ["Unreleased"], ["1.2.0", "2026-01-02"], ["1.1.0", "2025-12-01"]
+        ["Unreleased"],
+        ["1.2.0", "2026-01-02"],
+        ["1.1.0", "2025-12-01"],
     ]
     assert '<a href="https://example.test/tag/v1.2.0">1.2.0</a>' in page
     unreleased = page.split('id="1.2.0"')[0]

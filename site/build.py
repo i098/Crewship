@@ -59,9 +59,7 @@ def features(readme, index=""):
         (title, link, desc)
         for title, link, desc in (
             (title, posixpath.normpath(f"docs/{link}"), desc)
-            for title, link, desc in re.findall(
-                r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M
-            )
+            for title, link, desc in re.findall(r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M)
         )
         if link in SCENE
     )
@@ -167,7 +165,9 @@ def doc_link(link, source, routes, image=False):
     path = posixpath.normpath(posixpath.join(posixpath.dirname(source), unquote(parsed.path)))
     if not image and path in routes:
         return urlunsplit(("", "", routes[path], parsed.query, parsed.fragment))
-    base = "https://raw.githubusercontent.com/i098/Crewship/main/" if image else f"{REPO}/blob/main/"
+    base = (
+        "https://raw.githubusercontent.com/i098/Crewship/main/" if image else f"{REPO}/blob/main/"
+    )
     return urljoin(base + source, link)
 
 
@@ -187,7 +187,7 @@ def doc_inline(text, source, routes):
     for match in INLINE.finditer(text):
         parts.append(html.escape(text[end : match.start()]))
         if match.group("code") is not None:
-            value = f'<code>{html.escape(match["code"])}</code>'
+            value = f"<code>{html.escape(match['code'])}</code>"
         elif match.group("url") is not None:
             url = doc_link(match["url"].strip("<>"), source, routes, bool(match["image"]))
             if match["image"]:
@@ -196,14 +196,16 @@ def doc_inline(text, source, routes):
                     ' loading="lazy">'
                 )
             else:
-                value = f'<a href="{html.escape(url)}">{doc_inline(match["label"], source, routes)}</a>'
+                value = (
+                    f'<a href="{html.escape(url)}">{doc_inline(match["label"], source, routes)}</a>'
+                )
         elif match.group("auto") is not None:
             url = match["auto"][1:-1]
             value = f'<a href="{html.escape(doc_link(url, source, routes))}">{html.escape(url)}</a>'
         elif match.group("bold") is not None:
-            value = f'<strong>{doc_inline(match["bold"], source, routes)}</strong>'
+            value = f"<strong>{doc_inline(match['bold'], source, routes)}</strong>"
         elif match.group("italic") is not None:
-            value = f'<em>{doc_inline(match["italic"], source, routes)}</em>'
+            value = f"<em>{doc_inline(match['italic'], source, routes)}</em>"
         else:
             value = html.escape(match[0][1:])
         parts.append(value)
@@ -283,9 +285,14 @@ def _table_at(lines, index):
 def _block_at(lines, index):
     line = lines[index].strip()
     return (
-        FENCE.match(line) or HEADING.match(line) or HTML_HEADING.fullmatch(line)
-        or LIST.match(lines[index]) or line.startswith((">", "<!--"))
-        or RAW_HTML.match(line) or RULE.fullmatch(line) or _table_at(lines, index)
+        FENCE.match(line)
+        or HEADING.match(line)
+        or HTML_HEADING.fullmatch(line)
+        or LIST.match(lines[index])
+        or line.startswith((">", "<!--"))
+        or RAW_HTML.match(line)
+        or RULE.fullmatch(line)
+        or _table_at(lines, index)
     )
 
 
@@ -356,7 +363,9 @@ def _table_block(lines, i, source, routes):
     i += 2
     while i < len(lines) and "|" in lines[i] and lines[i].strip():
         output.append("<tr>")
-        output.extend(f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i]))
+        output.extend(
+            f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i])
+        )
         output.append("</tr>")
         i += 1
     return "\n".join([*output, "</tbody></table></div>"]), i
@@ -368,7 +377,7 @@ def _paragraph_block(lines, i, source, routes):
     while i < len(lines) and lines[i].strip() and not _block_at(lines, i):
         paragraph.append(lines[i].strip())
         i += 1
-    return f'<p>{doc_inline(" ".join(paragraph), source, routes)}</p>', i
+    return f"<p>{doc_inline(' '.join(paragraph), source, routes)}</p>", i
 
 
 def _render_block(lines, i, source, routes, headings):
@@ -416,16 +425,21 @@ def doc_page(title, description, route, body, source=None):
     crumbs = [("Crewship", ORIGIN + "/"), ("Documentation", ORIGIN + "/docs")]
     if source:
         crumbs.append((title, canonical))
-    structured = json.dumps({
-        "@context": "https://schema.org", "@type": "BreadcrumbList",
-        "itemListElement": [
-            {"@type": "ListItem", "position": i, "name": name, "item": url}
-            for i, (name, url) in enumerate(crumbs, 1)
-        ],
-    }, ensure_ascii=False).replace("<", "\\u003c")
+    structured = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": i, "name": name, "item": url}
+                for i, (name, url) in enumerate(crumbs, 1)
+            ],
+        },
+        ensure_ascii=False,
+    ).replace("<", "\\u003c")
     source_link = (
         f' · <a href="{REPO}/blob/main/{html.escape(source)}">View Markdown source</a>'
-        if source else ""
+        if source
+        else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -474,7 +488,9 @@ def build_docs(dist):
             if (t := plain_text(p)) and " · " not in t
         ]
         description = paragraphs.pop(0) if paragraphs else title
-        while len(description) < 70 and paragraphs:  # a one-line first paragraph is too thin for a snippet
+        while (
+            len(description) < 70 and paragraphs
+        ):  # a one-line first paragraph is too thin for a snippet
             description += " " + paragraphs.pop(0)
         if len(description) > 160:
             description = description[:157].rsplit(" ", 1)[0] + "..."
@@ -484,13 +500,22 @@ def build_docs(dist):
         entries.append(
             f'<li><a href="{route}">{html.escape(title)}</a><p>{html.escape(description)}</p></li>'
         )
-    description = "Crewship guides for installation, configuration, coding agents, and host operations."
+    description = (
+        "Crewship guides for installation, configuration, coding agents, and host operations."
+    )
     index = (
         '<h1 id="documentation">Crewship documentation</h1>'
         f"<p>{description}</p><ul>" + "\n".join(entries) + "</ul>"
     )
     (dist / "docs.html").write_text(doc_page("Documentation", description, "/docs", index))
-    urls = ["/", "/how", "/about", "/changelog", "/docs", *(r for r in routes.values() if r not in UNLISTED)]
+    urls = [
+        "/",
+        "/how",
+        "/about",
+        "/changelog",
+        "/docs",
+        *(r for r in routes.values() if r not in UNLISTED),
+    ]
     (dist / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -522,7 +547,11 @@ def release_notes(markdown):
             releases[-1][2].setdefault(kind, []).append([line[2:]])
         elif releases and kind and line.startswith("  ") and releases[-1][2][kind]:
             releases[-1][2][kind][-1].append(line.strip())
-    return [(v, d, {k: [note(n) for n in ns] for k, ns in kinds.items()}) for v, d, kinds in releases if v != "Unreleased"]
+    return [
+        (v, d, {k: [note(n) for n in ns] for k, ns in kinds.items()})
+        for v, d, kinds in releases
+        if v != "Unreleased"
+    ]
 
 
 def fragment_notes(directory):
@@ -539,7 +568,11 @@ def fragment_notes(directory):
 
 
 def release_html(version, date, kinds, href=None):
-    title = f'<a href="{html.escape(href)}">{html.escape(version)}</a>' if href else html.escape(version)
+    title = (
+        f'<a href="{html.escape(href)}">{html.escape(version)}</a>'
+        if href
+        else html.escape(version)
+    )
     stamp = f'<time datetime="{date}">{html.escape(date)}</time>' if date else ""
     groups = "".join(
         f'<h3 class="{kind.lower()}">{kind}</h3><ul>'
@@ -558,7 +591,9 @@ def release_html(version, date, kinds, href=None):
 
 def changelog_page(unreleased, releases, tags):
     canonical = ORIGIN + "/changelog"
-    description = "What changed in each Crewship release, with the changes that have not shipped yet."
+    description = (
+        "What changed in each Crewship release, with the changes that have not shipped yet."
+    )
     sections = [release_html("Unreleased", None, unreleased)] if unreleased else []
     sections += [release_html(v, d, k, tags.get(v)) for v, d, k in releases]
     return f"""<!doctype html>
