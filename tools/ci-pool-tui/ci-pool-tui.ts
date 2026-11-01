@@ -74,6 +74,18 @@ export type SlotRow = { slot: string; repo: string; level: "ok" | "idle" | "bad"
 
 const repoJobs = (s: Snapshot, repo: string) => [...(s.queued[repo] ?? []), ...(s.progress[repo] ?? [])].flatMap(r => s.jobs[r.id] ?? [])
 
+/** Why an active-looking slot is stuck, or "". Only a slot older than STALL_S is judged on its container and runner. */
+function slotProblem(unit: Unit | undefined, box: Box | undefined, runner: Runner | undefined, known: boolean, dockerAnswered: boolean): string {
+  if (!unit) return "no ci-runner@ unit"
+  if (unit.state === "failed") return "unit failed"
+  if (unit.state !== "active" || unit.age <= STALL_S) return ""
+  if (box && box.state !== "running") return `container ${box.state}`
+  if (dockerAnswered && !box) return `no container for ${Math.round(unit.age / 60)} min`
+  if (known && !runner) return "runner never registered on GitHub"
+  if (runner && runner.status !== "online" && !runner.busy) return `runner ${runner.status} on GitHub`
+  return ""
+}
+
 export function slotRows(s: Snapshot): SlotRow[] {
   return s.slots.map(({ slot, repo }) => {
     const unit = s.units[slot]
@@ -89,23 +101,14 @@ export function slotRows(s: Snapshot): SlotRow[] {
       jobAge: secs(job?.started_at, s.now),
       job: job ? `${(s.progress[repo] ?? []).find(r => r.id === job.run_id)?.display_title ?? "run " + job.run_id} / ${job.name}` : runner?.busy ? "(job not read yet)" : "",
     }
-    let stuck = ""
-    if (!unit) stuck = "no ci-runner@ unit"
-    else if (unit.state === "failed") stuck = "unit failed"
-    else if (unit.state !== "active") { row.state = unit.state; row.level = "idle" } // activating, stopped (drained)
-    else if (unit.age > STALL_S) {
-      if (box && box.state !== "running") stuck = `container ${box.state}`
-      else if (s.containers && !box) stuck = `no container for ${Math.round(unit.age / 60)} min`
-      else if (known && !runner) stuck = "runner never registered on GitHub"
-      else if (runner && runner.status !== "online" && !runner.busy) stuck = `runner ${runner.status} on GitHub`
-    }
+    if (unit && unit.state !== "active" && unit.state !== "failed") row.state = unit.state // activating, stopped (drained)
+    const stuck = slotProblem(unit, box, runner, known, s.containers !== null)
     if (stuck) {
       row.problem = stuck
       const first = s.firstSeen?.[slot]
       if (first !== undefined && s.now - first < SETTLE_S * 1000) { row.state = "ending"; row.job = stuck }
       else { row.level = "bad"; row.state = "STUCK"; row.stuck = stuck }
-    }
-    else if (unit?.state === "active") {
+    } else if (unit?.state === "active") {
       row.level = runner?.busy ? "ok" : "idle"
       row.state = runner?.busy ? "busy" : runner?.status === "online" ? "idle" : known ? "starting" : "up"
     }
@@ -127,24 +130,28 @@ export function heldCause(labels: string[], runners: Runner[] | undefined): stri
   return online.length ? `all ${online.length} matching online runner(s) busy` : `all ${match.length} matching runner(s) offline`
 }
 
+/** Held self-hosted jobs of one repo, and one summary for queued runs whose jobs have not been read. */
+function queuedFindings(s: Snapshot, repo: string): Finding[] {
+  const short = repo.split("/")[1] ?? repo
+  const out: Finding[] = []
+  const unread: number[] = []
+  for (const run of s.queued[repo]) {
+    const jobs = s.jobs[run.id]
+    for (const j of jobs?.filter(x => x.status === "queued") ?? []) {
+      const age = secs(j.created_at, s.now)
+      if (j.labels.some(l => l.toLowerCase() === "self-hosted") && age !== null && age >= HELD_AFTER_S)
+        out.push({ sev: "bad", where: `${short} ${j.name} · ${run.display_title ?? run.name ?? run.id}`, what: "job queued", age, cause: heldCause(j.labels, s.runners[repo]) })
+    }
+    const age = secs(run.created_at, s.now)
+    if (!jobs && age !== null && age >= HELD_AFTER_S) unread.push(age)
+  }
+  if (unread.length) out.push({ sev: "warn", where: short, what: `${unread.length} runs queued`, age: Math.max(...unread), cause: `jobs of these runs not read yet (${JOB_RUNS_PER_REPO} reads per repo and kind)` })
+  return out
+}
+
 export function findings(s: Snapshot, rows: SlotRow[]): Finding[] {
   const out: Finding[] = rows.filter(r => r.stuck).map(r => ({ sev: "bad", where: r.slot, what: "runner stuck", age: r.age, cause: r.stuck! }))
-  for (const repo of Object.keys(s.queued)) {
-    const short = repo.split("/")[1] ?? repo
-    const unread: number[] = []
-    for (const run of s.queued[repo]) {
-      const jobs = s.jobs[run.id]
-      const queued = jobs ? jobs.filter(j => j.status === "queued") : null
-      for (const j of queued ?? []) {
-        const age = secs(j.created_at, s.now)
-        if (!j.labels.some(l => l.toLowerCase() === "self-hosted") || age === null || age < HELD_AFTER_S) continue
-        out.push({ sev: "bad", where: `${short} ${j.name} · ${run.display_title ?? run.name ?? run.id}`, what: "job queued", age, cause: heldCause(j.labels, s.runners[repo]) })
-      }
-      const age = secs(run.created_at, s.now)
-      if (!jobs && age !== null && age >= HELD_AFTER_S) unread.push(age)
-    }
-    if (unread.length) out.push({ sev: "warn", where: short, what: `${unread.length} runs queued`, age: Math.max(...unread), cause: `jobs of these runs not read yet (${JOB_RUNS_PER_REPO} reads per repo and kind)` })
-  }
+  out.push(...Object.keys(s.queued).flatMap(repo => queuedFindings(s, repo)))
   for (const r of rows) if (r.jobAge !== null && r.jobAge > LONG_JOB_S) out.push({ sev: "warn", where: r.slot, what: "job running long", age: r.jobAge, cause: r.job })
   if (s.errors.length) out.push({ sev: "warn", where: "GitHub", what: `${s.errors.length} read(s) failed`, age: null, cause: s.errors[0] })
   return out.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === "bad" ? -1 : 1) || (b.age ?? 0) - (a.age ?? 0))
