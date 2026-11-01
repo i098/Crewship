@@ -9,7 +9,7 @@ webhook receiver wrote. Only then does it read the API, once per
 FM_GH_FALLBACK_POLL seconds per pull request (default 600). rate_limit is read
 at most once a minute; below 20 percent remaining the interval is four times
 longer, and below 5 percent no read is made. FM_GH_EVENTS_DIR moves the event
-directory (default ~/.local/state/crewship/gh-webhook).
+directory (default $XDG_STATE_HOME or ~/.local/state, plus crewship/gh-webhook).
 ---
  bin/fm-pr-poll.sh                  | 40 +++++++++++++++++++++++++
  tests/fm-pr-check-security.test.sh |  2 ++
