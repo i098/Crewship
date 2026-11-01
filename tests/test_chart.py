@@ -686,9 +686,9 @@ print(json.dumps({{"result": result}}))
 """)
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
-    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui"]
-    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "crewboard-tui --queue"]  # the decision-queue tab adds --queue
-    pane_labels = ["usage-tui", "crewboard-tui", "browsers"]
+    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui", "ci-pool-tui"]
+    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "ci-pool-tui", "crewboard-tui --queue"]  # the decision-queue tab adds --queue
+    pane_labels = ["usage-tui", "crewboard-tui", "browsers", "ci-pool"]
     pane_log = tmp_path / "panes.log"
     for name in pane_commands:
         stub = local_bin / name
@@ -721,7 +721,7 @@ print(json.dumps({{"result": result}}))
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
                                   **({} if mode in ("all", "update") else {k: False for k in (
-                                      "usage_tab", "crewboard_tab", "browsers_tab")})}},
+                                      "usage_tab", "crewboard_tab", "browsers_tab", "ci_pool_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
         "crewship_share_dir": str(home / ".local/share/crewship"),
@@ -746,11 +746,11 @@ print(json.dumps({{"result": result}}))
     elif mode == "update":
         # An installed host that only has the schedules tab gains each new pane once.
         assert [t["label"] for t in actual["tabs"]] == ["custom", "schedules", *pane_labels, "decision-queue"]
-        assert len(actual["runs"]) == 4
+        assert len(actual["runs"]) == 5
         assert pane_log.read_text().splitlines() == pane_runs
     elif mode == "all":
         assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue"]
-        assert len(actual["runs"]) == 5
+        assert len(actual["runs"]) == 6
         assert pane_log.read_text().splitlines() == pane_runs
         assert "changed=0" in result.stdout
     else:
