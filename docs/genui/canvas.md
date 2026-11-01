@@ -27,7 +27,7 @@ curl -X POST 127.0.0.1:8787/agent/demo -d '{"tool":"set_style","args":{"tokens":
 | Link two cards | drag a card's link glyph onto another card | `link {to}` |
 | Pin a card | tap `pin` | `pin {pinned}` |
 | Choose who wins a move | header `wins` pill (tap to switch) | `input {field:"wins",value}` on `header` |
-| Ask the agent | type in the input box, Enter | `input {text}` on `input` |
+| Ask the agent | type in the input box, Enter; "show all boards" (or "spread all clusters") opens the spread view at once, like ⊞ | `input {text}` on `input`; none for the spread verb |
 | Undo | Ctrl+Z or Cmd+Z; plain `z` in hotkeys mode | `undo` |
 | Select | tap a card: white ring and a `locked` tag; the bar shows "N selected · Bring to center · Clear"; double tap brings it to the centre | none; the next ask carries `about.ids` |
 | Full view | `⤢` on a card: a window over the board; drag it by any empty spot, resize it from the corner grip; the ask box stays on top and answers (`props.of`) sit under the card | the next ask carries `about.of` |

@@ -14,6 +14,18 @@ test("an answer card lists the real PRs it showed, his own first, and says when 
   expect(topicRows({ ...f, prsAt: 0 }, ["prs"])[0].rows[0]).toMatch(/Still loading/);
 });
 
+test("an answer's crew rows list workers too, and an ask row keeps the options after its colon", () => {
+  const line = (state: string, text: string) => ({ state, text }) as Fleet["mates"][number]["lines"][number];
+  const f = {
+    ...fleet,
+    mates: [{ id: "mate1", lines: [line("working", "reviewing. More later.")] }],
+    workers: [{ id: "w1", lines: [line("working", "rebuilding the cache")] }],
+    asks: [{ task: "w1", note: "Which database? Options: Postgres or SQLite" }],
+  } as unknown as Fleet;
+  expect(topicRows(f, ["crew"])).toEqual([{ h: "Crew (2)", rows: ["mate1 · working: reviewing.", "w1 · working: rebuilding the cache"] }]);
+  expect(topicRows(f, ["asks"])[0].rows).toEqual(["w1: Which database? Options: Postgres or SQLite"]);
+});
+
 describe("merge guard", () => {
   test("only an owned, non-draft, all-green PR with a live task may merge", () => {
     expect(mergeBlock(fleet, pr({}))).toBeUndefined();
@@ -100,6 +112,10 @@ test("an ask shows the options it names, the one it recommends, or none when it 
     ["He signs in once himself", true],
     ["Another Apple ID", false],
     ["Skip iOS", false],
+  ]);
+  expect(askOpts("Which database? Options: Postgres (recommended) or SQLite").map((o) => [o.b, o.rec])).toEqual([
+    ["Postgres", true],
+    ["SQLite", false],
   ]);
   expect(askOpts("PR 874 is green, see https://x.y/z. Recommend OK.")).toMatchObject([{ b: "OK", rec: true }]);
   expect(askOpts("Who are the others? Send names and I add them.")).toEqual([]);
