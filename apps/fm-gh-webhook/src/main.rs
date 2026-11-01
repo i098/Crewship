@@ -9,8 +9,8 @@
 //! Events land under GH_WEBHOOK_DIR (default ~/.local/state/crewship/gh-webhook),
 //! one small file each, written atomically, for the Firstmate merged-PR poll:
 //!   merged/<owner>__<repo>__<number>  empty; pull_request closed with merged true
-//!   ci/<owner>__<repo>__<sha>         conclusion of the latest completed check_suite,
-//!                                     check_run or workflow_run on that commit
+//!   ci/<owner>__<repo>__<sha>/<check>  conclusion of each completed check_suite (app slug),
+//!                                     check_run or workflow_run (name), one file per check
 
 use hmac::{Hmac, Mac};
 use serde_json::Value;
@@ -64,9 +64,20 @@ fn repo_ok(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
 }
 
+static TMP_SEQ: AtomicUsize = AtomicUsize::new(0);
+
 fn write(path: &Path, text: &str) -> std::io::Result<()> {
     fs::create_dir_all(path.parent().expect("event paths have a parent"))?;
-    let tmp = path.with_extension("tmp");
+    let mut name = path
+        .file_name()
+        .expect("event paths have a name")
+        .to_os_string();
+    name.push(format!(
+        ".{}.{}.tmp",
+        process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let tmp = path.with_file_name(name);
     fs::write(&tmp, text)?;
     fs::rename(tmp, path)
 }
@@ -78,10 +89,31 @@ fn merged_marker(payload: &Value) -> Option<String> {
     merged.then(|| format!("merged/{{}}__{{}}__{n}"))
 }
 
+fn check_name(payload: &Value, event: &str) -> Option<String> {
+    let obj = &payload[event];
+    let raw = match event {
+        "check_suite" => obj["app"]["slug"].as_str()?,
+        _ => obj["name"].as_str()?,
+    };
+    let name: String = raw
+        .chars()
+        .take(100)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    repo_ok(&name).then_some(name)
+}
+
 fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
     let obj = &payload[event];
     let sha = obj["head_sha"].as_str()?;
     let conclusion = obj["conclusion"].as_str()?;
+    let name = check_name(payload, event)?;
     let sha_ok = sha.len() == 40
         && sha
             .bytes()
@@ -90,8 +122,12 @@ fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
         && conclusion
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c == b'_');
-    (payload["action"] == "completed" && sha_ok && word_ok)
-        .then(|| (format!("ci/{{}}__{{}}__{sha}"), format!("{conclusion}\n")))
+    (payload["action"] == "completed" && sha_ok && word_ok).then(|| {
+        (
+            format!("ci/{{}}__{{}}__{sha}/{name}"),
+            format!("{conclusion}\n"),
+        )
+    })
 }
 
 /// Store what the watcher reads. 204 stored, 202 valid but not of interest, 500 write failed.
@@ -310,18 +346,26 @@ mod tests {
     }
 
     #[test]
-    fn completed_ci_event_stores_conclusion() {
+    fn ci_records_are_per_check_so_later_success_keeps_earlier_failure() {
         let d = tempdir("ci");
-        let body = format!(
-            r#"{{"action":"completed","repository":{{"full_name":"o/r"}},"check_suite":{{"head_sha":"{SHA}","conclusion":"success"}}}}"#
-        );
-        assert_eq!(post(&d, "check_suite", &body, SECRET), 204);
+        let run = |name: &str, conclusion: &str| {
+            format!(
+                r#"{{"action":"completed","repository":{{"full_name":"o/r"}},"check_run":{{"head_sha":"{SHA}","conclusion":"{conclusion}","name":"{name}"}}}}"#
+            )
+        };
+        assert_eq!(post(&d, "check_run", &run("lint", "failure"), SECRET), 204);
         assert_eq!(
-            fs::read_to_string(d.join(format!("ci/o__r__{SHA}"))).unwrap(),
+            post(&d, "check_run", &run("build (x)", "success"), SECRET),
+            204
+        );
+        let dir = d.join(format!("ci/o__r__{SHA}"));
+        assert_eq!(fs::read_to_string(dir.join("lint")).unwrap(), "failure\n");
+        assert_eq!(
+            fs::read_to_string(dir.join("build__x_")).unwrap(),
             "success\n"
         );
-        let pending = body.replace("completed", "requested");
-        assert_eq!(post(&d, "check_suite", &pending, SECRET), 202);
+        let pending = run("lint", "failure").replace("completed", "requested");
+        assert_eq!(post(&d, "check_run", &pending, SECRET), 202);
     }
 
     #[test]
