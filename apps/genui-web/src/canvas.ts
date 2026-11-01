@@ -27,6 +27,13 @@ const FALLBACK = "hsl(188 95% 58%)";
 const IA = "button,form,video,audio,input,textarea,select,a,.mw";
 
 const board = new Board();
+// the last board you saw draws at once, so a slow board server never leaves a blank page; the snapshot replaces it
+const cacheKey = `genui-board:${boardId}`;
+try {
+  const c = JSON.parse(localStorage.getItem(cacheKey) ?? "null") as { seq: number; spec: BoardSpec } | null;
+  if (c?.spec) board.receive({ t: "snapshot", seq: c.seq, spec: c.spec });
+} catch {}
+let saveT = 0;
 let ws: WebSocket | undefined;
 let live = false;
 let spec: BoardSpec = board.view();
@@ -54,6 +61,7 @@ function intent(kind: IntentKind, targetId: string, payload: Record<string, unkn
 let sentView: string | null = null; // the cluster the feeder was last told the camera is on
 
 function connect(delay = 1000) {
+  document.body.classList.add("offline");
   ws = new WebSocket(wsUrl);
   ws.onopen = () => {
     live = true;
@@ -61,11 +69,24 @@ function connect(delay = 1000) {
     send({ t: "hello", boardId, clientId });
   };
   ws.onmessage = (e) => {
-    board.receive(JSON.parse(String(e.data)) as ServerMsg);
+    const m = JSON.parse(String(e.data)) as ServerMsg;
+    const had = new Set(Object.keys(board.spec.components));
+    board.receive(m);
+    // a confirm answers the owner's own pick or steer, so it comes to the front instead of landing in another cluster
+    const confirms = Object.keys(board.spec.components).filter((id) => id.startsWith("confirm-") && !had.has(id));
+    if (m.t === "ops" && confirms.length) cam.bring(confirms);
+    if (m.t === "snapshot") document.body.classList.remove("offline");
+    clearTimeout(saveT);
+    saveT = window.setTimeout(() => {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ seq: board.seq, spec: board.spec }));
+      } catch {} // a full storage only loses the instant first paint
+    }, 2000);
     paint();
   };
   ws.onclose = () => {
     live = false;
+    document.body.classList.add("offline");
     paint();
     setTimeout(() => connect(Math.min(delay * 2, 10_000)), delay);
   };
@@ -272,7 +293,8 @@ function item(id: string, c: Component, now: number): Item {
     r = c.rect,
     h = held.get(id);
   const done = p.done === true,
-    boost = (asked.get(id) ?? 0) > now ? 200 : 0;
+    // above any feeder priority (base ≤ 800, +200 once asked), so a card you bring wins over an earlier answer
+    boost = (asked.get(id) ?? 0) > now ? 10_000 : 0;
   const size = r || h ? { w: h?.w ?? r?.w, h: h?.h ?? r?.h } : undefined;
   const pin = floats(p) ? (r ? { x: h?.x ?? (Number(r.x) || 0), y: h?.y ?? (Number(r.y) || 0) } : nearSpot(p)) : undefined;
   const plain = {
@@ -670,8 +692,10 @@ ask.form!.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = ask.value.trim();
   if (!text) return;
-  intent("input", "input", { text, about: ctx.about?.() });
   ask.value = "";
+  // the spread view is the camera's, not the spec's, so the model cannot draw it: the verb works the Spread button
+  if (/^(show|spread)( me)?( out)? (all|every)( the)? (boards|clusters)\W*$/i.test(text)) return void cam.spread(true);
+  intent("input", "input", { text, about: ctx.about?.() });
 });
 // the tick also re-fits cards whose text arrived after the paint (build-in) or whose size was mid-transition
 setInterval(() => (tickStamps(world), fitCards(world)), 1000);

@@ -403,6 +403,8 @@ function fleetTarget(about: unknown): { id: string; c: Component } | undefined {
 
 /** Puts an action on the board as a confirm card; it runs only when the owner picks Yes. */
 function ask(a: Pending, of?: string) {
+  // a new pick on the same card replaces its unanswered confirm, so one Yes cannot leave a second send waiting
+  if (of) for (const [k, v] of pending) if (v.of === of && !v.state) pending.delete(k);
   const id = `confirm-${Date.now().toString(36)}`;
   pending.set(id, { ...a, id, of });
 }
@@ -679,9 +681,16 @@ async function onBoard(m: Intent, c: P) {
 }
 
 async function decide(m: Intent, c: P) {
-  const pr = Number(m.targetId.slice(2)), yes = m.payload.value === "approve";
-  const r = await pub({ decision: m.payload.value, pr, url: c.url, ...(yes ? { draft: `gh pr merge ${pr}` } : {}) }).catch(failed);
-  note(`${yes ? "Approved" : "Declined"} #${pr}; recorded on ${TOPIC} (seq ${r.trim()})${yes ? `. Merge draft, not run: gh pr merge ${pr}` : ""}`, "repo");
+  const n = /^ok(\d+)$/.exec(m.targetId)?.[1],
+    yes = m.payload.value === "approve";
+  // only a PR card's decision is about a PR; any other decision records which question was answered
+  if (n) {
+    const r = await pub({ decision: m.payload.value, pr: Number(n), url: c.url, ...(yes ? { draft: `gh pr merge ${n}` } : {}) }).catch(failed);
+    note(`${yes ? "Approved" : "Declined"} #${n}; recorded on ${TOPIC} (seq ${r.trim()})${yes ? `. Merge draft, not run: gh pr merge ${n}` : ""}`, "repo");
+  } else {
+    const r = await pub({ decision: m.payload.value, card: m.targetId, q: c.q ?? c.title ?? null }).catch(failed);
+    note(`Picked ${m.payload.value} on "${c.q ?? c.title ?? m.targetId}"; recorded on ${TOPIC} (seq ${r.trim()})`);
+  }
   await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
 }
 

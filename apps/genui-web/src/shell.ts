@@ -218,7 +218,11 @@ function bind() {
   $(".stats").addEventListener("click", (e) => {
     const b = (e.target as Element).closest<HTMLElement>(".st");
     const tui = b?.dataset.tui;
-    if (b) ctx.intent("input", "header", tui ? { text: `Open the ${tui} terminal`, open: `tui-${tui}` } : { text: "Open host stats", open: "sys" });
+    if (!b) return;
+    const open = tui ? `tui-${tui}` : "sys";
+    ctx.intent("input", "header", { text: tui ? `Open the ${tui} terminal` : "Open host stats", open });
+    // the card lands in its own cluster, so bring it to the front or the tap shows nothing
+    ctx.cam.bring([open]);
   });
   $(".logbtn").addEventListener("click", () => toggleLog());
   $(".logx").addEventListener("click", () => toggleLog(false));
@@ -233,7 +237,10 @@ function bind() {
   });
   $(".queue").addEventListener("click", (e) => {
     const id = (e.target as Element).closest<HTMLElement>(".qi")?.dataset.id;
-    if (id && spec.components[id]) ctx.cam.bring([id]);
+    if (!id || !spec.components[id]) return;
+    // a decision the last answer set aside comes back onto the board, else the tap shows nothing
+    if (spec.components[id].props.aside === true) ctx.intent("input", id, { field: "aside", value: false });
+    ctx.cam.bring([id]);
   });
   $(".rail").addEventListener("click", onRailTap);
   $("#attach").addEventListener("click", () => $<HTMLInputElement>("#file").click());

@@ -69,11 +69,11 @@ export type Topic = (typeof TOPICS)[number];
 export type Rows = { h: string; rows: string[] };
 
 const ROWS = 8;
-// the first sentence of a status line: a whole thought, so the row is not cut mid-word
+// the first sentence of a status line: a whole thought, so the row is not cut mid-word; a colon does not end it, so "Options: a or b" stays
 const sentence = (s: string) =>
   s
     .replace(/\s+/g, " ")
-    .split(/(?<=[.;:])\s/)[0]
+    .split(/(?<=[.;])\s/)[0]
     .slice(0, 160);
 
 /** The real lists behind an answer's shown topics (asks, PRs, crew), so the answer card itself lists them on any screen. */
@@ -98,7 +98,7 @@ export function topicRows(f: Fleet, topics: Iterable<Topic>): Rows[] {
         );
     } else if (t === "crew")
       more(
-        f.mates.map((m) => `${m.id} · ${m.lines.at(-1)?.state ?? "idle"}: ${sentence(m.lines.at(-1)?.text ?? "no status yet")}`),
+        [...f.mates, ...f.workers].map((m) => `${m.id} · ${m.lines.at(-1)?.state ?? "idle"}: ${sentence(m.lines.at(-1)?.text ?? "no status yet")}`),
         "Crew",
       );
   }
@@ -149,7 +149,7 @@ export function askOpts(note: string): Opt[] {
   const t = note.replace(URL_RE, "");
   const marked = markedOpts(t);
   if (marked.length) return marked;
-  const list = /\bOptions?:\s*([^.]+)\./i
+  const list = /\bOptions?:\s*([^.]+)(?:\.|$)/i
     .exec(t)?.[1]
     .split(/,\s*(?:or\s+)?|\s+or\s+/)
     .filter((s) => s.trim());
