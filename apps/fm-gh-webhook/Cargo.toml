@@ -1,0 +1,19 @@
+[package]
+name = "fm-gh-webhook"
+version = "0.1.0"
+edition = "2024"
+description = "GitHub webhook receiver that writes merged and CI events for the Firstmate watcher"
+license = "FSL-1.1-ALv2"
+publish = false
+
+[dependencies]
+hmac = "0.12"
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
+strip = true
