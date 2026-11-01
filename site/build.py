@@ -59,9 +59,7 @@ def features(readme, index=""):
         (title, link, desc)
         for title, link, desc in (
             (title, posixpath.normpath(f"docs/{link}"), desc)
-            for title, link, desc in re.findall(
-                r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M
-            )
+            for title, link, desc in re.findall(r"^- \[([^\]]+)\]\(([^)]+)\): (.+)$", index, re.M)
         )
         if link in SCENE
     )
@@ -167,7 +165,9 @@ def doc_link(link, source, routes, image=False):
     path = posixpath.normpath(posixpath.join(posixpath.dirname(source), unquote(parsed.path)))
     if not image and path in routes:
         return urlunsplit(("", "", routes[path], parsed.query, parsed.fragment))
-    base = "https://raw.githubusercontent.com/i098/Crewship/main/" if image else f"{REPO}/blob/main/"
+    base = (
+        "https://raw.githubusercontent.com/i098/Crewship/main/" if image else f"{REPO}/blob/main/"
+    )
     return urljoin(base + source, link)
 
 
@@ -187,7 +187,7 @@ def doc_inline(text, source, routes):
     for match in INLINE.finditer(text):
         parts.append(html.escape(text[end : match.start()]))
         if match.group("code") is not None:
-            value = f'<code>{html.escape(match["code"])}</code>'
+            value = f"<code>{html.escape(match['code'])}</code>"
         elif match.group("url") is not None:
             url = doc_link(match["url"].strip("<>"), source, routes, bool(match["image"]))
             if match["image"]:
@@ -196,14 +196,16 @@ def doc_inline(text, source, routes):
                     ' loading="lazy">'
                 )
             else:
-                value = f'<a href="{html.escape(url)}">{doc_inline(match["label"], source, routes)}</a>'
+                value = (
+                    f'<a href="{html.escape(url)}">{doc_inline(match["label"], source, routes)}</a>'
+                )
         elif match.group("auto") is not None:
             url = match["auto"][1:-1]
             value = f'<a href="{html.escape(doc_link(url, source, routes))}">{html.escape(url)}</a>'
         elif match.group("bold") is not None:
-            value = f'<strong>{doc_inline(match["bold"], source, routes)}</strong>'
+            value = f"<strong>{doc_inline(match['bold'], source, routes)}</strong>"
         elif match.group("italic") is not None:
-            value = f'<em>{doc_inline(match["italic"], source, routes)}</em>'
+            value = f"<em>{doc_inline(match['italic'], source, routes)}</em>"
         else:
             value = html.escape(match[0][1:])
         parts.append(value)
@@ -283,9 +285,14 @@ def _table_at(lines, index):
 def _block_at(lines, index):
     line = lines[index].strip()
     return (
-        FENCE.match(line) or HEADING.match(line) or HTML_HEADING.fullmatch(line)
-        or LIST.match(lines[index]) or line.startswith((">", "<!--"))
-        or RAW_HTML.match(line) or RULE.fullmatch(line) or _table_at(lines, index)
+        FENCE.match(line)
+        or HEADING.match(line)
+        or HTML_HEADING.fullmatch(line)
+        or LIST.match(lines[index])
+        or line.startswith((">", "<!--"))
+        or RAW_HTML.match(line)
+        or RULE.fullmatch(line)
+        or _table_at(lines, index)
     )
 
 
@@ -356,7 +363,9 @@ def _table_block(lines, i, source, routes):
     i += 2
     while i < len(lines) and "|" in lines[i] and lines[i].strip():
         output.append("<tr>")
-        output.extend(f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i]))
+        output.extend(
+            f"<td>{doc_inline(c.strip(), source, routes)}</td>" for c in table_cells(lines[i])
+        )
         output.append("</tr>")
         i += 1
     return "\n".join([*output, "</tbody></table></div>"]), i
@@ -368,7 +377,7 @@ def _paragraph_block(lines, i, source, routes):
     while i < len(lines) and lines[i].strip() and not _block_at(lines, i):
         paragraph.append(lines[i].strip())
         i += 1
-    return f'<p>{doc_inline(" ".join(paragraph), source, routes)}</p>', i
+    return f"<p>{doc_inline(' '.join(paragraph), source, routes)}</p>", i
 
 
 def _render_block(lines, i, source, routes, headings):
@@ -416,16 +425,21 @@ def doc_page(title, description, route, body, source=None):
     crumbs = [("Crewship", ORIGIN + "/"), ("Documentation", ORIGIN + "/docs")]
     if source:
         crumbs.append((title, canonical))
-    structured = json.dumps({
-        "@context": "https://schema.org", "@type": "BreadcrumbList",
-        "itemListElement": [
-            {"@type": "ListItem", "position": i, "name": name, "item": url}
-            for i, (name, url) in enumerate(crumbs, 1)
-        ],
-    }, ensure_ascii=False).replace("<", "\\u003c")
+    structured = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": i, "name": name, "item": url}
+                for i, (name, url) in enumerate(crumbs, 1)
+            ],
+        },
+        ensure_ascii=False,
+    ).replace("<", "\\u003c")
     source_link = (
         f' · <a href="{REPO}/blob/main/{html.escape(source)}">View Markdown source</a>'
-        if source else ""
+        if source
+        else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -449,7 +463,7 @@ def doc_page(title, description, route, body, source=None):
 </head>
 <body class="how about docs">
 <header class="top">
-  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a></nav>
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a><a href="/changelog">What's new</a></nav>
 </header>
 <main><article class="post">
 {body}
@@ -474,7 +488,9 @@ def build_docs(dist):
             if (t := plain_text(p)) and " · " not in t
         ]
         description = paragraphs.pop(0) if paragraphs else title
-        while len(description) < 70 and paragraphs:  # a one-line first paragraph is too thin for a snippet
+        while (
+            len(description) < 70 and paragraphs
+        ):  # a one-line first paragraph is too thin for a snippet
             description += " " + paragraphs.pop(0)
         if len(description) > 160:
             description = description[:157].rsplit(" ", 1)[0] + "..."
@@ -484,19 +500,140 @@ def build_docs(dist):
         entries.append(
             f'<li><a href="{route}">{html.escape(title)}</a><p>{html.escape(description)}</p></li>'
         )
-    description = "Crewship guides for installation, configuration, coding agents, and host operations."
+    description = (
+        "Crewship guides for installation, configuration, coding agents, and host operations."
+    )
     index = (
         '<h1 id="documentation">Crewship documentation</h1>'
         f"<p>{description}</p><ul>" + "\n".join(entries) + "</ul>"
     )
     (dist / "docs.html").write_text(doc_page("Documentation", description, "/docs", index))
-    urls = ["/", "/how", "/about", "/docs", *(r for r in routes.values() if r not in UNLISTED)]
+    urls = [
+        "/",
+        "/how",
+        "/about",
+        "/changelog",
+        "/docs",
+        *(r for r in routes.values() if r not in UNLISTED),
+    ]
     (dist / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         + "".join(f"  <url><loc>{ORIGIN}{url}</loc></url>\n" for url in urls)
         + "</urlset>\n"
     )
+
+
+KINDS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+ISSUE = re.compile(r"\s*\(?\[#(\d+)\]\([^)]*\)\)?")
+
+
+def note(lines):
+    """(HTML, issue) for one entry: its first line, with the issue link split off."""
+    issue = ISSUE.search(" ".join(lines))
+    return inline(ISSUE.sub("", lines[0])), issue and issue[1]
+
+
+def release_notes(markdown):
+    """[(version, date, {kind: [note]})] for every released version in CHANGELOG.md, newest first."""
+    releases, kind = [], None
+    for line in markdown.splitlines():
+        if head := re.match(r"## \[([^\]]+)\](?: - (\S+))?$", line):
+            releases.append((head[1], head[2], {}))
+            kind = None
+        elif releases and (h := re.match(r"### (\w+)$", line)):
+            kind = h[1]
+        elif releases and kind and line.startswith("- "):
+            releases[-1][2].setdefault(kind, []).append([line[2:]])
+        elif releases and kind and line.startswith("  ") and releases[-1][2][kind]:
+            releases[-1][2][kind][-1].append(line.strip())
+    return [
+        (v, d, {k: [note(n) for n in ns] for k, ns in kinds.items()})
+        for v, d, kinds in releases
+        if v != "Unreleased"
+    ]
+
+
+def fragment_notes(directory):
+    """{kind: [note]} for the unreleased fragments, newest issue first."""
+    found = []
+    for path in directory.glob("*.md"):
+        text = path.read_text().strip()
+        if (m := re.fullmatch(r"(\d+)\.(\w+)\.md", path.name)) and text:
+            found.append((int(m[1]), m[2].capitalize(), text.splitlines()[0]))
+    kinds = {}
+    for number, kind, text in sorted(found, reverse=True):
+        kinds.setdefault(kind, []).append((inline(text), str(number)))
+    return kinds
+
+
+def release_html(version, date, kinds, href=None):
+    title = (
+        f'<a href="{html.escape(href)}">{html.escape(version)}</a>'
+        if href
+        else html.escape(version)
+    )
+    stamp = f'<time datetime="{date}">{html.escape(date)}</time>' if date else ""
+    groups = "".join(
+        f'<h3 class="{kind.lower()}">{kind}</h3><ul>'
+        + "".join(
+            f"<li>{text}"
+            + (f' <a class="ref" href="{REPO}/issues/{issue}">#{issue}</a>' if issue else "")
+            + "</li>"
+            for text, issue in kinds[kind]
+        )
+        + "</ul>"
+        for kind in KINDS
+        if kinds.get(kind)
+    )
+    return f'<section class="release"><h2 id="{version.lower()}">{title}{stamp}</h2><div class="notes">{groups}</div></section>'
+
+
+def changelog_page(unreleased, releases, tags):
+    canonical = ORIGIN + "/changelog"
+    description = (
+        "What changed in each Crewship release, with the changes that have not shipped yet."
+    )
+    sections = [release_html("Unreleased", None, unreleased)] if unreleased else []
+    sections += [release_html(v, d, k, tags.get(v)) for v, d, k in releases]
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What's new - Crewship</title>
+<meta name="description" content="{description}">
+<link rel="canonical" href="{canonical}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{canonical}">
+<meta property="og:title" content="What's new - Crewship">
+<meta property="og:description" content="{description}">
+<meta property="og:image" content="{ORIGIN}/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/changelog.css">
+</head>
+<body>
+<header class="top">
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a><a href="/changelog" aria-current="page">What's new</a></nav>
+</header>
+<main>
+<h1>What's new</h1>
+{"".join(sections)}
+</main>
+<footer class="foot"><a href="{REPO}/blob/main/CHANGELOG.md">Full changelog on GitHub</a></footer>
+</body>
+</html>
+"""
+
+
+def build_changelog(dist):
+    text = (ROOT / "CHANGELOG.md").read_text()
+    tags = dict(re.findall(r"^\[([^\]]+)\]: (https://\S+/releases/tag/\S+)$", text, re.M))
+    page = changelog_page(fragment_notes(ROOT / "changelog.d"), release_notes(text), tags)
+    (dist / "changelog.html").write_text(page)
 
 
 def build(dist=HARBOR / "dist"):
@@ -514,6 +651,7 @@ def build(dist=HARBOR / "dist"):
     page = dist / "index.html"
     page.write_text(page.read_text().replace(MARK, items))
     build_docs(dist)
+    build_changelog(dist)
     return dist
 
 

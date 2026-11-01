@@ -164,7 +164,11 @@ def test_home_links_published_docs_on_crewship_si(tmp_path):
     head = Head()
     head.feed((dist / "index.html").read_text())
     published = set(build.doc_routes().values())
-    assert not [a for a in head.anchors if "/blob/main/docs/" in a and a.split("/blob/main/")[1].split("#")[0] in build.doc_routes()]
+    assert not [
+        a
+        for a in head.anchors
+        if "/blob/main/docs/" in a and a.split("/blob/main/")[1].split("#")[0] in build.doc_routes()
+    ]
     for anchor in head.anchors:
         if anchor.startswith("/docs/"):
             path, _, fragment = anchor.partition("#")
@@ -207,7 +211,11 @@ def test_pages_carry_json_ld(tmp_path):
     assert set(graph) == {"WebSite", "Organization", "SoftwareApplication"}
     assert graph["WebSite"]["alternateName"] == "crewship.si"
     org = graph["Organization"]["@id"]
-    assert graph["WebSite"]["publisher"]["@id"] == graph["SoftwareApplication"]["publisher"]["@id"] == org
+    assert (
+        graph["WebSite"]["publisher"]["@id"]
+        == graph["SoftwareApplication"]["publisher"]["@id"]
+        == org
+    )
     logo = urlparse(graph["Organization"]["logo"])
     assert (logo.scheme, logo.netloc) == ("https", "crewship.si")
     assert png_size(dist / logo.path.lstrip("/")) == (180, 180)
@@ -234,6 +242,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                 ("/how?preview=1", "how.html"),
                 ("/about", "about.html"),
                 ("/about?preview=1", "about.html"),
+                ("/changelog", "changelog.html"),
                 ("/docs", "docs.html"),
                 ("/docs?preview=1", "docs.html"),
                 ("/docs/setup", "docs/setup.html"),
@@ -260,6 +269,7 @@ def test_preview_serves_published_urls_and_rejects_unknown_routes(tmp_path):
                         "https://crewship.si/",
                         "https://crewship.si/how",
                         "https://crewship.si/about",
+                        "https://crewship.si/changelog",
                         "https://crewship.si/docs",
                         "https://crewship.si/docs/readme",
                         "https://crewship.si/docs/setup",
@@ -400,7 +410,10 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
         assert 70 <= len(head.meta["description"]) <= 160 or route == "/docs", route
         assert title[0].isalnum(), title
         assert head.meta["og:url"] == head.links["canonical"]
-        assert (head.meta["og:title"], head.meta["og:description"]) == (title, head.meta["description"])
+        assert (head.meta["og:title"], head.meta["og:description"]) == (
+            title,
+            head.meta["description"],
+        )
         assert {"/", "/about", "/docs"} <= set(head.anchors)
         assert head.links["stylesheet"] == "/harbor.css"
         assert len(head.ids) == len(set(head.ids)), route
@@ -415,7 +428,11 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
     for route, head in pages.items():
         for link in head.anchors:
             parsed = urlparse(link)
-            if parsed.scheme or parsed.netloc or (parsed.path and not parsed.path.startswith("/docs")):
+            if (
+                parsed.scheme
+                or parsed.netloc
+                or (parsed.path and not parsed.path.startswith("/docs"))
+            ):
                 continue
             target = parsed.path or route
             assert target in pages, (route, link)
@@ -423,3 +440,39 @@ def test_every_document_is_indexed_with_unique_metadata_and_working_links(tmp_pa
                 assert parsed.fragment in pages[target].ids, (route, link)
     for link in re.findall(r"https://crewship.si(/docs[\w/-]*)", (dist / "llms.txt").read_text()):
         assert link in pages
+
+
+def test_changelog_page_shows_fragments_then_released_versions_with_issue_links(tmp_path):
+    fragments = tmp_path / "changelog.d"
+    fragments.mkdir()
+    (fragments / "template.md").write_text("not a fragment\n")
+    (fragments / "9.fixed.md").write_text("Fix the `thing`.\n")
+    (fragments / "12.added.md").write_text("Add a <b>thing</b>\n")
+    (fragments / "7.added.md").write_text("Add another thing.\n")
+    released = (
+        "## [Unreleased]\n\n## [1.2.0] - 2026-01-02\n\n### Added\n\n"
+        "- Add a long entry that wraps\n  onto a second line ([#5](https://github.com/i098/Crewship/issues/5)).\n"
+        "- Add one without an issue.\n\n### Fixed\n\n- Fix it.\n\n"
+        "## [1.1.0] - 2025-12-01\n\n### Changed\n\n- Change it.\n"
+    )
+    tags = {"1.2.0": "https://example.test/tag/v1.2.0"}
+
+    page = build.changelog_page(
+        build.fragment_notes(fragments), build.release_notes(released), tags
+    )
+
+    headings = re.findall(r"<h2 [^>]*>(.*?)</h2>", page)
+    assert [re.sub(r"<[^>]+>", " ", h).split() for h in headings] == [
+        ["Unreleased"],
+        ["1.2.0", "2026-01-02"],
+        ["1.1.0", "2025-12-01"],
+    ]
+    assert '<a href="https://example.test/tag/v1.2.0">1.2.0</a>' in page
+    unreleased = page.split('id="1.2.0"')[0]
+    assert unreleased.index("#12") < unreleased.index("#7"), "newest fragment first"
+    assert "&lt;b&gt;thing&lt;/b&gt;" in unreleased and "template" not in page
+    assert "<code>thing</code>" in unreleased
+    assert 'href="https://github.com/i098/Crewship/issues/5">#5</a>' in page
+    assert "second line" not in page, "only the first line of an entry is shown"
+    assert page.count("<li>") == 7 and page.count('class="ref"') == 4
+    assert len(re.findall(r"<h1\b", page)) == 1

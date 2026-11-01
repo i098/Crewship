@@ -5,6 +5,7 @@
 The home page keeps its product summary, About link, and Docs link in the HTML.
 The start menu also links to the documentation.
 The static [About page](public/about.html), served at `/about`, explains the product and links to setup and safety guides.
+The static What's new page, served at `/changelog`, is built by `build.py` from the `changelog.d/` fragments and the released versions in `CHANGELOG.md`.
 The `/docs` index and guides are readable without JavaScript and are built from the repository's Markdown sources.
 
 The harbor is rendered natively: one plain JavaScript file, `public/harbor.js`, draws on a 2D canvas.
