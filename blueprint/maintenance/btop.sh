@@ -31,8 +31,9 @@ while :; do
     done
     wait "$pid"; rc=$?
     [ "$again" ] || exit "$rc"
-    # stty sets with TCSADRAIN: blocks until a client has read all queued output,
-    # so btop restarts only once the pty drains.
-    stty "$(stty -g)"
-    printf '\033[2J\033[H'
+    # A pty accepts a write into the free tail of its last buffer page (up to
+    # 4095 bytes) even when full, so a short clear would not wait. Eight KiB of
+    # NULs (ignored by terminals) cannot fit: the write blocks until a client
+    # reads, so btop restarts only once the pty drains.
+    { head -c 8192 /dev/zero; printf '\033[2J\033[H'; }
 done
