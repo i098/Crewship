@@ -11,11 +11,11 @@
 //!   merged/<owner>__<repo>__<number>  empty; pull_request closed with merged true
 //!   ci/<owner>__<repo>__<sha>/<event>-<id>-<hex name>
 //!                                     conclusion of each completed check_suite (app slug),
-//!                                     check_run or workflow_run (name); names over 80 bytes are skipped
+//!                                     check_run or workflow_run (name); names over 80 bytes use sha256-<digest>
 
 use hmac::{Hmac, Mac};
 use serde_json::Value;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -96,9 +96,12 @@ fn check_name(payload: &Value, event: &str) -> Option<String> {
         "check_suite" => obj["app"]["slug"].as_str()?,
         _ => obj["name"].as_str()?,
     };
-    (1..=80)
-        .contains(&raw.len())
-        .then(|| raw.bytes().map(|b| format!("{b:02x}")).collect())
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    match raw.len() {
+        0 => None,
+        1..=80 => Some(hex(raw.as_bytes())),
+        _ => Some(format!("sha256-{}", hex(&Sha256::digest(raw.as_bytes())))),
+    }
 }
 
 fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
@@ -352,12 +355,14 @@ mod tests {
                 r#"{{"action":"completed","repository":{{"full_name":"o/r"}},"{event}":{{"id":{id},"head_sha":"{SHA}","conclusion":"{conclusion}",{key}}}}}"#
             )
         };
+        let long = "x".repeat(81);
         for (event, id, name, conclusion) in [
             ("workflow_run", 1, "test", "failure"),
             ("check_run", 2, "test", "success"),
             ("check_run", 3, "test", "success"),
             ("check_run", 4, "build (x)", "failure"),
             ("check_run", 5, "build [x]", "success"),
+            ("check_run", 6, long.as_str(), "failure"),
         ] {
             assert_eq!(
                 post(&d, event, &run(event, id, name, conclusion), SECRET),
@@ -371,7 +376,13 @@ mod tests {
         assert_eq!(read("check_run-3-74657374"), "success\n");
         assert_eq!(read("check_run-4-6275696c6420287829"), "failure\n");
         assert_eq!(read("check_run-5-6275696c64205b785d"), "success\n");
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 5);
+        assert_eq!(
+            read(
+                "check_run-6-sha256-4d1f7bb876c6aae013f06a7430b8c6545ff30d8f9252838eb18b6357c1a2ba13"
+            ),
+            "failure\n"
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 6);
         let pending = run("check_run", 2, "test", "failure").replace("completed", "requested");
         assert_eq!(post(&d, "check_run", &pending, SECRET), 202);
     }
