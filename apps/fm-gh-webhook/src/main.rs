@@ -9,8 +9,9 @@
 //! Events land under GH_WEBHOOK_DIR (default ~/.local/state/crewship/gh-webhook),
 //! one small file each, written atomically, for the Firstmate merged-PR poll:
 //!   merged/<owner>__<repo>__<number>  empty; pull_request closed with merged true
-//!   ci/<owner>__<repo>__<sha>/<check>  conclusion of each completed check_suite (app slug),
-//!                                     check_run or workflow_run (name), one file per check
+//!   ci/<owner>__<repo>__<sha>/<event>-<id>-<hex name>
+//!                                     conclusion of each completed check_suite (app slug),
+//!                                     check_run or workflow_run (name); names over 80 bytes are skipped
 
 use hmac::{Hmac, Mac};
 use serde_json::Value;
@@ -95,18 +96,9 @@ fn check_name(payload: &Value, event: &str) -> Option<String> {
         "check_suite" => obj["app"]["slug"].as_str()?,
         _ => obj["name"].as_str()?,
     };
-    let name: String = raw
-        .chars()
-        .take(100)
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || "._-".contains(c) {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    repo_ok(&name).then_some(name)
+    (1..=80)
+        .contains(&raw.len())
+        .then(|| raw.bytes().map(|b| format!("{b:02x}")).collect())
 }
 
 fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
@@ -114,6 +106,7 @@ fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
     let sha = obj["head_sha"].as_str()?;
     let conclusion = obj["conclusion"].as_str()?;
     let name = check_name(payload, event)?;
+    let id = obj["id"].as_u64()?;
     let sha_ok = sha.len() == 40
         && sha
             .bytes()
@@ -124,7 +117,7 @@ fn ci_marker(payload: &Value, event: &str) -> Option<(String, String)> {
             .all(|c| c.is_ascii_lowercase() || c == b'_');
     (payload["action"] == "completed" && sha_ok && word_ok).then(|| {
         (
-            format!("ci/{{}}__{{}}__{sha}/{name}"),
+            format!("ci/{{}}__{{}}__{sha}/{event}-{id}-{name}"),
             format!("{conclusion}\n"),
         )
     })
@@ -348,23 +341,38 @@ mod tests {
     #[test]
     fn ci_records_are_per_check_so_later_success_keeps_earlier_failure() {
         let d = tempdir("ci");
-        let run = |name: &str, conclusion: &str| {
+        let run = |event: &str, id: u32, name: &str, conclusion: &str| {
+            let key = if event == "check_suite" {
+                r#""app":{"slug":"NAME"}"#
+            } else {
+                r#""name":"NAME""#
+            };
+            let key = key.replace("NAME", name);
             format!(
-                r#"{{"action":"completed","repository":{{"full_name":"o/r"}},"check_run":{{"head_sha":"{SHA}","conclusion":"{conclusion}","name":"{name}"}}}}"#
+                r#"{{"action":"completed","repository":{{"full_name":"o/r"}},"{event}":{{"id":{id},"head_sha":"{SHA}","conclusion":"{conclusion}",{key}}}}}"#
             )
         };
-        assert_eq!(post(&d, "check_run", &run("lint", "failure"), SECRET), 204);
-        assert_eq!(
-            post(&d, "check_run", &run("build (x)", "success"), SECRET),
-            204
-        );
+        for (event, id, name, conclusion) in [
+            ("workflow_run", 1, "test", "failure"),
+            ("check_run", 2, "test", "success"),
+            ("check_run", 3, "test", "success"),
+            ("check_run", 4, "build (x)", "failure"),
+            ("check_run", 5, "build [x]", "success"),
+        ] {
+            assert_eq!(
+                post(&d, event, &run(event, id, name, conclusion), SECRET),
+                204
+            );
+        }
         let dir = d.join(format!("ci/o__r__{SHA}"));
-        assert_eq!(fs::read_to_string(dir.join("lint")).unwrap(), "failure\n");
-        assert_eq!(
-            fs::read_to_string(dir.join("build__x_")).unwrap(),
-            "success\n"
-        );
-        let pending = run("lint", "failure").replace("completed", "requested");
+        let read = |f: &str| fs::read_to_string(dir.join(f)).unwrap();
+        assert_eq!(read("workflow_run-1-74657374"), "failure\n");
+        assert_eq!(read("check_run-2-74657374"), "success\n");
+        assert_eq!(read("check_run-3-74657374"), "success\n");
+        assert_eq!(read("check_run-4-6275696c6420287829"), "failure\n");
+        assert_eq!(read("check_run-5-6275696c64205b785d"), "success\n");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 5);
+        let pending = run("check_run", 2, "test", "failure").replace("completed", "requested");
         assert_eq!(post(&d, "check_run", &pending, SECRET), 202);
     }
 
