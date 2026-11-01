@@ -143,6 +143,7 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
 | `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |
+| `ci-pool-tui` (tab `ci-pool`) | every CI pool slot with its container, runner, and job; queued and running workflow runs; jobs held over 5 minutes and stuck slots with the cause; Forgejo runs. Read only; 20 GitHub calls a minute at most | `crewship.herdr.ci_pool_tab` |
 
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 
