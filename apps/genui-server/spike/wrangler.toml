@@ -1,0 +1,12 @@
+# Local only (`wrangler dev --local`). No account, no deploy.
+name = "genui-spike"
+main = "worker.ts"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "BOARD"
+class_name = "Board"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Board"]

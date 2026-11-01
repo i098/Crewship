@@ -1,0 +1,82 @@
+/* Tokens and the canvas engine from the frozen design (docs/genui/design). HSL only; the agent overrides tokens through the spec.
+   Shell (shell.css), card chrome (cards.css) and overlays (overlays.css) style their own parts. */
+:root {
+  --font: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bg: hsl(240 24% 4%);
+  --ink: hsl(230 30% 96%);
+  --mute: hsl(232 12% 64%);
+  --dim: hsl(232 10% 44%);
+  --glass: hsl(240 30% 100% / .045);
+  --hair: hsl(240 40% 100% / .1);
+  --vio: hsl(262 92% 70%);
+  --cyan: hsl(188 95% 58%);
+  --pink: hsl(320 90% 66%);
+  --ok: hsl(152 72% 56%);
+  --amber: hsl(38 98% 62%);
+  --red: hsl(0 90% 66%);
+  --sel: hsl(0 0% 96%);
+  --spring: cubic-bezier(.32, .72, 0, 1);
+  --pop: cubic-bezier(.34, 1.56, .64, 1);
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body { font: 14px/1.4 var(--font); color: var(--ink); background: var(--bg); overflow: hidden; letter-spacing: -.02em; -webkit-user-select: none; user-select: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* the canvas fills the whole window; the line and the composer float over it with no frame */
+.canvas { position: fixed; inset: 0; z-index: 1; overflow: hidden; cursor: grab; touch-action: none; background-image: radial-gradient(hsl(0 0% 100% / .1) 1.1px, transparent 1.6px); transition: background-position .9s var(--spring), background-size .9s var(--spring); }
+.canvas.drag { cursor: grabbing; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; transition: transform .9s var(--spring); }
+.canvas.drag, .canvas.drag .world { transition: none; }
+/* first paint: every box lands in place at once; the canvas shows only after it is laid out */
+.canvas.boot * { transition: none !important; }
+.canvas.boot { opacity: 0; }
+
+/* lines sit above the boxes, drawn in screen space every frame from where the two cards are now */
+.links { position: absolute; z-index: 30; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.links path { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.links .case { stroke: var(--bg); stroke-width: 8; }
+.links .tmp { stroke: var(--sel); stroke-dasharray: 6 6; }
+/* a line never rides along a move: it undraws, then draws again from the source card */
+.links g.in path { stroke-dasharray: 1; animation: ldraw .5s var(--spring) both; }
+.links g.in circle, .links g.in rect, .links g.in text { animation: lfin .3s .3s both; }
+.links g.out path { stroke-dasharray: 1; animation: lundraw .2s ease-in both; }
+.links g.out { opacity: 0; transition: opacity .1s .15s; }
+@keyframes ldraw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes lundraw { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -1; } }
+@keyframes lfin { from { opacity: 0; } }
+.links circle { stroke: var(--bg); stroke-width: 3; }
+.links text { font-size: 13px; fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 7px; }
+
+/* one glass layer per project: a static tint, not a backdrop blur, which recomposited every cluster on each frame (render speed, item 8) */
+.cluster { position: absolute; z-index: 0; transform-origin: 0 0; transform: scale(var(--s, 1)); border-radius: 34px; background: hsl(240 30% 100% / .04); box-shadow: inset 0 1px 1px hsl(0 0% 100% / .2), inset 0 -1px 2px hsl(0 0% 0% / .35), 0 40px 80px -30px hsl(0 0% 0% / .5); transition: left .9s var(--spring), top .9s var(--spring), transform .9s var(--spring), width .9s var(--spring), height .9s var(--spring), box-shadow .3s, opacity .5s; }
+/* cards off screen skip paint; their size is set inline, so nothing jumps when they come back */
+.tile { content-visibility: auto; }
+.cluster.away { cursor: pointer; }
+body.spread .cluster { cursor: zoom-in; }
+.cluster.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); pointer-events: none; transition: opacity .4s ease, transform .4s ease !important; }
+.cl-hd { position: absolute; left: 22px; top: 15px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--mute); white-space: nowrap; pointer-events: none; transition: left .9s var(--spring), transform .9s var(--spring); }
+.cl-hd b { padding: 3px 10px; border-radius: 99px; color: var(--bg); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
+/* the header slides to the side the cluster sits on */
+.cluster.r .cl-hd { left: calc(100% - 22px); transform: translateX(-100%); }
+/* hover: a thin light runs round the border of a cluster you can open */
+@property --ang { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.cluster::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--ang), transparent 0 55%, var(--ring, var(--cyan)) 80%, transparent 95%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity .45s; animation: ring 2.4s linear infinite; }
+.cluster.away:hover::before, body.spread .cluster:hover::before { opacity: 1; }
+@keyframes ring { to { --ang: 360deg; } }
+
+/* card placement and motion; the chrome is in cards.css */
+.tile.held { transition: none !important; z-index: 40 !important; cursor: grabbing; box-shadow: 0 24px 60px -12px hsl(0 0% 0% / .7); }
+/* focus: cards in clusters behind are smaller, dimmer and blurred; unlinked clusters fade back */
+.tile.away, .tile.away * { pointer-events: none; }
+.tile.away { filter: blur(3px) brightness(.5); }
+.cluster.far, .tile.far { opacity: .3; }
+/* the two cards a line joins get a ring in its colour, and the one behind is no longer blurred */
+.tile.lk { outline: calc(1.5px / var(--k, 1)) solid var(--lk); outline-offset: 3px; }
+.tile.away.lk { filter: brightness(.8); }
+body.sizing .tile, body.sizing .cluster { transition: none !important; }
+body.sizing { cursor: grabbing; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

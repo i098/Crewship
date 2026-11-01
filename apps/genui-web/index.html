@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Crewship genui canvas</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./src/shell.css" />
+    <link rel="stylesheet" href="./src/overlays.css" />
+  </head>
+  <body>
+    <header class="top" hidden>
+      <i class="orb"></i>
+      <h1 class="line"></h1>
+      <div class="linep" popover="manual"></div>
+      <button type="button" class="st fold" aria-controls="stats" aria-expanded="true" aria-label="Hide the pills">‹</button>
+      <div class="stats" id="stats"></div>
+      <button type="button" class="st nav" aria-label="Navigation: hotkeys or buttons"></button>
+      <button type="button" class="st logbtn" aria-controls="logp" aria-expanded="false"><b>log</b><span class="num"></span></button>
+      <button type="button" class="st wins" title="When you and the agent both move a card"></button>
+    </header>
+    <main class="canvas" aria-label="Canvas">
+      <div class="world"><svg class="links" aria-hidden="true"></svg></div>
+    </main>
+    <aside class="logp" id="logp" aria-label="Action log">
+      <h2>Everything that happened <button type="button" class="logx" aria-label="Close log">✕</button></h2>
+      <ol></ol>
+    </aside>
+    <div class="bottom">
+      <span class="hint"></span>
+      <div class="chips"></div>
+      <div class="rail" aria-label="Set aside"></div>
+      <form class="composer bar" hidden>
+        <button type="button" class="pen" aria-pressed="false" aria-label="Draw on the board" title="Draw (Esc clears)">✎</button>
+        <button type="button" class="pen" id="attach" aria-label="Upload images, video, audio or files">＋</button>
+        <input type="file" id="file" multiple hidden />
+        <button type="button" class="pen" id="recenter" aria-label="Back to what matters">◎</button>
+        <button type="button" class="pen" id="spread" aria-pressed="false" aria-label="Spread out all boards">⊞</button>
+        <input name="ask" autocomplete="off" aria-label="Ask the agent" />
+        <button type="submit" class="go" aria-label="Send">↑</button>
+      </form>
+      <div class="queue" aria-label="Up next"><span class="ql">Up next</span></div>
+    </div>
+    <svg class="sketch" aria-hidden="true"></svg>
+    <script type="module" src="./src/canvas.ts"></script>
+  </body>
+</html>
