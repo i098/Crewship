@@ -1,0 +1,21 @@
+[Unit]
+Description=GenUI site on 8458 (tailscale serve -> 127.0.0.1:4628), live fleet feed from the branch snapshot
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/genui-stack/apps/genui-web
+Environment=PATH=/home/administrator/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PORT=4628
+Environment=GENUI_SERVER=http://127.0.0.1:8796
+Environment=NODE_ENV=production
+Environment=GENUI_STATE=/dev/shm/genui-stack
+Environment=GENUI_FM_MAIN=/home/administrator/Dev/firstmate
+Environment=GENUI_ALLOW_LOGINS=jerry.x0930@gmail.com
+ExecStart=/home/administrator/.local/bin/bun dev.ts
+KillMode=control-group
+Nice=10
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

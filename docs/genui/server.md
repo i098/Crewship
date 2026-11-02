@@ -53,3 +53,7 @@ Header toggle: `components.header.props.wins` (`"user"`, otherwise agent wins), 
 ## Agent token limit
 
 `GENUI_AGENT_TOKEN` is enforced by the server, but the agent kit sends no token in this phase. Keep it unset until the P6 auth work. While it is unset, any client can claim `role=agent`.
+
+## Live site unit
+
+`apps/genui-web/deploy/genui-stack.service` is the user unit behind `tailscale serve` on port 8458 (page server on 127.0.0.1:4628, board server on 8796). Copy it to `~/.config/systemd/user/`, point `WorkingDirectory` at a snapshot of the branch, then `systemctl --user enable --now genui-stack`. `Restart=always` and user lingering bring it back after a reboot. `GENUI_STATE=/dev/shm/genui-stack` keeps board writes off the busy disk; without it the first paint took 15 s on a loaded host, with it 1.5 s. The feeder rebuilds the board after a restart.

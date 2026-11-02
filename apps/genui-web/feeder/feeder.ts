@@ -3,7 +3,7 @@
 // token cost from omp's stats store, and this host's load. Nothing here is invented: a missing source shows an empty card.
 // Run: bun feeder/feeder.ts  (GENUI_SERVER defaults to http://127.0.0.1:8787, BOARD to the canvas's default "demo")
 import { Database } from "bun:sqlite";
-import { statfsSync } from "node:fs";
+import { readFileSync, statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
@@ -88,8 +88,20 @@ function usage() {
 }
 
 // Host samples accumulate from the feeder's own reads; the series starts empty.
-const host: Record<string, number[]> = { cpu: [], mem: [], disk: [] };
+const host: Record<string, number[]> = { cpu: [], mem: [], disk: [], net: [] };
 let lastCpu = cpus().map((c) => c.times);
+/** Bytes moved on every interface but loopback; null off Linux. */
+function netBytes(): number | null {
+  try {
+    return readFileSync("/proc/net/dev", "utf8").split("\n").slice(2).reduce((s, l) => {
+      const [name, rest] = l.split(":");
+      if (!rest || name.trim() === "lo") return s;
+      const f = rest.trim().split(/\s+/);
+      return s + Number(f[0]) + Number(f[8]);
+    }, 0);
+  } catch { return null; }
+}
+let lastNet = { bytes: netBytes(), at: Date.now() };
 function sampleHost() {
   const now = cpus().map((c) => c.times);
   let busy = 0, all = 0;
@@ -100,10 +112,13 @@ function sampleHost() {
   });
   lastCpu = now;
   const fs = statfsSync("/");
-  const push = (k: string, v: number) => host[k] = [...host[k], Math.round(v)].slice(-30);
+  const push = (k: string, v: number, digits = 0) => host[k] = [...host[k], Number(v.toFixed(digits))].slice(-30);
   if (all) push("cpu", (100 * busy) / all);
   push("mem", 100 * (1 - freemem() / totalmem()));
   push("disk", 100 * (1 - fs.bavail / fs.blocks));
+  const bytes = netBytes(), at = Date.now();
+  if (bytes !== null && lastNet.bytes !== null) push("net", Math.max(0, bytes - lastNet.bytes) / 1e6 / ((at - lastNet.at) / 1000), 1);
+  lastNet = { bytes, at };
 }
 
 export async function gather(): Promise<Sources> {
