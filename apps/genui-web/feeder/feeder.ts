@@ -7,7 +7,7 @@ import { readFileSync, statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, askId, contextOf, fleetCards, fleetProjects, fleetTuis, merge, prId, prStage, STAGES, steer, TOPICS, topicRows, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
+import { answer, askId, contextOf, DECK, deckAsk, fleetCards, fleetProjects, fleetTuis, merge, prId, prStage, STAGES, steer, TOPICS, topicRows, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { briefAsks } from "../fleet/brief";
 import { type Fleet, FleetSource } from "../fleet/data";
 import { boardIds, chat, type Plan, stream } from "../fleet/chat";
@@ -329,10 +329,11 @@ export function applyPlan(want: Record<string, Component>, pl = plan) {
   for (const [id, c] of Object.entries(want)) if (!keep.includes(id) && !pl.own.has(id) && goesAside(id, c)) lift(id, { aside: true });
 }
 
-/** A card a plan may set aside: not the answer, not one waiting on his Yes, and not a floating window (those stay over any layout). */
+/** A card a plan may set aside: not the answer, not one waiting on his Yes, not a floating window (those stay over any
+ * layout), and not a card of the open deck, so a question about one keeps the pile. */
 function goesAside(id: string, c: Component): boolean {
   const p = c.props;
-  return c.type === "card" && p.removed !== true && id !== "ai-q" && !pending.has(id) && p.pinned !== true && p.float !== true;
+  return c.type === "card" && p.removed !== true && id !== "ai-q" && !pending.has(id) && p.pinned !== true && p.float !== true && p.proj !== DECK;
 }
 
 /** Publishes once more after the one in flight, so a burst of chat edits costs at most two board round trips. */
@@ -634,7 +635,8 @@ let chats = 0;
 function newAsk(m: Intent, first: string[], own: Set<string>): number {
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
-  open.deck = false; // a new question puts the gathered decisions back in their own clusters
+  // a question about a card in the deck keeps the deck and its place; any other new ask puts the decisions back
+  if (!first.some((id) => (spec.components[id] ?? extra[id])?.props.proj === DECK)) open.deck = false;
   // each question rebuilds the board from the overview; one with no plan: line keeps the overview, an ask about a card
   // shows that card large at once, before the model's plan reshapes the rest
   plan = first.length ? { p: { keep: first, size: { [first[0]]: "l" }, under: {}, edge: [] }, cause: m.id, back: [], own } : undefined;
@@ -718,9 +720,6 @@ function inPlaceOf(m: Intent, text: string): string | undefined {
   return !s.key && (s.kind === "tui" || !!s.task) && !QUESTION.test(text) ? undefined : sel;
 }
 
-// shortcut: the deck is told by its words, as the spread verb is; send it through the chat model if it misreads
-const DECK_ASK = /\b(one (by|at a) (one|time)|(all|every)( the| my)?( open)? (decisions|asks)|gather\b.*\b(decisions|asks))\b/i;
-
 /** "Show me all open decisions", "one by one": a new cluster gathers every open decision into one pile, shown one at a time.
  * It is the answer, so no chat runs and the last answer's card leaves. */
 function openDeck(m: Intent) {
@@ -733,7 +732,7 @@ function openDeck(m: Intent) {
 /** Owner text: the deck, else answered in the card it is about, else sent to the ask or crew card it names (after a confirm), else a chat. */
 function onText(m: Intent, text: string, fl: FleetSource) {
   // only a composer ask opens it: words typed into a card's answer box are that card's answer
-  if (m.targetId === "input" && DECK_ASK.test(text)) return openDeck(m);
+  if (m.targetId === "input" && deckAsk(text)) return openDeck(m);
   const inPlace = inPlaceOf(m, text);
   const to = inPlace ? undefined : fleetTarget(m.payload.about);
   if (inPlace) answerInPlace(m, inPlace, text, fl);

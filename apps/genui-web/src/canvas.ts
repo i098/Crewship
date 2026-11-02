@@ -137,18 +137,15 @@ const cam = {
     paint();
   },
   /** Steps a pile (the one holding `id`, else the selected card's, else the front cluster's) to its next or previous
-   * card and selects it, so Enter opens it; "fan" lays the pile out as rows, or stacks it again. */
-  pile(dir: number | "fan", id = [...sel].at(-1)) {
+   * card and selects it, so Enter opens it. */
+  pile(dir: number, id = [...sel].at(-1)) {
     const f = pileOf(id) ?? [...piles].find(([, s]) => L?.tiles[s[0]]?.proj === L?.front)?.[0] ?? [...piles.keys()][0];
     if (!f) return;
     const s = piles.get(f)!;
-    if (dir === "fan") void (fanned.delete(f) || fanned.add(f));
-    else {
-      const i = ((pileAt.get(f) ?? 0) + dir + s.length) % s.length;
-      pileAt.set(f, i);
-      sel.clear();
-      sel.add(s[i]);
-    }
+    const i = ((pileAt.get(f) ?? 0) + dir + s.length) % s.length;
+    pileAt.set(f, i);
+    sel.clear();
+    sel.add(s[i]);
     paint();
   },
   open(proj: string) {
@@ -180,7 +177,7 @@ const ctx = {
   sel,
   paint,
   /** A card's wide view, for the full view window. */
-  html: (id: string) => (spec.components[id] ? cardHtml(id, "wide") : ""),
+  html: (id: string) => (spec.components[id] ? renderCard(spec, spec.components[id], "wide") : ""),
   bring: cam.bring,
   /** Set by the overlays: what an ask is about (open card, selection, drawn spot). */
   about: undefined as undefined | (() => About),
@@ -268,15 +265,14 @@ function items(): Item[] {
 
 /** Piles: a stack's front card in the plan → the stack in order, the front card first. Rebuilt on each paint. */
 let piles = new Map<string, string[]>();
-/** Local, the plan's stack is unchanged: the card of each pile you stepped to, and the piles you fanned out. */
-const pileAt = new Map<string, number>(),
-  fanned = new Set<string>();
-/** The card on top of each pile (or the first card of a fanned one) → its place, for the pile bar. */
-let tops = new Map<string, { i: number; n: number; fan: boolean }>();
+/** Local, the plan's stack is unchanged: the card of each pile you stepped to. */
+const pileAt = new Map<string, number>();
+/** The card on top of each pile → its place, for the pile bar. */
+let tops = new Map<string, { i: number; n: number }>();
 const pileOf = (id?: string) => (id ? [...piles].find(([, s]) => s.includes(id))?.[0] : undefined);
 
 /** Each pile shows the card you stepped to on top, the cards after it next behind, so the next one peeks first;
- * a fanned pile is no stack at all. A pile whose front card left (answered and closed) keeps its other cards. */
+ * a pile whose front card left (answered and closed) keeps its other cards. */
 function restack(ts: Item[]): Item[] {
   const byId = new Map(ts.map((t) => [t.id, t])),
     st = new Map<string, Item[]>();
@@ -288,14 +284,13 @@ function restack(ts: Item[]): Item[] {
   piles = new Map([...st].map(([f, s]) => [f, s.map((t) => t.id)]));
   tops = new Map();
   for (const f of pileAt.keys()) if (!st.has(f)) pileAt.delete(f);
-  for (const f of fanned) if (!st.has(f)) fanned.delete(f);
   const ring = new Map<string, Item[]>();
   for (const [f, s] of st) {
     const i = Math.min(pileAt.get(f) ?? 0, s.length - 1),
       r = [...s.slice(i), ...s.slice(0, i)];
-    for (const t of r) t.under = t === r[0] || fanned.has(f) ? undefined : r[0].id;
+    for (const t of r) t.under = t === r[0] ? undefined : r[0].id;
     ring.set(f, r);
-    tops.set(r[0].id, { i, n: s.length, fan: fanned.has(f) });
+    tops.set(r[0].id, { i, n: s.length });
   }
   // the layout stacks in array order, so each pile goes in its ring order where its first card was
   const of = new Map([...ring].flatMap(([f, r]) => r.map((t) => [t.id, f] as const))),
@@ -312,19 +307,17 @@ function toFront(id: string) {
   if (f) pileAt.set(f, piles.get(f)!.indexOf(id));
 }
 
-/** A card's tile html: its view, plus the pile bar on a pile's top card: back, "3 of 19", next, and fan out or stack. */
+/** A card's tile html: its view, plus the pile bar on a pile's top card: back, "3 of 19", next. */
 function cardHtml(id: string, tier: WidthTier) {
   const html = renderCard(spec, spec.components[id], tier),
     p = tops.get(id);
   if (!p) return html;
   const b = (k: string, label: string, text: string) => `<button type="button" class="pb" data-pile="${k}" aria-label="${label}">${text}</button>`;
-  const bar = p.fan
-    ? b("fan", "Stack these cards", `Stack ${p.n}`)
-    : `${b("-1", "Previous card", "‹")}<b class="pn">${p.i + 1} of ${p.n}</b>${b("1", "Next card", "›")}${b("fan", "Fan out the pile", "Fan out")}`;
+  const bar = `${b("-1", "Previous card", "‹")}<b class="pn">${p.i + 1} of ${p.n}</b>${b("1", "Next card", "›")}`;
   return `${html}<div class="pile">${bar}</div>`;
 }
 
-// a pile is browsable: its bar steps and fans it, and a tap on a card behind brings it to the front
+// a pile is browsable: its bar steps it, and a tap on a card behind brings it to the front
 document.addEventListener(
   "click",
   (e) => {
@@ -334,7 +327,7 @@ document.addEventListener(
     if (!id) return;
     e.stopPropagation();
     e.preventDefault();
-    if (b) return cam.pile(b.dataset.pile === "fan" ? "fan" : Number(b.dataset.pile), id);
+    if (b) return cam.pile(Number(b.dataset.pile), id);
     toFront(id);
     paint();
   },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askOpts, askRef, contextOf, fleetCards, mergeBlock, topicRows } from "../fleet/cards";
+import { askOpts, askRef, contextOf, deckAsk, fleetCards, mergeBlock, topicRows } from "../fleet/cards";
 import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
@@ -149,6 +149,12 @@ test("the deck gathers every open decision from all clusters into one unpaged pi
   const [top, ...rest] = deck;
   expect(top[1].props.under).toBeUndefined();
   for (const [, c] of rest) expect(c.props.under).toBe(top[0]);
+});
+
+test("only the owner's show or gather words open the deck; questions that mention all the asks reach the chat", () => {
+  for (const t of ["show it to me one by one", "Show me all open decisions", "gather all decisions"]) expect(deckAsk(t)).toBe(true);
+  for (const t of ["why are all the asks from t1 stuck?", "how many of all my asks are old?", "merge these PRs one at a time", "show me why all the asks are stuck"])
+    expect(deckAsk(t)).toBe(false);
 });
 
 test("asking about a failing PR card shows its checks, though only a green PR's card carries prUrl", () => {
