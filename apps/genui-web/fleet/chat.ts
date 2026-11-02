@@ -140,10 +140,14 @@ function jsonPart(tag: string, rest: string): Part {
   if (tag === "plan") return planPart(j);
   if (tag === "choose") return choosePart(j as Record<string, unknown>);
   if (tag === "size") return sizePart(j as Record<string, unknown>);
-  const props = typeof j.props === "object" && j.props && !Array.isArray(j.props) ? (j.props as Record<string, unknown>) : {};
+  return cardPart(j, typeof j.props === "object" && j.props && !Array.isArray(j.props) ? (j.props as Record<string, unknown>) : {});
+}
+
+/** A plain card or Mermaid diagram of the model's own. */
+function cardPart(j: { id?: unknown; kind?: unknown; proj?: unknown }, props: Record<string, unknown>): Part {
   const proj = typeof j.proj === "string" && j.proj ? j.proj : "me";
   const id = (kind: string) => AI(typeof j.id === "string" && j.id ? j.id : kind);
-  // a Mermaid diagram is an embed whose picture the feeder draws before the card lands (see `take`)
+  // a Mermaid diagram is an embed whose picture is drawn before the card lands (see `drawCard`)
   if (j.kind === "diagram")
     return typeof props.mermaid === "string" && props.mermaid.trim()
       ? { card: { id: id("diagram"), ...card("embed", { type: "diagram", title: props.title ?? "Diagram", mermaid: props.mermaid, proj }) } }
@@ -239,32 +243,39 @@ export function boardIds(p: Plan, board: Record<string, unknown>): Plan {
   return { keep: p.keep.map(at), size: map(p.size), under: Object.fromEntries(Object.entries(p.under).map(([k, v]) => [at(k), at(v)])), edge: p.edge.map(at) };
 }
 
+type ChatIO = { board: Record<string, Component>; apply: (e: Edit) => Promise<void> };
+
+/** A diagram card carries Mermaid text; the picture is drawn here, so a source that does not parse says so in the card. */
+async function drawCard({ id, ...c }: Component & { id: string }, o: ChatIO) {
+  if (typeof c.props.mermaid === "string") {
+    const { mermaid, ...props } = c.props;
+    try {
+      c = { ...c, props: { ...props, src: await mermaidSrc(mermaid) } };
+    } catch (e) {
+      c = { ...c, props: { ...props, type: "text", text: `The diagram did not draw: ${(e as Error).message}\n\n${mermaid}` } };
+    }
+  }
+  await o.apply({ upsert: id, card: c });
+}
+
+/** Applies one parsed line to the board; returns the model's error text when the line was bad. */
+async function takePart(o: ChatIO, part: Part | undefined, said: string[]): Promise<string | undefined> {
+  if (!part) return;
+  if ("bad" in part) return part.bad;
+  if ("say" in part) (said.push(part.say), await o.apply({ say: part.say, done: false }));
+  else if ("focus" in part) await o.apply({ focus: part.focus.filter((id) => o.board[id]) });
+  else if ("card" in part) await drawCard(part.card, o);
+  else if ("size" in part) await o.apply({ size: { ...part.size, id: o.board[part.size.id] ? part.size.id : AI(part.size.id) } });
+  else await o.apply(part);
+}
+
 /** Answers one free-text question by streaming board edits, then one final `say` with done set. */
 export async function chat(o: { text: string; about?: unknown; fleet: Fleet; board: Record<string, Component>; apply: (e: Edit) => Promise<void> }): Promise<void> {
   const q = o.text.trim().slice(0, 300), said: string[] = [];
   const prompt = `Fleet summary:\n${summary(o.fleet)}\n\nBoard cards:\n${boardList(o.board)}\n\nCards the owner selected: ${o.about == null ? "none" : JSON.stringify(o.about).slice(0, 2000)}\n\nQuestion: ${q}`;
   let bad = "";
   const take = async (l: string) => {
-    const part = parse(l);
-    if (!part) return;
-    if ("say" in part) (said.push(part.say), await o.apply({ say: part.say, done: false }));
-    else if ("focus" in part) await o.apply({ focus: part.focus.filter((id) => o.board[id]) });
-    else if ("card" in part) await applyCard(part.card);
-    else if ("size" in part) await o.apply({ size: { ...part.size, id: o.board[part.size.id] ? part.size.id : AI(part.size.id) } });
-    else if ("drop" in part || "show" in part || "plan" in part) await o.apply(part);
-    else bad = part.bad;
-  };
-  // a diagram card carries Mermaid text; the picture is drawn here, so a source that does not parse says so in the card
-  const applyCard = async ({ id, ...c }: Component & { id: string }) => {
-    if (typeof c.props.mermaid === "string") {
-      const { mermaid, ...props } = c.props;
-      try {
-        c = { ...c, props: { ...props, src: await mermaidSrc(mermaid) } };
-      } catch (e) {
-        c = { ...c, props: { ...props, type: "text", text: `The diagram did not draw: ${(e as Error).message}\n\n${mermaid}` } };
-      }
-    }
-    await o.apply({ upsert: id, card: c });
+    bad = (await takePart(o, parse(l), said)) ?? bad;
   };
   try {
     let text = "";

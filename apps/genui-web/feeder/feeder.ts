@@ -573,6 +573,13 @@ function newAsk(m: Intent, first: string[], own: Set<string>): number {
   return ++chats;
 }
 
+/** An ask after drawing: the answer is a window on the board right of the ink, at its top, instead of in the cluster. */
+function besideInk(about: unknown) {
+  const ink = ((about ?? {}) as { at?: Record<string, unknown> }).at;
+  if (!ink || ![ink.x, ink.y, ink.w].every((n) => typeof n === "number" && Number.isFinite(n))) return undefined;
+  return { layer: Math.floor(Date.now() / 1000), rect: { x: Number(ink.x) + Number(ink.w) + 24, y: Number(ink.y), w: 0, h: 0 } };
+}
+
 /**
  * Free text: the chat model streams board edits, each applied as it lands. `about` is the card he asked about;
  * `first` are cards every plan of this answer keeps in front (the card he asked about).
@@ -584,11 +591,7 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
   const said: string[] = [];
   let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   const topics = (answerTopics = new Set<Topic>());
-  // an ask after drawing: the answer is a window on the board right of the ink, at its top, instead of in the cluster
-  const ink = ((about ?? {}) as { at?: Record<string, unknown> }).at;
-  const beside = ink && [ink.x, ink.y, ink.w].every((n) => typeof n === "number" && Number.isFinite(n))
-    ? { float: true, layer: Math.floor(Date.now() / 1000), rect: { x: Number(ink.x) + Number(ink.w) + 24, y: Number(ink.y), w: 0, h: 0 } }
-    : undefined;
+  const beside = besideInk(about);
   // base 100: the answer sits above the decision cards it lists, so a phone shows it first
   const ask = (ready: boolean, about: string[]) => {
     const c = card("ask", "me", 100, { q, ready, about, rows: ready ? topicRows(fl.fleet, topics) : [], asked: true, removed: false, ...(beside && { float: true, layer: beside.layer }) });
@@ -723,20 +726,29 @@ async function onAiCard(m: Intent): Promise<boolean> {
   const id = m.targetId, c = extra[id], typed = typeof m.payload.text === "string" ? m.payload.text.trim() : "";
   // the answer box on a decision of the model's is an answer in his own words
   const f = typed ? "pick" : m.payload.field, v = typed || m.payload.value;
-  if (!id.startsWith("ai-") || !c || typeof f !== "string" || !AI_TAPS.has(f) || c.props.done === true || (typed && c.props.kind !== "decision")) return false;
+  if (!c || typeof f !== "string" || !aiTap(id, c, f, typed)) return false;
   const rows = (key: string) => (Array.isArray(c.props[key]) ? (c.props[key] as { k?: unknown; b?: unknown; preview?: unknown }[]) : []);
   const chosen = rows(f === "pick" ? "opts" : "acts").find((o) => o.k === v);
   const what = String(chosen?.b ?? v).slice(0, 400);
   const r = await pub({ card: id, kind: c.props.kind, q: c.props.q ?? c.props.title ?? null, [f]: v, label: what }).catch(failed);
   note(`${f === "send" ? "Sent" : "Picked"} "${what}" on "${c.props.q ?? c.props.title ?? id}"; recorded on ${TOPIC} (seq ${r.trim()})`);
-  if (chosen?.preview && typeof chosen.preview === "object")
-    for (const [pid, props] of Object.entries(chosen.preview)) if (extra[pid] && props && typeof props === "object") extra[pid] = { ...extra[pid], props: { ...extra[pid].props, ...props } };
+  applyPreview(chosen?.preview);
   extra[id] = { ...c, props: { ...c.props, done: true, pick: v } };
   setTimeout(() => {
     delete extra[id];
     if (last) void publish(last, m.id).catch((e) => console.error("publish:", (e as Error).message));
   }, SENT_MS);
   return true;
+}
+
+/** Whether a tap is one the model's own open card takes: a typed answer only goes to a decision. */
+const aiTap = (id: string, c: Component, f: string, typed: string) =>
+  id.startsWith("ai-") && AI_TAPS.has(f) && c.props.done !== true && (!typed || c.props.kind === "decision");
+
+/** A picked option's preview becomes real on the model's other cards. */
+function applyPreview(preview: unknown) {
+  if (!preview || typeof preview !== "object") return;
+  for (const [pid, props] of Object.entries(preview)) if (extra[pid] && props && typeof props === "object") extra[pid] = { ...extra[pid], props: { ...extra[pid].props, ...props } };
 }
 
 /** The owner's intents, forwarded by the board to agent sockets. */
