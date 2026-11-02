@@ -37,6 +37,8 @@ Buttons carry `data-act` and `data-id`, and `data-k` when there is a choice: `fu
 
 Every kind also reads `need`, `pinned` (shows the project pill from `spec.projects`) and `kpi` where the design shows a big number.
 
+`embed.src` loads only for http(s), blob and same-origin paths. A base64 SVG `data:` URL also loads, but only for `image` and `diagram`; every other `data:` and `javascript:` URL is dropped.
+
 ## Chrome
 
 Cards have no border, a 22 px radius and a solid fill that lightens on hover. A thin light runs round the edge on hover. The title (20 px) shares the top row with the flag, the KPI and the bare ⤢ and ✕ glyphs. On a narrow card (500 px or less) the header takes the top row alone and the title uses the full width under it. The live stamp sits bottom left, and the L-shaped resize corner bottom right. Pin and link sit beside it and show on hover; a pinned card always shows its pin.
