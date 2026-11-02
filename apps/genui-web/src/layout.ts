@@ -33,8 +33,8 @@ export type State = {
   order: Record<string, string[]>;
 };
 export type ClusterBox = Rect & { proj: string; s: number; z: number; front: boolean; far: boolean; right: boolean; ids: string[] };
-/** `under`: a stacked card behind its front card. */
-export type TileBox = Rect & { s: number; z: number; away: boolean; far: boolean; center: boolean; proj: string | null; under?: boolean };
+/** `under`: a stacked card behind its front card; `deep`: so far behind in a pile that it is out of sight. */
+export type TileBox = Rect & { s: number; z: number; away: boolean; far: boolean; center: boolean; proj: string | null; under?: boolean; deep?: boolean };
 /** A line from a card `f` to the card `o` it affects; `g` is the cluster it leaves from in spread. */
 export type Line = { f: string; o: string; label: string; proj: string; g: string | null };
 export type Layout = {
@@ -57,6 +57,7 @@ export const P = 22,
   CW = 460, // a card's width on a wider screen: room for more of its text, still the narrow view
   CGAP = 120,
   STEP = 22, // how far each stacked card peeks out from behind the one in front
+  PEEK = 3, // how many cards of a pile peek out
   EW = 320; // the width of the edge column
 
 type Fit = (id: string, w: number) => number;
@@ -196,7 +197,7 @@ function place(gs: Group[], vg: Group | undefined, pull: Set<string>, tiles: Rec
     g.ts.forEach((t, j) => {
       const r = inner[i].local[j];
       gOf.set(t.id, box);
-      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 33 - 4 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj, under: (r[4] ?? 0) < 0 };
+      tiles[t.id] = { x: x + r[0] * s[i], y: y + r[1] * s[i], w: r[2], h: r[3], s: s[i], z: 33 - 4 * d + (r[4] ?? 0), away: !front, far, center: g === gs[0] && j === 0, proj: g.proj, under: (r[4] ?? 0) < 0, deep: r[5] === 1 };
     });
   });
   return { clusters, gOf };
@@ -242,11 +243,13 @@ function tile(ts: Item[], fit: Fit, one: boolean) {
     py = 0;
   for (const t of ts.filter(behind)) {
     const k = (depth.get(t.under!) ?? 0) + 1,
-      [x, fy, w, h] = at.get(t.under!)!;
+      [x, fy, w, h] = at.get(t.under!)!,
+      // a deep pile peeks three cards; the rest wait exactly behind the third, out of sight
+      d = Math.min(k, PEEK);
     depth.set(t.under!, k);
-    px = Math.max(px, k * dx);
-    py = Math.max(py, k * dy);
-    at.set(t.id, [x + k * dx, fy + k * dy, w, h, -Math.min(k, 2)]);
+    px = Math.max(px, d * dx);
+    py = Math.max(py, d * dy);
+    at.set(t.id, [x + d * dx, fy + d * dy, w, h, -d, k > PEEK ? 1 : 0]);
   }
   return { local: ts.map((t) => at.get(t.id)!), w: ex - P + (edge.length ? EW : -GAP) + 2 * P + px, h: Math.max(y, ey) - GAP + P + py };
 }

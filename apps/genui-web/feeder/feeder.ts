@@ -239,7 +239,7 @@ function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
 /** The patch that brings `spec` to the wanted cards without touching what the owner set. */
 export function diff(spec: BoardSpec, want: Record<string, Component>, owned: Set<string>): PatchOp[] {
   const patch: PatchOp[] = [];
-  const projects = { ...PROJECTS, ...(fleet ? fleetProjects(fleet.fleet) : {}) };
+  const projects = { ...PROJECTS, ...(fleet ? fleetProjects(fleet.fleet, open.deck) : {}) };
   if (JSON.stringify(spec.projects) !== JSON.stringify(projects)) patch.push({ op: "add", path: "/projects", value: projects });
   for (const [id, c] of Object.entries(want)) {
     const have = spec.components[id];
@@ -492,8 +492,8 @@ function offer(make: () => Pending, refused: string, of?: string) {
 }
 
 type Intent = Extract<ServerMsg, { t: "intent" }>;
-// what the owner has open: the cluster the camera is on and the cards in full view; only these load detail
-const open: Required<Open> = { cluster: null, cards: new Set(), page: new Map() };
+// what the owner has open: the cluster the camera is on, the cards in full view and the deck; only these load detail
+const open: Required<Open> = { cluster: null, cards: new Set(), page: new Map(), deck: false };
 // removed and done are cleared, so a card closed with its X opens again from its pill
 const again = { asked: true, removed: false, done: false };
 
@@ -634,6 +634,7 @@ let chats = 0;
 function newAsk(m: Intent, first: string[], own: Set<string>): number {
   focused.forEach((id) => unfocused.add(id));
   focused.clear();
+  open.deck = false; // a new question puts the gathered decisions back in their own clusters
   // each question rebuilds the board from the overview; one with no plan: line keeps the overview, an ask about a card
   // shows that card large at once, before the model's plan reshapes the rest
   plan = first.length ? { p: { keep: first, size: { [first[0]]: "l" }, under: {}, edge: [] }, cause: m.id, back: [], own } : undefined;
@@ -717,8 +718,22 @@ function inPlaceOf(m: Intent, text: string): string | undefined {
   return !s.key && (s.kind === "tui" || !!s.task) && !QUESTION.test(text) ? undefined : sel;
 }
 
-/** Owner text: answered in the card it is about, else sent to the ask or crew card it names (after a confirm), else a chat. */
+// shortcut: the deck is told by its words, as the spread verb is; send it through the chat model if it misreads
+const DECK_ASK = /\b(one (by|at a) (one|time)|(all|every)( the| my)?( open)? (decisions|asks)|gather\b.*\b(decisions|asks))\b/i;
+
+/** "Show me all open decisions", "one by one": a new cluster gathers every open decision into one pile, shown one at a time.
+ * It is the answer, so no chat runs and the last answer's card leaves. */
+function openDeck(m: Intent) {
+  newAsk(m, [], new Set());
+  delete extra["ai-q"];
+  open.deck = true;
+  note("Opened all decisions, one at a time");
+}
+
+/** Owner text: the deck, else answered in the card it is about, else sent to the ask or crew card it names (after a confirm), else a chat. */
 function onText(m: Intent, text: string, fl: FleetSource) {
+  // only a composer ask opens it: words typed into a card's answer box are that card's answer
+  if (m.targetId === "input" && DECK_ASK.test(text)) return openDeck(m);
   const inPlace = inPlaceOf(m, text);
   const to = inPlace ? undefined : fleetTarget(m.payload.about);
   if (inPlace) answerInPlace(m, inPlace, text, fl);

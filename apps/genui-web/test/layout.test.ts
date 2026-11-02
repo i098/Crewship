@@ -102,6 +102,17 @@ test("a plan's layout: a wide card takes the row alone, a stacked card peeks out
   expect((ph.m3.y - ph.m1.y) / ph.m1.s).toBeCloseTo(66);
 });
 
+test("a deep pile peeks three cards and hides the rest exactly behind the third", () => {
+  const pile: Item[] = ["p0", "p1", "p2", "p3", "p4", "p5"].map((id, i) => ({ ...it(id, "all", 90 - i), ...(i ? { under: "p0" } : {}) }));
+  const t = layout(pile, [], desk, st, tall).tiles;
+  expect(["p1", "p2", "p3"].map((id) => t[id].deep)).toEqual([false, false, false]);
+  expect(t.p3.z).toBeLessThan(t.p2.z);
+  for (const id of ["p4", "p5"]) {
+    expect(t[id].deep).toBe(true);
+    expect([t[id].x, t[id].y]).toEqual([t.p3.x, t.p3.y]);
+  }
+});
+
 test("floating windows keep their spot and stack by layer: the highest layer is on top", () => {
   const wins: Item[] = [
     { ...it("wa", "me", 0), pin: { x: 0, y: 0 }, layer: 9 },

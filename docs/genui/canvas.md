@@ -28,6 +28,8 @@ curl -X POST 127.0.0.1:8787/agent/demo -d '{"tool":"set_style","args":{"tokens":
 | Pin a card | tap `pin` | `pin {pinned}` |
 | Choose who wins a move | header `wins` pill (tap to switch) | `input {field:"wins",value}` on `header` |
 | Ask the agent | type in the input box, Enter; "show all boards" (or "spread all clusters") opens the spread view at once, like ⊞ | `input {text}` on `input`; none for the spread verb |
+| See all decisions one at a time | type "show me all open decisions", "one by one" or "gather all decisions": a new cluster, all decisions, holds every open decision from every cluster in one pile; a new ask puts them back | `input {text}` on `input`; the feeder opens the deck, no chat runs |
+| Step through a pile | a stacked card's top card has ‹, the count ("3 of 19"), › and Fan out; `,` `.` step and `f` fans out or stacks again in hotkeys mode; a tap on a card behind brings it to the top | none (local) |
 | Undo | Ctrl+Z or Cmd+Z; plain `z` in hotkeys mode | `undo` |
 | Select | tap a card: white ring and a `locked` tag; the bar shows "N selected · Bring to center · Clear"; double tap brings it to the centre | none; the next ask carries `about.ids` |
 | Full view | `⤢` on a card: a window over the board; drag it by any empty spot, resize it from the corner grip; the ask box stays on top and answers (`props.of`) sit under the card | the next ask carries `about.of` |

@@ -139,6 +139,18 @@ test("nothing is drawn until asked; asked-for asks page so every one is reachabl
   expect(seen.size).toBe(5);
 });
 
+test("the deck gathers every open decision from all clusters into one unpaged pile under its first card", () => {
+  const asks = Array.from({ length: 9 }, (_, i) => ({ home: "/h", task: `t${i % 3}`, key: `k${i}`, verb: "needs-decision", note: `Question ${i}?`, at: i }));
+  const f = { ...fleet, main: "/h", mates: [], workers: [], prs: [], asks } as unknown as Fleet;
+  const out = fleetCards(f, new Map(), { cards: new Set(), deck: true });
+  const deck = Object.entries(out).filter(([, c]) => c.props.proj === "all");
+  expect(deck.length).toBe(9);
+  expect(out["more-fm"]).toBeUndefined();
+  const [top, ...rest] = deck;
+  expect(top[1].props.under).toBeUndefined();
+  for (const [, c] of rest) expect(c.props.under).toBe(top[0]);
+});
+
 test("asking about a failing PR card shows its checks, though only a green PR's card carries prUrl", () => {
   const f = { ...fleet, mates: [], workers: [], asks: [], prs: [pr({ url: "https://x/1", title: "Fix login", checks: { ok: 2, bad: 1, pending: 0 } })] };
   expect(contextOf(f, { kind: "note", url: "https://x/1", title: "i098/app#1: 1 failing" })).toEqual([

@@ -22,10 +22,15 @@ const MATE_HSL = [
   "hsl(48 96% 60%)",
 ];
 
-/** One cluster per mate: "fm" is the first mate (the main home), then each second mate, each with its colour. */
-export function fleetProjects(f: Fleet): Record<string, { name: string; hsl: string }> {
+/** The generated cluster that gathers every open decision from all the others into one pile. */
+export const DECK = "all";
+
+/** One cluster per mate: "fm" is the first mate (the main home), then each second mate, each with its colour; plus the
+ * generated cluster of all decisions while it is open. */
+export function fleetProjects(f: Fleet, deck = false): Record<string, { name: string; hsl: string }> {
   const out: Record<string, { name: string; hsl: string }> = { fm: { name: "first mate", hsl: "hsl(48 96% 60%)" } };
   f.mates.forEach((m, i) => (out[m.id] = { name: m.id, hsl: MATE_HSL[i % MATE_HSL.length] }));
+  if (deck) out[DECK] = { name: "all decisions", hsl: "hsl(38 98% 62%)" };
   return out;
 }
 
@@ -58,8 +63,9 @@ export function short(who: string, text: string, n = 8): string {
 /** An action the owner asked for, shown as a confirm card until they pick Yes or Cancel; `of` is the card it acts on, `state` its run. */
 export type Pending = { id: string; q: string; why: string; of?: string; state?: "running" | "sent"; run: () => Promise<{ ok: boolean; text: string }> };
 
-/** What the owner has open: the cluster the camera is on, the cards in full view, and each cluster's page. Only these load detail. */
-export type Open = { cluster?: string | null; cards: Set<string>; page?: Map<string, number> };
+/** What the owner has open: the cluster the camera is on, the cards in full view, each cluster's page, and the generated
+ * cluster of all decisions (`deck`). Only these load detail. */
+export type Open = { cluster?: string | null; cards: Set<string>; page?: Map<string, number>; deck?: boolean };
 
 /** What the owner can ask the chat to draw; nothing is on the canvas until he asks. */
 export const TOPICS = ["asks", "prs", "crew", "usage", "merged", "host"] as const;
@@ -208,8 +214,8 @@ function askItem(f: Fleet, a: Ask, open: Open): Item {
     g = clusterOf(f, a.home, a.task),
     brief = briefOf(a),
     parsed = askOpts(a.note);
-  // a mate's own ask sits in its own cluster, whose label already names it
-  const who = g === a.task ? "" : a.task;
+  // a mate's own ask sits in its own cluster, whose label already names it; the deck mixes every mate, so it names them all
+  const who = g === a.task && !open.deck ? "" : a.task;
   return {
     id,
     g,
@@ -337,8 +343,9 @@ function items(f: Fleet, open: Open, shown: Set<Topic>): Item[] {
   const crews = shown.has("crew") ? [{ id: "fm", lines: [] as Task["lines"], home: f.main }, ...f.mates].map((m) => crewItem(f, m, open)) : [];
   return [
     ...crews.filter((x): x is Item => !!x),
-    ...(shown.has("asks") ? f.asks.map((a) => askItem(f, a, open)) : []),
-    ...(shown.has("prs") ? own.sort((a, b) => rank(a) - rank(b)).map((p) => prItem(f, p)) : []),
+    ...(shown.has("asks") || open.deck ? f.asks.map((a) => askItem(f, a, open)) : []),
+    // the deck holds every open decision, so the PRs ready to merge come too even when PRs are not shown
+    ...(shown.has("prs") ? own : open.deck ? own.filter((p) => !mergeBlock(f, p)) : []).sort((a, b) => rank(a) - rank(b)).map((p) => prItem(f, p)),
   ];
 }
 
@@ -359,13 +366,24 @@ function place(out: Record<string, Component>, g: string, list: Item[], open: Op
   });
 }
 
+/** The deck: every open decision in one pile, the first on top and the rest stacked under it, never paged; the canvas
+ * shows it one card at a time. It is the answer he asked for, so it takes the front. */
+function pile(out: Record<string, Component>, list: Item[]) {
+  for (const x of list) out[x.id] = { ...x.c, props: { ...x.c.props, proj: DECK, base: 800, asked: true, ...(x === list[0] ? {} : { under: list[0].id }) } };
+}
+
 export function fleetCards(f: Fleet, pending: Map<string, Pending>, open: Open = { cards: new Set() }, shown = new Set<Topic>()): Record<string, Component> {
   const out: Record<string, Component> = {},
     groups = new Map<string, Item[]>();
-  for (const x of items(f, open, shown)) (groups.get(x.g) ?? groups.set(x.g, []).get(x.g)!).push(x);
-  for (const [g, list] of groups) place(out, g, list, open);
+  // with the deck open, each decision leaves its own cluster for the deck
+  for (const x of items(f, open, shown)) {
+    const g = open.deck && x.c.props.kind === "decision" ? DECK : x.g;
+    (groups.get(g) ?? groups.set(g, []).get(g)!).push(x);
+  }
+  for (const [g, list] of groups) (g === DECK ? pile(out, list) : place(out, g, list, open));
   for (const p of pending.values())
-    out[p.id] = card("decision", "fm", 300, {
+    // the confirm for a decision in the deck stays in the deck, beside the pile he is working through
+    out[p.id] = card("decision", p.of && out[p.of]?.props.proj === DECK ? DECK : "fm", 300, {
       need: !p.state,
       q: p.q,
       why: p.state === "running" ? "Sending…" : p.why,

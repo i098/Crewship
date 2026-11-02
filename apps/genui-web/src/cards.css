@@ -13,6 +13,14 @@
 .tile.under { filter: blur(3px) brightness(.6); cursor: pointer; }
 .tile.under * { pointer-events: none; }
 .tile.under:hover { filter: brightness(.85); }
+/* a deep pile shows three cards behind the top one; the rest wait out of sight */
+.tile.deep { opacity: 0; pointer-events: none; }
+/* a pile's top card: back, "3 of 19", next, fan out; the count is the pile's badge */
+.pile { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.pile .pb { min-height: 36px; min-width: 36px; padding: 0 12px; border-radius: 12px; border: 0; background: hsl(240 30% 100% / .08); color: var(--ink); font: 600 13.5px/1 var(--font); transition: background .25s; }
+.pile .pb:hover { background: hsl(240 30% 100% / .14); }
+.pile .pb[data-pile="fan"] { margin-left: auto; }
+.pile .pn { padding: 6px 11px; border-radius: 99px; background: hsl(38 98% 62% / .16); color: hsl(38 98% 62%); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* dismiss: the card and everything in it shrink back and fade as one piece */
 .tile.gone { opacity: 0; transform: scale(calc(var(--s, 1) * .9)); filter: blur(8px); pointer-events: none; transition: opacity .4s ease, transform .4s ease, filter .4s ease !important; }
 .tile.gone *, .tile.gone::before { transition: none !important; animation: none !important; }

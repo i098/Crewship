@@ -13,6 +13,7 @@ export type OverlayCtx = {
     spreading: boolean;
     cycle(dir: number): void;
     step(m: Move, add?: boolean): void;
+    pile(dir: number | "fan"): void;
     toWorld(clientX: number, clientY: number): { x: number; y: number };
     onChange(fn: (transform: string, k: number) => void): void;
   };
@@ -447,13 +448,17 @@ function hotkey(st: St, e: KeyboardEvent, t: Element): (() => void) | undefined 
     "{": () => st.ctx.cam.cycle(-1),
     "}": () => st.ctx.cam.cycle(1),
     "0": () => document.getElementById("recenter")?.click(),
+    // a pile: the card before and after, and fan out or stack again
+    ",": () => st.ctx.cam.pile(-1),
+    ".": () => st.ctx.cam.pile(1),
+    f: () => st.ctx.cam.pile("fan"),
     "/": () => st.q.focus(),
     L: () => need(".logbtn").click(),
   };
   return cardKey(st, e, t) ?? nav[e.key];
 }
 
-/** Hotkeys mode (body.keys): cards [ ] tab h j k l arrows g G enter, clusters { }, 0 space / L z; any other letter types into the ask box. */
+/** Hotkeys mode (body.keys): cards [ ] tab h j k l arrows g G enter, piles , . f, clusters { }, 0 space / L z; any other letter types into the ask box. */
 function onKey(st: St, e: KeyboardEvent) {
   if (e.key === "Escape") return escape(st);
   const t = e.target as Element;

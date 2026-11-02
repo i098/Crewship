@@ -7,7 +7,7 @@ import { startLinks } from "./links";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { type About, initOverlays } from "./overlays";
 import { paintShell } from "./shell";
-import { bindCards, dropCard, mountCard, renderCard, tickStamps } from "./views/index";
+import { bindCards, dropCard, mountCard, renderCard, tickStamps, type WidthTier } from "./views/index";
 
 const q = new URLSearchParams(location.search);
 const boardId = q.get("board") ?? "demo";
@@ -136,6 +136,21 @@ const cam = {
     if (out) Object.assign(cam, { free: true, x: t.x + (t.w * t.s) / 2, y: t.y + (t.h * t.s) / 2 });
     paint();
   },
+  /** Steps a pile (the one holding `id`, else the selected card's, else the front cluster's) to its next or previous
+   * card and selects it, so Enter opens it; "fan" lays the pile out as rows, or stacks it again. */
+  pile(dir: number | "fan", id = [...sel].at(-1)) {
+    const f = pileOf(id) ?? [...piles.keys()].find((f) => L?.tiles[f]?.proj === L?.front) ?? [...piles.keys()][0];
+    if (!f) return;
+    const s = piles.get(f)!;
+    if (dir === "fan") void (fanned.delete(f) || fanned.add(f));
+    else {
+      const i = ((pileAt.get(f) ?? 0) + dir + s.length) % s.length;
+      pileAt.set(f, i);
+      sel.clear();
+      sel.add(s[i]);
+    }
+    paint();
+  },
   open(proj: string) {
     Object.assign(cam, { free: false, view: proj, spreading: false });
     sel.clear();
@@ -165,7 +180,7 @@ const ctx = {
   sel,
   paint,
   /** A card's wide view, for the full view window. */
-  html: (id: string) => (spec.components[id] ? renderCard(spec, spec.components[id], "wide") : ""),
+  html: (id: string) => (spec.components[id] ? cardHtml(id, "wide") : ""),
   bring: cam.bring,
   /** Set by the overlays: what an ask is about (open card, selection, drawn spot). */
   about: undefined as undefined | (() => About),
@@ -218,7 +233,7 @@ const tileEl = (id: string) => document.getElementById(`t-${id}`);
 const fits = new Map<string, number>();
 let meter: HTMLElement | undefined;
 function fit(id: string, w: number) {
-  const html = renderCard(spec, spec.components[id], tierOf(w)),
+  const html = cardHtml(id, tierOf(w)),
     key = `${id}|${w}|${html}`;
   const hit = fits.get(key);
   if (hit !== undefined) return hit;
@@ -251,36 +266,70 @@ function items(): Item[] {
   return restack(ts);
 }
 
-/** A stack's front card in the plan → the card you brought in front of it. Local: the plan's stack is unchanged. */
-const fronted = new Map<string, string>();
+/** Piles: a stack's front card in the plan → the stack in order, the front card first. Rebuilt on each paint. */
+let piles = new Map<string, string[]>();
+/** Local, the plan's stack is unchanged: the card of each pile you stepped to, and the piles you fanned out. */
+const pileAt = new Map<string, number>(),
+  fanned = new Set<string>();
+/** The card on top of each pile (or the first card of a fanned one) → its place, for the pile bar. */
+let tops = new Map<string, { i: number; n: number; fan: boolean }>();
+const pileOf = (id?: string) => (id ? [...piles].find(([, s]) => s.includes(id))?.[0] : undefined);
 
-/** The cards you brought to the front of their stacks swap places with the plan's front card. */
+/** Each pile shows the card you stepped to on top, the cards after it next behind, so the next one peeks first;
+ * a fanned pile is no stack at all. */
 function restack(ts: Item[]): Item[] {
-  for (const [f, x] of fronted) {
-    if (ts.find((t) => t.id === x)?.under !== f) {
-      fronted.delete(f); // the plan changed the stack
-      continue;
-    }
-    for (const t of ts) if (t.id === f || t.under === f) t.under = t.id === x ? undefined : x;
+  const byId = new Map(ts.map((t) => [t.id, t])),
+    st = new Map<string, Item[]>();
+  for (const t of ts) {
+    const f = t.under ? byId.get(t.under) : undefined;
+    if (f && !f.under && f !== t) (st.get(f.id) ?? st.set(f.id, [f]).get(f.id)!).push(t);
   }
-  return ts;
+  piles = new Map([...st].map(([f, s]) => [f, s.map((t) => t.id)]));
+  tops = new Map();
+  for (const f of pileAt.keys()) if (!st.has(f)) pileAt.delete(f);
+  for (const f of fanned) if (!st.has(f)) fanned.delete(f);
+  const ring = new Map<string, Item[]>();
+  for (const [f, s] of st) {
+    const i = Math.min(pileAt.get(f) ?? 0, s.length - 1),
+      r = [...s.slice(i), ...s.slice(0, i)];
+    for (const t of r) t.under = t === r[0] || fanned.has(f) ? undefined : r[0].id;
+    ring.set(f, r);
+    tops.set(r[0].id, { i, n: s.length, fan: fanned.has(f) });
+  }
+  // the layout stacks in array order, so each pile goes in its ring order where its front card was
+  const of = new Map([...ring].flatMap(([f, r]) => r.map((t) => [t.id, f] as const)));
+  return ts.flatMap((t) => (!of.has(t.id) ? [t] : of.get(t.id) === t.id ? ring.get(t.id)! : []));
 }
 
-/** Brings a card behind to the front of its stack; its plan front card puts the stack back. */
+/** Brings a card behind to the front of its pile. */
 function toFront(id: string) {
-  const f = spec.components[id]?.props.under;
-  if (fronted.has(id)) fronted.delete(id);
-  else if (typeof f === "string") fronted.set(f, id);
+  const f = pileOf(id);
+  if (f) pileAt.set(f, piles.get(f)!.indexOf(id));
 }
 
-// a stack is browsable: a tap on a card behind brings it to the front, a tap on the plan's front card puts it back
+/** A card's tile html: its view, plus the pile bar on a pile's top card: back, "3 of 19", next, and fan out or stack. */
+function cardHtml(id: string, tier: WidthTier) {
+  const html = renderCard(spec, spec.components[id], tier),
+    p = tops.get(id);
+  if (!p) return html;
+  const b = (k: string, label: string, text: string) => `<button type="button" class="pb" data-pile="${k}" aria-label="${label}">${text}</button>`;
+  const bar = p.fan
+    ? b("fan", "Stack these cards", `Stack ${p.n}`)
+    : `${b("-1", "Previous card", "‹")}<b class="pn">${p.i + 1} of ${p.n}</b>${b("1", "Next card", "›")}${b("fan", "Fan out the pile", "Fan out")}`;
+  return `${html}<div class="pile">${bar}</div>`;
+}
+
+// a pile is browsable: its bar steps and fans it, and a tap on a card behind brings it to the front
 document.addEventListener(
   "click",
   (e) => {
-    const id = (e.target as Element).closest<HTMLElement>(".world .tile.under[data-id]")?.dataset.id;
+    const t = e.target as Element,
+      b = t.closest<HTMLElement>(".world .tile [data-pile]"),
+      id = t.closest<HTMLElement>(b ? ".world .tile[data-id]" : ".world .tile.under[data-id]")?.dataset.id;
     if (!id) return;
     e.stopPropagation();
     e.preventDefault();
+    if (b) return cam.pile(b.dataset.pile === "fan" ? "fan" : Number(b.dataset.pile), id);
     toFront(id);
     paint();
   },
@@ -416,7 +465,7 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       if (staged) el.style.animationDelay = `${ARRIVE_AFTER}s`;
       world.append(el);
     } else if (staged) el.style.transitionDelay = `${MOVE_AFTER}s`;
-    const html = renderCard(spec, c, tierOf(t.w));
+    const html = cardHtml(id, tierOf(t.w));
     // the first card after boot builds in from a skeleton; later changes morph in place
     if (!el.classList.contains("held")) mountCard(el, html, !canvas.classList.contains("boot"));
     tokens(el, c);
@@ -432,6 +481,7 @@ function paintTiles(spec: BoardSpec, lay: Layout) {
       ["pinned", c.props.pinned === true],
       ["float", c.props.float === true],
       ["under", t.under === true],
+      ["deep", t.deep === true],
     ] as const)
       el.classList.toggle(k, on);
     // a floating window is capped in height and scrolls, so long context never covers the board or the ask bar
