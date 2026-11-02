@@ -1,12 +1,13 @@
 import { expect, mock, test } from "bun:test";
 import type { BoardSpec, Component, PatchOp } from "@crewship/genui-spec";
 
-// the feeder reads GENUI_FM_MAIN when it loads, so it is set before a dynamic import; a static import would load first
+// the feeder reads GENUI_FM_MAIN when it loads, so it is set before a dynamic import; a static import would load first,
+// and the query gives this file its own instance: feeder/feeder.test.ts loads one without the fleet in the same run
 process.env.GENUI_FM_MAIN ??= "/nonexistent-fleet-home";
 // the model is an external boundary: a chat here must never call it
 const real = await import("../fleet/chat");
 mock.module("../fleet/chat", () => ({ ...real, chat: async () => {} }));
-const { diff, extra, onIntent } = await import("../feeder/feeder");
+const { diff, extra, onIntent } = await import("../feeder/feeder?fleet");
 
 const ask = (n: number, text: string, about?: unknown) =>
   onIntent({ id: `i${n}`, kind: "input", targetId: "input", payload: { text, ...(about ? { about } : {}) } });
