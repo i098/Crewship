@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GAP, type Item, layout, packCheck, type Rel, stepCard } from "../src/layout";
+import { GAP, type Item, layout, packCheck, pilePlace, type Rel, stepCard } from "../src/layout";
 
 const it = (id: string, proj: string, prio: number): Item => ({ id, proj, prio, done: false });
 const items = [
@@ -111,6 +111,13 @@ test("a deep pile peeks three cards and hides the rest exactly behind the third"
     expect(t[id].deep).toBe(true);
     expect([t[id].x, t[id].y]).toEqual([t.p3.x, t.p3.y]);
   }
+});
+
+test("a new plan's front card tops its stack over an old pin; the deck keeps the card he reads when a new decision lands", () => {
+  const pinned = new Map([["x", { id: "x", i: 0 }]]);
+  expect(pilePlace("z", ["z", "x", "y"], false, pinned)).toBeUndefined();
+  expect(pilePlace("n", ["n", "x", "y"], true, pinned)).toEqual({ id: "x", i: 1 });
+  expect(pilePlace("x", ["x", "y"], true, new Map())).toEqual({ id: "x", i: 0 });
 });
 
 test("floating windows keep their spot and stack by layer: the highest layer is on top", () => {

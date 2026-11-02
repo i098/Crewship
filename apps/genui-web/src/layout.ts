@@ -380,3 +380,15 @@ export function packCheck(c: Rect, ts: Rect[]) {
     outside: Math.round(ts.reduce((s, t) => s + t.w * t.h - cut(t, room), 0)),
   };
 }
+
+export type PilePlace = { id: string; i: number };
+
+/** The place on top of pile `f` (its cards `ids`, front first) after a repaint, and whether it stays pinned. A deck pin
+ * follows its card wherever new decisions put it, and an answered card gives way to the next; any other pile keeps its
+ * pin only while its front card is the same, so a new plan's front card wins. */
+export function pilePlace(f: string, ids: string[], deck: boolean, was: Map<string, PilePlace>): PilePlace | undefined {
+  const p = (deck ? [...was.values()].find((p) => ids.includes(p.id)) : undefined) ?? was.get(f);
+  if (!p && !deck) return undefined;
+  const i = !p ? 0 : ids.includes(p.id) ? ids.indexOf(p.id) : Math.min(p.i, ids.length - 1);
+  return { id: ids[i], i };
+}

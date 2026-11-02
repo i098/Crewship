@@ -2,7 +2,7 @@
 // and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
 import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { fitCards } from "./fit";
-import { CW0, type Item, type Layout, layout, type Move, stepCard } from "./layout";
+import { CW0, type Item, type Layout, layout, type Move, type PilePlace, pilePlace, stepCard } from "./layout";
 import { startLinks } from "./links";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { type About, initOverlays } from "./overlays";
@@ -266,7 +266,7 @@ function items(): Item[] {
 /** Piles: a stack's front card in the plan → the stack in order, the front card first. Rebuilt on each paint. */
 let piles = new Map<string, string[]>();
 /** Local, the plan's stack is unchanged: each pile's front card → the card you stepped to and its place then. */
-let pileAt = new Map<string, { id: string; i: number }>();
+let pileAt = new Map<string, PilePlace>();
 /** The card on top of each pile → its place, for the pile bar. */
 let tops = new Map<string, { i: number; n: number }>();
 const pileOf = (id?: string) => (id ? [...piles].find(([, s]) => s.includes(id))?.[0] : undefined);
@@ -288,9 +288,9 @@ function restack(ts: Item[]): Item[] {
   const ring = new Map<string, Item[]>();
   for (const [f, s] of st) {
     const ids = s.map((t) => t.id),
-      p = [...was.values()].find((p) => ids.includes(p.id)) ?? was.get(f),
-      i = !p ? 0 : ids.includes(p.id) ? ids.indexOf(p.id) : Math.min(p.i, s.length - 1);
-    pileAt.set(f, { id: ids[i], i });
+      p = pilePlace(f, ids, s[0].proj === "all", was),
+      i = p?.i ?? 0;
+    if (p) pileAt.set(f, p);
     const r = [...s.slice(i), ...s.slice(0, i)];
     for (const t of r) t.under = t === r[0] ? undefined : r[0].id;
     ring.set(f, r);
