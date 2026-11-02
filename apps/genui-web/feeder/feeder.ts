@@ -406,8 +406,10 @@ async function publish(s: Sources, cause = "feeder:sources") {
 const note = (text: string, proj = "me") => log.push({ at: Math.round((Date.now() - t0) / 1000), text, proj });
 
 const BOOST_MS = 9000;
+type PrState = { at?: number; bad: number; t: string };
+type PrSeen = Map<string, PrState>;
 /** The fleet at the last publish: open asks, and open PRs with their stage and failing count once their checks are read. Each list is undefined until its source loads. */
-let seen: { asks?: Map<string, string>; prs?: Map<string, { at?: number; bad: number; t: string }> } = {};
+let seen: { asks?: Map<string, string>; prs?: PrSeen } = {};
 /** PRs that started failing while the feeder ran: each stays on the board while it fails, and leads it until its time. */
 const failing = new Map<string, number>();
 
@@ -421,27 +423,40 @@ export function track(f: Fleet, want: Record<string, Component>) {
     for (const [id, t] of asks) if (!seen.asks.has(id)) note(`New ask from ${t}`, proj(id));
     for (const [id, t] of seen.asks) if (!asks.has(id)) note(`Ask closed: ${t}`, proj(id));
   }
-  if (prs && seen.prs) {
-    // checks not read yet (or reset by a new push) are no stage: a PR keeps its last read until the next one
-    for (const [id, p] of prs) if (p.at === undefined && seen.prs.get(id)) prs.set(id, seen.prs.get(id)!);
-    for (const [id, p] of prs) {
-      const o = seen.prs.get(id);
-      if (!o) note(`New PR ${p.t}`, proj(id));
-      else if (p.at === undefined || o.at === undefined) continue;
-      else if (p.bad && !o.bad) {
-        note(`${p.t}: ${p.bad} check${p.bad > 1 ? "s" : ""} started failing`, proj(id));
-        failing.set(id, Date.now() + BOOST_MS);
-        // one more publish when the lead ends, so the card settles back by priority
-        setTimeout(() => kick("feeder:boost"), BOOST_MS + 200);
-      } else if (p.at !== o.at) note(`${p.t} moved to ${STAGES[p.at]}`, proj(id));
-    }
-    for (const [id, o] of seen.prs) if (!prs.has(id)) note(`${o.t} closed or merged`, proj(id));
-  }
+  if (prs && seen.prs) trackPrs(prs, seen.prs, proj);
   seen = { asks: asks ?? seen.asks, prs: prs ?? seen.prs };
-  for (const id of failing.keys()) if (!prs?.get(id)?.bad) failing.delete(id);
+  if (prs) lead(f, prs, want);
+}
+
+/** A PR that started failing stays on the board while it fails, with a boost that puts it in front until its time is up. */
+function lead(f: Fleet, prs: PrSeen, want: Record<string, Component>) {
+  for (const id of failing.keys()) if (!prs.get(id)?.bad) failing.delete(id);
   if (!failing.size) return;
   const own = fleetCards(f, new Map(), { cards: new Set(failing.keys()) }, new Set<Topic>(["prs"]));
   for (const [id, until] of failing) if (own[id]) want[id] = { ...own[id], props: { ...own[id].props, ...(until > Date.now() ? { boost: until } : {}) } };
+}
+
+/** Log rows for PRs that opened, closed, moved a stage or started failing since `old`; a PR that started failing is marked to lead. */
+function trackPrs(prs: PrSeen, old: PrSeen, proj: (id: string) => string) {
+  // checks not read yet (or reset by a new push) are no stage: a PR keeps its last read until the next one
+  for (const [id, p] of prs) if (p.at === undefined && old.get(id)) prs.set(id, old.get(id)!);
+  for (const [id, p] of prs) {
+    const c = prChange(p, old.get(id));
+    if (c) note(c.text, proj(id));
+    if (!c?.fails) continue;
+    failing.set(id, Date.now() + BOOST_MS);
+    // one more publish when the lead ends, so the card settles back by priority
+    setTimeout(() => kick("feeder:boost"), BOOST_MS + 200);
+  }
+  for (const [id, o] of old) if (!prs.has(id)) note(`${o.t} closed or merged`, proj(id));
+}
+
+/** What changed for one PR between two reads: new, started failing, or moved a stage; nothing while its checks are unread. */
+function prChange(p: PrState, o: PrState | undefined): { text: string; fails?: boolean } | undefined {
+  if (!o) return { text: `New PR ${p.t}` };
+  if (p.at === undefined || o.at === undefined) return undefined;
+  if (p.bad && !o.bad) return { text: `${p.t}: ${p.bad} check${p.bad > 1 ? "s" : ""} started failing`, fails: true };
+  return p.at !== o.at ? { text: `${p.t} moved to ${STAGES[p.at]}` } : undefined;
 }
 
 const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
