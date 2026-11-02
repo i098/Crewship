@@ -142,8 +142,8 @@ const cam = {
     const f = pileOf(id) ?? [...piles].find(([, s]) => L?.tiles[s[0]]?.proj === L?.front)?.[0] ?? [...piles.keys()][0];
     if (!f) return;
     const s = piles.get(f)!;
-    const i = ((pileAt.get(f) ?? 0) + dir + s.length) % s.length;
-    pileAt.set(f, i);
+    const i = ((pileAt.get(f)?.i ?? 0) + dir + s.length) % s.length;
+    pileAt.set(f, { id: s[i], i });
     sel.clear();
     sel.add(s[i]);
     paint();
@@ -265,8 +265,8 @@ function items(): Item[] {
 
 /** Piles: a stack's front card in the plan → the stack in order, the front card first. Rebuilt on each paint. */
 let piles = new Map<string, string[]>();
-/** Local, the plan's stack is unchanged: the card of each pile you stepped to. */
-const pileAt = new Map<string, number>();
+/** Local, the plan's stack is unchanged: each pile's front card → the card you stepped to and its place then. */
+let pileAt = new Map<string, { id: string; i: number }>();
 /** The card on top of each pile → its place, for the pile bar. */
 let tops = new Map<string, { i: number; n: number }>();
 const pileOf = (id?: string) => (id ? [...piles].find(([, s]) => s.includes(id))?.[0] : undefined);
@@ -283,11 +283,15 @@ function restack(ts: Item[]): Item[] {
   }
   piles = new Map([...st].map(([f, s]) => [f, s.map((t) => t.id)]));
   tops = new Map();
-  for (const f of pileAt.keys()) if (!st.has(f)) pileAt.delete(f);
+  const was = pileAt;
+  pileAt = new Map();
   const ring = new Map<string, Item[]>();
   for (const [f, s] of st) {
-    const i = Math.min(pileAt.get(f) ?? 0, s.length - 1),
-      r = [...s.slice(i), ...s.slice(0, i)];
+    const ids = s.map((t) => t.id),
+      p = [...was.values()].find((p) => ids.includes(p.id)) ?? was.get(f),
+      i = !p ? 0 : ids.includes(p.id) ? ids.indexOf(p.id) : Math.min(p.i, s.length - 1);
+    if (p) pileAt.set(f, { id: ids[i], i });
+    const r = [...s.slice(i), ...s.slice(0, i)];
     for (const t of r) t.under = t === r[0] ? undefined : r[0].id;
     ring.set(f, r);
     tops.set(r[0].id, { i, n: s.length });
@@ -304,7 +308,7 @@ function restack(ts: Item[]): Item[] {
 /** Brings a card behind to the front of its pile. */
 function toFront(id: string) {
   const f = pileOf(id);
-  if (f) pileAt.set(f, piles.get(f)!.indexOf(id));
+  if (f) pileAt.set(f, { id, i: piles.get(f)!.indexOf(id) });
 }
 
 /** A card's tile html: its view, plus the pile bar on a pile's top card: back, "3 of 19", next. */

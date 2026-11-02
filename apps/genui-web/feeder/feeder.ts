@@ -281,7 +281,7 @@ let spec: BoardSpec = { components: {}, links: [], tokens: {} };
 let last: Sources | undefined;
 const log: P[] = [];
 const owned = new Set<string>();
-const extra: Record<string, Component> = {}; // cards the owner opened: host stats, a crew terminal, an ask
+export const extra: Record<string, Component> = {}; // cards the owner opened: host stats, a crew terminal, an ask
 const focused = new Set<string>(), unfocused = new Set<string>(); // board cards the chat brought forward, now and before
 // cards the owner closed with ✕; any other card the sources want again (a PR back after a GitHub gap) returns.
 // shortcut: memory only, so a feeder restart brings back fleet cards he closed; persist it if that bothers him
@@ -839,7 +839,7 @@ function applyPreview(preview: unknown) {
 }
 
 /** The owner's intents, forwarded by the board to agent sockets. */
-async function onIntent(m: Intent) {
+export async function onIntent(m: Intent) {
   if (m.kind !== "input") return;
   const c = spec.components[m.targetId]?.props ?? {};
   if (!(await onView(m.payload, m.targetId)) && !(await onAiCard(m)) && !(fleet && (await onFleet(m, c, fleet)))) await onBoard(m, c);
