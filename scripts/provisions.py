@@ -397,7 +397,8 @@ def resolve_release_group(key, names):
             print(f"provisions: skipping optional {tool}: {error}", file=sys.stderr)
     if "node" in names:
         releases = json.loads(fetch("https://nodejs.org/dist/index.json", "node release"))
-        tag = max((r["version"] for r in releases), key=lambda v: tuple(map(int, v[1:].split("."))))
+        stable = (r["version"] for r in releases if re.fullmatch(r"v\d+\.\d+\.\d+", r["version"]))
+        tag = max(stable, key=lambda v: tuple(map(int, v[1:].split("."))))
         require_secure_node(tag)
         name = f"node-{tag}-linux-{ARCH[key]['node']}.tar.xz"
         sums = fetch(f"https://nodejs.org/dist/{tag}/SHASUMS256.txt", "node checksums").decode()

@@ -5,12 +5,13 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-SUITES = ["apps/genui-web", "apps/genui-server", "packages/genui-agent-kit", "packages/genui-spec"]
+SUITES = ["apps/genui-server", "apps/genui-web", "packages/genui-agent-kit", "packages/genui-spec"]
 
 
 @pytest.mark.parametrize("suite", SUITES)
 def test_genui_bun_suite(suite):
     # CI runs pytest only, so every genui bun suite is run from here.
+    # genui-server stays first: the genui-web contract test spawns wrangler from its installed deps.
     if not shutil.which("bun"):
         print(f"skipped {suite}: bun is not on PATH")
         pytest.skip("needs bun")
