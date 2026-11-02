@@ -161,6 +161,7 @@ GitHub Actions (`.github/workflows/ci.yml`) starts on pushes to `main`, on pull 
 When classification succeeds and identifies code changes, CI runs these checks:
 
 - `uv sync --locked --group dev`, then `ruff check` and `pytest -n auto --dist worksteal` (pytest-xdist).
+  The `python_checks` job is a matrix of four shards: `tests/conftest.py` keeps every fourth collected test per `CREWSHIP_TEST_SHARD=K/4`, and `tests/test_ci_shards.py` checks the shards cover the suite exactly once. Shard 1 also runs lint and the non-pytest checks below. The required `configuration and python checks` gate waits for all shards.
 - The [project database service verification](../project-databases.md#verification), run in a separate parallel job with its own 20-minute limit.
 - [Token-suggestion installation and runtime checks](../../tests/test_token_suggestions_install.py) use a fresh non-root CI account, except for `scope=imessage`.
 - `tests/test_herdr_patch.py` again on Python 3.9, the version macOS ships, because [herdr-patch](../../tools/herdr-patch/README.md) also runs on the operator's computer.
