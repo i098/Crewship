@@ -212,6 +212,7 @@ const KEEP = new Set(["pick", "done", "sent", "removed", "asked", "pinned", "flo
 function cardPatch(id: string, have: Component, c: Component): PatchOp[] {
   const patch: PatchOp[] = [];
   for (const [k, v] of Object.entries(c.props)) if (JSON.stringify(have.props[k]) !== JSON.stringify(v)) patch.push(setProp(id, k, v));
+  if (c.rect && JSON.stringify(have.rect) !== JSON.stringify(c.rect)) patch.push({ op: "add", path: `/components/${esc(id)}/rect`, value: c.rect });
   // a prop the card no longer has (an old paging card's list) is cleared; owner-set and derived props stay.
   // null, not remove: a publish computed before the last one lands would remove a missing path, and the board rejects that
   if (c.type === "card")
@@ -583,9 +584,16 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
   const said: string[] = [];
   let drew = false; // the first show: of an answer replaces what the last answer drew; an answer with none keeps it
   const topics = (answerTopics = new Set<Topic>());
+  // an ask after drawing: the answer is a window on the board right of the ink, at its top, instead of in the cluster
+  const ink = ((about ?? {}) as { at?: Record<string, unknown> }).at;
+  const beside = ink && [ink.x, ink.y, ink.w].every((n) => typeof n === "number" && Number.isFinite(n))
+    ? { float: true, layer: Math.floor(Date.now() / 1000), rect: { x: Number(ink.x) + Number(ink.w) + 24, y: Number(ink.y), w: 0, h: 0 } }
+    : undefined;
   // base 100: the answer sits above the decision cards it lists, so a phone shows it first
-  const ask = (ready: boolean, about: string[]) =>
-    card("ask", "me", 100, { q, ready, about, rows: ready ? topicRows(fl.fleet, topics) : [], asked: true, removed: false });
+  const ask = (ready: boolean, about: string[]) => {
+    const c = card("ask", "me", 100, { q, ready, about, rows: ready ? topicRows(fl.fleet, topics) : [], asked: true, removed: false, ...(beside && { float: true, layer: beside.layer }) });
+    return beside ? { ...c, rect: beside.rect } : c;
+  };
   extra["ai-q"] = ask(false, said);
   // the model reads the fleet once, so it waits up to a minute for asks and PRs to load instead of answering "still loading"
   const loaded = async () => {
@@ -607,6 +615,7 @@ function startChat(m: Intent, q: string, fl: FleetSource, about: unknown = m.pay
             e.show.forEach((t) => (shown.add(t), topics.add(t)));
           } else if ("upsert" in e) (extra[e.upsert] = e.card), own.add(e.upsert);
           else if ("plan" in e) plan = { p: { ...e.plan, keep: [...new Set([...first, ...e.plan.keep])] }, cause: m.id, back: [], own };
+          else if ("size" in e) await resize(e.size, m.id);
           else delete extra[e.drop];
           kick(m.id);
         },
@@ -694,11 +703,47 @@ async function decide(m: Intent, c: P) {
   await call("emit_view", { event: { delta: [setProp(m.targetId, "done", true)] }, cause: m.id });
 }
 
+const AI_TAPS = new Set(["pick", "act", "merge", "send"]);
+
+/** A card's size by the model ("make the timeline taller"): its rect, kept in the card's own entry too so the next publish does not drop it.
+ * 0 means a side the model did not name; the layout then uses the card's natural size. */
+async function resize(s: { id: string; w?: number; h?: number }, cause: string) {
+  const have = spec.components[s.id]?.rect ?? extra[s.id]?.rect;
+  const rect = { x: have?.x ?? 0, y: have?.y ?? 0, w: s.w ?? have?.w ?? 0, h: s.h ?? have?.h ?? 0 };
+  if (extra[s.id]) extra[s.id] = { ...extra[s.id], rect };
+  if (spec.components[s.id]) await call("emit_view", { event: { delta: [{ op: "add", path: `/components/${esc(s.id)}/rect`, value: rect }] }, cause });
+  note(`Resized ${s.id} to ${rect.w || "auto"} x ${rect.h || "auto"}`);
+}
+
+/**
+ * A tap on a card the model drew (a decision, a conflict, a compare, a plan): the choice is recorded for the crew on the genui topic,
+ * the card shows it as done, and an option's preview becomes real on the model's own cards. The card leaves a moment later.
+ */
+async function onAiCard(m: Intent): Promise<boolean> {
+  const id = m.targetId, c = extra[id], typed = typeof m.payload.text === "string" ? m.payload.text.trim() : "";
+  // the answer box on a decision of the model's is an answer in his own words
+  const f = typed ? "pick" : m.payload.field, v = typed || m.payload.value;
+  if (!id.startsWith("ai-") || !c || typeof f !== "string" || !AI_TAPS.has(f) || c.props.done === true || (typed && c.props.kind !== "decision")) return false;
+  const rows = (key: string) => (Array.isArray(c.props[key]) ? (c.props[key] as { k?: unknown; b?: unknown; preview?: unknown }[]) : []);
+  const chosen = rows(f === "pick" ? "opts" : "acts").find((o) => o.k === v);
+  const what = String(chosen?.b ?? v).slice(0, 400);
+  const r = await pub({ card: id, kind: c.props.kind, q: c.props.q ?? c.props.title ?? null, [f]: v, label: what }).catch(failed);
+  note(`${f === "send" ? "Sent" : "Picked"} "${what}" on "${c.props.q ?? c.props.title ?? id}"; recorded on ${TOPIC} (seq ${r.trim()})`);
+  if (chosen?.preview && typeof chosen.preview === "object")
+    for (const [pid, props] of Object.entries(chosen.preview)) if (extra[pid] && props && typeof props === "object") extra[pid] = { ...extra[pid], props: { ...extra[pid].props, ...props } };
+  extra[id] = { ...c, props: { ...c.props, done: true, pick: v } };
+  setTimeout(() => {
+    delete extra[id];
+    if (last) void publish(last, m.id).catch((e) => console.error("publish:", (e as Error).message));
+  }, SENT_MS);
+  return true;
+}
+
 /** The owner's intents, forwarded by the board to agent sockets. */
 async function onIntent(m: Intent) {
   if (m.kind !== "input") return;
   const c = spec.components[m.targetId]?.props ?? {};
-  if (!(await onView(m.payload, m.targetId)) && !(fleet && (await onFleet(m, c, fleet)))) await onBoard(m, c);
+  if (!(await onView(m.payload, m.targetId)) && !(await onAiCard(m)) && !(fleet && (await onFleet(m, c, fleet)))) await onBoard(m, c);
   // the reply carries the intent's id as its cause, so one z rewinds the action and the reply together
   if (last) await publish(last, m.id);
 }

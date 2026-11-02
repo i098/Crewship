@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { CardKind, Component } from "@crewship/genui-spec";
 import { askId, crewId, prId, TOPICS, type Topic } from "./cards";
+import { mermaidSrc } from "./diagram";
 import type { Fleet, Task } from "./data";
 
 export const CHAT_MODEL = process.env.GENUI_CHAT_MODEL ?? "anthropic/claude-haiku-5-5";
@@ -67,6 +68,13 @@ plan: {"keep": [ids], "layout": "grid|focus", "size": {"<id>": "s|m|l"}, "stack"
   layout: focus = the first kept card large and the rest small; grid = even tiles. size overrides one card (l = a full row). stack puts related cards behind a front card. edge pins a card beside the others.
   Send plan: when the question is about some cards and not the whole fleet, such as one PR, one mate, or what is blocked. Leave it out for an overview.
   When the owner selected a card, ALWAYS send plan: reshape the board around it. Keep it first; bring the cards tied to it (its mate, its workers, its PR, its asks) with card= ids; stack or set aside the rest; add a card of yours for what the board lacks (a timeline, a compare). Its facts already open in a floating window beside it; do not repeat them.
+choose: {"id": "<short-name>", "q": "<the decision in one line>", "why": "<one line on why it matters>", "opts": [{"b": "<option, at most 5 words>", "rec": true, "preview": {"<id of your own card>": {props that card shows if this option is picked}}}], "free": true}
+  A decision card of yours with 2 to 4 real options. Use it when his question is vague or open ("should we...", "what about...") and a choice from him is the real answer. At most one option has "rec" (your pick). preview is optional. When he picks, the choice is recorded for the crew and the card leaves.
+size: {"id": "<card id>", "w": <px>, "h": <px>}
+  Resizes one card when he asks for it ("make the timeline taller"). A card is about 460 wide and 220 tall by default; w and h are 240 to 900. Send only the side he named.
+Diagrams: a card {"kind": "diagram", "props": {"title": "How it works", "mermaid": "flowchart LR\n  A[...] --> B[...]"}} draws a Mermaid diagram (flowchart, sequence, state). Use it when he asks how something works or flows. For this canvas the facts are: the feeder reads the fleet's files and PRs, draws cards on the board server, the canvas shows them live, and what he types goes back to the feeder, which asks you and sends his confirmed answers to the crew. Plain Mermaid text, at most 12 nodes, no markdown fences.
+A plan card is a card of kind "plan" with fields: when he asks to plan something ("plan billing", "plan the build"). This is not the plan: line. Put it in the cluster the plan is about, with 2 to 4 fields and 2 to 4 options each; the first option is your pick.
+A compare card names its two sides and its buttons for the outcome: "acts": [{"k": "a", "b": "Move to Fly", "pri": true}, {"k": "b", "b": "Keep Vercel"}], never "Yes" or "Dismiss". metrics rows are [label, a, b] where a and b are plain numbers with no units or symbols (put the unit in the label), from facts you have.
 
 `;
 
@@ -99,13 +107,14 @@ export type Part =
   | { card: Component & { id: string } }
   | { drop: string }
   | { plan: Plan }
+  | { size: { id: string; w?: number; h?: number } }
   | { bad: string };
 
 const AI = (id: string) => `ai-${id.replace(/^ai-/, "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40)}`;
 
 /** Parses one output line. A card with an unknown kind becomes a note; its id always carries the `ai-` prefix. */
 export function parse(l: string): Part | undefined {
-  const m = /^(say|show|focus|card|drop|plan):\s*(.*)$/i.exec(l.trim());
+  const m = /^(say|show|focus|card|drop|plan|choose|size):\s*(.*)$/i.exec(l.trim());
   if (!m) return undefined;
   const tag = m[1].toLowerCase(), rest = m[2].trim();
   if (tag === "say") return { say: rest };
@@ -119,7 +128,7 @@ export function parse(l: string): Part | undefined {
   return jsonPart(tag, rest);
 }
 
-/** A card: or plan: line, whose rest is one JSON object. */
+/** A card:, plan:, choose: or size: line, whose rest is one JSON object. */
 function jsonPart(tag: string, rest: string): Part {
   let j: { id?: unknown; kind?: unknown; proj?: unknown; props?: unknown };
   try {
@@ -129,11 +138,42 @@ function jsonPart(tag: string, rest: string): Part {
   }
   if (!j || typeof j !== "object") return { bad: "the model's card was not an object" };
   if (tag === "plan") return planPart(j);
+  if (tag === "choose") return choosePart(j as Record<string, unknown>);
+  if (tag === "size") return sizePart(j as Record<string, unknown>);
   const props = typeof j.props === "object" && j.props && !Array.isArray(j.props) ? (j.props as Record<string, unknown>) : {};
+  const proj = typeof j.proj === "string" && j.proj ? j.proj : "me";
+  const id = (kind: string) => AI(typeof j.id === "string" && j.id ? j.id : kind);
+  // a Mermaid diagram is an embed whose picture the feeder draws before the card lands (see `take`)
+  if (j.kind === "diagram")
+    return typeof props.mermaid === "string" && props.mermaid.trim()
+      ? { card: { id: id("diagram"), ...card("embed", { type: "diagram", title: props.title ?? "Diagram", mermaid: props.mermaid, proj }) } }
+      : { bad: "the model's diagram had no mermaid text" };
   const kind = typeof j.kind === "string" && Object.hasOwn(KINDS, j.kind) ? j.kind : "note";
-  // the owner's bug: a model-made decision card had no real options, only a count and a bare bar
-  if (kind === "decision") return { bad: "decisions come from show: asks, not from a card" };
-  return { card: { id: AI(typeof j.id === "string" && j.id ? j.id : kind), ...card(kind, { ...props, proj: typeof j.proj === "string" && j.proj ? j.proj : "me" }) } };
+  // the owner's bug: a model-made decision card had no real options, only a count and a bare bar; choose: checks for them
+  if (kind === "decision") return { bad: "decisions come from show: asks or choose:, not from a card" };
+  return { card: { id: id(kind), ...card(kind, { ...props, proj }) } };
+}
+
+/** A decision of the model's own: 2 to 4 options with real labels, and an answer box. */
+function choosePart(j: Record<string, unknown>): Part {
+  const opts = (Array.isArray(j.opts) ? j.opts : []).filter(isProps).filter((o) => isText(o.b)).slice(0, 4);
+  if (!isText(j.q) || opts.length < 2) return { bad: "the model's decision needs a question and at least 2 options" };
+  let rec = false;
+  const list = opts.map((o, i) => {
+    const r = o.rec === true && !rec;
+    rec ||= r;
+    return { k: `o${i + 1}`, b: String(o.b).slice(0, 60), rec: r, ...(isProps(o.preview) ? { preview: o.preview } : {}) };
+  });
+  const props = { q: j.q.slice(0, 200), ...(isText(j.why) ? { why: j.why.slice(0, 200) } : {}), opts: list, free: true, proj: typeof j.proj === "string" && j.proj ? j.proj : "me", need: true };
+  return { card: { id: AI(isText(j.id) ? j.id : "decide"), ...card("decision", props) } };
+}
+
+const SIZE = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(240, Math.min(900, Math.round(v))) : undefined);
+
+/** A size line: the card's width and/or height in px, clamped. */
+function sizePart(j: Record<string, unknown>): Part {
+  const w = SIZE(j.w), h = SIZE(j.h);
+  return isText(j.id) && (w || h) ? { size: { id: j.id, ...(w ? { w } : {}), ...(h ? { h } : {}) } } : { bad: "the model's size line needed an id and a w or h" };
 }
 
 /** A plan line's edit; a plan that keeps nothing would set the whole board aside, so it is refused. */
@@ -189,7 +229,8 @@ export type Edit =
   | { focus: string[] }
   | { upsert: string; card: Component }
   | { drop: string }
-  | { plan: Plan };
+  | { plan: Plan }
+  | { size: { id: string; w?: number; h?: number } };
 
 /** A plan's ids as board ids at publish time: one the board has stays, any other names a card of the model's own (`ai-`). */
 export function boardIds(p: Plan, board: Record<string, unknown>): Plan {
@@ -208,9 +249,22 @@ export async function chat(o: { text: string; about?: unknown; fleet: Fleet; boa
     if (!part) return;
     if ("say" in part) (said.push(part.say), await o.apply({ say: part.say, done: false }));
     else if ("focus" in part) await o.apply({ focus: part.focus.filter((id) => o.board[id]) });
-    else if ("card" in part) { const { id, ...c } = part.card; await o.apply({ upsert: id, card: c }); }
+    else if ("card" in part) await applyCard(part.card);
+    else if ("size" in part) await o.apply({ size: { ...part.size, id: o.board[part.size.id] ? part.size.id : AI(part.size.id) } });
     else if ("drop" in part || "show" in part || "plan" in part) await o.apply(part);
     else bad = part.bad;
+  };
+  // a diagram card carries Mermaid text; the picture is drawn here, so a source that does not parse says so in the card
+  const applyCard = async ({ id, ...c }: Component & { id: string }) => {
+    if (typeof c.props.mermaid === "string") {
+      const { mermaid, ...props } = c.props;
+      try {
+        c = { ...c, props: { ...props, src: await mermaidSrc(mermaid) } };
+      } catch (e) {
+        c = { ...c, props: { ...props, type: "text", text: `The diagram did not draw: ${(e as Error).message}\n\n${mermaid}` } };
+      }
+    }
+    await o.apply({ upsert: id, card: c });
   };
   try {
     let text = "";

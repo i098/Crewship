@@ -93,6 +93,7 @@ function paintHeader(c: Component | undefined) {
 function follow() {
   const { cam } = ctx;
   $<HTMLButtonElement>("#recenter").disabled = !(cam.free || cam.view || cam.spreading);
+  $("#spread").setAttribute("aria-pressed", String(cam.spreading));
   const id = document.querySelector<HTMLElement>(".tile[id].center")?.dataset.id;
   const line = id && spec.components[id]?.props.line;
   if (typeof line !== "string") return setLine(String(spec.components.header?.props.title ?? ""));
