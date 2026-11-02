@@ -16,6 +16,18 @@ describe("card views", () => {
     expect(renderCard(spec, spec.components.p)).not.toContain("url(x)");
   });
 
+  test("an SVG data src loads only in an image or diagram embed", () => {
+    const src = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    const html = (type: string) => {
+      const spec = board({ e: { type: "card", props: { kind: "embed", type, title: "t", src } } });
+      return renderCard(spec, spec.components.e);
+    };
+    expect(html("image")).toContain(`<img class="media" src="${src}"`);
+    expect(html("site")).toContain('<iframe class="media" src=""');
+    expect(html("audio")).toContain('<audio class="media" src=""');
+    expect(html("file")).toContain('href=""');
+  });
+
   test("an unknown or prototype kind falls back to the plain note view", () => {
     const spec = board({ c: { type: "card", props: { kind: "constructor" as never, title: "Hi", body: "there" } } });
     expect(renderCard(spec, spec.components.c)).toContain('<p class="body">there</p>');

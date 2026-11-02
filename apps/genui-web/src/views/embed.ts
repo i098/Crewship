@@ -4,10 +4,11 @@ import { esc, hd, ICON, num, title, type View } from "./chrome";
 
 const AR = ["auto", "16/9", "4/3", "1/1", "9/16"];
 
-/** Only http(s), blob and same-origin paths load, plus an SVG picture as a data URL (an <img> never runs its script); anything else (javascript:, other data:) is dropped. */
-const safeSrc = (v: unknown) => {
+/** Only http(s), blob and same-origin paths load, plus an SVG data URL for image/diagram (an <img> never runs its script); anything else (javascript:, other data:) is dropped. */
+const safeSrc = (v: unknown, type: string) => {
   const s = String(v ?? "");
-  return !/^[a-z][a-z0-9+.-]*:/i.test(s) || /^(https?|blob):/i.test(s) || /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/.test(s) ? esc(s) : "";
+  const svg = (type === "image" || type === "diagram") && /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/.test(s);
+  return !/^[a-z][a-z0-9+.-]*:/i.test(s) || /^(https?|blob):/i.test(s) || svg ? esc(s) : "";
 };
 const ratio = (v: unknown) => (typeof v === "string" && /^\d{1,5}\/\d{1,5}$/.test(v) && !/(^|\/)0+$/.test(v) ? v : "");
 
@@ -30,7 +31,7 @@ function boxed(type: string, src: string, name: string, full: boolean) {
 }
 
 export const embed: View = (p, id, tier, spec) => {
-  const type = String(p.type ?? "site"), src = safeSrc(p.src), name = esc(p.title), i = esc(id);
+  const type = String(p.type ?? "site"), src = safeSrc(p.src, type), name = esc(p.title), i = esc(id);
   const head = `${hd(p, id, spec, { text: ICON[type] ?? ICON.site, cls: "ico" })}${title(name)}`;
   if (Object.hasOwn(BARE, type)) return head + BARE[type](src, name, p);
   const media = boxed(type, src, name, tier === "full");
