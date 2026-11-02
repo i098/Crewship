@@ -152,8 +152,9 @@ export function mountCard(el: HTMLElement, html: string, booted: boolean) {
   stamp(el);
 }
 
-/** A removed card shrinks back, blurs and fades as one piece, then leaves the DOM. */
+/** A removed card shrinks back, blurs and fades as one piece, its text scrambling back to glyphs, then leaves the DOM. */
 export function dropCard(el: HTMLElement) {
+  reveal(el, true, 350);
   el.classList.add("gone");
   setTimeout(() => el.remove(), 450);
 }

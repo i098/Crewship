@@ -141,7 +141,12 @@ function paintBottom(input: Component | undefined) {
 function paintQueue() {
   const items: [key: string, id: string, kind: string, text: string][] = [];
   const live = Object.entries(spec.components).filter(([, c]) => !c.props.hidden && !c.props.done && c.props.removed !== true);
-  for (const [id, c] of live) if (c.props.need) items.push([`n${id}`, id, "decide", `Decide: ${c.props.q ?? c.props.title ?? id}`]);
+  for (const [id, c] of live)
+    if (c.props.need) {
+      const q = String(c.props.q ?? c.props.title ?? id);
+      // a brief often starts "Decide whether…" already; the amber dot marks the kind either way
+      items.push([`n${id}`, id, "decide", /^decide\b/i.test(q) ? q : `Decide: ${q}`]);
+    }
   for (const [id, c] of live) if (c.props.claim) items.push([`c${id}`, id, "claimed", `${c.props.claim} claimed: ${c.props.title ?? id}`]);
   for (const [id, c] of live) if (typeof c.props.next === "string") items.push([`x${id}${c.props.next}`, id, "next", c.props.next]);
   const q = $(".queue"), keys = new Set(items.map((i) => i[0]));

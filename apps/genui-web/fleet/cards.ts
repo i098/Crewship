@@ -229,10 +229,14 @@ function askItem(f: Fleet, a: Ask, open: Open): Item {
       key: a.key,
       free: true,
       // the label is the whole answer: the brief can reorder the note's choices, so no pairing with the parsed ones
-      opts: brief ? brief.opts.map((o, i) => ({ k: `o${i + 1}`, b: o.b, say: "", rec: o.rec })) : parsed,
+      opts: previewed(id, brief ? brief.opts.map((o, i) => ({ k: `o${i + 1}`, b: o.b, say: "", rec: o.rec })) : parsed, (o) => `Sends "${o.b}" to ${a.task} after you confirm.`),
     }),
   };
 }
+
+/** Hovering an option previews its outcome on the card: that branch lights up and the line under the question says what happens. */
+const previewed = <O extends { k: string; b: string }>(id: string, opts: O[], outcome: (o: O) => string) =>
+  opts.map((o) => ({ ...o, preview: { [id]: { pick: o.k, why: outcome(o) } } }));
 
 function crewItem(f: Fleet, m: Pick<Task, "id" | "home" | "lines">, open: Open): Item | undefined {
   const crew = f.workers.filter((w) => (w.mate ?? "fm") === m.id);
@@ -281,10 +285,14 @@ function prItem(f: Fleet, p: Pr): Item {
         q: `Merge ${p.repo}#${p.number}: ${cut(p.title, 48)}`,
         url: p.url,
         prUrl: p.url,
-        opts: [
-          { k: "merge", b: "Merge", rec: true },
-          { k: "later", b: "Not now" },
-        ],
+        opts: previewed(
+          prId(p),
+          [
+            { k: "merge", b: "Merge", rec: true },
+            { k: "later", b: "Not now" },
+          ],
+          (o) => (o.k === "merge" ? `Merges #${p.number} after you confirm; the card leaves the board.` : `#${p.number} stays open; the card is marked decided.`),
+        ),
       }),
     };
   if (c?.bad)
@@ -293,7 +301,13 @@ function prItem(f: Fleet, p: Pr): Item {
       g,
       topic: "prs",
       line,
-      c: card("note", "", 60, { title: `${p.repo}#${p.number}: ${c.bad} failing`, flag: "failing", url: p.url, items: [cut(p.title, 90)] }),
+      c: card("note", "", 60, {
+        title: `${p.repo}#${p.number}: ${c.bad} failing`,
+        flag: "failing",
+        url: p.url,
+        items: [cut(p.title, 90)],
+        acts: [{ k: "claim", b: "Claim the fix", pri: true }],
+      }),
     };
   return {
     id: prId(p),
@@ -303,12 +317,18 @@ function prItem(f: Fleet, p: Pr): Item {
     c: card("pipeline", "", 40, {
       title: `${p.repo}#${p.number}`,
       url: p.url,
-      stages: ["Open", "Checks", "Review", "Merge"],
-      at: !c ? 0 : c.pending ? 1 : 2,
+      stages: STAGES,
+      at: prStage(p),
+      // the up-next row shows the stage it moves to next
+      next: `#${p.number} → ${STAGES[prStage(p) + 1]}`,
       kpi: { value: c ? `${c.ok}/${c.ok + c.bad + c.pending}` : "…", unit: "checks" },
     }),
   };
 }
+
+export const STAGES = ["Open", "Checks", "Review", "Merge"];
+/** The pipeline stage a PR is at: open until its checks are read, then checks while any run, then review. */
+export const prStage = (p: Pr) => (!p.checks ? 0 : p.checks.pending ? 1 : 2);
 
 function items(f: Fleet, open: Open, shown: Set<Topic>): Item[] {
   const own = f.prs.filter((p) => p.repo.startsWith(`${f.login}/`) && !p.draft);

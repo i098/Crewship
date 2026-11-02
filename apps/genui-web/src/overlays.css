@@ -52,6 +52,8 @@ body.dropping .canvas { outline: 2px dashed var(--sel); outline-offset: -8px; }
 .fullc > .ib:hover { background: hsl(240 30% 100% / .14); color: var(--ink); }
 .fullc [data-act="full"], .fullc > .core > .core > .hd [data-act="drop"] { display: none; }
 .fullc .core > .hd { margin-right: 36px; }
+/* the window shows the card's content only: its live stamp would float over the scrolled text, and the window has its own grip */
+.fullc :is(.ago, .tgrip) { display: none; }
 .thr { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; }
 /* the ask box stays on top of the full view; answers sit under the card */
 body.fullon .bottom { z-index: 8; }
