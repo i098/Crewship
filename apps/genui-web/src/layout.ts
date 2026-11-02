@@ -20,6 +20,8 @@ export type Item = {
   under?: string;
   /** Pinned in a column beside the cluster's rows. */
   edge?: boolean;
+  /** Its place in the deck, newest decision first. */
+  at?: number;
 };
 export type Rel = { from: string; to: string; label: string };
 export type Viewport = { W: number; H: number; topH: number; botH: number };
@@ -392,3 +394,6 @@ export function pilePlace(f: string, ids: string[], deck: boolean, was: Map<stri
   const i = !p ? 0 : ids.includes(p.id) ? ids.indexOf(p.id) : Math.min(p.i, ids.length - 1);
   return { id: ids[i], i };
 }
+
+/** A deck pile in the feeder's deck order, not the order its cards joined the board (an existing card keeps its old place there). */
+export const deckOrder = (s: Item[]) => s.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));

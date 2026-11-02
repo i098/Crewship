@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { askOpts, askRef, contextOf, deckAsk, fleetCards, mergeBlock, topicRows } from "../fleet/cards";
+import { deckOrder, pilePlace } from "../src/layout";
 import { countChecks, type Fleet, isLive, type Pr, parseBacklog, raisedAt } from "../fleet/data";
 
 const fleet = { login: "i098" } as Fleet;
@@ -149,6 +150,23 @@ test("the deck gathers every open decision from all clusters into one unpaged pi
   const [top, ...rest] = deck;
   expect(top[1].props.under).toBeUndefined();
   for (const [, c] of rest) expect(c.props.under).toBe(top[0]);
+});
+
+test("a new decision lands first in the deck; the card he reads, not yet stepped, shows as 2 of 21, not 21 of 21", () => {
+  const ask = (i: number) => ({ home: "/h", task: `t${i % 3}`, key: `k${i}`, verb: "needs-decision", note: `Decision ${i}?`, at: i });
+  const deck = (n: number) => {
+    // FleetSource lists asks newest first
+    const asks = Array.from({ length: n }, (_, i) => ask(n - 1 - i));
+    return fleetCards({ ...fleet, main: "/h", mates: [], workers: [], prs: [], asks } as unknown as Fleet, new Map(), { cards: new Set(), deck: true });
+  };
+  const before = deck(20);
+  // the board patches a card it has in place and adds a new one at the end, so the newest ask comes last in its keys
+  const board = { ...before, ...deck(21) };
+  const top = Object.keys(before)[0];
+  const s = Object.entries(board).map(([id, c]) => ({ id, proj: "all", prio: 0, done: false, at: c.props.at as number }));
+  const ids = deckOrder(s).map((t) => t.id);
+  expect(ids.at(-1)).toBe(Object.keys(before).at(-1)!);
+  expect(pilePlace(ids[0], ids, true, new Map([[top, { id: top, i: 0 }]]))).toEqual({ id: top, i: 1 });
 });
 
 test("only the owner's whole phrases open the deck; anything with a subject or filter reaches the chat", () => {

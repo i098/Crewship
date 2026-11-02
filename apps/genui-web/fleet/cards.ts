@@ -374,7 +374,8 @@ function place(out: Record<string, Component>, g: string, list: Item[], open: Op
 /** The deck: every open decision in one pile, the first on top and the rest stacked under it, never paged; the canvas
  * shows it one card at a time. It is the answer he asked for, so it takes the front. */
 function pile(out: Record<string, Component>, list: Item[]) {
-  for (const x of list) out[x.id] = { ...x.c, props: { ...x.c.props, proj: DECK, base: 800, asked: true, ...(x === list[0] ? {} : { under: list[0].id }) } };
+  // `at`: the deck order, since the board keeps a card's old place among its components when the deck changes
+  list.forEach((x, at) => (out[x.id] = { ...x.c, props: { ...x.c.props, proj: DECK, base: 800, asked: true, at, ...(x === list[0] ? {} : { under: list[0].id }) } }));
 }
 
 export function fleetCards(f: Fleet, pending: Map<string, Pending>, open: Open = { cards: new Set() }, shown = new Set<Topic>()): Record<string, Component> {

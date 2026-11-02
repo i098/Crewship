@@ -2,7 +2,7 @@
 // and hands the shell (S1), the card views (S2) and the overlays (S4) one shared context.
 import type { BoardSpec, ClientMsg, Component, IntentKind, ServerMsg } from "@crewship/genui-spec";
 import { fitCards } from "./fit";
-import { CW0, type Item, type Layout, layout, type Move, type PilePlace, pilePlace, stepCard } from "./layout";
+import { CW0, deckOrder, type Item, type Layout, layout, type Move, type PilePlace, pilePlace, stepCard } from "./layout";
 import { startLinks } from "./links";
 import { Board, MIN_H, MIN_W, safeStyle } from "./model";
 import { type About, initOverlays } from "./overlays";
@@ -281,6 +281,7 @@ function restack(ts: Item[]): Item[] {
     if (!t.under || f === t || f?.under) continue; // a stack is one deep
     (st.get(t.under) ?? st.set(t.under, f ? [f] : []).get(t.under)!).push(t);
   }
+  for (const s of st.values()) if (s[0]?.proj === "all") deckOrder(s);
   piles = new Map([...st].map(([f, s]) => [f, s.map((t) => t.id)]));
   tops = new Map();
   const was = pileAt;
@@ -355,6 +356,7 @@ function item(id: string, c: Component, now: number): Item {
     done,
     pin,
     layer: Number(p.layer) || 0,
+    at: typeof p.at === "number" ? p.at : undefined,
   };
   return { ...plain, ...planShape(p, size) };
 }
