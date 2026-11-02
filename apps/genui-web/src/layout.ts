@@ -77,7 +77,8 @@ export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit:
   const tiles = pinned(items, fit);
   // the clusters' grid follows the screen's shape: wide screens get more columns, phones a stack
   const cols = Math.max(1, Math.round(Math.sqrt(gs.length * (W / H))));
-  const { clusters, gOf } = place(gs, vg, pulled(rels, gs, sc), tiles, { SP, cols, fit, one: W < 600 });
+  const pull = pulled(rels, gs, sc);
+  const { clusters, gOf } = place(gs, vg, pull, tiles, { SP, cols, fit, one: W < 600 });
   return {
     clusters,
     tiles,
@@ -86,7 +87,7 @@ export function layout(items: Item[], rels: Rel[], vp: Viewport, st: State, fit:
     center: gs[0]?.ts[0]?.id,
     order: gs.map((g) => g.proj),
     spread: SP,
-    cam: fitCam(clusters, tiles, SP ? undefined : focusOf(clusters[0], tiles, W < 600), vp, SP),
+    cam: fitCam(clusters, tiles, SP ? undefined : focusOf(clusters, pull, tiles, W < 600), vp, SP),
   };
 }
 
@@ -119,10 +120,15 @@ function nearest(tiles: Record<string, TileBox>, ids: string[], cur: string, [dx
   return best;
 }
 
-/** What the camera fits in focus: the front cluster, or on a phone its top card so it reads at full size. */
-function focusOf(V: ClusterBox | undefined, tiles: Record<string, TileBox>, one: boolean): Rect | undefined {
-  const t = V && tiles[V.ids[0]];
-  return one && t ? { x: t.x - GAP, y: t.y - GAP, w: t.w + 2 * GAP, h: t.h + 2 * GAP } : V;
+/** What the camera fits in focus: the front cluster and any cluster stepped out beside it, so a linked card is not cut off
+ * at the screen edge; on a phone the front cluster's top card, so it reads at full size. */
+function focusOf(cs: ClusterBox[], pull: Set<string>, tiles: Record<string, TileBox>, one: boolean): Rect | undefined {
+  const t = cs[0] && tiles[cs[0].ids[0]];
+  if (one && t) return { x: t.x - GAP, y: t.y - GAP, w: t.w + 2 * GAP, h: t.h + 2 * GAP };
+  const fs = cs.filter((c, i) => i === 0 || pull.has(c.proj));
+  if (!fs.length) return undefined;
+  const x = Math.min(...fs.map((c) => c.x)), y = Math.min(...fs.map((c) => c.y));
+  return { x, y, w: Math.max(...fs.map((c) => c.x + c.w * c.s)) - x, h: Math.max(...fs.map((c) => c.y + c.h * c.s)) - y };
 }
 
 /** Loose cards by project, most important project first. Cards you moved keep the order you gave them; new ones still come in on top by priority. */

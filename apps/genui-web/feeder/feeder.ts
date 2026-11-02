@@ -7,9 +7,9 @@ import { statfsSync } from "node:fs";
 import { cpus, freemem, homedir, totalmem } from "node:os";
 import type { BoardSpec, Component, Op, PatchOp, ServerMsg } from "@crewship/genui-spec";
 import { applyPatch, esc } from "../src/model";
-import { answer, contextOf, fleetCards, fleetProjects, fleetTuis, merge, steer, TOPICS, topicRows, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
+import { answer, askId, contextOf, fleetCards, fleetProjects, fleetTuis, merge, prId, prStage, STAGES, steer, TOPICS, topicRows, tuiLines, type Open, type Opt, type Pending, type Topic } from "../fleet/cards";
 import { briefAsks } from "../fleet/brief";
-import { FleetSource } from "../fleet/data";
+import { type Fleet, FleetSource } from "../fleet/data";
 import { boardIds, chat, type Plan, stream } from "../fleet/chat";
 
 const SERVER = process.env.GENUI_SERVER ?? "http://127.0.0.1:8787";
@@ -191,7 +191,8 @@ function lineOf(id: string, p: P): string {
 function derived(spec: BoardSpec): Record<string, P> {
   const want: Record<string, P> = {};
   const items = Object.entries(spec.components).filter(([, c]) => c.type === "card" && c.props.removed !== true);
-  for (const [id, { props: p }] of items) want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0), line: lineOf(id, p) };
+  for (const [id, { props: p }] of items)
+    want[id] = { priority: p.done === true ? 5 : Number(p.base) + (p.asked === true ? 200 : 0) + (Number(p.boost) > Date.now() ? 300 : 0), line: lineOf(id, p) };
   const top = items.reduce<string | undefined>((a, [id]) => (!a || Number(want[id].priority) > Number(want[a].priority) ? id : a), undefined);
   // an empty canvas still says what waits on him, so the header never reads as "nothing" while asks are open
   if (!top) {
@@ -378,6 +379,7 @@ async function publish(s: Sources, cause = "feeder:sources") {
   liveExtras();
   const pl = planned();
   const want = { ...chrome(s, log), ...cards(s, pl.shown), ...(fleet ? fleetCards(fleet.fleet, pending, pl.open, pl.shown) : {}), ...extra };
+  if (fleet) track(fleet.fleet, want);
   focus(want);
   revive(want);
   applyPlan(want);
@@ -387,6 +389,46 @@ async function publish(s: Sources, cause = "feeder:sources") {
 }
 
 const note = (text: string, proj = "me") => log.push({ at: Math.round((Date.now() - t0) / 1000), text, proj });
+
+const BOOST_MS = 9000;
+/** The fleet at the last publish: open asks, and open PRs with their stage and failing count once their checks are read. Each list is undefined until its source loads. */
+let seen: { asks?: Map<string, string>; prs?: Map<string, { at?: number; bad: number; t: string }> } = {};
+/** PRs that started failing while the feeder ran: each stays on the board while it fails, and leads it until its time. */
+const failing = new Map<string, number>();
+
+/** Log rows for what the fleet did by itself (asks and PRs that came or went, stage moves, a PR that started failing),
+ * and the failing PRs' cards added to `want`. A source's first load only fills the board, so it logs nothing. */
+export function track(f: Fleet, want: Record<string, Component>) {
+  const asks = f.asksAt ? new Map(f.asks.map((a) => [askId(a), `${a.task}: ${a.note.replace(/\s+/g, " ").slice(0, 90)}`])) : undefined;
+  const prs = f.prsAt ? new Map(f.prs.map((p) => [prId(p), { at: p.checks && prStage(p), bad: p.checks?.bad ?? 0, t: `${p.repo}#${p.number}` }])) : undefined;
+  const proj = (id: string) => String(want[id]?.props.proj || spec.components[id]?.props.proj || "me");
+  if (asks && seen.asks) {
+    for (const [id, t] of asks) if (!seen.asks.has(id)) note(`New ask from ${t}`, proj(id));
+    for (const [id, t] of seen.asks) if (!asks.has(id)) note(`Ask closed: ${t}`, proj(id));
+  }
+  if (prs && seen.prs) {
+    // checks not read yet (or reset by a new push) are no stage: a PR keeps its last read until the next one
+    for (const [id, p] of prs) if (p.at === undefined && seen.prs.get(id)) prs.set(id, seen.prs.get(id)!);
+    for (const [id, p] of prs) {
+      const o = seen.prs.get(id);
+      if (!o) note(`New PR ${p.t}`, proj(id));
+      else if (p.at === undefined || o.at === undefined) continue;
+      else if (p.bad && !o.bad) {
+        note(`${p.t}: ${p.bad} check${p.bad > 1 ? "s" : ""} started failing`, proj(id));
+        failing.set(id, Date.now() + BOOST_MS);
+        // one more publish when the lead ends, so the card settles back by priority
+        setTimeout(() => kick("feeder:boost"), BOOST_MS + 200);
+      } else if (p.at !== o.at) note(`${p.t} moved to ${STAGES[p.at]}`, proj(id));
+    }
+    for (const [id, o] of seen.prs) if (!prs.has(id)) note(`${o.t} closed or merged`, proj(id));
+  }
+  seen = { asks: asks ?? seen.asks, prs: prs ?? seen.prs };
+  for (const id of failing.keys()) if (!prs?.get(id)?.bad) failing.delete(id);
+  if (!failing.size) return;
+  const own = fleetCards(f, new Map(), { cards: new Set(failing.keys()) }, new Set<Topic>(["prs"]));
+  for (const [id, until] of failing) if (own[id]) want[id] = { ...own[id], props: { ...own[id].props, ...(until > Date.now() ? { boost: until } : {}) } };
+}
+
 const pub = (body: P) => run(["crewboard", "pub", TOPIC, JSON.stringify(body)]);
 const failed = (e: unknown) => `failed: ${(e as Error).message}`;
 
@@ -673,9 +715,10 @@ async function onBoard(m: Intent, c: P) {
     note(`Sent to the crewboard topic ${TOPIC}: ${p.text} (seq ${r.trim()})`);
   } else if (p.field === "act" && p.value === "claim" && c.url) {
     // claiming is a record on the crewboard that the crew reads; nothing runs on the repo
-    const pr = Number(m.targetId.slice(2));
+    // the PR number ends the card id: "pr212" on the repo board, "pr-owner-repo-212" on the fleet's
+    const pr = Number(/\d+$/.exec(m.targetId)?.[0]);
     const r = await pub({ claim: pr, url: c.url, checks: c.items }).catch(failed);
-    note(`You claimed the fix for #${pr}; recorded on ${TOPIC} (seq ${r.trim()})`, "repo");
+    note(`You claimed the fix for #${pr}; recorded on ${TOPIC} (seq ${r.trim()})`, String(c.proj || "repo"));
     await call("emit_view", { event: { delta: [setProp(m.targetId, "claim", "you")] }, cause: m.id });
   } else if (p.field === "pick" && c.kind === "decision") await decide(m, c);
 }

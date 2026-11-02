@@ -2,6 +2,7 @@
 import type { ClientMsg, IntentKind, Rect } from "@crewship/genui-spec";
 import type { Move } from "./layout";
 import type { Board } from "./model";
+import { reveal } from "./views/motion";
 
 export type About = { of?: string; ids: string[]; at?: Rect };
 export type OverlayCtx = {
@@ -141,8 +142,8 @@ function syncFull(st: St) {
   st.full.classList.toggle("open", !!open);
   st.body.classList.toggle("fullon", !!open);
   if (!open) {
-    // the old content stays while the window fades out; the next open replaces it
-    if (st.shown) (st.shown = ""), (st.threads = 0), st.fc.removeAttribute("style");
+    // the old content scrambles back to glyphs while the window fades out; the next open replaces it
+    if (st.shown) (st.shown = ""), (st.threads = 0), st.fc.removeAttribute("style"), reveal(fb, true, 350);
     return;
   }
   // follow-up answers about the open card sit under it, so the talk about it stays in the window
@@ -150,7 +151,11 @@ function syncFull(st: St) {
   const th = Object.keys(comps).filter((id) => comps[id].props.of === open && live(st, id));
   fb.dataset.id = open;
   const html = ctx.html(open) + th.map((id) => `<div class="thr" data-id="${esc(id)}">${ctx.html(id)}</div>`).join("");
-  if (html !== st.shown) fb.innerHTML = st.shown = html;
+  if (html !== st.shown) {
+    const opening = !st.shown;
+    fb.innerHTML = st.shown = html;
+    if (opening) reveal(fb);
+  }
   if (th.length > st.threads) requestAnimationFrame(() => fb.scrollTo({ top: fb.scrollHeight, behavior: "smooth" }));
   st.threads = th.length;
 }
