@@ -242,6 +242,13 @@ function wireTaps(st: St) {
     ctx.intent("input", f.dataset.id!, { text, about: { of: f.dataset.id } });
     input.value = "";
   });
+  // a plan card's form: its picks and note go to the agent as one value, and the card shows it sent
+  document.addEventListener("submit", (e) => {
+    const f = (e.target as Element).closest<HTMLFormElement>('form[data-act="send"]');
+    if (!f) return;
+    e.preventDefault();
+    ctx.intent("input", f.dataset.id!, { field: "send", value: JSON.stringify(Object.fromEntries(new FormData(f))) });
+  });
   // an ask about the selection or the drawing takes them with it
   st.q.form?.addEventListener(
     "submit",

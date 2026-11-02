@@ -4,10 +4,10 @@ import { esc, hd, ICON, num, title, type View } from "./chrome";
 
 const AR = ["auto", "16/9", "4/3", "1/1", "9/16"];
 
-/** Only http(s), blob and same-origin paths load; anything else (javascript:, data:) is dropped. */
+/** Only http(s), blob and same-origin paths load, plus an SVG picture as a data URL (an <img> never runs its script); anything else (javascript:, other data:) is dropped. */
 const safeSrc = (v: unknown) => {
   const s = String(v ?? "");
-  return !/^[a-z][a-z0-9+.-]*:/i.test(s) || /^(https?|blob):/i.test(s) ? esc(s) : "";
+  return !/^[a-z][a-z0-9+.-]*:/i.test(s) || /^(https?|blob):/i.test(s) || /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/.test(s) ? esc(s) : "";
 };
 const ratio = (v: unknown) => (typeof v === "string" && /^\d{1,5}\/\d{1,5}$/.test(v) && !/(^|\/)0+$/.test(v) ? v : "");
 
