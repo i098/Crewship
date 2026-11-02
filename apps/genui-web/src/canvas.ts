@@ -139,7 +139,7 @@ const cam = {
   /** Steps a pile (the one holding `id`, else the selected card's, else the front cluster's) to its next or previous
    * card and selects it, so Enter opens it; "fan" lays the pile out as rows, or stacks it again. */
   pile(dir: number | "fan", id = [...sel].at(-1)) {
-    const f = pileOf(id) ?? [...piles.keys()].find((f) => L?.tiles[f]?.proj === L?.front) ?? [...piles.keys()][0];
+    const f = pileOf(id) ?? [...piles].find(([, s]) => L?.tiles[s[0]]?.proj === L?.front)?.[0] ?? [...piles.keys()][0];
     if (!f) return;
     const s = piles.get(f)!;
     if (dir === "fan") void (fanned.delete(f) || fanned.add(f));
@@ -276,13 +276,14 @@ let tops = new Map<string, { i: number; n: number; fan: boolean }>();
 const pileOf = (id?: string) => (id ? [...piles].find(([, s]) => s.includes(id))?.[0] : undefined);
 
 /** Each pile shows the card you stepped to on top, the cards after it next behind, so the next one peeks first;
- * a fanned pile is no stack at all. */
+ * a fanned pile is no stack at all. A pile whose front card left (answered and closed) keeps its other cards. */
 function restack(ts: Item[]): Item[] {
   const byId = new Map(ts.map((t) => [t.id, t])),
     st = new Map<string, Item[]>();
   for (const t of ts) {
     const f = t.under ? byId.get(t.under) : undefined;
-    if (f && !f.under && f !== t) (st.get(f.id) ?? st.set(f.id, [f]).get(f.id)!).push(t);
+    if (!t.under || f === t || f?.under) continue; // a stack is one deep
+    (st.get(t.under) ?? st.set(t.under, f ? [f] : []).get(t.under)!).push(t);
   }
   piles = new Map([...st].map(([f, s]) => [f, s.map((t) => t.id)]));
   tops = new Map();
@@ -296,9 +297,13 @@ function restack(ts: Item[]): Item[] {
     ring.set(f, r);
     tops.set(r[0].id, { i, n: s.length, fan: fanned.has(f) });
   }
-  // the layout stacks in array order, so each pile goes in its ring order where its front card was
-  const of = new Map([...ring].flatMap(([f, r]) => r.map((t) => [t.id, f] as const)));
-  return ts.flatMap((t) => (!of.has(t.id) ? [t] : of.get(t.id) === t.id ? ring.get(t.id)! : []));
+  // the layout stacks in array order, so each pile goes in its ring order where its first card was
+  const of = new Map([...ring].flatMap(([f, r]) => r.map((t) => [t.id, f] as const))),
+    put = new Set<string>();
+  return ts.flatMap((t) => {
+    const f = of.get(t.id);
+    return f === undefined ? [t] : put.has(f) ? [] : (put.add(f), ring.get(f)!);
+  });
 }
 
 /** Brings a card behind to the front of its pile. */
