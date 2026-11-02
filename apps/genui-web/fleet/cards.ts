@@ -26,9 +26,9 @@ const MATE_HSL = [
 export const DECK = "all";
 
 // shortcut: the deck is told by its words, as the spread verb is; send it through the chat model if it misreads
-/** "Show it to me one by one", "show me all open decisions", "gather all decisions": a show or gather verb leads, and a why or how question never opens it. */
+/** Only the owner's phrases open the deck, as the whole text: "show it to me one by one", "show me all open decisions", "gather all decisions". */
 export const deckAsk = (text: string) =>
-  /^(show|gather)\b(?!.*\b(why|how)\b).*\b(one (by|at a) (one|time)|(all|every)\b.*\b(decisions|asks))\b/i.test(text.trim());
+  /^(show it to me one by one|show me all open decisions|gather all decisions)[.!]?$/i.test(text.trim());
 
 /** One cluster per mate: "fm" is the first mate (the main home), then each second mate, each with its colour; plus the
  * generated cluster of all decisions while it is open. */

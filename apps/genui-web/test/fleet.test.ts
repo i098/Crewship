@@ -151,9 +151,9 @@ test("the deck gathers every open decision from all clusters into one unpaged pi
   for (const [, c] of rest) expect(c.props.under).toBe(top[0]);
 });
 
-test("only the owner's show or gather words open the deck; questions that mention all the asks reach the chat", () => {
-  for (const t of ["show it to me one by one", "Show me all open decisions", "gather all decisions"]) expect(deckAsk(t)).toBe(true);
-  for (const t of ["why are all the asks from t1 stuck?", "how many of all my asks are old?", "merge these PRs one at a time", "show me why all the asks are stuck"])
+test("only the owner's whole phrases open the deck; anything with a subject or filter reaches the chat", () => {
+  for (const t of ["show it to me one by one", "Show me all open decisions", "gather all decisions."]) expect(deckAsk(t)).toBe(true);
+  for (const t of ["show me the failing PRs one by one", "show me all open decisions from t1", "why are all the asks from t1 stuck?", "merge these PRs one at a time"])
     expect(deckAsk(t)).toBe(false);
 });
 
