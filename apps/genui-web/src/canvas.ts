@@ -290,7 +290,7 @@ function restack(ts: Item[]): Item[] {
     const ids = s.map((t) => t.id),
       p = [...was.values()].find((p) => ids.includes(p.id)) ?? was.get(f),
       i = !p ? 0 : ids.includes(p.id) ? ids.indexOf(p.id) : Math.min(p.i, s.length - 1);
-    if (p) pileAt.set(f, { id: ids[i], i });
+    pileAt.set(f, { id: ids[i], i });
     const r = [...s.slice(i), ...s.slice(0, i)];
     for (const t of r) t.under = t === r[0] ? undefined : r[0].id;
     ring.set(f, r);
