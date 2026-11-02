@@ -100,8 +100,12 @@ jobs:
           [[ "$PYTHON_RESULT" == success ]] &&
           [[ "$RUNTIME_RESULT" == success ]]
 
+  # The suite is sharded over four runners, one 4-vCPU machine each, because the audit of 100 runs
+  # showed 1031 s of pytest on one runner was the critical path (waiting and setup were under 15 s).
+  # The required "configuration and python checks" gate reads this job's aggregate result, so every
+  # shard must pass. Shard 1 also runs the checks that are not pytest.
   python_checks:
-    name: python and configuration tests
+    name: python and configuration tests (${{ matrix.shard }}/4)
     needs: changes
     if: >-
       always() &&
@@ -109,6 +113,10 @@ jobs:
        needs.changes.outputs.code != 'false')
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     permissions:
       contents: read
     steps:
@@ -141,6 +149,7 @@ jobs:
           bun-version: latest
 
       - name: Lint
+        if: matrix.shard == 1
         run: uv run ruff check .
 
       # tests/test_configuration.py runs koncreet.yml under fakeroot when not root.
@@ -159,6 +168,7 @@ jobs:
       - name: Python tests
         env:
           SCOPE: ${{ needs.changes.outputs.scope }}
+          CREWSHIP_TEST_SHARD: ${{ matrix.shard }}/4
         run: |
           tests=(tests)
           if [[ "$SCOPE" == imessage ]]; then
@@ -168,7 +178,7 @@ jobs:
           uv run pytest -n auto --dist worksteal "${tests[@]}"
 
       - name: Token suggestion installation and runtime smoke
-        if: needs.changes.outputs.scope != 'imessage'
+        if: matrix.shard == 1 && needs.changes.outputs.scope != 'imessage'
         run: |
           user=crewship-token-proof
           home=/home/$user
@@ -193,16 +203,20 @@ jobs:
 
       # herdr-patch also runs on the operator's computer: macOS ships Python 3.9.
       - name: herdr-patch tests on Python 3.9
+        if: matrix.shard == 1
         run: uvx --python 3.9 pytest tests/test_herdr_patch.py
 
       # Offline: a stub omp records the argv omp-as-pi builds.
       - name: omp-as-pi tests
+        if: matrix.shard == 1
         run: bash blueprint/config/omp-as-pi/test.sh
 
       - name: Validate default configuration
+        if: matrix.shard == 1
         run: ./ship.sh inspect --config blueprint/config/default.yml
 
       - name: Validate container configuration
+        if: matrix.shard == 1
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
 
   runtime_smoke:

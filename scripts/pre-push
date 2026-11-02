@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Fast pre-push check: ruff and `bash -n` on the files this push changes, a few seconds
+# instead of a CI round trip. Install: ln -sf "$PWD/scripts/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# Files in commits no remote branch has yet; nothing to check when there are none.
+oldest=$(git rev-list HEAD --not --remotes | tail -n 1)
+files=()
+[[ -z "$oldest" ]] || mapfile -t files < <(git diff --name-only --diff-filter=d "$oldest^" HEAD)
+
+py=() sh=()
+for file in "${files[@]+"${files[@]}"}"; do
+  case "$file" in
+    *.py) py+=("$file") ;;
+    *.sh) sh+=("$file") ;;
+  esac
+done
+
+[[ ${#py[@]} -eq 0 ]] || uv run ruff check "${py[@]}"
+for file in "${sh[@]+"${sh[@]}"}"; do bash -n "$file"; done

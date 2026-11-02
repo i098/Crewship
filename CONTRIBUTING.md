@@ -101,6 +101,9 @@ uv run pytest -n auto --dist worksteal
 
 # Ansible syntax check
 uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/site.yml --syntax-check
+
+# Optional pre-push hook: ruff and bash -n on the files you changed, about 2 s
+ln -sf "$PWD/scripts/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
 ```
 
 See the [CI reference](docs/agents/architecture.md#ci) for documentation-only skips, required check reporting, and event exceptions.
