@@ -2,11 +2,13 @@
 // The bridge passes its effects in (SessionHost); a turn that ends with no action goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
-import { createDelegator } from "./desk-delegate.ts";
+import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
 import { DeskSession, sessionConfig } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
+
+export { TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
 
@@ -67,7 +69,7 @@ function startSession<R extends TurnRequest>(host: SessionHost<R>): DeskSession 
   const config = `${cwd}/session-config.json`;
   writeFileSync(config, sessionConfig(thresholdKeyOf(host.provider, host.model), HOST_TOOLS), { mode: 0o600 });
   return new DeskSession({
-    argv: [env.FM_DESK_SESSION_OMP || "omp", "--mode", "rpc", "--no-ui", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`,
+    argv: ["omp", "--mode", "rpc", "--no-ui", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`,
       "--tools=read,grep,glob,bash,zoom", "--config", `${import.meta.dir}/desk-tools.yml`, "--config", config, "--approval-mode=write",
       "--no-skills", "--no-rules", "--no-context-files", "--no-title", `--thinking=${instant ? "off" : host.reasoning}`, "--model", model,
       "--session-dir", `${dir}/sessions`, "--continue", "--system-prompt", sessionPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", host.model, host.supervisorModel)],
@@ -80,7 +82,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
   let child: DeskSession | undefined;
   const delegate = createDelegator<R>({
-    answerDir: `${host.stateDir}/desk-tasks`, waitMs: Number(host.env.FM_IMESSAGE_DELEGATE_WAIT_MS) || 600_000, pollMs: 500,
+    answerDir: `${host.stateDir}/desk-tasks`, waitMs: WAIT_MS, pollMs: 500,
     stopping: host.stopping, muted: host.muted, log: host.log("desk task"), safe: (text) => host.safe!(text), // a turn runs only with the filter
     listed: host.listed, send: host.send, report: host.report,
   });

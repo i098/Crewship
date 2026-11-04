@@ -39,7 +39,7 @@ import type { DispatchModel } from "./dispatch-policy.ts";
 import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
-import { createSessionTurn } from "./desk-session-turn.ts";
+import { createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
@@ -626,6 +626,10 @@ function checkV2Delivery(o: Out) {
 function checkDeskDelivery(o: Out) {
   if (o.loop === "v2") {
     checkV2Delivery(o);
+    return;
+  }
+  if (o.guid?.startsWith(TASK_GUID_PREFIX)) {
+    if (muted()) throw deskCancelled;
     return;
   }
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;

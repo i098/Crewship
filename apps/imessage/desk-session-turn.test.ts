@@ -17,7 +17,7 @@ async function sessionArgv(provider: string, model: string): Promise<string[]> {
   chmodSync(wrapper, 0o755);
   const request: TurnRequest = { requestId: "r1", text: "hi", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   const turn = createSessionTurn<TurnRequest>({
-    env: { FM_DESK_SESSION_OMP: wrapper, PATH: process.env.PATH }, provider, model, reasoning: "off", supervisorModel: "", vetted: true,
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider, model, reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => {}, answer: () => {}, react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }),
@@ -35,6 +35,13 @@ test.each([["omp", "claude-haiku-5-5"], ["inception", "mercury-3"]])("the %s ses
   expect(modelOf(await sessionArgv(provider, model))).toBe(modelOf(oneShot));
 });
 
+test("the system prompt the child starts with tells the desk to ack an owner instruction and hand it to Firstmate", async () => {
+  const argv = await sessionArgv("omp", "claude-haiku-5-5");
+  const prompt = argv[argv.indexOf("--system-prompt") + 1];
+  expect(prompt).toContain("never yours to judge, correct, or argue with");
+  expect(prompt).toContain("delegate_task to firstmate, or call handoff_main");
+});
+
 test("a background task's answer reaches the next turn as a missed line, the session's own replies do not", async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -45,7 +52,7 @@ test("a background task's answer reaches the next turn as a missed line, the ses
   const msgs: { i: number; kind: string; text: string; requestId?: string }[] = [];
   const add = (kind: string, text: string, requestId?: string) => msgs.push({ i: msgs.length, kind, text, requestId });
   const turn = createSessionTurn<TurnRequest>({
-    env: { FM_DESK_SESSION_OMP: wrapper, PATH: process.env.PATH }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs, render: () => "" } as never,
     memoryIndex: (r) => r.memoryId, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => {}, answer: () => {}, react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, send: async () => true, report: () => {},

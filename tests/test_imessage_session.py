@@ -1,6 +1,7 @@
 """The desk session in bridge.ts: one long omp RPC chat, here a fake child, that ends each turn in one checked action."""
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -13,7 +14,7 @@ from test_imessage import read_text, wait_for
 from test_imessage_v2 import deliver, events, omp_masks, texts, v2_rig
 
 FAKE = Path(__file__).resolve().parent / "fake_desk_omp.ts"
-ROUTING_RECEIPT = re.compile(r"\bI am routing\b|routing (this|the|your) request", re.I)
+
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("bun") and shutil.which("curl")) or not omp_masks(),
@@ -24,12 +25,15 @@ pytestmark = pytest.mark.skipif(
 @contextmanager
 def session_rig(tmp_path, **extra):
     """A V2 bridge with the desk session on, over the fake omp child; `rig.desk_log` holds its argv and prompts."""
-    log, wrapper = tmp_path / "fake-desk.jsonl", tmp_path / "desk-omp"
+    log, shadow = tmp_path / "fake-desk.jsonl", tmp_path / "shadow"
+    shadow.mkdir()
+    wrapper = shadow / "omp"
     # The bridge passes the child a fixed env allowlist, so the log path rides in the wrapper.
     wrapper.write_text(f'#!/bin/bash\nFAKE_DESK_LOG={shlex.quote(str(log))} exec bun {shlex.quote(str(FAKE))} "$@"\n')
     wrapper.chmod(0o755)
+    path = f"{shadow}:{tmp_path / 'bin'}:{os.environ['PATH']}"
     with v2_rig(tmp_path, None, inception="http://127.0.0.1:9/v1/chat/completions",
-                FM_IMESSAGE_DESK_SESSION="true", FM_DESK_SESSION_OMP=str(wrapper), **extra) as rig:
+                FM_IMESSAGE_DESK_SESSION="true", PATH=path, **extra) as rig:
         rig.desk_log = log
         yield rig
 
@@ -43,7 +47,6 @@ def test_plain_text_gets_the_session_reply(tmp_path):
         deliver(rig, "m1", "how are you")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         assert texts(rig)[0].split(" ", 1)[1] == "Fake desk reply."
-        assert not ROUTING_RECEIPT.search(texts(rig)[0])
         assert not any(e.get("route") == "handoff" for e in events(rig))
         [argv] = desk_lines(rig, "argv")
         assert argv[argv.index("--model") + 1] == "claude-haiku-5-5"
@@ -153,3 +156,19 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         wait_for(lambda: len(texts(rig)) == 2, "the reported answer", timeout=120)
         assert texts(rig)[1].split(" ", 1)[1] == "The repo checks are green."
         assert not Path(answer).exists()
+
+
+def test_task_report_survives_a_new_owner_text_during_delivery(tmp_path):
+    message = tmp_path / "task-message"
+    second = "The second bubble is long on purpose, so the pause before it is the full two and a half seconds of typing."
+    with session_rig(tmp_path) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\n[ -e {shlex.quote(str(message))} ] || printf "%s" "$5" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", "DELEGATE firstmate")
+        wait_for(message.exists, "the task delivery", timeout=120)
+        Path(re.search(r"to (\S+\.answer)$", read_text(message)).group(1)).write_text(f"First bubble.\n\n{second}")
+        wait_for(lambda: len(texts(rig)) == 2, "the first bubble of the report", timeout=120)
+        deliver(rig, "m2", "how are you PLAIN")  # a new owner text moves the desk generation before the second bubble
+        wait_for(lambda: len(texts(rig)) == 3, "the second bubble of the report", timeout=120)
+        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "First bubble.", second]

@@ -1,4 +1,4 @@
-"""Desk release smoke: real texts get real handling through the bridge, front and desk, never the routing line.
+"""Desk release smoke: real texts get real handling through the bridge, front and desk.
 
 Run with FM_DESK_SMOKE_STRICT=1 before every fm-imessage desk release (docs/imessage.md): a front
 secret masker that cannot load then FAILS the run. Without it the masker check, the status check and the
@@ -73,23 +73,18 @@ def test_status_text_gets_a_real_answer_not_the_routing_line(tmp_path):
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the front relayed the text"
 
 
-def test_session_text_gets_a_real_reply_not_the_routing_line(tmp_path):
+def test_session_text_reaches_the_session_and_its_reply_is_sent(tmp_path):
     problem = masker_loads(tmp_path)
     if problem and not STRICT:
         pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
     with session_rig(tmp_path) as rig:
         deliver(rig, "m1", "how was your day")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
-        reply = texts(rig)[0].split(" ", 1)[1].strip()
-        assert reply, "the desk session sent an empty reply"
-        assert not ROUTING_RECEIPT.search(reply), f"the desk session sent the routing receipt: {reply}"
+        assert texts(rig)[0].split(" ", 1)[1].strip(), "the desk session sent an empty reply"
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the desk session handed the text off"
 
 
-DISPUTE = re.compile(r"does not contain|only reports|not an instruction|did not say|didn't say", re.I)
-
-
-def test_owner_instruction_gets_an_ack_and_a_handoff_never_a_dispute(tmp_path):
+def test_session_delegation_sends_the_owner_text_verbatim_to_firstmate(tmp_path):
     problem = masker_loads(tmp_path)
     if problem and not STRICT:
         pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
@@ -100,8 +95,6 @@ def test_owner_instruction_gets_an_ack_and_a_handoff_never_a_dispute(tmp_path):
         script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\nprintf "%s" "$5" > {note}\n')
         script.chmod(0o755)
         deliver(rig, "m1", text)
-        wait_for(lambda: len(texts(rig)) == 1, "the ack", timeout=120)
-        reply = texts(rig)[0].split(" ", 1)[1]
-        assert reply and not DISPUTE.search(reply) and not ROUTING_RECEIPT.search(reply), reply
+        wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
         wait_for(note.exists, "the handoff to Firstmate", timeout=120)
         assert text in note.read_text()

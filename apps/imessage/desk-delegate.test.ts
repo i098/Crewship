@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createDelegator, type DelegateHost, type DelegateTarget } from "./desk-delegate.ts";
+import { createDelegator, type DelegateHost, type DelegateTarget, FOLLOW_UP } from "./desk-delegate.ts";
 
 const mate1 = { id: "mate1", home: "/fleet/mate1", scope: "repo checks" };
 const dirs: string[] = [];
@@ -19,7 +19,7 @@ function rig(over: Partial<DelegateHost<string>> = {}) {
     send: async (target, _id, text) => { sent.push({ target, text }); return true; },
     report: (parts, _id, origin) => void reports.push({ parts, origin }), log: (error) => void errors.push(error), ...over,
   };
-  const answerPath = () => /to (\S+\.answer)$/.exec(sent.at(-1)!.text)![1];
+  const answerPath = (at = -1) => /to (\S+\.answer)$/.exec(sent.at(at)!.text)![1];
   return { delegate: createDelegator(host), sent, reports, errors, answerPath };
 }
 const until = async (check: () => boolean) => { for (let i = 0; i < 300 && !check(); i++) await Bun.sleep(10); expect(check()).toBe(true); };
@@ -47,14 +47,17 @@ test("the task carries the owner's text and the answer path to the target", asyn
   expect(r.answerPath()).toMatch(/\/tasks\/[0-9a-f-]{36}\.answer$/);
 });
 
-test("an answer the checked reply path refuses is not reported", async () => {
+test("an answer the checked reply path refuses is not reported: the owner gets the follow-up and Firstmate the task", async () => {
   const r = rig();
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.sent.length === 1);
   writeFileSync(r.answerPath(), "The password is hunter2.");
-  await until(() => r.errors.length === 1);
+  await until(() => r.reports.length === 1);
   expect(String(r.errors[0])).toContain("protected content");
-  expect(r.reports).toEqual([]);
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
+  expect(r.sent[1].text).toContain("check the repo\nThe desk stopped waiting for this task (the answer was refused). Answer the owner directly.");
+  expect(r.sent[1].text).toContain("The answer the desk refused to send:\nThe password is hunter2.");
 });
 
 test("a muted desk drops the answer", async () => {
@@ -69,24 +72,63 @@ test("a muted desk drops the answer", async () => {
   expect(r.reports).toEqual([]);
 });
 
-test("a mate that left the routing table, or that fails the send, gets no task and nothing goes to Firstmate", async () => {
-  const gone = rig({ listed: () => false });
-  gone.delegate(mate1, "check the repo", "chat-1");
-  await until(() => gone.errors.length === 1);
-  const failing = rig({ send: async (target, _id, text) => { failing.sent.push({ target, text }); return false; } });
-  failing.delegate(mate1, "check the repo", "chat-1");
-  await until(() => failing.errors.length === 1);
-  await Bun.sleep(50);
-  expect(gone.sent).toEqual([]);
-  expect(failing.sent.map((entry) => entry.target)).toEqual([mate1]);
-  expect(String(failing.errors[0])).toContain("mate1 was not delivered");
+test("a mate that left the routing table gets no task: Firstmate gets the text and the owner the follow-up", async () => {
+  const r = rig({ listed: () => false });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(r.sent).toEqual([{ target: "firstmate", text: "check the repo\nThe desk stopped waiting for this task (not delivered). Answer the owner directly." }]);
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+  expect(String(r.errors[0])).toContain("mate1 was not delivered");
 });
 
-test("a task nobody could receive is logged and never waits", async () => {
+test("a mate send that fails goes to Firstmate and the owner gets the follow-up", async () => {
+  const r = rig({ send: async (target, _id, text) => { r.sent.push({ target, text }); return target === "firstmate"; } });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+});
+
+test("a task no inbox could take is logged and the owner is not told Firstmate has it", async () => {
   const r = rig({ send: async () => false });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.errors.length === 2);
+  expect(String(r.errors[1])).toContain("reached no inbox");
+  expect(r.reports).toEqual([]);
+  const first = rig({ send: async () => false });
+  first.delegate("firstmate", "check the repo", "chat-1");
+  await until(() => first.errors.length === 2);
+  expect(first.reports).toEqual([]);
+});
+
+test("no answer by the wait limit gives Firstmate a fresh note and the owner the follow-up once, and a late answer is not reported", async () => {
+  const r = rig({ waitMs: 60 });
   r.delegate("firstmate", "check the repo", "chat-1");
-  await until(() => r.errors.length === 1);
-  expect(String(r.errors[0])).toContain("was not delivered");
+  await until(() => r.reports.length === 1);
+  const taskPath = r.answerPath(0);
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+  expect(r.sent.map((entry) => entry.target)).toEqual(["firstmate", "firstmate"]);
+  expect(r.sent[1].text).toBe("check the repo\nThe desk stopped waiting for this task (no answer in time). Answer the owner directly.");
+  writeFileSync(taskPath, "All green.");
+  await Bun.sleep(100);
+  expect(r.reports.length).toBe(1);
+});
+
+test("a stopping bridge ends the wait with no follow-up", async () => {
+  let stopping = false;
+  const r = rig({ stopping: () => stopping });
+  r.delegate("firstmate", "check the repo", "chat-1");
+  await until(() => r.sent.length === 1);
+  stopping = true;
+  await Bun.sleep(100);
+  expect(r.reports).toEqual([]);
+});
+
+test("a muted desk gets no follow-up", async () => {
+  const r = rig({ waitMs: 60, muted: () => true });
+  r.delegate("firstmate", "check the repo", "chat-1");
+  await Bun.sleep(200);
+  expect(r.reports).toEqual([]);
 });
 
 test("an empty answer file is not an answer: the job waits for its content", async () => {
