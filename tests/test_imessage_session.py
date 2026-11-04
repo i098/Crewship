@@ -172,3 +172,21 @@ def test_task_report_survives_a_new_owner_text_during_delivery(tmp_path):
         deliver(rig, "m2", "how are you PLAIN")  # a new owner text moves the desk generation before the second bubble
         wait_for(lambda: len(texts(rig)) == 3, "the second bubble of the report", timeout=120)
         assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "First bubble.", second]
+
+
+def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(tmp_path):
+    message = tmp_path / "task-message"
+    with session_rig(tmp_path) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\n[ -e {shlex.quote(str(message))} ] || printf "%s" "$5" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", "DELEGATE firstmate")
+        wait_for(lambda: len(texts(rig)) == 1 and message.exists(), "the reply and the task delivery", timeout=120)
+        answer = Path(re.search(r"to (\S+\.answer)$", read_text(message)).group(1))
+        rig.stop()
+        answer.write_text("The repo checks are green.")
+        rig.start()
+        wait_for(lambda: len(texts(rig)) == 2, "the answer after the restart", timeout=120)
+        time.sleep(1.5)
+        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "The repo checks are green."]
+        assert not answer.exists()

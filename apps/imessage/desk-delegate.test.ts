@@ -20,7 +20,7 @@ function rig(over: Partial<DelegateHost<string>> = {}) {
     report: (parts, _id, origin) => void reports.push({ parts, origin }), log: (error) => void errors.push(error), ...over,
   };
   const answerPath = (at = -1) => /to (\S+\.answer)$/.exec(sent.at(at)!.text)![1];
-  return { delegate: createDelegator(host), sent, reports, errors, answerPath };
+  return { delegate: createDelegator(host), host, sent, reports, errors, answerPath };
 }
 const until = async (check: () => boolean) => { for (let i = 0; i < 300 && !check(); i++) await Bun.sleep(10); expect(check()).toBe(true); };
 
@@ -101,7 +101,7 @@ test("a task no inbox could take is logged and the owner is not told Firstmate h
   expect(first.reports).toEqual([]);
 });
 
-test("no answer by the wait limit gives Firstmate a fresh note and the owner the follow-up once, and a late answer is not reported", async () => {
+test("no answer by the wait limit gives Firstmate a fresh note and the owner the follow-up once; a late answer is then sent once", async () => {
   const r = rig({ waitMs: 60 });
   r.delegate("firstmate", "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
@@ -110,8 +110,29 @@ test("no answer by the wait limit gives Firstmate a fresh note and the owner the
   expect(r.sent.map((entry) => entry.target)).toEqual(["firstmate", "firstmate"]);
   expect(r.sent[1].text).toBe("check the repo\nThe desk stopped waiting for this task (no answer in time). Answer the owner directly.");
   writeFileSync(taskPath, "All green.");
+  await until(() => r.reports.length === 2);
   await Bun.sleep(100);
-  expect(r.reports.length).toBe(1);
+  expect(r.reports[1]).toEqual({ parts: ["All green."], origin: "chat-1" });
+  expect(r.reports.length).toBe(2);
+  expect(existsSync(taskPath)).toBe(false);
+});
+
+test("an answer written while the bridge is down is sent after the restart, once, to the chat of the task", async () => {
+  let stopping = false;
+  const r = rig({ stopping: () => stopping });
+  r.delegate(mate1, "check the repo", "chat-7");
+  await until(() => r.sent.length === 1);
+  stopping = true;
+  const taskPath = r.answerPath();
+  await Bun.sleep(50);
+  writeFileSync(taskPath, "All green.");
+  await Bun.sleep(50);
+  expect(r.reports).toEqual([]);
+  const restarted = rig({ answerDir: r.host.answerDir });
+  await until(() => restarted.reports.length === 1);
+  await Bun.sleep(100);
+  expect(restarted.reports).toEqual([{ parts: ["All green."], origin: "chat-7" }]);
+  expect(existsSync(taskPath)).toBe(false);
 });
 
 test("a stopping bridge ends the wait with no follow-up", async () => {

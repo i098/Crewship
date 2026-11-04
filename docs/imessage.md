@@ -340,10 +340,12 @@ The bridge sends the reply first and then starts one background job.
 - A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target is refused before anything is sent.
 - `firstmate` gets an inbox note and a mate gets `fm-send.sh`. Both start with `[from captain via desk]`.
 - The task text ends with a path in `desk-tasks/` in the state directory. The target writes its answer for the owner to that file. This is the only answer channel.
-- The bridge waits for the file for 10 minutes. A restart also ends the wait.
+- The bridge also saves a task file with the same id in `desk-tasks/`. It holds the owner's text and the chat of the request.
+- The bridge waits for the answer file for 10 minutes. A restart ends the wait, but not the task.
+- A sweep checks `desk-tasks/` when the bridge starts and then every half second. It sends each answer that has no waiting job, for example an answer that came while the bridge was down or after the 10 minutes. It sends each answer once to the chat in its task file, then removes both files.
 - The answer goes through the same checks as `reply`: `clean.ts`, the raw status line check, and the secret filter. A refused answer is logged and not sent.
 - A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
-- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. Then the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that Firstmate must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back". If the inbox does not take the note, the bridge only logs it. A restart or a muted desk sends no text.
+- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. Then the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that Firstmate must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back". If the inbox does not take the note, the bridge only logs it. A muted desk sends no text.
 - A task report is a late answer, so a new owner text does not cancel it. Only a muted desk does.
 
 The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
