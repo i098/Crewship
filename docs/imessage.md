@@ -287,6 +287,7 @@ Delayed handoffs follow the [deadline rules](#what-it-does).
 Set `crewship.imessage.desk_v2: true` in `.local/host.yml` to select the V2 front desk.
 The setting defaults to `false`; omit it or set it to `false` to keep the legacy loop for rollback.
 The service renders this setting as `FM_IMESSAGE_DESK_V2=true` or `false`.
+With the default `desk_session: true`, the desk runs as one long omp session instead of the loop below. See [Desk session](#desk-session).
 The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
 Deployment and a one-week trial require separate authorization.
 The front picks one of four results: social, status, dispatch, or relay.
