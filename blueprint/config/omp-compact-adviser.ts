@@ -142,8 +142,8 @@ export default function (pi: PiLike) {
 							if (isContinuing(ev)) return;
 							const settle = (tries: number) =>
 								setTimeout(() => {
-									if (ctx.isIdle() || tries >= 20) guarded(handler)(ev, ctx);
-									else settle(tries + 1);
+									if (ctx.isIdle()) guarded(handler)(ev, ctx);
+									else if (tries < 20) settle(tries + 1);
 								}, 250);
 							settle(0);
 						});
