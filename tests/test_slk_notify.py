@@ -47,7 +47,6 @@ def host(tmp_path, monkeypatch):
     fm.chmod(0o755)
     env = {
         "PATH": f"{fm.parent}:/usr/bin:/bin",
-        "XDG_STATE_HOME": str(tmp_path / "state"),
         "FM_TASK_ID": "worker-1",
     }
 
@@ -67,33 +66,19 @@ def texts(log):
     return log.read_text().splitlines() if log.exists() else []
 
 
-def test_export_passes_through_and_notifies_once_per_window(host):
+def test_export_passes_through_and_notifies(host):
     first = host("export", "-workspace", "acme", "-channel", "dev")
     assert (first.returncode, first.stdout) == (7, "real export -workspace acme -channel dev\n")
-    host("export", "-workspace", "acme", "-channel", "ops")
     assert texts(host.log) == ["slk read: worker-1 read acme dev"]
 
 
-def test_dropped_reads_count_into_next_line(host, tmp_path):
+def test_two_reads_in_a_row_send_two_texts(host):
     host("export", "-workspace", "acme", "-channel", "dev")
     host("export", "-workspace", "acme", "-channel", "ops")
-    state = tmp_path / "state/crewship/slk-read-notify.json"
-    state.write_text(state.read_text().replace('"sent":', '"sent": 1, "old":'))
-    host("export", "-workspace", "acme", "-channel", "ops")
-    assert texts(host.log)[-1] == "slk read: worker-1 read acme ops (+1 more)"
-
-
-def test_agents_limited_separately(host):
-    host("export", "-workspace", "a", "-channel", "c")
-    host(
-        "export",
-        "-workspace",
-        "a",
-        "-channel",
-        "c",
-        env_extra={"FM_TASK_ID": "", "FM_HOME": "/x/mate"},
-    )
-    assert texts(host.log) == ["slk read: worker-1 read a c", "slk read: mate read a c"]
+    assert sorted(texts(host.log)) == [
+        "slk read: worker-1 read acme dev",
+        "slk read: worker-1 read acme ops",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -115,10 +100,3 @@ def test_bare_tui_notifies(host):
 def test_missing_fm_imessage_does_not_break_slk(host):
     result = host("export", "-workspace", "a", "-channel", "c", env_extra={"PATH": "/usr/bin:/bin"})
     assert (result.returncode, result.stdout) == (7, "real export -workspace a -channel c\n")
-
-
-def test_unwritable_state_does_not_break_slk(host, tmp_path):
-    blocker = tmp_path / "file"
-    blocker.write_text("")
-    result = host("export", "-channel", "c", env_extra={"XDG_STATE_HOME": str(blocker)})
-    assert result.returncode == 7

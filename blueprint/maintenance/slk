@@ -4,16 +4,13 @@
 `slk export` and a bare `slk` (the TUI) read messages; every other call passes through silently.
 The text names the agent, workspace and channel, never message content.
 """
-import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-WINDOW = 600
 VALUE_FLAGS = {"channel", "workspace"}
 
 
@@ -41,37 +38,8 @@ def clean(text):
     return re.sub(r"[^\w#@.:-]+", " ", text).strip()[:60]
 
 
-def due(who, now):
-    """True at most once per WINDOW per agent; reads in between count into the next line."""
-    state_home = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    path = Path(state_home) / "crewship/slk-read-notify.json"
-    try:
-        state = json.loads(path.read_text())
-    except (OSError, ValueError):
-        state = {}
-    entry = state.get(who, {})
-    if now - entry.get("sent", 0) < WINDOW:
-        entry["skipped"] = entry.get("skipped", 0) + 1
-        ok, skipped = False, 0
-    else:
-        ok, skipped = True, entry.get("skipped", 0)
-        entry = {"sent": now, "skipped": 0}
-    state[who] = entry
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = path.with_suffix(".tmp")
-    staged.write_text(json.dumps(state))
-    os.replace(staged, path)
-    return ok, skipped
-
-
 def notify(call):
-    who = clean(agent())
-    ok, skipped = due(who, time.time())
-    if not ok:
-        return
-    text = f"slk read: {who} {call}"
-    if skipped:
-        text += f" (+{skipped} more)"
+    text = f"slk read: {clean(agent())} {call}"
     command = ["fm-imessage", "--", text]
     if not shutil.which("fm-imessage"):
         return
