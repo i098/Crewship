@@ -295,7 +295,7 @@ Status answers a question about what the mates are doing. The desk reads the inb
 It hands the text to Firstmate when the request is a decision, approval, money, deploy, public post or write, when the status text does not answer it, or when the call fails.
 Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
 Relay hands the work to the owning mate or to Firstmate. An invalid front answer fails closed to a Firstmate relay.
-Before relay or dispatch work starts, the desk sends one short reply that names where the request goes: Firstmate, the secondmate, or a worker. It does not complete the request or stop the typing indicator.
+Before relay or dispatch work starts, the desk sends no reply: no fixed receipt. The typing indicator stays on until the real answer goes out.
 The typing indicator stops when a newer text replaces the running job.
 
 ### Token log

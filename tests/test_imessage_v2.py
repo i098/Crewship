@@ -28,8 +28,11 @@ try {
 FAKE_INCEPTION = """
 const server = Bun.serve({
   port: 0,
-  async fetch() {
-    const content = process.env.FRONT ?? JSON.stringify({ kind: "relay", target: 0, domains: [], category: "other" });
+  async fetch(req) {
+    const asked = await req.text();
+    const content = asked.includes("status question")
+      ? JSON.stringify({ answer: "Checks are running." })
+      : process.env.FRONT ?? JSON.stringify({ kind: "relay", target: 0, domains: [], category: "other" });
     return Response.json({ choices: [{ message: { content } }] });
   },
 });
@@ -107,8 +110,8 @@ def test_social_text_gets_one_tapback_even_when_the_model_returns_text(tmp_path)
         assert not any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
 
 
-@pytest.mark.parametrize("resume,destination", [(None, "Firstmate"), ("relay", "Firstmate"), ("dispatch", "Firstmate"), ("mate", "mate1 secondmate")])
-def test_work_request_gets_front_reply_without_completing_handoff(tmp_path, resume, destination):
+@pytest.mark.parametrize("resume", [None, "relay", "dispatch", "mate"])
+def test_work_request_hands_off_without_a_canned_reply(tmp_path, resume):
     front = {"kind": "relay", "target": 0, "domains": [], "category": "other"}
     if resume == "mate":
         front = {"kind": "relay", "target": 1, "domains": [1], "category": "work"}
@@ -118,14 +121,12 @@ def test_work_request_gets_front_reply_without_completing_handoff(tmp_path, resu
         deliver(rig, "m1", "please check the whole repo")
         wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", [])
                              for e in events(rig)), "the firstmate handoff", timeout=120)
-        wait_for(lambda: texts(rig), "the front reply", timeout=5)
-        assert len(texts(rig)) == 1
-        assert destination in texts(rig)[0] and "worker" not in texts(rig)[0]
+        time.sleep(1)
+        assert texts(rig) == []
         assert not any("responded" in e for e in events(rig))
         if resume == "mate":
             return
         if resume:
-            wait_for(lambda: rig.outbox() == [], "the front delivery receipt")
             rig.stop()
             plan = next(e["v2"] for e in events(rig) if "v2" in e)
             if resume == "dispatch":
@@ -135,22 +136,20 @@ def test_work_request_gets_front_reply_without_completing_handoff(tmp_path, resu
                 log.write(json.dumps({"ids": ["bluebubbles-m1"], "route": "pending"}) + "\n")
             rig.start()
             wait_for(lambda: sum(e.get("route") == "handoff" for e in events(rig)) == 2, "the resumed handoff")
-            wait_for(lambda: rig.outbox() == [], "the deduplicated front reply")
-            assert len(texts(rig)) == 1
-            assert not any("responded" in e for e in events(rig))
+            assert texts(rig) == []
         rig.cli("The review is complete.")
-        wait_for(lambda: len(texts(rig)) == 2, "the final answer", timeout=30)
+        wait_for(lambda: len(texts(rig)) == 1, "the final answer", timeout=30)
         wait_for(lambda: any("responded" in e for e in events(rig)), "the completed request", timeout=30)
         assert not any(e.get("route") == "desk" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig))
 
 
-def test_front_reply_keeps_typing_until_the_final_answer(tmp_path):
+def test_work_request_keeps_typing_until_the_final_answer(tmp_path):
     with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]) as rig:
         typing = rig.fake / "typing-events"
         record = {"id": "m1", "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": "please check the whole repo"}
         publish_json(rig.fake / "inbound" / "m1.json", record)
-        wait_for(lambda: "send " in read_text(rig.fake / "sent"), "the front reply", timeout=120)
-        wait_for(lambda: rig.outbox() == [], "the front delivery receipt")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the handoff", timeout=120)
+        wait_for(lambda: read_text(typing), "typing", timeout=30)
         rows = [json.loads(line) for line in read_text(typing).splitlines()]
         assert rows and all(row["on"] for row in rows)
         assert not any("responded" in e for e in events(rig))
@@ -164,21 +163,25 @@ def test_unreachable_front_falls_back_to_firstmate(tmp_path):
         deliver(rig, "m1", "please check the whole repo")
         wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", [])
                              for e in events(rig)), "the fail-closed handoff", timeout=120)
-        wait_for(lambda: texts(rig), "the fallback front reply", timeout=30)
-        assert not texts(rig)[0].startswith("react ")
+        time.sleep(1)
+        assert texts(rig) == []
 
 
-def test_unavailable_dispatch_model_gets_a_firstmate_receipt(tmp_path):
+def test_different_texts_never_get_the_same_fixed_routing_line(tmp_path):
     with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]) as rig:
-        deliver(rig, "m1", "please check the whole repo")
-        wait_for(lambda: texts(rig) and rig.outbox() == [], "the first receipt")
-        rig.stop()
-        plan = next(e["v2"] for e in events(rig) if "v2" in e)
-        plan["front"]["requestId"] = "front-unavailable"
-        plan["intents"] = [{"kind": "dispatch", "model": "nonexistent/model", "reasoning": "off"}]
-        with (rig.state / "routing.jsonl").open("a") as log:
-            log.write(json.dumps({"ids": ["bluebubbles-m1"], "v2": plan}) + "\n")
-            log.write(json.dumps({"ids": ["bluebubbles-m1"], "route": "pending"}) + "\n")
-        rig.start()
-        wait_for(lambda: len(texts(rig)) == 2, "the dispatch receipt")
-        assert "Firstmate" in texts(rig)[1] and "worker" not in texts(rig)[1]
+        for i, text in enumerate(["why do you repeat yourself", "please check the whole repo", "what is the weather"]):
+            deliver(rig, f"m{i}", text)
+        wait_for(lambda: {i for e in events(rig) if e.get("route") == "handoff" for i in e["ids"]} == {f"bluebubbles-m{n}" for n in range(3)},
+                 "three handoffs", timeout=120)
+        time.sleep(1)
+        assert not any("routing this request" in line for line in texts(rig))
+        assert texts(rig) == []
+
+
+def test_status_question_gets_a_real_answer_from_the_desk(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "status", "text": ""}]) as rig:
+        deliver(rig, "m1", "what is the mate doing right now")
+        wait_for(lambda: len(texts(rig)) == 1, "the desk status answer", timeout=120)
+        assert "Checks are running." in texts(rig)[0]
+        assert "routing this request" not in texts(rig)[0]
+        assert not any(e.get("route") == "handoff" for e in events(rig))
