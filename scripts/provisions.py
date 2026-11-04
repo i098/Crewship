@@ -168,6 +168,7 @@ NPM_LATEST = {
     "forgejo-axi": "forgejo-axi",
     "ondine": "ondine",
     "backpass": "backpass",
+    "compact-adviser": "compact-adviser",
 }
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
@@ -725,6 +726,9 @@ def bun_latest_install(home, tool, version, environment):
                     "--global",
                     "--exact",
                     "--no-progress",
+                    # compact-adviser is a Pi extension: omp supplies the Pi packages it lists as peers,
+                    # and a second copy under its prefix would shadow them.
+                    *(["--omit", "peer"] if tool == "compact-adviser" else []),
                     f"{package_name}@{version}",
                 ],
                 env={
@@ -743,7 +747,7 @@ def bun_latest_install(home, tool, version, environment):
             staging.rename(final)
         changed = True
     changed = link_package_bins(home, final, [package_name]) or changed
-    if tool == "chrome-devtools-mcp":
+    if tool in ("chrome-devtools-mcp", "compact-adviser"):
         changed = point_current(final) or changed
     return changed
 

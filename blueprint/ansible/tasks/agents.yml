@@ -247,6 +247,19 @@
     remote_src: true
   become: true
 
+# compact-adviser (installed by --npm) in automatic mode: TypeSafe Jev picks the checkpoint and omp
+# compacts. The file imports the package by a path relative to the extensions directory, so the
+# destination must stay under ~/.omp/agent/extensions. Managed: every apply rewrites it.
+- name: Install the compact-adviser omp extension
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/omp-compact-adviser.ts"
+    dest: "{{ crewship_cfg.home }}/.omp/agent/extensions/compact-adviser.ts"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+
 # The omp extension that runs the sentrux and fallow quality gate at the end of
 # every agent turn (docs/omp.md#quality-gate). Managed: every apply rewrites it.
 - name: Install the quality gate omp extension
