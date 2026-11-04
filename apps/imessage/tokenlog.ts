@@ -47,6 +47,7 @@ function writeDaily(dir: string, day: string): void {
   let rows: string[] = [];
   try { rows = readFileSync(path, "utf8").split("\n").filter((row) => row && !row.startsWith(`${day} `)); } catch { /* first day */ }
   rows.push(`${day} calls=${calls} input_tokens=${input} output_tokens=${output}`);
-  writeFileSync(`${path}.tmp`, `${rows.join("\n")}\n`, { mode: 0o600 });
-  renameSync(`${path}.tmp`, path);
+  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync(tmp, `${rows.join("\n")}\n`, { mode: 0o600 });
+  renameSync(tmp, path);
 }

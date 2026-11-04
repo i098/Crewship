@@ -602,7 +602,7 @@ export async function readDesk(proc: DeskProc, serverTools = false): Promise<Des
       }
       continue;
     }
-    if (typeof event?.type === "string" && !events++) drafted = ""; // json mode: only an assistant message is an answer
+    if (/^(agent|turn|message|tool)_/.test(event?.type) && !events++) drafted = ""; // json mode: only an assistant message is an answer
     if (event?.type === "message_end" && event.message.role === "assistant") {
       drafted = event.message.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
       count(event.message.usage, event.message.model);
@@ -621,7 +621,7 @@ export function compactReply(output: string): { text: string; input?: number; ou
   for (const row of output.split("\n")) {
     let event;
     try { event = JSON.parse(row); } catch { continue; }
-    streamed ||= typeof event?.type === "string";
+    streamed ||= /^(agent|turn|message|tool)_/.test(event?.type);
     if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
     text = (event.message.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
     const used = usageTokens(event.message.usage);
