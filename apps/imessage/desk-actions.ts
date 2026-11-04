@@ -32,13 +32,20 @@ export type ActionHost = {
   relay(mate: Secondmate): Promise<boolean>; // true when every request reached the mate
   handoff(reason: string): void;
   status(): Promise<string>;
+  safe(text: string): string; // the bridge's redacting filter: a reply it would change is refused
 };
 
-function replyParts(args: Record<string, unknown>, count: number): { parts: string[]; target: number } {
+function replyText(args: Record<string, unknown>, safe: (text: string) => string): string {
   if (typeof args.text !== "string" || !args.text.trim()) throw new Error("text must be a non-empty string");
   const clean = cleanText(args.text);
+  if (safe(clean) !== clean) throw new Error("refused: the text holds protected content; call handoff_main");
   const why = statusLine(clean);
   if (why) throw new Error(`refused: the text reads as a raw status line (${why}); say it in plain words`);
+  return clean;
+}
+
+function replyParts(args: Record<string, unknown>, count: number, safe: (text: string) => string): { parts: string[]; target: number } {
+  const clean = replyText(args, safe);
   const target = args.to === undefined ? count : Number(args.to);
   if (!Number.isInteger(target) || target < 1 || target > count) throw new Error(`to must be 1 to ${count}`);
   const parts = bubbles(clean);
@@ -69,7 +76,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
   const handlers: Record<string, (args: Record<string, unknown>) => string | Promise<string>> = {
     reply: (args) => {
       open(); may();
-      const { parts, target } = replyParts(args, host.requests.length);
+      const { parts, target } = replyParts(args, host.requests.length, host.safe);
       done = true;
       host.reply(parts, target);
       return "sent; your turn is over";

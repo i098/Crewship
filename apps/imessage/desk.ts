@@ -495,7 +495,9 @@ function voiceFlags(value: string): string {
 
 type DeskOptions = { model: string; system: string; prompt: string; spent: number; memoryDir: string; cwd: string; env: Record<string, string | undefined>; provider?: string; reasoning?: string; voice?: boolean; serverTools?: boolean; writePath?: string; question?: string; apiKeyEnv?: string | null; bindModel?: boolean };
 
-function deskCommand(o: DeskOptions, reasoning: string): string[] {
+export const modelArg = (provider: string | undefined, model: string) => (provider === "inception" ? `inception/${model}` : model);
+
+export function deskCommand(o: DeskOptions, reasoning: string): string[] {
   const inception = o.provider === "inception";
   const system = o.serverTools ? `${o.system}\nHost context: FM_HOME=${o.env.FM_HOME ?? ""}.` : o.system;
   return inception && o.voice
@@ -504,7 +506,7 @@ function deskCommand(o: DeskOptions, reasoning: string): string[] {
       "--mode=json", ...(o.serverTools ? ["--tools=read,grep,glob,bash,write,zoom",
         "--config", `${import.meta.dir}/desk-tools.yml`, "--approval-mode=write"] : ["--no-tools"]),
       "--no-skills", "--no-rules", "--no-session",
-      `--thinking=${inception && reasoning === "instant" ? "off" : reasoning}`, "--model", inception ? `inception/${o.model}` : o.model, "--system-prompt", system];
+      `--thinking=${inception && reasoning === "instant" ? "off" : reasoning}`, "--model", modelArg(o.provider, o.model), "--system-prompt", system];
 }
 
 export function deskSecretValues(env: Record<string, string | undefined>): string[] {

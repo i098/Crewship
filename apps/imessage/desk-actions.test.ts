@@ -15,6 +15,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     relay: async (mate) => { calls.push(["relay", mate.id]); return true; },
     handoff: (reason) => void calls.push(["handoff", reason]),
     status: async () => "all quiet",
+    safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     ...over,
   };
   return { calls, ...createActions(stub) };
@@ -23,6 +24,13 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
 test("reply refuses a protected request", async () => {
   const h = host(["approve the deploy"]);
   await expect(h.run("reply", { text: "Done." })).rejects.toThrow("protected");
+  expect(h.calls).toEqual([]);
+  expect(h.acted()).toBe(false);
+});
+
+test("reply refuses text the redacting filter would change", async () => {
+  const h = host(["hello"]);
+  await expect(h.run("reply", { text: "The password is hunter2." })).rejects.toThrow("protected content");
   expect(h.calls).toEqual([]);
   expect(h.acted()).toBe(false);
 });

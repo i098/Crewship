@@ -46,7 +46,7 @@ def test_plain_text_gets_the_session_reply(tmp_path):
         assert not ROUTING_RECEIPT.search(texts(rig)[0])
         assert not any(e.get("route") == "handoff" for e in events(rig))
         [argv] = desk_lines(rig, "argv")
-        assert argv[argv.index("--model") + 1] == "anthropic/claude-haiku-5-5"
+        assert argv[argv.index("--model") + 1] == "claude-haiku-5-5"
         config = Path(next(argv[i + 1] for i, arg in enumerate(argv) if arg == "--config" and argv[i + 1].endswith("session-config.json")))
         assert json.loads(config.read_text())["compaction"]["modelThresholds"] == {"anthropic/claude-haiku-5-5": "f80000"}
         [prompt] = desk_lines(rig, "prompt")

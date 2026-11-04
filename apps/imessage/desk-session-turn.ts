@@ -3,14 +3,16 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createActions, HOST_TOOLS, sessionPrompt, turnMessage } from "./desk-actions.ts";
 import { DeskSession, sessionConfig } from "./desk-session.ts";
-import { mateStatusLines, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
+import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
+
+type SessionEnv = Record<string, string | undefined>;
 
 export type TurnRequest = RelayRequest & { memoryId: number; route: string };
 
 export type SessionHost<R extends TurnRequest> = {
-  env: Record<string, string | undefined>;
+  env: SessionEnv;
   provider: string;
   model: string;
   reasoning: string;
@@ -32,36 +34,46 @@ export type SessionHost<R extends TurnRequest> = {
   inbox(): Promise<{ status: string; statusOk: boolean }>;
 };
 
-export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
-  const dir = `${host.stateDir}/desk-session`;
-  const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
-  const inception = host.provider === "inception";
-  const model = `${inception ? "inception" : "anthropic"}/${host.model}`; // omp wants provider/model-id for the compaction key
-  const instant = inception && host.reasoning === "instant"; // an env hook sends instant; omp's --thinking has no such level
-  let child: DeskSession | undefined;
+// omp wants provider/model-id for the compaction key.
+const thresholdKeyOf = (provider: string, model: string) => `${provider === "inception" ? "inception" : "anthropic"}/${model}`;
 
-  function session(): DeskSession {
-    if (child) return child;
-    const { env } = host;
-    const cwd = `${dir}/cwd`; // empty cwd: no project context files load
-    rmSync(cwd, { recursive: true, force: true });
-    mkdirSync(cwd, { recursive: true, mode: 0o700 });
-    writeDeskSecrets(cwd, env);
-    const config = `${cwd}/session-config.json`;
-    writeFileSync(config, sessionConfig(model, HOST_TOOLS), { mode: 0o600 });
-    const keys = inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"];
-    const childEnv = Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR", "PATH", ...keys]
-      .map((key) => [key, env[key]]));
-    child = new DeskSession({
-      argv: [env.FM_DESK_SESSION_OMP || "omp", "--mode", "rpc", "--no-ui", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`,
-        "--tools=read,grep,glob,bash,zoom", "--config", `${import.meta.dir}/desk-tools.yml`, "--config", config, "--approval-mode=write",
-        "--no-skills", "--no-rules", "--no-context-files", "--no-title", `--thinking=${instant ? "off" : host.reasoning}`, "--model", model,
-        "--session-dir", `${dir}/sessions`, "--continue", "--system-prompt", sessionPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", host.model, host.supervisorModel)],
-      cwd, sessionDir: `${dir}/sessions`, model, tools: HOST_TOOLS, track: host.track, log: host.log("desk session"),
-      env: { ...childEnv, FM_DESK_MEMORY: host.memoryDir, FM_DESK_SESSION: "1", FM_DESK_INCEPTION_INSTANT: instant ? "1" : undefined, OMP_SKIP_SETUP: "1" },
-    });
-    return child;
-  }
+// What the session already has: its own desk replies and this burst's texts.
+const seenInTurn = (m: { kind: string; requestId?: string }, ids: Set<string>) => m.kind === "desk" || (!!m.requestId && ids.has(m.requestId));
+
+const mask = (text: string, safe: (text: string) => string) => (supervisorOnly(text) || safe(text) !== text ? "Protected context requires Firstmate." : text);
+
+function childEnv(env: SessionEnv, inception: boolean): SessionEnv {
+  const keys = inception ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"];
+  return Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR", "PATH", ...keys]
+    .map((key) => [key, env[key]]));
+}
+
+function startSession<R extends TurnRequest>(host: SessionHost<R>): DeskSession {
+  const { env } = host;
+  const dir = `${host.stateDir}/desk-session`;
+  const inception = host.provider === "inception";
+  const model = modelArg(host.provider, host.model); // as the one-shot desk: omp resolves a bare id's provider
+  const instant = inception && host.reasoning === "instant"; // an env hook sends instant; omp's --thinking has no such level
+  const cwd = `${dir}/cwd`; // empty cwd: no project context files load
+  rmSync(cwd, { recursive: true, force: true });
+  mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  writeDeskSecrets(cwd, env);
+  const config = `${cwd}/session-config.json`;
+  writeFileSync(config, sessionConfig(thresholdKeyOf(host.provider, host.model), HOST_TOOLS), { mode: 0o600 });
+  return new DeskSession({
+    argv: [env.FM_DESK_SESSION_OMP || "omp", "--mode", "rpc", "--no-ui", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`,
+      "--tools=read,grep,glob,bash,zoom", "--config", `${import.meta.dir}/desk-tools.yml`, "--config", config, "--approval-mode=write",
+      "--no-skills", "--no-rules", "--no-context-files", "--no-title", `--thinking=${instant ? "off" : host.reasoning}`, "--model", model,
+      "--session-dir", `${dir}/sessions`, "--continue", "--system-prompt", sessionPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", host.model, host.supervisorModel)],
+    cwd, sessionDir: `${dir}/sessions`, model, tools: HOST_TOOLS, track: host.track, log: host.log("desk session"),
+    env: { ...childEnv(env, inception), FM_DESK_MEMORY: host.memoryDir, FM_DESK_SESSION: "1", FM_DESK_INCEPTION_INSTANT: instant ? "1" : undefined, OMP_SKIP_SETUP: "1" },
+  });
+}
+
+export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
+  const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
+  let child: DeskSession | undefined;
+  const session = () => (child ??= startSession(host));
 
   const seen = (): number => {
     try { return Number(readFileSync(seenPath, "utf8")) || 0; } catch { return 0; }
@@ -70,15 +82,17 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   const refused = (pending: R[], original: string[]) => !host.vetted || host.muted() || !host.safe || pending.some((r) => r.mutationPath)
     || !deskMayAct(pending) || original.some((text) => host.safe!(text) !== text);
 
+  function missedLines(ids: Set<string>, last: number, safe: (text: string) => string) {
+    return host.memory.msgs.slice(Math.min(seen(), last + 1), last + 1)
+      .filter((m) => !seenInTurn(m, ids))
+      .map(({ kind, text }) => ({ kind, text: mask(text, safe) }));
+  }
+
   // The prompt of one turn: the memory view for a new or compacted session, else what the session missed, then the burst.
   function message(pending: R[], original: string[], safe: (text: string) => string, seed: boolean) {
     const indexes = pending.map((r) => host.memoryIndex(r));
     const last = Math.max(...indexes);
-    const ids = new Set(pending.map((r) => r.requestId));
-    const start = Math.min(seen(), last + 1);
-    const missed = seed ? [] : host.memory.msgs.slice(start, last + 1)
-      .filter((m) => m.kind !== "desk" && !(m.requestId && ids.has(m.requestId)))
-      .map(({ kind, text }) => ({ kind, text: supervisorOnly(text) || safe(text) !== text ? "Protected context requires Firstmate." : text }));
+    const missed = seed ? [] : missedLines(new Set(pending.map((r) => r.requestId)), last, safe);
     writeFileSync(seenPath, String(last + 1));
     return turnMessage({ view: seed ? host.memory.render(Math.min(...indexes)) : undefined, missed, burst: original });
   }
@@ -91,7 +105,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     const safe = host.safe!;
     const mates = secondmates(host.fmHome);
     const actions = createActions({
-      requests: pending, current, muted: host.muted, mates: () => mates,
+      requests: pending, current, muted: host.muted, mates: () => mates, safe,
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),
       react: (emoji) => host.react(pending, emoji),
       relay: async (mate) => {
