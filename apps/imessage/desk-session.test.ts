@@ -73,9 +73,10 @@ test("a compaction makes the next prompt carry the seed again", async () => {
   expect(seeds).toEqual([true, true, false]);
 });
 
-test("the session config compacts the model at the fixed trigger", () => {
-  expect(JSON.parse(sessionConfig("fake/desk-model"))).toMatchObject({ compaction: { enabled: true, modelThresholds: { "fake/desk-model": `f${COMPACT_AT}` } } });
-  expect(sessionConfig("m")).toContain("f80000");
+test("the session config keys the fixed trigger by provider/model-id, as omp requires", () => {
+  const thresholds = JSON.parse(sessionConfig("anthropic/claude-haiku-5-5")).compaction.modelThresholds;
+  expect(thresholds).toEqual({ "anthropic/claude-haiku-5-5": `f${COMPACT_AT}` });
+  expect(Object.keys(thresholds).every((key) => /^[^/*]+\/.+/.test(key))).toBe(true);
 });
 
 test("the usage of each assistant message goes to the token log", async () => {
@@ -100,7 +101,22 @@ test("an abort signal aborts the turn in flight", async () => {
   expect(await asked).toEqual({ status: "aborted" });
 });
 
-test("a turn that answers in words returns them as text", async () => {
+test("a newer ask waits behind the turn in flight instead of aborting it", async () => {
+  const { desk, lines } = session();
+  const first = new AbortController();
+  let settled = false;
+  const slow = desk.ask(() => "SLOW", first.signal, run).finally(() => { settled = true; });
+  await until(() => lines().some((line) => line.prompt === "SLOW"));
+  const next = desk.ask(() => "hi", live(), run);
+  await Bun.sleep(300);
+  expect(settled).toBe(false);
+  expect(lines().filter((line) => line.prompt).length).toBe(1);
+  first.abort();
+  expect(await slow).toEqual({ status: "aborted" });
+  expect(await next).toEqual({ status: "completed" });
+});
+
+test("a turn that answers in words is completed with no text for the bridge to send", async () => {
   const { desk } = session();
-  expect(await desk.ask(() => "PLAIN", live(), run)).toEqual({ status: "completed", text: "Plain words." });
+  expect(await desk.ask(() => "PLAIN", live(), run)).toEqual({ status: "completed" });
 });

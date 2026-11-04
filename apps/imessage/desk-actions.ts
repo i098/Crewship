@@ -34,6 +34,25 @@ export type ActionHost = {
   status(): Promise<string>;
 };
 
+function replyParts(args: Record<string, unknown>, count: number): { parts: string[]; target: number } {
+  if (typeof args.text !== "string" || !args.text.trim()) throw new Error("text must be a non-empty string");
+  const clean = cleanText(args.text);
+  const why = statusLine(clean);
+  if (why) throw new Error(`refused: the text reads as a raw status line (${why}); say it in plain words`);
+  const target = args.to === undefined ? count : Number(args.to);
+  if (!Number.isInteger(target) || target < 1 || target > count) throw new Error(`to must be 1 to ${count}`);
+  const parts = bubbles(clean);
+  if (!parts.length) throw new Error("text must be a non-empty string");
+  return { parts, target };
+}
+
+function tapbackEmoji(args: Record<string, unknown>, requests: readonly RelayRequest[]): string {
+  const emoji = String(args.emoji);
+  if (!TAPBACKS.includes(emoji)) throw new Error(`emoji must be one of ${TAPBACKS.join(" ")}`);
+  if (requests.some((request) => /\?/.test(request.authored ?? request.text))) throw new Error("refused: a question needs words; call reply");
+  return emoji;
+}
+
 // One runner per turn. `acted()` says whether the turn ended in a reply, tapback, relay or handoff.
 export function createActions(host: ActionHost): { run: ToolRunner; acted(): boolean } {
   let done = false;
@@ -47,56 +66,45 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
   const may = () => {
     if (!deskMayAct(host.requests)) throw new Error("refused: this request is protected; call handoff_main");
   };
-  const text = (value: unknown) => {
-    if (typeof value !== "string" || !value.trim()) throw new Error("text must be a non-empty string");
-    return value;
+  const handlers: Record<string, (args: Record<string, unknown>) => string | Promise<string>> = {
+    reply: (args) => {
+      open(); may();
+      const { parts, target } = replyParts(args, host.requests.length);
+      done = true;
+      host.reply(parts, target);
+      return "sent; your turn is over";
+    },
+    tapback: (args) => {
+      open(); may();
+      const emoji = tapbackEmoji(args, host.requests);
+      done = true;
+      host.react(emoji);
+      return "reacted; your turn is over";
+    },
+    relay_mate: async (args) => {
+      open(); may();
+      const id = String(args.mate);
+      const mate = relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
+      if (!mate) throw new Error(`refused: ${id} is not a listed mate; call handoff_main`);
+      done = true;
+      if (!await host.relay(mate)) throw new Error(`delivery to ${id} did not complete; Firstmate has the text`);
+      return `routed to ${mate.id}; your turn is over`;
+    },
+    handoff_main: (args) => {
+      open();
+      done = true;
+      host.handoff(typeof args.reason === "string" ? args.reason : "");
+      return "handed to Firstmate; your turn is over";
+    },
+    fleet_status: async () => {
+      live(); may();
+      return (await host.status()).slice(0, STATUS_MAX);
+    },
   };
   const run: ToolRunner = async (name, args) => {
-    switch (name) {
-      case "reply": {
-        open(); may();
-        const clean = cleanText(text(args.text));
-        const why = statusLine(clean);
-        if (why) throw new Error(`refused: the text reads as a raw status line (${why}); say it in plain words`);
-        const target = args.to === undefined ? host.requests.length : Number(args.to);
-        if (!Number.isInteger(target) || target < 1 || target > host.requests.length) throw new Error(`to must be 1 to ${host.requests.length}`);
-        const parts = bubbles(clean);
-        if (!parts.length) throw new Error("text must be a non-empty string");
-        done = true;
-        host.reply(parts, target);
-        return "sent; your turn is over";
-      }
-      case "tapback": {
-        open(); may();
-        const emoji = String(args.emoji);
-        if (!TAPBACKS.includes(emoji)) throw new Error(`emoji must be one of ${TAPBACKS.join(" ")}`);
-        if (host.requests.some((request) => /\?/.test(request.authored ?? request.text))) throw new Error("refused: a question needs words; call reply");
-        done = true;
-        host.react(emoji);
-        return "reacted; your turn is over";
-      }
-      case "relay_mate": {
-        open(); may();
-        const id = String(args.mate);
-        const mates = host.mates();
-        const mate = relayTarget(host.requests, { category: "work", target: id, domains: [id] }, mates);
-        if (!mate) throw new Error(`refused: ${id} is not a listed mate; call handoff_main`);
-        done = true;
-        if (!await host.relay(mate)) throw new Error(`delivery to ${id} did not complete; Firstmate has the text`);
-        return `routed to ${mate.id}; your turn is over`;
-      }
-      case "handoff_main": {
-        open();
-        done = true;
-        host.handoff(typeof args.reason === "string" ? args.reason : "");
-        return "handed to Firstmate; your turn is over";
-      }
-      case "fleet_status": {
-        live(); may();
-        return (await host.status()).slice(0, STATUS_MAX);
-      }
-      default: throw new Error(`unknown tool ${name}`);
-    }
+    const handler = Object.hasOwn(handlers, name) ? handlers[name] : undefined;
+    if (!handler) throw new Error(`unknown tool ${name}`);
+    return handler(args);
   };
   return { run, acted: () => done };
 }

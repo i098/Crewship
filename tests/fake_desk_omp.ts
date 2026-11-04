@@ -45,7 +45,7 @@ async function prompt(id: string, message: string) {
   send({ type: "prompt_result", id, status, sessionSettled: true });
 }
 
-record({ argv: process.argv.slice(2) });
+record({ argv: process.argv.slice(2), instant: process.env.FM_DESK_INCEPTION_INSTANT });
 send({ type: "ready", protocolVersion: 1 });
 for await (const line of console) {
   let frame: Frame;

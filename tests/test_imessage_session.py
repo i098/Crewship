@@ -22,14 +22,14 @@ pytestmark = pytest.mark.skipif(
 
 
 @contextmanager
-def session_rig(tmp_path):
+def session_rig(tmp_path, **extra):
     """A V2 bridge with the desk session on, over the fake omp child; `rig.desk_log` holds its argv and prompts."""
     log, wrapper = tmp_path / "fake-desk.jsonl", tmp_path / "desk-omp"
     # The bridge passes the child a fixed env allowlist, so the log path rides in the wrapper.
     wrapper.write_text(f'#!/bin/bash\nFAKE_DESK_LOG={shlex.quote(str(log))} exec bun {shlex.quote(str(FAKE))} "$@"\n')
     wrapper.chmod(0o755)
     with v2_rig(tmp_path, None, inception="http://127.0.0.1:9/v1/chat/completions",
-                FM_IMESSAGE_DESK_SESSION="true", FM_DESK_SESSION_OMP=str(wrapper)) as rig:
+                FM_IMESSAGE_DESK_SESSION="true", FM_DESK_SESSION_OMP=str(wrapper), **extra) as rig:
         rig.desk_log = log
         yield rig
 
@@ -46,9 +46,9 @@ def test_plain_text_gets_the_session_reply(tmp_path):
         assert not ROUTING_RECEIPT.search(texts(rig)[0])
         assert not any(e.get("route") == "handoff" for e in events(rig))
         [argv] = desk_lines(rig, "argv")
-        assert argv[argv.index("--model") + 1] == "claude-haiku-5-5"
+        assert argv[argv.index("--model") + 1] == "anthropic/claude-haiku-5-5"
         config = Path(next(argv[i + 1] for i, arg in enumerate(argv) if arg == "--config" and argv[i + 1].endswith("session-config.json")))
-        assert json.loads(config.read_text())["compaction"]["modelThresholds"] == {"claude-haiku-5-5": "f80000"}
+        assert json.loads(config.read_text())["compaction"]["modelThresholds"] == {"anthropic/claude-haiku-5-5": "f80000"}
         [prompt] = desk_lines(rig, "prompt")
         assert "1: how are you" in prompt
 
@@ -102,8 +102,22 @@ def test_bridge_restart_continues_the_same_session(tmp_path):
             assert argv[argv.index("--session-dir") + 1] == session_dir
 
 
-def test_plain_words_from_the_session_are_sent_as_the_reply(tmp_path):
+def test_a_turn_with_no_action_goes_to_firstmate(tmp_path):
     with session_rig(tmp_path) as rig:
         deliver(rig, "m1", "how are you PLAIN")
-        wait_for(lambda: len(texts(rig)) == 1, "the plain-words reply", timeout=120)
-        assert texts(rig)[0].split(" ", 1)[1].strip() == "Plain words."
+        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig)),
+                 "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+
+
+def test_instant_reasoning_starts_the_inception_session(tmp_path):
+    extra = dict(FM_IMESSAGE_DESK_PROVIDER="inception", FM_IMESSAGE_DESK_MODEL="mercury-3", FM_IMESSAGE_DESK_REASONING="instant")
+    with session_rig(tmp_path, **extra) as rig:
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        [argv] = desk_lines(rig, "argv")
+        assert "--thinking=off" in argv
+        assert desk_lines(rig, "instant") == ["1"]
+        config = Path(next(argv[i + 1] for i, arg in enumerate(argv) if arg == "--config" and argv[i + 1].endswith("session-config.json")))
+        assert json.loads(config.read_text())["compaction"]["modelThresholds"] == {"inception/mercury-3": "f80000"}

@@ -7,8 +7,7 @@ import { logTokens, usageTokens } from "./tokenlog.ts";
 
 export type HostTool = { name: string; description: string; parameters: Record<string, unknown> };
 export type ToolRunner = (name: string, args: Record<string, unknown>) => Promise<string>;
-// `text` is the last plain assistant text of the turn: a model that answers in words instead of calling reply.
-export type PromptResult = { status: "completed" | "aborted" | "error"; error?: string; text?: string };
+export type PromptResult = { status: "completed" | "aborted" | "error"; error?: string };
 type Frame = {
   type?: string; id?: string; success?: boolean; error?: unknown; status?: PromptResult["status"];
   result?: unknown; aborted?: boolean; message?: { role?: string; usage?: unknown; model?: string; content?: { type?: string; text?: string }[] };
@@ -35,9 +34,9 @@ export type SessionOptions = {
 
 // The omp config overlay: it makes omp compact this session at COMPACT_AT tokens, whatever the catalog window says.
 // The host tools need no human approval in omp: the bridge checks each call itself (desk-actions.ts).
-export function sessionConfig(model: string, tools: readonly HostTool[] = []): string {
+export function sessionConfig(thresholdKey: string, tools: readonly HostTool[] = []): string {
   return JSON.stringify({
-    compaction: { enabled: true, modelThresholds: { [model]: `f${COMPACT_AT}` } },
+    compaction: { enabled: true, modelThresholds: { [thresholdKey]: `f${COMPACT_AT}` } },
     tools: { approval: Object.fromEntries(tools.map((tool) => [tool.name, "allow"])) },
   });
 }
@@ -48,13 +47,11 @@ export class DeskSession {
   private waiters = new Map<string, Waiter>();
   private run?: ToolRunner;
   private tail: Promise<unknown> = Promise.resolve();
-  private inflight = 0;
   private sequence = 0;
   private failures = 0;
   private retryAt = 0;
   private seed = false;
   private closing = false;
-  private words = "";
 
   constructor(private readonly o: SessionOptions) {}
 
@@ -107,16 +104,12 @@ export class DeskSession {
       case "response": return frame.id ? this.settle(`r:${frame.id}`, frame) : undefined;
       case "prompt_result": return frame.id ? this.settle(`p:${frame.id}`, frame) : undefined;
       case "host_tool_call": return void this.tool(frame);
-      case "message_end":
+      case "message_end": {
         if (frame.message?.role !== "assistant") return;
-        {
-          const text = (frame.message.content ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim();
-          // Words before a tool call are narration, not the answer.
-          this.words = (frame.message.content ?? []).some((part) => part.type === "toolCall") ? "" : text || this.words;
-          const used = usageTokens(frame.message.usage);
-          if (used) logTokens({ kind: "desk-session", model: String(frame.message.model ?? this.o.model), ...used });
-        }
+        const used = usageTokens(frame.message.usage);
+        if (used) logTokens({ kind: "desk-session", model: String(frame.message.model ?? this.o.model), ...used });
         return;
+      }
       case "auto_compaction_end":
         // The summary replaced the old turns: the next prompt re-seeds the memory view next to it.
         if (frame.result && !frame.aborted) this.seed = true;
@@ -179,14 +172,12 @@ export class DeskSession {
     this.retryAt = (this.o.now ?? Date.now)() + Math.min(BACKOFF_MAX_MS, 1000 * 2 ** (this.failures - 1));
   }
 
-  // One prompt, one result. A newer ask aborts the one in flight and waits for its end before it sends, so a late
-  // tool call of the old turn never reaches the new turn's runner. `build` gets whether this prompt must carry the seed.
+  // One prompt, one result: asks queue, so only a turn's own signal aborts it and a late tool call of an
+  // old turn never reaches the next turn's runner. `build` gets whether this prompt must carry the seed.
   async ask(build: (seed: boolean) => string, signal: AbortSignal, run: ToolRunner): Promise<PromptResult> {
     const previous = this.tail;
     const { promise: ended, resolve: release } = Promise.withResolvers<void>();
     this.tail = ended;
-    if (this.inflight) { try { this.send({ type: "abort" }); } catch { /* the child is gone: the old ask ends on its own */ } }
-    this.inflight++;
     try {
       await previous.catch(() => {});
       if (signal.aborted) return { status: "aborted" };
@@ -196,7 +187,6 @@ export class DeskSession {
       this.seed = false;
       const id = `p${++this.sequence}`;
       this.run = run;
-      this.words = "";
       const done = this.expect(`p:${id}`);
       this.send({ id, type: "prompt", message: build(seed) });
       const abort = () => { try { this.send({ type: "abort" }); } catch { /* exited */ } };
@@ -207,13 +197,12 @@ export class DeskSession {
         const result = await done;
         if (result.status === "completed") this.failures = 0;
         const error = result.error as { message?: string } | undefined;
-        return { status: result.status ?? "error", ...(this.words ? { text: this.words } : {}), ...(error ? { error: String(error.message ?? error) } : {}) };
+        return { status: result.status ?? "error", ...(error ? { error: String(error.message ?? error) } : {}) };
       } finally {
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
       }
     } finally {
-      this.inflight--;
       release();
     }
   }
