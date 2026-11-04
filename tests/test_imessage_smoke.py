@@ -1,8 +1,9 @@
 """Desk release smoke: real texts get real handling through the bridge, front and desk, never the routing line.
 
 Run with FM_DESK_SMOKE_STRICT=1 before every fm-imessage desk release (docs/imessage.md): a front
-secret masker that cannot load then FAILS the run. Without it that check skips, as in CI, whose omp
-stub has none. The routing checks need no masker and always run. Only the model's network edge is stubbed.
+secret masker that cannot load then FAILS the run. Without it the masker check and the status check skip,
+as in CI, whose omp stub has none. The relay routing check needs no masker and always runs.
+Only the model's network edge is stubbed.
 """
 
 import json
@@ -59,6 +60,9 @@ def test_work_text_is_handed_off_with_no_routing_line(tmp_path):
 
 
 def test_status_text_gets_a_real_answer_not_the_routing_line(tmp_path):
+    problem = masker_loads(tmp_path)
+    if problem and not STRICT:
+        pytest.skip(f"front secret masker unavailable, so the front relays every text: {problem}")
     with v2_rig(tmp_path, [{"kind": "status", "text": ""}]) as rig:
         deliver(rig, "m1", "what is the mate doing right now")
         wait_for(lambda: len(texts(rig)) == 1, "the desk answer", timeout=120)
