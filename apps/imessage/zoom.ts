@@ -14,7 +14,7 @@ import { canonicalWritePath } from "./desk.ts";
 
 // The slice of omp's ExtensionAPI this file uses.
 type Zod = { object(shape: Record<string, unknown>): unknown; number(): { describe(text: string): unknown } };
-type DeskMessage = { role: string; content: string | { type: string; text?: string }[]; toolCallId?: string; toolName?: string; isError?: boolean };
+type DeskMessage = { role: string; content: string | { type: string; text?: string }[]; toolCallId?: string; toolName?: string; isError?: boolean; model?: string; usage?: { input?: number; output?: number } };
 export default function (pi: {
   zod: Zod;
   registerTool(tool: unknown): void;
@@ -46,7 +46,10 @@ export default function (pi: {
     const tools = Object.fromEntries(output.filter((message) => message.role === "toolResult" && !message.isError)
       .map((message) => [message.toolCallId, { name: message.toolName, text: message.text }]));
     const drafted = output.findLast((message) => message.role === "assistant")?.text ?? "";
-    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools, question: redact(process.env.FM_DESK_QUESTION ?? "") })}\n`);
+    const calls = messages.filter((message) => message.role === "assistant");
+    const usage = { input: calls.reduce((sum, call) => sum + (call.usage?.input ?? 0), 0), output: calls.reduce((sum, call) => sum + (call.usage?.output ?? 0), 0) };
+    const model = calls.findLast((call) => call.model)?.model;
+    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools, question: redact(process.env.FM_DESK_QUESTION ?? ""), usage, model })}\n`);
   });
   // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
   const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));

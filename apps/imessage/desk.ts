@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
 import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { logTokens, usageTokens } from "./tokenlog.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
@@ -103,6 +104,18 @@ export function secondmates(home: string): Secondmate[] {
     }
     return mates;
   } catch { return []; }
+}
+
+// The last status line of each mate, from `<home>/state/<id>.status`; a missing or empty file adds nothing.
+export function mateStatusLines(home: string, mates: readonly Secondmate[]): string {
+  const lines: string[] = [];
+  for (const { id } of mates) {
+    try {
+      const last = readFileSync(`${home}/state/${id}.status`, "utf8").trimEnd().split("\n").at(-1)?.trim();
+      if (last) lines.push(`${id}: ${last.slice(0, 300)}`);
+    } catch { /* no status file yet */ }
+  }
+  return lines.join("\n");
 }
 
 export function supervisorOnly(text: string): boolean {
@@ -488,7 +501,7 @@ function deskCommand(o: DeskOptions, reasoning: string): string[] {
   return inception && o.voice
     ? [process.execPath, `${import.meta.dir}/inception-desk.ts`, o.model, reasoning, o.system, "voice"]
     : ["omp", "-p", "--no-extensions", ...(o.voice ? [] : ["-e", `${import.meta.dir}/zoom.ts`]),
-      ...(o.serverTools ? ["--tools=read,grep,glob,bash,write,zoom", "--mode=json",
+      "--mode=json", ...(o.serverTools ? ["--tools=read,grep,glob,bash,write,zoom",
         "--config", `${import.meta.dir}/desk-tools.yml`, "--approval-mode=write"] : ["--no-tools"]),
       "--no-skills", "--no-rules", "--no-session",
       `--thinking=${inception && reasoning === "instant" ? "off" : reasoning}`, "--model", inception ? `inception/${o.model}` : o.model, "--system-prompt", system];
@@ -526,7 +539,7 @@ export function spawnDesk(o: DeskOptions): DeskProc {
   const reasoning = o.voice ? (inception ? o.reasoning ?? "instant" : "off") : o.reasoning ?? "off";
   const argv = deskCommand(o, reasoning);
   const env = inception && o.voice
-    ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL }
+    ? { ...desk, INCEPTION_API_KEY: o.env.INCEPTION_API_KEY, FM_DESK_INCEPTION_URL: o.env.FM_DESK_INCEPTION_URL, STATE_DIRECTORY: o.env.STATE_DIRECTORY, HOME: o.env.HOME }
     : !o.serverTools && !inception && o.apiKeyEnv === undefined ? { ...o.env, ...desk }
     : { ...Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR",
       ...(o.apiKeyEnv !== undefined ? (o.apiKeyEnv === null ? [] : [o.apiKeyEnv])
@@ -569,18 +582,53 @@ export async function readDesk(proc: DeskProc, serverTools = false): Promise<Des
   let drafted = serverTools ? "" : output;
   let tools: DeskEvidence = {};
   let question = "";
+  let spent = { input: 0, output: 0, seen: false };
+  let model = "unknown";
+  let events = 0;
+  const count = (usage: unknown, name: unknown) => {
+    const used = usageTokens(usage);
+    if (!used) return;
+    spent = { input: spent.input + used.input, output: spent.output + used.output, seen: true };
+    if (typeof name === "string") model = name;
+  };
   for (const line of output.split("\n")) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
     if (serverTools) {
-      if (event.type === "desk_result") ({ drafted, tools, question = "" } = event);
+      if (event.type === "desk_result") {
+        ({ drafted, tools, question = "" } = event);
+        spent = { input: 0, output: 0, seen: false };
+        count(event.usage, event.model);
+      }
       continue;
     }
-    if (event.type === "message_end" && event.message.role === "assistant") {
+    if (/^(agent|turn|message|tool)_/.test(event?.type) && !events++) drafted = ""; // json mode: only an assistant message is an answer
+    if (event?.type === "message_end" && event.message.role === "assistant") {
       drafted = event.message.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
+      count(event.message.usage, event.message.model);
     }
   }
+  if (spent.seen) logTokens({ kind: "desk", model, input: spent.input, output: spent.output });
   return { ok: (await proc.exited) === 0 && drafted !== "", drafted, tools, question };
+}
+
+// The reply text and token use of a compaction call. Output that is not an omp json event stream is the text itself.
+export function compactReply(output: string): { text: string; input?: number; output?: number; model: string } {
+  let text: string | undefined;
+  let model = "gpt-6-luna";
+  let spent: { input: number; output: number } | undefined;
+  let streamed = false;
+  for (const row of output.split("\n")) {
+    let event;
+    try { event = JSON.parse(row); } catch { continue; }
+    streamed ||= /^(agent|turn|message|tool)_/.test(event?.type);
+    if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
+    text = (event.message.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
+    const used = usageTokens(event.message.usage);
+    if (used) spent = { input: (spent?.input ?? 0) + used.input, output: (spent?.output ?? 0) + used.output };
+    if (typeof event.message.model === "string") model = event.message.model;
+  }
+  return { text: text ?? (streamed ? "" : output), model, ...spent };
 }
 
 // One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
@@ -597,11 +645,14 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
       if (stopping()) throw new Error("bridge stopping");
       const proc = track(Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
-          "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
+          "--mode=json", "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
         { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
       ));
-      const line = (await new Response(proc.stdout).text()).replace(/^Working\.\.\.\s*/m, "").trim();
+      const output = await new Response(proc.stdout).text();
       const exit = await proc.exited;
+      const reply = compactReply(output);
+      if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
+      const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
       if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
       return line;
     },

@@ -9,9 +9,14 @@ export type RelayRequest = Readonly<{
   mutationPath?: string;
 }>;
 
+// Decisions, money, deploys, credentials, writes and unclear approvals stay with Firstmate.
+export function deskMayAct(requests: readonly RelayRequest[]): boolean {
+  return requests.length > 0 && !requests.some((request) => request.firstmate || !request.mateEligible || request.mutationPath
+    || supervisorOnly(request.authored ?? request.text));
+}
+
 export function relayTarget(requests: readonly RelayRequest[], metadata: unknown, mates: Secondmate[]): Secondmate | undefined {
-  if (!requests.length || requests.some((request) => request.firstmate || !request.mateEligible || request.mutationPath
-    || supervisorOnly(request.authored ?? request.text))) return;
+  if (!deskMayAct(requests)) return;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return;
   const value = metadata as Record<string, unknown>;
   if (value.category !== "work" || typeof value.target !== "string" || !Array.isArray(value.domains)

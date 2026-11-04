@@ -33,12 +33,12 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import type { DispatchModel } from "./dispatch-policy.ts";
-import { loadFrontRedactor, runFront } from "./front.ts";
+import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
-import { relayTarget, relayTargetCurrent } from "./relay.ts";
+import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
@@ -1085,12 +1085,30 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     recordRoute({ ids: pending.map((r) => r.requestId), v2: plan });
   }
   const intent = plan.intents[0];
+  if (intent?.kind === "status") return statusV2(pending, secondmates(FM_HOME), controller.signal, current);
   put({
     ...target.ref, ...plan.front, kind: "desk", loop: "v2", front: true, reply: target.ref.id,
     bubbles: [`I am routing this request to ${intent?.kind === "relay" ? (plan.mate ? `the ${plan.mate.id} secondmate` : "Firstmate") : dispatchSelection(intent, v2Models) ? "a worker" : "Firstmate"}.`],
   });
   if (intent?.kind === "dispatch") await dispatchV2(pending, intent, controller.signal, current);
   else if (intent?.kind === "relay") await relayV2(pending, plan, current);
+}
+
+// The desk answers a status question itself from the inbox status and the mates' last status lines.
+// Anything it cannot answer from them, and any request it may not act on, goes to Firstmate.
+async function statusV2(pending: Routing[], mates: Secondmate[], signal: AbortSignal, current: () => boolean) {
+  if (!deskMayAct(pending) || !v2Redact) return handoffV2(pending);
+  const inbox = await readInboxStatus();
+  if (!current()) return;
+  if (muted() || !inbox.statusOk) return handoffV2(pending);
+  const reply = await answerStatus({
+    original: pending.map((r) => r.authored ?? r.text), status: `${inbox.status}\n${mateStatusLines(FM_HOME, mates)}`.slice(0, 30_000),
+    apiKey: env.INCEPTION_API_KEY ?? "", signal, endpoint: env.FM_DESK_INCEPTION_URL, redact: v2Redact,
+  });
+  if (!current()) return;
+  const text = reply && cleanText(reply);
+  if (!text || muted()) return handoffV2(pending);
+  commitV2Answer(pending, bubbles(text));
 }
 
 async function dispatchV2(pending: Routing[], intent: Extract<FrontIntent, { kind: "dispatch" }>, signal: AbortSignal, current: () => boolean) {

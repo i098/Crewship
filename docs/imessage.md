@@ -289,12 +289,19 @@ The setting defaults to `false`; omit it or set it to `false` to keep the legacy
 The service renders this setting as `FM_IMESSAGE_DESK_V2=true` or `false`.
 The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
 Deployment and a one-week trial require separate authorization.
-The front picks one of three results: social, dispatch, or relay.
+The front picks one of four results: social, status, dispatch, or relay.
 A purely social text gets one tapback and no text.
+Status answers a question about what the mates are doing. The desk reads the inbox status and each mate's last line from `state/<mate>.status`, and answers in one tool-free call, without the routing reply.
+It hands the text to Firstmate when the request is a decision, approval, money, deploy, public post or write, when the status text does not answer it, or when the call fails.
 Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
 Relay hands the work to the owning mate or to Firstmate. An invalid front answer fails closed to a Firstmate relay.
 Before relay or dispatch work starts, the desk sends one short reply that names where the request goes: Firstmate, the secondmate, or a worker. It does not complete the request or stop the typing indicator.
 The typing indicator stops when a newer text replaces the running job.
+
+### Token log
+
+Every desk and compaction call appends one line to `tokens.jsonl` in the state directory: `{ts, kind, model, input_tokens, output_tokens}`, with the counts the provider returned. `kind` is `front`, `status`, `desk`, `voice`, or `compaction`.
+`tokens-daily.log` holds one line per day with the call count and the token totals. A call whose provider returns no counts adds no line. A failed write is logged and never fails the call.
 
 ## Herdr status alerts
 
