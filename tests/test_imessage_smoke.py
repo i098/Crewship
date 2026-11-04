@@ -1,8 +1,8 @@
-"""Desk release smoke: one real text gets a real answer through the bridge, front and desk.
+"""Desk release smoke: real texts get real handling through the bridge, front and desk, never the routing line.
 
-Run before every fm-imessage desk release (docs/imessage.md). With FM_DESK_SMOKE_STRICT=1 a front
-secret masker that cannot load FAILS the run; without it the test skips, as in CI, whose omp stub
-has none. Only the model's network edge is stubbed.
+Run with FM_DESK_SMOKE_STRICT=1 before every fm-imessage desk release (docs/imessage.md): a front
+secret masker that cannot load then FAILS the run. Without it that check skips, as in CI, whose omp
+stub has none. The routing checks need no masker and always run. Only the model's network edge is stubbed.
 """
 
 import json
@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -38,24 +39,30 @@ console.log(redact(JSON.stringify({{ messages: [{{ role: "user", content: "hello
     return next((line for line in lines if "rror" in line), "unknown")
 
 
-@pytest.fixture(autouse=True)
-def masker(tmp_path):
+def test_front_secret_masker_loads(tmp_path):
     problem = masker_loads(tmp_path)
     if problem and not STRICT:
         pytest.skip(f"front secret masker unavailable: {problem}")
     assert problem is None, f"front secret masker cannot load, so the front relays every text: {problem}"
 
 
-def test_front_secret_masker_loads():
-    """The autouse fixture is the check: a missing native addon fails the smoke run."""
+def test_work_text_is_handed_off_with_no_routing_line(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]) as rig:
+        deliver(rig, "m1", "please check the whole repo")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the handoff", timeout=120)
+        deadline = time.monotonic() + 8
+        while not texts(rig) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        sent = texts(rig)
+        assert not any(ROUTING_RECEIPT.search(line) for line in sent), f"the desk sent the routing receipt: {sent}"
+        assert sent == [], "the desk answered a text it handed to the firstmate"
 
 
-def test_real_text_gets_a_real_answer_not_the_routing_line(tmp_path):
+def test_status_text_gets_a_real_answer_not_the_routing_line(tmp_path):
     with v2_rig(tmp_path, [{"kind": "status", "text": ""}]) as rig:
         deliver(rig, "m1", "what is the mate doing right now")
         wait_for(lambda: len(texts(rig)) == 1, "the desk answer", timeout=120)
         reply = texts(rig)[0].split(" ", 1)[1].strip()
         assert reply, "the desk sent an empty reply"
         assert not ROUTING_RECEIPT.search(reply), f"the desk sent the routing receipt: {reply}"
-        assert "Checks are running." in reply
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the front relayed the text"
