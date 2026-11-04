@@ -7,11 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Add the `imessage.desk_session` setting, on by default with `desk_v2`, to run the V2 desk as one persistent omp session; set it to `false` to keep the one-shot V2 loop ([#1121](https://github.com/i098/Crewship/issues/1121)).
-- Add the `delegate_task` desk tool. The desk replies at once, and one background job sends the owner's text to Firstmate or a listed second mate, waits for the answer file, and texts the answer through the checked reply path.
-
 ## [0.4.8] - 2026-10-28
 
 ### Added
