@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Text the operator when an agent reads Slack with slk, then run the real slk.
+
+`slk export` and a bare `slk` (the TUI) read messages; every other call passes through silently.
+The text names the agent, workspace and channel, never message content.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+WINDOW = 600
+VALUE_FLAGS = {"channel", "workspace"}
+
+
+def parse(args):
+    """Return what the agent did for an export or TUI call, or None for any other call."""
+    if not args:
+        return "opened the Slack TUI"
+    if args[0] != "export" or {"-h", "-help", "--help"} & set(args[1:]):
+        return None
+    found = {}
+    rest = iter(args[1:])
+    for arg in rest:
+        name, eq, value = arg.lstrip("-").partition("=")
+        if arg.startswith("-") and name in VALUE_FLAGS:
+            found[name] = value if eq else next(rest, "")
+    return f"read {clean(found.get('workspace', 'default'))} {clean(found.get('channel', '?'))}"
+
+
+def agent():
+    home = os.environ.get("FM_HOME", "").rstrip("/")
+    return os.environ.get("FM_TASK_ID") or os.environ.get("FM_TASK") or (os.path.basename(home) if home else "") or "unknown"
+
+
+def clean(text):
+    return re.sub(r"[^\w#@.:-]+", " ", text).strip()[:60]
+
+
+def due(who, now):
+    """True at most once per WINDOW per agent; reads in between count into the next line."""
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    path = Path(state_home) / "crewship/slk-read-notify.json"
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, ValueError):
+        state = {}
+    entry = state.get(who, {})
+    if now - entry.get("sent", 0) < WINDOW:
+        entry["skipped"] = entry.get("skipped", 0) + 1
+        ok, skipped = False, 0
+    else:
+        ok, skipped = True, entry.get("skipped", 0)
+        entry = {"sent": now, "skipped": 0}
+    state[who] = entry
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_suffix(".tmp")
+    staged.write_text(json.dumps(state))
+    os.replace(staged, path)
+    return ok, skipped
+
+
+def notify(call):
+    who = clean(agent())
+    ok, skipped = due(who, time.time())
+    if not ok:
+        return
+    text = f"slk read: {who} {call}"
+    if skipped:
+        text += f" (+{skipped} more)"
+    command = ["fm-imessage", "--", text]
+    if not shutil.which("fm-imessage"):
+        return
+    if shutil.which("timeout"):
+        command = ["timeout", "30", *command]
+    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def main():
+    call = parse(sys.argv[1:])
+    if call:
+        try:
+            notify(call)
+        except Exception:
+            pass  # a notification must never break the slk call
+    wrapper = Path(__file__).resolve()
+    real = wrapper.with_name("slk-real").resolve(strict=True)
+    if real == wrapper:
+        sys.exit("slk: wrapper points at itself")
+    os.execv(real, [str(real), *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    main()

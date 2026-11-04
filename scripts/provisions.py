@@ -545,15 +545,16 @@ def link_binary(home, name, target):
 
 
 GH_GUARD_SOURCE = Path(__file__).resolve().parents[1] / "blueprint/maintenance/gh"
+SLK_NOTIFY_SOURCE = Path(__file__).resolve().parents[1] / "blueprint/maintenance/slk"
 
 
 def install_gh_guard(home, real_binary, name="gh"):
-    if name not in ("gh", "gh-axi"):
+    if name not in ("gh", "gh-axi", "slk"):
         raise ValueError(f"unsupported guarded command: {name}")
     guard = home / ".local/share/crewship/gh-guard"
     guard.mkdir(parents=True, exist_ok=True)
     wrapper, real, target = guard / name, guard / f"{name}-real", real_binary.resolve()
-    source = GH_GUARD_SOURCE.read_bytes()
+    source = (SLK_NOTIFY_SOURCE if name == "slk" else GH_GUARD_SOURCE).read_bytes()
     changed = False
     if (
         wrapper.is_symlink()
@@ -629,8 +630,8 @@ def install_asset(home, name, spec, key):
             unpacked.rename(final)
         changed = True
     for binary, path in verified_binaries(name, version, final, asset["binaries"]).items():
-        if binary == "gh":
-            changed = install_gh_guard(home, path) or changed
+        if binary in ("gh", "slk"):
+            changed = install_gh_guard(home, path, binary) or changed
         else:
             changed = link_binary(home, binary, path) or changed
     return changed
