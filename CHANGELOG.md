@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A `ci_pool.repos` entry with a `name` is a separate slot group again: its slots, runners, and units use that name, so the quick runners no longer drop offline after an install ([#1117](https://github.com/i098/Crewship/issues/1117)).
+
 ## [0.4.8] - 2026-10-28
 
 ### Added
