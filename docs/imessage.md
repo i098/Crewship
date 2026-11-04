@@ -316,12 +316,12 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - omp compacts the session at a fixed 80,000 tokens. The bridge sets this trigger in `compaction.modelThresholds`.
 - The memory view seeds a new session and a session that was just compacted.
 - The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool; it hands all writes to Firstmate.
-- The session acts through five host tools. The bridge checks each call before it does the action:
+- The session acts through five action tools. The bridge checks each call before it does the action:
   - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
   - `tapback` reacts only when `deskMayAct` permits it.
   - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
   - `handoff_main` gives the text to Firstmate.
-  - `delegate_task` starts background work and does not end the turn. See [Background tasks](#background-tasks).
+  - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
 - The desk sends no fixed routing receipt bubble.
 - Each assistant message adds one `desk-session` line to the token log.

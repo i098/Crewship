@@ -39,7 +39,6 @@ import type { DispatchModel } from "./dispatch-policy.ts";
 import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
-import { createDelegator } from "./desk-delegate.ts";
 import { createSessionTurn } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -1068,23 +1067,17 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
-const delegateTask = createDelegator<Routing>({
-  answerDir: `${STATE}/desk-tasks`, waitMs: Number(env.FM_IMESSAGE_DELEGATE_WAIT_MS) || 600_000, pollMs: 500,
-  stopping: () => stopping, muted, log: log("desk task"),
-  safe: (text) => frontContextText(v2Redact!, text), // the session never runs without the redactor
-  listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
-  send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
-    : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
-  report: (parts, id, origin) => outbox.add({ ...origin.ref, requestId: `task-${id}`, requests: [], kind: "desk",
-    guid: crypto.randomUUID(), at: Date.now(), bubbles: parts, deskGeneration, deskSession }),
-});
-
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
   memoryIndex: (r) => memoryByRequest.get(r.requestId) ?? r.memoryId,
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
-  handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus, delegate: delegateTask,
+  handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
+  stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
+  send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
+    : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
+  report: (parts, guid, origin) => outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
+    guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession }),
 });
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {

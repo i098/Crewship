@@ -88,3 +88,16 @@ test("a task nobody could receive is logged and never waits", async () => {
   await until(() => r.errors.length === 1);
   expect(String(r.errors[0])).toContain("was not delivered");
 });
+
+test("an empty answer file is not an answer: the job waits for its content", async () => {
+  const r = rig();
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.sent.length === 1);
+  writeFileSync(r.answerPath(), "");
+  await Bun.sleep(100);
+  expect(r.reports).toEqual([]);
+  expect(r.errors).toEqual([]);
+  writeFileSync(r.answerPath(), "All green.");
+  await until(() => r.reports.length === 1);
+  expect(r.reports[0].parts).toEqual(["All green."]);
+});

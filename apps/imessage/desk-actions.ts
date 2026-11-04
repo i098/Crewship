@@ -1,5 +1,5 @@
-// What the desk session may do: five host tools. The session reads freely (read, grep, glob, zoom, fleet_status)
-// but acts only through reply, tapback, relay_mate and handoff_main, and each of those runs the bridge's checks first.
+// What the desk session may do: six host tools. The session reads freely (read, grep, glob, zoom, fleet_status)
+// but acts only through reply, tapback, relay_mate, delegate_task and handoff_main, and each of those runs the bridge's checks first.
 // The bridge supplies the effects (ActionHost); this file holds the checks, so tests run without the bridge.
 import { cleanText, statusLine } from "./clean.ts";
 import { bubbles, type Secondmate } from "./desk.ts";
@@ -7,6 +7,7 @@ import type { HostTool, ToolRunner } from "./desk-session.ts";
 import { deskMayAct, relayTarget, type RelayRequest } from "./relay.ts";
 
 export const TAPBACKS = ["❤️", "😂", "‼️", "👍"];
+export const TASK_GUID_PREFIX = "task-"; // the outbox guid of a background task's report; memory keeps it as outbox-text-<guid>
 export const STATUS_MAX = 12_000; // chars of fleet status one tool call returns
 
 export const HOST_TOOLS: HostTool[] = [

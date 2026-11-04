@@ -1,10 +1,10 @@
 // One turn of the desk's long chat: the bridge's checks, the child's start, and the prompt it gets.
 // The bridge passes its effects in (SessionHost); a turn that ends with no action goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createActions, HOST_TOOLS, sessionPrompt, turnMessage } from "./desk-actions.ts";
+import { createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
+import { createDelegator } from "./desk-delegate.ts";
 import { DeskSession, sessionConfig } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
-import type { DelegateTarget } from "./desk-delegate.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
 
@@ -33,14 +33,18 @@ export type SessionHost<R extends TurnRequest> = {
   react(pending: R[], emoji: string): void;
   relay(items: R[], mate: Secondmate, current: () => boolean): Promise<void>;
   inbox(): Promise<{ status: string; statusOk: boolean }>;
-  delegate(target: DelegateTarget, text: string, origin: R): void;
+  stopping(): boolean;
+  listed(mate: Secondmate): boolean; // the mate is still in the routing table
+  send(target: Secondmate | "firstmate", id: string, text: string): Promise<boolean>; // true when the target's inbox took a background task
+  report(parts: string[], guid: string, origin: R): void; // a background task's answer, queued on the chat of the request
 };
 
 // omp wants provider/model-id for the compaction key.
 const thresholdKeyOf = (provider: string, model: string) => `${provider === "inception" ? "inception" : "anthropic"}/${model}`;
 
-// What the session already has: its own desk replies and this burst's texts.
-const seenInTurn = (m: { kind: string; requestId?: string }, ids: Set<string>) => m.kind === "desk" || (!!m.requestId && ids.has(m.requestId));
+// What the session already has: its own desk replies and this burst's texts. A background task's answer is news to it.
+const seenInTurn = (m: { kind: string; requestId?: string }, ids: Set<string>) =>
+  (m.kind === "desk" && !m.requestId?.startsWith(`outbox-text-${TASK_GUID_PREFIX}`)) || (!!m.requestId && ids.has(m.requestId));
 
 const mask = (text: string, safe: (text: string) => string) => (supervisorOnly(text) || safe(text) !== text ? "Protected context requires Firstmate." : text);
 
@@ -75,6 +79,11 @@ function startSession<R extends TurnRequest>(host: SessionHost<R>): DeskSession 
 export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
   let child: DeskSession | undefined;
+  const delegate = createDelegator<R>({
+    answerDir: `${host.stateDir}/desk-tasks`, waitMs: Number(host.env.FM_IMESSAGE_DELEGATE_WAIT_MS) || 600_000, pollMs: 500,
+    stopping: host.stopping, muted: host.muted, log: host.log("desk task"), safe: (text) => host.safe!(text), // a turn runs only with the filter
+    listed: host.listed, send: host.send, report: host.report,
+  });
   const session = () => (child ??= startSession(host));
 
   const seen = (): number => {
@@ -116,7 +125,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         return items.every((r) => r.route === "done");
       },
       handoff: (reason) => { if (reason) host.log("desk handoff")(reason); host.handoff(pending); },
-      delegate: (target) => host.delegate(target, original.join("\n"), pending.at(-1)!),
+      delegate: (target) => delegate(target, original.join("\n"), pending.at(-1)!),
       status: async () => {
         const inbox = await host.inbox();
         if (!inbox.statusOk) throw new Error("fleet status is unavailable; call handoff_main");
