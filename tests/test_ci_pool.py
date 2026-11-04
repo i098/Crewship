@@ -77,6 +77,17 @@ def test_slots_past_the_pool_total_are_dropped_from_the_end_of_the_list(capsys):
     ]
 
 
+def test_a_named_slot_group_keeps_its_own_unit_names_beside_an_unnamed_entry():
+    pool = {
+        "repos": [
+            {"repo": "o/Repo", "slots": 1},
+            {"repo": "o/Repo", "name": "o-repo-quick", "slots": 2},
+        ]
+    }
+    assert pool_script.wanted_slots(pool, 10) == ["o-repo-1", "o-repo-quick-1", "o-repo-quick-2"]
+    assert [pool_script.entry_slug(entry) for entry in pool["repos"]] == ["o-repo", "o-repo-quick"]
+
+
 @pytest.fixture
 def slots(tmp_path, monkeypatch):
     """Pool state: kept-1 and gone-1 enabled, work/cache dirs for both, a foreign dir."""
@@ -427,6 +438,15 @@ def test_two_repositories_that_share_a_unit_name_are_rejected(configuration):
     configuration["crewship"]["ci_pool"]["repos"].append(
         {"repo": "O/Repo", "slots": 1, "labels": ["pool"]}
     )
+    with pytest.raises(ValueError, match="twice"):
+        ship.validate_config(configuration)
+
+
+def test_a_named_slot_group_may_share_a_repository_but_not_a_unit_name(configuration):
+    repos = configuration["crewship"]["ci_pool"]["repos"]
+    repos.append({"repo": "o/repo", "name": "o-repo-quick", "slots": 1, "labels": ["quick"]})
+    ship.validate_config(configuration)
+    repos.append({"repo": "o/other", "name": "o-repo-quick", "slots": 1, "labels": ["pool"]})
     with pytest.raises(ValueError, match="twice"):
         ship.validate_config(configuration)
 

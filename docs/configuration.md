@@ -245,7 +245,7 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
-- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name.
+- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
 - `board` needs `firstmate` and `development`.

@@ -128,8 +128,11 @@ def validate_config(document):
             raise ValueError("the CI pool requires the docker profile")
         if ".." in Path(pool["data_dir"]).parts:
             raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        # Unit instance names; the same rule as slug() in blueprint/maintenance/ci-pool.py.
-        slugs = [re.sub(r"[^a-z0-9]+", "-", e["repo"].lower()).strip("-") for e in pool["repos"]]
+        # Unit instance names; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py.
+        slugs = [
+            re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-")
+            for e in pool["repos"]
+        ]
         if len(set(slugs)) != len(slugs):
             raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
     prune = config["browser_prune"]
