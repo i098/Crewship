@@ -1,5 +1,6 @@
 // Inception's tool-free voice pass. Classification uses omp's native tool runtime.
 import { INCEPTION_MAX } from "./desk.ts";
+import { logTokens, usageTokens } from "./tokenlog.ts";
 
 const [model, reasoning, system, mode] = process.argv.slice(2);
 const url = process.env.FM_DESK_INCEPTION_URL || "https://api.inceptionlabs.ai/v1/chat/completions";
@@ -21,7 +22,10 @@ const response = await fetch(url, { method: "POST", headers: { Authorization: `B
   .catch((e: unknown) => fail(`request failed: ${e instanceof Error ? e.name : "error"}`));
 console.error(`${tag} HTTP ${response.status} ${Math.round(performance.now() - started)}ms ${size} bytes`);
 if (!response.ok) fail("refused");
-const reply = (await response.json().catch(() => undefined))?.choices?.[0]?.message;
+const payload = await response.json().catch(() => undefined);
+const used = usageTokens(payload?.usage);
+if (used) logTokens({ kind: "voice", model, ...used });
+const reply = payload?.choices?.[0]?.message;
 if (!reply) fail("no message in the response");
 if (reply.tool_calls?.length) fail("unexpected voice tool call");
 await Bun.write(Bun.stdout, reply.content ?? "");
