@@ -461,8 +461,8 @@ def refresh_image():
         argv, stdin = [*docker(), "pull", "--quiet", image], None
         seconds = DOCKER_TIMEOUT
     else:
-        argv = [*docker(), "build", "--pull", "--quiet", "--build-arg", f"REFRESH={time.strftime('%Y-%m-%d')}",
-                "--tag", BUILT_IMAGE, "-"]
+        argv = [*docker(), "build", "--pull", "--quiet", "--rm", "--force-rm",
+                "--build-arg", f"REFRESH={time.strftime('%Y-%m-%d')}", "--tag", BUILT_IMAGE, "-"]
         stdin, seconds = DOCKERFILE, BUILD_TIMEOUT
     done = subprocess.run(bounded(argv, seconds), input=stdin, text=True, stdout=subprocess.DEVNULL)
     print(f"image {image}: exit {done.returncode}", flush=True)

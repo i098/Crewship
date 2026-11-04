@@ -935,3 +935,20 @@ def test_a_slot_does_not_kill_the_job_of_its_previous_container(tmp_path, monkey
     assert pool_script.run("o-kept-1") == 1
     assert not any("create" in argv for argv in runs)
     assert sleeps == [pool_script.FAILURE_PAUSE_SECONDS]
+
+
+def test_image_build_removes_its_intermediate_containers(monkeypatch, tmp_path):
+    config = tmp_path / "pool.json"
+    config.write_text("{}")
+    monkeypatch.setattr(pool_script, "CONFIG", config)
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 1)
+
+    monkeypatch.setattr(pool_script.subprocess, "run", fake_run)
+
+    assert pool_script.refresh_image() == 1
+
+    assert {"--rm", "--force-rm"} <= set(seen[0])
