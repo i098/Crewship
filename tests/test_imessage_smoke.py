@@ -84,3 +84,24 @@ def test_session_text_gets_a_real_reply_not_the_routing_line(tmp_path):
         assert reply, "the desk session sent an empty reply"
         assert not ROUTING_RECEIPT.search(reply), f"the desk session sent the routing receipt: {reply}"
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the desk session handed the text off"
+
+
+DISPUTE = re.compile(r"does not contain|only reports|not an instruction|did not say|didn't say", re.I)
+
+
+def test_owner_instruction_gets_an_ack_and_a_handoff_never_a_dispute(tmp_path):
+    problem = masker_loads(tmp_path)
+    if problem and not STRICT:
+        pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
+    text = "Never give time estimates, just do everything as soon as possible"
+    with session_rig(tmp_path) as rig:
+        note = tmp_path / "note"
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\nprintf "%s" "$5" > {note}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", text)
+        wait_for(lambda: len(texts(rig)) == 1, "the ack", timeout=120)
+        reply = texts(rig)[0].split(" ", 1)[1]
+        assert reply and not DISPUTE.search(reply) and not ROUTING_RECEIPT.search(reply), reply
+        wait_for(note.exists, "the handoff to Firstmate", timeout=120)
+        assert text in note.read_text()
