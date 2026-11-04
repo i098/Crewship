@@ -308,7 +308,7 @@ Every desk and compaction call appends one line to `tokens.jsonl` in the state d
 With `desk_v2: true`, the desk is one long omp session by default.
 Set `crewship.imessage.desk_session: false` to roll back to the one-shot V2 loop above. The setting has no effect without `desk_v2`.
 The service renders this setting as `FM_IMESSAGE_DESK_SESSION=true` or `false`.
-The code is `apps/imessage/desk-session.ts` and `desk-actions.ts`.
+The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actions.ts`, and `desk-delegate.ts`.
 
 - The bridge runs one persistent omp RPC child. The model and the reasoning level come from the desk settings.
 - The child keeps its session in the state directory. After a crash or a service restart, it resumes the same session with `--continue`.
@@ -316,14 +316,34 @@ The code is `apps/imessage/desk-session.ts` and `desk-actions.ts`.
 - omp compacts the session at a fixed 80,000 tokens. The bridge sets this trigger in `compaction.modelThresholds`.
 - The memory view seeds a new session and a session that was just compacted.
 - The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool; it hands all writes to Firstmate.
-- The session acts only through four host tools. The bridge checks each call before it does the action:
+- The session acts through five host tools. The bridge checks each call before it does the action:
   - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
   - `tapback` reacts only when `deskMayAct` permits it.
   - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
   - `handoff_main` gives the text to Firstmate.
+  - `delegate_task` starts background work and does not end the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
 - The desk sends no fixed routing receipt bubble.
 - Each assistant message adds one `desk-session` line to the token log.
+
+If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
+
+#### Background tasks
+
+The desk can answer the owner at once while the work goes on in the background.
+The session calls `delegate_task` with the target `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
+The tool works like `reply`: it ends the turn, and the same checks apply to the reply text.
+The bridge sends the reply first and then starts one background job.
+
+- The bridge sends the owner's verbatim text to the target. The model never writes the task.
+- `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
+- A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target is refused before anything is sent.
+- `firstmate` gets an inbox note and a mate gets `fm-send.sh`. Both start with `[from captain via desk]`.
+- The task text ends with a path in `desk-tasks/` in the state directory. The target writes its answer for the owner to that file. This is the only answer channel.
+- The bridge waits for the file for 10 minutes (`FM_IMESSAGE_DELEGATE_WAIT_MS` changes the limit). A restart also ends the wait.
+- The answer goes through the same checks as `reply`: `clean.ts`, the raw status line check, and the secret filter. A refused answer is logged and not sent.
+- A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
+- A task that the target cannot receive is logged and goes nowhere else. The owner has the reply, but no answer follows.
 
 The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
 

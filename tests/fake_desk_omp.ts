@@ -1,5 +1,5 @@
 // A fake `omp --mode rpc` child for the desk session tests. Each prompt runs one script, chosen by a token
-// in the owner's texts: TAPBACK, RELAY <mate>, HANDOFF, STATUS, CRASH, COMPACT, SLOW, PLAIN (answers in words, no tool call); else one plain reply.
+// in the owner's texts: TAPBACK, RELAY <mate>, HANDOFF, STATUS, CRASH, COMPACT, DELEGATE <target> (delegate_task with a reply), SLOW, PLAIN (answers in words, no tool call); else one plain reply.
 // $FAKE_DESK_LOG gets one JSON line per start ({argv}) and per prompt ({prompt}).
 import { appendFileSync } from "node:fs";
 
@@ -35,7 +35,9 @@ async function prompt(id: string, message: string) {
   } else if (texts.includes("TAPBACK")) await call("tapback", { emoji: "❤️" });
   else if (texts.includes("PLAIN")) send({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Plain words." }] } });
   else if (texts.includes("HANDOFF")) await call("handoff_main", { reason: "fake handoff" });
-  else if (/RELAY (\S+)/.test(texts)) await call("relay_mate", { mate: /RELAY (\S+)/.exec(texts)![1] });
+  else if (/DELEGATE (\S+)/.test(texts)) {
+    await call("delegate_task", { target: /DELEGATE (\S+)/.exec(texts)![1], text: "On it." });
+  } else if (/RELAY (\S+)/.test(texts)) await call("relay_mate", { mate: /RELAY (\S+)/.exec(texts)![1] });
   else if (texts.includes("STATUS")) await call("reply", { text: await call("fleet_status", {}) });
   else {
     if (texts.includes("COMPACT")) send({ type: "auto_compaction_end", result: {}, aborted: false });

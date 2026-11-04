@@ -39,6 +39,7 @@ import type { DispatchModel } from "./dispatch-policy.ts";
 import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { createDelegator } from "./desk-delegate.ts";
 import { createSessionTurn } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -1067,12 +1068,23 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
+const delegateTask = createDelegator<Routing>({
+  answerDir: `${STATE}/desk-tasks`, waitMs: Number(env.FM_IMESSAGE_DELEGATE_WAIT_MS) || 600_000, pollMs: 500,
+  stopping: () => stopping, muted, log: log("desk task"),
+  safe: (text) => frontContextText(v2Redact!, text), // the session never runs without the redactor
+  listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
+  send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
+    : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
+  report: (parts, id, origin) => outbox.add({ ...origin.ref, requestId: `task-${id}`, requests: [], kind: "desk",
+    guid: crypto.randomUUID(), at: Date.now(), bubbles: parts, deskGeneration, deskSession }),
+});
+
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
   memoryIndex: (r) => memoryByRequest.get(r.requestId) ?? r.memoryId,
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
-  handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
+  handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus, delegate: delegateTask,
 });
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
@@ -1314,6 +1326,11 @@ async function draftHandoff(pending: Routing[], mates: Secondmate[], current: ()
   return handoffTarget(ok, drafted, mates);
 }
 
+function spawnSender(mate: Secondmate, text: string) {
+  const sender = join(dirname(realpathSync(Bun.which(INBOX) ?? INBOX)), "fm-send.sh");
+  return track(Bun.spawn([sender, mate.id, text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
+}
+
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
   recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
   for (const item of pending) mateDeliveries.add(item.requestId);
@@ -1326,9 +1343,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
       recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
       let proc: Bun.Subprocess | undefined;
       try {
-        const sender = join(dirname(realpathSync(Bun.which(INBOX) ?? INBOX)), "fm-send.sh");
-        proc = track(Bun.spawn([sender, mate.id, `[from captain via desk] ${item.authored ?? item.text}`],
-          { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
+        proc = spawnSender(mate, `[from captain via desk] ${item.authored ?? item.text}`);
         deskRun = proc;
         if (await proc.exited === 0) handoffNote = `routed to ${mate.id}`;
       } catch (e) {
@@ -1457,6 +1472,14 @@ async function noteText(message: LineMessage) {
     throw e;
   }));
   return { text, failed };
+}
+
+// A background desk task for Firstmate: an inbox note that waits for the answer file, not for fm-imessage.
+async function noteMain(requestId: string, text: string): Promise<boolean> {
+  if (stopping) return false;
+  const proc = track(Bun.spawn([INBOX, "note", "--request-id", requestId, "--", `[from captain via desk] ${text}`],
+    { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
+  return await proc.exited === 0;
 }
 
 // Files a Firstmate inbox note; true when the inbox took it.

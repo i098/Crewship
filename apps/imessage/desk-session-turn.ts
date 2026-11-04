@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createActions, HOST_TOOLS, sessionPrompt, turnMessage } from "./desk-actions.ts";
 import { DeskSession, sessionConfig } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
+import type { DelegateTarget } from "./desk-delegate.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
 
@@ -32,6 +33,7 @@ export type SessionHost<R extends TurnRequest> = {
   react(pending: R[], emoji: string): void;
   relay(items: R[], mate: Secondmate, current: () => boolean): Promise<void>;
   inbox(): Promise<{ status: string; statusOk: boolean }>;
+  delegate(target: DelegateTarget, text: string, origin: R): void;
 };
 
 // omp wants provider/model-id for the compaction key.
@@ -114,6 +116,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         return items.every((r) => r.route === "done");
       },
       handoff: (reason) => { if (reason) host.log("desk handoff")(reason); host.handoff(pending); },
+      delegate: (target) => host.delegate(target, original.join("\n"), pending.at(-1)!),
       status: async () => {
         const inbox = await host.inbox();
         if (!inbox.statusOk) throw new Error("fleet status is unavailable; call handoff_main");

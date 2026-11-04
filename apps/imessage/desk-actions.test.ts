@@ -14,6 +14,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     react: (emoji) => void calls.push(["react", emoji]),
     relay: async (mate) => { calls.push(["relay", mate.id]); return true; },
     handoff: (reason) => void calls.push(["handoff", reason]),
+    delegate: (target) => void calls.push(["delegate", typeof target === "string" ? target : target.id]),
     status: async () => "all quiet",
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     ...over,
@@ -96,4 +97,56 @@ test("turnMessage puts the seed view first, then the missed lines, then the numb
   expect(message.endsWith("1: hi\n2: how are you")).toBe(true);
   expect(turnMessage({ missed: [], burst: ["hi"] })).not.toContain("<chat>");
   expect(turnMessage({ missed: [], burst: ["hi"] })).not.toContain("Since your last turn");
+});
+
+test("delegate_task sends the reply first, then starts the work, and ends the turn", async () => {
+  const h = host(["check the repo"]);
+  expect(await h.run("delegate_task", { target: "mate1", text: "On it." })).toContain("turn is over");
+  expect(h.calls).toEqual([["reply", ["On it."], 1], ["delegate", "mate1"]]);
+  expect(h.acted()).toBe(true);
+  await expect(h.run("handoff_main", {})).rejects.toThrow("already ended");
+  const main = host(["check the repo"]);
+  await main.run("delegate_task", { target: "firstmate", text: "Asking Firstmate." });
+  expect(main.calls).toEqual([["reply", ["Asking Firstmate."], 1], ["delegate", "firstmate"]]);
+});
+
+test("delegate_task refuses a target that is neither firstmate nor a listed mate", async () => {
+  for (const target of ["mate2", "everyone", "", "constructor"]) {
+    const h = host(["check the repo"]);
+    await expect(h.run("delegate_task", { target, text: "On it." })).rejects.toThrow("not a listed mate");
+    expect(h.calls).toEqual([]);
+    expect(h.acted()).toBe(false);
+  }
+});
+
+test("delegate_task keeps a protected request with handoff_main, for Firstmate too, so Firstmate gets it once", async () => {
+  const h = host(["approve the deploy"]);
+  for (const target of ["mate1", "firstmate"]) await expect(h.run("delegate_task", { target, text: "On it." })).rejects.toThrow("protected");
+  expect(h.calls).toEqual([]);
+  await h.run("handoff_main", { reason: "protected" });
+  expect(h.calls).toEqual([["handoff", "protected"]]);
+});
+
+test("delegate_task checks the reply text before it starts anything", async () => {
+  for (const text of ["", "The password is hunter2.", "PR https://github.com/o/r/pull/1142"]) {
+    const h = host(["check the repo"]);
+    await expect(h.run("delegate_task", { target: "firstmate", text })).rejects.toThrow();
+    expect(h.calls).toEqual([]);
+    expect(h.acted()).toBe(false);
+  }
+});
+
+test("delegate_task refuses once the turn has ended or is no longer current", async () => {
+  const ended = host(["hi"]);
+  await ended.run("reply", { text: "Hi." });
+  await expect(ended.run("delegate_task", { target: "firstmate", text: "On it." })).rejects.toThrow("already ended");
+  await expect(host(["hi"], { current: () => false }).run("delegate_task", { target: "firstmate", text: "On it." })).rejects.toThrow("no longer current");
+});
+
+test("turnMessage keeps the newest missed lines when the gap is longer than the limit", () => {
+  const missed = Array.from({ length: 40 }, (_, i) => ({ kind: "firstmate", text: `line ${i} ${"x".repeat(480)}` }));
+  const message = turnMessage({ missed, burst: ["hi"] });
+  expect(message).toContain("line 39 ");
+  expect(message).not.toContain("line 0 ");
+  expect(message.slice(message.indexOf("Since your last turn"), message.indexOf("The owner's new texts")).length).toBeLessThan(8200);
 });

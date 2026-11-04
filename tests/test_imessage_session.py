@@ -121,3 +121,35 @@ def test_instant_reasoning_starts_the_inception_session(tmp_path):
         assert desk_lines(rig, "instant") == ["1"]
         config = Path(next(argv[i + 1] for i, arg in enumerate(argv) if arg == "--config" and argv[i + 1].endswith("session-config.json")))
         assert json.loads(config.read_text())["compaction"]["modelThresholds"] == {"inception/mercury-3": "f80000"}
+
+
+@pytest.mark.parametrize("target", ["mate1", "firstmate"])
+def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")
+    message, finished, release = tmp_path / "task-message", tmp_path / "task-finished", tmp_path / "task-release"
+    # The delivery blocks on the release file (at most 4.5 s: the bridge kills a sender after 5 s), so the reply must come first.
+    body = f'for _ in $(seq 45); do [ -e {shlex.quote(str(release))} ] && break; sleep 0.1; done\ntouch {shlex.quote(str(finished))}\n'
+    with session_rig(tmp_path) as rig:
+        if target == "mate1":
+            script = tmp_path / "bin" / "fm-send.sh"
+            script.write_text(f'#!/bin/bash\nprintf "%s" "$2" > {shlex.quote(str(message))}\n{body}')
+        else:
+            script = tmp_path / "bin" / "fm-inbox"
+            script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\nprintf "%s" "$5" > {shlex.quote(str(message))}\n{body}')
+        script.chmod(0o755)
+        deliver(rig, "m1", f"DELEGATE {target}")
+        wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
+        assert texts(rig)[0].split(" ", 1)[1] == "On it."
+        wait_for(message.exists, "the task delivery", timeout=120)
+        assert not finished.exists()  # the reply was sent while the delivery was still open
+        release.touch()
+        wait_for(finished.exists, "the task delivery to end", timeout=120)
+        sent = read_text(message)
+        assert sent.startswith("[from captain via desk] DELEGATE ")
+        assert "fm-imessage" not in sent  # the answer file is the only answer channel
+        answer = re.search(r"to (\S+\.answer)$", sent).group(1)
+        Path(answer).write_text("The repo checks are green.")
+        wait_for(lambda: len(texts(rig)) == 2, "the reported answer", timeout=120)
+        assert texts(rig)[1].split(" ", 1)[1] == "The repo checks are green."
+        assert not Path(answer).exists()
