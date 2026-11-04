@@ -523,7 +523,7 @@ export function deskSecretValues(env: Record<string, string | undefined>): strin
   return [...secrets];
 }
 
-function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>): void {
+export function writeDeskSecrets(cwd: string, env: Record<string, string | undefined>): void {
   mkdirSync(join(cwd, ".omp"), { mode: 0o700 });
   writeFileSync(join(cwd, ".omp", "secrets.yml"), JSON.stringify(deskSecretValues(env).map((content) => ({
     type: "plain", content, mode: "replace", replacement: "[REDACTED]",

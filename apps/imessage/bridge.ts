@@ -33,12 +33,14 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { writeDeskSecrets, authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import type { DispatchModel } from "./dispatch-policy.ts";
 import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { createActions, HOST_TOOLS, sessionPrompt, turnMessage } from "./desk-actions.ts";
+import { DeskSession, sessionConfig } from "./desk-session.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
@@ -101,6 +103,8 @@ const DESK_PROVIDER = env.FM_IMESSAGE_DESK_PROVIDER || "omp";
 const DESK_MODEL = env.FM_IMESSAGE_DESK_MODEL || "claude-haiku-5-5";
 const DESK_REASONING = env.FM_IMESSAGE_DESK_REASONING || "off";
 const DESK_V2 = env.FM_IMESSAGE_DESK_V2 === "true";
+// One long-lived omp session keeps the whole chat; false keeps the one-shot V2 loop.
+const DESK_SESSION = DESK_V2 && env.FM_IMESSAGE_DESK_SESSION === "true";
 // The desks vetted for direct answers; any other provider and model hands every request to Firstmate.
 const DESK_VETTED = ["omp claude-haiku-5-5", "inception mercury-3"].includes(`${DESK_PROVIDER} ${DESK_MODEL}`);
 const SUPERVISOR_MODEL = env.FM_IMESSAGE_SUPERVISOR_MODEL || "";
@@ -1064,8 +1068,86 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
+const SESSION_DIR = `${STATE}/desk-session`;
+const SESSION_SEEN = `${STATE}/desk-session.seen`; // memory messages the session has been shown, as a count
+const SESSION_MODEL = DESK_PROVIDER === "inception" ? `inception/${DESK_MODEL}` : DESK_MODEL;
+let deskSessionChild: DeskSession | undefined;
+
+function deskSessionFor(): DeskSession {
+  if (deskSessionChild) return deskSessionChild;
+  const cwd = `${SESSION_DIR}/cwd`; // empty cwd: no project context files load
+  rmSync(cwd, { recursive: true, force: true });
+  mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  writeDeskSecrets(cwd, env);
+  const config = `${cwd}/session-config.json`;
+  writeFileSync(config, sessionConfig(SESSION_MODEL, HOST_TOOLS), { mode: 0o600 });
+  const keys = DESK_PROVIDER === "inception" ? ["INCEPTION_API_KEY"] : ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"];
+  const childEnv = Object.fromEntries(["HOME", "USER", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "FM_HOME", "FAKE_DIR", "PATH", ...keys]
+    .map((key) => [key, env[key]]));
+  deskSessionChild = new DeskSession({
+    argv: [env.FM_DESK_SESSION_OMP || "omp", "--mode", "rpc", "--no-ui", "--no-extensions", "-e", `${import.meta.dir}/zoom.ts`,
+      "--tools=read,grep,glob,bash,zoom", "--config", `${import.meta.dir}/desk-tools.yml`, "--config", config, "--approval-mode=write",
+      "--no-skills", "--no-rules", "--no-context-files", "--no-title", `--thinking=${DESK_REASONING}`, "--model", SESSION_MODEL,
+      "--session-dir", `${SESSION_DIR}/sessions`, "--continue", "--system-prompt", sessionPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_MODEL, SUPERVISOR_MODEL)],
+    cwd, sessionDir: `${SESSION_DIR}/sessions`, model: SESSION_MODEL, tools: HOST_TOOLS, track, log: log("desk session"),
+    env: { ...childEnv, FM_DESK_MEMORY: MEMORY_DIR, FM_DESK_SESSION: "1", OMP_SKIP_SETUP: "1" },
+  });
+  return deskSessionChild;
+}
+
+// One turn of the long chat: the session reads, then ends in one bridge-checked action. No action hands the burst to Firstmate.
+async function runSessionTurn(pending: Routing[], controller: AbortController, current: () => boolean) {
+  if (!current()) return;
+  if (!DESK_VETTED || muted() || !v2Redact || pending.some((r) => r.mutationPath) || !deskMayAct(pending)) return handoffV2(pending);
+  const original = pending.map((r) => r.authored ?? r.text);
+  if (original.some((text) => frontContextText(v2Redact, text) !== text)) return handoffV2(pending);
+  const mates = secondmates(FM_HOME);
+  const unassigned = () => pending.filter((r) => r.route === "pending");
+  const actions = createActions({
+    requests: pending, current, muted, mates: () => mates,
+    reply: (parts, target) => commitV2Answer(pending, parts, pending[target - 1]),
+    react: (emoji) => commitV2Reaction(pending, emoji),
+    relay: async (mate) => {
+      const items = unassigned();
+      await handoffToMate(items, mate, current);
+      return items.every((r) => r.route === "done");
+    },
+    handoff: (reason) => { if (reason) log("desk handoff")(reason); handoffV2(pending); },
+    status: async () => {
+      const inbox = await readInboxStatus();
+      if (!inbox.statusOk) throw new Error("fleet status is unavailable; call handoff_main");
+      return frontContextText(v2Redact, `${inbox.status}\n${mateStatusLines(FM_HOME, mates)}`);
+    },
+  });
+  const indexes = pending.map((r) => memoryByRequest.get(r.requestId) ?? r.memoryId);
+  const from = Math.min(...indexes);
+  const last = Math.max(...indexes);
+  const ids = new Set(pending.map((r) => r.requestId));
+  const result = await deskSessionFor().ask((seed) => {
+    const seen = seed ? last + 1 : Math.min(readSeen(), last + 1);
+    const missed = seed ? [] : memory.msgs.slice(seen, last + 1)
+      .filter((m) => m.kind !== "desk" && !(m.requestId && ids.has(m.requestId)))
+      .map(({ kind, text }) => ({ kind, text: supervisorOnly(text) || frontContextText(v2Redact, text) !== text ? "Protected context requires Firstmate." : text }));
+    writeFileSync(SESSION_SEEN, String(last + 1));
+    return turnMessage({ view: seed ? memory.render(from) : undefined, missed, burst: original });
+  }, controller.signal, actions.run);
+  if (!current() || actions.acted()) return;
+  // The model answered in words and skipped reply: the same checks run on those words.
+  if (result.status === "completed" && result.text) {
+    try { await actions.run("reply", { text: result.text }); return; } catch (error) { log("desk session")(error); }
+    if (!current() || actions.acted()) return;
+  }
+  log("desk session")(new Error(`turn ended with no action (${result.status}${result.error ? `: ${result.error}` : ""})`));
+  handoffV2(pending);
+}
+
+function readSeen(): number {
+  try { return Number(readFileSync(SESSION_SEEN, "utf8")) || 0; } catch { return 0; }
+}
+
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (!current()) return;
+  if (DESK_SESSION) return runSessionTurn(pending, controller, current);
   if (muted()) return handoffV2(pending);
   if (pending.some((r) => r.mutationPath)) return handoffV2(pending);
   const target = pending.at(-1)!;

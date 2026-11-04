@@ -1,9 +1,9 @@
 """Desk release smoke: real texts get real handling through the bridge, front and desk, never the routing line.
 
 Run with FM_DESK_SMOKE_STRICT=1 before every fm-imessage desk release (docs/imessage.md): a front
-secret masker that cannot load then FAILS the run. Without it the masker check and the status check skip,
-as in CI, whose omp stub has none. The relay routing check needs no masker and always runs.
-Only the model's network edge is stubbed.
+secret masker that cannot load then FAILS the run. Without it the masker check, the status check and the
+desk session check skip, as in CI, whose omp stub has none. The relay routing check needs no masker and always runs.
+Only the model's network edge is stubbed; the desk session check runs a fake omp child (tests/fake_desk_omp.ts).
 """
 
 import json
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from test_imessage import wait_for
+from test_imessage_session import session_rig
 from test_imessage_v2 import deliver, events, texts, v2_rig
 
 STRICT = os.environ.get("FM_DESK_SMOKE_STRICT") == "1"
@@ -70,3 +71,16 @@ def test_status_text_gets_a_real_answer_not_the_routing_line(tmp_path):
         assert reply, "the desk sent an empty reply"
         assert not ROUTING_RECEIPT.search(reply), f"the desk sent the routing receipt: {reply}"
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the front relayed the text"
+
+
+def test_session_text_gets_a_real_reply_not_the_routing_line(tmp_path):
+    problem = masker_loads(tmp_path)
+    if problem and not STRICT:
+        pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how was your day")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        reply = texts(rig)[0].split(" ", 1)[1].strip()
+        assert reply, "the desk session sent an empty reply"
+        assert not ROUTING_RECEIPT.search(reply), f"the desk session sent the routing receipt: {reply}"
+        assert not any(e.get("route") == "handoff" for e in events(rig)), "the desk session handed the text off"

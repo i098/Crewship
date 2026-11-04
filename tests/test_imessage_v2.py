@@ -60,8 +60,8 @@ def texts(rig):
 
 
 @contextmanager
-def v2_rig(tmp_path, front, inception=None):
-    """A V2 bridge over the fake transports; `front` holds the one scripted front reply."""
+def v2_rig(tmp_path, front, inception=None, **extra):
+    """A V2 bridge over the fake transports; `front` holds the one scripted front reply, `extra` more bridge env."""
     server, url = None, inception
     if url is None:
         port_file = tmp_path / "inception-port"
@@ -76,7 +76,7 @@ def v2_rig(tmp_path, front, inception=None):
             raise
     rig = FallbackRig(tmp_path, FM_IMESSAGE_TEST="1", FM_IMESSAGE_TEST_QUIET_MS="30",
                       FM_IMESSAGE_DESK_V2="true", INCEPTION_API_KEY="test-key",
-                      FM_DESK_INCEPTION_URL=url, PI_CODING_AGENT_DIR=str(tmp_path / "agent"))
+                      FM_DESK_INCEPTION_URL=url, PI_CODING_AGENT_DIR=str(tmp_path / "agent"), **extra)
     (tmp_path / "bin" / "omp").unlink()  # unshadow the real omp: the V2 desk needs its installed packages
     try:
         rig.start()

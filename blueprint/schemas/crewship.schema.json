@@ -358,6 +358,9 @@
               "type": "string",
               "pattern": "^[^\\n`$\"\\\\%]{1,40}$"
             },
+            "desk_session": {
+              "type": "boolean"
+            },
             "desk_v2": {
               "type": "boolean"
             },

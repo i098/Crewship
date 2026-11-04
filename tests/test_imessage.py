@@ -31,6 +31,7 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 
 @pytest.mark.parametrize("backend", ["instagrapi", "graph"])
 @pytest.mark.parametrize("desk_v2", [None, False, True])
+@pytest.mark.parametrize("desk_session", [None, False, True])
 @pytest.mark.parametrize("herdr_alerts", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
     ("fm-imessage", "bun", ["bridge.ts"]),
@@ -38,7 +39,8 @@ SEND = ROOT / "apps/imessage/fm-imessage"
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
 ])
-def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend, desk_v2, herdr_alerts):
+def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, binary, args, backend, desk_v2, desk_session,
+                                                             herdr_alerts):
     home = tmp_path / "home with spaces"
     local_bin = home / ".local/bin"
     local_bin.mkdir(parents=True)
@@ -61,6 +63,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
         ansible_managed="test",
         crewship_cfg={"imessage": {"owner": "", "cards": {"url": "https://cards.example.com"},
                                    **({} if desk_v2 is None else {"desk_v2": desk_v2}),
+                                   **({} if desk_session is None else {"desk_session": desk_session}),
                                    **({} if herdr_alerts is None else {"herdr_alerts": herdr_alerts})}},
         crewship_local_bin=str(local_bin), crewship_imessage_dir=str(home),
         crewship_firstmate_dir=str(home), crewship_imessage_desk_provider="omp",
@@ -99,6 +102,8 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     assert result.stderr == ""
     if unit == "fm-imessage":
         assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
+        expected_session = "true" if desk_session is None else str(desk_session).lower()
+        assert f'Environment="FM_IMESSAGE_DESK_SESSION={expected_session}"' in rendered
         assert f'Environment="FM_IMESSAGE_HERDR_ALERTS={str(bool(herdr_alerts)).lower()}"' in rendered
 
 
@@ -1532,6 +1537,7 @@ def load_ship():
         (lambda f: f["imessage"].update(desk_provider="inception", desk_model="mercury-3", desk_reasoning="off"), "imessage"),
         (lambda f: f["imessage"].update(desk_reasoning="instant"), "imessage"),
         (lambda f: f["imessage"].update(desk_v2="true"), "imessage"),
+        (lambda f: f["imessage"].update(desk_session="true"), "imessage"),
     ],
 )
 def test_config_rejects_a_bridge_it_cannot_run(change, error):
@@ -1544,11 +1550,14 @@ def test_config_rejects_a_bridge_it_cannot_run(change, error):
 
 
 @pytest.mark.parametrize("desk_v2", [None, False, True])
-def test_config_selects_the_desk_loop(desk_v2):
+@pytest.mark.parametrize("desk_session", [None, False, True])
+def test_config_selects_the_desk_loop(desk_v2, desk_session):
     document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     document["crewship"]["imessage"] = {"owner": "+10000000000"}
     if desk_v2 is not None:
         document["crewship"]["imessage"]["desk_v2"] = desk_v2
+    if desk_session is not None:
+        document["crewship"]["imessage"]["desk_session"] = desk_session
     load_ship().validate_config(document)
 
 
