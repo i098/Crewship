@@ -1086,10 +1086,7 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
   }
   const intent = plan.intents[0];
   if (intent?.kind === "status") return statusV2(pending, secondmates(FM_HOME), controller.signal, current);
-  put({
-    ...target.ref, ...plan.front, kind: "desk", loop: "v2", front: true, reply: target.ref.id,
-    bubbles: [`I am routing this request to ${intent?.kind === "relay" ? (plan.mate ? `the ${plan.mate.id} secondmate` : "Firstmate") : dispatchSelection(intent, v2Models) ? "a worker" : "Firstmate"}.`],
-  });
+  // No canned receipt: a fixed line sent for every text read as the desk's answer. Typing stays on until the real answer.
   if (intent?.kind === "dispatch") await dispatchV2(pending, intent, controller.signal, current);
   else if (intent?.kind === "relay") await relayV2(pending, plan, current);
 }
