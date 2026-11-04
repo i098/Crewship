@@ -43,7 +43,7 @@ async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused 
   let held = false;
   try { held = await host.send("firstmate", `${job.id}-lost`, note); } catch (error) { host.log(error); }
   if (!held) return host.log(new Error(`desk task ${job.id} reached no inbox`));
-  if (!host.muted()) try { host.report([FOLLOW_UP], job.guid, job.origin); } catch (error) { host.log(error); }
+  if (!host.muted()) try { host.report([FOLLOW_UP], `${job.guid}-followup`, job.origin); } catch (error) { host.log(error); }
 }
 
 // The answer reaches the owner through the checked reply path; a muted desk drops it.

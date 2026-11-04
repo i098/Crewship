@@ -14,7 +14,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     react: (emoji) => void calls.push(["react", emoji]),
     relay: async (mate) => { calls.push(["relay", mate.id]); return true; },
     handoff: (reason) => void calls.push(["handoff", reason]),
-    delegate: (target) => void calls.push(["delegate", typeof target === "string" ? target : target.id]),
+    delegate: (target, parts, replyTarget) => void calls.push(["delegate", typeof target === "string" ? target : target.id, parts, replyTarget]),
     status: async () => "all quiet",
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     ...over,
@@ -99,15 +99,15 @@ test("turnMessage puts the seed view first, then the missed lines, then the numb
   expect(turnMessage({ missed: [], burst: ["hi"] })).not.toContain("Since your last turn");
 });
 
-test("delegate_task sends the reply first, then starts the work, and ends the turn", async () => {
+test("delegate_task hands the reply and the target to one delegate call, and ends the turn", async () => {
   const h = host(["check the repo"]);
   expect(await h.run("delegate_task", { target: "mate1", text: "On it." })).toContain("turn is over");
-  expect(h.calls).toEqual([["reply", ["On it."], 1], ["delegate", "mate1"]]);
+  expect(h.calls).toEqual([["delegate", "mate1", ["On it."], 1]]);
   expect(h.acted()).toBe(true);
   await expect(h.run("handoff_main", {})).rejects.toThrow("already ended");
   const main = host(["check the repo"]);
   await main.run("delegate_task", { target: "firstmate", text: "Asking Firstmate." });
-  expect(main.calls).toEqual([["reply", ["Asking Firstmate."], 1], ["delegate", "firstmate"]]);
+  expect(main.calls).toEqual([["delegate", "firstmate", ["Asking Firstmate."], 1]]);
 });
 
 test("delegate_task refuses a target that is neither firstmate nor a listed mate", async () => {

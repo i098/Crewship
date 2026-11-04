@@ -70,3 +70,24 @@ test("a background task's answer reaches the next turn as a missed line, the ses
   expect(prompts[1]).toContain("desk: 2 tests fail, in a and b");
   expect(prompts[1]).not.toContain("On it.");
 });
+
+test("delegate_task answers as a delegated ack first, then the task is sent once", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  const wrapper = join(dir, "omp");
+  writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
+  chmodSync(wrapper, 0o755);
+  const events: unknown[][] = [];
+  const turn = createSessionTurn<TurnRequest>({
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+    stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
+    memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
+    log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts, _target, delegated) => events.push(["answer", parts, delegated]),
+    react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true,
+    send: async (target, _id, text) => { events.push(["send", target, text.split("\n")[0]]); return true; }, report: () => {},
+  });
+  const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
+  await turn([request], new AbortController(), () => true);
+  for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
+  expect(events).toEqual([["answer", ["On it."], true], ["send", "firstmate", "DELEGATE firstmate"]]);
+});

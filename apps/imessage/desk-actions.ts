@@ -34,7 +34,7 @@ export type ActionHost = {
   react(emoji: string): void;
   relay(mate: Secondmate): Promise<boolean>; // true when every request reached the mate
   handoff(reason: string): void;
-  delegate(target: Secondmate | "firstmate"): void; // starts the background work after the reply; the bridge reports the answer later
+  delegate(target: Secondmate | "firstmate", parts: string[], replyTarget: number): void; // sends the ack, then starts the background work; the bridge reports the answer later
   status(): Promise<string>;
   safe(text: string): string; // the bridge's redacting filter: a reply it would change is refused
 };
@@ -114,8 +114,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
       if (!mate) throw new Error(`refused: ${id} is not a listed mate; use firstmate or call handoff_main`);
       const { parts, target } = replyParts(args, host.requests.length, host.safe);
       done = true;
-      host.reply(parts, target);
-      host.delegate(mate);
+      host.delegate(mate, parts, target);
       return "sent, and the work started; your turn is over";
     },
     fleet_status: async () => {

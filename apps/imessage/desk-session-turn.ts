@@ -31,7 +31,7 @@ export type SessionHost<R extends TurnRequest> = {
   track<T extends Bun.Subprocess>(proc: T): T;
   log(what: string): (error: unknown) => void;
   handoff(pending: R[]): void;
-  answer(pending: R[], parts: string[], target: R): void;
+  answer(pending: R[], parts: string[], target: R, delegated?: true): void; // delegated: a background task already holds the text, so a lost ack must not hand it off again
   react(pending: R[], emoji: string): void;
   relay(items: R[], mate: Secondmate, current: () => boolean): Promise<void>;
   inbox(): Promise<{ status: string; statusOk: boolean }>;
@@ -127,7 +127,10 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         return items.every((r) => r.route === "done");
       },
       handoff: (reason) => { if (reason) host.log("desk handoff")(reason); host.handoff(pending); },
-      delegate: (target) => delegate(target, original.join("\n"), pending.at(-1)!),
+      delegate: (mate, parts, target) => {
+        host.answer(pending, parts, pending[target - 1], true);
+        delegate(mate, original.join("\n"), pending.at(-1)!);
+      },
       status: async () => {
         const inbox = await host.inbox();
         if (!inbox.statusOk) throw new Error("fleet status is unavailable; call handoff_main");

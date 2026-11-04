@@ -190,3 +190,21 @@ def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(
         time.sleep(1.5)
         assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "The repo checks are green."]
         assert not answer.exists()
+
+
+def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_path):
+    ids = tmp_path / "note-ids"
+    with session_rig(tmp_path) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\nprintf "%s\\n" "$3" >> {shlex.quote(str(ids))}\n')
+        script.chmod(0o755)
+        (rig.fake / "relay-mode").write_text("send-busy")  # the relay refuses the ack, so it stays in the outbox
+        deliver(rig, "m1", "DELEGATE firstmate")
+        wait_for(lambda: (rig.fake / "relay-payloads").exists(), "the refused ack", timeout=120)
+        deliver(rig, "m2", "second text PLAIN")  # the new text cancels the ack of the first
+        (rig.fake / "relay-mode").unlink()
+        wait_for(lambda: any(line.startswith("desk-task-") for line in read_text(ids).splitlines())
+                 and "bluebubbles-m2" in read_text(ids).splitlines(), "both notes", timeout=120)
+        time.sleep(2)
+        assert "bluebubbles-m1" not in read_text(ids).splitlines()
+        assert len([line for line in read_text(ids).splitlines() if line.startswith("desk-task-")]) == 1

@@ -198,7 +198,7 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true };
@@ -991,11 +991,11 @@ function handoffV2(pending: Routing[]) {
   flushRoutes();
 }
 
-function commitV2Answer(pending: Routing[], parts: string[], target = pending.at(-1)!) {
+function commitV2Answer(pending: Routing[], parts: string[], target = pending.at(-1)!, delegated?: true) {
   const ids = pending.map((r) => r.requestId);
   recordRoute({ ids, route: "desk", out: {
     ...target.ref, requestId: target.requestId, requests: ids, kind: "desk", loop: "v2",
-    guid: crypto.randomUUID(), at: Date.now(), bubbles: parts, reply: target.ref.id,
+    guid: crypto.randomUUID(), at: Date.now(), bubbles: parts, reply: target.ref.id, ...(delegated && { delegated }),
   } });
   flushRoutes();
 }
@@ -1408,6 +1408,7 @@ function ensureRemembered(item: Received) {
 function lostDeskAnswer(item: Out) {
   if (item.front) return;
   finishDeskDelivery(item);
+  if (item.delegated) return;
   if (!item.requests?.length || (!hasRestoredUnsentText(item) && (item.done || Object.keys(item.maybe ?? {}).length))) return;
   const ids = item.loop === "v2" ? item.requests.filter((id) => !routing.get(id)?.responded) : item.requests;
   if (!ids.length) return;
@@ -1435,7 +1436,7 @@ function flushRoutes() {
       if (mateDeliveries.has(item.requestId)) continue;
       if (item.route === "desk" && muted()) {
         if (item.out) finishDeskDelivery(item.out);
-        recordRoute({ ids: [item.requestId], route: "handoff" });
+        recordRoute({ ids: [item.requestId], route: item.out?.delegated ? "done" : "handoff" });
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);

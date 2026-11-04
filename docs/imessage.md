@@ -347,6 +347,7 @@ The bridge sends the reply first and then starts one background job.
 - A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
 - A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. Then the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that Firstmate must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back". If the inbox does not take the note, the bridge only logs it. A muted desk sends no text.
 - A task report is a late answer, so a new owner text does not cancel it. Only a muted desk does.
+- If a new owner text cancels the reply before it is sent, the bridge does not hand the first text to Firstmate again. The task already holds it, so Firstmate or the mate gets it once.
 
 The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
 

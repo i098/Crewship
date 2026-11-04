@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Queue } from "./outbox.ts";
 import { createDelegator, type DelegateHost, type DelegateTarget, FOLLOW_UP } from "./desk-delegate.ts";
 
 const mate1 = { id: "mate1", home: "/fleet/mate1", scope: "repo checks" };
@@ -12,15 +13,16 @@ function rig(over: Partial<DelegateHost<string>> = {}) {
   dirs.push(dir);
   const sent: { target: DelegateTarget; text: string }[] = [];
   const reports: { parts: string[]; origin: string }[] = [];
+  const guids: string[] = [];
   const errors: unknown[] = [];
   const host: DelegateHost<string> = {
     answerDir: join(dir, "tasks"), waitMs: 3000, pollMs: 10, stopping: () => false, muted: () => false,
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"), listed: () => true,
     send: async (target, _id, text) => { sent.push({ target, text }); return true; },
-    report: (parts, _id, origin) => void reports.push({ parts, origin }), log: (error) => void errors.push(error), ...over,
+    report: (parts, guid, origin) => void (reports.push({ parts, origin }), guids.push(guid)), log: (error) => void errors.push(error), ...over,
   };
   const answerPath = (at = -1) => /to (\S+\.answer)$/.exec(sent.at(at)!.text)![1];
-  return { delegate: createDelegator(host), host, sent, reports, errors, answerPath };
+  return { delegate: createDelegator(host), host, sent, reports, guids, errors, answerPath };
 }
 const until = async (check: () => boolean) => { for (let i = 0; i < 300 && !check(); i++) await Bun.sleep(10); expect(check()).toBe(true); };
 
@@ -114,6 +116,8 @@ test("no answer by the wait limit gives Firstmate a fresh note and the owner the
   await Bun.sleep(100);
   expect(r.reports[1]).toEqual({ parts: ["All green."], origin: "chat-1" });
   expect(r.reports.length).toBe(2);
+  expect(r.guids.every((guid) => guid.startsWith("task-"))).toBe(true);
+  expect(new Set(r.guids).size).toBe(2);
   expect(existsSync(taskPath)).toBe(false);
 });
 
@@ -163,4 +167,17 @@ test("an empty answer file is not an answer: the job waits for its content", asy
   writeFileSync(r.answerPath(), "All green.");
   await until(() => r.reports.length === 1);
   expect(r.reports[0].parts).toEqual(["All green."]);
+});
+
+test("with the bridge's keyed outbox, the follow-up and the late answer are both delivered", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-outbox-"));
+  dirs.push(dir);
+  const delivered: string[][] = [];
+  const outbox = new Queue<{ requestId: string; bubbles: string[] }>(join(dir, "outbox"), "outbox item", async (item) => void delivered.push(item.bubbles), 10, undefined, (item) => item.requestId);
+  const r = rig({ waitMs: 60, report: (bubbles, guid) => outbox.add({ requestId: guid, bubbles }) });
+  r.delegate("firstmate", "check the repo", "chat-1");
+  await until(() => delivered.length === 1);
+  writeFileSync(r.answerPath(0), "All green.");
+  await until(() => delivered.length === 2);
+  expect(delivered).toEqual([[FOLLOW_UP], ["All green."]]);
 });

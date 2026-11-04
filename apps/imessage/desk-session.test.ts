@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { COMPACT_AT, DeskSession, sessionConfig, type SessionOptions, type ToolRunner } from "./desk-session.ts";
+import { DeskSession, sessionConfig, type SessionOptions, type ToolRunner } from "./desk-session.ts";
 
 const FAKE = join(import.meta.dir, "../../tests/fake_desk_omp.ts");
 const cleanup: (() => void)[] = [];
@@ -75,7 +75,7 @@ test("a compaction makes the next prompt carry the seed again", async () => {
 
 test("the session config keys the fixed trigger by provider/model-id, as omp requires", () => {
   const thresholds = JSON.parse(sessionConfig("anthropic/claude-haiku-5-5")).compaction.modelThresholds;
-  expect(thresholds).toEqual({ "anthropic/claude-haiku-5-5": `f${COMPACT_AT}` });
+  expect(thresholds).toEqual({ "anthropic/claude-haiku-5-5": "f80000" });
   expect(Object.keys(thresholds).every((key) => /^[^/*]+\/.+/.test(key))).toBe(true);
 });
 
