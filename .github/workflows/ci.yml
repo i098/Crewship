@@ -68,7 +68,7 @@ jobs:
                 README*|docs/*|changelog.d/*|*.md) ;;
                 site/*) scope=all ;;
                 # Only the iMessage bridge reads apps/imessage/; the Python tests that cover it are
-                # tests/test_imessage.py and tests/test_bluebubbles_relay.py.
+                # tests/test_imessage.py, tests/test_imessage_smoke.py and tests/test_bluebubbles_relay.py.
                 apps/imessage/*) code=true ;;
                 *) code=true scope=all; break ;;
               esac
@@ -172,7 +172,7 @@ jobs:
         run: |
           tests=(tests)
           if [[ "$SCOPE" == imessage ]]; then
-            tests=(tests/test_imessage.py tests/test_bluebubbles_relay.py tests/test_changelog.py
+            tests=(tests/test_imessage.py tests/test_imessage_smoke.py tests/test_bluebubbles_relay.py tests/test_changelog.py
               tests/test_instructions.py tests/test_readme.py tests/test_skills.py)
           fi
           uv run pytest -n auto --dist worksteal "${tests[@]}"

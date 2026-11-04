@@ -712,6 +712,13 @@ See [Desk memory](#desk-memory) for compaction recovery after a restart.
 For this desk update, main must apply the reviewed source after merge and verify the installed bridge files.
 Pre-merge fixture checks do not complete this step.
 Run the following commands from the reviewed checkout as the bridge account, during an approved service window.
+First run the desk smoke test; it fails if the desk sends the routing receipt or an empty status answer, or if the front secret masker cannot load:
+
+```bash
+FM_DESK_SMOKE_STRICT=1 uv run pytest -q tests/test_imessage_smoke.py
+```
+
+Do not stop the service until it passes.
 Keep the existing unit, credentials, model settings, dependencies, and private state unchanged.
 Do not run a full host apply or restart another service.
 
