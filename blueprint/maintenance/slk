@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Text the operator when an agent reads Slack with slk, then run the real slk.
 
-Only `slk export` reads messages; every other subcommand passes through silently.
+`slk export` and a bare `slk` (the TUI) read messages; every other call passes through silently.
 The text names the agent, workspace and channel, never message content.
 """
 import json
@@ -18,8 +18,10 @@ VALUE_FLAGS = {"channel", "workspace"}
 
 
 def parse(args):
-    """Return (workspace, channel) for an export call, or None for any other call."""
-    if not args or args[0] != "export" or {"-h", "-help", "--help"} & set(args[1:]):
+    """Return what the agent did for an export or TUI call, or None for any other call."""
+    if not args:
+        return "opened the Slack TUI"
+    if args[0] != "export" or {"-h", "-help", "--help"} & set(args[1:]):
         return None
     found = {}
     rest = iter(args[1:])
@@ -27,7 +29,7 @@ def parse(args):
         name, eq, value = arg.lstrip("-").partition("=")
         if arg.startswith("-") and name in VALUE_FLAGS:
             found[name] = value if eq else next(rest, "")
-    return found.get("workspace", "default"), found.get("channel", "?")
+    return f"read {clean(found.get('workspace', 'default'))} {clean(found.get('channel', '?'))}"
 
 
 def agent():
@@ -67,7 +69,7 @@ def notify(call):
     ok, skipped = due(who, time.time())
     if not ok:
         return
-    text = f"slk read: {who} read {clean(call[0])} {clean(call[1])}"
+    text = f"slk read: {who} {call}"
     if skipped:
         text += f" (+{skipped} more)"
     command = ["fm-imessage", "--", text]

@@ -17,14 +17,14 @@ loader.exec_module(slk)
     [
         (
             ["export", "-channel", "dev", "-workspace", "acme", "-since", "2026-01-01"],
-            ("acme", "dev"),
+            "read acme dev",
         ),
-        (["export", "--channel=dm-bob", "--workspace=acme"], ("acme", "dm-bob")),
-        (["export", "-channel", "dev"], ("default", "dev")),
+        (["export", "--channel=dm-bob", "--workspace=acme"], "read acme dm-bob"),
+        (["export", "-channel", "dev"], "read default dev"),
         (["export", "--help"], None),
         (["--list-workspaces"], None),
         (["--add-workspace"], None),
-        ([], None),
+        ([], "opened the Slack TUI"),
     ],
 )
 def test_parse(args, expected):
@@ -96,10 +96,20 @@ def test_agents_limited_separately(host):
     assert texts(host.log) == ["slk read: worker-1 read a c", "slk read: mate read a c"]
 
 
-def test_non_read_never_notifies(host):
-    result = host("--list-workspaces")
-    assert result.stdout == "real --list-workspaces\n"
+@pytest.mark.parametrize(
+    "flag",
+    ["--list-workspaces", "--dump-sections", "--version", "--help", "--add-workspace", "--remove-workspace"],
+)
+def test_non_read_never_notifies(host, flag):
+    result = host(flag)
+    assert result.stdout == f"real {flag}\n"
     assert texts(host.log) == []
+
+
+def test_bare_tui_notifies(host):
+    result = host()
+    assert (result.returncode, result.stdout) == (7, "real \n")
+    assert texts(host.log) == ["slk read: worker-1 opened the Slack TUI"]
 
 
 def test_missing_fm_imessage_does_not_break_slk(host):
