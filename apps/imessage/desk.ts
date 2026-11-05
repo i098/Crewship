@@ -354,13 +354,13 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
   const exact = requestsExactOutput(question);
   const text = exact ? rewritten : rewritten.trim();
   if (!ok || !text.trim() || text.length > 2000 || claimsWork(text)) return;
-  if (exact && text === source.answer) return [text];
+  if (exact && text === source.answer) return fit(text, BUBBLE_MAX).filter((p) => p.trim() !== "");
   const fields = voiceFields(source.answer);
   if (exact === "source" || (exact && !fields.length)) return;
   const literals = voiceLiterals(source.answer, fields);
   if (/```/.test(text) || (!exact && sourceStyle(text, literals, source.identity))) return;
   if (!preservesVoiceFacts(source.answer, text, literals, preserveWords, !!exact) || !preservesFieldValues(fields, text)) return;
-  return exact ? [text] : bubbles(text);
+  return exact ? fit(text, BUBBLE_MAX).filter((p) => p.trim() !== "") : bubbles(text);
 }
 
 function requestsExactOutput(question: string): "source" | "values" | false {
@@ -668,10 +668,44 @@ export function localCommand(headers: { get(name: string): string | null }, port
   return headers.get("host") === `127.0.0.1:${port}` && headers.get("x-firstmate") === "1";
 }
 
+// The longest bubble. A longer text is split here, because iMessage cuts a longer bubble short.
+export const BUBBLE_MAX = 1000;
+
+// Token patterns for each split level after the paragraph: line, sentence, word.
+const BREAKS = [/[^\n]*\n|[^\n]+/g, /[\s\S]+?[.!?]+(?:\s+|$)|[\s\S]+$/g, /\S+\s*/g];
+
+// Splits `text` into pieces of at most `max` characters, at the coarsest break that fits and without dropping a
+// character (only the white space at a cut is trimmed). A single word over `max` is cut by characters.
+function fit(text: string, max: number, level = 0): string[] {
+  if (text.length <= max) return [text];
+  const tokens = BREAKS[level] && text.match(BREAKS[level]!);
+  if (!tokens || tokens.length < 2) return level < BREAKS.length - 1 ? fit(text, max, level + 1) : cut(text, max);
+  const out: string[] = [];
+  let line = "";
+  for (const token of tokens) {
+    if (line && (line + token).trimEnd().length > max) { out.push(line.trimEnd()); line = ""; }
+    line += token;
+  }
+  if (line) out.push(line);
+  return out.flatMap((piece) => fit(piece, max, level + 1));
+}
+
+function cut(text: string, max: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length;) {
+    let end = Math.min(i + max, text.length);
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!) && end - 1 > i) end--;
+    out.push(text.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
 // The chat bubbles for one send: blank-line-separated paragraphs become separate bubbles, and lines inside a
-// paragraph (a list, a schedule) stay one bubble.
+// paragraph (a list, a schedule) stay one bubble while it fits in BUBBLE_MAX. A longer paragraph splits at a line,
+// then a sentence, then a word.
 export function bubbles(text: string): string[] {
-  return text.split(/\n\s*\n/).map((b) => b.trim()).filter((b) => b !== "");
+  return text.split(/\n\s*\n/).map((b) => b.trim()).filter((b) => b !== "").flatMap((b) => fit(b, BUBBLE_MAX).map((p) => p.trim()).filter((p) => p !== ""));
 }
 
 // The typing pause before each later bubble, scaled to its length.

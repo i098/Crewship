@@ -80,7 +80,7 @@ For each message from the owner, the service does these steps:
    The voice prompt uses the reply check's exact-output decision to select quotation or prose instructions before the model call.
    Prose instructions retain descriptions after source labels; quotation instructions retain the full source line, including bullets and emphasis.
    Exact quotations must match the source character for character, including indentation and whitespace.
-   The service sends accepted exact output as one bubble without trimming or splitting it; normal prose still uses paragraph bubbles.
+   The service sends accepted exact output without trimming it. Exact output over 1,000 characters splits at a line, then a sentence, then a word, and the service drops whitespace-only pieces. Normal prose still uses paragraph bubbles.
    The same rules apply when a request spans lines or combines several messages.
    Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
    Any other unconsumed or conflicting instruction selects the normal prose checks.
@@ -800,7 +800,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 
 | Command | What it does |
 | --- | --- |
-| `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
+| `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble while it has 1,000 characters or fewer; a longer paragraph splits at a line, then a sentence, then a word, so that iMessage never cuts a bubble short. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
 | `fm-imessage --reply N 'text'` | Targets the owner's Nth most recent text (1 is the latest). The first bubble sends plain if the target is still the last bubble in its chat at delivery. It threads only when a later bubble exists from either side; tapbacks do not count. See [Reply separation](#how-the-relay-set-behaves) for checks across BlueBubbles relays. A transport that cannot thread sends plain. The command picks the target when it runs, and the queued message keeps that target's id through retries and restarts. The service keeps at most 10 texts received since it started that were the newest text at that time. A text that arrives late (see [Inbound](#choose-the-transports)) is not kept. If the Nth text is not kept, nothing is queued and the command exits non-zero. Any other value of N queues nothing and exits with code 2. |
 | `fm-imessage --no-thread 'text'` | Forces a plain send, even with `--reply N`, regardless of option order. |
 | `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
