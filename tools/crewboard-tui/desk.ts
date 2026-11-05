@@ -104,11 +104,13 @@ const secs = (s: number | undefined) => (s === undefined ? "–" : s < 90 ? `${s
 
 const flat = (s: string) => s.replace(/\s+/g, " ").trim()
 const GRAPHEMES = new Intl.Segmenter()
+// Terminals that do not join ZWJ sequences (tmux) draw each part; count parts so rows never overflow.
+const cells = (s: string) => s.split("\u200d").reduce((n, p) => n + Bun.stringWidth(p), 0)
 export const cut = (s: string, w: number) => {
-  if (Bun.stringWidth(s) <= w) return s
+  if (cells(s) <= w) return s
   let out = "", used = 0
   for (const { segment } of GRAPHEMES.segment(s)) {
-    const sw = Bun.stringWidth(segment)
+    const sw = cells(segment)
     if (used + sw > w - 1) break
     out += segment
     used += sw

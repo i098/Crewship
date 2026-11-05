@@ -119,10 +119,11 @@ test("the snapshot lists the newest turns first, flattens and cuts text to the w
   expect(deskSnapshot(d, 6_000_000, 40, 12)).not.toContain("recent turns") // no room for one turn: none shown
 })
 
-test("cut counts CJK, VS16 and ZWJ graphemes as 2 cells and never splits them", () => {
+test("cut counts CJK and VS16 as 2 cells, ZWJ parts one by one, and never splits graphemes", () => {
   expect(cut("漢字漢字漢字漢字漢字", 8)).toBe("漢字漢…") // 3×2 + 1 = 7 cells; a 4th char would need 9
   expect(cut("ok ❤️❤️❤️❤️", 8)).toBe("ok ❤️❤️…") // 3 + 4 + 1 = 8
-  expect(cut("👩‍👩‍👧‍👧👩‍👩‍👧‍👧👩‍👩‍👧‍👧", 5)).toBe("👩‍👩‍👧‍👧👩‍👩‍👧‍👧…")
+  expect(cut("👩‍👩‍👧‍👧👩‍👩‍👧‍👧", 9)).toBe("👩‍👩‍👧‍👧…") // unjoined (tmux) a family draws 4×2 = 8 cells
+  expect(cut("👩‍👩‍👧‍👧👩‍👩‍👧‍👧", 8)).toBe("…")
   expect(cut("😀😀😀😀", 6)).toBe("😀😀…")
   expect(cut("short", 10)).toBe("short")
 })
@@ -130,10 +131,13 @@ test("cut counts CJK, VS16 and ZWJ graphemes as 2 cells and never splits them", 
 test("a turn row with wide characters stays within the pane width", () => {
   const empty = mkdtempSync(join(tmpdir(), "cbdesk-"))
   dirs.push(empty)
+  const fam = "👩‍👩‍👧‍👧"
   const log = [rin("w1", 1000, "漢字漢字漢字漢字漢字漢字漢字漢字漢字漢字"), JSON.stringify({ at: 1001, ids: ["w1"], route: "desk" }),
-    JSON.stringify({ at: 1002, ids: ["w1"], route: "done", out: { kind: "desk", bubbles: ["❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️"], guid: "g" } })].join("\n")
+    JSON.stringify({ at: 1002, ids: ["w1"], route: "done", out: { kind: "desk", bubbles: ["❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️"], guid: "g" } }),
+    rin("w2", 1003, fam.repeat(12)), JSON.stringify({ at: 1004, ids: ["w2"], route: "done", out: { kind: "desk", bubbles: [fam.repeat(12)], guid: "h" } })].join("\n")
   const d = { ...loadDesk(empty, NOW, { unit: "active", journal: "" }), turns: parseTurns(log) }
-  const rows = deskSnapshot(d, 6_000_000, 40, 40).split("\n").filter(l => l.includes("in 漢") || l.includes("out ❤"))
-  expect(rows).toHaveLength(2)
-  for (const r of rows) expect(Bun.stringWidth(r)).toBeLessThanOrEqual(40)
+  const rows = deskSnapshot(d, 6_000_000, 40, 40).split("\n").filter(l => l.includes("in 漢") || l.includes("out ❤") || l.includes("👩"))
+  expect(rows).toHaveLength(4)
+  // oracle: a terminal that does not join ZWJ sequences (tmux) draws every part
+  for (const r of rows) expect(r.split("\u200d").reduce((n, p) => n + Bun.stringWidth(p), 0)).toBeLessThanOrEqual(40)
 })
