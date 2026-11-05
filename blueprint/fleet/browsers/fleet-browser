@@ -72,7 +72,7 @@ cmd_status() {
     fi
     printf '%-8s %-6s %-9s %-8s %s\n' "$t" "$(port_of "$t")" "$st" "$(clients "$t")" "$note"
   done
-  n=$(python3 -c "import json,sys;print(len(json.load(open('$STATE/cookies.json'))))" 2>/dev/null || echo 0)
+  n=$(jar_count); n=${n:-0}
   echo "session: $n cookies in canonical jar ($STATE/cookies.json); last sync: $(tail -1 "$STATE/sync.log" 2>/dev/null | cut -c1-120)"
 }
 
@@ -217,7 +217,8 @@ run_chrome() {  # tier 2
     --window-size=1280,800 about:blank
 }
 
-jar_count() { python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$STATE/cookies.json" 2>/dev/null || echo 0; }
+# A missing jar counts as 0; a jar that cannot be read right now (mid-write) prints nothing.
+jar_count() { [ -e "$STATE/cookies.json" ] || { echo 0; return; }; python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$STATE/cookies.json" 2>/dev/null; }
 
 # Voxl starts only once the shared jar exists, so it never joins the cookie sync with nothing to give.
 wait_jar() {
@@ -228,9 +229,9 @@ wait_jar() {
 # Refuse to keep running while the shared jar loses cookies: a headed browser that joins the
 # sync with fewer logins can drag the canonical jar down. Log the drop and stop the unit.
 voxl_guard() {
-  local peak now; peak=$(jar_count)
+  local peak now; peak=$(jar_count); peak=${peak:-0}
   while sleep "$VOXL_GUARD_SECS"; do
-    now=$(jar_count)
+    now=$(jar_count); [ -n "$now" ] || continue
     [ "$now" -gt "$peak" ] && peak=$now
     if [ "$now" -lt $(( peak - peak * VOXL_JAR_DROP_PCT / 100 )) ]; then
       log "voxl guard: shared jar fell from $peak to $now cookies; stopping voxl"

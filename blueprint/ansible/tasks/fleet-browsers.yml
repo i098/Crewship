@@ -351,6 +351,18 @@
   loop_control:
     label: "{{ item.unit }}"
 
+# voxl waits for the shared jar, and the sync timer first writes it two minutes after boot,
+# so a new host gets an empty one here; cookie-sync merges into it as into any jar.
+- name: Seed an empty shared cookie jar for the voxl service
+  ansible.builtin.copy:
+    content: "{}\n"
+    dest: "{{ crewship_cfg.home }}/.fleet-browser/cookies.json"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0600"
+    force: false
+  become: true
+
 - name: Enable and start fleet browser units
   ansible.builtin.systemd_service:
     scope: user

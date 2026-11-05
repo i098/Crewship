@@ -47,6 +47,19 @@ def test_guard_stops_voxl_only_when_the_jar_count_falls(tmp_path, after, stopped
         assert not calls.exists()
 
 
+def test_guard_ignores_a_jar_that_cannot_be_read_for_a_moment(tmp_path):
+    home, jar, calls, env = _home(tmp_path, 100)
+    guard = subprocess.Popen([str(SCRIPT), "_voxl-guard"], env=env)
+    try:
+        time.sleep(0.6)
+        jar.write_text('{"c0": ')
+        time.sleep(0.7)
+        assert guard.poll() is None and not calls.exists()
+    finally:
+        guard.kill()
+        guard.wait()
+
+
 @pytest.mark.parametrize("cookies,expected", [(5, 0), (None, 1)])
 def test_voxl_waits_for_the_cookie_jar(tmp_path, cookies, expected):
     _, _, _, env = _home(tmp_path, cookies)
