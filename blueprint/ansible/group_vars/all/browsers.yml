@@ -26,6 +26,9 @@ crewship_fleet_browser_voxl_packages:
   - libxcb1-dev
   - libpulse-dev
   - esbuild
+# Spare loopback port the apply uses to check a fresh voxl build before it
+# retires the old tier that still holds port 6909.
+crewship_fleet_browser_voxl_check_port: 6919
 # Unit files of retired tiers; the tasks remove them.
 crewship_fleet_browser_retired_units:
   - fleet-browser-vnc.service

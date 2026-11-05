@@ -288,12 +288,12 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
 
    A site still asking for a login on every tier means nobody has signed in yet.
    Bring up `voxl`, sign in through its viewer (`ssh -L 6909:127.0.0.1:6909 <host>`,
-   then the `view:` link `fleet-browser up voxl` prints), and the next sync
+   then the `view:` link `fleet-browser up voxl` prints, and enter the password from `~/.fleet-browser/voxl-password`), and the next sync
    carries the session to `obscura` and `chrome`. A Google sign-in stays in `voxl`.
    On a tailnet host, publish voxl to the tailnet once, never with Funnel:
    `sudo tailscale serve --bg --https=6909 http://127.0.0.1:6909`. Then open
-   `https://<host>.<tailnet>.ts.net:6909/?token=<password>` (the `view:` link's token,
-   kept in `~/.fleet-browser/voxl-password`). voxl needs HTTPS or localhost for
+   `https://<host>.<tailnet>.ts.net:6909/` and enter the password kept in
+   `~/.fleet-browser/voxl-password` (the command never prints it). voxl needs HTTPS or localhost for
    video, which `tailscale serve` provides. The password gates every tailnet
    device that the tailnet policy lets reach that port.
 

@@ -60,21 +60,6 @@
     - "{{ crewship_user_units }}/default.target.wants"
     - "{{ crewship_user_units }}/timers.target.wants"
 
-- name: Install the fleet browser scripts
-  ansible.builtin.copy:
-    src: "{{ crewship_fleet_sources }}/{{ item.src }}"
-    dest: "{{ item.dest }}"
-    owner: "{{ crewship_cfg.user }}"
-    group: "{{ crewship_group }}"
-    mode: "{{ item.mode }}"
-    remote_src: true
-  become: true
-  loop:
-    - { src: browsers/fleet-browser, dest: "{{ crewship_fleet_browsers_dir }}/fleet-browser", mode: "0755" }
-    - { src: browsers/api-anything-fleet, dest: "{{ crewship_fleet_browsers_dir }}/api-anything-fleet", mode: "0755" }
-    - { src: browsers/cookie-sync.ts, dest: "{{ crewship_fleet_browsers_dir }}/cookie-sync.ts", mode: "0644" }
-    - { src: browsers/env.sh, dest: "{{ crewship_fleet_browsers_dir }}/env.sh", mode: "0644" }
-
 - name: Stat the resolved Obscura release
   ansible.builtin.stat:
     path: "{{ crewship_browser_obscura_dir }}/obscura"
@@ -256,6 +241,49 @@
   become: true
   when: not ansible_check_mode
 
+- name: Look for the retired noVNC tier unit
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/{{ item }}"
+    get_checksum: false
+  loop: "{{ crewship_fleet_browser_retired_units }}"
+  register: crewship_retired_browser_units
+  changed_when: false
+  check_mode: false
+
+# voxl answers on a spare loopback port with a throwaway password, so the old
+# tier keeps display :9 and port 6909 until voxl is known to serve. A failed
+# check fails the apply before anything of the old tier is touched.
+- name: Confirm voxl serves before the noVNC tier is retired
+  ansible.builtin.shell: |
+    set -u
+    port={{ crewship_fleet_browser_voxl_check_port }}
+    display=:{{ crewship_fleet_browser_voxl_check_port }}
+    Xvfb "$display" -screen 0 1600x900x24 -nolisten tcp >/dev/null 2>&1 &
+    xpid=$!
+    DISPLAY=$display VOXL_PASSWORD=cutover-check "{{ crewship_browser_voxl_dir }}/voxl" --addr=127.0.0.1 --port="$port" \
+      --audio-enabled=false >/dev/null 2>&1 &
+    pid=$!
+    trap 'kill "$pid" "$xpid" 2>/dev/null' EXIT
+    for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0.5; done
+    for _ in $(seq 1 20); do
+      code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/") || code=000
+      [ "$code" = 401 ] && break
+      sleep 0.5
+    done
+    [ "$code" = 401 ] || { echo "voxl answered $code, not 401, on port $port" >&2; exit 1; }
+    code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' -u ':cutover-check' "http://127.0.0.1:$port/")
+    [ "$code" = 200 ] || { echo "voxl answered $code, not 200, with its password" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  changed_when: false
+  register: crewship_voxl_check
+  when:
+    - not ansible_check_mode
+    - crewship_retired_browser_units.results | selectattr('stat.exists') | list | length > 0
+  failed_when: crewship_voxl_check.rc != 0
+
 # A running retired tier would outlive its unit file with nothing left to stop
 # it, so stop it first; a missing unit is not an error.
 - name: Stop the retired noVNC tier
@@ -278,6 +306,22 @@
   become: true
   loop: "{{ crewship_fleet_browser_retired_units }}"
   notify: reload user systemd
+  when: not ansible_check_mode
+
+- name: Install the fleet browser scripts
+  ansible.builtin.copy:
+    src: "{{ crewship_fleet_sources }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "{{ item.mode }}"
+    remote_src: true
+  become: true
+  loop:
+    - { src: browsers/fleet-browser, dest: "{{ crewship_fleet_browsers_dir }}/fleet-browser", mode: "0755" }
+    - { src: browsers/api-anything-fleet, dest: "{{ crewship_fleet_browsers_dir }}/api-anything-fleet", mode: "0755" }
+    - { src: browsers/cookie-sync.ts, dest: "{{ crewship_fleet_browsers_dir }}/cookie-sync.ts", mode: "0644" }
+    - { src: browsers/env.sh, dest: "{{ crewship_fleet_browsers_dir }}/env.sh", mode: "0644" }
 
 - name: Render fleet browser units
   ansible.builtin.template:

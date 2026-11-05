@@ -106,7 +106,7 @@ cmd_up() {
   fi
   date +%s > "$STATE/last-client-$t"
   cmd_sync
-  echo "$t up at $(url_of "$t")"; [ "$t" = voxl ] && echo "view: http://127.0.0.1:$VOXL_WEB_PORT/?token=$(voxl_password)  (tunnel: ssh -L $VOXL_WEB_PORT:127.0.0.1:$VOXL_WEB_PORT box)"
+  echo "$t up at $(url_of "$t")"; [ "$t" = voxl ] && echo "view: http://127.0.0.1:$VOXL_WEB_PORT/  (password: $STATE/voxl-password; tunnel: ssh -L $VOXL_WEB_PORT:127.0.0.1:$VOXL_WEB_PORT box)"
   echo "use:  eval \"\$(fleet-browser env $t)\""
 }
 

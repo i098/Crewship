@@ -640,7 +640,7 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
 
 
 @pytest.mark.parametrize("check_mode", [True, False])
-@pytest.mark.parametrize("release_state", ["absent", "installed", "bad-digest"])
+@pytest.mark.parametrize("release_state", ["absent", "installed", "bad-digest", "dead-voxl"])
 def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, release_state):
     home = tmp_path / "home"
     browsers = home / "oss-fleet/browsers"
@@ -648,13 +648,32 @@ def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, rel
     release = browsers / "voxl-test"
     cargo = home / ".cargo/bin/cargo"
     cargo.parent.mkdir(parents=True)
+    # Stands in for voxl: 401 without the VOXL_PASSWORD basic-auth password, 200 with it.
+    voxl_stub = (
+        f"#!{sys.executable}\n# %s\n"
+        "import base64, http.server, os, sys\n"
+        "port = int([a for a in sys.argv if a.startswith('--port=')][0][7:])\n"
+        "ok = 'Basic ' + base64.b64encode((':' + os.environ['VOXL_PASSWORD']).encode()).decode()\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        self.send_response(200 if self.headers.get('Authorization') == ok else 401)\n"
+        "        self.end_headers()\n"
+        "    def log_message(self, *a): pass\n"
+        "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n"
+    )
+    built = voxl_stub % "built" if release_state != "dead-voxl" else "#!/bin/sh\n# built\nexit 1\n"
     # Stands in for cargo: the build must run in the extracted crate and write the release binary.
     cargo.write_text("#!/bin/sh\nset -e\ntest -f Cargo.toml\nmkdir -p \"$5/release\"\n"
-                     "echo built > \"$5/release/voxl\"\n")
+                     f"cat > \"$5/release/voxl\" <<'EOF'\n{built}EOF\n")
     cargo.chmod(0o755)
+    units = home / ".config/systemd/user"
+    units.mkdir(parents=True)
+    old_unit = units / "fleet-browser-vnc.service"
+    old_unit.write_text("old vnc tier\n")
     if release_state == "installed":
         release.mkdir()
-        (release / "voxl").write_text("existing release\n")
+        (release / "voxl").write_text(voxl_stub % "existing")
+        (release / "voxl").chmod(0o755)
     crate = tmp_path / "voxl-server-test.crate"
     source = tmp_path / "voxl-server-test"
     source.mkdir()
@@ -663,10 +682,11 @@ def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, rel
         bundle.add(source, arcname="voxl-server-test")
     tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/fleet-browsers.yml").read_text())
     start = next(i for i, task in enumerate(tasks) if task["name"] == "Stat the resolved voxl release")
-    end = next(i for i, task in enumerate(tasks) if task["name"] == "Stop the retired noVNC tier")
+    end = next(i for i, task in enumerate(tasks) if task["name"] == "Install the fleet browser scripts")
     playbook = tmp_path / "voxl.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "tasks": tasks[start:end],
+        "handlers": [{"name": "reload user systemd", "ansible.builtin.debug": {"msg": "reload"}}],
     }]))
     variables = {
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home)},
@@ -679,6 +699,11 @@ def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, rel
             else hashlib.sha256(crate.read_bytes()).hexdigest(),
         },
         "crewship_become_target": False,
+        "crewship_manage_services": False,
+        "crewship_user_units": str(units),
+        "crewship_user_systemd_env": {},
+        "crewship_fleet_browser_voxl_check_port": 6919,
+        "crewship_fleet_browser_retired_units": ["fleet-browser-vnc.service"],
         "ansible_become": False,
     }
     result = subprocess.run(
@@ -691,13 +716,16 @@ def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, rel
         assert result.returncode == 0, output
         assert ("would download, verify and build voxl" in output) == (release_state != "installed")
         assert not (browsers / "voxl").exists()
-    elif release_state == "bad-digest":
+        assert old_unit.exists()
+    elif release_state in ("bad-digest", "dead-voxl"):
         assert result.returncode != 0, output
-        assert not (release / "voxl").exists()
+        assert old_unit.read_text() == "old vnc tier\n"
+        if release_state == "bad-digest":
+            assert not (release / "voxl").exists()
     else:
         assert result.returncode == 0, output
-        expected = "existing release\n" if release_state == "installed" else "built\n"
-        assert (release / "voxl").read_text() == expected
+        assert not old_unit.exists()
+        assert f"# {'existing' if release_state == 'installed' else 'built'}\n" in (release / "voxl").read_text()
         assert (browsers / "voxl").resolve() == release / "voxl"
         assert sorted(path.name for path in release.iterdir()) == ["voxl"]
 
