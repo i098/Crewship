@@ -149,7 +149,7 @@ Bun output stays in one labeled block per package, including command failures.
   These plugins have no publisher checksums and track each author's default branch.
   They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
-- `sgrep` or `development` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the published `.sha256`.
+- `sgrep`, `development`, `fleet_browsers` or `fleet_guards` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the published `.sha256`.
   It installs the Rust `stable` toolchain with rustfmt and clippy.
   Each selected apply updates the toolchain to the newest stable release.
 - `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
@@ -226,7 +226,7 @@ The Pyrefly configuration is the only added runtime file.
 
 ## Optional fleet browsers
 
-- `fleet_browsers` or `fleet_guards` profile: Obscura, the latest [h4ckf0r0day/obscura release](https://github.com/h4ckf0r0day/obscura/releases/latest) for the host's platform, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/fleet-browsers.yml`). Each release extracts into its own `~/oss-fleet/browsers/obscura-<version>/`. The `vnc` tier's Ubuntu packages: tigervnc-standalone-server, websockify, novnc, xfwm4.
+- `fleet_browsers` or `fleet_guards` profile: Obscura, the latest [h4ckf0r0day/obscura release](https://github.com/h4ckf0r0day/obscura/releases/latest) for the host's platform, verified against the GitHub release-asset digest (`blueprint/ansible/tasks/fleet-browsers.yml`). Each release extracts into its own `~/oss-fleet/browsers/obscura-<version>/`. The `voxl` tier's [tembo/voxl](https://github.com/tembo/voxl) release, which publishes only a source crate: the crate is verified against the GitHub release-asset digest, then built with `cargo build --release --locked` by the Rust toolchain that the installer adds for this profile, into its own `~/oss-fleet/browsers/voxl-<version>/`. The `voxl` tier's Ubuntu packages: xvfb, xfwm4, and the build needs clang, pkg-config, libx264-dev, libyuv-dev, libopus-dev, libpulse-dev, libxcb1-dev, esbuild.
 
 ## Optional project databases
 

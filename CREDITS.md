@@ -35,6 +35,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [runner-up](https://github.com/kunchenguid/runner-up) (`runner-up`): the coordinator of just-in-time GitHub Actions jobs, one container per job, with the `runner_up` block. License: MIT.
 - [Jujutsu](https://github.com/jj-vcs/jj) (`jj`): a Git-compatible version control system for agents, with the `jj` profile. License: Apache-2.0.
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.
+- [voxl](https://github.com/tembo/voxl) (`voxl`): the browser stream of the fleet browser ladder's human tier, built by apply. License: MIT; the built binary links x264 (GPL-2.0).
 - [Koncreet](https://github.com/jimididit/koncreet) (`koncreet`): host hardening, patched by Crewship. License: MIT.
 - [Bun](https://github.com/oven-sh/bun) (`bun`): the JavaScript runtime and package manager. License: MIT.
 - [Node.js](https://github.com/nodejs/node) (`node`): the runtime of `npx crewship` and the chrome-devtools-axi bridge. License: MIT.
