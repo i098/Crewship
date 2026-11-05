@@ -139,6 +139,7 @@
                     and crewship_instagram_curator_enabled | bool) else [])
              + ([crewship_local_bin ~ '/concord',
                  crewship_local_bin ~ '/slk',
+                 crewship_local_bin ~ '/discord',
                  crewship_cfg.home ~ '/.config/concord/config.toml',
                  crewship_cfg.home ~ '/.config/slk/config.toml']
                 if (crewship_cfg.profiles.chat | bool) else [])

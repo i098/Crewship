@@ -500,6 +500,7 @@ def test_profile_selection_and_tags_preserve_chat_configuration(tmp_path, enable
             "crewship_cfg": {"home": str(home), "user": getpass.getuser(),
                              "profiles": {"chat": enabled}},
             "crewship_blueprint": str(ROOT / "blueprint"),
+            "crewship_local_bin": str(home / ".local/bin"),
             "crewship_account_ready": True, "crewship_become_target": False,
             "crewship_user_env": {"HOME": str(home)}, "ansible_become": False,
         },
