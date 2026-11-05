@@ -136,3 +136,5 @@ crewship_vnc_dir: "{{ crewship_cfg.home }}/.vnc"
 crewship_vnc_chrome_profile: "{{ crewship_cfg.home }}/.vnc-chrome-profile"
 # Generated on the host for `ssh mac` (tasks/mac_ssh.yml), never copied.
 crewship_mac_ssh_key: "{{ crewship_cfg.home }}/.ssh/id_ed25519_mac"
+# Optional Dia cookie sync script (tasks/dia_cookies.yml); its store and key stay mode 0600.
+crewship_dia_cookies_bin: "{{ crewship_local_bin }}/dia-cookies"
