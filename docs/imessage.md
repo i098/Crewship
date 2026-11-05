@@ -287,6 +287,7 @@ Delayed handoffs follow the [deadline rules](#what-it-does).
 Set `crewship.imessage.desk_v2: true` in `.local/host.yml` to select the V2 front desk.
 The setting defaults to `false`; omit it or set it to `false` to keep the legacy loop for rollback.
 The service renders this setting as `FM_IMESSAGE_DESK_V2=true` or `false`.
+With the default `desk_session: true`, the desk runs as one long omp session instead of the loop below. See [Desk session](#desk-session).
 The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
 Deployment and a one-week trial require separate authorization.
 The front picks one of four results: social, status, dispatch, or relay.
@@ -300,8 +301,57 @@ The typing indicator stops when a newer text replaces the running job.
 
 ### Token log
 
-Every desk and compaction call appends one line to `tokens.jsonl` in the state directory: `{ts, kind, model, input_tokens, output_tokens}`, with the counts the provider returned. `kind` is `front`, `status`, `desk`, `voice`, or `compaction`.
+Every desk and compaction call appends one line to `tokens.jsonl` in the state directory: `{ts, kind, model, input_tokens, output_tokens}`, with the counts the provider returned. `kind` is `front`, `status`, `desk`, `desk-session`, `voice`, or `compaction`.
 `tokens-daily.log` holds one line per day with the call count and the token totals. A call whose provider returns no counts adds no line. A failed write is logged and never fails the call.
+
+### Desk session
+
+With `desk_v2: true`, the desk is one long omp session by default.
+Set `crewship.imessage.desk_session: false` to roll back to the one-shot V2 loop above. The setting has no effect without `desk_v2`.
+The service renders this setting as `FM_IMESSAGE_DESK_SESSION=true` or `false`.
+The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actions.ts`, and `desk-delegate.ts`.
+
+- The bridge runs one persistent omp RPC child. The model and the reasoning level come from the desk settings.
+- The child keeps its session in the state directory. After a crash or a service restart, it resumes the same session with `--continue`.
+- When the child stops, the bridge starts it again with backoff: 1 second first, doubled each time, to a maximum of 60 seconds.
+- omp compacts the session at a fixed 80,000 tokens. The bridge sets this trigger in `compaction.modelThresholds`.
+- The memory view seeds a new session and a session that was just compacted.
+- The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool; it hands all writes to Firstmate.
+- The session acts through five action tools. The bridge checks each call before it does the action:
+  - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
+  - `tapback` reacts only when `deskMayAct` permits it.
+  - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
+  - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
+  - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
+- A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
+- The desk sends no fixed routing receipt bubble.
+- Each assistant message adds one `desk-session` line to the token log.
+- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each of the last 200 bubbles in `senders.json` in the state directory. When the transport gives the sent message an id, a reply that names that id gets that sender. Otherwise the start of the text decides, and only when every recent bubble with that start has the same sender. A desk bubble counts as a sender, so a text that a mate and the desk both sent goes to the desk. A home path or id in `data/secondmates.md` maps the sender to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or two senders with the same text and no id, gives the normal desk turn.
+
+If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
+
+#### Background tasks
+
+The desk can answer the owner at once while the work goes on in the background.
+The session calls `delegate_task` with the target `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
+The tool works like `reply`: it ends the turn, and the same checks apply to the reply text.
+The bridge sends the reply first and then starts one background job.
+
+- The bridge sends the owner's verbatim text to the target. The model never writes the task.
+- `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
+- A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target is refused before anything is sent.
+- `firstmate` gets an inbox note and a mate gets `fm-send.sh`. Both start with `[from captain via desk]`.
+- The task text ends with a path in `desk-tasks/` in the state directory. The target writes its answer for the owner to that file. This is the only answer channel.
+- The bridge also saves a task file with the same id in `desk-tasks/`. It holds the owner's text and the chat of the request.
+- The bridge waits for the answer file for 10 minutes. A restart ends the wait, but not the task.
+- A sweep checks `desk-tasks/` when the bridge starts and then every half second. It sends each answer that has no waiting job, for example an answer that came while the bridge was down or after the 10 minutes. It sends each answer once to the chat in its task file, then removes both files.
+- The answer goes through the same checks as `reply`: `clean.ts`, the raw status line check, and the secret filter. A refused answer is logged and not sent.
+- A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
+- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. Then the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that Firstmate must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back". If the inbox does not take the note, the bridge only logs it. A muted desk sends no text.
+- A task report is a late answer, so a new owner text does not cancel it. Only a muted desk does.
+- If a new owner text cancels the reply before it is sent, the bridge does not hand the first text to Firstmate again. The task already holds it, so Firstmate or the mate gets it once.
+
+The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
 
 ## Herdr status alerts
 
@@ -452,11 +502,11 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   A restart restores this cooldown before rebuilding unfinished nodes from the unchanged message log.
   Missing retry state needs no migration; the service creates it after the first failure.
 
-The memory and routing journal hold owner texts on the host in private state.
+The memory, routing journal, desk session, background tasks, and sender record hold owner texts on the host in private state.
 Deleting only `memory/` does not erase this history; routing recovery restores missing inbound records.
 For complete erasure, first finish every pending routing request, download, and outbox delivery.
 Then stop the bridge through the normal service procedure.
-Remove `memory/`, `routing.jsonl`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
+Remove `memory/`, `routing.jsonl`, `senders.json`, `desk-session/`, `desk-session.seen`, `desk-tasks/`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
 This also clears local routing deduplication, so retain transport seen records and do not replay old message history.
 Never erase these files while requests or uncertain sends still need recovery.
 
@@ -680,6 +730,7 @@ crewship:
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
     desk_v2: false                  # optional; select the V2 loop with true
+    desk_session: true              # optional; this is the default; with desk_v2, false keeps the one-shot V2 loop
     herdr_alerts: false             # optional; true alerts you from herdr agent status
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```

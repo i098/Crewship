@@ -1,9 +1,9 @@
-"""Desk release smoke: real texts get real handling through the bridge, front and desk, never the routing line.
+"""Desk release smoke: real texts get real handling through the bridge, front and desk.
 
 Run with FM_DESK_SMOKE_STRICT=1 before every fm-imessage desk release (docs/imessage.md): a front
-secret masker that cannot load then FAILS the run. Without it the masker check and the status check skip,
-as in CI, whose omp stub has none. The relay routing check needs no masker and always runs.
-Only the model's network edge is stubbed.
+secret masker that cannot load then FAILS the run. Without it the masker check, the status check and the
+desk session check skip, as in CI, whose omp stub has none. The relay routing check needs no masker and always runs.
+Only the model's network edge is stubbed; the desk session check runs a fake omp child (tests/fake_desk_omp.ts).
 """
 
 import json
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from test_imessage import wait_for
+from test_imessage_session import session_rig
 from test_imessage_v2 import deliver, events, texts, v2_rig
 
 STRICT = os.environ.get("FM_DESK_SMOKE_STRICT") == "1"
@@ -70,3 +71,33 @@ def test_status_text_gets_a_real_answer_not_the_routing_line(tmp_path):
         assert reply, "the desk sent an empty reply"
         assert not ROUTING_RECEIPT.search(reply), f"the desk sent the routing receipt: {reply}"
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the front relayed the text"
+
+
+def test_session_text_reaches_the_session_and_its_reply_is_sent(tmp_path):
+    problem = masker_loads(tmp_path)
+    if problem and not STRICT:
+        pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how was your day")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        assert texts(rig)[0].split(" ", 1)[1].strip(), "the desk session sent an empty reply"
+        assert not any(e.get("route") == "handoff" for e in events(rig)), "the desk session handed the text off"
+
+
+def test_session_owner_instruction_gets_one_ack_and_goes_verbatim_to_firstmate(tmp_path):
+    problem = masker_loads(tmp_path)
+    if problem and not STRICT:
+        pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
+    text = "Never give time estimates, just do everything as soon as possible"
+    with session_rig(tmp_path) as rig:
+        note = tmp_path / "note"
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\nprintf "%s" "$5" > {note}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", text)
+        wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
+        wait_for(note.exists, "the handoff to Firstmate", timeout=120)
+        assert text in note.read_text()
+        time.sleep(2)
+        assert len(texts(rig)) == 1, "the desk sent more than the one ack"
+        assert not (rig.state / "desk-tasks").exists(), "an owner instruction started a background task"
