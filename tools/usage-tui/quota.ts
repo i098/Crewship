@@ -90,7 +90,7 @@ const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v 
 // ---- DeepSeek reseller: plan quota from the reseller's quotaMe call -----------------
 // The reseller (deepseekv4pro.com) reports plan credits through quotaMe, read over HTTP via api-anything with the
 // saved login, renewed from the fleet cookie jar when it expires. resets_at is epoch seconds. No browser is opened.
-export type DeepseekUsage = { rows?: { window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
+export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
 
 const RESELLER = "deepseek (reseller)"
 const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
@@ -99,7 +99,7 @@ export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
   const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
     if (!r || typeof r.window !== "string") return []
     const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
-    return [{ account: RESELLER, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+    return [{ account: typeof r.plan === "string" && r.plan ? `${RESELLER} ${r.plan}` : RESELLER, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
   })
   return rows.length ? rows : [resellerNote("n/a")]
 }
@@ -152,7 +152,7 @@ export function clockAt(at: number, tz: string): string {
 }
 
 export const BAR_W = 20
-export const ACCOUNT_W = 20
+export const ACCOUNT_W = 30
 export type Cells = { bar: string; left: string; reset: string; clock: string; color: string; note: string }
 
 export function cells(r: QuotaRow, now: number, tz: string): Cells {
@@ -250,13 +250,14 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 export function parseQuotaMe(plans: unknown): DeepseekUsage {
   const rows: NonNullable<DeepseekUsage["rows"]> = []
   for (const plan of Array.isArray(plans) ? plans : []) {
-    const quota = isObj(plan) ? plan.quota : undefined
+    const p = isObj(plan) ? plan : {}
+    const quota = p.quota
     if (!isObj(quota)) continue
     for (const [key, window] of WINDOWS) {
       const win = quota[key]
       const w = isObj(win) ? win : {}
       const at = typeof w.resetAt === "string" ? Date.parse(w.resetAt) / 1000 : NaN
-      rows.push({ window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
+      rows.push({ plan: typeof p.planName === "string" ? p.planName : undefined, window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
     }
   }
   return { rows }
