@@ -14,10 +14,10 @@ export type ProviderList = { version: 1; providers: DetectedProvider[] }
 const KNOWN: Record<string, { label: string; source: QuotaSource }> = {
   anthropic: { label: "claude", source: "omp-usage" },
   "openai-codex": { label: "codex", source: "omp-usage" },
-  zai: { label: "glm", source: "zai" },
-  "zai-coding-plan": { label: "glm", source: "zai" },
+  zai: { label: "glm", source: "none" },
+  "zai-coding-plan": { label: "glm", source: "none" },
   inception: { label: "mercury", source: "mercury-tokens" },
-  deepseek: { label: "deepseek", source: "deepseek" },
+  deepseek: { label: "deepseek", source: "none" },
 }
 // API-key environment variables checked by name only; the value is never read into the result.
 const ENV_KEYS: Record<string, string[]> = {
@@ -35,12 +35,26 @@ export function configPath(e: Env): string {
 function ompAccounts(e: Env): Record<string, number> {
   const path = e.env.OMP_AGENT_DB ?? `${e.home}/.omp/agent/agent.db`
   if (!existsSync(path)) return {}
-  const db = new Database(path, { readonly: true })
   try {
-    const rows = db.query("select provider, count(*) as n from auth_credentials where disabled_cause is null and provider not like 'mcp_oauth%' group by provider").all() as { provider: string; n: number }[]
-    return Object.fromEntries(rows.map(r => [r.provider, r.n]))
-  } finally {
-    db.close()
+    const db = new Database(path, { readonly: true })
+    try {
+      const rows = db.query("select provider, count(*) as n from auth_credentials where disabled_cause is null and provider not like 'mcp_oauth%' group by provider").all() as { provider: string; n: number }[]
+      return Object.fromEntries(rows.map(r => [r.provider, r.n]))
+    } finally {
+      db.close()
+    }
+  } catch {
+    return {} // locked, corrupt or schema-less database
+  }
+}
+
+// The reseller quota reads the fleet cookie jar, so only a deepseekv4pro.com session there counts. Values are never read out.
+function resellerSession(e: Env): boolean {
+  try {
+    const jar = JSON.parse(readFileSync(`${e.home}/.fleet-browser/cookies.json`, "utf8")) as Record<string, { domain?: unknown } | null>
+    return Object.values(jar).some(c => /^\.?([a-z0-9-]+\.)*deepseekv4pro\.com$/.test(String(c?.domain ?? "")))
+  } catch {
+    return false
   }
 }
 
@@ -53,22 +67,25 @@ function rtkWorks(e: Env): boolean {
   }
 }
 
-export function detect(e: Env): ProviderList {
+export function detect(e: Env, probeRtk = true): ProviderList {
   const found = new Map<string, DetectedProvider>()
-  const add = (id: string, accounts: number, from: string) => {
+  const add = (id: string, accounts: number, from: string, source?: QuotaSource) => {
     const k = KNOWN[id]
     const p = found.get(id) ?? { id, label: k?.label ?? id, accounts: 0, source: k?.source ?? "none", found: [] }
+    if (source) p.source = source
     p.accounts = Math.max(p.accounts, accounts)
     if (!p.found.includes(from)) p.found.push(from)
     found.set(id, p)
   }
   for (const [id, n] of Object.entries(ompAccounts(e))) add(id, n, "omp")
-  if (existsSync(`${e.home}/.codex/auth.json`)) add("openai-codex", 1, "codex-cli")
-  for (const [id, names] of Object.entries(ENV_KEYS)) if (names.some(n => e.env[n])) add(id, 1, "env")
+  // `omp usage` reports omp accounts only, so a Codex CLI login alone has no quota source.
+  if (existsSync(`${e.home}/.codex/auth.json`)) add("openai-codex", 1, "codex-cli", found.has("openai-codex") ? undefined : "none")
+  for (const [id, names] of Object.entries(ENV_KEYS)) if (names.some(n => e.env[n])) add(id, 1, "env", id === "zai" ? "zai" : undefined)
   // The GLM quota call reads its key from the zai-glm provider in models.yml; only the block's presence counts here.
   const models = `${e.home}/.omp/agent/models.yml`
-  if (existsSync(models) && /^\s*zai-glm:/m.test(readFileSync(models, "utf8"))) add("zai", 1, "models.yml")
-  if (rtkWorks(e)) add("rtk", 1, "rtk-cli")
+  if (existsSync(models) && /^\s*zai-glm:/m.test(readFileSync(models, "utf8"))) add("zai", 1, "models.yml", "zai")
+  if (resellerSession(e)) add("deepseek", 1, "fleet-cookies", "deepseek")
+  if (probeRtk && rtkWorks(e)) add("rtk", 1, "rtk-cli")
   const providers = [...found.values()].sort((a, b) => a.id.localeCompare(b.id))
   return { version: 1, providers }
 }
@@ -79,7 +96,7 @@ export function readProviders(e: Env): ProviderList {
     const list = JSON.parse(readFileSync(configPath(e), "utf8")) as ProviderList
     if (list.version === 1 && Array.isArray(list.providers)) return list
   } catch {}
-  return detect(e)
+  return detect(e, false)
 }
 
 // Writes the file only when its content differs. Returns whether it changed.

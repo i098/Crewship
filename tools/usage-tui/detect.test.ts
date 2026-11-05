@@ -85,3 +85,26 @@ test("a zai-glm provider in models.yml counts as GLM without reading its key", (
   const list = detect({ home: h, env: { PATH: "/nonexistent" } })
   expect(list.providers).toEqual([{ id: "zai", label: "glm", accounts: 1, source: "zai", found: ["models.yml"] }])
 })
+
+test("a DeepSeek key alone has no reseller source; a deepseekv4pro.com session in the fleet jar does", () => {
+  const h = home([["deepseek", null]])
+  const e = { home: h, env: { DEEPSEEK_API_KEY: "k", PATH: "/nonexistent" } }
+  expect(detect(e).providers).toEqual([expect.objectContaining({ id: "deepseek", source: "none" })])
+  mkdirSync(join(h, ".fleet-browser"))
+  writeFileSync(join(h, ".fleet-browser/cookies.json"), JSON.stringify({ a: { name: "n", value: "v", domain: ".deepseekv4pro.com" } }))
+  const p = detect(e).providers
+  expect(p).toEqual([expect.objectContaining({ id: "deepseek", source: "deepseek" })])
+  expect(JSON.stringify(p)).not.toContain('"v"')
+})
+
+test("codex CLI login alone has no quota source, a corrupt agent.db is ignored, and the fallback skips rtk", () => {
+  const h = home([], true)
+  const bin = join(h, "bin")
+  mkdirSync(bin)
+  writeFileSync(join(bin, "rtk"), "#!/bin/sh\nexit 0\n")
+  chmodSync(join(bin, "rtk"), 0o755)
+  const e = { home: h, env: { PATH: bin } }
+  expect(readProviders(e).providers).toEqual([expect.objectContaining({ id: "openai-codex", source: "none" })])
+  writeFileSync(join(h, ".omp/agent/agent.db"), "not a database")
+  expect(detect(e).providers.map(p => p.id)).toEqual(["openai-codex", "rtk"])
+})

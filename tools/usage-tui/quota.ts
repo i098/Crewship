@@ -205,8 +205,8 @@ async function run(cmd: string[]): Promise<string> {
 
 // The key is read at call time, held in a local, and never logged; errors carry only an HTTP status.
 async function fetchZai(): Promise<ZaiQuota> {
-  const yml = await Bun.file(`${HOME}/.omp/agent/models.yml`).text()
-  const key = yml.match(/zai-glm:[\s\S]*?apiKey:\s*(\S+)/)?.[1] ?? process.env.ZAI_API_KEY
+  const yml = await Bun.file(`${HOME}/.omp/agent/models.yml`).text().catch(() => "")
+  const key = yml.match(/zai-glm:[\s\S]*?apiKey:\s*(\S+)/)?.[1] ?? process.env.ZAI_API_KEY ?? process.env.GLM_API_KEY
   if (!key) throw new Error("no key")
   const res = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(15_000) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
