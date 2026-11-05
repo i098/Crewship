@@ -58,12 +58,16 @@ def check_body(body, ui):
     if not any(PLAN.match(line) for line in lines):
         errors.append("Add a 'Review plan: <how a reviewer checks this>' line to the body.")
     if ui and not any(IMAGE.search(line) for line in lines):
-        errors.append("The diff changes UI files: embed a hosted screenshot (https image) in the body.")
+        errors.append(
+            "The diff changes UI files: embed a hosted screenshot (https image) in the body."
+        )
     return errors
 
 
 def git(*args):
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.splitlines()
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True
+    ).stdout.splitlines()
 
 
 def main():

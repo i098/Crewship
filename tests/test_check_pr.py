@@ -1,6 +1,6 @@
+import importlib.util
 import subprocess
 import sys
-import importlib.util
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/check_pr.py"
@@ -15,7 +15,14 @@ SHOT = "![after](https://example.com/a.png)\n"
 def test_commit_subjects():
     assert check_pr.check_commits(["feat(ci): add x", "fix!: drop y"]) == []
     assert len(check_pr.check_commits(["Merge branch cleanup into utils"])) == 1
-    for bad in ["Update thing", "fix(CI): x", "fix: done.", "feat:x", "wip: x", "fix: " + "a" * 100]:
+    for bad in [
+        "Update thing",
+        "fix(CI): x",
+        "fix: done.",
+        "feat:x",
+        "wip: x",
+        "fix: " + "a" * 100,
+    ]:
         assert len(check_pr.check_commits([bad])) == 1, bad
 
 
@@ -40,7 +47,11 @@ def test_ui_paths():
 
 
 def _git(repo, *args):
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _run(repo, monkeypatch, *argv):

@@ -249,8 +249,10 @@ Every ship worker also runs the pre-push PR check before opening a PR:
 python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
 ```
 
-It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>(<scope>): <text>`, 100 characters at most, no final period).
-It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or lacks a hosted `https` image while the diff changes UI files (`.tsx`, `.css`, `.html`, `site/`, app web directories).
+It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
+The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
+It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or lacks a hosted `https` image while the diff changes UI files.
+UI files are `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, and `.html` files, `site/`, and `apps/<app>/web`, `apps/<app>/src/components`, and `apps/<app>/public`.
 Use `--ui` or `--no-ui` to override the UI detection.
 
 ## Branch rules
