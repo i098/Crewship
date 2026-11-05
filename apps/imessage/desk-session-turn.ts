@@ -1,5 +1,5 @@
 // One turn of the desk's long chat: the bridge's checks, the child's start, and the prompt it gets.
-// The bridge passes its effects in (SessionHost); a turn that ends with no action goes to Firstmate.
+// The bridge passes its effects in (SessionHost); a turn that ends with no action gets one reminder, then its words go out as the reply or the text goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
 import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
