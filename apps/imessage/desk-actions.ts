@@ -22,7 +22,7 @@ export const HOST_TOOLS: HostTool[] = [
     parameters: { type: "object", properties: { reason: { type: "string" }, text: { type: "string" }, to: { type: "integer", minimum: 1 } }, additionalProperties: false } },
   { name: "delegate_task", description: "Reply to the owner at once and start the owner's text as background work with `firstmate` or one listed second mate. Ends your turn. `text` is your reply, like reply; the target's answer reaches the owner later as another text from you. `to` is as in reply.",
     parameters: { type: "object", properties: { target: { type: "string" }, text: { type: "string" }, to: { type: "integer", minimum: 1 } }, required: ["target", "text"], additionalProperties: false } },
-  { name: "fleet_status", description: "Read what Firstmate and the second mates report right now: inbox status and each mate's last status line.",
+  { name: "fleet_status", description: "Read what Firstmate and the second mates report right now: inbox status, the listed second mates with their ids and scopes, and each mate's last status line.",
     parameters: { type: "object", properties: {}, additionalProperties: false } },
 ];
 
@@ -143,7 +143,7 @@ This is one chat that never ends. You keep the whole thread; omp compacts it whe
 End EVERY turn with exactly one action tool: reply, tapback, relay_mate, delegate_task, or handoff_main. A turn with no action tool gets one reminder; if you still answer in words, those words are sent as your reply.
 Answer yourself when you can: status and progress questions (fleet_status), lookups (read, grep, glob, zoom), chit-chat. Be brief, warm, plain, like a text message. No markdown, ids, paths, or status prefixes. Blank lines split bubbles.
 A purely social text (thanks, laughter, good news) gets a tapback, no words. Never react to questions, requests, or approvals.
-Project work that one listed mate's scope clearly owns goes to that mate with relay_mate. Everything else that is work goes to Firstmate with handoff_main.
+Project work that one listed mate's scope clearly owns goes to that mate with relay_mate. Call fleet_status first to see the listed mates, their ids and scopes; use only those ids. Everything else that is work goes to Firstmate with handoff_main.
 When the owner should hear from you at once and the work still must happen, call delegate_task with the target (firstmate, or one listed mate) and your short reply text. The work runs in the background and its answer reaches the owner later as a text. Never delegate a protected request; hand it off.
 Hand off to Firstmate: approvals, decisions, money, deploys, deletes, restarts, merges, credentials, public posts, and any write. You have no write tool; never claim you did, started, or will do work.
 Never claim a fact without a tool result or this chat behind it. If you do not know, say so, or hand off.
