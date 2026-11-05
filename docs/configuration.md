@@ -393,7 +393,7 @@ The limit on the number of Firstmate homes is a Firstmate setting; Crewship does
 ## Data disk
 
 Set `data_dir` to an existing absolute path on a mounted data disk.
-On a fresh account, the default `""` keeps the legacy storage layout and writes no bulk defaults.
+On a fresh account, the default `""` keeps the legacy storage layout and writes no bulk data-location defaults (the [Worktree cap](#worktree-cap) is still written).
 Clearing `data_dir` removes the managed Bash block and user-manager file.
 Apply and preview tolerate a missing `.bashrc`.
 Native tool keys and existing data remain unchanged.
