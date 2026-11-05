@@ -37,7 +37,13 @@ REPOS = [
     {"repo": "acme/engine", "slots": 2, "labels": ["engine"]},
     {"repo": "acme/engine", "name": "engine-quick", "slots": 1, "labels": ["engine-quick"]},
     {"repo": "acme/api", "slots": 1, "labels": ["linux", "api"]},
-    {"repo": "acme/e2e.tests", "slots": 1, "labels": ["linux", "e2e"], "docker": "dind", "userns": True},
+    {
+        "repo": "acme/e2e.tests",
+        "slots": 1,
+        "labels": ["linux", "e2e"],
+        "docker": "dind",
+        "userns": True,
+    },
     {"repo": "acme/mixed", "slots": 1, "labels": ["self-hosted", "Linux", "one", "two"]},
 ]
 
@@ -47,7 +53,12 @@ def home(tmp_path):
     """An account whose layout exists, as on a host the installer ran on: a copy from the
     checkout needs its parent directory even in check mode."""
     home = tmp_path / "home"
-    for path in (".local/bin", ".local/share/runner-up/shim", ".config/runner-up", ".config/systemd/user"):
+    for path in (
+        ".local/bin",
+        ".local/share/runner-up/shim",
+        ".config/runner-up",
+        ".config/systemd/user",
+    ):
         (home / path).mkdir(parents=True)
     return home
 
@@ -62,26 +73,52 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
     playbook = home.parent / "runner_up.yml"
     if not (home.parent / "templates").exists():
         (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
-    playbook.write_text(yaml.safe_dump([{
-        "hosts": "localhost",
-        "connection": "local",
-        "gather_facts": False,
-        "vars_files": [str(f) for f in sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))],
-        "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/runner_up.yml")}],
-        "handlers": [
-            {"name": "user", "ansible.builtin.debug": {"msg": "x"}, "listen": "reload user systemd"},
-            {"name": "system", "ansible.builtin.debug": {"msg": "x"}, "listen": "reload system systemd"},
-        ],
-    }]))
+    playbook.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "hosts": "localhost",
+                    "connection": "local",
+                    "gather_facts": False,
+                    "vars_files": [
+                        str(f)
+                        for f in sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))
+                    ],
+                    "tasks": [
+                        {
+                            "ansible.builtin.import_tasks": str(
+                                ROOT / "blueprint/ansible/tasks/runner_up.yml"
+                            )
+                        }
+                    ],
+                    "handlers": [
+                        {
+                            "name": "user",
+                            "ansible.builtin.debug": {"msg": "x"},
+                            "listen": "reload user systemd",
+                        },
+                        {
+                            "name": "system",
+                            "ansible.builtin.debug": {"msg": "x"},
+                            "listen": "reload system systemd",
+                        },
+                    ],
+                }
+            ]
+        )
+    )
     crewship = {
-        "user": getpass.getuser(), "home": str(home), "start_services": start_services,
+        "user": getpass.getuser(),
+        "home": str(home),
+        "start_services": start_services,
         "runner_up": runner_up,
     }
     if ci_pool:
         crewship["ci_pool"] = ci_pool
     variables = {
         "ansible_become": False,
-        "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
+        "crewship_repo": str(ROOT),
+        "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship_become_target": False,
         "crewship_runner_up_slice_dir": str(home.parent / "etc"),
         "crewship_runner_up_check": validator(),
@@ -90,9 +127,18 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
     }
     (home.parent / "etc").mkdir(exist_ok=True)
     result = subprocess.run(
-        [Path(sys.executable).parent / "ansible-playbook", "-i", "localhost,", str(playbook),
-         "--extra-vars", json.dumps(variables), *flags],
-        cwd=home.parent, capture_output=True, text=True,
+        [
+            Path(sys.executable).parent / "ansible-playbook",
+            "-i",
+            "localhost,",
+            str(playbook),
+            "--extra-vars",
+            json.dumps(variables),
+            *flags,
+        ],
+        cwd=home.parent,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return int(result.stdout.rsplit("changed=", 1)[1].split()[0])
@@ -109,8 +155,14 @@ def units(home):
 def pool(home, **extra):
     data_dir = home.parent / "data"
     data_dir.mkdir(exist_ok=True)
-    return {"data_dir": str(data_dir), "total_slots": 6, "job_cpus": 4, "job_memory_gb": 8,
-            "repos": REPOS, **extra}
+    return {
+        "data_dir": str(data_dir),
+        "total_slots": 6,
+        "job_cpus": 4,
+        "job_memory_gb": 8,
+        "repos": REPOS,
+        **extra,
+    }
 
 
 def test_config_maps_every_ci_pool_entry_to_places_and_pools_and_leaves_dind_out(home):
@@ -118,11 +170,24 @@ def test_config_maps_every_ci_pool_entry_to_places_and_pools_and_leaves_dind_out
     cfg = config(home)
     assert cfg["github"]["repos"] == ["acme/web", "acme/engine", "acme/api", "acme/mixed"]
     # A reserved label is no pool: runner-up refuses it, and every self-hosted runner has it.
-    assert [p["label"] for p in cfg["pools"]] == ["web", "engine", "engine-quick", "api", "one", "two"]
+    assert [p["label"] for p in cfg["pools"]] == [
+        "web",
+        "engine",
+        "engine-quick",
+        "api",
+        "one",
+        "two",
+    ]
     places = {p["id"]: p for p in cfg["machines"][0]["places"]}
     assert sorted(places) == [
-        "acme-api-1", "acme-engine-1", "acme-engine-2", "acme-mixed-1",
-        "acme-web-1", "acme-web-2", "acme-web-3", "engine-quick-1",
+        "acme-api-1",
+        "acme-engine-1",
+        "acme-engine-2",
+        "acme-mixed-1",
+        "acme-web-1",
+        "acme-web-2",
+        "acme-web-3",
+        "engine-quick-1",
     ]
     # A named group keeps places of its own, so quick jobs never wait behind the long ones.
     assert places["engine-quick-1"]["pools"] == ["engine-quick"]
@@ -146,9 +211,9 @@ def test_auto_slots_take_half_of_the_host_like_the_ci_pool(home):
     auto = {key: value for key, value in pool(home).items() if key != "total_slots"}
     apply(home, {}, ci_pool=auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
     machine = config(home)["machines"][0]
-    assert machine["cores"] == pool_script.auto_slots(
-        {"job_cpus": 4, "job_memory_gb": 8}, 96, 250
-    ) * 4
+    assert (
+        machine["cores"] == pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250) * 4
+    )
 
 
 def test_runner_up_repos_replace_the_ci_pool_list_and_need_no_ci_pool(home):
@@ -159,12 +224,24 @@ def test_runner_up_repos_replace_the_ci_pool_list_and_need_no_ci_pool(home):
 
 
 def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
-    machine = {"name": "laptop", "ssh": ["ci@laptop"], "slots": 1, "job_cpus": 2, "job_memory_gb": 4,
-               "cores": 2, "memory_gb": 4, "agent": "/opt/agent"}
+    machine = {
+        "name": "laptop",
+        "ssh": ["ci@laptop"],
+        "slots": 1,
+        "job_cpus": 2,
+        "job_memory_gb": 4,
+        "cores": 2,
+        "memory_gb": 4,
+        "agent": "/opt/agent",
+    }
     apply(home, {"machines": [machine]}, ci_pool=pool(home))
     cfg = config(home)
     laptop = cfg["machines"][1]
-    assert (laptop["name"], laptop["ssh"], laptop["agent"]) == ("laptop", ["ci@laptop"], "/opt/agent")
+    assert (laptop["name"], laptop["ssh"], laptop["agent"]) == (
+        "laptop",
+        ["ci@laptop"],
+        "/opt/agent",
+    )
     assert (laptop["cores"], laptop["memoryMB"]) == (2, 4096)
     (place,) = laptop["places"]
     assert (place["cores"], place["memoryMB"]) == (2, 4096)
@@ -195,7 +272,9 @@ def test_the_slice_and_the_units_carry_the_caps(home):
     service = unit_sections(units(home) / "runner-up.service")["Service"]
     assert service["Nice"] == ["10"]
     assert service["KillMode"] == ["process"]  # stopping the coordinator leaves running jobs alone
-    assert any(v.startswith(f"PATH={home}/.local/share/runner-up/shim:") for v in service["Environment"])
+    assert any(
+        v.startswith(f"PATH={home}/.local/share/runner-up/shim:") for v in service["Environment"]
+    )
     assert any("image --ensure" in v for v in service["ExecStartPre"])
     clean = unit_sections(units(home) / "runner-up-clean.service")["Service"]
     assert "RUNNER_UP_DISK_MAX_GB=50" in clean["Environment"]
@@ -223,11 +302,15 @@ def test_a_second_apply_changes_nothing_and_check_mode_writes_nothing(home):
 
 
 def test_the_job_image_recipe_is_the_ci_pools_image(home):
-    assert (ROOT / "blueprint/containers/ci-runner.Dockerfile").read_text() == pool_script.DOCKERFILE
+    assert (
+        ROOT / "blueprint/containers/ci-runner.Dockerfile"
+    ).read_text() == pool_script.DOCKERFILE
 
 
 def test_reserved_labels_match_the_validator_and_the_template(home):
-    variables = yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/runner_up.yml").read_text())
+    variables = yaml.safe_load(
+        (ROOT / "blueprint/ansible/group_vars/all/runner_up.yml").read_text()
+    )
     assert tuple(variables["crewship_runner_up_reserved_labels"]) == ship.RUNNER_UP_RESERVED_LABELS
 
 
@@ -291,10 +374,19 @@ def stubs(tmp_path):
 
 def run_script(script, stubs, *args, env=None, **kwargs):
     bin_dir, log = stubs
-    environment = {"PATH": f"{bin_dir}:/usr/bin:/bin", "RUNNER_UP_DOCKER": str(bin_dir / "docker"),
-                   "XDG_RUNTIME_DIR": str(log.parent), **(env or {})}
-    done = subprocess.run([str(MAINTENANCE / script), *args], env=environment, capture_output=True,
-                          text=True, **kwargs)
+    environment = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "RUNNER_UP_DOCKER": str(bin_dir / "docker"),
+        "XDG_RUNTIME_DIR": str(log.parent),
+        **(env or {}),
+    }
+    done = subprocess.run(
+        [str(MAINTENANCE / script), *args],
+        env=environment,
+        capture_output=True,
+        text=True,
+        **kwargs,
+    )
     assert done.returncode == 0, done.stderr
     return log.read_text().splitlines() if log.exists() else []
 
@@ -339,7 +431,9 @@ def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(
     assert calls[-1] == "docker image prune --force"
 
 
-def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_always_builds(stubs, tmp_path):
+def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_always_builds(
+    stubs, tmp_path
+):
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n")
     present = tmp_path / "image"
