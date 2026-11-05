@@ -816,7 +816,7 @@ print(json.dumps({{"result": result}}))
     base = yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/base.yml").read_text())
     variables = {
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
-        "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
+        "crewship_cfg": {"user": getpass.getuser(), "home": str(home), "ci_pool": {},
                          "herdr": {"schedules_tab": mode != "disabled",
                                   **({} if mode in ("all", "update") else {k: False for k in (
                                       "usage_tab", "crewboard_tab", "browsers_tab", "ci_pool_tab")})}},

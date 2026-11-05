@@ -106,9 +106,11 @@ crewship_herdr_tabs: >-
      + crewship_tuis | map('combine', {'args': ''}) | list
      + [{'label': 'decision-queue', 'bin': 'crewboard-tui', 'args': ' --queue', 'switch': 'crewboard_tab'},
         {'label': 'frontdesk', 'bin': 'crewboard-tui', 'args': ' --desk', 'switch': 'crewboard_tab'}] }}
+# The ci-pool tab opens only on a host that runs the CI pool.
 crewship_herdr_open_tabs: >-
   {{ crewship_herdr_tabs | rejectattr('switch', 'in',
-     crewship_cfg.herdr | dict2items | rejectattr('value') | map(attribute='key') | list) | list }}
+     (crewship_cfg.herdr | dict2items | rejectattr('value') | map(attribute='key') | list)
+     + ([] if crewship_cfg.ci_pool is defined else ['ci_pool_tab'])) | list }}
 crewship_user_units: "{{ crewship_cfg.home }}/.config/systemd/user"
 crewship_home_layout_paths: >-
   {{ [crewship_cfg.home ~ '/.config',

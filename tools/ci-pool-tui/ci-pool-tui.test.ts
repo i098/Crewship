@@ -5,7 +5,7 @@ const NOW = Date.parse("2026-11-01T12:00:00Z")
 const ago = (s: number) => new Date(NOW - s * 1000).toISOString()
 const runner = (n: number, status: string, busy: boolean, labels: string[]) => ({ name: `pool-o-r-${n}-1`, status, busy, labels: labels.map(name => ({ name })) })
 const base = (): Snapshot => ({
-  now: NOW, slots: poolSlots({ repos: [{ repo: "o/r", slots: 3, labels: [] }] }),
+  now: NOW, slots: poolSlots({ repos: [{ repo: "o/r", slots: 3, labels: ["x"] }] }),
   units: { "o-r-1": { state: "active", age: 900 }, "o-r-2": { state: "active", age: 900 }, "o-r-3": { state: "active", age: 900 } },
   containers: { "ci-runner-o-r-1": { state: "running", status: "Up 15 minutes" }, "ci-runner-o-r-2": { state: "running", status: "Up 15 minutes" }, "ci-runner-o-r-3": { state: "running", status: "Up 15 minutes" } },
   runners: { "o/r": [runner(1, "online", true, ["self-hosted", "x"]), runner(2, "online", false, ["self-hosted", "x"]), runner(3, "online", false, ["self-hosted", "x"])] },
@@ -42,13 +42,16 @@ test("a slot problem seen for under 2 minutes is ending, not stuck", () => {
   expect(slotRows(s)[0]).toMatchObject({ state: "STUCK", level: "bad", stuck: "container dead" })
 })
 
-test("a self-hosted job queued over 5 minutes is held with its cause; younger and GitHub-hosted jobs are not", () => {
+test("a pool job queued over 5 minutes is held with its cause, also in a running run and by pool label alone; younger and GitHub-hosted jobs are not", () => {
   const s = base()
   s.queued["o/r"] = [{ id: 8, display_title: "t", status: "queued", created_at: ago(700) }]
-  const job = (id: number, age: number, labels: string[]) => ({ id, run_id: 8, name: `j${id}`, status: "queued", created_at: ago(age), labels })
+  s.progress["o/r"] = [{ id: 9, display_title: "m", status: "in_progress", created_at: ago(800) }]
+  const job = (id: number, age: number, labels: string[], run_id = 8) => ({ id, run_id, name: `j${id}`, status: "queued", created_at: ago(age), labels })
   s.jobs[8] = [job(1, 700, ["self-hosted", "x"]), job(2, 100, ["self-hosted", "x"]), job(3, 900, ["ubuntu-latest"]), job(4, 700, ["self-hosted", "nope"])]
+  s.jobs[9] = [{ ...job(6, 800, ["X"], 9), status: "in_progress" }, job(5, 800, ["X"], 9)]
   const f = findings(s, slotRows(s))
   expect(f.map(x => [x.where, Math.round(x.age!), x.cause])).toEqual([
+    ["r j5 · m", 800, "2 idle matching runner(s) online; GitHub has not assigned the job"],
     ["r j1 · t", 700, "2 idle matching runner(s) online; GitHub has not assigned the job"],
     ["r j4 · t", 700, "no runner has labels self-hosted,nope"],
   ])

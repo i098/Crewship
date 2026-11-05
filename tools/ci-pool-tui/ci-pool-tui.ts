@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // CI pool TUI: slots, GitHub runners, queued and running workflow runs, and what is held up. Read only.
-// The model (first half) is pure and tested in pool.test.ts; the rest reads systemd, docker and GitHub.
+// The model (first half) is pure and tested in ci-pool-tui.test.ts; the rest reads systemd, docker and GitHub.
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
-import { accessSync, constants, readFileSync } from "node:fs"
+import { accessSync, constants, existsSync, readFileSync } from "node:fs"
 import { theme } from "../tui-theme/theme.ts"
 
 // ---- model ----------------------------------------------------------------
@@ -12,11 +12,11 @@ export const SETTLE_S = 120 // a slot problem must last this long to count as st
 export const STALL_S = 300 // a slot older than this must have a container and a registered runner (same rule as ci-pool.py watch)
 export const CALLS_PER_MIN = 20 // GitHub REST budget
 export const CALL_GAP_MS = 60_000 / CALLS_PER_MIN
-export const MIN_AGE_MS = 60_000 // one GitHub read is never repeated sooner
+export const MIN_AGE_MS = 120_000 // one GitHub read is never repeated sooner: held and stuck checks wait minutes anyway
 const JOB_RUNS_PER_REPO = 8 // job reads per repo and kind (queued, in progress)
 
 export type PoolEntry = { repo: string; slots: number; labels: string[]; name?: string }
-export type Slot = { slot: string; repo: string }
+export type Slot = { slot: string; repo: string; labels: string[] }
 export type Unit = { state: string; age: number }
 export type Box = { state: string; status: string }
 export type Runner = { name: string; status: string; busy: boolean; labels: { name: string }[] }
@@ -39,7 +39,7 @@ export type Snapshot = {
 export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
 export function poolSlots(pool: { repos: PoolEntry[] }): Slot[] {
-  return pool.repos.flatMap(e => Array.from({ length: e.slots }, (_, i) => ({ slot: `${slug(e.name ?? e.repo)}-${i + 1}`, repo: e.repo })))
+  return pool.repos.flatMap(e => Array.from({ length: e.slots }, (_, i) => ({ slot: `${slug(e.name ?? e.repo)}-${i + 1}`, repo: e.repo, labels: e.labels ?? [] })))
 }
 
 /** `systemctl --user show ci-runner@*.service -p Id -p ActiveState -p ActiveEnterTimestampMonotonic`; bootSeconds is the monotonic clock now. */
@@ -66,7 +66,7 @@ export function parseContainers(text: string): Record<string, Box> {
 const secs = (iso: string | null | undefined, now: number) => (iso ? Math.max(0, (now - Date.parse(iso)) / 1000) : null)
 
 export function newestRunner(list: Runner[] | undefined, slot: string): Runner | undefined {
-  const own = (list ?? []).filter(r => new RegExp(`^pool-${slot.replace(/[^a-z0-9-]/g, "")}-\\d+$`).test(r.name))
+  const own = (list ?? []).filter(r => new RegExp(`^pool-${slot}-\\d+$`).test(r.name))
   return own.sort((a, b) => Number(b.name.split("-").pop()) - Number(a.name.split("-").pop()))[0]
 }
 
@@ -130,20 +130,21 @@ export function heldCause(labels: string[], runners: Runner[] | undefined): stri
   return online.length ? `all ${online.length} matching online runner(s) busy` : `all ${match.length} matching runner(s) offline`
 }
 
-/** Held self-hosted jobs of one repo, and one summary for queued runs whose jobs have not been read. */
+/** Held pool jobs of one repo (a run is in progress once any job runs), and one summary for queued runs whose jobs have not been read. */
 function queuedFindings(s: Snapshot, repo: string): Finding[] {
   const short = repo.split("/")[1] ?? repo
+  const pool = new Set(["self-hosted", ...s.slots.filter(x => x.repo === repo).flatMap(x => x.labels.map(l => l.toLowerCase()))])
   const out: Finding[] = []
   const unread: number[] = []
-  for (const run of s.queued[repo]) {
+  for (const run of [...(s.queued[repo] ?? []), ...(s.progress[repo] ?? [])]) {
     const jobs = s.jobs[run.id]
     for (const j of jobs?.filter(x => x.status === "queued") ?? []) {
       const age = secs(j.created_at, s.now)
-      if (j.labels.some(l => l.toLowerCase() === "self-hosted") && age !== null && age >= HELD_AFTER_S)
+      if (j.labels.some(l => pool.has(l.toLowerCase())) && age !== null && age >= HELD_AFTER_S)
         out.push({ sev: "bad", where: `${short} ${j.name} · ${run.display_title ?? run.name ?? run.id}`, what: "job queued", age, cause: heldCause(j.labels, s.runners[repo]) })
     }
     const age = secs(run.created_at, s.now)
-    if (!jobs && age !== null && age >= HELD_AFTER_S) unread.push(age)
+    if (!jobs && run.status === "queued" && age !== null && age >= HELD_AFTER_S) unread.push(age)
   }
   if (unread.length) out.push({ sev: "warn", where: short, what: `${unread.length} runs queued`, age: Math.max(...unread), cause: `jobs of these runs not read yet (${JOB_RUNS_PER_REPO} reads per repo and kind)` })
   return out
@@ -151,7 +152,7 @@ function queuedFindings(s: Snapshot, repo: string): Finding[] {
 
 export function findings(s: Snapshot, rows: SlotRow[]): Finding[] {
   const out: Finding[] = rows.filter(r => r.stuck).map(r => ({ sev: "bad", where: r.slot, what: "runner stuck", age: r.age, cause: r.stuck! }))
-  out.push(...Object.keys(s.queued).flatMap(repo => queuedFindings(s, repo)))
+  out.push(...[...new Set([...Object.keys(s.queued), ...Object.keys(s.progress)])].flatMap(repo => queuedFindings(s, repo)))
   for (const r of rows) if (r.jobAge !== null && r.jobAge > LONG_JOB_S) out.push({ sev: "warn", where: r.slot, what: "job running long", age: r.jobAge, cause: r.job })
   if (s.errors.length) out.push({ sev: "warn", where: "GitHub", what: `${s.errors.length} read(s) failed`, age: null, cause: s.errors[0] })
   return out.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === "bad" ? -1 : 1) || (b.age ?? 0) - (a.age ?? 0))
@@ -306,9 +307,9 @@ function header(s: Snapshot, sent: number[], pending: number): Line[] {
 }
 
 // ---- data -----------------------------------------------------------------
-function loadSlots() {
-  const pool = JSON.parse(readFileSync(POOL, "utf8"))
-  return poolSlots(pool)
+function loadSlots(): Slot[] {
+  if (!existsSync(POOL)) return [] // no CI pool on this host
+  return poolSlots(JSON.parse(readFileSync(POOL, "utf8")))
 }
 
 async function sh(argv: string[], ms = 20_000) {
@@ -367,10 +368,12 @@ const errors = new Map<string, string>()
 let pausedUntil = 0 // epoch ms: GitHub said the hourly limit is used up
 async function gh(path: string, key: string) {
   sent.push(Date.now())
+  if (sent.length > CALLS_PER_MIN) sent.shift() // only the last CALLS_PER_MIN can fall in the 60 s window
   const r = await sh(["gh", "api", path])
   if (r.code === 0) {
     cache.set(key, { at: Date.now(), data: JSON.parse(r.out) })
     errors.delete(key)
+    errors.delete("limit")
     return
   }
   cache.set(key, { at: Date.now(), data: cache.get(key)?.data })
@@ -452,7 +455,7 @@ async function main() {
   const pSlots = mkPanel(" Runner slots · ci-runner@ ")
   renderer.root.add(column)
 
-  let slots = loadSlots()
+  const slots = loadSlots()
   const repos = () => [...new Set(slots.map(x => x.repo))]
   let local: Pick<Snapshot, "units" | "containers"> = { units: {}, containers: null }
   let forgejo: Forgejo | null = null
@@ -477,16 +480,24 @@ async function main() {
     busy = true
     try {
       const c = Date.now() < pausedUntil ? null : nextCall(repos(), cache, sent, Date.now())
-      if (c) await gh(c.path, c.key)
+      if (c) {
+        await gh(c.path, c.key)
+        // Drop reads of runs that have finished, so their data and errors do not stay for ever.
+        const wanted = new Set(dueCalls(repos(), cache, Infinity).map(x => x.key))
+        for (const k of cache.keys()) if (!wanted.has(k)) cache.delete(k)
+        for (const k of errors.keys()) if (k !== "limit" && !wanted.has(k)) errors.delete(k)
+      }
     } finally { busy = false; draw() }
   }
+  // Sleep after each round, so a hung docker or forgejo-axi never stacks rounds.
+  const every = async (f: () => Promise<void>, ms: number) => { for (;;) { await f(); await Bun.sleep(ms) } }
   const refreshLocal = async () => { local = await readLocal(); draw() }
   const refreshForgejo = async () => { forgejo = await readForgejo(); draw() }
 
   draw()
-  void refreshLocal()
-  void refreshForgejo()
-  const timers = [setInterval(refreshLocal, LOCAL_MS), setInterval(refreshForgejo, FORGEJO_MS), setInterval(tick, 1000), setInterval(draw, 1000)]
+  void every(refreshLocal, LOCAL_MS)
+  void every(refreshForgejo, FORGEJO_MS)
+  const timers = [setInterval(tick, 1000), setInterval(draw, 1000)]
   renderer.on("resize", draw)
   renderer.keyInput.on("keypress", (k: { name: string }) => {
     if (k.name === "q") {
