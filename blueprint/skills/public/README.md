@@ -7,6 +7,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`apple-hig`](apple-hig/SKILL.md): short Apple Human Interface Guidelines rules with a link to each HIG page, plus current iOS design and SwiftUI resources (credits community skills), for iOS, macOS and mobile UI work.
 - [`ios-app-checklist`](ios-app-checklist/SKILL.md): check common App Store submission requirements described in a developer's reel.
 - [`be-ambitious`](be-ambitious/SKILL.md): deepen a prompt through expert methods, primary sources, and external verification (MIT; [Dan McAteer](https://github.com/DannyMac180), [source](https://github.com/DannyMac180/skills/tree/main/be-ambitious)).
+- [`structured-thinker`](structured-thinker/SKILL.md): answer judgment, design, advice, recommendation and premise-dependent questions with three interpretations, a counter-case and a final answer.
 - [`ai-design-consistency`](ai-design-consistency/SKILL.md): keep AI-generated design consistent through a clear point of view, encoded design standards and templates, user-like inspection, and adversarial critique.
 - [`clean-code-classes`](clean-code-classes/SKILL.md): one job per class, when to stop splitting, objects versus data, Law of Demeter, wrapping third-party libraries (credits `@s4.codes` reels).
 - [`clean-code-comments`](clean-code-comments/SKILL.md): when a comment earns its place, and when to delete or replace it with code (credits `@s4.codes` reels).
