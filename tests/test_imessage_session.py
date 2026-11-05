@@ -5,12 +5,13 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from test_imessage import read_text, wait_for
+from test_imessage import SEND, read_text, wait_for
 from test_imessage_v2 import deliver, events, omp_masks, texts, v2_rig
 
 FAKE = Path(__file__).resolve().parent / "fake_desk_omp.ts"
@@ -208,3 +209,27 @@ def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_p
         time.sleep(2)
         assert "bluebubbles-m1" not in read_text(ids).splitlines()
         assert len([line for line in read_text(ids).splitlines() if line.startswith("desk-task-")]) == 1
+
+
+def test_thread_reply_to_a_mates_bubble_goes_to_that_mate(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text(f"- engram - Engram mate (home: {tmp_path}/engram; scope: engram work; projects: none)\n")
+    message = tmp_path / "task-message"
+    with session_rig(tmp_path) as rig:
+        script = tmp_path / "bin" / "fm-send.sh"
+        script.write_text(f'#!/bin/bash\nprintf "%s %s" "$1" "$2" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        # The mate's bubble, sent with its home in FM_HOME, then his thread reply to it.
+        sent = subprocess.run([str(SEND), "The engram checks are green."], capture_output=True, text=True,
+                              env={**rig.env, "FM_HOME": f"{tmp_path}/engram"}, timeout=30)
+        assert sent.returncode == 0, sent.stderr
+        wait_for(lambda: len(texts(rig)) == 2, "the mate's bubble", timeout=120)
+        rig.relay_message("b1", "The engram checks are green.", int(time.time() * 1000), isFromMe=True)
+        rig.relay_message("m2", "nice, thanks", int(time.time() * 1000) + 1, threadOriginatorGuid="b1")
+        subprocess.run(["curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": "m2"}}),
+                        f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
+        wait_for(message.exists, "the relay to the mate", timeout=120)
+        assert read_text(message) == "engram [from captain via desk] nice, thanks"
+        assert len(texts(rig)) == 2  # no model reply to the owner

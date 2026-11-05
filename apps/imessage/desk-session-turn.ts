@@ -12,7 +12,7 @@ export { TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
 
-export type TurnRequest = RelayRequest & { memoryId: number; route: string };
+export type TurnRequest = RelayRequest & { memoryId: number; route: string; threadMate?: string };
 
 export type SessionHost<R extends TurnRequest> = {
   env: SessionEnv;
@@ -117,6 +117,11 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     if (refused(pending, original)) return host.handoff(pending);
     const safe = host.safe!;
     const mates = secondmates(host.fmHome);
+    // A thread reply to a mate's bubble goes back to that mate, with the same relay checks.
+    const replied = mates.find((m) => m.id === pending[0]!.threadMate);
+    if (replied && pending.every((r) => r.threadMate === replied.id)) {
+      return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
+    }
     const actions = createActions({
       requests: pending, current, muted: host.muted, mates: () => mates, safe,
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),

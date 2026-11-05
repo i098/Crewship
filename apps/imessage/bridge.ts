@@ -198,8 +198,8 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true };
-type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; at?: number; loop?: "v2" };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
@@ -207,6 +207,21 @@ type RouteEvent = { received: Received } | { ids: string[]; route: Routing["rout
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
+// Who sent each recent bubble, by the start of its text: a thread reply to it goes back to that mate.
+// shortcut: in memory and keyed by text, so a restart or two bubbles with the same start lose or mix it; use message ids if that matters.
+const sentBy = new Map<string, string>();
+const quoteKey = (text: string) => text.slice(0, 120).trim();
+function rememberSender(text: string, sender: string) {
+  sentBy.delete(quoteKey(text));
+  sentBy.set(quoteKey(text), sender);
+  if (sentBy.size > 200) sentBy.delete(sentBy.keys().next().value!);
+}
+// The mate whose home or id the sender header names; the main home and unknown senders give none.
+const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
+function quotedText(c: LineMessage["content"]): string | undefined {
+  if (c.type === "reply") return c.target.content.type === "text" ? c.target.content.text : undefined;
+  if (c.type === "effect") return quotedText(c.content);
+}
 let routingRetry: NodeJS.Timeout | undefined;
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
 type Bubble = string | Picture;
@@ -485,6 +500,7 @@ Bun.serve({
     const photo = form && await photoOf(form);
     if (photo instanceof Response) return photo;
     const raw = form ? String(form.get("caption") ?? "") : await req.text();
+    const sender = req.headers.get("x-fm-sender")?.trim() || undefined;
     const status = statusLine(raw);
     if (status) return new Response(`nothing queued: this is a status line (${status}); write one plain-prose sentence for the owner\n`, { status: 422 });
     const parts = bubbles(cleanText(raw));
@@ -502,7 +518,7 @@ Bun.serve({
     return queue({ ...destination, image, bubbles: parts,
       ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
         : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
-      reply: url.searchParams.has("no-thread") ? undefined : target?.id }, what);
+      reply: url.searchParams.has("no-thread") ? undefined : target?.id, sender }, what);
   },
 });
 
@@ -831,6 +847,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
         checkDeskDelivery(o);
         if (typeof bubble === "string") {
           const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
+          if (o.sender) rememberSender(bubble, o.sender);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
           await line.sendImage!(space, bubble, thread);
@@ -1513,7 +1530,8 @@ async function handle(line: Line, message: LineMessage) {
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
   const authored = authoredText(message.content);
-  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored);
+  const quoted = quotedText(message.content);
+  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, quoted === undefined ? undefined : mateOfSender(sentBy.get(quoteKey(quoted))));
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);
@@ -1539,12 +1557,12 @@ async function handle(line: Line, message: LineMessage) {
 }
 
 // Persist the full input before marking it read or seen. A duplicate never opens another routing decision.
-function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text) {
+function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text, threadMate?: string) {
   if (routing.has(requestId)) return;
   const mateEligible = !firstmate && !supervisorOnly(authored);
   // Destructive requests, unclear approvals, and sensitive content keep the existing supervisor boundary.
   firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
-  const received: Received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, at: Date.now(), ...(DESK_V2 ? { loop: "v2" } : {}) };
+  const received: Received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, ...(threadMate ? { threadMate } : {}), at: Date.now(), ...(DESK_V2 ? { loop: "v2" } : {}) };
   if (!DESK_V2) prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);

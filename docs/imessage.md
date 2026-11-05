@@ -326,6 +326,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
 - The desk sends no fixed routing receipt bubble.
 - Each assistant message adds one `desk-session` line to the token log.
+- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each recent bubble by the start of its text, in memory, and maps a home path or id in `data/secondmates.md` to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or a restart since the bubble, gives the normal desk turn.
 
 If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
 

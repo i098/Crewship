@@ -11,7 +11,7 @@
 # Text and caption pass through the outbound filter (clean.ts: strips tags, ids, raw paths, status prefixes).
 # Exit 0 = queued: the bridge sends in order and retries while the upstream is down. Exit non-zero = nothing queued.
 url=http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}
-B=(curl -sS --fail-with-body --max-time 60 -H 'X-Firstmate: 1')
+B=(curl -sS --fail-with-body --max-time 60 -H 'X-Firstmate: 1' -H "X-Fm-Sender: ${FM_MATE_ID:-${FM_HOME:-}}")
 q=
 image=
 here=$(dirname "$(readlink -f "$0")")
