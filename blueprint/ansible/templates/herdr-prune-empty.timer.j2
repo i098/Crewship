@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Close empty Herdr panes every {{ crewship_herdr_prune_every }} (Crewship managed)
+
+[Timer]
+Unit=herdr-prune-empty.service
+OnBootSec=5min
+OnUnitActiveSec={{ crewship_herdr_prune_every }}
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

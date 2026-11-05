@@ -297,3 +297,18 @@ Retired: `herdr-mosh` is now `herdr-patch`. An apply on a host that still has `~
 - CPU and RAM count only processes the reporter's account can read, and RAM is resident memory, so shared pages count once per process. CPU counts a process only while two runs a second apart both see it: a process that starts and ends between two runs is not counted, and the time before the first run that sees it or after the last is lost, so a space running many short builds reads low.
 - The machine line's parts are single-spaced so it fits even with CPU at 100% and memory and disk at 99%: after the `machine` entry's state dot, or two columns in under the primary home's name, where Herdr shows 40 columns at width 46. At 100%, or on a narrower sidebar, Herdr cuts its end.
 - Herdr sidebar styles offer color, bold and dim only: no italic and no thinner weight.
+
+## Empty-pane pruner
+
+[`blueprint/maintenance/herdr-prune-empty.py`](../blueprint/maintenance/herdr-prune-empty.py) is installed as `~/.local/bin/herdr-prune-empty.py` and run by the user timer `herdr-prune-empty.timer` (the `firstmate` profile, every 2 minutes). It uses only the Python standard library.
+
+A pane is closed only when all of these hold; any read failure or doubt keeps the pane:
+
+- Herdr reports no agent in it, its foreground process is its own shell, and that shell has no child process.
+- Its screen text, title and directory stayed unchanged for `crewship_herdr_prune_idle` seconds (default 600). The clock lives in `~/.local/state/crewship/herdr-prune-empty.json`.
+- No `state/*.meta` records it as `window=`, `herdr_pane_id=` or `hiatus_window=`. The homes are the main Firstmate home plus every local home in its `data/secondmates.md` (`home: <path>`; entries with `host:` are skipped) and `crewship_herdr_prune_extra_homes`. A listed home without a readable `state/` stops the run.
+- It is not `crewship_herdr_prune_main_pane`, its tab is not in `crewship_herdr_prune_keep_tabs` (default Concord, crewboard, monitoring) and it is not the last pane of the session.
+
+Herdr removes a tab or workspace when its last pane closes; the pruner also closes any tab or workspace that reports no pane.
+Every close is one journal line with the pane id, tab, workspace and reason: `journalctl --user -u herdr-prune-empty.service`.
+`herdr-prune-empty.py --dry-run` (with the unit's environment) lists what the next run would close and why, and closes nothing; it may write its own idle-clock state file. `crewship_herdr_prune_main_pane` is required for real closes: while it is unset the unit logs `MAIN_PANE is not set` and only dry-runs.

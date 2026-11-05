@@ -1,0 +1,14 @@
+---
+# Empty-pane pruner: herdr-prune-empty.timer closes Herdr panes that hold only an idle bare shell
+# (docs/herdr.md#empty-pane-pruner). The main Firstmate home is crewship_firstmate_dir; the secondmate
+# homes come from its data/secondmates.md. Their state/*.meta panes are never closed.
+crewship_herdr_prune_script: "{{ crewship_local_bin }}/herdr-prune-empty.py"
+crewship_herdr_prune_session: default
+crewship_herdr_prune_idle: 600
+crewship_herdr_prune_every: 2min
+# Tabs whose panes are never closed (case-insensitive names).
+crewship_herdr_prune_keep_tabs: [Concord, crewboard, monitoring]
+# Homes besides the main one and the secondmates.md list.
+crewship_herdr_prune_extra_homes: []
+# REQUIRED for real closes: the main Firstmate pane id (such as w2:pZ). Unset, the pruner only dry-runs.
+crewship_herdr_prune_main_pane: ""

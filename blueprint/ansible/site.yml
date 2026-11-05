@@ -132,6 +132,16 @@
         - crewship_cfg.profiles.firstmate | bool
       tags: [firstmate, stall_nudge]
 
+    - name: Empty-pane pruner that closes idle bare-shell Herdr panes
+      ansible.builtin.import_tasks: tasks/herdr_prune.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.profiles.firstmate | bool
+      tags: [firstmate, herdr_prune]
+
     - name: Stuck-composer guard that clears stale text from second mates
       ansible.builtin.import_tasks: tasks/stuck_composer.yml
       become: "{{ crewship_become_target | bool }}"
