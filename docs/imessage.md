@@ -325,6 +325,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
 - The desk sends no fixed routing receipt bubble.
+- A turn that ends with no action tool gets one reminder to use `reply`. If the model still answers in words, the bridge sends those words through the `reply` checks. Words that the checks refuse go to Firstmate. omp RPC cannot force a tool call, so the desk does not rely on one.
 - Each assistant message adds one `desk-session` line to the token log.
 - A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each of the last 200 bubbles in `senders.json` in the state directory. When the transport gives the sent message an id, a reply that names that id gets that sender. Otherwise the start of the text decides, and only when every recent bubble with that start has the same sender. A desk bubble counts as a sender, so a text that a mate and the desk both sent goes to the desk. A home path or id in `data/secondmates.md` maps the sender to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or two senders with the same text and no id, gives the normal desk turn.
 

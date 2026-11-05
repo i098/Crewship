@@ -1,5 +1,5 @@
 // A fake `omp --mode rpc` child for the desk session tests. Each prompt runs one script, chosen by a token
-// in the owner's texts: TAPBACK, RELAY <mate>, HANDOFF, STATUS, CRASH, COMPACT, DELEGATE <target> (delegate_task with a reply), SLOW, PLAIN (answers in words, no tool call); else one plain reply.
+// in the owner's texts: TAPBACK, RELAY <mate>, HANDOFF, STATUS, CRASH, COMPACT, DELEGATE <target> (delegate_task with a reply), SLOW, PLAIN (answers in words, then uses reply when reminded), STUBBORN (answers in words even when reminded); else one plain reply.
 // $FAKE_DESK_LOG gets one JSON line per start ({argv}) and per prompt ({prompt}).
 import { appendFileSync } from "node:fs";
 
@@ -20,6 +20,8 @@ async function call(toolName: string, args: Record<string, unknown>): Promise<st
   return (await promise).result?.content?.[0]?.text ?? "";
 }
 
+let stubborn = "";
+
 async function prompt(id: string, message: string) {
   record({ prompt: message });
   send({ type: "response", id, command: "prompt", success: true });
@@ -33,7 +35,10 @@ async function prompt(id: string, message: string) {
     await promise;
     status = "aborted";
   } else if (texts.includes("TAPBACK")) await call("tapback", { emoji: "❤️" });
-  else if (texts.includes("PLAIN")) send({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Plain words." }] } });
+  else if (texts.includes("STUBBORN") || (stubborn && message.includes("without an action tool"))) {
+    if (texts.includes("STUBBORN")) stubborn = texts.includes("STATUSLINE") ? "working: cf-x on tests" : "Stubborn words."; // a reminder has no owner text
+    send({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: stubborn }] } });
+  } else if (texts.includes("PLAIN")) send({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Plain words." }] } });
   else if (texts.includes("HANDOFF")) await call("handoff_main", { reason: "fake handoff" });
   else if (texts.includes("Never give time estimates")) await call("handoff_main", { text: "Got it, passing that to Firstmate." });
   else if (/DELEGATE (\S+)/.test(texts)) {

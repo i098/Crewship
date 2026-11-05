@@ -116,7 +116,7 @@ test("a newer ask waits behind the turn in flight instead of aborting it", async
   expect(await next).toEqual({ status: "completed" });
 });
 
-test("a turn that answers in words is completed with no text for the bridge to send", async () => {
+test("a turn that answers in words is completed and returns the words", async () => {
   const { desk } = session();
-  expect(await desk.ask(() => "PLAIN", live(), run)).toEqual({ status: "completed" });
+  expect(await desk.ask(() => "PLAIN", live(), run)).toEqual({ status: "completed", text: "Plain words." });
 });
