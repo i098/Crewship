@@ -48,12 +48,21 @@ crewship_runner_up_dir: "{{ crewship_cfg.home }}/.local/share/runner-up"
 crewship_runner_up_shim_dir: "{{ crewship_runner_up_dir }}/shim"
 crewship_runner_up_dockerfile: "{{ crewship_runner_up_dir }}/ci-runner.Dockerfile"
 crewship_runner_up_config_dir: "{{ crewship_cfg.home }}/.config/runner-up"
-crewship_runner_up_config: "{{ crewship_runner_up_config_dir }}/config.json"
+# One coordinator for each repository: a runner-up pool is global to its coordinator, so one
+# coordinator for every repository would open a scale set in each repository for every label.
+crewship_runner_up_repo_names: "{{ crewship_runner_up_repos | map(attribute='repo') | unique | list }}"
+# The instance name of a repository: its name with every run of other characters turned to a dash.
+crewship_runner_up_instances: >-
+  {{ crewship_runner_up_repo_names | map('lower') | map('regex_replace', '[^a-z0-9]+', '-')
+     | map('regex_replace', '^-|-$', '') | list }}
+# Extra machines join one coordinator, because a machine's budget is not shared between coordinators.
+crewship_runner_up_machines_repo: >-
+  {{ crewship_runner_up.machines_repo | default(crewship_runner_up_repo_names | first | default(''), true) }}
 crewship_runner_up_maintain: "{{ crewship_local_bin }}/runner-up-maintain"
 crewship_runner_up_bin: "{{ crewship_local_bin }}/runner-up"
 # Validates each config before it replaces the live one; the coordinator ignores a bad file and keeps the old setup.
 crewship_runner_up_check: "{{ crewship_runner_up_bin }} check-config --config %s"
 # The CI pool's own hourly timer builds the same image, so the second builder runs only without it.
 crewship_runner_up_build_image: "{{ crewship_cfg.ci_pool is not defined }}"
-crewship_runner_up_units: [runner-up.service, runner-up-clean.service, runner-up-clean.timer]
+crewship_runner_up_units: [runner-up@.service, runner-up-clean.service, runner-up-clean.timer]
 crewship_runner_up_image_units: [runner-up-image.service, runner-up-image.timer]

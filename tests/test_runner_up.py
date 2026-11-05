@@ -144,8 +144,13 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
     return int(result.stdout.rsplit("changed=", 1)[1].split()[0])
 
 
-def config(home):
-    return json.loads((home / ".config/runner-up/config.json").read_text())
+def config(home, instance="acme-web"):
+    """The setup of one repository's coordinator (runner-up@<instance>)."""
+    return json.loads((home / f".config/runner-up/{instance}.json").read_text())
+
+
+def instances(home):
+    return sorted(p.stem for p in (home / ".config/runner-up").glob("*.json"))
 
 
 def units(home):
@@ -165,20 +170,27 @@ def pool(home, **extra):
     }
 
 
-def test_config_maps_every_ci_pool_entry_to_places_and_pools_and_leaves_dind_out(home):
+def test_config_maps_every_ci_pool_entry_to_its_repositorys_places_and_pools_and_leaves_dind_out(
+    home,
+):
     apply(home, {}, ci_pool=pool(home))
-    cfg = config(home)
-    assert cfg["github"]["repos"] == ["acme/web", "acme/engine", "acme/api", "acme/mixed"]
-    # A reserved label is no pool: runner-up refuses it, and every self-hosted runner has it.
-    assert [p["label"] for p in cfg["pools"]] == [
-        "web",
-        "engine",
-        "engine-quick",
-        "api",
-        "one",
-        "two",
-    ]
-    places = {p["id"]: p for p in cfg["machines"][0]["places"]}
+    # One coordinator for each repository; the dind entry has none.
+    assert instances(home) == ["acme-api", "acme-engine", "acme-mixed", "acme-web"]
+    places = {}
+    for instance, repo, pools in (
+        ("acme-web", "acme/web", ["web"]),
+        ("acme-engine", "acme/engine", ["engine", "engine-quick"]),
+        # A reserved label is no pool: runner-up refuses it, and every self-hosted runner has it.
+        ("acme-api", "acme/api", ["api"]),
+        ("acme-mixed", "acme/mixed", ["one", "two"]),
+    ):
+        cfg = config(home, instance)
+        assert cfg["github"]["repos"] == [repo]
+        # No other repository's label: a pool is global to its coordinator and opens a scale set
+        # in every repository the coordinator serves.
+        assert [p["label"] for p in cfg["pools"]] == pools
+        assert [m["name"] for m in cfg["machines"]] == ["local"]
+        places.update({p["id"]: p for p in cfg["machines"][0]["places"]})
     assert sorted(places) == [
         "acme-api-1",
         "acme-engine-1",
@@ -195,32 +207,70 @@ def test_config_maps_every_ci_pool_entry_to_places_and_pools_and_leaves_dind_out
     assert places["acme-mixed-1"]["pools"] == ["one", "two"]
     assert {p["provider"] for p in places.values()} == {"docker"}
     assert {(p["cores"], p["memoryMB"]) for p in places.values()} == {(4, 8192)}
-    assert not any("e2e" in json.dumps(v) for v in (cfg["pools"], places))
+    assert not any("e2e" in json.dumps(v) for v in places.values())
 
 
-def test_the_machine_budget_holds_total_slots_jobs_and_logs_are_kept_for_a_week(home):
+def test_total_slots_is_split_across_coordinators_by_their_slots_and_logs_are_kept_for_a_week(home):
     apply(home, {}, ci_pool=pool(home))
     cfg = config(home)
-    assert cfg["machines"][0]["cores"] == 6 * 4
-    assert cfg["machines"][0]["memoryMB"] == 6 * 8192
+    # 6 total slots over 3+3+1+1 repository slots: web 6*3//8=2, engine 2, api and mixed 6//8=0 raised to 1.
+    shares = {
+        name: (
+            config(home, name)["machines"][0]["cores"],
+            config(home, name)["machines"][0]["memoryMB"],
+        )
+        for name in instances(home)
+    }
+    assert shares == {
+        "acme-web": (2 * 4, 2 * 8192),
+        "acme-engine": (2 * 4, 2 * 8192),
+        "acme-api": (1 * 4, 1 * 8192),
+        "acme-mixed": (1 * 4, 1 * 8192),
+    }
     assert cfg["logKeepDays"] == 7
-    assert cfg["stateDir"] == f"{home.parent}/data/runner-up"
+    # Each coordinator keeps its own state, so two never share a session file.
+    assert cfg["stateDir"] == f"{home.parent}/data/runner-up/acme-web"
+    assert config(home, "acme-api")["stateDir"] == f"{home.parent}/data/runner-up/acme-api"
+
+
+def test_the_single_coordinator_of_the_earlier_layout_is_removed(home):
+    (units(home) / "default.target.wants").mkdir()
+    old = [
+        units(home) / "runner-up.service",
+        units(home) / "default.target.wants/runner-up.service",
+        home / ".config/runner-up/config.json",
+    ]
+    for path in old:
+        path.write_text("{}")
+    apply(home, {}, ci_pool=pool(home))
+    assert not any(p.exists() or p.is_symlink() for p in old)
+    assert instances(home) == ["acme-api", "acme-engine", "acme-mixed", "acme-web"]
+
+
+def test_two_repositories_with_one_instance_name_write_nothing(home):
+    repos = [
+        {"repo": "a/b-c", "slots": 1, "labels": ["one"]},
+        {"repo": "a-b/c", "slots": 1, "labels": ["two"]},
+    ]
+    with pytest.raises(AssertionError, match="one runner-up instance name"):
+        apply(home, {"repos": repos})
+    assert instances(home) == []
 
 
 def test_auto_slots_take_half_of_the_host_like_the_ci_pool(home):
     auto = {key: value for key, value in pool(home).items() if key != "total_slots"}
     apply(home, {}, ci_pool=auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
     machine = config(home)["machines"][0]
-    assert (
-        machine["cores"] == pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250) * 4
-    )
+    total = pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250)
+    assert machine["cores"] == total * 3 // 8 * 4
 
 
 def test_runner_up_repos_replace_the_ci_pool_list_and_need_no_ci_pool(home):
     apply(home, {"repos": [{"repo": "acme/solo", "slots": 2, "labels": ["solo"]}]})
-    cfg = config(home)
+    cfg = config(home, "acme-solo")
     assert cfg["github"]["repos"] == ["acme/solo"]
     assert [p["id"] for p in cfg["machines"][0]["places"]] == ["acme-solo-1", "acme-solo-2"]
+    assert instances(home) == ["acme-solo"]
 
 
 def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
@@ -245,8 +295,25 @@ def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
     assert (laptop["cores"], laptop["memoryMB"]) == (2, 4096)
     (place,) = laptop["places"]
     assert (place["cores"], place["memoryMB"]) == (2, 4096)
-    assert place["pools"] == [p["label"] for p in cfg["pools"]]
+    assert place["pools"] == ["web"]  # the pools of the coordinator it joins
     assert "image" not in place  # runner-up's own pinned runner image
+    # A machine's budget is not shared between coordinators, so no other one lists it.
+    assert [m["name"] for m in config(home, "acme-engine")["machines"]] == ["local"]
+
+
+def test_a_machine_joins_the_repository_that_the_setup_names(home):
+    machine = {
+        "name": "laptop",
+        "ssh": ["ci@laptop"],
+        "job_cpus": 2,
+        "job_memory_gb": 4,
+        "cores": 2,
+        "memory_gb": 4,
+    }
+    apply(home, {"machines": [machine], "machines_repo": "acme/engine"}, ci_pool=pool(home))
+    assert [m["name"] for m in config(home, "acme-web")["machines"]] == ["local"]
+    laptop = config(home, "acme-engine")["machines"][1]
+    assert laptop["places"][0]["pools"] == ["engine", "engine-quick"]
 
 
 def unit_sections(path):
@@ -269,7 +336,11 @@ def test_the_slice_and_the_units_carry_the_caps(home):
     assert slice_["CPUWeight"] == ["15"]
     assert slice_["IOWeight"] == ["20"]
     assert slice_["MemoryMax"] == ["30%"]
-    service = unit_sections(units(home) / "runner-up.service")["Service"]
+    service = unit_sections(units(home) / "runner-up@.service")["Service"]
+    assert any(
+        v.endswith("serve --config " + str(home) + "/.config/runner-up/%i.json")
+        for v in service["ExecStart"]
+    )
     assert service["Nice"] == ["10"]
     assert service["KillMode"] == ["process"]  # stopping the coordinator leaves running jobs alone
     assert any(
@@ -280,7 +351,9 @@ def test_the_slice_and_the_units_carry_the_caps(home):
     assert "RUNNER_UP_DISK_MAX_GB=50" in clean["Environment"]
     assert clean["IOSchedulingClass"] == ["idle"]
     assert (units(home) / "timers.target.wants/runner-up-clean.timer").is_symlink()
-    assert (units(home) / "default.target.wants/runner-up.service").is_symlink()
+    for instance in instances(home):
+        assert (units(home) / f"default.target.wants/runner-up@{instance}.service").is_symlink()
+    assert len(instances(home)) == 4
 
 
 def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(home):
@@ -296,9 +369,20 @@ def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(hom
 
 def test_a_second_apply_changes_nothing_and_check_mode_writes_nothing(home):
     assert apply(home, {}, "--check", ci_pool=pool(home)) > 0
-    assert not (home / ".config/runner-up/config.json").exists()
+    assert not (home / ".config/runner-up/acme-web.json").exists()
     assert apply(home, {}, ci_pool=pool(home)) > 0
     assert apply(home, {}, ci_pool=pool(home)) == 0
+
+
+def test_a_repository_that_leaves_the_list_loses_its_unit_and_config_and_the_others_stay(home):
+    apply(home, {}, ci_pool=pool(home))
+    (home / ".config/runner-up/config.json").write_text("{}")  # the old single-coordinator file
+    apply(home, {"repos": [r for r in REPOS if r["repo"] != "acme/api"]}, ci_pool=None)
+    assert instances(home) == ["acme-engine", "acme-mixed", "acme-web"]
+    wants = units(home) / "default.target.wants"
+    assert not (wants / "runner-up@acme-api.service").exists()
+    assert not (wants / "runner-up@config.service").exists()
+    assert (wants / "runner-up@acme-web.service").is_symlink()
 
 
 def test_the_job_image_recipe_is_the_ci_pools_image(home):

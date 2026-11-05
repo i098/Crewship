@@ -28,14 +28,15 @@ crewship:
   #   machines: []              # other machines; see "Other machines"
 ```
 
-`./ship.sh launch` installs the latest runner-up release (checksum verified, see [Dependencies](dependencies.md#latest-releases)), writes the config and the units, and starts the coordinator.
+`./ship.sh launch` installs the latest runner-up release (checksum verified, see [Dependencies](dependencies.md#latest-releases)), writes the configs and the units, and starts one coordinator for each repository (`runner-up@<repo>`).
 A second apply changes nothing.
 It needs the `docker` profile.
 
 ## How the config is made
 
-`~/.config/runner-up/config.json` is a template of the repository list.
-The coordinator applies an edited file by itself, so a change needs no restart and no job stops.
+`~/.config/runner-up/<repo>.json` is a template of one repository's entries: one file and one coordinator (`runner-up@<repo>`) for each repository, where `<repo>` is the name in lower case with a dash for each run of other characters (`owner/My_Repo` is `owner-my-repo`).
+A coordinator applies an edited file by itself, so a change needs no restart and no job stops.
+Every coordinator runs in `runnerup.slice` and keeps its own state in `<state dir>/<repo>`.
 
 | ci_pool | runner-up |
 | --- | --- |
@@ -44,10 +45,13 @@ The coordinator applies an edited file by itself, so a change needs no restart a
 | `repos[].name` | the slot name; a second group of one repository (a quick group) keeps its own places |
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
 | `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place |
-| `total_slots` | the machine budget: `total_slots` times the job caps, so that at most that many jobs run together |
+| `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
 | `docker: dind` | not mapped; the entry stays on the CI pool (see [Not covered](#not-covered)) |
 
-A pool is a scale set of GitHub, one for each repository and pool pair in the config.
+A pool is a scale set of GitHub, and it is global to its coordinator: it opens in every repository that the coordinator serves.
+That is why each repository has a coordinator of its own, with only its own labels.
+One coordinator for all repositories would open a scale set in each repository for every label, 272 for 16 repositories and 17 labels, and GitHub refuses many of them.
+A scale set stays in the repository settings after its coordinator stops; it is idle and harmless.
 The workflow asks for the pool with the label alone: `runs-on: my-label`.
 `runs-on: [self-hosted, linux, my-label]` still goes to the CI pool.
 
@@ -62,7 +66,7 @@ Every job container and image build runs in `runnerup.slice`, so these caps hold
 | `MemoryMax` | `memory_max` (50%) | A hard limit. The kernel stops the biggest process of the slice at the limit, not a process of the host. |
 | `Nice` | `nice` (10) | Priority of the coordinator and its place runners. |
 | Process limit | 8192 for each job | As in the CI pool. |
-| Concurrency | `total_slots` | The machine budget in the config. |
+| Concurrency | `total_slots` | The sum of the coordinators' machine budgets in the config. |
 
 runner-up starts a job with a plain `docker run`, which puts the container in `system.slice`.
 The unit puts a `docker` shim first in `PATH` (`~/.local/share/runner-up/shim/docker`, from `blueprint/maintenance/runner-up-docker`).
@@ -97,6 +101,7 @@ No step stops a busy runner.
 
 1. List the repository in `runner_up.repos` (the whole entry, as in `ci_pool.repos`) and apply.
    Once `runner_up.repos` exists, it is the list; every repository that already moved stays in it.
+   Apply starts `runner-up@<repo>` for the new repository and leaves the other coordinators alone.
    The CI pool keeps all of its slots.
 2. Run the repository's workflow from a branch with `runs-on: <label>` (the label alone) on one job.
    It must pass on a runner named `runner-up-<place>`.
@@ -110,11 +115,12 @@ No step stops a busy runner.
 Keep `crewship.ci_pool` until every repository moved; a `docker: dind` entry stays in it.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
-Removing a repository from `runner_up.repos` closes its scale sets and leaves running jobs alone.
+Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
 
 ## Other machines
 
-`runner_up.machines` adds machines that the coordinator reaches over SSH.
+`runner_up.machines` adds machines that a coordinator reaches over SSH.
+A machine's budget is not shared between coordinators, so a machine joins one repository's coordinator: `runner_up.machines_repo` (default is the first repository of the list).
 Each machine needs a hard `cores` and `memory_gb` budget: a place takes a job only while its size fits the budget, so the machine never runs more.
 
 ```yaml
@@ -131,8 +137,11 @@ runner_up:
       # agent: /Users/ci/bin/runner-up-agent   # a wrapper, for example `taskpolicy -b nice -n 19 runner-up "$@"`
 ```
 
-The machine's places serve every pool.
+The machine's places serve the pools of that coordinator.
 runner-up must be on the machine under the name in `agent` (default `runner-up`), and the SSH account must reach Docker.
+On a Mac, runner-up v0.1.12 mounts its own file into the Linux container for the fork guard, and that file is a Mach-O program, so the job fails with `exec format error`.
+Put a `docker` wrapper first in the agent's `PATH` that replaces the mount that ends in `:/opt/runner-up/runner-up:ro` with the `linux-arm64` release of runner-up (checksum verified).
+The `agent` wrapper sets that `PATH`, starts OrbStack when it is stopped, and runs `taskpolicy -b nice -n 19 runner-up "$@"`.
 The slice, the shim and the cleanup of this page apply to the coordinator's host only; cap a Mac with its own settings (`orb config set cpu` and `memory_mib`) and the budget above.
 
 ## Container engine
@@ -151,7 +160,7 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
 - **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.
   Put that root on a data disk with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
-- **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart runner-up`.
+- **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart 'runner-up@*'`.
   A restart stops no job.
 
 ## Files on the host
@@ -159,8 +168,8 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 | Path | Contents |
 | --- | --- |
 | `~/.local/bin/runner-up` | The program (installer, latest release). |
-| `~/.config/runner-up/config.json` | The setup. Apply writes it. |
-| `~/.config/systemd/user/runner-up.service` | The coordinator. |
+| `~/.config/runner-up/<repo>.json` | The setup of one repository. Apply writes it. |
+| `~/.config/systemd/user/runner-up@.service` | The coordinator unit; one instance for each repository. |
 | `~/.config/systemd/user/runner-up-clean.{service,timer}` | The hourly cleanup. |
 | `~/.config/systemd/user/runner-up-image.{service,timer}` | The hourly image build, without `ci_pool`. |
 | `/etc/systemd/system/runnerup.slice` | The caps. |
@@ -170,8 +179,8 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 ## See what runs
 
 ```bash
-runner-up status                       # places, running jobs and waiting jobs
-runner-up usage                        # sampled use of finished jobs
-journalctl --user -u runner-up -f      # the coordinator
+runner-up status --config ~/.config/runner-up/<repo>.json   # places, running jobs and waiting jobs
+runner-up usage --config ~/.config/runner-up/<repo>.json    # sampled use of finished jobs
+journalctl --user -u 'runner-up@*' -f  # the coordinators
 systemctl --user list-timers 'runner-up-*'
 ```

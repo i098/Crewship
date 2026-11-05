@@ -1,6 +1,6 @@
 {{ ansible_managed | comment }}
 [Unit]
-Description=runner-up coordinator: one fresh container per GitHub Actions job (Crewship managed)
+Description=runner-up coordinator of %i: one fresh container per GitHub Actions job (Crewship managed)
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -12,7 +12,7 @@ Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
 Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
 # The first start builds the job image when the host does not have it yet.
 ExecStartPre={{ crewship_runner_up_maintain }} image --ensure
-ExecStart={{ crewship_runner_up_bin }} serve --config {{ crewship_runner_up_config }}
+ExecStart={{ crewship_runner_up_bin }} serve --config {{ crewship_runner_up_config_dir }}/%i.json
 TimeoutStartSec=3600
 Restart=on-failure
 RestartSec=10

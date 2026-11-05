@@ -1,16 +1,18 @@
 #jinja2: lstrip_blocks: True
-{#- The runner-up setup, made from the CI pool's repository list (docs/runner-up.md#how-the-config-is-made).
+{#- The runner-up setup of one repository (crewship_runner_up_repo), made from the CI pool's repository list (docs/runner-up.md#how-the-config-is-made).
     Each entry keeps its own places, so a named slot group keeps its own capacity, and each label that
     is not a reserved one becomes a pool that only that entry's places serve. The coordinator applies an edit
     of this file by itself, so a change here needs no restart. -#}
-{% set total = crewship_runner_up_total_slots | int %}
+{% set all_slots = crewship_runner_up_repos | map(attribute='slots') | sum %}
+{% set repo_slots = crewship_runner_up_repos | selectattr('repo', 'equalto', crewship_runner_up_repo) | map(attribute='slots') | sum %}
+{% set total = [1, crewship_runner_up_total_slots | int * repo_slots // all_slots] | max %}
 {% set cpus = crewship_runner_up_job_cpus | int %}
 {% set memory = crewship_runner_up_job_memory_gb | int * 1024 %}
 {% set repos = [] %}
 {% set pools = [] %}
 {% set pool_labels = [] %}
 {% set places = [] %}
-{% for entry in crewship_runner_up_repos %}
+{% for entry in crewship_runner_up_repos | selectattr('repo', 'equalto', crewship_runner_up_repo) | list %}
 {%   set slug = entry.name | default(entry.repo | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-|-$', ''), true) %}
 {%   set entry_pools = [] %}
 {%   if entry.repo not in repos %}{% set _ = repos.append(entry.repo) %}{% endif %}
@@ -24,7 +26,7 @@
 {%   endfor %}
 {% endfor %}
 {% set machines = [{'name': 'local', 'cores': total * cpus, 'memoryMB': total * memory, 'places': places}] %}
-{% for machine in crewship_runner_up.machines | default([]) %}
+{% for machine in crewship_runner_up.machines | default([]) if crewship_runner_up_repo == crewship_runner_up_machines_repo %}
 {%   set machine_places = [] %}
 {%   for n in range(1, machine.slots | default(1) + 1) %}
 {%     set _ = machine_places.append({'id': machine.name ~ '-' ~ n, 'provider': machine.provider | default('docker'),
@@ -36,7 +38,7 @@
                               'memoryMB': machine.memory_gb * 1024, 'places': machine_places}
                              | combine({'agent': machine.agent} if machine.agent is defined else {})) %}
 {% endfor %}
-{{ {'stateDir': crewship_runner_up_state_dir,
+{{ {'stateDir': crewship_runner_up_state_dir ~ '/' ~ crewship_runner_up_instance,
     'github': {'repos': repos},
     'pools': pools,
     'machines': machines,
