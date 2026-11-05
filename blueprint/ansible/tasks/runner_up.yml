@@ -1,0 +1,112 @@
+# runner-up (crewship.runner_up, docs/runner-up.md): one coordinator serves the CI pool's
+# repositories with one fresh container per job, in a capped systemd slice.
+#
+# The coordinator applies an edited config.json by itself, so a repository added to the
+# config starts serving jobs with no restart, and running jobs are never touched. The task
+# starts the unit only when it is not running and never restarts it.
+#
+# Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
+
+- name: Cap CI jobs in a systemd slice
+  become: true
+  block:
+    - name: Write the runner-up slice
+      ansible.builtin.template:
+        src: runner-up.slice.j2
+        dest: "{{ crewship_runner_up_slice_dir }}/{{ crewship_runner_up_slice }}"
+        mode: "0644"
+      notify: reload system systemd
+
+- name: Install runner-up for the account
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  block:
+    - name: Create the runner-up directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ crewship_local_bin }}"
+        - "{{ crewship_runner_up_dir }}"
+        - "{{ crewship_runner_up_shim_dir }}"
+        - "{{ crewship_runner_up_config_dir }}"
+        - "{{ crewship_runner_up_state_dir }}"
+        - "{{ crewship_user_units }}/default.target.wants"
+        - "{{ crewship_user_units }}/timers.target.wants"
+
+    - name: Install the docker shim and the maintenance script
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/maintenance/{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "0755"
+        remote_src: true
+      loop:
+        - {src: runner-up-docker, dest: "{{ crewship_runner_up_shim_dir }}/docker"}
+        - {src: runner-up-maintain, dest: "{{ crewship_runner_up_maintain }}"}
+
+    - name: Install the job image recipe
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/containers/ci-runner.Dockerfile"
+        dest: "{{ crewship_runner_up_dockerfile }}"
+        mode: "0644"
+        remote_src: true
+
+    - name: Write the runner-up config
+      ansible.builtin.template:
+        src: runner-up.config.json.j2
+        dest: "{{ crewship_runner_up_config }}"
+        mode: "0644"
+        validate: "{{ crewship_runner_up_check }}"
+
+    - name: Write the runner-up units
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ crewship_user_units }}/{{ item }}"
+        mode: "0644"
+      loop: "{{ crewship_runner_up_units + (crewship_runner_up_image_units if crewship_runner_up_build_image | bool else []) }}"
+      notify: reload user systemd
+
+    - name: Remove the image timer while the CI pool builds the image
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ [] if crewship_runner_up_build_image | bool else
+           [crewship_user_units ~ '/runner-up-image.service',
+            crewship_user_units ~ '/runner-up-image.timer',
+            crewship_user_units ~ '/timers.target.wants/runner-up-image.timer'] }}
+      notify: reload user systemd
+
+    - name: Statically enable the runner-up units
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/{{ item.unit }}"
+        dest: "{{ crewship_user_units }}/{{ item.target }}.wants/{{ item.unit }}"
+        state: link
+        force: true
+        follow: false
+      loop: >-
+        {{ [{'unit': 'runner-up.service', 'target': 'default.target'},
+            {'unit': 'runner-up-clean.timer', 'target': 'timers.target'}]
+           + ([{'unit': 'runner-up-image.timer', 'target': 'timers.target'}] if crewship_runner_up_build_image | bool else []) }}
+
+    - name: Check for the installed runner-up unit
+      ansible.builtin.stat:
+        path: "{{ crewship_user_units }}/runner-up.service"
+      register: crewship_runner_up_unit
+      when: ansible_check_mode
+
+    - name: Start the runner-up units
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: >-
+        {{ ['runner-up.service', 'runner-up-clean.timer']
+           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode or crewship_runner_up_unit.stat.exists

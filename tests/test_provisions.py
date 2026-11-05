@@ -668,6 +668,7 @@ RELEASES = {
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
     "jimididit/koncreet": ("v9.9.9", "koncreet.tar.gz"),
     "jj-vcs/jj": ("v9.9.9", "jj-v9.9.9-x86_64-unknown-linux-musl.tar.gz"),
+    "kunchenguid/runner-up": ("v9.9.9", "runner-up-v9.9.9-linux-amd64.tar.gz"),
     "googleworkspace/cli": (
         "v9.9.9",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
@@ -817,6 +818,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "obscura",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
     for tool in (
@@ -833,6 +835,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "obscura",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["version"] == "9.9.9"
     gws = latest["gws"]["assets"]["linux-x86_64"]

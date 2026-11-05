@@ -148,6 +148,13 @@ GITHUB_LATEST = {
         "jj-v{v}-{gnu}-unknown-linux-musl.tar.gz",
         {"jj": "jj"},
     ),
+    # GitHub Actions coordinator for the opt-in runner_up block (docs/runner-up.md); static binary.
+    "runner-up": (
+        "kunchenguid/runner-up",
+        "v",
+        "runner-up-v{v}-linux-{go}.tar.gz",
+        {"runner-up": "runner-up"},
+    ),
     # Google Workspace CLI, verified against the .sha256 file the release publishes.
     "gws": (
         "googleworkspace/cli",

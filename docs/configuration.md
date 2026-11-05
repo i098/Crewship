@@ -235,6 +235,7 @@ crewship:
   #   data_dir: /mnt/data/ci
   #   repos:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
+  # runner_up: {}         # Optional; runner-up runs the ci_pool repositories behind caps. See runner-up.md
 ```
 
 See [iMessage credential loading](imessage.md#enable-it) for the shell format and security requirements of `~/super.env`.
@@ -247,6 +248,7 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
 - `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
+- `runner_up` needs `docker`. It needs `runner_up.repos` or `ci_pool.repos` entries without `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
 - `board` needs `firstmate` and `development`.

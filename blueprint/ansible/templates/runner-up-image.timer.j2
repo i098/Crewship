@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=runner-up job image every hour (Crewship managed)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

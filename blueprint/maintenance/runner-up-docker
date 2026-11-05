@@ -1,0 +1,21 @@
+#!/bin/sh
+# The `docker` that runner-up's service finds first in PATH (docs/runner-up.md#caps).
+# runner-up runs a job with a plain `docker run`, which puts the container in system.slice
+# with no process limit. This puts every job container and image build in the capped slice
+# and limits the processes of a job. An account outside the docker group uses sudo.
+set -eu
+docker=${RUNNER_UP_DOCKER:-/usr/bin/docker}
+slice=${RUNNER_UP_SLICE:-runnerup.slice}
+[ -w "${RUNNER_UP_DOCKER_SOCK:-/var/run/docker.sock}" ] || docker="sudo -n $docker"
+case "${1-}" in
+run)
+  shift
+  # shellcheck disable=SC2086 # $docker is a command and its arguments
+  exec $docker run --cgroup-parent "$slice" --pids-limit 8192 "$@" ;;
+build)
+  shift
+  # shellcheck disable=SC2086
+  exec $docker build --cgroup-parent "$slice" "$@" ;;
+esac
+# shellcheck disable=SC2086
+exec $docker "$@"
