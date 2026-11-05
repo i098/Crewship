@@ -1,0 +1,16 @@
+name: runner-up-proof
+on:
+  push:
+    branches: [fm/runner-up-proof]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: crewship
+    timeout-minutes: 15
+    steps:
+      - run: |
+          echo "runner=$RUNNER_NAME"
+          uname -m
+          cat /proc/self/cgroup
+          cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max 2>&1
