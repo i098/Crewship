@@ -106,13 +106,70 @@ def test_bridge_restart_continues_the_same_session(tmp_path):
             assert argv[argv.index("--session-dir") + 1] == session_dir
 
 
-def test_a_turn_with_no_action_goes_to_firstmate(tmp_path):
+def test_a_turn_in_plain_words_is_reminded_once_and_then_replies_with_the_tool(tmp_path):
     with session_rig(tmp_path) as rig:
         deliver(rig, "m1", "how are you PLAIN")
-        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig)),
-                 "the firstmate handoff", timeout=120)
+        wait_for(lambda: len(texts(rig)) == 1, "the reply after the reminder", timeout=120)
+        time.sleep(1)
+        assert texts(rig)[0].split(" ", 1)[1] == "Fake desk reply."
+        prompts = desk_lines(rig, "prompt")
+        assert len(prompts) == 2 and "without an action tool" in prompts[1]
+        assert not any(e.get("route") == "handoff" for e in events(rig))
+
+
+def test_a_model_that_keeps_answering_in_plain_words_has_its_words_sent_as_the_reply(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how are you STUBBORN")
+        wait_for(lambda: len(texts(rig)) == 1, "the plain words as the reply", timeout=120)
+        time.sleep(1)
+        assert texts(rig)[0].split(" ", 1)[1] == "Stubborn words."
+        assert len(desk_lines(rig, "prompt")) == 2
+        assert not any(e.get("route") == "handoff" for e in events(rig))
+
+
+def test_plain_words_the_reply_checks_refuse_go_to_firstmate(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "STUBBORN STATUSLINE")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
         time.sleep(1)
         assert texts(rig) == []
+
+
+def test_narration_before_a_tool_call_is_not_sent_as_the_reply(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "NARRATE")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+
+
+def test_plain_words_of_a_prompt_that_ended_in_error_go_to_firstmate(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "ERRORWORDS")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+        assert len(desk_lines(rig, "prompt")) == 1
+
+
+def test_words_of_the_first_prompt_are_not_sent_when_the_reminder_turn_fails(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "ERRORRETRY")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+        assert len(desk_lines(rig, "prompt")) == 2
+
+
+@pytest.mark.parametrize("compacted", [True, False])
+def test_the_reminder_turn_carries_the_chat_view_only_after_a_compaction(tmp_path, compacted):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how are you PLAIN" + (" COMPACT" if compacted else ""))
+        wait_for(lambda: len(texts(rig)) == 1, "the reply after the reminder", timeout=120)
+        time.sleep(1)
+        prompts = desk_lines(rig, "prompt")
+        assert len(prompts) == 2 and "without an action tool" in prompts[1]
+        assert ("<chat>" in prompts[1]) == compacted
 
 
 def test_instant_reasoning_starts_the_inception_session(tmp_path):
@@ -170,7 +227,7 @@ def test_task_report_survives_a_new_owner_text_during_delivery(tmp_path):
         wait_for(message.exists, "the task delivery", timeout=120)
         Path(re.search(r"to (\S+\.answer)$", read_text(message)).group(1)).write_text(f"First bubble.\n\n{second}")
         wait_for(lambda: len(texts(rig)) == 2, "the first bubble of the report", timeout=120)
-        deliver(rig, "m2", "how are you PLAIN")  # a new owner text moves the desk generation before the second bubble
+        deliver(rig, "m2", "how are you HANDOFF")  # a new owner text moves the desk generation before the second bubble
         wait_for(lambda: len(texts(rig)) == 3, "the second bubble of the report", timeout=120)
         assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "First bubble.", second]
 
@@ -202,7 +259,7 @@ def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_p
         (rig.fake / "relay-mode").write_text("send-busy")  # the relay refuses the ack, so it stays in the outbox
         deliver(rig, "m1", "DELEGATE firstmate")
         wait_for(lambda: (rig.fake / "relay-payloads").exists(), "the refused ack", timeout=120)
-        deliver(rig, "m2", "second text PLAIN")  # the new text cancels the ack of the first
+        deliver(rig, "m2", "second text HANDOFF")  # the new text cancels the ack of the first
         (rig.fake / "relay-mode").unlink()
         wait_for(lambda: any(line.startswith("desk-task-") for line in read_text(ids).splitlines())
                  and "bluebubbles-m2" in read_text(ids).splitlines(), "both notes", timeout=120)

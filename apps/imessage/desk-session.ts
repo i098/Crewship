@@ -7,7 +7,7 @@ import { logTokens, usageTokens } from "./tokenlog.ts";
 
 export type HostTool = { name: string; description: string; parameters: Record<string, unknown> };
 export type ToolRunner = (name: string, args: Record<string, unknown>) => Promise<string>;
-export type PromptResult = { status: "completed" | "aborted" | "error"; error?: string };
+export type PromptResult = { status: "completed" | "aborted" | "error"; error?: string; text?: string }; // text: the last words the model wrote in this prompt
 type Frame = {
   type?: string; id?: string; success?: boolean; error?: unknown; status?: PromptResult["status"];
   result?: unknown; aborted?: boolean; message?: { role?: string; usage?: unknown; model?: string; content?: { type?: string; text?: string }[] };
@@ -51,6 +51,7 @@ export class DeskSession {
   private failures = 0;
   private retryAt = 0;
   private seed = false;
+  private words = "";
   private closing = false;
 
   constructor(private readonly o: SessionOptions) {}
@@ -106,6 +107,8 @@ export class DeskSession {
       case "host_tool_call": return void this.tool(frame);
       case "message_end": {
         if (frame.message?.role !== "assistant") return;
+        const written = (frame.message.content ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim();
+        this.words = written;
         const used = usageTokens(frame.message.usage);
         if (used) logTokens({ kind: "desk-session", model: String(frame.message.model ?? this.o.model), ...used });
         return;
@@ -187,6 +190,7 @@ export class DeskSession {
       this.seed = false;
       const id = `p${++this.sequence}`;
       this.run = run;
+      this.words = "";
       const done = this.expect(`p:${id}`);
       this.send({ id, type: "prompt", message: build(seed) });
       const abort = () => { try { this.send({ type: "abort" }); } catch { /* exited */ } };
@@ -197,7 +201,7 @@ export class DeskSession {
         const result = await done;
         if (result.status === "completed") this.failures = 0;
         const error = result.error as { message?: string } | undefined;
-        return { status: result.status ?? "error", ...(error ? { error: String(error.message ?? error) } : {}) };
+        return { status: result.status ?? "error", ...(error ? { error: String(error.message ?? error) } : {}), ...(this.words ? { text: this.words } : {}) };
       } finally {
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
