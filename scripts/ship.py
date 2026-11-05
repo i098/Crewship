@@ -545,6 +545,19 @@ def setup_status(document, config_path):
     return int(bool(failed or missing or pending or not memory_ready))
 
 
+def dia_cookies_question(config, config_path):
+    """The optional Dia cookie sync question; asked only once `ssh mac` is set and works."""
+    if "mac_ssh" not in config or "dia_cookies" in config["mac_ssh"]:
+        return ""
+    return (
+        " Then run `ssh -o BatchMode=yes mac true` as this account. Only if it succeeds, ask one "
+        "short question: turn on the optional Dia cookie sync, which exports each Dia profile's "
+        "cookies from the Mac to private files on this host every 30 minutes? If yes, set "
+        f"crewship.mac_ssh.dia_cookies to true in {config_path}, follow "
+        f"{ROOT / 'docs/security.md'}#optional-dia-cookie-sync, and never print cookie values."
+    )
+
+
 def questions(document, config_path):
     """Open Firstmate on omp to ask the operator the new-host move questions."""
     config = document["crewship"]
@@ -623,6 +636,7 @@ def questions(document, config_path):
             "If yes, set crewship.profiles.project_databases to true in "
             f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
+    prompt += dia_cookies_question(config, config_path)
     argv = [omp, prompt]
     if os.environ.get("CREWSHIP_INSTALL_LOG"):
         argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]

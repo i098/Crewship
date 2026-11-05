@@ -203,6 +203,7 @@ crewship:
   # mac_ssh:              # Optional; set only in .local/host.yml. See security.md#ssh-to-a-mac
   #   host: <Mac tailnet name or IP>
   #   user: <Mac login>
+  #   dia_cookies: true    # Optional; Dia cookie sync. See security.md#optional-dia-cookie-sync
   # skills:               # Optional, off when absent (removing it removes the skills and rules an earlier fill added); set only in .local/host.yml. See omp.md#skills
   #   private_source: git@github.com:owner/private-skills.git   # or an absolute local path
   #   private_ref: main   # Optional git branch, tag or commit; the default is the remote HEAD
@@ -295,6 +296,7 @@ After a successful `./ship.sh launch` with the `firstmate` profile on, once omp 
 - The questions follow `firstmate.checklist` when it is set and `gh` can read it: `repo` is a GitHub repository (it can be private) and `path` is the checklist file in it. Set it only in `.local/host.yml`, never in `blueprint/config/default.yml`. Otherwise they follow [Agent host move](agent-host-move.md).
 - When `.local/host.yml` has no `github_board` block, a question asks whether to turn on the [GitHub board](github-board.md). The answer is off unless you choose it.
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.
+- When `mac_ssh` is set without `mac_ssh.dia_cookies`, a question offers the [Dia cookie sync](security.md#optional-dia-cookie-sync), only after `ssh mac` works. The answer is off unless you choose it.
 - When `project_databases` is off or omitted, a question offers the [per-project dev databases](project-databases.md).
   The prompt names the resolved config path and does not enable the profile without your choice.
 - They are asked once per host.

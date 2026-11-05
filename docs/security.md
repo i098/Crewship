@@ -122,6 +122,24 @@ rm ~/.local/bin/dia-debug ~/Library/LaunchAgents/local.dia-debug.plist
 
 Risk: any local process on the Mac can control the signed-in browser without a prompt. The port is bound to 127.0.0.1 only.
 
+##### Optional: Dia cookie sync
+
+The new-host questions offer this step only after `ssh mac` works. The answer is off unless you choose it. It needs the debug-port setup above, Python with `websocket` on the Mac, and at least one open tab in each Dia profile to export.
+
+```yaml
+crewship:
+  mac_ssh:
+    host: <Mac tailnet name or IP>
+    user: <Mac login>
+    dia_cookies: true
+```
+
+When `mac_ssh.dia_cookies` is true, apply installs [`tools/dia-cookies/dia-cookies`](../tools/dia-cookies/dia-cookies) to `~/.local/bin`, installs `python3-cryptography`, and enables the user timer `dia-cookies.timer` (every 30 minutes). Apply does not read the Mac. The timer runs `dia-cookies refresh`: it reads each profile's cookies through the debug port and keeps them on this host only. The files are mode 0600, encrypted with a key in `~/.config/dia-cookies/fernet.key`. Crewship never commits or uploads them, and apply and the unit never print cookie values.
+
+`dia-cookies list` shows profiles and ages. `dia-cookies list <profile>` shows cookie names, never values. Only `dia-cookies get` prints values, and `-o FILE` writes a mode 0600 file. A profile with no open tab keeps its previous export.
+
+To remove it, set `dia_cookies` to false, run `systemctl --user disable --now dia-cookies.timer`, and delete `~/.local/share/dia-cookies` and `~/.config/dia-cookies`.
+
 #### Optional: app control
 
 Skip this part if agents only open links. To let an SSH session focus apps and type with `osascript` and System Events, give two permissions to `/usr/libexec/sshd-keygen-wrapper`. Every SSH session on the Mac runs under this program.

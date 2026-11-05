@@ -312,6 +312,19 @@
         - crewship_cfg.mac_ssh is defined
       tags: [mac_ssh]
 
+    - name: Optional Dia cookie sync, offered after the `ssh mac` step
+      ansible.builtin.include_tasks:
+        file: tasks/dia_cookies.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [dia_cookies]
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.mac_ssh.dia_cookies | default(false) | bool
+      tags: [dia_cookies]
+
     - name: Koncreet host hardening toolkit, installed but never run
       ansible.builtin.include_tasks:
         file: tasks/koncreet.yml
