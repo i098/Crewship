@@ -251,19 +251,18 @@ export function parseQuotaMe(plans: unknown): DeepseekUsage {
   const rows: NonNullable<DeepseekUsage["rows"]> = []
   for (const plan of Array.isArray(plans) ? plans : []) {
     const p = isObj(plan) ? plan : {}
-    const quota = p.quota
-    if (!isObj(quota)) continue
+    const quota = isObj(p.quota) ? p.quota : {}
     for (const [key, window] of WINDOWS) {
       const win = quota[key]
       const w = isObj(win) ? win : {}
       const at = typeof w.resetAt === "string" ? Date.parse(w.resetAt) / 1000 : NaN
-      rows.push({ plan: typeof p.planName === "string" ? p.planName : undefined, window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
+      rows.push({ plan: typeof p.planName === "string" && p.planName ? p.planName : "plan", window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
     }
   }
   return { rows }
 }
 
-const apiAnythingEnv = () => ({ ...process.env, API_ANYTHING_HOME: `${HOME}/.local/state/crewship/api-anything`, API_ANYTHING_BROWSER_ROOTS: "[]" })
+const apiAnythingEnv = () => ({ API_ANYTHING_HOME: `${HOME}/.local/state/crewship/api-anything`, API_ANYTHING_BROWSER_ROOTS: "[]", ...process.env })
 
 async function apiAnything(args: string[]): Promise<{ out: string; code: number }> {
   const p = Bun.spawn(["api-anything", ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: apiAnythingEnv(), signal: AbortSignal.timeout(90_000) })

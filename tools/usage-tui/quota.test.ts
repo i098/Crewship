@@ -89,6 +89,7 @@ test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones"
 const QUOTA_ME = [
   { planName: "Basic", quota: { fiveHour: { usedCredits: 25, limitCredits: 100, resetAt: "2026-01-10T13:30:00Z" }, sevenDay: { usedCredits: 90, limitCredits: 120 } } },
   { planName: "Max", quota: { fiveHour: { usedCredits: 10, limitCredits: 400, resetAt: "2026-01-10T14:00:00Z" }, sevenDay: { usedCredits: 0, limitCredits: 1000 } } },
+  { planName: "Idle", quota: null },
 ]
 
 test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for missing fields", () => {
@@ -97,9 +98,11 @@ test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for m
     { plan: "Basic", window: "7d", used: 90, limit: 120, resets_at: null },
     { plan: "Max", window: "5h", used: 10, limit: 400, resets_at: Date.UTC(2026, 0, 10, 14, 0) / 1000 },
     { plan: "Max", window: "7d", used: 0, limit: 1000, resets_at: null },
+    { plan: "Idle", window: "5h", used: null, limit: null, resets_at: null },
+    { plan: "Idle", window: "7d", used: null, limit: null, resets_at: null },
   ])
   expect(parseQuotaMe("junk").rows).toEqual([])
-  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek (reseller) Basic", "5h", 75], ["deepseek (reseller) Basic", "7d", 25], ["deepseek (reseller) Max", "5h", 97.5], ["deepseek (reseller) Max", "7d", 100]])
+  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek (reseller) Basic", "5h", 75], ["deepseek (reseller) Basic", "7d", 25], ["deepseek (reseller) Max", "5h", 97.5], ["deepseek (reseller) Max", "7d", 100], ["deepseek (reseller) Idle", "5h", null], ["deepseek (reseller) Idle", "7d", null]])
 })
 
 test("readQuotaMe renews the login once on auth and reports failures without throwing", async () => {
@@ -107,7 +110,7 @@ test("readQuotaMe renews the login once on auth and reports failures without thr
   let refreshed = 0
   const refresh = async () => { refreshed++ }
   const expired = async () => { if (calls++ === 0) throw new AuthExpired("auth"); return QUOTA_ME }
-  expect((await readQuotaMe(expired, refresh)).value?.rows?.length).toBe(4)
+  expect((await readQuotaMe(expired, refresh)).value?.rows?.length).toBe(6)
   expect(refreshed).toBe(1)
   expect(await readQuotaMe(async () => { throw new AuthExpired("auth") }, async () => { throw new Error("signed out") })).toEqual({ error: "signed out" })
   expect(await readQuotaMe(async () => { throw new Error("rate-limited") }, refresh)).toEqual({ error: "rate-limited" })
