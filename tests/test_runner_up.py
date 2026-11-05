@@ -215,7 +215,10 @@ def test_total_slots_is_split_across_coordinators_by_their_slots_and_logs_are_ke
     cfg = config(home)
     # 6 total slots over 3+3+1+1 repository slots: web 6*3//8=2, engine 2, api and mixed 6//8=0 raised to 1.
     shares = {
-        name: (config(home, name)["machines"][0]["cores"], config(home, name)["machines"][0]["memoryMB"])
+        name: (
+            config(home, name)["machines"][0]["cores"],
+            config(home, name)["machines"][0]["memoryMB"],
+        )
         for name in instances(home)
     }
     assert shares == {
