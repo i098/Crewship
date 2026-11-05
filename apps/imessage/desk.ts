@@ -354,13 +354,13 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
   const exact = requestsExactOutput(question);
   const text = exact ? rewritten : rewritten.trim();
   if (!ok || !text.trim() || text.length > 2000 || claimsWork(text)) return;
-  if (exact && text === source.answer) return [text];
+  if (exact && text === source.answer) return fit(text, BUBBLE_MAX);
   const fields = voiceFields(source.answer);
   if (exact === "source" || (exact && !fields.length)) return;
   const literals = voiceLiterals(source.answer, fields);
   if (/```/.test(text) || (!exact && sourceStyle(text, literals, source.identity))) return;
   if (!preservesVoiceFacts(source.answer, text, literals, preserveWords, !!exact) || !preservesFieldValues(fields, text)) return;
-  return exact ? [text] : bubbles(text);
+  return exact ? fit(text, BUBBLE_MAX) : bubbles(text);
 }
 
 function requestsExactOutput(question: string): "source" | "values" | false {
@@ -691,8 +691,14 @@ function fit(text: string, max: number, level = 0): string[] {
 }
 
 function cut(text: string, max: number): string[] {
-  const chars = Array.from(text);
-  return Array.from({ length: Math.ceil(chars.length / max) }, (_, i) => chars.slice(i * max, (i + 1) * max).join(""));
+  const out: string[] = [];
+  for (let i = 0; i < text.length;) {
+    let end = Math.min(i + max, text.length);
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!) && end - 1 > i) end--;
+    out.push(text.slice(i, end));
+    i = end;
+  }
+  return out;
 }
 
 // The chat bubbles for one send: blank-line-separated paragraphs become separate bubbles, and lines inside a
