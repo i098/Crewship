@@ -153,6 +153,7 @@ Bun output stays in one labeled block per package, including command failures.
   It installs the Rust `stable` toolchain with rustfmt and clippy.
   Each selected apply updates the toolchain to the newest stable release.
 - `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
+- `runner_up` block: runner-up ([kunchenguid/runner-up](https://github.com/kunchenguid/runner-up/releases/latest), `runner-up-v<version>-linux-<arch>.tar.gz`), verified against the GitHub release-asset digest. Its job image is the CI pool's. See [runner-up](runner-up.md).
 - `gateway` profile: cloudflared ([cloudflare/cloudflared](https://github.com/cloudflare/cloudflared/releases/latest), `cloudflared-linux-<arch>`), verified against the GitHub release-asset digest. See [Web pages from anywhere](gateway.md).
 
 The GitHub API allows 60 unauthenticated requests per hour per IP.

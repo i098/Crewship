@@ -1,0 +1,15 @@
+{{ ansible_managed | comment }}
+# Triggered by runner-up-image.timer: builds the job image from the latest official runner image.
+[Unit]
+Description=runner-up job image: rebuild from the latest official runner image (Crewship managed)
+
+[Service]
+Type=oneshot
+Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
+Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
+Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
+ExecStart={{ crewship_runner_up_maintain }} image
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle

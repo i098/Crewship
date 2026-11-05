@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+# Every runner-up job container and image build runs in this slice (the docker shim passes
+# --cgroup-parent), so these caps cover all CI work as one group. The weights count only
+# while the host wants the CPU or the disk; MemoryMax always holds, and the kernel stops
+# the biggest process of the slice at the limit instead of hurting the rest of the host.
+# The name has no dash: a dash nests a slice.
+[Unit]
+Description=runner-up CI jobs (Crewship managed)
+
+[Slice]
+CPUWeight={{ crewship_runner_up_cpu_weight }}
+IOWeight={{ crewship_runner_up_io_weight }}
+MemoryMax={{ crewship_runner_up_memory_max }}

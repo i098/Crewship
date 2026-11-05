@@ -66,6 +66,48 @@ def validate_document(document, schema_name):
         raise ValueError(f"{schema_name}: invalid {location} ({error.validator})") from None
 
 
+# Pool labels runner-up refuses: internal/config checkLabel in kunchenguid/runner-up.
+RUNNER_UP_RESERVED_LABELS = ("self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm", "x86")
+RUNNER_UP_HOSTED_PREFIXES = ("ubuntu-", "windows-", "macos-")
+
+
+def entry_slugs(entries):
+    """Slot prefixes; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py."""
+    return [re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-") for e in entries]
+
+
+def validate_runner_up(config):
+    runner = config["runner_up"]
+    if not config["profiles"]["docker"]:
+        raise ValueError("runner_up requires the docker profile")
+    if ".." in Path(runner.get("data_dir", "/")).parts:
+        raise ValueError("runner_up.data_dir must not traverse; give a plain path")
+    entries = runner.get("repos") or [
+        e for e in config.get("ci_pool", {}).get("repos", []) if "docker" not in e
+    ]
+    if not entries:
+        raise ValueError(
+            "runner_up needs repos, or ci_pool.repos entries without docker: dind to take them from"
+        )
+    if len(set(entry_slugs(entries))) != len(entries):
+        raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
+    for entry in entries:
+        pools = [
+            label for label in entry["labels"] if label.lower() not in RUNNER_UP_RESERVED_LABELS
+        ]
+        if not pools:
+            raise ValueError(
+                f"{entry['repo']}: runner-up needs a label besides {', '.join(RUNNER_UP_RESERVED_LABELS)}"
+                " for its pool; workflows use it as `runs-on`"
+            )
+        for label in pools:
+            if label.lower().startswith(RUNNER_UP_HOSTED_PREFIXES):
+                raise ValueError(f"{entry['repo']}: label {label} looks like a GitHub-hosted runner")
+    names = [m["name"] for m in runner.get("machines", [])]
+    if len(set(names)) != len(names) or "local" in names:
+        raise ValueError("runner_up.machines names must be unique and not `local`")
+
+
 def validate_config(document):
     config = document.get("crewship") if isinstance(document, dict) else None
     if isinstance(config, dict) and (
@@ -128,13 +170,10 @@ def validate_config(document):
             raise ValueError("the CI pool requires the docker profile")
         if ".." in Path(pool["data_dir"]).parts:
             raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        # Unit instance names; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py.
-        slugs = [
-            re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-")
-            for e in pool["repos"]
-        ]
-        if len(set(slugs)) != len(slugs):
+        if len(set(entry_slugs(pool["repos"]))) != len(pool["repos"]):
             raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
+    if "runner_up" in config:
+        validate_runner_up(config)
     prune = config["browser_prune"]
     if prune["enabled"] and not config["profiles"]["agents"]:
         raise ValueError("browser pruning requires the agents profile")

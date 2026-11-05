@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=runner-up disk cleanup every hour (Crewship managed)
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
