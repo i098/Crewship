@@ -9,9 +9,11 @@
 #                     Obscura misrenders. Headless Chromium, persistent profile.
 #                     Started on demand, stopped after 30 min without a client.
 #   tier 3  voxl      http 127.0.0.1:9523      LAST RESORT: a headed Chrome on an
-#                     Xvfb display (:9) streamed by voxl on 127.0.0.1:6909, for when
+#                     Xvfb display (:9) streamed by voxl on 127.0.0.1:6913, for when
 #                     a human must see or drive the browser (OAuth consent, a
-#                     captcha, a native dialog). Started on demand, same idle stop.
+#                     captcha, a native dialog). A permanent service: it starts at
+#                     boot once the cookie jar exists, gc never stops it, and its
+#                     guard stops it if the jar count falls.
 #
 # One session across all three: cookie-sync.ts keeps a canonical jar in
 # ~/.fleet-browser/cookies.json and converges every live tier to it (timer every
@@ -21,9 +23,9 @@
 #   fleet-browser status            tiers, ports, clients, cookie counts
 #   fleet-browser env [tier]        export lines for chrome-devtools-axi / omp (default: obscura)
 #   fleet-browser up chrome|voxl    start a fallback tier, wait ready, push the session in
-#   fleet-browser down chrome|voxl  stop a fallback tier
+#   fleet-browser down chrome|voxl  stop a fallback tier (voxl is permanent; `up voxl` brings it back)
 #   fleet-browser sync              converge cookies now
-#   fleet-browser gc                stop fallback tiers idle >= $IDLE_MIN min (timer)
+#   fleet-browser gc                stop idle chrome (>= $IDLE_MIN min; timer); voxl is never stopped
 #   fleet-browser seed <profile>    one-shot: import cookies from a Chrome profile dir
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -36,7 +38,11 @@ CHROME_URL=http://127.0.0.1:9522
 VOXL_URL=http://127.0.0.1:9523
 OBSCURA_JAR=$STATE/obscura/cookies.json
 VOXL_DISPLAY=9
-VOXL_WEB_PORT=6909
+VOXL_WEB_PORT=${VOXL_WEB_PORT:-6913}
+# The guard stops voxl when the shared jar falls more than this share below its peak.
+VOXL_JAR_DROP_PCT=${VOXL_JAR_DROP_PCT:-5}
+VOXL_GUARD_SECS=${VOXL_GUARD_SECS:-30}
+VOXL_JAR_WAIT_SECS=${VOXL_JAR_WAIT_SECS:-120}
 mkdir -p "$STATE"; chmod 755 "$STATE"
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 
@@ -61,7 +67,7 @@ cmd_status() {
     [ "$t" = obscura ] && note="default"
     [ "$t" = chrome ] && note="fallback: pixel-critical evidence (fleet-browser up chrome)"
     [ "$t" = voxl ] && note="last resort: human eyes/hands; voxl http://127.0.0.1:$VOXL_WEB_PORT/ (fleet-browser up voxl)"
-    if [ "$t" != obscura ] && [ "$st" = up ]; then
+    if [ "$t" = chrome ] && [ "$st" = up ]; then
       idle=$(idle_minutes "$t"); note="$note; idle ${idle}m of ${IDLE_MIN}m"
     fi
     printf '%-8s %-6s %-9s %-8s %s\n' "$t" "$(port_of "$t")" "$st" "$(clients "$t")" "$note"
@@ -164,7 +170,7 @@ idle_minutes() {  # <tier>
 }
 
 cmd_gc() {
-  for t in chrome voxl; do
+  for t in chrome; do
     alive "$t" || continue
     idle=$(idle_minutes "$t")
     if [ "$idle" -ge "$IDLE_MIN" ]; then
@@ -210,6 +216,29 @@ run_chrome() {  # tier 2
     --remote-debugging-port=9522 --remote-allow-origins='*' --user-data-dir="$STATE/chrome-profile" \
     --window-size=1280,800 about:blank
 }
+
+jar_count() { python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$STATE/cookies.json" 2>/dev/null || echo 0; }
+
+# Voxl starts only once the shared jar exists, so it never joins the cookie sync with nothing to give.
+wait_jar() {
+  local i; for i in $(seq 1 "$VOXL_JAR_WAIT_SECS"); do [ -s "$STATE/cookies.json" ] && return 0; sleep 1; done
+  echo "no cookie jar at $STATE/cookies.json after ${VOXL_JAR_WAIT_SECS}s" >&2; return 1
+}
+
+# Refuse to keep running while the shared jar loses cookies: a headed browser that joins the
+# sync with fewer logins can drag the canonical jar down. Log the drop and stop the unit.
+voxl_guard() {
+  local peak now; peak=$(jar_count)
+  while sleep "$VOXL_GUARD_SECS"; do
+    now=$(jar_count)
+    [ "$now" -gt "$peak" ] && peak=$now
+    if [ "$now" -lt $(( peak - peak * VOXL_JAR_DROP_PCT / 100 )) ]; then
+      log "voxl guard: shared jar fell from $peak to $now cookies; stopping voxl"
+      systemctl --user stop "$(unit_of voxl)"; return
+    fi
+  done
+}
+
 run_voxl() {  # tier 3: Xvfb display + window manager + voxl + headed Chromium; foreground on the Chrome pid
   local chrome; chrome=$(fleet_chrome_bin) || { echo "no chrome binary"; exit 1; }
   local voxl=$HERE/voxl
@@ -234,6 +263,7 @@ run_voxl() {  # tier 3: Xvfb display + window manager + voxl + headed Chromium; 
     VOXL_PASSWORD=$(voxl_password) voxl_serve "$voxl" "$VOXL_WEB_PORT" >"$STATE/voxl.log" 2>&1 &
     local j; for j in $(seq 1 20); do ss -ltn 2>/dev/null | grep -q "127.0.0.1:$VOXL_WEB_PORT " && break; sleep 0.5; done
   fi
+  voxl_guard &
   exec "$chrome" --no-sandbox --no-first-run --no-default-browser-check --start-maximized \
     --remote-debugging-port=9523 --remote-allow-origins='*' --user-data-dir="$STATE/vnc-profile" about:blank
 }
@@ -248,7 +278,9 @@ case "${1:-status}" in
   seed) cmd_seed "${2:-}" ;;
   _run-chrome) run_chrome ;;
   _run-voxl) run_voxl ;;
+  _wait-jar) wait_jar ;;
+  _voxl-guard) voxl_guard ;;
   _voxl-serve) voxl_serve "${2:?voxl binary}" "${3:?port}" ;;
-  -h|--help|help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) echo "unknown command: $1 (try: fleet-browser help)" >&2; exit 2 ;;
 esac

@@ -309,6 +309,21 @@
         - crewship_forgejo_enabled | bool
       tags: [forgejo]
 
+    # After Tailscale, so the permanent voxl service can be published with tailscale serve.
+    - name: Publish the voxl tier to the tailnet
+      ansible.builtin.include_tasks:
+        file: tasks/fleet-browser-serve.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [fleet, fleet_browsers]
+      when:
+        - crewship_account_ready | bool
+        - crewship_fleet_browsers_enabled | bool
+        - crewship_manage_services | bool
+      tags: [fleet, fleet_browsers]
+
     - name: Optional `ssh mac` key and Host entry for an operator Mac
       ansible.builtin.include_tasks:
         file: tasks/mac_ssh.yml

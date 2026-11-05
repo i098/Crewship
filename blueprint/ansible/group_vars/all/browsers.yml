@@ -26,8 +26,11 @@ crewship_fleet_browser_voxl_packages:
   - libxcb1-dev
   - libpulse-dev
   - esbuild
+# The fixed loopback port of the permanent voxl service, and the tailnet HTTPS port
+# that tailscale serve publishes for it.
+crewship_fleet_browser_voxl_web_port: 6913
 # Spare loopback port the apply uses to check a fresh voxl build before it
-# retires the old tier that still holds port 6909.
+# retires the old tier that still holds the display.
 crewship_fleet_browser_voxl_check_port: 6919
 # Unit files of retired tiers; the tasks remove them.
 crewship_fleet_browser_retired_units:
@@ -42,5 +45,6 @@ crewship_fleet_browser_units:
   - fleet-browser-gc.timer
 crewship_fleet_browser_enabled_units:
   - { unit: fleet-browser-obscura.service, wants: default.target.wants }
+  - { unit: fleet-browser-voxl.service, wants: default.target.wants }
   - { unit: fleet-browser-sync.timer, wants: timers.target.wants }
   - { unit: fleet-browser-gc.timer, wants: timers.target.wants }

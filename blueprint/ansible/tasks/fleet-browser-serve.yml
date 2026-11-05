@@ -1,0 +1,76 @@
+---
+# Publish the permanent voxl service to the tailnet at
+# https://<tailnet host>:<crewship_fleet_browser_voxl_web_port>/. voxl keeps its own
+# password. Runs after the Tailscale tasks; skipped when Tailscale is absent, stopped,
+# or has no HTTPS certificates, because tailscale serve would then wait for an admin.
+- name: Read the Tailscale state for voxl
+  ansible.builtin.command:
+    argv: [tailscale, status, --json]
+  register: crewship_voxl_tailscale
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Name the tailnet host when Tailscale runs with HTTPS certificates
+  ansible.builtin.set_fact:
+    crewship_voxl_tailnet_host: >-
+      {{ ((crewship_voxl_tailscale.stdout | from_json).Self.DNSName | regex_replace('[.]$', ''))
+         if (crewship_voxl_tailscale.rc | default(1)) == 0
+            and (crewship_voxl_tailscale.stdout | from_json).BackendState == 'Running'
+            and (crewship_voxl_tailscale.stdout | from_json).CertDomains | default([], true) | length > 0
+         else '' }}
+
+- name: Publish voxl to the tailnet over HTTPS
+  when: crewship_voxl_tailnet_host | length > 0
+  become: true
+  become_user: root
+  vars:
+    crewship_voxl_proxy: {"/": {"Proxy": "http://127.0.0.1:{{ crewship_fleet_browser_voxl_web_port }}"}}
+    crewship_voxl_served_by: >-
+      {{ (((crewship_voxl_serve.stdout | from_json).Web | default({}, true))
+          [crewship_voxl_tailnet_host ~ ':' ~ crewship_fleet_browser_voxl_web_port] | default({}))
+         .Handlers | default({}) }}
+  block:
+    - name: Read the tailscale serve configuration
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_voxl_serve
+      changed_when: false
+      check_mode: false
+
+    # Never takes over a port that tailscale serve already gives to something else.
+    - name: Refuse a tailnet port that serves something else
+      ansible.builtin.assert:
+        that: crewship_voxl_served_by in [{}, crewship_voxl_proxy]
+        fail_msg: >-
+          tailscale serve already uses HTTPS port {{ crewship_fleet_browser_voxl_web_port }} for
+          something else; free it (tailscale serve --https={{ crewship_fleet_browser_voxl_web_port }} off)
+          or set crewship_fleet_browser_voxl_web_port.
+        quiet: true
+
+    - name: Ask tailscale serve to publish voxl
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "60"
+          - tailscale
+          - serve
+          - --bg
+          - "--https={{ crewship_fleet_browser_voxl_web_port }}"
+          - "http://127.0.0.1:{{ crewship_fleet_browser_voxl_web_port }}"
+      register: crewship_voxl_publish
+      changed_when: false
+      failed_when: false
+      when:
+        - crewship_voxl_served_by == {}
+        - not ansible_check_mode
+
+    # Only the configuration read below decides whether voxl is published.
+    - name: Confirm that the tailnet serves voxl
+      ansible.builtin.command:
+        argv: [tailscale, serve, status, --json]
+      register: crewship_voxl_serve
+      changed_when:
+        - crewship_voxl_publish is not skipped
+        - crewship_voxl_served_by == crewship_voxl_proxy
+      check_mode: false

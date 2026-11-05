@@ -114,9 +114,9 @@ async function probeCdp(port: number): Promise<Probe | null> {
 function voxlViewer() {
   try {
     const dns = JSON.parse(Bun.spawnSync(["tailscale", "status", "--json"]).stdout.toString()).Self?.DNSName?.replace(/\.$/, "")
-    if (dns) return `https://${dns}:6909/`
+    if (dns) return `https://${dns}:6913/`
   } catch {}
-  return "http://127.0.0.1:6909/"
+  return "http://127.0.0.1:6913/"
 }
 
 const run = (cmd: string[]) => Bun.spawnSync(cmd, { stderr: "ignore" }).stdout.toString()

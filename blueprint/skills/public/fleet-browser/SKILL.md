@@ -15,7 +15,7 @@ Ladder, driven with `fleet-browser status|env|up|down|sync`:
 | --- | --- | --- |
 | **obscura** (default) | `:9222` | All normal browsing, screenshots, clicks. |
 | **chrome** (fallback) | `fleet-browser up chrome` then `:9522` | Pixel-critical before/after evidence, or a page Obscura renders wrong. Stops after 30 idle minutes. |
-| **voxl** (last resort) | `fleet-browser up voxl` then `:9523`, voxl viewer `:6909` over an SSH tunnel or the tailnet URL | A human must see or drive the browser: OAuth consent, captcha, native dialog. |
+| **voxl** (last resort) | always on at `:9523`, voxl viewer `:6913` over an SSH tunnel or the tailnet URL | A human must see or drive the browser: OAuth consent, captcha, native dialog. |
 
 Use a fallback tier for one task with `eval "$(fleet-browser env chrome)"`. It sets a separate axi session, so it does not collide with the default.
 

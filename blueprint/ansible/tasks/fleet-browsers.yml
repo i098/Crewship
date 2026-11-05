@@ -3,8 +3,8 @@
 # profiles.fleet_browsers or profiles.fleet_guards turns it on.
 # docs/fleet-guards.md owns the design; blueprint/fleet/browsers/fleet-browser owns the
 # runtime. The obscura tier needs its latest binary + unit and the voxl tier its
-# apt packages and a build of the latest verified voxl crate; chrome and voxl are started on demand by the operator or the
-# fleet-browser CLI and gc'd after idle_timeout_min. The Herdr unit carries
+# apt packages and a build of the latest verified voxl crate; chrome is started on demand by the operator or the
+# fleet-browser CLI and gc'd after idle_timeout_min; voxl is a permanent service. The Herdr unit carries
 # the ladder's environment (templates/herdr.service.j2), so this file never
 # edits it.
 
@@ -251,7 +251,7 @@
   check_mode: false
 
 # voxl answers on a spare loopback port with a throwaway password, so the old
-# tier keeps display :9 and port 6909 until voxl is known to serve. A failed
+# tier keeps display :9 until voxl is known to serve. A failed
 # check fails the apply before anything of the old tier is touched.
 - name: Confirm voxl serves before the noVNC tier is retired
   ansible.builtin.shell: |

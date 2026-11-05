@@ -16,7 +16,7 @@ bun browser-tui.ts
 - The CDP port comes from `--remote-debugging-port` or `--port`, else from a socket the browser listens on (`ss -ltnp`).
 - A known CDP port (9222-9229, 9522, 9523) whose owner is not visible is listed as `cdp` with no pid.
 - A browser started with `--headless`, Obscura, or a CDP user agent that says `Headless` is headless; any other browser is headed.
-- The fleet-browser tiers have fixed names: `fleet obscura` (9222), `fleet chrome` (9522) and `fleet voxl` (9523). The voxl tier shows its viewer link: the tailnet name from `tailscale status` on port 6909, else `http://127.0.0.1:6909/`.
+- The fleet-browser tiers have fixed names: `fleet obscura` (9222), `fleet chrome` (9522) and `fleet voxl` (9523). The voxl tier shows its viewer link: the tailnet name from `tailscale status` on port 6913, else `http://127.0.0.1:6913/`.
 
 The view reads again every 3 seconds and renders only the visible rows.
 

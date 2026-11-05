@@ -1,6 +1,7 @@
 {{ ansible_managed | comment }}
-# Tier 3: Xvfb display :9 + headed Chromium + voxl on 127.0.0.1:6909, on
-# demand (`fleet-browser up voxl`), stopped by fleet-browser gc after 30 idle min.
+# Tier 3: Xvfb display :9 + headed Chromium + voxl on 127.0.0.1:{{ crewship_fleet_browser_voxl_web_port }}.
+# A permanent service: enabled at boot, never stopped by fleet-browser gc. It waits
+# for the shared cookie jar, and its guard stops it if the jar count falls.
 
 [Unit]
 Description=Fleet browser tier 3 - voxl display with headed Chromium on 127.0.0.1:9523 (Crewship managed)
@@ -11,7 +12,10 @@ ConditionPathExists=/usr/bin/Xvfb
 [Service]
 Type=simple
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VOXL_WEB_PORT={{ crewship_fleet_browser_voxl_web_port }}
+ExecStartPre={{ crewship_fleet_browsers_dir }}/fleet-browser _wait-jar
 ExecStart={{ crewship_fleet_browsers_dir }}/fleet-browser _run-voxl
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=180
 MemoryMax=4G
