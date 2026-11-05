@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
+import { readProviders, type DetectedProvider, type QuotaSource } from "./detect.ts"
 
 export const MERCURY_LIMIT = 100_000_000
 export const QUOTA_MIN_MS = 60_000
@@ -107,6 +108,7 @@ export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
+  providers?: DetectedProvider[] // from usage-tui-detect; absent means every source is shown
   omp?: OmpUsage
   ompError?: string
   zai?: ZaiQuota
@@ -119,15 +121,24 @@ export type QuotaInput = {
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
   const rows: QuotaRow[] = []
+  const on = (s: QuotaSource) => !inp.providers || inp.providers.some(p => p.source === s)
   const ompRows = inp.omp ? parseOmp(inp.omp) : []
-  if (ompRows.length) rows.push(...ompRows)
+  if (!on("omp-usage")) {
+  } else if (ompRows.length) rows.push(...ompRows)
   else rows.push({ account: "omp usage", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.ompError ?? (inp.omp ? "no accounts reported" : "not reported") })
-  if (inp.zai) rows.push(...parseZai(inp.zai))
+  if (!on("zai")) {
+  } else if (inp.zai) rows.push(...parseZai(inp.zai))
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
-  if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
+  if (!on("mercury-tokens")) {
+  } else if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
-  if (inp.deepseek) rows.push(...deepseekRows(inp.deepseek))
+  if (!on("deepseek")) {
+  } else if (inp.deepseek) rows.push(...deepseekRows(inp.deepseek))
   else rows.push(resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a"))
+  // Detected providers with no quota source still get a row, so the list matches the host's accounts.
+  for (const p of inp.providers ?? []) {
+    if (p.source === "none") rows.push({ account: p.label, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `${p.accounts} account${p.accounts === 1 ? "" : "s"}, quota not reported` })
+  }
   return rows
 }
 
@@ -341,15 +352,24 @@ export async function deepseek(): Promise<{ value?: DeepseekUsage; error?: strin
 
 export async function loadQuota(): Promise<QuotaInput> {
   const msg = (e: unknown) => (e as Error).message
-  const [omp, zai, mercury, ds] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek()])
+  const providers = readProviders({ home: HOME, env: process.env }).providers
+  const on = (s: QuotaSource) => providers.some(p => p.source === s)
+  const off = Promise.resolve(undefined)
+  const [omp, zai, mercury, ds] = await Promise.allSettled([
+    on("omp-usage") ? run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage) : off,
+    on("zai") ? fetchZai() : off,
+    on("mercury-tokens") ? mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })) : off,
+    on("deepseek") ? deepseek() : off,
+  ])
   return {
+    providers,
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
     zai: zai.status === "fulfilled" ? zai.value : undefined,
     zaiError: zai.status === "rejected" ? `unavailable: ${msg(zai.reason)}` : undefined,
     mercury: mercury.status === "fulfilled" ? mercury.value : undefined,
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
-    deepseek: ds.status === "fulfilled" ? ds.value.value : undefined,
-    deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value.error,
+    deepseek: ds.status === "fulfilled" ? ds.value?.value : undefined,
+    deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value?.error,
   }
 }

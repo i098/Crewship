@@ -139,6 +139,8 @@ test("quota load runs omp outside the TUI's process group and session", async ()
   mkdirSync(bin)
   writeFileSync(join(bin, "omp"), `#!/bin/sh\nprintf '{"probe":"%s"}\\n' "$(ps -o pid=,pgid=,sid= -p $$)"\n`)
   chmodSync(join(bin, "omp"), 0o755)
+  mkdirSync(join(dir, ".config/crewship"), { recursive: true })
+  writeFileSync(join(dir, ".config/crewship/usage-providers.json"), JSON.stringify({ version: 1, providers: [{ id: "anthropic", label: "claude", accounts: 1, source: "omp-usage", found: ["omp"] }] }))
   const runner = join(dir, "runner.ts")
   // Static import cannot work here: quota.ts reads HOME when it loads, so the runner needs
   // this test's temporary HOME already in place before the module is imported.
@@ -159,3 +161,15 @@ test("quota load runs omp outside the TUI's process group and session", async ()
     rmSync(dir, { recursive: true, force: true })
   }
 }, 60_000)
+
+test("buildRows shows only the detected sources, plus a row for providers without a quota source", () => {
+  const providers = [
+    { id: "anthropic", label: "claude", accounts: 2, source: "omp-usage" as const, found: ["omp"] },
+    { id: "xiaomi", label: "xiaomi", accounts: 1, source: "none" as const, found: ["omp"] },
+  ]
+  const rows = buildRows({ ...FIXTURE, providers })
+  expect(rows.some(r => /^(glm|mercury|deepseek)/.test(r.account))).toBe(false)
+  expect(rows.some(r => r.account.startsWith("claude"))).toBe(true)
+  expect(rows.find(r => r.account === "xiaomi")?.note).toBe("1 account, quota not reported")
+  expect(buildRows({ providers: [] })).toEqual([])
+})

@@ -44,6 +44,15 @@ function ompAccounts(e: Env): Record<string, number> {
   }
 }
 
+// rtk has no auth store: it counts as a provider when `rtk gain` runs.
+function rtkWorks(e: Env): boolean {
+  try {
+    return Bun.spawnSync(["rtk", "gain"], { env: e.env, stdout: "ignore", stderr: "ignore" }).exitCode === 0
+  } catch {
+    return false // rtk is not installed
+  }
+}
+
 export function detect(e: Env): ProviderList {
   const found = new Map<string, DetectedProvider>()
   const add = (id: string, accounts: number, from: string) => {
@@ -56,8 +65,21 @@ export function detect(e: Env): ProviderList {
   for (const [id, n] of Object.entries(ompAccounts(e))) add(id, n, "omp")
   if (existsSync(`${e.home}/.codex/auth.json`)) add("openai-codex", 1, "codex-cli")
   for (const [id, names] of Object.entries(ENV_KEYS)) if (names.some(n => e.env[n])) add(id, 1, "env")
+  // The GLM quota call reads its key from the zai-glm provider in models.yml; only the block's presence counts here.
+  const models = `${e.home}/.omp/agent/models.yml`
+  if (existsSync(models) && /^\s*zai-glm:/m.test(readFileSync(models, "utf8"))) add("zai", 1, "models.yml")
+  if (rtkWorks(e)) add("rtk", 1, "rtk-cli")
   const providers = [...found.values()].sort((a, b) => a.id.localeCompare(b.id))
   return { version: 1, providers }
+}
+
+// The saved list, or a fresh detection when setup has not written one. Never writes.
+export function readProviders(e: Env): ProviderList {
+  try {
+    const list = JSON.parse(readFileSync(configPath(e), "utf8")) as ProviderList
+    if (list.version === 1 && Array.isArray(list.providers)) return list
+  } catch {}
+  return detect(e)
 }
 
 // Writes the file only when its content differs. Returns whether it changed.

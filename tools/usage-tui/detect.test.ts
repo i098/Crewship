@@ -3,12 +3,15 @@ import { Database } from "bun:sqlite"
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, detect, type ProviderList } from "./detect.ts"
+import { chmodSync } from "node:fs"
+import { apply, detect, readProviders, type ProviderList } from "./detect.ts"
 
 function home(creds: [string, string | null][], codex = false) {
   const h = mkdtempSync(join(tmpdir(), "detect-"))
   mkdirSync(join(h, ".omp/agent"), { recursive: true })
   const db = new Database(join(h, ".omp/agent/agent.db"))
+  db.run("pragma journal_mode=off")
+  db.run("pragma synchronous=off")
   db.run("create table auth_credentials (id integer primary key, provider text, data text, disabled_cause text)")
   for (const [p, d] of creds) db.run("insert into auth_credentials (provider, data, disabled_cause) values (?, 'SECRET-TOKEN', ?)", [p, d])
   db.close()
@@ -51,4 +54,34 @@ test("merges codex login and env keys with omp accounts without double counting"
 test("a host with no omp database yields an empty list", () => {
   const h = mkdtempSync(join(tmpdir(), "detect-"))
   expect(detect({ home: h, env: {} }).providers).toEqual([])
+})
+
+test("rtk is a provider only when `rtk gain` exits 0", () => {
+  const h = mkdtempSync(join(tmpdir(), "detect-"))
+  const bin = join(h, "bin")
+  mkdirSync(bin)
+  const env = { PATH: `${bin}:/usr/bin:/bin` }
+  expect(detect({ home: h, env }).providers).toEqual([])
+  writeFileSync(join(bin, "rtk"), "#!/bin/sh\n[ \"$1\" = gain ]\n")
+  chmodSync(join(bin, "rtk"), 0o755)
+  expect(detect({ home: h, env }).providers.map(p => p.id)).toEqual(["rtk"])
+  writeFileSync(join(bin, "rtk"), "#!/bin/sh\nexit 1\n")
+  expect(detect({ home: h, env }).providers).toEqual([])
+})
+
+test("readProviders prefers the saved list and falls back to detection without writing", () => {
+  const h = home([["anthropic", null]])
+  const e = { home: h, env: { PATH: "/nonexistent" } }
+  expect(readProviders(e).providers.map(p => p.id)).toEqual(["anthropic"])
+  expect(() => readFileSync(join(h, ".config/crewship/usage-providers.json"))).toThrow()
+  apply(e)
+  writeFileSync(join(h, ".config/crewship/usage-providers.json"), JSON.stringify({ version: 1, providers: [] }))
+  expect(readProviders(e).providers).toEqual([])
+})
+
+test("a zai-glm provider in models.yml counts as GLM without reading its key", () => {
+  const h = home([])
+  writeFileSync(join(h, ".omp/agent/models.yml"), "providers:\n  zai-glm:\n    apiKey: SECRET-KEY\n")
+  const list = detect({ home: h, env: { PATH: "/nonexistent" } })
+  expect(list.providers).toEqual([{ id: "zai", label: "glm", accounts: 1, source: "zai", found: ["models.yml"] }])
 })
