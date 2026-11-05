@@ -2,7 +2,7 @@
 
 The user says "build me a habit tracker" (or any category). This is the full
 loop. Do not stop early: the goal is a finished app where every screen is
-verified better-than-reference in the simulator — not a scaffold.
+verified better-than-reference in vphone-linux — not a scaffold.
 
 ## Phase 1 — Find the winners
 
@@ -75,7 +75,7 @@ For EVERY screen, in journey order:
    Higgsfield MCP or CLI / whatever is present) at the highest quality — one
    style system for the whole app, per appllama-app-design-skill's
    references/image-assets.md.
-4. **Simulator loop until flawless**: run on the iOS Simulator (or Android
+4. **Device loop until flawless**: run on vphone-linux (or the Android
    emulator), screenshot, actually look, exercise the motion frame by frame,
    check the Dynamic Island / safe areas / dark mode / Dynamic Type, fix,
    repeat. The checklist lives in appllama-app-design-skill's
@@ -88,7 +88,7 @@ For EVERY screen, in journey order:
 
 ## Phase 6 — The bar
 
-Walk the whole app in the simulator as a new user, three times: happy path,
+Walk the whole app in vphone-linux as a new user, three times: happy path,
 skeptic path (skip everything skippable), abuse path (bad input, offline,
 interrupt mid-flow, and every back path — chevron, edge swipe, Android
 hardware back, active-tab re-tap — especially right after sign-in,

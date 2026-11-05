@@ -54,7 +54,7 @@ The source author prefers fully native apps; this is a preference, not a require
 ## 7. Build one flow at a time
 
 - Give the agent one flow specification, its screenshots, and its completion criteria instead of one prompt for the whole app.
-- Implement the flow, run it on the target device or simulator, and check the completion criteria before starting another flow.
+- Implement the flow, run it on the target device or in vphone-linux (the virtual iPhone on the host), and check the completion criteria before starting another flow.
 - Animate meaningful state changes with short transitions, about 0.2 seconds as a starting point. Reserve stronger motion for major user milestones.
 - Use skeleton loading when the screen layout is known. Respect reduced-motion settings, and pause decorative animation in low-power mode.
 - Check real phone behavior before release; report any device or platform that you could not test.

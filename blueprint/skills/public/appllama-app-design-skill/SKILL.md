@@ -1,6 +1,6 @@
 ---
 name: appllama-app-design-skill
-description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI — screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states — or when polishing motion, navigation, typography, dark mode, or perceived performance. Enforces Apple HIG fidelity, semantic colors, native controls, anti-slop discipline, navigation semantics (push vs replace, modal vs sheet vs overlay, the one-way doors where back must not exist), purposeful Reanimated motion, a full-motion simulator-verified iteration loop, and a study-real-apps-first workflow (pairs with the Appllama MCP). Trigger on "build a screen", "make this screen better", "design the onboarding", "wire up this flow", "polish the UI", "make it feel native", or any mobile design/implementation task.
+description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI — screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states — or when polishing motion, navigation, typography, dark mode, or perceived performance. Enforces Apple HIG fidelity, semantic colors, native controls, anti-slop discipline, navigation semantics (push vs replace, modal vs sheet vs overlay, the one-way doors where back must not exist), purposeful Reanimated motion, a full-motion vphone-linux-verified iteration loop, and a study-real-apps-first workflow (pairs with the Appllama MCP). Trigger on "build a screen", "make this screen better", "design the onboarding", "wire up this flow", "polish the UI", "make it feel native", or any mobile design/implementation task.
 license: MIT
 metadata:
   author: Appllama (appllama.io)
@@ -174,7 +174,7 @@ explicitly asks for the thing AND you can articulate why it fits this product.
    shape, empty states are composed (and say how to fill them), errors are
    inline and specific.
 9. **The slop pre-flight is mechanical.** Before any flow reaches the
-   simulator pass, count: distinct accent hues (must be 1), distinct corner
+   device pass, count: distinct accent hues (must be 1), distinct corner
    radii (all from the stated scale), emoji in UI chrome (0), gradients
    without a brand reason (0), duplicate labels for one intent (0). A failed
    count is a fix, not a judgment call.
@@ -269,11 +269,11 @@ beyond the symbol set:
 - Full asset pipeline and prompt patterns:
   [references/image-assets.md](references/image-assets.md).
 
-## The simulator loop (non-negotiable)
+## The device loop (non-negotiable)
 
 A screen does not exist until you have seen it running. The loop:
 
-1. Implement → launch in the iOS Simulator (or Android emulator).
+1. Implement → launch in vphone-linux (or the Android emulator).
 2. Screenshot and **actually look**: alignment, optical centering, spacing
    rhythm, truncation with long content, dark mode, Dynamic Type at XL.
 3. Run the **full-motion pass** below — screenshots prove layout; they prove
@@ -287,9 +287,9 @@ fine" — stop at "cannot find a flaw at 100% zoom".
 
 ### The full-motion pass (mandatory, per flow)
 
-Every flow is evaluated as **moving pictures in the simulator, never as
-stills**. Screen-record the entire flow end to end
-(`xcrun simctl io booted recordVideo flow.mov`), exercising ALL of it:
+Every flow is evaluated as **moving pictures on the device, never as
+stills**. Film the entire flow end to end with vphone-linux
+(`tools/swipe-film.py` or repeated `tools/qmp.py SOCK shot`), exercising ALL of it:
 
 - every screen transition, push/pop, tab switch
 - every back path — chevron, edge swipe, Android hardware back — and, after
@@ -321,7 +321,7 @@ zero UX glitches. One glitchy frame means the flow is not done.
 - [ ] Navigation answered: what this screen *is* (push / modal / sheet /
       overlay / replace), what back does from it on iOS and Android, and —
       behind a one-way door — that back cannot re-enter the old state
-- [ ] Light + dark mode verified in the simulator
+- [ ] Light + dark mode verified in vphone-linux
 - [ ] Safe areas / Dynamic Island / home indicator verified
 - [ ] Long-content, empty, loading, and error states designed — not defaulted
 - [ ] Motion: the full flow screen-recorded and scrubbed — entrances,
