@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""api-anything on the fleet browser's shared cookie jar.
+
+api-anything login <site|url>   api-anything-fleet login <site|url>
+api-anything call ...           api-anything-fleet call <site> <op> [k=v ...]
+api-anything <other> ...        api-anything-fleet <other> ...   (learn, ops, sites ...)
+
+`login` syncs the tiers, then imports the jar (~/.fleet-browser/cookies.json) as the site's
+saved login; api-anything keeps only the cookies of that site. `call` runs `api-anything call`;
+when the answer is class "auth", it renews the login from the jar once and retries once.
+Learning needs a Chromium: the one fleet-browser uses (FLEET_CHROME_BIN, a system Chrome, or the
+newest Playwright build) unless API_ANYTHING_BROWSER is set.
+The jar is never edited and no browser profile is read.
+"""
+
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+JAR = Path.home() / ".fleet-browser/cookies.json"
+STATE = Path.home() / ".local/state/crewship/api-anything"
+
+
+def chromium():
+    for name in (os.environ.get("FLEET_CHROME_BIN"), "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        if name and (found := shutil.which(name)):
+            return found
+    builds = glob.glob(str(Path.home() / ".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
+    return max(builds, key=lambda p: [int(n) for n in p.split("chromium-")[1].split("/")[0].split("-")], default=None)
+
+
+def login(target):
+    # Callers that hit auth together share one sync: a jar written in the last 5 s is fresh.
+    if not JAR.is_file() or time.time() - JAR.stat().st_mtime > 5:
+        subprocess.run(["fleet-browser", "sync"], check=False, capture_output=True)
+    try:
+        cookies = list(json.loads(JAR.read_text()).values())
+    except (OSError, ValueError) as error:
+        sys.exit(f"api-anything-fleet: cannot read the fleet cookie jar {JAR}: {error}")
+    fd, name = tempfile.mkstemp(suffix=".json")  # mode 0600
+    try:
+        with os.fdopen(fd, "w") as file:
+            json.dump({"cookies": cookies}, file)
+        return subprocess.run(["api-anything", "login", target, "--cookies", name]).returncode
+    finally:
+        os.unlink(name)
+
+
+def call(args):
+    for attempt in (0, 1):
+        run = subprocess.run(["api-anything", "call", *args], capture_output=True, text=True)
+        try:
+            answer = json.loads(run.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            answer = {}
+        if answer.get("class") != "auth" or attempt:
+            break
+        if login(args[0]):
+            break
+    sys.stdout.write(run.stdout)
+    sys.stderr.write(run.stderr)
+    return run.returncode
+
+
+def main(argv):
+    os.environ.setdefault("API_ANYTHING_HOME", str(STATE))
+    os.environ.setdefault("API_ANYTHING_BROWSER_ROOTS", "[]")
+    if browser := chromium():
+        os.environ.setdefault("API_ANYTHING_BROWSER", browser)
+    if len(argv) == 2 and argv[0] == "login":
+        return login(argv[1])
+    if len(argv) >= 3 and argv[0] == "call":
+        return call(argv[1:])
+    if not argv:
+        sys.exit(__doc__)
+    return subprocess.run(["api-anything", *argv]).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

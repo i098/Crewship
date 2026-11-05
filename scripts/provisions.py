@@ -169,6 +169,7 @@ NPM_LATEST = {
     "ondine": "ondine",
     "backpass": "backpass",
     "compact-adviser": "compact-adviser",
+    "api-anything": "api-anything",
 }
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
