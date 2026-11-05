@@ -8,6 +8,7 @@ const mate1: Secondmate = { id: "mate1", home: "/fleet/mate1", scope: "repo chec
 
 function host(texts: string[], over: Partial<ActionHost> = {}) {
   const calls: unknown[][] = [];
+  const logged: unknown[][] = [];
   const stub: ActionHost = {
     requests: texts.map(ask), current: () => true, muted: () => false, mates: () => [mate1],
     reply: (parts, target) => void calls.push(["reply", parts, target]),
@@ -18,11 +19,12 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     status: async () => "all quiet",
     message: async (mate, text) => { calls.push(["message", mate.id, text]); return true; },
     replies: () => "mate1: done [at=1]: checks green",
-    claim: (key) => key !== "seen",
+    sent: (key) => key === "seen",
+    log: (key, text) => void logged.push([key, text]),
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     ...over,
   };
-  return { calls, ...createActions(stub) };
+  return { calls, logged, ...createActions(stub) };
 }
 
 test("reply refuses a protected request", async () => {
@@ -187,6 +189,8 @@ test("reply with a key already sent today is refused and leaves the turn open", 
   await expect(h.run("reply", { text: "Up 4 percent.", key: "seen" })).rejects.toThrow("already got this");
   expect(h.acted()).toBe(false);
   await expect(h.run("reply", { text: "Up 4 percent.", key: "bad key!" })).rejects.toThrow("key must be");
+  expect(h.logged).toEqual([]);
   await h.run("reply", { text: "Up 5 percent.", key: "fresh" });
+  expect(h.logged).toEqual([["fresh", "Up 5 percent."]]);
   expect(h.acted()).toBe(true);
 });

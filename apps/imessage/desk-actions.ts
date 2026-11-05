@@ -44,7 +44,8 @@ export type ActionHost = {
   status(): Promise<string>;
   message(mate: Secondmate, text: string): Promise<boolean>; // true when the mate's inbox took the text
   replies(mate: Secondmate): string; // the mate's newest status lines
-  claim(key: string | undefined, text: string): boolean; // logs the text for the owner; false when this key already sent this content today
+  sent(key: string | undefined, text: string): boolean; // this key already sent this content to the owner today
+  log(key: string | undefined, text: string): void; // records a text that reached the owner
   safe(text: string): string; // the bridge's redacting filter: a reply it would change is refused
 };
 
@@ -57,7 +58,7 @@ export function replyText(args: Record<string, unknown>, safe: (text: string) =>
   return clean;
 }
 
-function replyParts(args: Record<string, unknown>, count: number, host: Pick<ActionHost, "safe" | "claim">): { parts: string[]; target: number } {
+function replyParts(args: Record<string, unknown>, count: number, host: Pick<ActionHost, "safe" | "sent" | "log">): { parts: string[]; target: number; logged(): void } {
   const clean = replyText(args, host.safe);
   const target = args.to === undefined ? count : Number(args.to);
   if (!Number.isInteger(target) || target < 1 || target > count) throw new Error(`to must be 1 to ${count}`);
@@ -65,8 +66,8 @@ function replyParts(args: Record<string, unknown>, count: number, host: Pick<Act
   if (!parts.length) throw new Error("text must be a non-empty string");
   const key = args.key === undefined ? undefined : String(args.key);
   if (key !== undefined && !KEY_PATTERN.test(key)) throw new Error("key must be 1 to 64 letters, digits, . _ : -");
-  if (!host.claim(key, clean)) throw new Error("refused: the owner already got this under this key today; do not repeat it");
-  return { parts, target };
+  if (host.sent(key, clean)) throw new Error("refused: the owner already got this under this key today; do not repeat it");
+  return { parts, target, logged: () => host.log(key, clean) };
 }
 
 function tapbackEmoji(args: Record<string, unknown>, requests: readonly RelayRequest[]): string {
@@ -74,6 +75,29 @@ function tapbackEmoji(args: Record<string, unknown>, requests: readonly RelayReq
   if (!TAPBACKS.includes(emoji)) throw new Error(`emoji must be one of ${TAPBACKS.join(" ")}`);
   if (requests.some((request) => /\?/.test(request.authored ?? request.text))) throw new Error("refused: a question needs words; call reply");
   return emoji;
+}
+
+// The tools that talk to a second mate directly: send it a text, read its status lines.
+function mateTools(host: ActionHost, live: () => void, may: () => void): Record<string, (args: Record<string, unknown>) => string | Promise<string>> {
+  const listed = (args: Record<string, unknown>) => {
+    const id = String(args.mate);
+    const mate = host.mates().find((m) => m.id === id);
+    if (!mate) throw new Error(`refused: ${id} is not a listed mate`);
+    return mate;
+  };
+  return {
+    message_mate: async (args) => {
+      live(); may();
+      const mate = listed(args);
+      if (typeof args.text !== "string" || !args.text.trim()) throw new Error("text must be a non-empty string");
+      if (!await host.message(mate, args.text.trim())) throw new Error(`delivery to ${mate.id} did not complete`);
+      return `sent to ${mate.id}; read its answer with mate_replies`;
+    },
+    mate_replies: (args) => {
+      live(); may();
+      return host.replies(listed(args)).slice(0, STATUS_MAX) || "no status lines yet";
+    },
+  };
 }
 
 // One runner per turn. `acted()` says whether the turn ended in a reply, tapback, relay or handoff.
@@ -89,18 +113,13 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
   const may = () => {
     if (!deskMayAct(host.requests)) throw new Error("refused: this request is protected; call handoff_main");
   };
-  const listed = (args: Record<string, unknown>) => {
-    const id = String(args.mate);
-    const mate = host.mates().find((m) => m.id === id);
-    if (!mate) throw new Error(`refused: ${id} is not a listed mate`);
-    return mate;
-  };
   const handlers: Record<string, (args: Record<string, unknown>) => string | Promise<string>> = {
     reply: (args) => {
       open(); may();
-      const { parts, target } = replyParts(args, host.requests.length, host);
+      const { parts, target, logged } = replyParts(args, host.requests.length, host);
       done = true;
       host.reply(parts, target);
+      logged();
       return "sent; your turn is over";
     },
     tapback: (args) => {
@@ -121,13 +140,14 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
     },
     handoff_main: (args) => {
       open();
-      let ack: { parts: string[]; target: number } | undefined;
+      let ack: ReturnType<typeof replyParts> | undefined;
       if (args.text !== undefined) {
         if (!deskMayAct(host.requests)) throw new Error("refused: this request is protected; call handoff_main with no text");
         ack = replyParts(args, host.requests.length, host);
       }
       done = true;
-      host.handoff(typeof args.reason === "string" ? args.reason : "", ack);
+      host.handoff(typeof args.reason === "string" ? args.reason : "", ack && { parts: ack.parts, target: ack.target });
+      ack?.logged();
       return "handed to Firstmate; your turn is over";
     },
     delegate_task: (args) => {
@@ -135,22 +155,13 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
       const id = String(args.target);
       const mate = id === "firstmate" ? id : relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
       if (!mate) throw new Error(`refused: ${id} is not a listed mate; use firstmate or call handoff_main`);
-      const { parts, target } = replyParts(args, host.requests.length, host);
+      const { parts, target, logged } = replyParts(args, host.requests.length, host);
       done = true;
       host.delegate(mate, parts, target);
+      logged();
       return "sent, and the work started; your turn is over";
     },
-    message_mate: async (args) => {
-      live(); may();
-      const mate = listed(args);
-      if (typeof args.text !== "string" || !args.text.trim()) throw new Error("text must be a non-empty string");
-      if (!await host.message(mate, args.text.trim())) throw new Error(`delivery to ${mate.id} did not complete`);
-      return `sent to ${mate.id}; read its answer with mate_replies`;
-    },
-    mate_replies: (args) => {
-      live(); may();
-      return host.replies(listed(args)).slice(0, STATUS_MAX) || "no status lines yet";
-    },
+    ...mateTools(host, live, may),
     fleet_status: async () => {
       live(); may();
       return (await host.status()).slice(0, STATUS_MAX);

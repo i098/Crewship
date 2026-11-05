@@ -12,20 +12,23 @@ const day = (at: number) => new Date(at).toDateString();
 const normal = (text: string) => text.replace(/\(\s*re-?post\s*\)/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
 const hashOf = (text: string) => new Bun.CryptoHasher("sha256").update(normal(text)).digest("hex");
 
-// Records the text; false (and no record) when its key already sent the same content today. No key: always sent, still logged.
-export function claimSend(dir: string, o: { key?: string; sender?: string; text: string }, now = Date.now()): boolean {
+export type Send = { key?: string; sender?: string; text: string };
+
+// True when this key already sent the same content today. No key: never.
+export function alreadySent(dir: string, o: Send, now = Date.now()): boolean {
+  if (!o.key) return false;
   const hash = hashOf(o.text);
-  const key = o.key ?? "-";
-  if (o.key) {
-    let lines: string[] = [];
-    try { lines = readFileSync(`${dir}/${FILE}`, "utf8").split("\n"); } catch { /* no log yet */ }
-    for (const line of lines) {
-      try {
-        const seen = JSON.parse(line) as Entry;
-        if (seen.key === key && seen.hash === hash && day(seen.at) === day(now)) return false;
-      } catch { /* blank or damaged line */ }
-    }
-  }
-  appendFileSync(`${dir}/${FILE}`, `${JSON.stringify({ key, sender: o.sender ?? "-", hash, at: now } satisfies Entry)}\n`, { mode: 0o600 });
-  return true;
+  let lines: string[] = [];
+  try { lines = readFileSync(`${dir}/${FILE}`, "utf8").split("\n"); } catch { /* no log yet */ }
+  return lines.some((line) => {
+    try {
+      const seen = JSON.parse(line) as Entry;
+      return seen.key === o.key && seen.hash === hash && day(seen.at) === day(now);
+    } catch { return false; /* blank or damaged line */ }
+  });
+}
+
+// Logs a text that reached the outbox. No key: logged under "-".
+export function logSend(dir: string, o: Send, now = Date.now()): void {
+  appendFileSync(`${dir}/${FILE}`, `${JSON.stringify({ key: o.key ?? "-", sender: o.sender ?? "-", hash: hashOf(o.text), at: now } satisfies Entry)}\n`, { mode: 0o600 });
 }
