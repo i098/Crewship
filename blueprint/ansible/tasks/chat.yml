@@ -20,6 +20,12 @@
   loop: [concord, slk]
 
 # Headless Discord with Concord's saved login; no TUI needed (docs/chat.md#headless-discord).
+- name: Ensure the local bin directory
+  ansible.builtin.file:
+    path: "{{ crewship_local_bin }}"
+    state: directory
+    mode: "0755"
+
 - name: Install the discord command
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/maintenance/discord"
