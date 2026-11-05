@@ -1,0 +1,17 @@
+{{ ansible_managed | comment }}
+# Tier 3: Xvfb display :9 + headed Chromium + voxl on 127.0.0.1:6909, on
+# demand (`fleet-browser up voxl`), stopped by fleet-browser gc after 30 idle min.
+
+[Unit]
+Description=Fleet browser tier 3 - voxl display with headed Chromium on 127.0.0.1:9523 (Crewship managed)
+ConditionPathExists={{ crewship_fleet_browsers_dir }}/fleet-browser
+ConditionPathExists={{ crewship_fleet_browsers_dir }}/voxl
+ConditionPathExists=/usr/bin/Xvfb
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart={{ crewship_fleet_browsers_dir }}/fleet-browser _run-voxl
+Restart=on-failure
+RestartSec=5
+MemoryMax=4G

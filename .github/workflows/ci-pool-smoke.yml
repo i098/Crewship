@@ -1,4 +1,4 @@
-# Real-job proof for the self-hosted CI pool (docs/ci-pool.md).
+# Real-job proof for the self-hosted runners (docs/runner-up.md, docs/ci-pool.md).
 #
 # Only manual runs are allowed: this public repository must never let a pull
 # request from a fork reach the host. Action pins and the read-only token match ci.yml.
@@ -16,8 +16,8 @@ defaults:
 
 jobs:
   config-and-python:
-    name: configuration and python checks (CI pool)
-    runs-on: [self-hosted, crewship]
+    name: configuration and python checks (runner-up)
+    runs-on: crewship
     timeout-minutes: 20
     permissions:
       contents: read
