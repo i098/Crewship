@@ -15,7 +15,7 @@ async function sessionArgv(provider: string, model: string): Promise<string[]> {
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(log)} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
   chmodSync(wrapper, 0o755);
   const request: TurnRequest = { requestId: "r1", text: "hi", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
-  const turn = createSessionTurn<TurnRequest>({
+  const turn = createSessionTurn<TurnRequest>({ claim: () => true, message: async () => true,
     env: { PATH: `${dir}:${process.env.PATH}` }, provider, model, reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
@@ -48,7 +48,7 @@ test("a background task's answer reaches the next turn as a missed line, the ses
   chmodSync(wrapper, 0o755);
   const msgs: { i: number; kind: string; text: string; requestId?: string }[] = [];
   const add = (kind: string, text: string, requestId?: string) => msgs.push({ i: msgs.length, kind, text, requestId });
-  const turn = createSessionTurn<TurnRequest>({
+  const turn = createSessionTurn<TurnRequest>({ claim: () => true, message: async () => true,
     env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs, render: () => "" } as never,
     memoryIndex: (r) => r.memoryId, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
@@ -75,7 +75,7 @@ test("delegate_task answers as a delegated ack first, then the task is sent once
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
   chmodSync(wrapper, 0o755);
   const events: unknown[][] = [];
-  const turn = createSessionTurn<TurnRequest>({
+  const turn = createSessionTurn<TurnRequest>({ claim: () => true, message: async () => true,
     env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
@@ -96,7 +96,7 @@ test("an owner instruction is acked with handoff_main: one handoff, one ack text
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
   chmodSync(wrapper, 0o755);
   const events: unknown[][] = [];
-  const turn = createSessionTurn<TurnRequest>({
+  const turn = createSessionTurn<TurnRequest>({ claim: () => true, message: async () => true,
     env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
@@ -117,7 +117,7 @@ test("a thread reply to a mate's bubble is relayed to that mate with no model tu
   mkdirSync(join(dir, "data"));
   writeFileSync(join(dir, "data/secondmates.md"), "- engram - Engram mate (home: /srv/engram; scope: engram work; projects: none)\n");
   const relayed: string[] = [];
-  const turn = createSessionTurn<TurnRequest>({
+  const turn = createSessionTurn<TurnRequest>({ claim: () => true, message: async () => true,
     env: { PATH: process.env.PATH }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },

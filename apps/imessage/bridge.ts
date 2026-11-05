@@ -44,6 +44,7 @@ import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
+import { claimSend, KEY_PATTERN } from "./sender-log.ts";
 import { HerdrWatch } from "./herdr-watch.ts";
 import { brief, permanent, Queue, transient } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
@@ -531,6 +532,9 @@ Bun.serve({
     const destination = target ?? proactiveRef;
     if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
+    const key = req.headers.get("x-fm-key")?.trim() || undefined;
+    if (key && !KEY_PATTERN.test(key)) return new Response("nothing queued: --key needs 1 to 64 letters, digits, . _ : -\n", { status: 400 });
+    if (!photo && !claimSend(STATE, { key, sender: mateOfSender(sender) ?? sender ?? "main", text: parts.join("\n\n") })) return new Response(`skipped: key ${key} already sent this content to the owner today; nothing queued\n`);
     const image = photo && stage(photo);
     const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
     return queue({ ...destination, image, bubbles: parts,
@@ -1116,8 +1120,10 @@ const runSessionTurn = createSessionTurn<Routing>({
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
   send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
     : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
-  report: (parts, guid, origin) => outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
-    guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession }),
+  message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
+  claim: (key, text) => claimSend(STATE, { key, sender: "desk", text }),
+  report: (parts, guid, origin) => (claimSend(STATE, { sender: "desk", text: parts.join("\n\n") }), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
+    guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),
 });
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {

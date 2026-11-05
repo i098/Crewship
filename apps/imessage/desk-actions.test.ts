@@ -16,6 +16,9 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     handoff: (reason, ack) => void calls.push(ack ? ["handoff", reason, ack] : ["handoff", reason]),
     delegate: (target, parts, replyTarget) => void calls.push(["delegate", typeof target === "string" ? target : target.id, parts, replyTarget]),
     status: async () => "all quiet",
+    message: async (mate, text) => { calls.push(["message", mate.id, text]); return true; },
+    replies: () => "mate1: done [at=1]: checks green",
+    claim: (key) => key !== "seen",
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     ...over,
   };
@@ -167,4 +170,23 @@ test("turnMessage keeps the newest missed lines when the gap is longer than the 
   expect(message).toContain("line 39 ");
   expect(message).not.toContain("line 0 ");
   expect(message.slice(message.indexOf("Since your last turn"), message.indexOf("The owner's new texts")).length).toBeLessThan(8200);
+});
+
+test("message_mate sends a listed mate a text and keeps the turn open; mate_replies reads its status", async () => {
+  const h = host(["how are the checks?"]);
+  expect(await h.run("message_mate", { mate: "mate1", text: "  status please " })).toContain("mate_replies");
+  expect(h.calls).toEqual([["message", "mate1", "status please"]]);
+  expect(h.acted()).toBe(false);
+  expect(await h.run("mate_replies", { mate: "mate1" })).toContain("checks green");
+  await expect(h.run("message_mate", { mate: "ghost", text: "hi" })).rejects.toThrow("not a listed mate");
+  await expect(h.run("mate_replies", { mate: "ghost" })).rejects.toThrow("not a listed mate");
+});
+
+test("reply with a key already sent today is refused and leaves the turn open", async () => {
+  const h = host(["numbers?"]);
+  await expect(h.run("reply", { text: "Up 4 percent.", key: "seen" })).rejects.toThrow("already got this");
+  expect(h.acted()).toBe(false);
+  await expect(h.run("reply", { text: "Up 4 percent.", key: "bad key!" })).rejects.toThrow("key must be");
+  await h.run("reply", { text: "Up 5 percent.", key: "fresh" });
+  expect(h.acted()).toBe(true);
 });
