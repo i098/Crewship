@@ -1028,6 +1028,17 @@ def test_pyrefly_musl_release_installs_verified_tar_and_is_idempotent(
     assert not installer.install_asset(tmp_path, "pyrefly", spec, key)
 
 
+def test_pyrefly_release_without_sha256_file_uses_the_github_digest(monkeypatch):
+    name = "pyrefly-linux-x86_64-musl.tar.gz"
+    monkeypatch.setitem(RELEASES, "facebook/pyrefly", ("9.9.9", name))
+    upstream(monkeypatch)
+    spec = installer.resolve_latest("linux-x86_64", {"pyrefly"})["pyrefly"]
+    assert spec["assets"]["linux-x86_64"]["sha256"] == "a" * 64
+    upstream(monkeypatch, unverified="facebook/pyrefly")
+    with pytest.raises(Exception, match="SHA-256"):
+        installer.resolve_latest("linux-x86_64", {"pyrefly"})
+
+
 def test_no_mistakes_follows_the_prerelease_channel_and_skips_drafts(monkeypatch):
     seen = []
     upstream(monkeypatch, seen=seen)
