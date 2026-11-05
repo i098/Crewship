@@ -18,3 +18,10 @@
     mode: "0644"
     force: false
   loop: [concord, slk]
+
+# Headless Discord with Concord's saved login; no TUI needed (docs/chat.md#headless-discord).
+- name: Install the discord command
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/discord"
+    dest: "{{ crewship_local_bin }}/discord"
+    mode: "0755"

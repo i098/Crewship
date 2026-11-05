@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+# Headless Discord client: uses the login Concord saved, needs no TUI (docs/chat.md).
+#   discord channels                     list the DM channels (id, recipients)
+#   discord read CHANNEL_ID [-n N]       print the last N messages, oldest first
+#   discord mentions [-n N]              print the last N messages that mention the account
+#   discord send CHANNEL_ID (TEXT | -f FILE) [--dry-run]
+# Reads the token from ~/.local/state/concord/credentials.toml (CONCORD_CREDENTIALS) and
+# refuses a file that group or others can read. It never prints or writes the token.
+import argparse
+import json
+import os
+import stat
+import sys
+import tomllib
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+API = "https://discord.com/api/v9/"
+CREDENTIALS = Path(
+    os.environ.get("CONCORD_CREDENTIALS") or "~/.local/state/concord/credentials.toml"
+).expanduser()
+
+
+def token():
+    if not CREDENTIALS.is_file():
+        sys.exit("discord: no saved Concord login; sign in with concord first")
+    if CREDENTIALS.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        sys.exit(f"discord: {CREDENTIALS} must be mode 600")
+    data = tomllib.loads(CREDENTIALS.read_text())
+    accounts = data.get("accounts") or []
+    chosen = [a for a in accounts if a.get("id") == data.get("selected_account")] or accounts
+    if not chosen or not chosen[0].get("token"):
+        sys.exit("discord: the saved Concord login has no token")
+    return chosen[0]["token"]
+
+
+def call(path, body=None):
+    request = urllib.request.Request(
+        API + path,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={
+            "Authorization": token(),
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        sys.exit(f"discord: HTTP {error.code} for {path.split('?')[0]}")  # never echo headers
+    except urllib.error.URLError as error:
+        sys.exit(f"discord: {error.reason}")
+
+
+def show(message):
+    author = message["author"]["username"]
+    where = message.get("channel_id", "")
+    print(f"{message['timestamp']} {where} {author}: {message['content']}".replace("\n", "\n  "))
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog="discord")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("channels")
+    for name in ("read", "mentions"):
+        p = sub.add_parser(name)
+        if name == "read":
+            p.add_argument("channel")
+        p.add_argument("-n", type=int, default=20)
+    send = sub.add_parser("send")
+    send.add_argument("channel")
+    send.add_argument("text", nargs="?")
+    send.add_argument("-f", "--file")
+    send.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.cmd == "channels":
+        for c in call("users/@me/channels"):
+            names = ",".join(r["username"] for r in c.get("recipients", [])) or c.get("name") or ""
+            print(c["id"], names)
+    elif args.cmd == "read":
+        for m in reversed(
+            call(f"channels/{args.channel}/messages?limit={min(max(args.n, 1), 100)}")
+        ):
+            show(m)
+    elif args.cmd == "mentions":
+        for m in reversed(call(f"users/@me/mentions?limit={min(max(args.n, 1), 100)}")):
+            show(m)
+    else:
+        if (args.text is None) == (args.file is None):
+            sys.exit("discord send: give TEXT or --file, not both")
+        text = args.text if args.file is None else Path(args.file).read_text()
+        if not text.strip():
+            sys.exit("discord send: empty message")
+        if args.dry_run:
+            print(f"dry run: would send {len(text)} characters to {args.channel}")
+        else:
+            print("sent", call(f"channels/{args.channel}/messages", {"content": text})["id"])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

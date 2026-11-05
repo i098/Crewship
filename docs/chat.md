@@ -32,6 +32,19 @@ The `kitty` setting sends images as kitty graphics. WezTerm, kitty and Ghostty s
 
 Apply puts a small wrapper at `~/.local/bin/slk`. When an agent runs `slk export`, the wrapper sends one `fm-imessage` text: `slk read: <agent> read <workspace> <channel>`. When an agent opens the bare `slk` TUI, the text is `slk read: <agent> opened the Slack TUI`. The agent is `FM_TASK_ID`, `FM_TASK`, or the name of `FM_HOME`. The text holds no message content. The wrapper sends the text at once on every read, in the background, so it never delays `slk`. Every other `slk` command, such as `--list-workspaces`, `--dump-sections`, `--version`, `--help`, `--add-workspace` and `--remove-workspace`, passes through unchanged, and a failed or missing `fm-imessage` never changes the `slk` result.
 
+## Headless Discord
+
+Concord has no command line, daemon or headless mode, so it needs a running TUI. Apply also installs `~/.local/bin/discord`, which needs no TUI. It reads the login that Concord saved in `~/.local/state/concord/credentials.toml`. It refuses a file that group or others can read, and it never prints or writes the token.
+
+| Command | Action |
+| --- | --- |
+| `discord channels` | List the DM channels with their ids. |
+| `discord read CHANNEL_ID [-n N]` | Print the last N messages, oldest first. |
+| `discord mentions [-n N]` | Print the last N messages that mention the account. |
+| `discord send CHANNEL_ID TEXT` or `-f FILE` | Send one message. `--dry-run` sends nothing. |
+
+The Concord desktop notifications still need a running Concord. Use `discord mentions` when no Concord runs.
+
 ## Start the clients
 
 Open a Herdr tab for each client, and start `concord` or `slk` in it. The Herdr server keeps the tabs and the clients when you detach.
