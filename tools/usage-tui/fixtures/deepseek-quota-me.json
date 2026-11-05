@@ -1,0 +1,81 @@
+{
+  "plans": [
+    {
+      "subscriptionId": "sub-1",
+      "planSlug": "deepseek-coding-plan-max",
+      "planName": "DeepSeek Coding Plan Max",
+      "currentPeriodEnd": "2026-11-24T00:31:00+00:00",
+      "quotaStatus": "available",
+      "quota": {
+        "status": "active",
+        "activatedAt": "2026-10-23T18:28:25.412641Z",
+        "expiresAt": null,
+        "fiveHour": {
+          "limitCredits": 140000000,
+          "usedCredits": 0,
+          "remainingCredits": 140000000,
+          "resetAt": "2026-10-31T01:28:25.412641Z"
+        },
+        "sevenDay": {
+          "limitCredits": 1200000000,
+          "usedCredits": 0,
+          "remainingCredits": 1200000000,
+          "resetAt": "2026-11-06T18:28:25.412641Z"
+        },
+        "usageByModel": {
+          "deepseek-flash": {
+            "promptTokens": 297410779,
+            "completionTokens": 2025400,
+            "chargedCredits": 299436179
+          },
+          "deepseek-v4-pro": {
+            "promptTokens": 66608872,
+            "completionTokens": 172822,
+            "chargedCredits": 66781694
+          }
+        }
+      }
+    },
+    {
+      "subscriptionId": "sub-2",
+      "planSlug": "deepseek-v4-token-plan",
+      "planName": "DeepSeek Coding Plan",
+      "currentPeriodEnd": "2026-11-23T07:25:00+00:00",
+      "quotaStatus": "available",
+      "quota": {
+        "status": "active",
+        "activatedAt": "2026-10-22T15:47:13.151718Z",
+        "expiresAt": null,
+        "fiveHour": {
+          "limitCredits": 50000000,
+          "usedCredits": 0,
+          "remainingCredits": 50000000,
+          "resetAt": "2026-10-30T23:47:13.151718Z"
+        },
+        "sevenDay": {
+          "limitCredits": 400000000,
+          "usedCredits": 0,
+          "remainingCredits": 400000000,
+          "resetAt": "2026-11-05T15:47:13.151718Z"
+        },
+        "usageByModel": {
+          "deepseek-flash": {
+            "promptTokens": 36,
+            "completionTokens": 10,
+            "chargedCredits": 46
+          },
+          "deepseek-v4-flash": {
+            "promptTokens": 49590018,
+            "completionTokens": 54107,
+            "chargedCredits": 49644125
+          },
+          "deepseek-v4-pro": {
+            "promptTokens": 323057,
+            "completionTokens": 4756,
+            "chargedCredits": 327813
+          }
+        }
+      }
+    }
+  ]
+}
