@@ -7,7 +7,7 @@ are never replaced. Archives cannot write outside their staging directory.
 Nothing is pinned: every tool tracks its latest release (no-mistakes its newest
 non-draft one, prereleases included). Native assets are
 verified against the SHA-256 their publisher lists for that exact release (the
-GitHub release-asset digest, or the release's own .sha256 file for gws and Pyrefly, Node's
+GitHub release-asset digest, or the release's own .sha256 file when gws and Pyrefly publish one, Node's
 SHASUMS256.txt, rustup's .sha256, Forgejo's .sha256 on Codeberg), npm-registry tools (installed by bun)
 against the integrity the registry records for the resolved version, psutil against the
 digests PyPI publishes. The Rust toolchain follows the stable channel. The omp
@@ -165,7 +165,7 @@ GITHUB_LATEST = {
 }
 # Resolved when they can be, skipped with a warning when they cannot: they never stop a run.
 OPTIONAL = {"koncreet"}
-# Verified against the `<asset>.sha256` file of the release instead of the GitHub digest.
+# Verified against the `<asset>.sha256` file of the release when it has one, else the GitHub digest.
 SHA256_FILE = {"gws", "pyrefly"}
 # npm-registry tools on the registry's latest version, each installed by bun into its own prefix.
 NPM_LATEST = {
@@ -407,8 +407,9 @@ def resolve_release_group(key, names):
             url = asset.get("browser_download_url", "")
             if tool in SHA256_FILE:
                 sums = next((a for a in release["assets"] if a["name"] == name + ".sha256"), {})
-                text = fetch(sums["browser_download_url"], f"{tool} checksum") if sums else b""
-                checksum = text.decode().split(" ")[0]
+                if sums:
+                    text = fetch(sums["browser_download_url"], f"{tool} checksum")
+                    checksum = text.decode().split(" ")[0]
             latest[tool] = verified(tool, version, key, name, url, checksum, binaries)
         except (OSError, ValueError, KeyError) as error:
             if tool not in OPTIONAL:
