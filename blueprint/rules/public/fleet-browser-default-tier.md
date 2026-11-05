@@ -12,11 +12,11 @@ The box runs ONE browser ladder, already wired into your shell:
 | --- | --- | --- |
 | **obscura** (default) | `CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222` | All normal browsing, screenshots, clicks. Rust engine, ~5x less RAM than Chrome. |
 | **chrome** (fallback) | `fleet-browser up chrome` -> `:9522` | Pixel-critical before/after evidence, or a page Obscura misrenders. |
-| **voxl** (last resort) | `fleet-browser up voxl` -> `:9523`, voxl viewer `:6909` | A human must see or drive it: OAuth consent, captcha, native dialog. |
+| **voxl** (last resort) | always on at `:9523`, voxl viewer `:6913` | A human must see or drive it: OAuth consent, captcha, native dialog. |
 
 Do NOT:
 - launch Chrome/Chromium with your own `--user-data-dir` (the regex above allows the fleet tiers' own profiles and puppeteer temp dirs only);
-- probe for a desktop on any `DISPLAY` other than `:9` — only `:9` (the on-demand voxl tier) exists;
+- probe for a desktop on any `DISPLAY` other than `:9` — only `:9` (the permanent voxl tier) exists;
 - enumerate `google-chrome`/`chromium` on `PATH` or look for a default Chrome profile — the host holds no such profile by design, an empty result is a false negative;
 - copy, prune, or hand-edit the shared session jar.
 

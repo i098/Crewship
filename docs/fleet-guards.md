@@ -197,12 +197,12 @@ only on a run that includes the `herdr` tag, for example
 | --- | --- | --- | --- |
 | 1 `obscura` | `127.0.0.1:9222` | Yes (`fleet-browser-obscura.service`) | Default for everything: clicks, screenshots, screencast. ~25 MB idle; ~5x less RAM per page than Chrome. |
 | 2 `chrome` | `127.0.0.1:9522` | On demand (`fleet-browser up chrome`) | Obscura misrenders the page, a site blocks it, or the maintainer needs pixel-exact before/after evidence. Headless Chromium, persistent profile. |
-| 3 `voxl` | `127.0.0.1:9523`, [voxl](https://github.com/tembo/voxl) viewer `http://127.0.0.1:6909/` | On demand (`fleet-browser up voxl`) | A human must see or drive the browser: OAuth consent, second factors, captchas, native dialogs, sites such as Google that refuse any automated browser. Xvfb display `:9` + headed Chromium. |
+| 3 `voxl` | `127.0.0.1:9523`, [voxl](https://github.com/tembo/voxl) viewer `http://127.0.0.1:6913/` | Always on: a user service enabled at boot (`fleet-browser up voxl` restarts it) | A human must see or drive the browser: OAuth consent, second factors, captchas, native dialogs, sites such as Google that refuse any automated browser. Xvfb display `:9` + headed Chromium. |
 
 Move down one tier only when the tier above cannot do the job; move back to
 `obscura` for the next task. `fleet-browser-gc.timer` (every 5 min) stops tiers
-2 and 3 after 30 idle minutes (`FLEET_BROWSER_IDLE_MIN`, no CDP client
-connected). Tier 3 needs voxl and Xvfb. The ladder builds voxl from the latest release's crate, verified against its published SHA-256, and installs Xvfb from
+2 after 30 idle minutes (`FLEET_BROWSER_IDLE_MIN`, no CDP client
+connected); it never stops tier 3. Tier 3 needs voxl and Xvfb. The ladder builds voxl from the latest release's crate, verified against its published SHA-256, and installs Xvfb from
 Ubuntu (`ConditionPathExists=/usr/bin/Xvfb`). Tiers 2 and 3 need a
 Chrome/Chromium binary (`FLEET_CHROME_BIN`, Google Chrome, Chromium, or a
 Playwright Chromium).
@@ -287,15 +287,31 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
    ```
 
    A site still asking for a login on every tier means nobody has signed in yet.
-   Bring up `voxl`, sign in through its viewer (`ssh -L 6909:127.0.0.1:6909 <host>`,
+   Bring up `voxl`, sign in through its viewer (`ssh -L 6913:127.0.0.1:6913 <host>`,
    then the `view:` link `fleet-browser up voxl` prints, and enter the password from `~/.fleet-browser/voxl-password`), and the next sync
    carries the session to `obscura` and `chrome`. A Google sign-in stays in `voxl`.
-   On a tailnet host, publish voxl to the tailnet once, never with Funnel:
-   `sudo tailscale serve --bg --https=6909 http://127.0.0.1:6909`. Then open
-   `https://<host>.<tailnet>.ts.net:6909/` and enter the password kept in
+   On a tailnet host, apply publishes voxl to the tailnet (`tailscale serve`, never Funnel)
+   when Tailscale runs with HTTPS certificates. Open
+   `https://<host>.<tailnet>.ts.net:6913/` and enter the password kept in
    `~/.fleet-browser/voxl-password` (the command never prints it). voxl needs HTTPS or localhost for
    video, which `tailscale serve` provides. The password gates every tailnet
    device that the tailnet policy lets reach that port.
+
+#### The permanent voxl service
+
+`fleet-browser-voxl.service` is enabled at boot. It waits up to two minutes for the
+shared cookie jar, so it never joins the cookie sync with nothing to give. Its guard
+checks the jar count every 30 seconds; when the count falls more than 5% between two
+checks, it writes `voxl guard: shared jar fell from X to Y
+cookies` to `~/.fleet-browser/fleet-browser.log` and stops the unit. Restart it with
+`fleet-browser up voxl` after you have checked the jar. Apply publishes port 6913 with
+`tailscale serve` only when Tailscale runs with HTTPS certificates and the port serves
+nothing else.
+
+Rollback: run `systemctl --user disable --now fleet-browser-voxl.service` and
+`sudo tailscale serve --https=6913 off`. The old tier's packages (TigerVNC, websockify
+and noVNC) stay installed on hosts that had them and stay inactive. This release no longer
+ships its unit, so to bring the old tier back, revert the voxl pull request and apply.
 
 ### api-anything
 
