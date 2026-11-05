@@ -53,7 +53,10 @@ def test_other_mcp_servers_stay_and_skills_carry_the_addendum(host):
     (home / ".omp/agent").mkdir(parents=True)
     (home / ".omp/agent/mcp.json").write_text('{"mcpServers": {"other": {"command": "x"}}}')
     api_anything.install(home, state)
-    assert set(json.loads((home / ".omp/agent/mcp.json").read_text())["mcpServers"]) == {"other", "api-anything"}
+    assert set(json.loads((home / ".omp/agent/mcp.json").read_text())["mcpServers"]) == {
+        "other",
+        "api-anything",
+    }
     for rel in api_anything.SKILLS:
         text = (home / rel / "SKILL.md").read_text()
         assert text.startswith("upstream skill") and "Sharing is off" in text
@@ -78,14 +81,24 @@ def test_call_renews_the_login_from_the_jar_once_on_auth(tmp_path):
     (bin_dir / "fleet-browser").write_text("#!/bin/sh\nexit 0\n")
     (bin_dir / "api-anything").write_text(
         f'#!/bin/sh\necho "$1 $2" >> {log}\n'
-        'if [ "$1" = login ]; then cat "$4" >> ' + str(log) + "; echo >> " + str(log) + "; exit 0; fi\n"
+        'if [ "$1" = login ]; then cat "$4" >> '
+        + str(log)
+        + "; echo >> "
+        + str(log)
+        + "; exit 0; fi\n"
         f'if grep -q "^login" {log}; then echo \'{{"ok":true,"data":1}}\'; else echo \'{{"ok":false,"class":"auth"}}\'; fi\n'
     )
     for name in ("fleet-browser", "api-anything"):
         (bin_dir / name).chmod(0o755)
     env = {**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    run = subprocess.run([sys.executable, str(BRIDGE), "call", "site", "op"], env=env, capture_output=True, text=True)
+    run = subprocess.run(
+        [sys.executable, str(BRIDGE), "call", "site", "op"], env=env, capture_output=True, text=True
+    )
     assert run.stdout.strip() == '{"ok":true,"data":1}'
     lines = log.read_text().splitlines()
-    assert [line.split()[0] for line in lines if line.split()[0] in ("call", "login")] == ["call", "login", "call"]
+    assert [line.split()[0] for line in lines if line.split()[0] in ("call", "login")] == [
+        "call",
+        "login",
+        "call",
+    ]
     assert '"value": "v"' in log.read_text()
