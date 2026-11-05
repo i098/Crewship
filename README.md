@@ -82,7 +82,7 @@ See [LICENSE](LICENSE).
 - **[In-memory message board](docs/board.md):** agents on one host talk over topics, not disk (opt-in).
 - **[Guards](docs/fleet-guards.md):** block `pkill`, gate quality, and clean up stray containers and dev servers.
 - **[Schedule viewer](docs/configuration.md#schedule-viewer):** view local jobs, owners, and results without changing schedules.
-- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or noVNC when needed (opt-in).
+- **[Browser ladder](docs/fleet-guards.md#browser-ladder):** a light browser first, full Chrome or voxl when needed (opt-in).
 - **[Chat clients](docs/chat.md):** Discord, Slack, and [iMessage](docs/imessage.md) from the terminal (opt-in).
 - **[Credentials](docs/secrets.md):** one `super.env` file, fetched by each new host via a private Worker.
 - **[Mac control](docs/security.md#ssh-to-a-mac):** JARVIS-style, agents run `ssh mac` to control apps on your Mac (opt-in).

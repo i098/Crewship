@@ -1,6 +1,6 @@
 ---
 name: fleet-browser
-description: "Use for web interaction, screenshots or browser automation on a fleet host: which browser tier (obscura, chrome, vnc) to use and how the shared login session works."
+description: "Use for web interaction, screenshots or browser automation on a fleet host: which browser tier (obscura, chrome, voxl) to use and how the shared login session works."
 ---
 
 # Fleet browser ladder: one shared session, three tiers
@@ -15,7 +15,7 @@ Ladder, driven with `fleet-browser status|env|up|down|sync`:
 | --- | --- | --- |
 | **obscura** (default) | `:9222` | All normal browsing, screenshots, clicks. |
 | **chrome** (fallback) | `fleet-browser up chrome` then `:9522` | Pixel-critical before/after evidence, or a page Obscura renders wrong. Stops after 30 idle minutes. |
-| **vnc** (last resort) | `fleet-browser up vnc` then `:9523`, noVNC `:6909` over an SSH tunnel | A human must see or drive the browser: OAuth consent, captcha, native dialog. |
+| **voxl** (last resort) | `fleet-browser up voxl` then `:9523`, voxl viewer `:6909` over an SSH tunnel or the tailnet URL | A human must see or drive the browser: OAuth consent, captcha, native dialog. |
 
 Use a fallback tier for one task with `eval "$(fleet-browser env chrome)"`. It sets a separate axi session, so it does not collide with the default.
 

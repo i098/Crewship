@@ -6,7 +6,7 @@ scope: "text"
 ---
 ## Drive the browser; do not delegate clicking to the user
 
-The fleet browser ladder is live: obscura (default, CDP `http://127.0.0.1:9222`) -> chrome (pixel-critical fallback, `fleet-browser up chrome`) -> vnc (human eyes/hands, `fleet-browser up vnc`).
+The fleet browser ladder is live: obscura (default, CDP `http://127.0.0.1:9222`) -> chrome (pixel-critical fallback, `fleet-browser up chrome`) -> voxl (human eyes/hands, `fleet-browser up voxl`).
 Your shell already exports `CHROME_DEVTOOLS_AXI_BROWSER_URL`, so `chrome-devtools-axi` and omp's own browser tools attach to the default tier and launch no private Chrome.
 Cookies other than Google cookies sync through one shared jar across all three tiers every 2 min.
 Google cookies never enter the shared jar; they stay in the tier that holds the login.
@@ -21,7 +21,7 @@ Standing order: **when a task needs a browser, drive it.** Never hand a click, p
 
 Use the signed-in tier for Google tasks.
 For other tasks, escalate only when the default cannot do the job, and state the reason:
-pixel-critical evidence -> `fleet-browser up chrome`; human interaction (OAuth consent, captcha, native dialog) -> `fleet-browser up vnc`.
+pixel-critical evidence -> `fleet-browser up chrome`; human interaction (OAuth consent, captcha, native dialog) -> `fleet-browser up voxl`.
 
 ## Stop only at a genuine wall
 
