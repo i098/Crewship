@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseZai, readUsageCommand, relReset, resellerRow, type QuotaInput } from "./quota.ts"
+import { AuthExpired, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -69,63 +69,56 @@ test("--once prints the fixture without starting the TUI", async () => {
   const out = await new Response(p.stdout).text()
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
-  expect(raw.map(l => l.slice(0, 30).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek Basic 5h", "deepseek (reseller) -",
+  expect(raw.map(l => l.slice(0, 40).replace(/\s+/g, " ").trim())).toEqual([
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek (reseller) Basic 5h",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
-  expect(lines).toContain("deepseek Basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
+  expect(lines).toContain("deepseek (reseller) Basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
   expect(out).toContain("not reported")
 })
 
 test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones", () => {
-  const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { window: "x" }] })
-  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek Basic", "5h", 75, 1_000_000, undefined], ["deepseek Basic", "7d", null, null, "n/a"]])
+  const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { plan: "x" }] })
+  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek (reseller) Basic", "5h", 75, 1_000_000, undefined], ["deepseek (reseller) Basic", "7d", null, null, "n/a"]])
   expect(deepseekRows({}).map(r => r.note)).toEqual(["n/a"])
 })
 
-const commandDir = () => mkdtempSync(join(tmpdir(), "usage-tui-cmd-"))
-const script = (dir: string, body: string) => {
-  const f = join(dir, "usage.sh")
-  writeFileSync(f, `#!/bin/sh\n${body}\n`)
-  chmodSync(f, 0o755)
-  return f
-}
+// Oracle: the quotaMe shape of deepseekv4pro.com plan quota (credits, ISO resetAt); invented numbers.
+const QUOTA_ME = [
+  { planName: "Basic", quota: { fiveHour: { usedCredits: 25, limitCredits: 100, resetAt: "2026-01-10T13:30:00Z" }, sevenDay: { usedCredits: 90, limitCredits: 120 } } },
+  { planName: "Max", quota: { fiveHour: { usedCredits: 10, limitCredits: 400, resetAt: "2026-01-10T14:00:00Z" }, sevenDay: { usedCredits: 0, limitCredits: 1000 } } },
+  { planName: "Idle", quota: null },
+]
 
-test("readUsageCommand reports an absent command without running anything", async () => {
-  expect(await readUsageCommand(undefined)).toEqual({ error: "no usage command set" })
-  expect(await readUsageCommand("  ")).toEqual({ error: "no usage command set" })
+test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for missing fields", () => {
+  expect(parseQuotaMe(QUOTA_ME).rows).toEqual([
+    { plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: Date.UTC(2026, 0, 10, 13, 30) / 1000 },
+    { plan: "Basic", window: "7d", used: 90, limit: 120, resets_at: null },
+    { plan: "Max", window: "5h", used: 10, limit: 400, resets_at: Date.UTC(2026, 0, 10, 14, 0) / 1000 },
+    { plan: "Max", window: "7d", used: 0, limit: 1000, resets_at: null },
+    { plan: "Idle", window: "5h", used: null, limit: null, resets_at: null },
+    { plan: "Idle", window: "7d", used: null, limit: null, resets_at: null },
+  ])
+  expect(parseQuotaMe("junk").rows).toEqual([])
+  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek (reseller) Basic", "5h", 75], ["deepseek (reseller) Basic", "7d", 25], ["deepseek (reseller) Max", "5h", 97.5], ["deepseek (reseller) Max", "7d", 100], ["deepseek (reseller) Idle", "5h", null], ["deepseek (reseller) Idle", "7d", null]])
 })
 
-test("readUsageCommand reports a failing command and invalid output", async () => {
-  const dir = commandDir()
-  expect(await readUsageCommand(script(dir, "echo secret-detail >&2; exit 3"))).toEqual({ error: "command exited 3" })
-  expect(await readUsageCommand(script(dir, "echo not-json"))).toEqual({ error: "command printed invalid JSON" })
-  expect(await readUsageCommand(join(dir, "missing"))).toEqual({ error: "command failed" })
+test("readQuotaMe renews the login once on auth and reports failures without throwing", async () => {
+  let calls = 0
+  let refreshed = 0
+  const refresh = async () => { refreshed++ }
+  const expired = async () => { if (calls++ === 0) throw new AuthExpired("auth"); return QUOTA_ME }
+  expect((await readQuotaMe(expired, refresh)).value?.rows?.length).toBe(6)
+  expect(refreshed).toBe(1)
+  expect(await readQuotaMe(async () => { throw new AuthExpired("auth") }, async () => { throw new Error("signed out") })).toEqual({ error: "signed out" })
+  expect(await readQuotaMe(async () => { throw new Error("rate-limited") }, refresh)).toEqual({ error: "rate-limited" })
 })
 
-test("readUsageCommand parses a valid JSON result", async () => {
-  const out = await readUsageCommand(script(commandDir(), `echo '{"rows":[{"plan":"Basic","window":"5h","used":1,"limit":4}]}'`))
-  expect(out.error).toBeUndefined()
-  expect(deepseekRows(out.value!)[0]).toMatchObject({ account: "deepseek Basic", leftPct: 75 })
-})
-
-test("buildRows shows n/a when the DeepSeek command is absent or fails", () => {
-  expect(buildRows({}).find(r => r.account === "deepseek")?.note).toBe("n/a")
-  expect(buildRows({ deepseekError: "command exited 3" }).find(r => r.account === "deepseek")?.note).toBe("n/a: command exited 3")
-})
-
-test("resellerRow shows the key's cumulative spend and its own account label", () => {
-  expect(resellerRow({ spend: 6.609482 })).toMatchObject({ account: "deepseek (reseller)", leftPct: null, note: "spent $6.61" })
-  expect(resellerRow({ spend: NaN }).note).toBe("no spend reported")
-})
-
-test("buildRows keeps the reseller row when the DeepSeek read fails, and shows its own error", () => {
-  const rows = buildRows({ deepseekError: "connection refused", reseller: { spend: 1.5 } })
-  expect(rows.find(r => r.account === "deepseek")?.note).toBe("n/a: connection refused")
-  expect(rows.find(r => r.account === "deepseek (reseller)")?.note).toBe("spent $1.50")
-  expect(buildRows({ resellerError: "reseller HTTP 401" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("unavailable: reseller HTTP 401")
+test("buildRows has one reseller row, n/a with the reason when the quota call fails", () => {
+  expect(buildRows({}).filter(r => r.account.startsWith("deepseek")).map(r => [r.account, r.note])).toEqual([["deepseek (reseller)", "n/a"]])
+  expect(buildRows({ deepseekError: "signed out" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: signed out")
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {
