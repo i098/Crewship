@@ -12,8 +12,9 @@
 //     "+<added>", "−<deleted>", "✎ <files>". A worker shows its size as soon
 //     as its diff is non-empty, before any commit or pull request.
 //     The first part present carries the indent.
-// Lookups run in the background on session start and turn end, the size also
-// every 10 seconds, and never fail or slow a turn.
+// Lookups run in the background on session start, turn end and every 30
+// seconds, and never fail or slow a turn. The size is recomputed only when the
+// checkout's HEAD commit or index changed; git runs niced, two at a time.
 // @ts-nocheck
 
 import { execFile } from "node:child_process";
@@ -24,16 +25,32 @@ import { promisify } from "node:util";
 
 const BLANK = "\u2800";
 const SOURCE = "crewship:sidebar";
-const PR_REFRESH_MS = 5 * 60 * 1000;
-const SIZE_REFRESH_MS = 10 * 1000;
+const REFRESH_MS = 30 * 1000;
+const MAX_GIT = 2;
 const PARTS = ["pr", "issue", "add", "del", "files"];
 const taskId = process.env.FM_TASK_ID || "";
 const paneId = process.env.HERDR_PANE_ID;
 const workspaceId = process.env.HERDR_WORKSPACE_ID;
 const herdr = process.env.HERDR_BIN_PATH || "herdr";
 
-const run = async (cmd: string, args: string[], cwd?: string): Promise<string> =>
-  (await promisify(execFile)(cmd, args, { cwd, timeout: 15_000, encoding: "utf8", maxBuffer: 64 << 20 })).stdout;
+let gitBusy = 0;
+const gitQueue: (() => void)[] = [];
+
+// git runs under nice and ionice, at most MAX_GIT at a time, so a sidebar never competes with real work.
+const run = async (cmd: string, args: string[], cwd?: string): Promise<string> => {
+  if (cmd === "git") {
+    if (gitBusy >= MAX_GIT) await new Promise<void>((resolve) => gitQueue.push(resolve));
+    else gitBusy++;
+    try {
+      return await run("nice", ["-n", "10", "ionice", "-c3", cmd, ...args], cwd);
+    } finally {
+      const next = gitQueue.shift();
+      if (next) next();
+      else gitBusy--;
+    }
+  }
+  return (await promisify(execFile)(cmd, args, { cwd, timeout: 15_000, encoding: "utf8", maxBuffer: 64 << 20 })).stdout;
+};
 
 export function titleFor(topic: string): string {
   return (taskId ? "└ " : "") + topic;
@@ -118,6 +135,13 @@ async function diffStat(cwd: string, base: string) {
   return stat.files ? stat : {};
 }
 
+// What the size depends on besides the base: the HEAD commit and the index
+// mtime. "" when unreadable, which forces a recompute.
+async function sizeFingerprint(cwd: string, base: string): Promise<string> {
+  const [head, index] = (await run("git", ["-C", cwd, "rev-parse", "HEAD", "--git-path", "index"])).split("\n");
+  return `${base} ${head} ${(await lstat(path.resolve(cwd, index))).mtimeMs}`;
+}
+
 // Token values for the pull request line; "" clears a part.
 export function prParts(v: { pr?; issue?; add?; del?; files? }, indent: number): Record<string, string> {
   const text = {
@@ -182,10 +206,10 @@ export default function (pi) {
   let pr; // open pull request for the current branch, from the REST API
   let taskIssue = "";
   let stat = {};
-  let reported; // the size last reported successfully
+  let sizeKey = ""; // HEAD commit and index mtime the size was computed at
   let lookedUpAt = 0;
   let refreshing = false;
-  let sizeTimer;
+  let timer;
 
   // Runs from a raw timer too, where a throw would take the session down.
   function applyTitle() {
@@ -209,7 +233,6 @@ export default function (pi) {
   }
 
   async function report() {
-    const sent = JSON.stringify(stat);
     let who = "";
     if (!taskId) {
       const label = JSON.parse(await run(herdr, ["workspace", "get", workspaceId])).result?.workspace?.label;
@@ -224,27 +247,25 @@ export default function (pi) {
     const args = ["pane", "report-metadata", paneId, "--source", SOURCE];
     for (const [k, v] of Object.entries({ who, ...parts })) args.push(...(v ? ["--token", `${k}=${v}`] : ["--clear-token", k]));
     await run(herdr, args);
-    reported = sent;
   }
 
   // Display-only: a failed lookup keeps the previous value. Re-reporting on
-  // every call also restores tokens a Herdr restart dropped. A lookup asked
+  // every call also restores tokens a Herdr restart dropped. A refresh asked
   // for while one runs or inside the throttle window is put off to the
-  // window's end, not dropped. `lookup` false (the size timer) skips the pull
-  // request lookup and reports only a size not yet reported successfully.
-  async function refresh(cwd?: string, lookup = true) {
-    const wait = lookedUpAt + PR_REFRESH_MS - Date.now();
-    if (lookup && cwd && (refreshing || wait > 0) && !trailing) {
+  // window's end, not dropped.
+  async function refresh(cwd?: string) {
+    const wait = lookedUpAt + REFRESH_MS - 1000 - Date.now();
+    if (cwd && (refreshing || wait > 0) && !trailing) {
       trailing = setTimeout(() => {
         trailing = undefined;
         void refresh(current.cwd);
       }, Math.max(wait, 1000));
       trailing.unref?.();
     }
-    if (refreshing) return;
+    if (refreshing || (cwd && wait > 0)) return;
     refreshing = true;
     try {
-      if (lookup && cwd && wait <= 0) {
+      if (cwd) {
         if (!lookedUpAt) await report().catch(() => {});
         lookedUpAt = Date.now();
         pr = await lookupPr(cwd).catch(() => pr);
@@ -254,9 +275,13 @@ export default function (pi) {
       // commit or PR: against the PR base, else the remote's default branch.
       if (cwd && (pr || taskId)) {
         const base = pr ? `origin/${pr.base?.repo?.default_branch || pr.base?.ref}` : "origin/HEAD";
-        stat = await diffStat(cwd, base).catch(() => stat);
+        const key = await sizeFingerprint(cwd, base).catch(() => "");
+        if (!key || key !== sizeKey) {
+          stat = await diffStat(cwd, base).catch(() => stat);
+          sizeKey = key;
+        }
       }
-      if (lookup || JSON.stringify(stat) !== reported) await report();
+      await report();
     } catch {
     } finally {
       refreshing = false;
@@ -267,11 +292,10 @@ export default function (pi) {
     track(ctx);
     if (!current) return;
     void refresh(current.cwd);
-    // A worker stays in one turn for most of its task: keep the size live.
-    // refresh() skips a tick while the previous refresh still runs.
-    if (!sizeTimer) {
-      sizeTimer = setInterval(() => void refresh(current.cwd, false), SIZE_REFRESH_MS);
-      sizeTimer.unref?.();
+    // A worker stays in one turn for most of its task: keep the line live.
+    if (!timer) {
+      timer = setInterval(() => void refresh(current.cwd), REFRESH_MS);
+      timer.unref?.();
     }
   });
   pi.on("session_switch", (_event, ctx) => track(ctx));
@@ -286,8 +310,8 @@ export default function (pi) {
   pi.on("session_shutdown", () => {
     clearInterval(titleTimer);
     titleTimer = undefined;
-    clearInterval(sizeTimer);
-    sizeTimer = undefined;
+    clearInterval(timer);
+    timer = undefined;
     clearTimeout(trailing);
     const clear = ["who", ...PARTS].flatMap((k) => ["--clear-token", k]);
     if (current) void run(herdr, ["pane", "report-metadata", paneId, "--source", SOURCE, ...clear]).catch(() => {});

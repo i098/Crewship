@@ -788,7 +788,7 @@ def test_deferred_cold_disk_refresh_runs_on_the_next_tick(fixture, monkeypatch):
 def worker_log(tmp_path, origin_head=True, commit=True, setup=None, live=""):
     """A worker pane with no pull request: its `report-metadata` calls in order,
     and the `--- <name>` lines that `live` marks. `live` is JS run after session
-    start, with the checkout `work`, `tick()` for the 10-second size timer,
+    start, with the checkout `work`, `tick()` for the 30-second refresh timer (it first moves the clock past the throttle),
     `settled()` to wait out the reports, `mark(name)`, and `fail`, a file whose
     presence makes the stub herdr exit 1."""
     git_env = {
@@ -838,8 +838,12 @@ const settled = async () => {{ let n; do {{ n = lines(); await sleep(800); }} wh
 const mark = (name) => appendFileSync({json.dumps(str(log))}, `--- ${{name}}\\n`);
 const ticks = [];
 const setInterval0 = globalThis.setInterval;
-globalThis.setInterval = (f, ms) => (ms === 10000 ? (ticks.push(f), {{ unref() {{}} }}) : setInterval0(f, ms));
-const tick = () => ticks.forEach((f) => f());
+globalThis.setInterval = (f, ms) => (ms === 30000 ? (ticks.push(f), {{ unref() {{}} }}) : setInterval0(f, ms));
+const realNow = Date.now;
+let skew = 0;
+Date.now = () => realNow() + skew;
+const tick = () => {{ skew += 31000; ticks.forEach((f) => f()); }};
+const stage = (...files) => Bun.spawnSync(["git", "-C", work, "add", ...files]);
 const on = {{}};
 ext({{ on: (e, f) => (on[e] = f) }});
 on.session_start({{}}, {ctx});
@@ -937,9 +941,11 @@ def test_worker_size_follows_edits_without_a_turn_end(tmp_path):
     live = """
 await settled();
 writeFileSync(`${work}/live`, "l1\\nl2\\n");
+stage("live");
 mark("edited");
 tick();
 await settled();
+writeFileSync(`${work}/ghost`, "g\\n"); // untracked: HEAD and index unchanged, so not recounted
 mark("idle");
 tick();
 await settled();
@@ -950,7 +956,7 @@ await settled();
     assert len(log[edited + 1 : idle]) == 1
     assert f"add={BLANK * 2}+3" in log[edited + 1]
     assert "files=✎ 2" in log[edited + 1]
-    assert log[idle + 1 :] == []
+    assert log[idle + 1 :] == [log[edited + 1]]  # HEAD and index unchanged: size not recomputed, re-reported
 
 
 @needs_bun
@@ -958,6 +964,7 @@ def test_worker_retries_a_size_report_that_failed(tmp_path):
     live = """
 await settled();
 writeFileSync(`${work}/live`, "l\\n");
+stage("live");
 writeFileSync(fail, "");
 mark("failing");
 tick();
