@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseZai, readUsageCommand, relReset, resellerRow, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseZai, readUsageCommand, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -70,18 +70,18 @@ test("--once prints the fixture without starting the TUI", async () => {
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
   expect(raw.map(l => l.slice(0, 30).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek Basic 5h", "deepseek (reseller) -",
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek (reseller) 5h",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
-  expect(lines).toContain("deepseek Basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
+  expect(lines).toContain("deepseek (reseller) 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
   expect(out).toContain("not reported")
 })
 
 test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones", () => {
-  const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { window: "x" }] })
-  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek Basic", "5h", 75, 1_000_000, undefined], ["deepseek Basic", "7d", null, null, "n/a"]])
+  const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { plan: "x" }] })
+  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek (reseller)", "5h", 75, 1_000_000, undefined], ["deepseek (reseller)", "7d", null, null, "n/a"]])
   expect(deepseekRows({}).map(r => r.note)).toEqual(["n/a"])
 })
 
@@ -108,24 +108,12 @@ test("readUsageCommand reports a failing command and invalid output", async () =
 test("readUsageCommand parses a valid JSON result", async () => {
   const out = await readUsageCommand(script(commandDir(), `echo '{"rows":[{"plan":"Basic","window":"5h","used":1,"limit":4}]}'`))
   expect(out.error).toBeUndefined()
-  expect(deepseekRows(out.value!)[0]).toMatchObject({ account: "deepseek Basic", leftPct: 75 })
+  expect(deepseekRows(out.value!)[0]).toMatchObject({ account: "deepseek (reseller)", leftPct: 75 })
 })
 
-test("buildRows shows n/a when the DeepSeek command is absent or fails", () => {
-  expect(buildRows({}).find(r => r.account === "deepseek")?.note).toBe("n/a")
-  expect(buildRows({ deepseekError: "command exited 3" }).find(r => r.account === "deepseek")?.note).toBe("n/a: command exited 3")
-})
-
-test("resellerRow shows the key's cumulative spend and its own account label", () => {
-  expect(resellerRow({ spend: 6.609482 })).toMatchObject({ account: "deepseek (reseller)", leftPct: null, note: "spent $6.61" })
-  expect(resellerRow({ spend: NaN }).note).toBe("no spend reported")
-})
-
-test("buildRows keeps the reseller row when the DeepSeek read fails, and shows its own error", () => {
-  const rows = buildRows({ deepseekError: "connection refused", reseller: { spend: 1.5 } })
-  expect(rows.find(r => r.account === "deepseek")?.note).toBe("n/a: connection refused")
-  expect(rows.find(r => r.account === "deepseek (reseller)")?.note).toBe("spent $1.50")
-  expect(buildRows({ resellerError: "reseller HTTP 401" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("unavailable: reseller HTTP 401")
+test("buildRows has one reseller row, n/a with the reason when the command is absent or fails", () => {
+  expect(buildRows({}).filter(r => r.account.startsWith("deepseek")).map(r => [r.account, r.note])).toEqual([["deepseek (reseller)", "n/a"]])
+  expect(buildRows({ deepseekError: "command exited 3" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: command exited 3")
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {

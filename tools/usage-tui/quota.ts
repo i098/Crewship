@@ -1,6 +1,6 @@
 // Remaining-quota rows for usage-tui: parsing, percent-left maths, colors, reset formatting, loaders.
 // Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key),
-// an optional external DeepSeek usage command and a reseller chat-response header (spend).
+// an optional external command for the DeepSeek reseller plan quota.
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
@@ -84,31 +84,22 @@ export function mercuryRows(keyIds: number[], tokens: Record<string, number>): Q
 }
 const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v))
 
-// ---- DeepSeek: plan usage, read from an optional external command -----------------
-// DeepSeek has no quota API. USAGE_TUI_DEEPSEEK_CMD names a command (split on spaces, no shell) that prints
-// one JSON object: {"rows":[{"plan","window","used","limit","resets_at"}]} with resets_at in epoch seconds.
-// Nothing here opens a browser; with no command, or when it fails, the panel shows n/a.
+// ---- DeepSeek reseller: plan quota, read from an optional external command -----------------
+// The reseller (deepseekv4pro.com) reports plan credits through its quotaMe call. USAGE_TUI_DEEPSEEK_CMD names a command
+// (split on spaces, no shell) that prints one JSON object: {"rows":[{"plan","window","used","limit","resets_at"}]}
+// with resets_at in epoch seconds. Nothing here opens a browser; with no command, or when it fails, the row shows n/a.
 export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
+
+const RESELLER = "deepseek (reseller)"
+const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
 
 export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
   const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
-    if (!r || typeof r.plan !== "string" || typeof r.window !== "string") return []
+    if (!r || typeof r.window !== "string") return []
     const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
-    return [{ account: `deepseek ${r.plan}`, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+    return [{ account: RESELLER, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
   })
-  return rows.length ? rows : [{ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "n/a" }]
-}
-
-// ---- DeepSeek reseller: spend so far ------------------------------------------
-// The reseller is a LiteLLM proxy that serves only /v1/models and chat. Its balance and key-info routes 404,
-// so the one real number is the key's cumulative spend, echoed in a chat response header.
-const money = (v: number, currency: string) => `${v < 0 ? "-" : ""}${currency === "USD" ? "$" : `${currency} `}${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
-
-export type ResellerSpend = { spend: number }
-
-export function resellerRow(json: ResellerSpend): QuotaRow {
-  const note = finite(json.spend) ? `spent ${money(json.spend, "USD")}` : "no spend reported"
-  return { account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note }
+  return rows.length ? rows : [resellerNote("n/a")]
 }
 
 // ---- assembly ---------------------------------------------------------------
@@ -122,8 +113,6 @@ export type QuotaInput = {
   mercuryError?: string
   deepseek?: DeepseekUsage
   deepseekError?: string
-  reseller?: ResellerSpend
-  resellerError?: string
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
@@ -136,9 +125,7 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
   if (inp.deepseek) rows.push(...deepseekRows(inp.deepseek))
-  else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a" })
-  if (inp.reseller) rows.push(resellerRow(inp.reseller))
-  else rows.push({ account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.resellerError ? `unavailable: ${inp.resellerError}` : "not reported" })
+  else rows.push(resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a"))
   return rows
 }
 
@@ -277,49 +264,9 @@ export async function deepseek(): Promise<{ value?: DeepseekUsage; error?: strin
   return (deepseekLast = await readUsageCommand(process.env.USAGE_TUI_DEEPSEEK_CMD))
 }
 
-// ---- DeepSeek reseller loader -------------------------------------------------
-const RESELLER_URL = "https://api.deepseekv4pro.com/v1/chat/completions"
-let resellerAt = 0
-let resellerLast: { value?: ResellerSpend; error?: string } = {}
-
-// The key stays in this function: it is read from omp's credential store, sent as a header, and never logged or put in an error.
-async function fetchReseller(): Promise<ResellerSpend> {
-  const db = new Database(AGENT_DB, { readonly: true })
-  let key: string | undefined
-  try {
-    const row = db.query("select data from auth_credentials where provider = 'deepseek' and disabled_cause is null order by id limit 1").get() as { data: string } | null
-    const d = row && JSON.parse(row.data)
-    key = d?.apiKey ?? d?.api_key ?? d?.key
-  } finally {
-    db.close()
-  }
-  if (!key) throw new Error("no DeepSeek key in omp")
-  const r = await fetch(RESELLER_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: "deepseek-flash", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
-    signal: AbortSignal.timeout(30_000),
-  })
-  if (!r.ok) throw new Error(`reseller HTTP ${r.status}`)
-  const spend = Number(r.headers.get("x-litellm-key-spend"))
-  if (!r.headers.has("x-litellm-key-spend") || !Number.isFinite(spend)) throw new Error("no spend header")
-  return { spend }
-}
-
-// Each read is a paid 1-token chat call, so results (success or failure) are held for 10 minutes like the DeepSeek read.
-export async function reseller(): Promise<{ value?: ResellerSpend; error?: string }> {
-  if (resellerAt && Date.now() - resellerAt < DEEPSEEK_MIN_MS) return resellerLast
-  resellerAt = Date.now()
-  try {
-    return (resellerLast = { value: await fetchReseller() })
-  } catch (e) {
-    return (resellerLast = { error: (e as Error).message })
-  }
-}
-
 export async function loadQuota(): Promise<QuotaInput> {
   const msg = (e: unknown) => (e as Error).message
-  const [omp, zai, mercury, ds, rs] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek(), reseller()])
+  const [omp, zai, mercury, ds] = await Promise.allSettled([run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage), fetchZai(), mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })), deepseek()])
   return {
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
@@ -329,7 +276,5 @@ export async function loadQuota(): Promise<QuotaInput> {
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
     deepseek: ds.status === "fulfilled" ? ds.value.value : undefined,
     deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value.error,
-    reseller: rs.status === "fulfilled" ? rs.value.value : undefined,
-    resellerError: rs.status === "rejected" ? msg(rs.reason) : rs.value.error,
   }
 }
