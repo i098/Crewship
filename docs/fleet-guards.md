@@ -301,8 +301,8 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
 
 `fleet-browser-voxl.service` is enabled at boot. It waits up to two minutes for the
 shared cookie jar, so it never joins the cookie sync with nothing to give. Its guard
-checks the jar count every 30 seconds; when the count falls more than 5% below the
-highest count seen since start, it writes `voxl guard: shared jar fell from X to Y
+checks the jar count every 30 seconds; when the count falls more than 5% between two
+checks, it writes `voxl guard: shared jar fell from X to Y
 cookies` to `~/.fleet-browser/fleet-browser.log` and stops the unit. Restart it with
 `fleet-browser up voxl` after you have checked the jar. Apply publishes port 6913 with
 `tailscale serve` only when Tailscale runs with HTTPS certificates and the port serves

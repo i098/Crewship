@@ -39,7 +39,7 @@ VOXL_URL=http://127.0.0.1:9523
 OBSCURA_JAR=$STATE/obscura/cookies.json
 VOXL_DISPLAY=9
 VOXL_WEB_PORT=${VOXL_WEB_PORT:-6913}
-# The guard stops voxl when the shared jar falls more than this share below its peak.
+# The guard stops voxl when the shared jar falls more than this share between two consecutive checks.
 VOXL_JAR_DROP_PCT=${VOXL_JAR_DROP_PCT:-5}
 VOXL_GUARD_SECS=${VOXL_GUARD_SECS:-30}
 VOXL_JAR_WAIT_SECS=${VOXL_JAR_WAIT_SECS:-120}
@@ -229,14 +229,14 @@ wait_jar() {
 # Refuse to keep running while the shared jar loses cookies: a headed browser that joins the
 # sync with fewer logins can drag the canonical jar down. Log the drop and stop the unit.
 voxl_guard() {
-  local peak now; peak=$(jar_count); peak=${peak:-0}
+  local prev now; prev=$(jar_count); prev=${prev:-0}
   while sleep "$VOXL_GUARD_SECS"; do
     now=$(jar_count); [ -n "$now" ] || continue
-    [ "$now" -gt "$peak" ] && peak=$now
-    if [ "$now" -lt $(( peak - peak * VOXL_JAR_DROP_PCT / 100 )) ]; then
-      log "voxl guard: shared jar fell from $peak to $now cookies; stopping voxl"
+    if [ "$now" -lt $(( prev - prev * VOXL_JAR_DROP_PCT / 100 )) ]; then
+      log "voxl guard: shared jar fell from $prev to $now cookies; stopping voxl"
       systemctl --user stop "$(unit_of voxl)"; return
     fi
+    prev=$now
   done
 }
 

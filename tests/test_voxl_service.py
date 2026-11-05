@@ -47,6 +47,19 @@ def test_guard_stops_voxl_only_when_the_jar_count_falls(tmp_path, after, stopped
         assert not calls.exists()
 
 
+def test_guard_keeps_voxl_through_a_slow_decline_from_cookie_expiry(tmp_path):
+    home, jar, calls, env = _home(tmp_path, 200)
+    guard = subprocess.Popen([str(SCRIPT), "_voxl-guard"], env=env)
+    try:
+        for count in range(198, 158, -2):
+            time.sleep(0.25)
+            jar.write_text(json.dumps({f"c{i}": {} for i in range(count)}))
+        assert guard.poll() is None and not calls.exists()
+    finally:
+        guard.kill()
+        guard.wait()
+
+
 def test_guard_ignores_a_jar_that_cannot_be_read_for_a_moment(tmp_path):
     home, jar, calls, env = _home(tmp_path, 100)
     guard = subprocess.Popen([str(SCRIPT), "_voxl-guard"], env=env)
