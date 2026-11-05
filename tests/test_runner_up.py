@@ -331,11 +331,18 @@ def unit_sections(path):
 
 
 def test_the_slice_and_the_units_carry_the_caps(home):
-    apply(home, {"cpu_weight": 15, "memory_max": "30%"}, ci_pool=pool(home))
+    apply(
+        home,
+        {"cpu_weight": 15, "memory_max": "30%", "cpu_share": 25},
+        ci_pool=pool(home),
+        facts={"processor_vcpus": 8},
+    )
     slice_ = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert slice_["CPUWeight"] == ["15"]
     assert slice_["IOWeight"] == ["20"]
     assert slice_["MemoryMax"] == ["30%"]
+    # A hard cap for every coordinator together: a quarter of 8 CPUs.
+    assert slice_["CPUQuota"] == ["200%"]
     service = unit_sections(units(home) / "runner-up@.service")["Service"]
     assert any(
         v.endswith("serve --config " + str(home) + "/.config/runner-up/%i.json")

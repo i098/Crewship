@@ -23,6 +23,7 @@ crewship:
   #   io_weight: 20             # IOWeight of the slice
   #   nice: 10                  # Nice of the coordinator
   #   memory_max: 50%           # MemoryMax of the slice, a size (64G) or a percent of the host
+  #   cpu_share: 50             # CPUQuota of the slice: this percent of the host's CPUs
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
   #   data_dir: /mnt/data/ci    # state; default is ci_pool.data_dir, else ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
@@ -64,9 +65,10 @@ Every job container and image build runs in `runnerup.slice`, so these caps hold
 | `CPUWeight` | `cpu_weight` (20) | When the host wants the CPU, CI gets about a fifth of what an equal-weight task gets. An idle CPU is free for CI. |
 | `IOWeight` | `io_weight` (20) | The same for disk I/O. |
 | `MemoryMax` | `memory_max` (50%) | A hard limit. The kernel stops the biggest process of the slice at the limit, not a process of the host. |
+| `CPUQuota` | `cpu_share` (50) | A hard limit: this percent of the host's CPUs, even when the host is idle. |
 | `Nice` | `nice` (10) | Priority of the coordinator and its place runners. |
 | Process limit | 8192 for each job | As in the CI pool. |
-| Concurrency | `total_slots` | The sum of the coordinators' machine budgets in the config. |
+| Concurrency | `total_slots` | At most `max(total_slots, number of repositories)` jobs run at one time, because each coordinator keeps at least one slot. The slice CPU and memory caps always hold, whatever the count. |
 
 runner-up starts a job with a plain `docker run`, which puts the container in `system.slice`.
 The unit puts a `docker` shim first in `PATH` (`~/.local/share/runner-up/shim/docker`, from `blueprint/maintenance/runner-up-docker`).
