@@ -143,7 +143,7 @@
                  crewship_cfg.home ~ '/.config/slk/config.toml']
                 if (crewship_cfg.profiles.chat | bool) else [])
              + ([crewship_local_bin ~ '/jj'] if (crewship_cfg.profiles.jj | default(false) | bool) else [])
-             + ([crewship_runner_up_bin, crewship_runner_up_config, crewship_user_units ~ '/runner-up.service']
+             + ([crewship_runner_up_bin, crewship_user_units ~ '/runner-up@.service']
                 if (crewship_cfg.runner_up is defined) else [])
              + ([crewship_local_bin ~ '/crewboard',
                  crewship_user_units ~ '/crewboard.service',

@@ -1,9 +1,12 @@
-# runner-up (crewship.runner_up, docs/runner-up.md): one coordinator serves the CI pool's
-# repositories with one fresh container per job, in a capped systemd slice.
+# runner-up (crewship.runner_up, docs/runner-up.md): one coordinator for each repository
+# (runner-up@<repo>) serves its places with one fresh container per job, in a capped systemd
+# slice. A pool is global to a coordinator, so one coordinator for all repositories would open
+# a scale set in each repository for every label.
 #
-# The coordinator applies an edited config.json by itself, so a repository added to the
-# config starts serving jobs with no restart, and running jobs are never touched. The task
-# starts the unit only when it is not running and never restarts it.
+# A coordinator applies an edited config by itself, so a changed repository entry needs no
+# restart, and running jobs are never touched. The task starts a unit only when it is not
+# running and never restarts it. A repository that leaves the list loses its unit and config;
+# its running jobs finish.
 #
 # Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
 
@@ -53,12 +56,52 @@
         mode: "0644"
         remote_src: true
 
-    - name: Write the runner-up config
+    - name: Write the runner-up config of each repository
       ansible.builtin.template:
         src: runner-up.config.json.j2
-        dest: "{{ crewship_runner_up_config }}"
+        dest: "{{ crewship_runner_up_config_dir }}/{{ item.1 }}.json"
         mode: "0644"
         validate: "{{ crewship_runner_up_check }}"
+      vars:
+        crewship_runner_up_repo: "{{ item.0 }}"
+        crewship_runner_up_instance: "{{ item.1 }}"
+      loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+
+    - name: Find the configs of repositories that left the list
+      ansible.builtin.find:
+        paths: "{{ crewship_runner_up_config_dir }}"
+        patterns: "*.json"
+      register: crewship_runner_up_found
+
+    - name: Name the repositories that left the list
+      ansible.builtin.set_fact:
+        crewship_runner_up_stale: >-
+          {{ crewship_runner_up_found.files | map(attribute='path') | map('basename')
+             | map('regex_replace', '[.]json$', '') | reject('in', crewship_runner_up_instances) | list }}
+
+    - name: Stop the coordinators of repositories that left the list
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "runner-up@{{ item }}.service"
+        enabled: false
+        state: stopped
+      loop: "{{ crewship_runner_up_stale }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+
+    - name: Remove the config of repositories that left the list
+      ansible.builtin.file:
+        path: "{{ crewship_runner_up_config_dir }}/{{ item }}.json"
+        state: absent
+      loop: "{{ crewship_runner_up_stale }}"
+
+    - name: Remove the link of repositories that left the list
+      ansible.builtin.file:
+        path: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item }}.service"
+        state: absent
+      loop: "{{ crewship_runner_up_stale }}"
 
     - name: Write the runner-up units
       ansible.builtin.template:
@@ -79,32 +122,52 @@
             crewship_user_units ~ '/timers.target.wants/runner-up-image.timer'] }}
       notify: reload user systemd
 
-    - name: Statically enable the runner-up units
+    - name: Statically enable the coordinator of each repository
       ansible.builtin.file:
-        src: "{{ crewship_user_units }}/{{ item.unit }}"
-        dest: "{{ crewship_user_units }}/{{ item.target }}.wants/{{ item.unit }}"
+        src: "{{ crewship_user_units }}/runner-up@.service"
+        dest: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item }}.service"
+        state: link
+        force: true
+        follow: false
+      loop: "{{ crewship_runner_up_instances }}"
+
+    - name: Statically enable the runner-up timers
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/{{ item }}"
+        dest: "{{ crewship_user_units }}/timers.target.wants/{{ item }}"
         state: link
         force: true
         follow: false
       loop: >-
-        {{ [{'unit': 'runner-up.service', 'target': 'default.target'},
-            {'unit': 'runner-up-clean.timer', 'target': 'timers.target'}]
-           + ([{'unit': 'runner-up-image.timer', 'target': 'timers.target'}] if crewship_runner_up_build_image | bool else []) }}
+        {{ ['runner-up-clean.timer']
+           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
 
     - name: Check for the installed runner-up unit
       ansible.builtin.stat:
-        path: "{{ crewship_user_units }}/runner-up.service"
+        path: "{{ crewship_user_units }}/runner-up@.service"
       register: crewship_runner_up_unit
       when: ansible_check_mode
 
-    - name: Start the runner-up units
+    - name: Start the coordinator of each repository
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "runner-up@{{ item }}.service"
+        enabled: true
+        state: started
+      loop: "{{ crewship_runner_up_instances }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode or crewship_runner_up_unit.stat.exists
+
+    - name: Start the runner-up timers
       ansible.builtin.systemd_service:
         scope: user
         name: "{{ item }}"
         enabled: true
         state: started
       loop: >-
-        {{ ['runner-up.service', 'runner-up-clean.timer']
+        {{ ['runner-up-clean.timer']
            + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
       environment: "{{ crewship_user_systemd_env }}"
       when:
