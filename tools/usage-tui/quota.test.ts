@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseZai, readUsageCommand, relReset, type QuotaInput } from "./quota.ts"
+import { AuthExpired, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -85,35 +85,32 @@ test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones"
   expect(deepseekRows({}).map(r => r.note)).toEqual(["n/a"])
 })
 
-const commandDir = () => mkdtempSync(join(tmpdir(), "usage-tui-cmd-"))
-const script = (dir: string, body: string) => {
-  const f = join(dir, "usage.sh")
-  writeFileSync(f, `#!/bin/sh\n${body}\n`)
-  chmodSync(f, 0o755)
-  return f
-}
+// Oracle: the quotaMe shape of deepseekv4pro.com plan quota (credits, ISO resetAt); invented numbers.
+const QUOTA_ME = [{ planName: "Basic", quota: { fiveHour: { usedCredits: 25, limitCredits: 100, resetAt: "2026-01-10T13:30:00Z" }, sevenDay: { usedCredits: 90, limitCredits: 120 } } }]
 
-test("readUsageCommand reports an absent command without running anything", async () => {
-  expect(await readUsageCommand(undefined)).toEqual({ error: "no usage command set" })
-  expect(await readUsageCommand("  ")).toEqual({ error: "no usage command set" })
+test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for missing fields", () => {
+  expect(parseQuotaMe(QUOTA_ME).rows).toEqual([
+    { window: "5h", used: 25, limit: 100, resets_at: Date.UTC(2026, 0, 10, 13, 30) / 1000 },
+    { window: "7d", used: 90, limit: 120, resets_at: null },
+  ])
+  expect(parseQuotaMe("junk").rows).toEqual([])
+  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.window, r.leftPct])).toEqual([["5h", 75], ["7d", 25]])
 })
 
-test("readUsageCommand reports a failing command and invalid output", async () => {
-  const dir = commandDir()
-  expect(await readUsageCommand(script(dir, "echo secret-detail >&2; exit 3"))).toEqual({ error: "command exited 3" })
-  expect(await readUsageCommand(script(dir, "echo not-json"))).toEqual({ error: "command printed invalid JSON" })
-  expect(await readUsageCommand(join(dir, "missing"))).toEqual({ error: "command failed" })
+test("readQuotaMe renews the login once on auth and reports failures without throwing", async () => {
+  let calls = 0
+  let refreshed = 0
+  const refresh = async () => { refreshed++ }
+  const expired = async () => { if (calls++ === 0) throw new AuthExpired("auth"); return QUOTA_ME }
+  expect((await readQuotaMe(expired, refresh)).value?.rows?.length).toBe(2)
+  expect(refreshed).toBe(1)
+  expect(await readQuotaMe(async () => { throw new AuthExpired("auth") }, async () => { throw new Error("signed out") })).toEqual({ error: "signed out" })
+  expect(await readQuotaMe(async () => { throw new Error("rate-limited") }, refresh)).toEqual({ error: "rate-limited" })
 })
 
-test("readUsageCommand parses a valid JSON result", async () => {
-  const out = await readUsageCommand(script(commandDir(), `echo '{"rows":[{"plan":"Basic","window":"5h","used":1,"limit":4}]}'`))
-  expect(out.error).toBeUndefined()
-  expect(deepseekRows(out.value!)[0]).toMatchObject({ account: "deepseek (reseller)", leftPct: 75 })
-})
-
-test("buildRows has one reseller row, n/a with the reason when the command is absent or fails", () => {
+test("buildRows has one reseller row, n/a with the reason when the quota call fails", () => {
   expect(buildRows({}).filter(r => r.account.startsWith("deepseek")).map(r => [r.account, r.note])).toEqual([["deepseek (reseller)", "n/a"]])
-  expect(buildRows({ deepseekError: "command exited 3" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: command exited 3")
+  expect(buildRows({ deepseekError: "signed out" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: signed out")
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {

@@ -1,8 +1,11 @@
 // Remaining-quota rows for usage-tui: parsing, percent-left maths, colors, reset formatting, loaders.
 // Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key),
-// an optional external command for the DeepSeek reseller plan quota.
+// the reseller's quotaMe call (DeepSeek plan quota).
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
 
 export const MERCURY_LIMIT = 100_000_000
@@ -84,11 +87,10 @@ export function mercuryRows(keyIds: number[], tokens: Record<string, number>): Q
 }
 const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v))
 
-// ---- DeepSeek reseller: plan quota, read from an optional external command -----------------
-// The reseller (deepseekv4pro.com) reports plan credits through its quotaMe call. USAGE_TUI_DEEPSEEK_CMD names a command
-// (split on spaces, no shell) that prints one JSON object: {"rows":[{"plan","window","used","limit","resets_at"}]}
-// with resets_at in epoch seconds. Nothing here opens a browser; with no command, or when it fails, the row shows n/a.
-export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
+// ---- DeepSeek reseller: plan quota from the reseller's quotaMe call -----------------
+// The reseller (deepseekv4pro.com) reports plan credits through quotaMe, read over HTTP via api-anything with the
+// saved login, renewed from the fleet cookie jar when it expires. resets_at is epoch seconds. No browser is opened.
+export type DeepseekUsage = { rows?: { window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
 
 const RESELLER = "deepseek (reseller)"
 const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
@@ -241,27 +243,100 @@ const DEEPSEEK_MIN_MS = 10 * 60_000
 let deepseekAt = 0
 let deepseekLast: { value?: DeepseekUsage; error?: string } = {}
 
-// Runs the configured command; absent or failing commands give an error, never a throw.
-export async function readUsageCommand(cmd: string | undefined): Promise<{ value?: DeepseekUsage; error?: string }> {
-  const argv = cmd?.trim().split(/\s+/).filter(Boolean) ?? []
-  if (!argv.length) return { error: "no usage command set" }
+const WINDOWS: [string, string][] = [["fiveHour", "5h"], ["sevenDay", "7d"]]
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
+
+// quotaMe answers a plan list: {quota: {fiveHour|sevenDay: {usedCredits, limitCredits, resetAt (ISO)}}}.
+export function parseQuotaMe(plans: unknown): DeepseekUsage {
+  const rows: NonNullable<DeepseekUsage["rows"]> = []
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    const quota = isObj(plan) ? plan.quota : undefined
+    if (!isObj(quota)) continue
+    for (const [key, window] of WINDOWS) {
+      const win = quota[key]
+      const w = isObj(win) ? win : {}
+      const at = typeof w.resetAt === "string" ? Date.parse(w.resetAt) / 1000 : NaN
+      rows.push({ window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
+    }
+  }
+  return { rows }
+}
+
+const apiAnythingEnv = () => ({ ...process.env, API_ANYTHING_HOME: `${HOME}/.local/state/crewship/api-anything`, API_ANYTHING_BROWSER_ROOTS: "[]" })
+
+async function apiAnything(args: string[]): Promise<{ out: string; code: number }> {
+  const p = Bun.spawn(["api-anything", ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: apiAnythingEnv(), signal: AbortSignal.timeout(90_000) })
+  const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited])
+  return { out, code }
+}
+
+export class AuthExpired extends Error {}
+
+async function callQuotaMe(): Promise<unknown> {
+  let answer: unknown
   try {
-    const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", signal: AbortSignal.timeout(120_000) })
-    const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited])
-    if (code !== 0) return { error: `command exited ${code}` }
-    const value = JSON.parse(out) as DeepseekUsage
-    if (!value || typeof value !== "object") return { error: "command printed no JSON object" }
-    return { value }
-  } catch (e) {
-    return { error: e instanceof SyntaxError ? "command printed invalid JSON" : "command failed" }
+    answer = JSON.parse((await apiAnything(["call", "deepseekv4pro.com", "quotaMe"])).out.trim().split("\n").pop() ?? "")
+  } catch {
+    throw new Error("no answer from api-anything")
+  }
+  if (!isObj(answer)) throw new Error("bad answer from api-anything")
+  if (answer.class === "auth") throw new AuthExpired("auth")
+  if (!answer.ok) throw new Error(String(answer.class ?? "call failed"))
+  return answer.data
+}
+
+// The site's session JWT lives 60 s. Mint a new one from the long-lived Clerk client cookie in the fleet jar and
+// save the jar's deepseekv4pro cookies as api-anything's login. Cookie values stay in locals and a 0600 temp file.
+async function refreshSession(): Promise<void> {
+  let cookies: { name: string; value: string; domain?: string }[]
+  let jwt: string
+  try {
+    const jar = JSON.parse(await Bun.file(`${HOME}/.fleet-browser/cookies.json`).text())
+    cookies = Object.values(jar as Record<string, { name: string; value: string; domain?: string }>).filter(c => String(c?.domain ?? "").includes("deepseekv4pro.com"))
+    const sid = cookies.find(c => c.name === "clerk_active_context")!.value.split(":")[0]
+    const cookie = cookies.filter(c => String(c.domain).includes("clerk") || c.name.startsWith("__client")).map(c => `${c.name}=${c.value}`).join("; ")
+    const res = await fetch(`https://clerk.deepseekv4pro.com/v1/client/sessions/${sid}/tokens?__clerk_api_version=2026-08-20`, {
+      method: "POST",
+      headers: { Cookie: cookie, Origin: "https://deepseekv4pro.com", "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!res.ok) throw new Error("clerk")
+    jwt = ((await res.json()) as { jwt: string }).jwt
+    if (typeof jwt !== "string") throw new Error("clerk")
+  } catch {
+    throw new Error("signed out: sign in through Dia and sync the fleet jar")
+  }
+  for (const c of cookies) if (c.name.startsWith("__session")) c.value = jwt
+  const dir = mkdtempSync(join(tmpdir(), "usage-tui-ds-"))
+  try {
+    const file = join(dir, "cookies.json")
+    writeFileSync(file, JSON.stringify({ cookies }), { mode: 0o600 })
+    if ((await apiAnything(["login", "deepseekv4pro.com", "--cookies", file])).code !== 0) throw new Error("login save failed")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
-// Any result holds for 10 minutes, so a slow or failing command is not rerun every refresh.
+// `call` and `refresh` are injectable so tests run without network or login.
+export async function readQuotaMe(call: () => Promise<unknown> = callQuotaMe, refresh: () => Promise<void> = refreshSession): Promise<{ value?: DeepseekUsage; error?: string }> {
+  try {
+    try {
+      return { value: parseQuotaMe(await call()) }
+    } catch (e) {
+      if (!(e instanceof AuthExpired)) throw e
+      await refresh()
+      return { value: parseQuotaMe(await call()) }
+    }
+  } catch (e) {
+    return { error: e instanceof AuthExpired ? "auth expired" : (e as Error).message }
+  }
+}
+
+// Any result holds for 10 minutes, so a slow or failing call is not repeated every refresh.
 export async function deepseek(): Promise<{ value?: DeepseekUsage; error?: string }> {
   if (deepseekAt && Date.now() - deepseekAt < DEEPSEEK_MIN_MS) return deepseekLast
   deepseekAt = Date.now()
-  return (deepseekLast = await readUsageCommand(process.env.USAGE_TUI_DEEPSEEK_CMD))
+  return (deepseekLast = await readQuotaMe())
 }
 
 export async function loadQuota(): Promise<QuotaInput> {
