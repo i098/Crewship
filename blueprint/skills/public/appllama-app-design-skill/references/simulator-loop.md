@@ -1,23 +1,27 @@
-# The simulator loop — verification checklist & device matrix
+# The device loop — verification checklist & device matrix
 
-A screen is finished when it survives this checklist on a real simulator, not
+A screen is finished when it survives this checklist on a real device in vphone-linux, not
 when the code compiles. Budget as many loop iterations as it takes; the goal
 is "cannot find a flaw", not "looks fine".
 
 ## Loop mechanics
 
-1. Launch on the iOS Simulator (primary) — `npx expo start` + `i`, or your
-   dev build. Android emulator second.
-2. Screenshot the screen (simctl: `xcrun simctl io booted screenshot s.png`,
-   or your agent's screenshot tool). **Open the screenshot and study it** —
-   do not trust memory of what you wrote.
-3. Interact: tap every control, type overlong text, background/foreground the
-   app, rotate if supported.
-4. For motion: screen-record the ENTIRE flow
-   (`xcrun simctl io booted recordVideo m.mov`) — not just the hero
-   transition. Watch it at full speed for feel, then scrub frame by frame.
-   Stills cannot catch a one-frame flash, a dropped spring, or a keyboard
-   jump-cut; only the recording can.
+1. Launch on vphone-linux (primary), the virtual iPhone on the host from the
+   `vphone` profile. Boot it with `tools/boot-test.sh` or `setup/start-vm.sh`
+   from `~/.local/share/crewship/vphone-linux`, then install your dev build
+   with `tools/install-ipa.py APP.ipa --launch BUNDLE_ID`. Android emulator
+   second.
+2. Screenshot the screen with `tools/qmp.py SOCK shot s.png` (SOCK is the
+   QMP socket in `runs/RUN/qmp.sock`; see the vphone-linux `docs/TOOLS.md`).
+   **Open the screenshot and study it** — do not trust memory of what you
+   wrote.
+3. Interact: tap (`tools/qmp.py SOCK tap X Y`) and swipe every control, type
+   overlong text, background/foreground the app, rotate if supported.
+4. For motion: film the ENTIRE flow, not just the hero transition. Run
+   `tools/swipe-film.py SOCK OUTDIR X0 Y0 X1 Y1` for a gesture, or take
+   `tools/qmp.py SOCK shot` frames while you drive the flow. Scrub the frames
+   one by one. Stills cannot catch a one-frame flash, a dropped spring, or a
+   keyboard jump-cut; only dense frames can.
 5. Fix → relaunch → re-verify. Never batch more than a few fixes between
    looks; regressions hide in batches.
 

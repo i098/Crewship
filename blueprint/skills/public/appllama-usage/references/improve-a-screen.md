@@ -2,12 +2,12 @@
 
 The user has a screen (code, screenshot, or a live app) and wants it better.
 "Better" means: measurably closer to the best equivalent screens shipped by
-top-grossing apps — in hierarchy, motion, and feel — verified in the
-simulator, not eyeballed in code.
+top-grossing apps — in hierarchy, motion, and feel — verified in
+vphone-linux, not eyeballed in code.
 
 ## 1. Diagnose before you search
 
-Run the screen in the simulator and study it against appllama-app-design-skill's
+Run the screen in vphone-linux and study it against appllama-app-design-skill's
 definition-of-done checklist. Name the top 3 deficits precisely ("no visual
 hierarchy — three same-weight text rows", "dead motion — modal pops with no
 transition", "non-native segmented control"). The research pass is aimed at
@@ -46,7 +46,7 @@ should be checkable in a screenshot.
 2. Asset gaps (illustration, empty-state art, icons beyond the symbol set):
    generate with the best available image model at max quality, one style
    system, per the design skill's image-assets reference.
-3. **Simulator loop until perfect**: screenshot → compare side-by-side with
+3. **Device loop until perfect**: screenshot → compare side-by-side with
    your top references → fix → repeat. Record the motion and scrub it
    frame by frame. Verify Dynamic Island/safe areas, dark + light, Dynamic
    Type XL, Reduce Motion, 60fps on the interaction.
@@ -58,7 +58,7 @@ should be checkable in a screenshot.
 ## 5. If the screen is part of a flow
 
 Screens live in journeys. After the screen passes, walk one step before and
-one step after it in the simulator: entrance transition, exit transition,
+one step after it in vphone-linux: entrance transition, exit transition,
 state carried across — and what back does from it on iOS and Android
 (appllama-app-design-skill's Navigation laws).
 If the screen is a sheet, a modal or a step behind a one-way door, verify

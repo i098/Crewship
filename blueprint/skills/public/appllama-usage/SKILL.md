@@ -77,7 +77,7 @@ mean, plus its closest siblings across the library.
 | Make an existing screen better | [references/improve-a-screen.md](references/improve-a-screen.md) |
 | Flow & element research; general research method | [references/research-methods.md](references/research-methods.md) |
 
-Both build playbooks end the same way: **the simulator loop from
+Both build playbooks end the same way: **the device loop (vphone-linux) from
 appllama-app-design-skill, repeated until you cannot find a flaw.** Research
 without that loop is decoration.
 
