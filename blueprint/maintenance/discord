@@ -29,8 +29,15 @@ def token():
         sys.exit(f"discord: {CREDENTIALS} must be mode 600")
     data = tomllib.loads(CREDENTIALS.read_text())
     accounts = data.get("accounts") or []
-    chosen = [a for a in accounts if a.get("id") == data.get("selected_account")] or accounts
-    if not chosen or not chosen[0].get("token"):
+    selected = data.get("selected_account")
+    chosen = [a for a in accounts if a.get("id") == selected]
+    if not chosen and selected is None and accounts:
+        chosen = accounts[:1]
+    if not chosen and selected is not None and len(accounts) == 1:
+        chosen = accounts
+    if not chosen:
+        sys.exit("discord: selected Concord account not found in saved login")
+    if not chosen[0].get("token"):
         sys.exit("discord: the saved Concord login has no token")
     return chosen[0]["token"]
 

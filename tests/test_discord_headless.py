@@ -25,6 +25,14 @@ def test_token_is_the_selected_account(login):
     assert discord.token() == "two"
 
 
+def test_token_refuses_a_stale_selected_account(login):
+    login.write_text(
+        'selected_account = "3"\n[[accounts]]\nid = "1"\ntoken = "one"\n[[accounts]]\nid = "2"\ntoken = "two"\n'
+    )
+    with pytest.raises(SystemExit, match="not found"):
+        discord.token()
+
+
 def test_token_refuses_a_readable_file(login):
     login.chmod(0o644)
     with pytest.raises(SystemExit, match="mode 600"):
