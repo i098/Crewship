@@ -103,7 +103,18 @@ const ago = (ms: number | undefined, now: number) => (ms === undefined ? "never"
 const secs = (s: number | undefined) => (s === undefined ? "–" : s < 90 ? `${s.toFixed(1)}s` : age(s))
 
 const flat = (s: string) => s.replace(/\s+/g, " ").trim()
-const cut = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w - 1)) + "…" : s)
+const GRAPHEMES = new Intl.Segmenter()
+export const cut = (s: string, w: number) => {
+  if (Bun.stringWidth(s) <= w) return s
+  let out = "", used = 0
+  for (const { segment } of GRAPHEMES.segment(s)) {
+    const sw = Bun.stringWidth(segment)
+    if (used + sw > w - 1) break
+    out += segment
+    used += sw
+  }
+  return out + "…"
+}
 
 export function deskLines(d: Desk, nowMs: number, width = 100, height = 40): Line[] {
   const up = d.unit === "active"
@@ -130,7 +141,7 @@ export function deskLines(d: Desk, nowMs: number, width = 100, height = 40): Lin
   return [...head, [], [v(" recent turns", theme.accent, true), m("   in, route, out; newest first")], ...shown.flatMap((t): Line[] => {
     const tag = `[${cut(t.route, 24)}]`
     return [
-      [m(`  ${age((nowMs - t.at) / 1000).padStart(5)} `), v("in ", theme.muted), v(cut(flat(t.text), Math.max(10, width - 11 - tag.length - 1)), theme.text), v(" "), v(tag, t.route === "pending" ? theme.warn : theme.accent)],
+      [m(`  ${age((nowMs - t.at) / 1000).padStart(5)} `), v("in ", theme.muted), v(cut(flat(t.text), Math.max(10, width - 11 - Bun.stringWidth(tag) - 1)), theme.text), v(" "), v(tag, t.route === "pending" ? theme.warn : theme.accent)],
       [m("        "), v("out ", theme.muted), t.reply ? v(cut(flat(t.reply), Math.max(10, width - 12)), theme.ok) : m("–")],
     ]
   })]

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseTurns } from "./traffic.ts"
-import { deskSnapshot, latencyStats, loadDesk, parseLog, replyLatencies, retryCounts } from "./desk.ts"
+import { cut, deskSnapshot, latencyStats, loadDesk, parseLog, replyLatencies, retryCounts } from "./desk.ts"
 
 const dirs: string[] = []
 afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })))
@@ -117,4 +117,23 @@ test("the snapshot lists the newest turns first, flattens and cuts text to the w
   expect(deskSnapshot(d, 6_000_000, 100, 40)).toContain("what is the eta on the port [desk]") // newline flattened
   expect(deskSnapshot(d, 6_000_000, 40, 16).split("\n").filter(l => /^ +\S* +in /.test(l))).toHaveLength(2) // height 16 leaves room for 2 turns
   expect(deskSnapshot(d, 6_000_000, 40, 12)).not.toContain("recent turns") // no room for one turn: none shown
+})
+
+test("cut counts CJK, VS16 and ZWJ graphemes as 2 cells and never splits them", () => {
+  expect(cut("漢字漢字漢字漢字漢字", 8)).toBe("漢字漢…") // 3×2 + 1 = 7 cells; a 4th char would need 9
+  expect(cut("ok ❤️❤️❤️❤️", 8)).toBe("ok ❤️❤️…") // 3 + 4 + 1 = 8
+  expect(cut("👩‍👩‍👧‍👧👩‍👩‍👧‍👧👩‍👩‍👧‍👧", 5)).toBe("👩‍👩‍👧‍👧👩‍👩‍👧‍👧…")
+  expect(cut("😀😀😀😀", 6)).toBe("😀😀…")
+  expect(cut("short", 10)).toBe("short")
+})
+
+test("a turn row with wide characters stays within the pane width", () => {
+  const empty = mkdtempSync(join(tmpdir(), "cbdesk-"))
+  dirs.push(empty)
+  const log = [rin("w1", 1000, "漢字漢字漢字漢字漢字漢字漢字漢字漢字漢字"), JSON.stringify({ at: 1001, ids: ["w1"], route: "desk" }),
+    JSON.stringify({ at: 1002, ids: ["w1"], route: "done", out: { kind: "desk", bubbles: ["❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️"], guid: "g" } })].join("\n")
+  const d = { ...loadDesk(empty, NOW, { unit: "active", journal: "" }), turns: parseTurns(log) }
+  const rows = deskSnapshot(d, 6_000_000, 40, 40).split("\n").filter(l => l.includes("in 漢") || l.includes("out ❤"))
+  expect(rows).toHaveLength(2)
+  for (const r of rows) expect(Bun.stringWidth(r)).toBeLessThanOrEqual(40)
 })
