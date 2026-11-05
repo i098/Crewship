@@ -502,11 +502,11 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   A restart restores this cooldown before rebuilding unfinished nodes from the unchanged message log.
   Missing retry state needs no migration; the service creates it after the first failure.
 
-The memory and routing journal hold owner texts on the host in private state.
+The memory, routing journal, desk session, background tasks, and sender record hold owner texts on the host in private state.
 Deleting only `memory/` does not erase this history; routing recovery restores missing inbound records.
 For complete erasure, first finish every pending routing request, download, and outbox delivery.
 Then stop the bridge through the normal service procedure.
-Remove `memory/`, `routing.jsonl`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
+Remove `memory/`, `routing.jsonl`, `senders.json`, `desk-session/`, `desk-session.seen`, `desk-tasks/`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
 This also clears local routing deduplication, so retain transport seen records and do not replay old message history.
 Never erase these files while requests or uncertain sends still need recovery.
 
