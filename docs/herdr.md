@@ -306,7 +306,7 @@ A pane is closed only when all of these hold; any read failure or doubt keeps th
 
 - Herdr reports no agent in it, its foreground process is its own shell, and that shell has no child process.
 - Its screen text, title and directory stayed unchanged for `crewship_herdr_prune_idle` seconds (default 600). The clock lives in `~/.local/state/crewship/herdr-prune-empty.json`.
-- No `state/*.meta` records it as `window=`, `herdr_pane_id=` or `hiatus_window=`. The homes are the main Firstmate home plus every local home in its `data/secondmates.md` (`home: <path>`; entries with `host:` are skipped) and `crewship_herdr_prune_extra_homes`. A listed home without a readable `state/` stops the run.
+- No `state/*.meta` records it as `window=`, `herdr_pane_id=` or `hiatus_window=`. The homes are the main Firstmate home plus every local home in its `data/secondmates.md` (`home: <path>`, absolute or `~`; other text after `home:` is ignored; entries with `host:` are skipped) and `crewship_herdr_prune_extra_homes`. A listed home without a readable `state/` stops the run.
 - It is not `crewship_herdr_prune_main_pane`, its tab is not in `crewship_herdr_prune_keep_tabs` (default Concord, crewboard, monitoring) and it is not the last pane of the session.
 
 Herdr removes a tab or workspace when its last pane closes; the pruner also closes any tab or workspace that reports no pane.
