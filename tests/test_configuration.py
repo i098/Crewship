@@ -1051,7 +1051,11 @@ def _managed_environment(tmp_path, fleet_guards, release="1.0.0"):
 
 @pytest.mark.parametrize("fleet_guards", [False, True])
 def test_the_managed_environment_never_carries_a_process_wide_runtime_limit(tmp_path, fleet_guards):
-    assert set(_managed_environment(tmp_path, fleet_guards)) == {"CHROME_DEVTOOLS_AXI_MCP_PATH"}
+    assert set(_managed_environment(tmp_path, fleet_guards)) == {
+        "CHROME_DEVTOOLS_AXI_MCP_PATH",
+        "API_ANYTHING_HOME",
+        "API_ANYTHING_BROWSER_ROOTS",
+    }
 
 
 def test_a_new_chrome_devtools_mcp_release_leaves_the_managed_environment_unchanged(tmp_path):

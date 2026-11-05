@@ -123,6 +123,23 @@
   changed_when: (crewship_skills_run.stdout_lines | last | from_json).changed | bool
   when: not ansible_check_mode
 
+# api-anything (docs/fleet-guards.md#api-anything): private catalog, sharing off, MCP server
+# in omp, skill in omp and Claude Code. The installer prints JSON whose `changed` is the signal.
+- name: Set up api-anything for the agents
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_repo }}/scripts/api_anything.py"
+      - --home
+      - "{{ crewship_cfg.home }}"
+      - --state
+      - "{{ crewship_api_anything_home }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  register: crewship_api_anything_run
+  changed_when: (crewship_api_anything_run.stdout_lines | last | from_json).changed | bool
+  when: not ansible_check_mode
+
 # blueprint/config/AGENTS.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, and a
 # one-line import of the first as ~/.omp/agent/AGENTS.md (docs/omp.md#global-instructions).
 # profiles.agent_instructions true installs it, false leaves it out, and absent installs

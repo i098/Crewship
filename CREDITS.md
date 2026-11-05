@@ -23,6 +23,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [quota-axi](https://github.com/kunchenguid/quota-axi) (`quota-axi`): agent provider quota windows. License: MIT.
 - [backpass](https://github.com/kunchenguid/backpass) (`backpass`): evidence-backed edits to AGENTS.md and CLAUDE.md from agent sessions. License: MIT.
 - [compact-adviser](https://github.com/kunchenguid/compact-adviser) (`compact-adviser`): judges when an omp session is at a safe checkpoint to compact. License: MIT.
+- [api-anything](https://github.com/goodnight000/api-anything) (`api-anything`): site operations learned once and called over plain HTTP. License: MIT.
 - [tasks-axi](https://github.com/kunchenguid/tasks-axi) (`tasks-axi`): the task backlog of Firstmate. License: MIT.
 - [GitHub CLI](https://github.com/cli/cli) (`gh`): GitHub access. License: MIT.
 - [Google Workspace CLI](https://github.com/googleworkspace/cli) (`gws`): Google Workspace access for agents. License: Apache-2.0.

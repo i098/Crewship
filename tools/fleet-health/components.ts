@@ -226,6 +226,7 @@ export const components: Component[] = [
   // kunchenguid tools: gh-axi, chrome-devtools-axi, tasks-axi, quota-axi and lavish-axi are on the npm list above.
   npm("backpass", "backpass"),
   npm("compact-adviser", "compact-adviser"), // on hold upstream: absent from the host by design
+  npm("api-anything", "api-anything"),
   skill("kun", "kunchenguid/kun"),
   skill("vision", "kunchenguid/vision"),
   plugin("ponytail", "DietrichGebert/ponytail"),

@@ -111,7 +111,12 @@ GITHUB_LATEST = {
     # JS/TS changed-code health for the omp quality gate (docs/omp.md#quality-gate).
     "fallow": ("fallow-rs/fallow", "v", "fallow-linux-{node}-musl", {"fallow": "fallow"}),
     # Quick Tunnel to the password gateway (docs/gateway.md); a single binary per release.
-    "cloudflared": ("cloudflare/cloudflared", "", "cloudflared-linux-{go}", {"cloudflared": "cloudflared"}),
+    "cloudflared": (
+        "cloudflare/cloudflared",
+        "",
+        "cloudflared-linux-{go}",
+        {"cloudflared": "cloudflared"},
+    ),
     # Python type checker and language server for every host.
     "pyrefly": (
         "facebook/pyrefly",
@@ -169,6 +174,7 @@ NPM_LATEST = {
     "ondine": "ondine",
     "backpass": "backpass",
     "compact-adviser": "compact-adviser",
+    "api-anything": "api-anything",
 }
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
@@ -314,7 +320,9 @@ def require_secure_node(version):
     if minimum is None:
         if installed[0] > max(NODE_SECURITY_MINIMUMS):
             return
-        raise ValueError(f"node {version} has no supported security minimum; use Node 22, 24, or 26+")
+        raise ValueError(
+            f"node {version} has no supported security minimum; use Node 22, 24, or 26+"
+        )
     if installed < minimum:
         floor = ".".join(map(str, minimum))
         raise ValueError(f"node {version} is below security minimum {floor}")
@@ -323,7 +331,9 @@ def require_secure_node(version):
 def check_ca_bundle():
     context = ssl.create_default_context()
     paths = ssl.get_default_verify_paths()
-    for directory in os.environ.get(paths.openssl_capath_env, paths.openssl_capath).split(os.pathsep):
+    for directory in os.environ.get(paths.openssl_capath_env, paths.openssl_capath).split(
+        os.pathsep
+    ):
         if not directory or not Path(directory).is_dir():
             continue
         for certificate in Path(directory).iterdir():
@@ -581,7 +591,9 @@ def verified_binaries(name, version, directory, patterns):
     paths = binaries_in(directory, patterns)
     if name == "node":
         require_secure_node(version)
-        require_secure_node(subprocess.check_output([paths["node"], "--version"], text=True).strip())
+        require_secure_node(
+            subprocess.check_output([paths["node"], "--version"], text=True).strip()
+        )
     return paths
 
 
@@ -666,14 +678,24 @@ def secure_python(python, uv, environment):
     )
     before = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
     requirements = [
-        f"{name}>={floor}" for name, floor in (("certifi", "2026.10.19"), ("pip", "26.2.2"))
+        f"{name}>={floor}"
+        for name, floor in (("certifi", "2026.10.19"), ("pip", "26.2.2"))
         if name in before
     ]
     if not requirements:
         return False
     command(
-        [uv, "pip", "install", "--system-certs", "--no-build", "--no-deps",
-         "--python", python, *requirements],
+        [
+            uv,
+            "pip",
+            "install",
+            "--system-certs",
+            "--no-build",
+            "--no-deps",
+            "--python",
+            python,
+            *requirements,
+        ],
         environment,
     )
     after = json.loads(subprocess.check_output([python, "-I", "-c", probe], env=environment))
@@ -873,7 +895,10 @@ def warm_sgrep(binary, environment):
                 stdout=subprocess.DEVNULL,
             )
             if result.returncode not in (0, 1):
-                print(f"provisions: sgrep {model} model not warmed (exit {result.returncode})", file=sys.stderr)
+                print(
+                    f"provisions: sgrep {model} model not warmed (exit {result.returncode})",
+                    file=sys.stderr,
+                )
 
 
 def vphone_install(home, environment):
@@ -885,15 +910,28 @@ def vphone_install(home, environment):
     checkout = home / ".local/share/crewship/vphone-linux"
     url = f"https://github.com/{VPHONE_REPOSITORY}.git"
     if not (checkout / ".git").is_dir():
-        command(["git", "clone", "--quiet", "--depth", "1", "--branch", tag, url, checkout], environment)
+        command(
+            ["git", "clone", "--quiet", "--depth", "1", "--branch", tag, url, checkout], environment
+        )
         return True
     git = ["git", "-C", checkout]
     head = subprocess.check_output([*git, "rev-parse", "HEAD"], env=environment, text=True)
-    command([*git, "fetch", "--quiet", "--depth", "1", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], environment)
-    if subprocess.check_output([*git, "rev-parse", f"{tag}^{{commit}}"], env=environment, text=True) == head:
+    command(
+        [*git, "fetch", "--quiet", "--depth", "1", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"],
+        environment,
+    )
+    if (
+        subprocess.check_output(
+            [*git, "rev-parse", f"{tag}^{{commit}}"], env=environment, text=True
+        )
+        == head
+    ):
         return False
     if subprocess.check_output([*git, "status", "--porcelain"], env=environment, text=True):
-        print(f"vphone-linux: {checkout} has local changes; not moving to {tag}, a rebuild is needed", file=sys.stderr)
+        print(
+            f"vphone-linux: {checkout} has local changes; not moving to {tag}, a rebuild is needed",
+            file=sys.stderr,
+        )
         return False
     command([*git, "checkout", "--quiet", "--detach", tag], environment)
     command([*git, "submodule", "update", "--quiet", "--init", "--recursive"], environment)
@@ -913,16 +951,22 @@ def fdu_install(home, environment):
 
     before = version()
     command(
-        [home / ".local/bin/uv", "tool", "install", "--upgrade", "--no-build",
-         "--resolution", "highest", "fdu"],
+        [
+            home / ".local/bin/uv",
+            "tool",
+            "install",
+            "--upgrade",
+            "--no-build",
+            "--resolution",
+            "highest",
+            "fdu",
+        ],
         {**environment, "UV_TOOL_BIN_DIR": str(home / ".local/bin")},
     )
     tool_dir = subprocess.check_output(
         [home / ".local/bin/uv", "tool", "dir"], env=environment, text=True
     ).strip()
-    changed = secure_python(
-        Path(tool_dir) / "fdu/bin/python", home / ".local/bin/uv", environment
-    )
+    changed = secure_python(Path(tool_dir) / "fdu/bin/python", home / ".local/bin/uv", environment)
     return version() != before or changed
 
 
@@ -953,12 +997,26 @@ def omp_plugins(home, environment):
     known = marketplaces.read_text() if marketplaces.is_file() else ""
     installed = None
     node_env = environment.get("NODE_ENV") or "development"
-    if not any(environment.get(key) for key in (
-        "PI_CONFIG_DIR", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "XDG_DATA_HOME",
-    )) and not any((home / path).is_file() for path in (
-        ".env", ".env.local", f".env.{node_env}", f".env.{node_env}.local",
-        ".omp/.env", ".omp/agent/.env",
-    )):
+    if not any(
+        environment.get(key)
+        for key in (
+            "PI_CONFIG_DIR",
+            "PI_CODING_AGENT_DIR",
+            "OMP_PROFILE",
+            "PI_PROFILE",
+            "XDG_DATA_HOME",
+        )
+    ) and not any(
+        (home / path).is_file()
+        for path in (
+            ".env",
+            ".env.local",
+            f".env.{node_env}",
+            f".env.{node_env}.local",
+            ".omp/.env",
+            ".omp/agent/.env",
+        )
+    ):
         try:
             registry = json.loads((home / ".omp/plugins/installed_plugins.json").read_text())
         except (OSError, ValueError):
@@ -990,14 +1048,24 @@ def main():
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
     parser.add_argument("--npm", action="store_true")
-    parser.add_argument("--check-ca", action="store_true", help="reject compromised system CA roots")
-    parser.add_argument("--python-env", type=Path, help="secure present pip and certifi in a virtualenv")
+    parser.add_argument(
+        "--check-ca", action="store_true", help="reject compromised system CA roots"
+    )
+    parser.add_argument(
+        "--python-env", type=Path, help="secure present pip and certifi in a virtualenv"
+    )
     parser.add_argument("--development", action="store_true")
     parser.add_argument(
-        "--sgrep", action="store_true", help="also build sgrep with cargo (installs the Rust toolchain too)"
+        "--sgrep",
+        action="store_true",
+        help="also build sgrep with cargo (installs the Rust toolchain too)",
     )
-    parser.add_argument("--vphone", action="store_true", help="also clone the latest vphone-linux release")
-    parser.add_argument("--fdu", action="store_true", help="also install fdu with uv (needs uv in --tools)")
+    parser.add_argument(
+        "--vphone", action="store_true", help="also clone the latest vphone-linux release"
+    )
+    parser.add_argument(
+        "--fdu", action="store_true", help="also install fdu with uv (needs uv in --tools)"
+    )
     parser.add_argument(
         "--also",
         default="",
@@ -1046,10 +1114,7 @@ def main():
         fcntl.flock(guard, fcntl.LOCK_EX)
         changed = False
         with ThreadPoolExecutor(max_workers=4) as pool:
-            installs = [
-                pool.submit(install_asset, home, name, latest[name], key)
-                for name in names
-            ]
+            installs = [pool.submit(install_asset, home, name, latest[name], key) for name in names]
             for install in installs:
                 changed = install.result() or changed
         if "bun" in names:
