@@ -940,7 +940,7 @@ def test_image_release_check_follows_guard_to_the_recorded_release(tmp_path, bac
     bin_dir = home / ".local/bin"
     bin_dir.mkdir(parents=True)
     versions = {}
-    for name in ("herdr", "gh", "no-mistakes", "treehouse", "gws", "nvim"):
+    for name in ("herdr", "gh", "no-mistakes", "treehouse", "gws", "rtk", "nvim"):
         versions[name] = {"version": "1.0.0"}
         tool = bin_dir / name
         tool.write_text("#!/bin/sh\necho 'tool 1.0.0'\n")

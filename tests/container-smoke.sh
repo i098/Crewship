@@ -347,13 +347,13 @@ check_core_tools() {
     esac
 }
 
-# The installed herdr, gh, no-mistakes, treehouse, gws, nvim, omp, AXI tools, acpx and
+# The installed herdr, gh, no-mistakes, treehouse, gws, rtk, nvim, omp, AXI tools, acpx and
 # chrome-devtools-mcp are exactly
 # the releases the build resolved and recorded in RESOLVED_STAMP.
 check_resolved_releases() {
     local tool version banner package prefix target
     [ -f "${RESOLVED_STAMP}" ] || fail "installer wrote no ${RESOLVED_STAMP}"
-    for tool in herdr gh no-mistakes treehouse gws nvim; do
+    for tool in herdr gh no-mistakes treehouse gws rtk nvim; do
         version=$(resolved_version ".\"${tool}\".version")
         banner=$("${HOME}/.local/bin/${tool}" --version 2>&1) || fail "${tool} --version exited nonzero: ${banner}"
         case "${banner%%$'\n'*}" in

@@ -56,6 +56,7 @@ ARCH = {
         "gnu": "x86_64",
         "goreleaser": "x86_64",
         "nvim": "x86_64",
+        "rtk": "x86_64-unknown-linux-musl",
     },
     "linux-aarch64": {
         "node": "arm64",
@@ -64,6 +65,7 @@ ARCH = {
         "gnu": "aarch64",
         "goreleaser": "arm64",
         "nvim": "arm64",
+        "rtk": "aarch64-unknown-linux-gnu",
     },
 }
 # Native tools on their latest GitHub release: repository, tag prefix, asset
@@ -165,11 +167,16 @@ GITHUB_LATEST = {
         "google-workspace-cli-{gnu}-unknown-linux-musl.tar.gz",
         {"gws": "gws"},
     ),
+    # Token-saving command-output filter; verified against the release's checksums.txt.
+    # The plain edition, not rtk-oss or rtk-proxy.
+    "rtk": ("rtk-ai/rtk", "v", "rtk-{rtk}.tar.gz", {"rtk": "rtk"}),
 }
 # Resolved when they can be, skipped with a warning when they cannot: they never stop a run.
 OPTIONAL = {"koncreet"}
 # Verified against the `<asset>.sha256` file of the release when it has one, else the GitHub digest.
 SHA256_FILE = {"gws", "pyrefly"}
+# Verified against the line for the asset in the release's checksums.txt.
+CHECKSUMS_TXT = {"rtk"}
 # npm-registry tools on the registry's latest version, each installed by bun into its own prefix.
 NPM_LATEST = {
     "omp": "@oh-my-pi/pi-coding-agent",
@@ -189,7 +196,7 @@ NPM_LATEST = {
 # Tools that follow the prerelease channel: the newest non-draft release, betas
 # included, instead of the latest stable one.
 PRERELEASE_CHANNEL = {"no-mistakes"}
-AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws"]
+AGENT_TOOLS = ["bun", "gh", "no-mistakes", "treehouse", "gws", "rtk"]
 # Attempts per download; transient 5xx and connection errors back off 1 s, then 2 s.
 DOWNLOAD_ATTEMPTS = 3
 SGREP_REPOSITORY = "https://github.com/context-dot-dev/sgrep"
@@ -413,6 +420,11 @@ def resolve_release_group(key, names):
                 if sums:
                     text = fetch(sums["browser_download_url"], f"{tool} checksum")
                     checksum = text.decode().split(" ")[0]
+            if tool in CHECKSUMS_TXT:
+                sums = next((a for a in release["assets"] if a["name"] == "checksums.txt"), {})
+                text = fetch(sums.get("browser_download_url", ""), f"{tool} checksums").decode()
+                match = re.search(rf"^([0-9a-f]{{64}})  {re.escape(name)}$", text, re.M)
+                checksum = match[1] if match else ""
             latest[tool] = verified(tool, version, key, name, url, checksum, binaries)
         except (OSError, ValueError, KeyError) as error:
             if tool not in OPTIONAL:

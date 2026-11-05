@@ -421,6 +421,7 @@ def tool_checks(config, environment):
             "no-mistakes",
             "treehouse",
             "gws",
+            "rtk",
             "gh-axi",
             "chrome-devtools-axi",
             "tasks-axi",

@@ -140,6 +140,22 @@
   changed_when: (crewship_api_anything_run.stdout_lines | last | from_json).changed | bool
   when: not ansible_check_mode
 
+# rtk's command-rewrite hooks (docs/dependencies.md): a PreToolUse hook in
+# ~/.claude/settings.json (--hook-only leaves the Crewship-managed CLAUDE.md alone) and the
+# extension ~/.omp/agent/extensions/rtk.ts. A rerun prints "already" for each hook it keeps.
+- name: Wire the rtk command-rewrite hook for Claude Code and omp
+  ansible.builtin.command:
+    argv: "{{ [crewship_local_bin ~ '/rtk', 'init', '-g'] + item }}"
+  loop:
+    - [--hook-only, --auto-patch]
+    - [--agent, omp]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_rtk_init
+  changed_when: "'already' not in crewship_rtk_init.stdout"
+  when: not ansible_check_mode
+
 # blueprint/config/AGENTS.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, and a
 # one-line import of the first as ~/.omp/agent/AGENTS.md (docs/omp.md#global-instructions).
 # profiles.agent_instructions true installs it, false leaves it out, and absent installs
