@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+# Triggered by herdr-prune-empty.timer; not enabled on its own. Closes Herdr panes that
+# hold only an idle bare shell and logs every close (docs/herdr.md#empty-pane-pruner).
+
+[Unit]
+Description=Close empty Herdr panes (Crewship managed)
+ConditionPathExists={{ crewship_herdr_prune_script }}
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HERDR_BIN_PATH={{ crewship_herdr_bin }}
+Environment=HERDR_SESSION={{ crewship_herdr_prune_session }}
+Environment=FM_HOME={{ crewship_firstmate_dir }}
+Environment=EXTRA_HOMES={{ crewship_herdr_prune_extra_homes | join(':') }}
+Environment=MAIN_PANE={{ crewship_herdr_prune_main_pane }}
+Environment=IDLE={{ crewship_herdr_prune_idle }}
+Environment="KEEP_TABS={{ crewship_herdr_prune_keep_tabs | join(',') }}"
+ExecStart=/usr/bin/python3 {{ crewship_herdr_prune_script }}
+Nice=10
+IOSchedulingClass=idle
