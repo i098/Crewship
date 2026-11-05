@@ -1,16 +1,23 @@
 // One turn of the desk's long chat: the bridge's checks, the child's start, and the prompt it gets.
 // The bridge passes its effects in (SessionHost); a turn that ends with no action goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
+import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
 import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
 import { DeskSession, sessionConfig } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
 
-export { TASK_GUID_PREFIX };
+export { ACK_GUID_PREFIX, TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
+
+// The text goes to Firstmate first; the ack, when given, is a plain desk text with no task behind it.
+function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
+  if (reason) host.log("desk handoff")(reason);
+  host.handoff(pending);
+  if (ack) host.report(ack.parts, `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, pending[ack.target - 1]!);
+}
 
 // A thread reply to a mate's bubble goes back to that mate, with the same relay checks.
 function threadReplyMate(pending: TurnRequest[], mates: Secondmate[]) {
@@ -44,7 +51,7 @@ export type SessionHost<R extends TurnRequest> = {
   stopping(): boolean;
   listed(mate: Secondmate): boolean; // the mate is still in the routing table
   send(target: Secondmate | "firstmate", id: string, text: string): Promise<boolean>; // true when the target's inbox took a background task
-  report(parts: string[], guid: string, origin: R): void; // a background task's answer, queued on the chat of the request
+  report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
 };
 
 // omp wants provider/model-id for the compaction key.
@@ -134,7 +141,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         await host.relay(items, mate, current);
         return items.every((r) => r.route === "done");
       },
-      handoff: (reason) => { if (reason) host.log("desk handoff")(reason); host.handoff(pending); },
+      handoff: (reason, ack) => handoffWithAck(host, pending, reason, ack),
       delegate: (mate, parts, target) => {
         host.answer(pending, parts, pending[target - 1], true);
         delegate(mate, original.join("\n"), pending.at(-1)!);

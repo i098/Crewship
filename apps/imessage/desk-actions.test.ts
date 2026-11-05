@@ -13,7 +13,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     reply: (parts, target) => void calls.push(["reply", parts, target]),
     react: (emoji) => void calls.push(["react", emoji]),
     relay: async (mate) => { calls.push(["relay", mate.id]); return true; },
-    handoff: (reason) => void calls.push(["handoff", reason]),
+    handoff: (reason, ack) => void calls.push(ack ? ["handoff", reason, ack] : ["handoff", reason]),
     delegate: (target, parts, replyTarget) => void calls.push(["delegate", typeof target === "string" ? target : target.id, parts, replyTarget]),
     status: async () => "all quiet",
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
@@ -80,6 +80,24 @@ test("handoff_main works for a protected request", async () => {
   await h.run("handoff_main", { reason: "approval" });
   expect(h.calls).toEqual([["handoff", "approval"]]);
   expect(h.acted()).toBe(true);
+});
+
+test("handoff_main with text sends the ack and hands off in one call, and ends the turn", async () => {
+  const h = host(["never give time estimates", "work as fast as you can"]);
+  expect(await h.run("handoff_main", { text: "Got it.", to: 1 })).toContain("turn is over");
+  expect(h.calls).toEqual([["handoff", "", { parts: ["Got it."], target: 1 }]]);
+  await expect(h.run("reply", { text: "Again." })).rejects.toThrow("already ended");
+});
+
+test("handoff_main with text refuses a protected request or unsafe text before it hands anything off", async () => {
+  const protectedAsk = host(["approve the deploy"]);
+  await expect(protectedAsk.run("handoff_main", { text: "Got it." })).rejects.toThrow("protected");
+  expect(protectedAsk.calls).toEqual([]);
+  expect(protectedAsk.acted()).toBe(false);
+  const leaky = host(["hello"]);
+  await expect(leaky.run("handoff_main", { text: "The password is hunter2." })).rejects.toThrow("protected content");
+  expect(leaky.calls).toEqual([]);
+  expect(leaky.acted()).toBe(false);
 });
 
 test("fleet_status refuses a protected request and clips the text", async () => {

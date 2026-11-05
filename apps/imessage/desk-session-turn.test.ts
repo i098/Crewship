@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createSessionTurn, type TurnRequest } from "./desk-session-turn.ts";
 
@@ -36,7 +36,7 @@ test("the system prompt the child starts with tells the desk to ack an owner ins
   const argv = await sessionArgv("omp", "claude-haiku-5-5");
   const prompt = argv[argv.indexOf("--system-prompt") + 1];
   expect(prompt).toContain("never yours to judge, correct, or argue with");
-  expect(prompt).toContain("delegate_task to firstmate, or call handoff_main");
+  expect(prompt).toContain("Call handoff_main with a short ack as its text");
 });
 
 test("a background task's answer reaches the next turn as a missed line, the session's own replies do not", async () => {
@@ -87,6 +87,28 @@ test("delegate_task answers as a delegated ack first, then the task is sent once
   await turn([request], new AbortController(), () => true);
   for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
   expect(events).toEqual([["answer", ["On it."], true], ["send", "firstmate", "DELEGATE firstmate"]]);
+});
+
+test("an owner instruction is acked with handoff_main: one handoff, one ack text, no background task", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  const wrapper = join(dir, "omp");
+  writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
+  chmodSync(wrapper, 0o755);
+  const events: unknown[][] = [];
+  const turn = createSessionTurn<TurnRequest>({
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+    stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
+    memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
+    log: () => () => {}, handoff: () => events.push(["handoff"]), answer: () => events.push(["answer"]),
+    react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true,
+    send: async () => { events.push(["send"]); return true; }, report: (parts, guid) => events.push(["report", parts, guid.startsWith("ack-")]),
+  });
+  const request: TurnRequest = { requestId: "r1", text: "Never give time estimates, just do everything as soon as possible", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
+  await turn([request], new AbortController(), () => true);
+  await Bun.sleep(100);
+  expect(events).toEqual([["handoff"], ["report", ["Got it, passing that to Firstmate."], true]]);
+  expect(existsSync(join(dir, "desk-tasks"))).toBe(false);
 });
 
 test("a thread reply to a mate's bubble is relayed to that mate with no model turn;", async () => {

@@ -213,7 +213,9 @@ def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_p
 
 def mate_data(tmp_path):
     (tmp_path / "data").mkdir()
-    (tmp_path / "data/secondmates.md").write_text(f"- engram - Engram mate (home: {tmp_path}/engram; scope: engram work; projects: none)\n")
+    (tmp_path / "data/secondmates.md").write_text(
+        f"- engram - Engram mate (home: {tmp_path}/engram; scope: engram work; projects: none)\n"
+        f"- atlas - Atlas mate (home: {tmp_path}/atlas; scope: atlas work; projects: none)\n")
     return tmp_path / "task-message"
 
 
@@ -227,6 +229,11 @@ def send_bubble(rig, text, home, count):
     sent = subprocess.run([str(SEND), text], capture_output=True, text=True, env={**rig.env, "FM_HOME": home}, timeout=30)
     assert sent.returncode == 0, sent.stderr
     wait_for(lambda: len(texts(rig)) == count, "the bubble", timeout=120)
+
+
+def wait_saved(rig, text, count):
+    wait_for(lambda: len([row for row in json.loads(read_text(rig.state / "senders.json") or "[]") if row["key"] == text]) == count,
+             "the saved sender record")
 
 
 def reply_in_thread(rig, guid, quoted_guid, quoted_text, text):
@@ -260,7 +267,30 @@ def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_is_a_desk_turn(tmp_
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
         send_bubble(rig, "On it.", "", 3)  # no sender: the latest bubble with this text is not the mate's
-        wait_for(lambda: json.loads(read_text(rig.state / "senders.json")) == {}, "the cleared sender record")
+        wait_saved(rig, "On it.", 2)
         reply_in_thread(rig, "m3", "b1", "On it.", "thanks")
+        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        assert not message.exists()
+
+
+def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mates_sent_the_same_text(tmp_path):
+    message = mate_data(tmp_path)
+    with session_rig(tmp_path) as rig:
+        mate_script(tmp_path, message)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        send_bubble(rig, "Done.", f"{tmp_path}/engram", 2)
+        send_bubble(rig, "Done.", f"{tmp_path}/atlas", 3)
+        wait_saved(rig, "Done.", 2)
+        # The fake relay names a sent message "srv-<tempGuid>", as a real server gives its own guid, not the client's.
+        guids = [f"srv-{json.loads(line)['tempGuid']}" for line in read_text(rig.fake / "relay-payloads").splitlines() if json.loads(line)["message"] == "Done."]
+        assert len(guids) == 2
+        for n, (guid, mate) in enumerate(zip(guids, ["engram", "atlas"]), start=2):
+            message.unlink(missing_ok=True)
+            reply_in_thread(rig, f"m{n}", guid, "Done.", f"thanks {mate}")
+            wait_for(message.exists, f"the relay to {mate}", timeout=120)
+            assert read_text(message) == f"{mate} [from captain via desk] thanks {mate}"
+        message.unlink()
+        reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")  # no id match and two senders: a desk turn
         wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
         assert not message.exists()

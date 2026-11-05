@@ -1176,7 +1176,7 @@ done({{
     assert result["got"] == [
         ["m1", "inbound", "+15550000000", "iMessage;-;+15550000000", {"type": "text", "text": "ship it"}],
         ["m2", "inbound", "+15550000000", "iMessage;-;+15550000000",
-         {"type": "reply", "content": {"type": "text", "text": "this one"}, "target": {"content": {"type": "text", "text": "ship it"}}}],
+         {"type": "reply", "content": {"type": "text", "text": "this one"}, "target": {"id": "m1", "content": {"type": "text", "text": "ship it"}}}],
     ]
     assert result["restarted"] == 0
     assert result["reads"] == 2  # m1 itself once, and once as the thread target of m2
@@ -2549,9 +2549,9 @@ const server = Bun.serve({ port: 0, async fetch(req) {
     if (mode() === "send-down") return new Response("unavailable", { status: 503 });
     if (mode() === "lost") return new Response("garbled");
     appendFileSync(`${dir}/relay-sent`, `${b.chatGuid} ${b.message}\\n`);
-    const m = { guid: b.tempGuid, text: b.message, isFromMe: true, dateCreated: Date.now(), chats: [{ guid: b.chatGuid }] };
+    const m = { guid: `srv-${b.tempGuid}`, text: b.message, isFromMe: true, dateCreated: Date.now(), chats: [{ guid: b.chatGuid }] };
     appendFileSync(`${dir}/relay-history`, `${JSON.stringify(m)}\\n`);
-    return mode() === "garbled" ? new Response("garbled") : Response.json({ data: {} });
+    return mode() === "garbled" ? new Response("garbled") : Response.json({ data: { guid: `srv-${b.tempGuid}` } });
   }
   if (path === "message/react") {
     const b = await req.json();

@@ -203,7 +203,8 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   // `guid` is the client GUID (BlueBubbles tempGuid). Reply behavior is described in docs/imessage.md.
   // A later relay in one call sends only after no relay shows the text as sent; a retry of
   // a failed call is the bridge's to check first (`sent`), because the outbox item keeps what may have gone out.
-  async send(chat: string, text: string, replyTo?: string, guid?: string, beforeSend?: () => void): Promise<"accepted" | "reconciled"> {
+  // `sentId` gets the guid the relay gave the sent message, when it answers with one.
+  async send(chat: string, text: string, replyTo?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled"> {
     const started = Date.now();
     let maybeSent = false;
     let last: unknown = new RelayError("no relay is reachable", false, 503);
@@ -212,9 +213,10 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         const reconciled = maybeSent && await this.sent(chat, text, started);
         if (!reconciled) {
           beforeSend?.();
-          await this.call(r, "POST", "message/text", undefined,
+          const sent = await this.call(r, "POST", "message/text", undefined,
             { chatGuid: chat, tempGuid: guid ?? crypto.randomUUID(), message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
-            .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; });
+            .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; }) as { guid?: unknown } | undefined;
+          if (typeof sent?.guid === "string") sentId?.(sent.guid);
         }
         this.suspects.clear();
         return reconciled ? "reconciled" : "accepted";
@@ -407,7 +409,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         (t) => ({ type: "text", text: ((t as BBMessage).text ?? "").replace(/\uFFFC/g, "").trim() }),
         () => ({ type: "unknown" }),
       );
-      content = { type: "reply", content, target: { content: target } } as unknown as Content;
+      content = { type: "reply", content, target: { id: m.threadOriginatorGuid, content: target } } as unknown as Content;
     }
     return this.wrap(m, chat, content);
   }

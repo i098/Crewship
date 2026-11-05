@@ -35,7 +35,7 @@ async function prompt(id: string, message: string) {
   } else if (texts.includes("TAPBACK")) await call("tapback", { emoji: "❤️" });
   else if (texts.includes("PLAIN")) send({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Plain words." }] } });
   else if (texts.includes("HANDOFF")) await call("handoff_main", { reason: "fake handoff" });
-  else if (texts.includes("Never give time estimates")) await call("delegate_task", { target: "firstmate", text: "Got it, passing that to Firstmate." });
+  else if (texts.includes("Never give time estimates")) await call("handoff_main", { text: "Got it, passing that to Firstmate." });
   else if (/DELEGATE (\S+)/.test(texts)) {
     await call("delegate_task", { target: /DELEGATE (\S+)/.exec(texts)![1], text: "On it." });
   } else if (/RELAY (\S+)/.test(texts)) await call("relay_mate", { mate: /RELAY (\S+)/.exec(texts)![1] });

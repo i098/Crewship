@@ -84,7 +84,7 @@ def test_session_text_reaches_the_session_and_its_reply_is_sent(tmp_path):
         assert not any(e.get("route") == "handoff" for e in events(rig)), "the desk session handed the text off"
 
 
-def test_session_delegation_sends_the_owner_text_verbatim_to_firstmate(tmp_path):
+def test_session_owner_instruction_gets_one_ack_and_goes_verbatim_to_firstmate(tmp_path):
     problem = masker_loads(tmp_path)
     if problem and not STRICT:
         pytest.skip(f"front secret masker unavailable, so the desk session hands off every text: {problem}")
@@ -98,3 +98,6 @@ def test_session_delegation_sends_the_owner_text_verbatim_to_firstmate(tmp_path)
         wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
         wait_for(note.exists, "the handoff to Firstmate", timeout=120)
         assert text in note.read_text()
+        time.sleep(2)
+        assert len(texts(rig)) == 1, "the desk sent more than the one ack"
+        assert not (rig.state / "desk-tasks").exists(), "an owner instruction started a background task"

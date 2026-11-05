@@ -321,12 +321,12 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
   - `tapback` reacts only when `deskMayAct` permits it.
   - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
-  - `handoff_main` gives the text to Firstmate.
+  - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
   - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
 - The desk sends no fixed routing receipt bubble.
 - Each assistant message adds one `desk-session` line to the token log.
-- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each recent bubble (the last 200) by the start of its text, in `senders.json` in the state directory, and maps a home path or id in `data/secondmates.md` to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. A newer bubble with the same start and no sender clears the entry. An unknown or main sender gives the normal desk turn.
+- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each of the last 200 bubbles in `senders.json` in the state directory. When the transport gives the sent message an id, a reply that names that id gets that sender. Otherwise the start of the text decides, and only when every recent bubble with that start has the same sender. A desk bubble counts as a sender, so a text that a mate and the desk both sent goes to the desk. A home path or id in `data/secondmates.md` maps the sender to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or two senders with the same text and no id, gives the normal desk turn.
 
 If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
 

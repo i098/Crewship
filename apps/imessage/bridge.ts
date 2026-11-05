@@ -39,7 +39,7 @@ import type { DispatchModel } from "./dispatch-policy.ts";
 import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
 import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
-import { createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
+import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
@@ -207,28 +207,38 @@ type RouteEvent = { received: Received } | { ids: string[]; route: Routing["rout
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
-// Who sent each recent bubble, by the start of its text: a thread reply to it goes back to that mate.
-// The latest bubble with the same start wins; a bubble sent with no sender clears the entry. A capped file keeps it across restarts.
+// Who sent each recent bubble: a thread reply to it goes back to that mate. A reply names its target by message id when the
+// transport gave the sent bubble one. Otherwise the start of the text counts, and only when every recent bubble with that start has one sender.
+// A bubble sent with no sender is the desk's own. A capped file keeps the record across restarts.
+type SentBubble = { key: string; sender: string; id?: string };
 const SENDERS_FILE = `${STATE}/senders.json`;
-const sentBy = new Map<string, string>(Object.entries((() => {
-  try { return JSON.parse(readFileSync(SENDERS_FILE, "utf8")) as Record<string, string>; } catch { return {}; }
-})()));
+const sentBubbles: SentBubble[] = (() => {
+  try {
+    const rows = JSON.parse(readFileSync(SENDERS_FILE, "utf8"));
+    return Array.isArray(rows) ? rows : [];
+  } catch { return []; }
+})();
 const quoteKey = (text: string) => text.slice(0, 120).trim();
-function rememberSender(text: string, sender: string | undefined) {
-  const known = sentBy.delete(quoteKey(text));
-  if (sender) sentBy.set(quoteKey(text), sender);
-  if (sentBy.size > 200) sentBy.delete(sentBy.keys().next().value!);
-  if (known || sender) persistLatest(SENDERS_FILE, JSON.stringify(Object.fromEntries(sentBy)));
+function rememberSender(text: string, sender = "", id?: string) {
+  sentBubbles.push({ key: quoteKey(text), sender, ...(id && { id }) });
+  if (sentBubbles.length > 200) sentBubbles.shift();
+  persistLatest(SENDERS_FILE, JSON.stringify(sentBubbles));
+}
+function senderOfQuoted(text: string, id?: string) {
+  const byId = id ? sentBubbles.find((b) => b.id === id) : undefined;
+  if (byId) return byId.sender;
+  const senders = new Set(sentBubbles.filter((b) => b.key === quoteKey(text)).map((b) => b.sender));
+  return senders.size === 1 ? [...senders][0] : undefined;
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
-function quotedText(c: LineMessage["content"]): string | undefined {
-  if (c.type === "reply") return c.target.content.type === "text" ? c.target.content.text : undefined;
-  if (c.type === "effect") return quotedText(c.content);
+function quotedTarget(c: LineMessage["content"]): { id: string; text: string } | undefined {
+  if (c.type === "reply") return c.target.content.type === "text" ? { id: c.target.id, text: c.target.content.text } : undefined;
+  if (c.type === "effect") return quotedTarget(c.content);
 }
 function quotedMate(c: LineMessage["content"]) {
-  const quoted = quotedText(c);
-  return quoted === undefined ? undefined : mateOfSender(sentBy.get(quoteKey(quoted)));
+  const quoted = quotedTarget(c);
+  return quoted && mateOfSender(senderOfQuoted(quoted.text, quoted.id));
 }
 let routingRetry: NodeJS.Timeout | undefined;
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
@@ -241,7 +251,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   separated(space: string, id: string): Promise<boolean>;
-  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void): Promise<"accepted" | "reconciled">;
+  send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
@@ -272,7 +282,7 @@ async function startLine(name: string): Promise<Line> {
       messages: bb,
       find: (ref) => bb.message(ref.id),
       separated: (space, id) => bb.separated(space, id),
-      send: (space, text, reply, guid, beforeSend) => bb.send(space, text, reply, guid, beforeSend),
+      send: (space, text, reply, guid, beforeSend, sentId) => bb.send(space, text, reply, guid, beforeSend, sentId),
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
@@ -652,7 +662,7 @@ function checkDeskDelivery(o: Out) {
     checkV2Delivery(o);
     return;
   }
-  if (o.guid?.startsWith(TASK_GUID_PREFIX)) {
+  if (o.guid?.startsWith(TASK_GUID_PREFIX) || o.guid?.startsWith(ACK_GUID_PREFIX)) {
     if (muted()) throw deskCancelled;
     return;
   }
@@ -854,8 +864,9 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
         if (typeof bubble === "string") {
-          const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
-          rememberSender(bubble, o.sender);
+          let sentId: string | undefined;
+          const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o), (id) => { sentId = id; });
+          rememberSender(bubble, o.sender, sentId);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
           await line.sendImage!(space, bubble, thread);
