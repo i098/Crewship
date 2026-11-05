@@ -139,7 +139,7 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | Command | Shows | Switch (default `true`) |
 | --- | --- | --- |
 | `crewship schedules` | local cron entries, timers, and Firstmate checks | `crewship.herdr.schedules_tab` |
-| `usage-tui` | token usage from the omp stats store | `crewship.herdr.usage_tab` |
+| `usage-tui` | token usage from the omp stats store; `usage-tui-detect` writes its provider list from the accounts on the host | `crewship.herdr.usage_tab` |
 | `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
 | `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |

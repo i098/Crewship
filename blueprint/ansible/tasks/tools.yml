@@ -217,6 +217,27 @@
     mode: "0755"
   loop: "{{ crewship_tuis }}"
 
+- name: Install the usage provider re-detect command
+  ansible.builtin.copy:
+    dest: "{{ crewship_local_bin }}/usage-tui-detect"
+    content: |
+      #!/bin/sh
+      exec {{ (crewship_local_bin ~ '/bun') | quote }} {{ (crewship_share_dir ~ '/tui/usage-tui/detect.ts') | quote }} "$@"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+
+# Writes ~/.config/crewship/usage-providers.json from the accounts found on the host; prints "changed" or "unchanged".
+- name: Detect subscriptions for the usage pane
+  ansible.builtin.command:
+    argv: ["{{ crewship_local_bin }}/usage-tui-detect"]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  register: crewship_usage_detect
+  changed_when: crewship_usage_detect.stdout | trim == 'changed'
+  when: not ansible_check_mode
+
 - name: Remove the superseded curses entry point
   ansible.builtin.file:
     path: "{{ crewship_curses_path }}"

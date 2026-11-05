@@ -13,3 +13,7 @@ A quota panel shows how much is left per account and window (percent left, reset
 A window the source does not report shows "not reported"; a source that cannot be read shows one "unavailable" note with the reason. The `deepseek (reseller) <plan>` rows, one 5h and 7d pair per plan, show 5h and 7d percent left and reset time from the reseller's quotaMe call: read over HTTP through `api-anything` with its saved login, which is renewed from the fleet cookie jar (`~/.fleet-browser/cookies.json`) when it expires. When the call fails the row shows n/a with the reason. The TUI never opens a browser.
 The quota sources are read at most once per 60 seconds. A DeepSeek quota result, success or failure, is held for 10 minutes.
 `bun usage-tui.ts --once` prints the quota rows as text; add `--fixture file.json` to read recorded inputs instead. Run `bun test` for the tests.
+
+## Provider list
+
+`usage-tui-detect` finds which subscriptions and accounts this host has and writes `~/.config/crewship/usage-providers.json` (override with `USAGE_TUI_PROVIDERS`). It reads provider names and account counts only: omp auth providers from `~/.omp/agent/agent.db`, the Codex CLI login, and the variables `INCEPTION_API_KEY(S)`, `DEEPSEEK_API_KEY`, `ZAI_API_KEY` or `GLM_API_KEY` by name. It never reads or stores a key, token or email. Setup (`launch`) runs it once; run `usage-tui-detect --print` after you add or remove an account to detect again. It prints `changed` or `unchanged`, and `--check` writes nothing.
