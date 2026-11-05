@@ -184,6 +184,7 @@ export const components: Component[] = [
   github("jj", "jj-vcs/jj"),
   github("runner-up", "kunchenguid/runner-up"),
   github("gws", "googleworkspace/cli"),
+  github("rtk", "rtk-ai/rtk"),
   { name: "node", group: "runtime", source: { kind: "node" }, installed: cmd("node"), bin: "node" },
   { name: "rustup-init", group: "runtime", source: { kind: "rustup" }, installed: cmd("rustup"), bin: "rustup" },
   npm("omp", "@oh-my-pi/pi-coding-agent"),
