@@ -386,6 +386,13 @@ async function gh(path: string, key: string) {
   } else errors.set(key, `${key}: ${message}`)
 }
 
+/** Drop reads of runs that have finished, so their data and errors do not stay for ever. */
+function dropFinished(repos: string[]) {
+  const wanted = new Set(dueCalls(repos, cache, Infinity).map(x => x.key))
+  for (const k of cache.keys()) if (!wanted.has(k)) cache.delete(k)
+  for (const k of errors.keys()) if (k !== "limit" && !wanted.has(k)) errors.delete(k)
+}
+
 const firstSeen: Record<string, number> = {}
 function snapshot(slots: Slot[], local: Pick<Snapshot, "units" | "containers">) {
   const now = Date.now()
@@ -482,10 +489,7 @@ async function main() {
       const c = Date.now() < pausedUntil ? null : nextCall(repos(), cache, sent, Date.now())
       if (c) {
         await gh(c.path, c.key)
-        // Drop reads of runs that have finished, so their data and errors do not stay for ever.
-        const wanted = new Set(dueCalls(repos(), cache, Infinity).map(x => x.key))
-        for (const k of cache.keys()) if (!wanted.has(k)) cache.delete(k)
-        for (const k of errors.keys()) if (k !== "limit" && !wanted.has(k)) errors.delete(k)
+        dropFinished(repos())
       }
     } finally { busy = false; draw() }
   }
