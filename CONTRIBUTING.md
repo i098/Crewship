@@ -308,7 +308,7 @@ Do not change published releases, including `0.4.7`.
    Run `gh workflow run release-artifact.yml -f tag=v0.4.8-rc.1` for a prerelease.
    For an approved stable release, run `gh workflow run release-artifact.yml -f tag=vX.Y.Z -f stable=true`.
    The workflow rejects a tag that does not match the selected channel and rejects releases that are already published.
-   It sets the draft's prerelease and latest flags from the selected channel.
+   It sets the draft's prerelease flag from the selected channel; the latest flag is set when you publish.
    Check that the draft lists `crewship-<tag>.tar.gz`, `install.sh`, and both `.sha256` files before publication.
    The installer asset comes from `scripts/install.sh` at the tag, not from the workflow's branch.
 6. Publish a prerelease with `gh release edit v0.4.8-rc.1 --draft=false --prerelease --latest=false`.

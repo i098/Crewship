@@ -64,7 +64,8 @@ jobs:
             echo "::error title=release not a draft::$TAG is already published and releases are immutable; create the release as a draft, run this workflow, then publish it"
             exit 1
           fi
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease="$prerelease" --latest="$STABLE"
+          # A draft cannot be marked latest (gh rejects it); publication sets that flag.
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease="$prerelease"
 
       - name: Build the artifact and its checksum
         env:
