@@ -311,4 +311,4 @@ A pane is closed only when all of these hold; any read failure or doubt keeps th
 
 Herdr removes a tab or workspace when its last pane closes; the pruner also closes any tab or workspace that reports no pane.
 Every close is one journal line with the pane id, tab, workspace and reason: `journalctl --user -u herdr-prune-empty.service`.
-`herdr-prune-empty.py --dry-run` (with the unit's environment) lists what the next run would close and why, and changes nothing.
+`herdr-prune-empty.py --dry-run` (with the unit's environment) lists what the next run would close and why, and closes nothing; it may write its own idle-clock state file. `crewship_herdr_prune_main_pane` is required for real closes: while it is unset the unit logs `MAIN_PANE is not set` and only dry-runs.

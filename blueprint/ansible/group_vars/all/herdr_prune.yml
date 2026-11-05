@@ -8,6 +8,7 @@ crewship_herdr_prune_idle: 600
 crewship_herdr_prune_every: 2min
 # Tabs whose panes are never closed (case-insensitive names).
 crewship_herdr_prune_keep_tabs: [Concord, crewboard, monitoring]
-# Homes besides the main one and the secondmates.md list; a pane id such as w2:pZ pins main's pane.
+# Homes besides the main one and the secondmates.md list.
 crewship_herdr_prune_extra_homes: []
+# REQUIRED for real closes: the main Firstmate pane id (such as w2:pZ). Unset, the pruner only dry-runs.
 crewship_herdr_prune_main_pane: ""

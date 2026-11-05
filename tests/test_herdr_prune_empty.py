@@ -174,3 +174,83 @@ def test_listed_home_without_state_aborts(tmp_path):
     (main / "data/secondmates.md").write_text(f"- m - role. (home: {tmp_path}/missing; scope: x)\n")
     with pytest.raises(pruner.Abort):
         pruner.recorded_panes(pruner.read_homes(main, []))
+
+
+def test_session_qualified_pane_ids_match_recorded_and_main_panes():
+    herdr = fleet(**{"default:w1:p2": {"tab": "t3"}, "default:w1:p3": {"tab": "t3"}})
+    context = ctx(recorded=["w1:p2"], main="w1:p3")
+    state = aged(herdr, context)
+    closed, _, _ = run(herdr, context, state=state, now=5000)
+    assert closed == ["w1:p1"]
+
+
+FAKE_HERDR = """#!/usr/bin/env python3
+import json, os, sys
+a = sys.argv[1:]
+R = {
+    ("pane", "list"): {"panes": [
+        {"pane_id": "w1:p1", "tab_id": "t1", "workspace_id": "w1", "agent_status": "unknown"},
+        {"pane_id": "w1:p2", "tab_id": "t1", "workspace_id": "w1", "agent_status": "unknown"},
+    ]},
+    ("tab", "list"): {"tabs": [{"tab_id": "t1", "label": "work", "pane_count": 2}]},
+    ("workspace", "list"): {"workspaces": []},
+    ("pane", "process-info"): {"process_info": {
+        "shell_pid": int(os.environ["SHELL_PID"]),
+        "foreground_processes": [{"pid": int(os.environ["SHELL_PID"])}]}},
+}
+if a[1] == "close":
+    open(os.environ["CLOSE_LOG"], "a").write(a[2] + "\\n")
+    print(json.dumps({"result": {}}))
+elif a[1] == "read":
+    print("$ ")
+else:
+    print(json.dumps({"result": R[(a[0], a[1])]}))
+"""
+
+
+def run_main(tmp_path, monkeypatch, main_pane, argv=(), clock=(1000.0,)):
+    """One main() call per clock value; returns the panes the fake herdr closed."""
+    import subprocess
+
+    fm = tmp_path / "fm"
+    (fm / "state").mkdir(parents=True, exist_ok=True)
+    binary = tmp_path / "herdr"
+    binary.write_text(FAKE_HERDR)
+    binary.chmod(0o755)
+    sleeper = subprocess.Popen(["sleep", "30"])
+    try:
+        for k, v in {
+            "FM_HOME": str(fm),
+            "HERDR_BIN_PATH": str(binary),
+            "PRUNE_STATE": str(tmp_path / "state.json"),
+            "CLOSE_LOG": str(tmp_path / "closed"),
+            "SHELL_PID": str(sleeper.pid),
+            "MAIN_PANE": main_pane,
+            "IDLE": "600",
+        }.items():
+            monkeypatch.setenv(k, v)
+        for now in clock:
+            monkeypatch.setattr(pruner.time, "time", lambda now=now: now)
+            assert pruner.main(list(argv)) == 0
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    log = tmp_path / "closed"
+    return log.read_text().split() if log.exists() else []
+
+
+def test_dry_run_keeps_the_idle_clock_between_runs(tmp_path, monkeypatch, capsys):
+    closed = run_main(tmp_path, monkeypatch, "w1:p1", ["--dry-run"], clock=(1000.0, 1700.0))
+    assert closed == []
+    assert "would close pane w1:p2" in capsys.readouterr().out
+
+
+def test_unset_main_pane_closes_nothing(tmp_path, monkeypatch, capsys):
+    assert run_main(tmp_path, monkeypatch, "", clock=(1000.0, 1700.0)) == []
+    captured = capsys.readouterr()
+    assert "MAIN_PANE is not set" in captured.err
+    assert "would close pane w1:p1" in captured.out
+
+
+def test_set_main_pane_closes_other_idle_pane_once_aged(tmp_path, monkeypatch):
+    assert run_main(tmp_path, monkeypatch, "w1:p1", clock=(1000.0, 1700.0)) == ["w1:p2"]

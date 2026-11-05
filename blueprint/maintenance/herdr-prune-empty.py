@@ -22,7 +22,9 @@ MAIN_PANE (pane id); KEEP_TABS (comma separated, case-insensitive, default
 Concord,crewboard,monitoring); IDLE (seconds, default 600); HERDR_BIN_PATH;
 HERDR_SESSION; PRUNE_STATE (state file).
 
-  --dry-run   list every empty pane and what would be closed; change nothing.
+  --dry-run   list every empty pane and what would be closed; close nothing
+              (the idle-clock state file is still written). Also forced when
+              MAIN_PANE is unset.
 """
 
 import hashlib
@@ -93,7 +95,7 @@ def children(pid: int) -> list[int]:
 
 def keep_reason(pane, info, tab_label, ctx) -> str | None:
     """Why this pane must stay, or None when it is an empty bare shell."""
-    pid = pane["pane_id"]
+    pid = pane_key(pane["pane_id"])
     if pid in ctx["recorded"]:
         return "recorded by a home's meta"
     if pid == ctx["main_pane"]:
@@ -226,6 +228,9 @@ def sweep(herdr, ctx, dry_run, log=print):
 
 def main(argv) -> int:
     dry_run = "--dry-run" in argv
+    if not os.environ.get("MAIN_PANE", "").strip():
+        print("MAIN_PANE is not set: closing nothing (dry run)", file=sys.stderr)
+        dry_run = True
     env = os.environ
     try:
         main_home = Path(env["FM_HOME"])
@@ -247,8 +252,7 @@ def main(argv) -> int:
         state = load_state(state_path)
         prune(herdr, ctx, state, time.time(), int(env.get("IDLE", "600")), dry_run)
         sweep(herdr, ctx, dry_run)
-        if not dry_run:
-            save_state(state_path, state)
+        save_state(state_path, state)
     except (Abort, KeyError) as exc:
         print(f"keep everything: {exc!r}", file=sys.stderr)
         return 1
