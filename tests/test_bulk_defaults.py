@@ -398,10 +398,25 @@ def test_default_max_trees_scales_with_cores_and_ram(cpus, mem, expected):
     assert bulk.default_max_trees(cpus, mem) == expected
 
 
-def test_max_trees_written_once_without_data_dir_and_override_wins(home):
+def test_explicit_max_trees_replaces_value_and_is_idempotent(home):
     path = home / ".config/treehouse/config.toml"
 
     assert bulk.configure(home, None, max_trees=48)["changed"]
     assert bulk.tomllib.loads(path.read_text())["max_trees"] == 48
-    assert not bulk.configure(home, None, max_trees=99)["changed"]
-    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 48
+    assert not bulk.configure(home, None, max_trees=48)["changed"]
+    assert bulk.configure(home, None, max_trees=99)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 99
+    assert not bulk.configure(home, None)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 99
+
+
+@pytest.mark.parametrize("line", ["max_trees = 7", "  max_trees = 7  # old"])
+def test_explicit_max_trees_preserves_existing_file(home, line):
+    path = home / ".config/treehouse/config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(f'# Keep.\nroot = "/custom/pools"\n{line}\n[x]\ny = 1\n')
+
+    assert bulk.configure(home, None, max_trees=40)["changed"]
+    text = path.read_text()
+    assert bulk.tomllib.loads(text) == {"root": "/custom/pools", "max_trees": 40, "x": {"y": 1}}
+    assert "# Keep." in text

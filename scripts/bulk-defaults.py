@@ -51,6 +51,16 @@ def toml_default(text, section, key, value):
     return desired
 
 
+def toml_set(text, section, key, value):
+    if tomllib.loads(text).get(key) == value:
+        return text
+    parts = re.split(r"(?m)^(?=\[)", text, maxsplit=1)
+    head = re.sub(rf"(?m)^[ \t]*{re.escape(key)}[ \t]*=.*\n?", "", parts[0])
+    desired = f'{key} = {json.dumps(value)}\n' + head + "".join(parts[1:])
+    tomllib.loads(desired)
+    return desired
+
+
 def rc_default(text, key, value):
     name = re.escape(key)
     option = re.compile(rf"""^(?:{name}|"{name}"|'{name}')\s*(?:=|[#;]|$)""")
@@ -123,7 +133,7 @@ def default_max_trees(cpus=None, mem_gib=None):
 def native_changes(home, data, max_trees=None):
     changes = {}
     settings = [
-        (".config/treehouse/config.toml", toml_default, "", "max_trees", max_trees or default_max_trees()),
+        (".config/treehouse/config.toml", toml_set if max_trees else toml_default, "", "max_trees", max_trees or default_max_trees()),
     ]
     if data:
         settings += [
