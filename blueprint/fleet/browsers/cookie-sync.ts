@@ -1,6 +1,6 @@
 // cookie-sync.ts - one session, three browsers.
 //
-// The fleet's browser ladder is obscura -> chrome -> vnc (see fleet-browser).
+// The fleet's browser ladder is obscura -> chrome -> voxl (see fleet-browser).
 // A login made in any tier must be usable in the other two (Google excepted,
 // see below), so this keeps ONE canonical cookie jar
 // (~/.fleet-browser/cookies.json) and converges every live tier to it over CDP:
@@ -103,7 +103,7 @@ const sameCookie = (a: Cookie, b: Cookie) => a.value === b.value && a.expires ==
 // Google cookies: they never enter the canonical jar and are never pushed into
 // another tier. When several tiers hold the same Google cookie with the same
 // value (copies an earlier fan-out left behind), only the last tier on the
-// command line keeps it - vnc, where the human signs in - and the others drop it.
+// command line keeps it - voxl, where the human signs in - and the others drop it.
 // Domains: google.com and Google's country domains (google.de, google.co.uk,
 // google.com.au), plus youtube.com, which Google sign-in also sets.
 const googleOwned = (c: Cookie) => /(^|\.)(google\.[a-z]{2,3}(\.[a-z]{2})?|youtube\.com)$/.test(c.domain.toLowerCase());

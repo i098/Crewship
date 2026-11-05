@@ -249,9 +249,15 @@
     - crewship_data_dir | length > 0
     - crewship_account_ready | bool
 
+- name: Look for retired assets
+  ansible.builtin.import_tasks: retired.yml
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  when: crewship_account_ready | bool
+
 - name: Remove retired managed user-manager bulk defaults
   ansible.builtin.file:
-    path: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-bulk.conf"
+    path: "{{ crewship_bulk_defaults_path }}"
     state: absent
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
@@ -259,10 +265,11 @@
   when:
     - crewship_data_dir | length == 0
     - crewship_account_ready | bool
+    - crewship_bulk_defaults_path in crewship_retired_found.existing
 
 - name: Remove the retired managed Bash environment block
   ansible.builtin.blockinfile:
-    path: "{{ crewship_cfg.home }}/.bashrc"
+    path: "{{ crewship_bashrc_path }}"
     create: true
     marker: "# {mark} crewship managed environment"
     state: absent
@@ -272,6 +279,7 @@
     - crewship_data_dir | length == 0
     - crewship_manage_profile_path | bool
     - crewship_account_ready | bool
+    - crewship_bashrc_path in crewship_retired_found.containing
 
 - name: Keep the managed bin directory and environment on the interactive shell
   ansible.builtin.blockinfile:

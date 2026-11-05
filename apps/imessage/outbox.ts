@@ -1,6 +1,7 @@
 // The bridge's durable queues (bridge.ts): the outbox of sends and tapbacks, and the attachment downloads to try
 // again. Kept free of spectrum-ts so tests run without it.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { alreadySent, KEY_PATTERN, logSend, type Send } from "./sender-log.ts";
 
 const NETWORK = /^(TimeoutError|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EPIPE|ConnectionRefused|ConnectionClosed|FailedToOpenSocket|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_CLOSED)$/;
 
@@ -202,3 +203,27 @@ export class Queue<T> {
     }
   }
 }
+
+// Runs `send(dup)` and logs the text when it answered ok. A key that already sent this text today skips the send,
+// or with `alone` (a photo travels on its own) runs `send(true)` so the caller drops the text. A bare photo is not deduped or logged.
+export function sendOnce(dir: string, o: Send & { alone?: boolean }, send: (dup: boolean) => Response): Response {
+  if (!o.text) return send(false);
+  if (alreadySent(dir, o)) return o.alone ? send(true) : new Response(`skipped: key ${o.key} already sent this content to the owner today; nothing queued\n`);
+  const res = send(false);
+  if (res.ok) logSend(dir, o);
+  return res;
+}
+
+// The topic key of a /send request: undefined without one, or the 400 refusing a malformed one.
+export function keyOf(req: Request): string | undefined | Response {
+  const key = req.headers.get("x-fm-key")?.trim() || undefined;
+  if (key && !KEY_PATTERN.test(key)) return new Response("nothing queued: --key needs 1 to 64 letters, digits, . _ : -\n", { status: 400 });
+  return key;
+}
+
+// The desk's view of the log: whether a keyed text went out today, and a record of one that did.
+export const deskLog = (dir: string) => ({
+  sent: (key: string | undefined, text: string) => alreadySent(dir, { key, text }),
+  record: (key: string | undefined, text: string) => logSend(dir, { key, sender: "desk", text }),
+  report: (text: string) => logSend(dir, { sender: "desk", text }),
+});

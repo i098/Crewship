@@ -1,6 +1,6 @@
 // Remaining-quota rows for usage-tui: parsing, percent-left maths, colors, reset formatting, loaders.
 // Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key),
-// the DeepSeek platform site (Dia over CDP via `ssh mac`) and a reseller chat-response header (spend).
+// an optional external DeepSeek usage command and a reseller chat-response header (spend).
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
@@ -84,24 +84,26 @@ export function mercuryRows(keyIds: number[], tokens: Record<string, number>): Q
 }
 const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v))
 
-// ---- DeepSeek: prepaid balance, read from the platform website ----------------
-// DeepSeek has no quota API, and omp's only key is a reseller key that /user/balance refuses.
-// The site shows the prepaid balance per wallet currency, so read the response the signed-in site itself requests.
-export type DeepseekSummary = { normal_wallets?: { currency?: string; balance?: string | number }[] }
+// ---- DeepSeek: plan usage, read from an optional external command -----------------
+// DeepSeek has no quota API. USAGE_TUI_DEEPSEEK_CMD names a command (split on spaces, no shell) that prints
+// one JSON object: {"rows":[{"plan","window","used","limit","resets_at"}]} with resets_at in epoch seconds.
+// Nothing here opens a browser; with no command, or when it fails, the panel shows n/a.
+export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
 
-export function deepseekRow(json: DeepseekSummary): QuotaRow {
-  const wallets = (json.normal_wallets ?? []).flatMap(w => (typeof w?.currency === "string" && w.currency ? [{ currency: w.currency, balance: w.balance }] : []))
-  const w = wallets.find(w => w.currency === "USD") ?? wallets[0]
-  const raw = w?.balance
-  const bal = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN
-  return { account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: w && finite(bal) ? `balance ${money(bal, w.currency)}` : "no balance reported" }
+export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
+  const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
+    if (!r || typeof r.plan !== "string" || typeof r.window !== "string") return []
+    const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
+    return [{ account: `deepseek ${r.plan}`, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+  })
+  return rows.length ? rows : [{ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "n/a" }]
 }
-
-const money = (v: number, currency: string) => `${v < 0 ? "-" : ""}${currency === "USD" ? "$" : `${currency} `}${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
 
 // ---- DeepSeek reseller: spend so far ------------------------------------------
 // The reseller is a LiteLLM proxy that serves only /v1/models and chat. Its balance and key-info routes 404,
 // so the one real number is the key's cumulative spend, echoed in a chat response header.
+const money = (v: number, currency: string) => `${v < 0 ? "-" : ""}${currency === "USD" ? "$" : `${currency} `}${Math.abs(v).toFixed(Math.abs(v) < 0.01 && v !== 0 ? 4 : 2)}`
+
 export type ResellerSpend = { spend: number }
 
 export function resellerRow(json: ResellerSpend): QuotaRow {
@@ -118,7 +120,7 @@ export type QuotaInput = {
   zaiError?: string
   mercury?: { keyIds: number[]; tokens: Record<string, number> }
   mercuryError?: string
-  deepseek?: DeepseekSummary
+  deepseek?: DeepseekUsage
   deepseekError?: string
   reseller?: ResellerSpend
   resellerError?: string
@@ -133,8 +135,8 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
   if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
   else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
-  if (inp.deepseek) rows.push(deepseekRow(inp.deepseek))
-  else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `unavailable: ${inp.deepseekError}` : "not reported" })
+  if (inp.deepseek) rows.push(...deepseekRows(inp.deepseek))
+  else rows.push({ account: "deepseek", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a" })
   if (inp.reseller) rows.push(resellerRow(inp.reseller))
   else rows.push({ account: "deepseek (reseller)", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.resellerError ? `unavailable: ${inp.resellerError}` : "not reported" })
   return rows
@@ -248,116 +250,31 @@ function mercuryKeyIds(): number[] {
   }
 }
 
-// Reads the balance the signed-in Dia on the Mac loads: a background tab (never focused) replays the
-// site's own request, and CDP hands back that response body, so no cookie or token ever leaves Dia.
-const DEEPSEEK_CDP = String.raw`
-import base64, json, os, socket, struct, sys, time, urllib.request
-PORT, WANT = 9222, "/api/v0/users/get_user_summary"
-def get(p):
-    return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}{p}", timeout=10))
-def open_ws(url):
-    s = socket.create_connection(("127.0.0.1", PORT), timeout=20)
-    key = base64.b64encode(os.urandom(16)).decode()
-    s.sendall(f"GET /{url.split('/', 3)[3]} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode())
-    buf = b""
-    while b"\r\n\r\n" not in buf:
-        c = s.recv(4096)
-        if not c:
-            raise OSError("handshake failed")
-        buf += c
-    return s
-def send(s, text):
-    data = text.encode()
-    n = len(data)
-    head = bytes([0x81, 0x80 | n]) if n < 126 else bytes([0x81, 0xFE]) + struct.pack(">H", n)
-    mask = os.urandom(4)
-    s.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
-def read(s, n):
-    out = b""
-    while len(out) < n:
-        c = s.recv(n - len(out))
-        if not c:
-            raise EOFError("connection closed")
-        out += c
-    return out
-def recv(s):
-    while True:
-        b1, b2 = read(s, 2)
-        n = b2 & 0x7F
-        if n == 126:
-            n = struct.unpack(">H", read(s, 2))[0]
-        elif n == 127:
-            n = struct.unpack(">Q", read(s, 8))[0]
-        payload = read(s, n)
-        if b1 & 0x0F in (1, 2):
-            return payload.decode()
-def call(s, i, method, params):
-    send(s, json.dumps({"id": i, "method": method, "params": params}))
-    while True:
-        m = json.loads(recv(s))
-        if m.get("id") == i:
-            return m
-def main():
-    browser = open_ws(get("/json/version")["webSocketDebuggerUrl"])
-    target = call(browser, 1, "Target.createTarget", {"url": "https://platform.deepseek.com/usage", "background": True})["result"]["targetId"]
-    try:
-        deadline, page = time.time() + 20, None
-        while time.time() < deadline and not page:
-            page = next((p["webSocketDebuggerUrl"] for p in get("/json/list") if p.get("id") == target and p.get("type") == "page"), None)
-            if not page:
-                time.sleep(0.3)
-        if not page:
-            raise OSError("page target did not appear")
-        ws = open_ws(page)
-        call(ws, 2, "Network.enable", {})
-        call(ws, 3, "Page.reload", {})
-        while time.time() < deadline:
-            m = json.loads(recv(ws))
-            if m.get("method") == "Network.responseReceived" and WANT in m["params"]["response"]["url"]:
-                body = call(ws, 5, "Network.getResponseBody", {"requestId": m["params"]["requestId"]})["result"]["body"]
-                return json.loads(body)["data"]["biz_data"]
-        raise OSError("balance request not seen")
-    finally:
-        call(browser, 6, "Target.closeTarget", {"targetId": target})
-try:
-    biz = main()
-    print(json.dumps({"normal_wallets": biz.get("normal_wallets")}))
-except Exception as e:
-    print(str(e), file=sys.stderr)
-    sys.exit(1)
-`
-
 const DEEPSEEK_MIN_MS = 10 * 60_000
 let deepseekAt = 0
-let deepseekLast: { value?: DeepseekSummary; error?: string } = {}
+let deepseekLast: { value?: DeepseekUsage; error?: string } = {}
 
-async function fetchDeepseek(): Promise<DeepseekSummary> {
-  const p = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "mac", "python3", "-"], {
-    stdin: new Blob([DEEPSEEK_CDP]),
-    stdout: "pipe",
-    stderr: "pipe",
-    signal: AbortSignal.timeout(40_000),
-  })
-  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
-  const code = await p.exited
-  // 255 is ssh's own failure code; its stderr names the Mac's address, which must not reach the panel.
-  if (code === 255) throw new Error("Mac not reachable")
-  if (code !== 0) throw new Error(err.trim().split("\n").pop() || "CDP read failed")
-  const line = out.split("\n").findLast(l => l.trimStart().startsWith("{"))
-  if (!line) throw new Error("no JSON in the CDP output")
-  return JSON.parse(line) as DeepseekSummary
+// Runs the configured command; absent or failing commands give an error, never a throw.
+export async function readUsageCommand(cmd: string | undefined): Promise<{ value?: DeepseekUsage; error?: string }> {
+  const argv = cmd?.trim().split(/\s+/).filter(Boolean) ?? []
+  if (!argv.length) return { error: "no usage command set" }
+  try {
+    const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", signal: AbortSignal.timeout(120_000) })
+    const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited])
+    if (code !== 0) return { error: `command exited ${code}` }
+    const value = JSON.parse(out) as DeepseekUsage
+    if (!value || typeof value !== "object") return { error: "command printed no JSON object" }
+    return { value }
+  } catch (e) {
+    return { error: e instanceof SyntaxError ? "command printed invalid JSON" : "command failed" }
+  }
 }
 
-// A read costs a background tab in the owner's browser, so any result - success or failure - holds
-// for 10 minutes: a signed-out owner must not see a tab appear and vanish every minute.
-export async function deepseek(): Promise<{ value?: DeepseekSummary; error?: string }> {
+// Any result holds for 10 minutes, so a slow or failing command is not rerun every refresh.
+export async function deepseek(): Promise<{ value?: DeepseekUsage; error?: string }> {
   if (deepseekAt && Date.now() - deepseekAt < DEEPSEEK_MIN_MS) return deepseekLast
   deepseekAt = Date.now()
-  try {
-    return (deepseekLast = { value: await fetchDeepseek() })
-  } catch (e) {
-    return (deepseekLast = { error: (e as Error).message })
-  }
+  return (deepseekLast = await readUsageCommand(process.env.USAGE_TUI_DEEPSEEK_CMD))
 }
 
 // ---- DeepSeek reseller loader -------------------------------------------------
@@ -389,7 +306,7 @@ async function fetchReseller(): Promise<ResellerSpend> {
   return { spend }
 }
 
-// Each read is a paid 1-token chat call, so results (success or failure) are held for 10 minutes like the Dia read.
+// Each read is a paid 1-token chat call, so results (success or failure) are held for 10 minutes like the DeepSeek read.
 export async function reseller(): Promise<{ value?: ResellerSpend; error?: string }> {
   if (resellerAt && Date.now() - resellerAt < DEEPSEEK_MIN_MS) return resellerLast
   resellerAt = Date.now()

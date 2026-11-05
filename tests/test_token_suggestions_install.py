@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import jsonschema
 import pytest
 import yaml
+from retired_probe import GROUP_VARS, PROBE
 from test_token_suggestions import CUTOFF, ledger_fixture, snapshot_fixture
 from test_token_suggestions import report as report
 
@@ -77,9 +78,8 @@ def installation(tmp_path):
     playbook = tmp_path / "play.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "vars_files": [str(ROOT / "blueprint/ansible/group_vars/all" / f"{name}.yml")
-                       for name in ("base", "services", "token_suggestions")],
-        "tasks": [{"ansible.builtin.import_tasks":
+        "vars_files": GROUP_VARS,
+        "tasks": [PROBE, {"ansible.builtin.import_tasks":
                    str(ROOT / "blueprint/ansible/tasks/token_suggestions.yml")}],
         "handlers": [{"name": "Reload user units", "ansible.builtin.systemd_service": {
             "scope": "user", "daemon_reload": True},

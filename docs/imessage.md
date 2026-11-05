@@ -80,7 +80,7 @@ For each message from the owner, the service does these steps:
    The voice prompt uses the reply check's exact-output decision to select quotation or prose instructions before the model call.
    Prose instructions retain descriptions after source labels; quotation instructions retain the full source line, including bullets and emphasis.
    Exact quotations must match the source character for character, including indentation and whitespace.
-   The service sends accepted exact output as one bubble without trimming or splitting it; normal prose still uses paragraph bubbles.
+   The service sends accepted exact output without trimming it. Exact output over 1,000 characters splits at a line, then a sentence, then a word, and the service drops whitespace-only pieces. Normal prose still uses paragraph bubbles.
    The same rules apply when a request spans lines or combines several messages.
    Only supported formatting continuations, such as “One per line.”, retain exact-output permission.
    Any other unconsumed or conflicting instruction selects the normal prose checks.
@@ -287,14 +287,74 @@ Delayed handoffs follow the [deadline rules](#what-it-does).
 Set `crewship.imessage.desk_v2: true` in `.local/host.yml` to select the V2 front desk.
 The setting defaults to `false`; omit it or set it to `false` to keep the legacy loop for rollback.
 The service renders this setting as `FM_IMESSAGE_DESK_V2=true` or `false`.
+With the default `desk_session: true`, the desk runs as one long omp session instead of the loop below. See [Desk session](#desk-session).
 The code is `apps/imessage/front.ts`, `dispatch-policy.ts`, and `subagent.ts`.
 Deployment and a one-week trial require separate authorization.
-The front picks one of three results: social, dispatch, or relay.
+The front picks one of four results: social, status, dispatch, or relay.
 A purely social text gets one tapback and no text.
+Status answers a question about what the mates are doing. The desk reads the inbox status and each mate's last line from `state/<mate>.status`, and answers in one tool-free call, without the routing reply.
+It hands the text to Firstmate when the request is a decision, approval, money, deploy, public post or write, when the status text does not answer it, or when the call fails.
 Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
 Relay hands the work to the owning mate or to Firstmate. An invalid front answer fails closed to a Firstmate relay.
-Before relay or dispatch work starts, the desk sends one short reply that names where the request goes: Firstmate, the secondmate, or a worker. It does not complete the request or stop the typing indicator.
+Before relay or dispatch work starts, the desk sends no reply: no fixed receipt. The typing indicator stays on until the real answer goes out.
 The typing indicator stops when a newer text replaces the running job.
+
+### Token log
+
+Every desk and compaction call appends one line to `tokens.jsonl` in the state directory: `{ts, kind, model, input_tokens, output_tokens}`, with the counts the provider returned. `kind` is `front`, `status`, `desk`, `desk-session`, `voice`, or `compaction`.
+`tokens-daily.log` holds one line per day with the call count and the token totals. A call whose provider returns no counts adds no line. A failed write is logged and never fails the call.
+
+### Desk session
+
+With `desk_v2: true`, the desk is one long omp session by default.
+Set `crewship.imessage.desk_session: false` to roll back to the one-shot V2 loop above. The setting has no effect without `desk_v2`.
+The service renders this setting as `FM_IMESSAGE_DESK_SESSION=true` or `false`.
+The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actions.ts`, and `desk-delegate.ts`.
+
+- The bridge runs one persistent omp RPC child. The model and the reasoning level come from the desk settings.
+- The child keeps its session in the state directory. After a crash or a service restart, it resumes the same session with `--continue`.
+- When the child stops, the bridge starts it again with backoff: 1 second first, doubled each time, to a maximum of 60 seconds.
+- omp compacts the session at a fixed 80,000 tokens. The bridge sets this trigger in `compaction.modelThresholds`.
+- The memory view seeds a new session and a session that was just compacted.
+- The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool; it hands all writes to Firstmate.
+- The session acts through five action tools. The bridge checks each call before it does the action:
+  - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
+  - `tapback` reacts only when `deskMayAct` permits it.
+  - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
+  - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
+  - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
+- A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
+- The desk sends no fixed routing receipt bubble.
+- `message_mate` sends a listed mate a text of its own through `fm-send.sh` and does not end the turn; `mate_replies` reads that mate's newest status lines, where its marked replies arrive. `reply`, `handoff_main` and `delegate_task` take an optional `key`: a key already sent with the same content today is refused, so the desk does not repeat news the owner has.
+- `fleet_status` lists the second mates in `data/secondmates.md` with their scopes, so the session picks a real mate id for `relay_mate` and `delegate_task`.
+- A turn that ends with no action tool gets one reminder to use `reply`. If the model still completes in words, the bridge sends those words through the `reply` checks. Words that the checks refuse go to Firstmate. A turn that errors or aborts goes to Firstmate with no reminder. omp RPC cannot force a tool call, so the desk does not rely on one.
+- Each assistant message adds one `desk-session` line to the token log.
+- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each of the last 200 bubbles in `senders.json` in the state directory. When the transport gives the sent message an id, a reply that names that id gets that sender. Otherwise the start of the text decides, and only when every recent bubble with that start has the same sender. A desk bubble counts as a sender, so a text that a mate and the desk both sent goes to the desk. A home path or id in `data/secondmates.md` maps the sender to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or two senders with the same text and no id, gives the normal desk turn.
+
+If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
+
+#### Background tasks
+
+The desk can answer the owner at once while the work goes on in the background.
+The session calls `delegate_task` with the target `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
+The tool works like `reply`: it ends the turn, and the same checks apply to the reply text.
+The bridge sends the reply first and then starts one background job.
+
+- The bridge sends the owner's verbatim text to the target. The model never writes the task.
+- `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
+- A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target is refused before anything is sent.
+- `firstmate` gets an inbox note and a mate gets `fm-send.sh`. Both start with `[from captain via desk]`.
+- The task text ends with a path in `desk-tasks/` in the state directory. The target writes its answer for the owner to that file. This is the only answer channel.
+- The bridge also saves a task file with the same id in `desk-tasks/`. It holds the owner's text and the chat of the request.
+- The bridge waits for the answer file for 10 minutes. A restart ends the wait, but not the task.
+- A sweep checks `desk-tasks/` when the bridge starts and then every half second. It sends each answer that has no waiting job, for example an answer that came while the bridge was down or after the 10 minutes. It sends each answer once to the chat in its task file, then removes both files.
+- The answer goes through the same checks as `reply`: `clean.ts`, the raw status line check, and the secret filter. A refused answer is logged and not sent.
+- A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
+- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. Then the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that Firstmate must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back". If the inbox does not take the note, the bridge only logs it. A muted desk sends no text.
+- A task report is a late answer, so a new owner text does not cancel it. Only a muted desk does.
+- If a new owner text cancels the reply before it is sent, the bridge does not hand the first text to Firstmate again. The task already holds it, so Firstmate or the mate gets it once.
+
+The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
 
 ## Herdr status alerts
 
@@ -445,11 +505,11 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   A restart restores this cooldown before rebuilding unfinished nodes from the unchanged message log.
   Missing retry state needs no migration; the service creates it after the first failure.
 
-The memory and routing journal hold owner texts on the host in private state.
+The memory, routing journal, desk session, background tasks, and sender record hold owner texts on the host in private state.
 Deleting only `memory/` does not erase this history; routing recovery restores missing inbound records.
 For complete erasure, first finish every pending routing request, download, and outbox delivery.
 Then stop the bridge through the normal service procedure.
-Remove `memory/`, `routing.jsonl`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
+Remove `memory/`, `routing.jsonl`, `senders.json`, `desk-session/`, `desk-session.seen`, `desk-tasks/`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
 This also clears local routing deduplication, so retain transport seen records and do not replay old message history.
 Never erase these files while requests or uncertain sends still need recovery.
 
@@ -673,6 +733,7 @@ crewship:
     desk_model: claude-haiku-5-5    # optional; this is the default; mercury-3 with inception
     desk_reasoning: "off"           # optional; this is the default; the omp thinking level or Inception reasoning effort
     desk_v2: false                  # optional; select the V2 loop with true
+    desk_session: true              # optional; this is the default; with desk_v2, false keeps the one-shot V2 loop
     herdr_alerts: false             # optional; true alerts you from herdr agent status
     supervisor_model: ""            # optional; the model that runs Firstmate
 ```
@@ -705,6 +766,13 @@ See [Desk memory](#desk-memory) for compaction recovery after a restart.
 For this desk update, main must apply the reviewed source after merge and verify the installed bridge files.
 Pre-merge fixture checks do not complete this step.
 Run the following commands from the reviewed checkout as the bridge account, during an approved service window.
+First run the desk smoke test; it fails if the desk sends the routing receipt or an empty status answer, or if the front secret masker cannot load:
+
+```bash
+FM_DESK_SMOKE_STRICT=1 uv run pytest -q tests/test_imessage_smoke.py
+```
+
+Do not stop the service until it passes.
 Keep the existing unit, credentials, model settings, dependencies, and private state unchanged.
 Do not run a full host apply or restart another service.
 
@@ -733,9 +801,10 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 
 | Command | What it does |
 | --- | --- |
-| `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
+| `fm-imessage 'text'` | Queues a plain message using the [proactive routing rules](#choose-the-transports), even when his latest text is a thread reply. Without an argument, it reads the text from stdin. Paragraphs that a blank line separates become separate chat bubbles. The lines of one paragraph, for example a list or a schedule, stay in one bubble while it has 1,000 characters or fewer; a longer paragraph splits at a line, then a sentence, then a word, so that iMessage never cuts a bubble short. Before each bubble after the first, the typing bubble shows for 400 ms plus 25 ms for each character, 2.5 seconds at most. |
 | `fm-imessage --reply N 'text'` | Targets the owner's Nth most recent text (1 is the latest). The first bubble sends plain if the target is still the last bubble in its chat at delivery. It threads only when a later bubble exists from either side; tapbacks do not count. See [Reply separation](#how-the-relay-set-behaves) for checks across BlueBubbles relays. A transport that cannot thread sends plain. The command picks the target when it runs, and the queued message keeps that target's id through retries and restarts. The service keeps at most 10 texts received since it started that were the newest text at that time. A text that arrives late (see [Inbound](#choose-the-transports)) is not kept. If the Nth text is not kept, nothing is queued and the command exits non-zero. Any other value of N queues nothing and exits with code 2. |
 | `fm-imessage --no-thread 'text'` | Forces a plain send, even with `--reply N`, regardless of option order. |
+| `fm-imessage --key TOPIC 'text'` | Logs the text under a topic key. The same key with the same content on the same local day is skipped: nothing is queued and the command exits 0 with a `skipped` message. A second mate pushes a text to the owner with `FM_HOME=<mate home> fm-imessage --key TOPIC 'text'`; the sender log (`sent.jsonl` in the state directory) holds key, sender, content hash and time for every text sent by a mate, the desk or Firstmate. Unkeyed texts are logged and never skipped. A `(repost)` marker and spacing do not make a text new. With `--image`, the caption is logged and deduped; the photo is not. |
 | `fm-imessage --image PATH ['caption']` | Queues a photo (png, jpg or webp), then the caption as text bubbles. See [Send a photo](#send-a-photo). `--reply N` and `--no-thread` act on the photo as they act on the first bubble of a text. |
 | `fm-imessage --typing` | Shows the typing bubble on a best-effort basis. See [the typing lifecycle](#what-it-does) for expiry and cleanup. |
 | `fm-imessage --react '👍'` | Queues a tapback in the outbox, in order with the sends. The tapback goes on the text that was his latest when the command ran. |

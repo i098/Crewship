@@ -50,6 +50,15 @@
     - crewship_cfg.profiles.chat | bool
     - not ansible_check_mode or crewship_apt_indexes.matched > 0
 
+- name: Install the cookie encryption library for the Dia cookie sync
+  ansible.builtin.apt:
+    name: python3-cryptography
+    state: present
+  become: true
+  when:
+    - crewship_cfg.mac_ssh.dia_cookies | default(false) | bool
+    - not ansible_check_mode or crewship_apt_indexes.matched > 0
+
 - name: Install development prerequisites
   ansible.builtin.apt:
     name: "{{ crewship_development_packages }}"

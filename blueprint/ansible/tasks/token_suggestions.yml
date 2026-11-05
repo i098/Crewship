@@ -69,8 +69,9 @@
 
     - name: Remove token suggestion activation
       ansible.builtin.file:
-        path: "{{ crewship_user_units }}/timers.target.wants/crewship-token-suggestions.timer"
+        path: "{{ crewship_token_activation_path }}"
         state: absent
+      when: crewship_token_activation_path in crewship_retired_found.existing
       notify: reload user systemd
 
 - name: Install the configured manual token suggestion reader
@@ -168,27 +169,13 @@
           environment: "{{ crewship_user_systemd_env }}"
 
 - name: Remove unconfigured token suggestion assets without removing reports
-  when: not (crewship_token_suggestions_configured | bool)
+  when:
+    - not (crewship_token_suggestions_configured | bool)
+    - crewship_token_suggestion_paths | intersect(crewship_retired_found.existing) | length > 0
   block:
-    - name: Look for token suggestion assets
-      ansible.builtin.command:
-        argv: [python3, "{{ crewship_path_checker }}", "{{ crewship_token_suggestion_paths | to_json }}"]
-      vars: &crewship_token_suggestion_paths
-        crewship_token_suggestion_paths:
-          - "{{ crewship_user_units }}/crewship-token-suggestions.service"
-          - "{{ crewship_user_units }}/crewship-token-suggestions.timer"
-          - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
-          - "{{ crewship_token_suggestions_assets }}/token_suggestions_sources.py"
-          - "{{ crewship_token_suggestions_assets }}/usage.py"
-          - "{{ crewship_token_suggestions_assets }}/config.json"
-      register: crewship_token_suggestion_paths_found
-      changed_when: false
-      check_mode: false
-
     - name: Remove the present token suggestion assets
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      vars: *crewship_token_suggestion_paths
-      loop: "{{ crewship_token_suggestion_paths | select('in', (crewship_token_suggestion_paths_found.stdout | from_json).existing) | list }}"
+      loop: "{{ crewship_token_suggestion_paths | select('in', crewship_retired_found.existing) | list }}"
       notify: reload user systemd

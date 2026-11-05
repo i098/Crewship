@@ -1,0 +1,51 @@
+---
+# Assets that a later task removes when they exist (tasks/retired.yml probes
+# them once per apply; every removal below gates on that probe).
+crewship_bulk_defaults_path: "{{ crewship_cfg.home }}/.config/environment.d/60-crewship-bulk.conf"
+crewship_bashrc_path: "{{ crewship_cfg.home }}/.bashrc"
+crewship_bashrc_marker: "# BEGIN crewship managed environment"
+crewship_curses_path: "{{ crewship_local_bin }}/crewship-schedules"
+crewship_herdr_mosh_path: "{{ crewship_local_bin }}/herdr-mosh"
+crewship_global_herdr_mosh_path: "{{ crewship_global_bin }}/herdr-mosh"
+crewship_token_activation_path: "{{ crewship_user_units }}/timers.target.wants/crewship-token-suggestions.timer"
+crewship_board_sink_paths:
+  - "{{ crewship_user_units }}/default.target.wants/crewboard-github-sink.service"
+  - "{{ crewship_user_units }}/crewboard-github-sink.service"
+crewship_board_paths:
+  - "{{ crewship_user_units }}/default.target.wants/crewboard.service"
+  - "{{ crewship_user_units }}/crewboard.service"
+  - "{{ crewship_local_bin }}/crewboard"
+  - "{{ crewship_board_dir }}"
+crewship_gateway_paths:
+  - "{{ crewship_user_units }}/default.target.wants/crewship-tunnel.service"
+  - "{{ crewship_user_units }}/default.target.wants/crewship-gateway.service"
+  - "{{ crewship_user_units }}/crewship-tunnel.service"
+  - "{{ crewship_user_units }}/crewship-gateway.service"
+  - "{{ crewship_gateway_script }}"
+crewship_github_board_paths:
+  - "{{ crewship_user_units }}/timers.target.wants/github-board.timer"
+  - "{{ crewship_user_units }}/github-board.timer"
+  - "{{ crewship_user_units }}/github-board.service"
+  - "{{ crewship_local_bin }}/github-board.py"
+crewship_usage_paths:
+  - "{{ crewship_user_units }}/crewship-usage.timer"
+  - "{{ crewship_user_units }}/crewship-usage.service"
+  - "{{ crewship_usage_assets }}/usage.py"
+  - "{{ crewship_usage_assets }}/omp-usage.ts"
+  - "{{ crewship_usage_assets }}/dashboard.json"
+  - "{{ crewship_usage_assets }}/usage.patch"
+  - "{{ crewship_usage_assets }}/capture.env"
+crewship_token_suggestion_paths:
+  - "{{ crewship_user_units }}/crewship-token-suggestions.service"
+  - "{{ crewship_user_units }}/crewship-token-suggestions.timer"
+  - "{{ crewship_token_suggestions_assets }}/token_suggestions.py"
+  - "{{ crewship_token_suggestions_assets }}/token_suggestions_sources.py"
+  - "{{ crewship_token_suggestions_assets }}/usage.py"
+  - "{{ crewship_token_suggestions_assets }}/config.json"
+crewship_retired_paths: >-
+  {{ [crewship_bulk_defaults_path, crewship_bashrc_path, crewship_curses_path,
+      crewship_herdr_mosh_path, crewship_global_herdr_mosh_path, crewship_token_activation_path]
+     + crewship_board_sink_paths + crewship_board_paths + crewship_gateway_paths
+     + crewship_github_board_paths + crewship_usage_paths + crewship_token_suggestion_paths }}
+# `existing`: paths present; `containing`: existing files holding the marker.
+crewship_retired_found: "{{ crewship_retired_probe.stdout | from_json }}"

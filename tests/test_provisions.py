@@ -666,8 +666,10 @@ RELEASES = {
     "chojs23/concord": ("v9.9.9", "concord-x86_64-unknown-linux-gnu.tar.xz"),
     "gammons/slk": ("v9.9.9", "slk_9.9.9_linux_x86_64.tar.gz"),
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
+    "tembo/voxl": ("v9.9.9", "voxl-server-9.9.9.crate"),
     "jimididit/koncreet": ("v9.9.9", "koncreet.tar.gz"),
     "jj-vcs/jj": ("v9.9.9", "jj-v9.9.9-x86_64-unknown-linux-musl.tar.gz"),
+    "kunchenguid/runner-up": ("v9.9.9", "runner-up-v9.9.9-linux-amd64.tar.gz"),
     "googleworkspace/cli": (
         "v9.9.9",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
@@ -815,8 +817,10 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "concord",
         "slk",
         "obscura",
+        "voxl",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
     for tool in (
@@ -831,8 +835,10 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "concord",
         "slk",
         "obscura",
+        "voxl",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["version"] == "9.9.9"
     gws = latest["gws"]["assets"]["linux-x86_64"]
@@ -1025,6 +1031,17 @@ def test_pyrefly_musl_release_installs_verified_tar_and_is_idempotent(
     assert not installer.install_asset(tmp_path, "pyrefly", spec, key)
 
 
+def test_pyrefly_release_without_sha256_file_uses_the_github_digest(monkeypatch):
+    name = "pyrefly-linux-x86_64-musl.tar.gz"
+    monkeypatch.setitem(RELEASES, "facebook/pyrefly", ("9.9.9", name))
+    upstream(monkeypatch)
+    spec = installer.resolve_latest("linux-x86_64", {"pyrefly"})["pyrefly"]
+    assert spec["assets"]["linux-x86_64"]["sha256"] == "a" * 64
+    upstream(monkeypatch, unverified="facebook/pyrefly")
+    with pytest.raises(Exception, match="SHA-256"):
+        installer.resolve_latest("linux-x86_64", {"pyrefly"})
+
+
 def test_no_mistakes_follows_the_prerelease_channel_and_skips_drafts(monkeypatch):
     seen = []
     upstream(monkeypatch, seen=seen)
@@ -1165,6 +1182,8 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
         (["--tools", "herdr,node"], {"herdr", "node"}),
         (["--tools", "uv", "--development"], {"uv", "rustup-init"}),
         (["--tools", "uv", "--sgrep"], {"uv", "rustup-init"}),
+        (["--tools", "uv", "--rust"], {"uv", "rustup-init"}),
+        (["--tools", "uv", "--also", "voxl"], {"uv", "voxl"}),
         (["--tools", "uv", "--npm"], {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST}),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
         (["--tools", "uv", "--also", "forgejo"], {"uv", "forgejo"}),

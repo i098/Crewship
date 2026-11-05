@@ -30,7 +30,7 @@ Follow [Project databases](project-databases.md) for optional per-project databa
 | Item | How it moves |
 | --- | --- |
 | omp, gh and other CLI logins | Sign in again on the new host: [Sign in](omp.md#sign-in), `gh auth login`. Never copy a credential store ([Security](security.md)). |
-| Fleet-browser web sessions | Sign in again on the new host through the fleet-browser VNC tier: run `~/oss-fleet/browsers/fleet-browser up vnc`, then open noVNC at `http://127.0.0.1:6909/vnc.html?autoconnect=1` over an SSH tunnel (`ssh -L 6909:127.0.0.1:6909 <host>`). `cookie-sync` then shares that session with every tier ([Browser ladder](fleet-guards.md#browser-ladder)). Sign in to Google by hand in the VNC tier; `cookie-sync` keeps Google cookies in that tier only. |
+| Fleet-browser web sessions | Sign in again on the new host through the fleet-browser voxl tier: run `~/oss-fleet/browsers/fleet-browser up voxl`, then open the `view:` link it prints over an SSH tunnel (`ssh -L 6909:127.0.0.1:6909 <host>`). `cookie-sync` then shares that session with every tier ([Browser ladder](fleet-guards.md#browser-ladder)). Sign in to Google by hand in the voxl tier; `cookie-sync` keeps Google cookies in that tier only. |
 | Each home's `.env` | Enter it by hand on the new host, in a file with mode `600`. |
 | Project clones with unpushed commits | List them on the old host with the loop below. Push each branch to its fork, except branches the [Warnings](#warnings) exclude. |
 | `data/` and `config/` of the main home (`~/Dev/firstmate`) | `rsync -a` over SSH after `./ship.sh launch`, as the first pass of the cutover sync ([On a new host](security.md#on-a-new-host)). Add `--exclude secondmates.md`: `data/secondmates.md` holds each host's own secondmate home paths, and only that host's provisioning writes it. The next apply rewrites the seeded names in `blueprint/config/` from this repository ([Seeded Firstmate and OMP configuration](agents/architecture.md#seeded-firstmate-and-omp-configuration)). Never copy any home's `state/`: its records name host-bound Herdr panes, pids and sockets, so [Cutover](#cutover) step 2 empties it of tasks first. |
@@ -63,7 +63,7 @@ CI runs the `agent-gate` check in `tests/container-smoke.sh` for the gate agent,
 
 | Check | Command on the new host | Pass |
 | --- | --- | --- |
-| The VNC browser tier finds a Chrome binary | `test -x /usr/bin/google-chrome` | Exit `0`. |
+| The voxl browser tier finds a Chrome binary | `test -x /usr/bin/google-chrome` | Exit `0`. |
 | Crew advisor calls skip the server-side fallback | `grep -A2 '^providers:' ~/Dev/firstmate/config/omp-crew-overlay.yml` | `serverSideFallback: false` under `anthropic:`. |
 | ponytail-review runs | `git -C <Crewship checkout> diff HEAD~1 \| ponytail-review --stdin; echo $?` | Exit `0` or `2`, never `1`. |
 | no-mistakes gate agent | `no-mistakes --version`, `no-mistakes doctor`, `~/.no-mistakes/omp-as-pi/omp-as-pi --omp-as-pi-check`, `jq -r .agents.omp.command ~/.acpx/config.json`, `grep -c '^acp_registry_overrides' ~/.no-mistakes/config.yaml` | The version in `~/.local/share/crewship/resolved.json`, doctor reports `pi` runnable (or `acp:omp` when the apply kept it), `omp-as-pi: ok`, `omp acp`, `0`. |

@@ -1,6 +1,6 @@
 ---
 name: fleet-browser-default-tier
-description: "Browser work uses the shared fleet ladder (obscura -> chrome -> vnc), never a private per-lane Chrome profile or a DISPLAY probe"
+description: "Browser work uses the shared fleet ladder (obscura -> chrome -> voxl), never a private per-lane Chrome profile or a DISPLAY probe"
 condition: ["--user-data-dir=(?!\\S*/\\.fleet-browser/|/tmp/puppeteer)", "DISPLAY=:(?!9\\b)\\d", "fm-desktop", "\\.vnc-chrome-profile", "(?:pgrep|ps -eo)[^\\n]{0,80}chrom[^\\n]{0,200}DISPLAY", "installed browsers[\\s\\S]{0,400}google-chrome-stable"]
 scope: "tool:bash"
 ---
@@ -12,11 +12,11 @@ The box runs ONE browser ladder, already wired into your shell:
 | --- | --- | --- |
 | **obscura** (default) | `CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222` | All normal browsing, screenshots, clicks. Rust engine, ~5x less RAM than Chrome. |
 | **chrome** (fallback) | `fleet-browser up chrome` -> `:9522` | Pixel-critical before/after evidence, or a page Obscura misrenders. |
-| **vnc** (last resort) | `fleet-browser up vnc` -> `:9523`, noVNC `:6909` | A human must see or drive it: OAuth consent, captcha, native dialog. |
+| **voxl** (last resort) | `fleet-browser up voxl` -> `:9523`, voxl viewer `:6909` | A human must see or drive it: OAuth consent, captcha, native dialog. |
 
 Do NOT:
 - launch Chrome/Chromium with your own `--user-data-dir` (the regex above allows the fleet tiers' own profiles and puppeteer temp dirs only);
-- probe for a desktop on any `DISPLAY` other than `:9` — only `:9` (the on-demand vnc tier) exists;
+- probe for a desktop on any `DISPLAY` other than `:9` — only `:9` (the on-demand voxl tier) exists;
 - enumerate `google-chrome`/`chromium` on `PATH` or look for a default Chrome profile — the host holds no such profile by design, an empty result is a false negative;
 - copy, prune, or hand-edit the shared session jar.
 

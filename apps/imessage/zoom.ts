@@ -9,12 +9,12 @@ import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-sc
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern, resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 import { isReadableUrlPath } from "@oh-my-pi/pi-tui/tools/read";
-import { Budget, load, zoom } from "./memory.ts";
+import { Budget, clip, load, ZOOM_MAX, zoom } from "./memory.ts";
 import { canonicalWritePath } from "./desk.ts";
 
 // The slice of omp's ExtensionAPI this file uses.
 type Zod = { object(shape: Record<string, unknown>): unknown; number(): { describe(text: string): unknown } };
-type DeskMessage = { role: string; content: string | { type: string; text?: string }[]; toolCallId?: string; toolName?: string; isError?: boolean };
+type DeskMessage = { role: string; content: string | { type: string; text?: string }[]; toolCallId?: string; toolName?: string; isError?: boolean; model?: string; usage?: { input?: number; output?: number } };
 export default function (pi: {
   zod: Zod;
   registerTool(tool: unknown): void;
@@ -46,10 +46,14 @@ export default function (pi: {
     const tools = Object.fromEntries(output.filter((message) => message.role === "toolResult" && !message.isError)
       .map((message) => [message.toolCallId, { name: message.toolName, text: message.text }]));
     const drafted = output.findLast((message) => message.role === "assistant")?.text ?? "";
-    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools, question: redact(process.env.FM_DESK_QUESTION ?? "") })}\n`);
+    const calls = messages.filter((message) => message.role === "assistant");
+    const usage = { input: calls.reduce((sum, call) => sum + (call.usage?.input ?? 0), 0), output: calls.reduce((sum, call) => sum + (call.usage?.output ?? 0), 0) };
+    const model = calls.findLast((call) => call.model)?.model;
+    process.stdout.write(`${JSON.stringify({ type: "desk_result", drafted, tools, question: redact(process.env.FM_DESK_QUESTION ?? ""), usage, model })}\n`);
   });
-  // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it.
-  const budget = new Budget(Number(process.env.FM_DESK_SPENT || Infinity));
+  // A missing FM_DESK_SPENT counts as a full call: the first zoom ends it. The long desk session
+  // (FM_DESK_SESSION=1) has no per-call budget: omp compacts its context, and each result is still clipped.
+  const budget = process.env.FM_DESK_SESSION === "1" ? undefined : new Budget(Number(process.env.FM_DESK_SPENT || Infinity));
   pi.registerTool({
     approval: "read",
     name: "zoom",
@@ -58,7 +62,7 @@ export default function (pi: {
     parameters: z.object({ id: z.number().describe("the line's first message"), n: z.number().describe("how many messages the line covers") }),
     async execute(_call: string, p: { id: number; n: number }) {
       const { msgs, nodes } = load(process.env.FM_DESK_MEMORY ?? "");
-      const text = budget.take(zoom(msgs, nodes, p.id, p.n));
+      const text = budget ? budget.take(zoom(msgs, nodes, p.id, p.n)) : clip(zoom(msgs, nodes, p.id, p.n), ZOOM_MAX);
       // Even the refusal would pass the ceiling: end the call before its next request. The desk stays quiet.
       if (text === undefined) process.exit(1);
       return { content: [{ type: "text", text }] };

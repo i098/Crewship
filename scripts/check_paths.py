@@ -9,12 +9,14 @@ import pwd
 import stat
 
 
-def classify_paths(paths, *, include_directories=False, ownership=None):
+def classify_paths(paths, *, include_directories=False, ownership=None, containing=None):
     result = {"existing": [], "missing": []}
     if include_directories:
         result["directories"] = []
     if ownership is not None:
         result["owned_directories"] = []
+    if containing is not None:
+        result["containing"] = []
     for path in paths:
         try:
             info = os.lstat(path)
@@ -26,7 +28,18 @@ def classify_paths(paths, *, include_directories=False, ownership=None):
                 result["directories"].append(path)
             if ownership is not None and stat.S_ISDIR(info.st_mode) and (info.st_uid, info.st_gid) == ownership:
                 result["owned_directories"].append(path)
+            if containing is not None and _holds(path, containing):
+                result["containing"].append(path)
     return result
+
+
+def _holds(path, text):
+    # Follows links: an editor changes the file a link points to.
+    try:
+        with open(path, "rb") as handle:
+            return text.encode() in handle.read()
+    except OSError:
+        return False
 
 
 def main():
@@ -39,6 +52,10 @@ def main():
         "--owned-by", nargs=2, metavar=("USER", "GROUP"),
         help="include real directories with this owner and group",
     )
+    parser.add_argument(
+        "--containing", metavar="TEXT",
+        help="include existing readable files that hold TEXT",
+    )
     args = parser.parse_args()
     if not isinstance(args.paths, list) or not all(isinstance(path, str) for path in args.paths):
         parser.error("paths must be a JSON array of strings")
@@ -47,7 +64,8 @@ def main():
             (pwd.getpwnam(args.owned_by[0]).pw_uid, grp.getgrnam(args.owned_by[1]).gr_gid)
             if args.owned_by else None
         )
-        result = classify_paths(args.paths, include_directories=args.directories, ownership=ownership)
+        result = classify_paths(args.paths, include_directories=args.directories, ownership=ownership,
+                                containing=args.containing)
     except (KeyError, OSError) as error:
         parser.exit(1, f"check_paths: {error}\n")
     print(json.dumps(result))

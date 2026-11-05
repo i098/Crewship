@@ -197,13 +197,13 @@ only on a run that includes the `herdr` tag, for example
 | --- | --- | --- | --- |
 | 1 `obscura` | `127.0.0.1:9222` | Yes (`fleet-browser-obscura.service`) | Default for everything: clicks, screenshots, screencast. ~25 MB idle; ~5x less RAM per page than Chrome. |
 | 2 `chrome` | `127.0.0.1:9522` | On demand (`fleet-browser up chrome`) | Obscura misrenders the page, a site blocks it, or the maintainer needs pixel-exact before/after evidence. Headless Chromium, persistent profile. |
-| 3 `vnc` | `127.0.0.1:9523`, noVNC `http://127.0.0.1:6909/vnc.html` | On demand (`fleet-browser up vnc`) | A human must see or drive the browser: OAuth consent, second factors, captchas, native dialogs, sites such as Google that refuse any automated browser. TigerVNC display `:9` + headed Chromium. |
+| 3 `voxl` | `127.0.0.1:9523`, [voxl](https://github.com/tembo/voxl) viewer `http://127.0.0.1:6909/` | On demand (`fleet-browser up voxl`) | A human must see or drive the browser: OAuth consent, second factors, captchas, native dialogs, sites such as Google that refuse any automated browser. Xvfb display `:9` + headed Chromium. |
 
 Move down one tier only when the tier above cannot do the job; move back to
 `obscura` for the next task. `fleet-browser-gc.timer` (every 5 min) stops tiers
 2 and 3 after 30 idle minutes (`FLEET_BROWSER_IDLE_MIN`, no CDP client
-connected). Tier 3 needs TigerVNC and noVNC, which the ladder installs from
-Ubuntu (`ConditionPathExists=/usr/bin/tigervncserver`). Tiers 2 and 3 need a
+connected). Tier 3 needs voxl and Xvfb. The ladder builds voxl from the latest release's crate, verified against its published SHA-256, and installs Xvfb from
+Ubuntu (`ConditionPathExists=/usr/bin/Xvfb`). Tiers 2 and 3 need a
 Chrome/Chromium binary (`FLEET_CHROME_BIN`, Google Chrome, Chromium, or a
 Playwright Chromium).
 
@@ -224,14 +224,14 @@ See [Bounded general syslog](configuration.md#bounded-general-syslog) for file s
 All three tiers share one session. `cookie-sync.ts` keeps a canonical jar at
 `~/.fleet-browser/cookies.json` and converges every live tier to it over CDP.
 `fleet-browser-sync.timer` runs it every 2 minutes, and
-`fleet-browser up chrome|vnc` runs it before returning (`up obscura` returns as
+`fleet-browser up chrome|voxl` runs it before returning (`up obscura` returns as
 soon as the tier answers, without a converge). So a login made in any tier is
 present in every tier within one sync. Cookies are synced; localStorage is
 engine-local and is not. Google cookies (google.com, Google's country domains,
 youtube.com) are the exception: each stays in the tier that set it. Google
 treats one session replayed from several browsers as theft and revokes it, so
-a Google sign-in made by hand in the `vnc` tier stays in `vnc`. A Google cookie
-that another tier holds with the same value as `vnc` is deleted from that tier.
+a Google sign-in made by hand in the `voxl` tier stays in `voxl`. A Google cookie
+that another tier holds with the same value as `voxl` is deleted from that tier.
 Obscura ignores cookie deletes over CDP, so `fleet-browser sync` stops
 `obscura`, rewrites its session file, and starts it again, only when no lane is
 connected to it.
@@ -241,10 +241,10 @@ private `--user-data-dir`. A private profile has none of the fleet's logins and
 is outside the sync. Use the tier that is already running, or bring one up with
 `fleet-browser up`.
 
-The ladder's `vnc` tier is not the `desktop` profile's operator desktop (XFCE +
+The ladder's `voxl` tier is not the `desktop` profile's operator desktop (XFCE +
 TigerVNC, noVNC on `127.0.0.1:6080`, profile `~/.vnc-chrome-profile`, see
 [Desktop access](recovery.md#desktop-access)). The desktop is a human
-workstation; the `vnc` tier is a fleet browser with a human window into it.
+workstation; the `voxl` tier is a fleet browser with a human window into it.
 
 ### Testing a tier before using it
 
@@ -261,13 +261,13 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
    ```bash
    curl -s -m 3 http://127.0.0.1:9222/json/version    # obscura
    curl -s -m 3 http://127.0.0.1:9522/json/version    # chrome
-   curl -s -m 3 http://127.0.0.1:9523/json/version    # vnc
+   curl -s -m 3 http://127.0.0.1:9523/json/version    # voxl
    ```
 
    Healthy: exit 0 and a JSON object with `"Browser"`, `"Protocol-Version": "1.3"`
    and a `"webSocketDebuggerUrl"` on the same port. Anything else (empty output,
    exit 7 or 28, HTML) means the tier is down. Run `fleet-browser up chrome` or
-   `fleet-browser up vnc` (waits until the probe answers), or for `obscura` run
+   `fleet-browser up voxl` (waits until the probe answers), or for `obscura` run
    `systemctl --user start fleet-browser-obscura.service`.
 
 2. Check the whole ladder at once. `STATE` is `up`/`down`, `CLIENTS` counts open
@@ -287,14 +287,33 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
    ```
 
    A site still asking for a login on every tier means nobody has signed in yet.
-   Bring up `vnc`, sign in through noVNC (`ssh -L 6909:127.0.0.1:6909 <host>`,
-   then `http://127.0.0.1:6909/vnc.html?autoconnect=1`), and the next sync
-   carries the session to `obscura` and `chrome`. A Google sign-in stays in `vnc`.
-   On a tailnet host, publish noVNC to the tailnet once, never with Funnel:
+   Bring up `voxl`, sign in through its viewer (`ssh -L 6909:127.0.0.1:6909 <host>`,
+   then the `view:` link `fleet-browser up voxl` prints, and enter the password from `~/.fleet-browser/voxl-password`), and the next sync
+   carries the session to `obscura` and `chrome`. A Google sign-in stays in `voxl`.
+   On a tailnet host, publish voxl to the tailnet once, never with Funnel:
    `sudo tailscale serve --bg --https=6909 http://127.0.0.1:6909`. Then open
-   `https://<host>.<tailnet>.ts.net:6909/vnc.html?autoconnect=1`. The VNC
-   display has no password, so every tailnet device that the tailnet policy
-   lets reach that port can drive the signed-in browser.
+   `https://<host>.<tailnet>.ts.net:6909/` and enter the password kept in
+   `~/.fleet-browser/voxl-password` (the command never prints it). voxl needs HTTPS or localhost for
+   video, which `tailscale serve` provides. The password gates every tailnet
+   device that the tailnet policy lets reach that port.
+
+### api-anything
+
+[api-anything](https://github.com/goodnight000/api-anything) turns a site into plain HTTP calls: open the site once, call it later with the saved login and no browser.
+The `agents` profile installs it (`api-anything` on `PATH`), the MCP server in `~/.omp/agent/mcp.json`, and the skill for omp and Claude Code.
+Its catalog and sessions live in `~/.local/state/crewship/api-anything` (`API_ANYTHING_HOME`).
+Sharing is off: `settings.json` is written once with `share: false` and never rewritten, so only reading the public catalog goes off the host.
+`API_ANYTHING_BROWSER_ROOTS=[]` stops it from reading any browser profile.
+Learning a new site (`api-anything-fleet learn ...`) launches a headless Chromium, the one the fleet uses, with its own profile in the state directory.
+
+The fleet browser supplies the login. Sign in to a site in any tier, then:
+
+```bash
+api-anything-fleet login <site|url>            # import the shared jar as the site's saved login
+api-anything-fleet call <site> <op> key=value  # on class "auth": renew from the jar once, retry once
+```
+
+`api-anything-fleet` (`blueprint/fleet/browsers/api-anything-fleet`) never edits the jar. Installer: `scripts/api_anything.py`.
 
 ## Devtools-bridge reaper
 

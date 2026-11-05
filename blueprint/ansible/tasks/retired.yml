@@ -1,0 +1,13 @@
+---
+# One probe for every retired or switched-off asset; the removal tasks gate on it.
+- name: Look for retired and switched-off assets
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_path_checker }}"
+      - "{{ crewship_retired_paths | to_json }}"
+      - --containing
+      - "{{ crewship_bashrc_marker }}"
+  register: crewship_retired_probe
+  changed_when: false
+  check_mode: false

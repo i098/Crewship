@@ -1,0 +1,26 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=runner-up coordinator of %i: one fresh container per GitHub Actions job (Crewship managed)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+# The shim directory comes first so that every `docker run` of a job starts in {{ crewship_runner_up_slice }}.
+Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
+Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
+Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
+# The first start builds the job image when the host does not have it yet.
+ExecStartPre={{ crewship_runner_up_maintain }} image --ensure
+ExecStart={{ crewship_runner_up_bin }} serve --config {{ crewship_runner_up_config_dir }}/%i.json
+TimeoutStartSec=3600
+Restart=on-failure
+RestartSec=10
+# Stop only the coordinator: the place runners of running jobs carry on.
+KillMode=process
+Nice={{ crewship_runner_up_nice }}
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=default.target

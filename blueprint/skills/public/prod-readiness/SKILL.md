@@ -93,9 +93,9 @@ Verify: Send boundary and oversized files, including without Content-Length; cit
 Verdict: Pass if limits hold before unbounded processing or storage; not applicable only if no upload path exists.
 
 ## 16. Caching repeated requests
-Check: Reuse safe repeated reads with bounded freshness, invalidation, and isolation between users.
-Verify: Repeat a read, change its source, and read as another user; cite hits, source-call counts, and fresh isolated results.
-Verdict: Pass if repeated work falls without stale or cross-user results; not applicable only if no read is safely reusable, with rationale.
+Check: Reuse safe repeated reads with bounded freshness, invalidation, and isolation between users. For data that may be a few seconds old, serve a bounded-stale copy while refreshing in the background; never for exact data.
+Verify: Repeat a read, change its source, and read as another user; for stale-while-revalidate, expire an entry, read it, and cite that the old copy returned at once and the next read is fresh. Cite hits, source-call counts, and fresh isolated results.
+Verdict: Pass if repeated work falls without results staler than the declared bound or cross-user results; not applicable only if no read is safely reusable, with rationale.
 
 ## 17. Uptime monitoring
 Check: Monitor the public service path externally and route failures to a responsible responder.

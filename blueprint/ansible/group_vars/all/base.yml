@@ -63,8 +63,13 @@ crewship_chrome_devtools_mcp_path: "{{ crewship_share_dir }}/chrome-devtools-mcp
 # provides the MCP entrypoint is installed by `--npm`. Nothing here may be a
 # process-wide runtime limit (NODE_OPTIONS, BUN_OPTIONS): it would also reach
 # the chrome-devtools-axi bridge, chrome-devtools-mcp and acpx.
+# api-anything keeps its catalog and sessions in one private directory and reads no browser
+# profile (scripts/api_anything.py); the empty root list is the same value its MCP entry carries.
+crewship_api_anything_home: "{{ crewship_cfg.home }}/.local/state/crewship/api-anything"
 crewship_managed_shell_env:
   CHROME_DEVTOOLS_AXI_MCP_PATH: "{{ crewship_chrome_devtools_mcp_path }}"
+  API_ANYTHING_HOME: "{{ crewship_api_anything_home }}"
+  API_ANYTHING_BROWSER_ROOTS: "[]"
 crewship_trust_env:
   SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
   REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
@@ -131,3 +136,5 @@ crewship_vnc_dir: "{{ crewship_cfg.home }}/.vnc"
 crewship_vnc_chrome_profile: "{{ crewship_cfg.home }}/.vnc-chrome-profile"
 # Generated on the host for `ssh mac` (tasks/mac_ssh.yml), never copied.
 crewship_mac_ssh_key: "{{ crewship_cfg.home }}/.ssh/id_ed25519_mac"
+# Optional Dia cookie sync script (tasks/dia_cookies.yml); its store and key stay mode 0600.
+crewship_dia_cookies_bin: "{{ crewship_local_bin }}/dia-cookies"

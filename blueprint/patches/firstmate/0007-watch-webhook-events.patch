@@ -1,0 +1,137 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Crewship <noreply@example.invalid>
+Date: Sun, 1 Nov 2026 03:00:00 +0000
+Subject: [PATCH] feat(watch): read GitHub webhook events before polling the
+ API
+
+The merged-PR poll first looks for merged/<owner>__<repo>__<number> that a
+webhook receiver wrote. Only then does it read the API, once per
+FM_GH_FALLBACK_POLL seconds per pull request (default 600). rate_limit is read
+at most once a minute; below 20 percent remaining the interval is four times
+longer, and below 5 percent no read is made. FM_GH_EVENTS_DIR moves the event
+directory (default $XDG_STATE_HOME or ~/.local/state, plus crewship/gh-webhook).
+---
+ bin/fm-pr-poll.sh                  | 40 +++++++++++++++++++++++++
+ tests/fm-pr-check-security.test.sh |  2 ++
+ tests/fm-pr-poll-webhook.test.sh   | 48 ++++++++++++++++++++++++++++++
+ 3 files changed, 90 insertions(+)
+ create mode 100755 tests/fm-pr-poll-webhook.test.sh
+
+diff --git a/bin/fm-pr-poll.sh b/bin/fm-pr-poll.sh
+index 0eee1795..9f595188 100755
+--- a/bin/fm-pr-poll.sh
++++ b/bin/fm-pr-poll.sh
+@@ -73,6 +73,46 @@ case "$provider" in
+       .|..|*[!A-Za-z0-9._-]*) exit 0 ;;
+     esac
+     [ "$url" = "https://$host/$owner/$repo/pull/$number" ] || exit 0
++    # Webhook events first: the receiver in Crewship (fm-gh-webhook) writes
++    # merged/<owner>__<repo>__<number> for a verified merged pull_request post.
++    # Only then does the API get read, as a slow fallback, so many homes on one
++    # account do not drain the shared REST quota. FM_GH_FALLBACK_POLL is the
++    # seconds between reads of one pull request (default 600). rate_limit does
++    # not count against the quota; it is read at most once a minute for all
++    # tasks. Below 20 percent remaining the interval is four times longer, and
++    # below 5 percent no read is made. Nothing here can print merged except an
++    # event file or a MERGED state from the API.
++    ev=${FM_GH_EVENTS_DIR:-${XDG_STATE_HOME:-${HOME:-/nonexistent}/.local/state}/crewship/gh-webhook}
++    key=${owner}__${repo}__${number}
++    if [ "$host" = github.com ] && [ -f "$ev/merged/$key" ]; then
++      printf '%s\n' merged
++      exit 0
++    fi
++    interval=${FM_GH_FALLBACK_POLL:-600}
++    case "$interval" in
++      ''|*[!0-9]*) interval=600 ;;
++    esac
++    if mkdir -p "$ev/poll" 2>/dev/null; then
++      rate=$ev/rate
++      if [ -z "$(find "$rate" -newermt '-60 seconds' 2>/dev/null)" ]; then
++        GH_HOST=$host gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit)"' \
++          > "$rate.$$" 2>/dev/null && mv -f "$rate.$$" "$rate" 2>/dev/null || rm -f "$rate.$$"
++      fi
++      remaining= limit=
++      if [ -n "$(find "$rate" -newermt '-600 seconds' 2>/dev/null)" ]; then
++        { read -r remaining limit < "$rate"; } 2>/dev/null
++      fi
++      case "$remaining$limit" in
++        ''|*[!0-9]*) ;;
++        *)
++          [ $((remaining * 100)) -ge $((limit * 5)) ] || exit 0
++          [ $((remaining * 100)) -ge $((limit * 20)) ] || interval=$((interval * 4))
++          ;;
++      esac
++      stamp=$ev/poll/$key
++      [ -z "$(find "$stamp" -newermt "-$interval seconds" 2>/dev/null)" ] || exit 0
++      : > "$stamp" 2>/dev/null
++    fi
+     state=$(GH_HOST=$host gh pr view "$url" --json state -q .state 2>/dev/null) || exit 0
+     [ "$state" = MERGED ] && printf '%s\n' merged
+     ;;
+diff --git a/tests/fm-pr-check-security.test.sh b/tests/fm-pr-check-security.test.sh
+index 8d2aecd5..e18a1bac 100755
+--- a/tests/fm-pr-check-security.test.sh
++++ b/tests/fm-pr-check-security.test.sh
+@@ -17,6 +17,8 @@ WATCH="$ROOT/bin/fm-watch.sh"
+ TEARDOWN="$ROOT/bin/fm-teardown.sh"
+ REGISTER="$ROOT/bin/fm-check-register.sh"
+ TMP_ROOT=$(fm_test_tmproot fm-pr-check-security)
++# The merged poll reads webhook events and throttles its API fallback; keep both in this suite.
++export FM_GH_EVENTS_DIR="$TMP_ROOT/gh-events" FM_GH_FALLBACK_POLL=0
+ fm_git_identity fmtest fmtest@example.invalid
+ BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+ REAL_CP=$(command -v cp)
+diff --git a/tests/fm-pr-poll-webhook.test.sh b/tests/fm-pr-poll-webhook.test.sh
+new file mode 100755
+index 00000000..a7e9bdeb
+--- /dev/null
++++ b/tests/fm-pr-poll-webhook.test.sh
+@@ -0,0 +1,48 @@
++#!/usr/bin/env bash
++# Webhook-first merged poll: an event file wins with no API read, the fallback
++# read is throttled per pull request, and the rate_limit guard stretches the
++# interval below 20 percent remaining and stops below 5 percent.
++set -u
++ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
++POLL="$ROOT/bin/fm-pr-poll.sh"
++TMP=$(mktemp -d)
++trap 'rm -rf "$TMP"' EXIT
++mkdir "$TMP/bin"
++# Fake gh: counts pr view calls, answers rate_limit from $TMP/rate-answer.
++cat > "$TMP/bin/gh" <<'G'
++#!/usr/bin/env bash
++case "$1" in
++  api) cat "$TMP/rate-answer" ;;
++  pr) echo x >> "$TMP/pr-views"; echo MERGED ;;
++esac
++G
++chmod +x "$TMP/bin/gh"
++export TMP PATH="$TMP/bin:$PATH" FM_GH_EVENTS_DIR="$TMP/ev"
++fails=0
++check() { # <name> <expected> <actual>
++  if [ "$2" = "$3" ]; then echo "ok - $1"; else echo "not ok - $1 (want '$2', got '$3')"; fails=$((fails + 1)); fi
++}
++run() { "$POLL" --validated github https://github.com/o/r/pull/"$1" github.com o/r "$1"; }
++views() { [ -f "$TMP/pr-views" ] && wc -l < "$TMP/pr-views" || echo 0; }
++reset() { rm -rf "$TMP/ev" "$TMP/pr-views"; }
++
++reset; echo "4000 5000" > "$TMP/rate-answer"
++check "first poll reads the API and reports merged" merged "$(run 1)"
++check "second poll inside the interval makes no API read" "1 " "$(views) $(run 1)"
++
++reset; echo "4000 5000" > "$TMP/rate-answer"; mkdir -p "$TMP/ev/merged"; : > "$TMP/ev/merged/o__r__2"
++check "webhook marker reports merged with no API read" "merged 0" "$(run 2) $(views)"
++
++reset; echo "4000 5000" > "$TMP/rate-answer"; run 3 >/dev/null; touch -d '-700 seconds' "$TMP/ev/poll/o__r__3"
++run 3 >/dev/null; check "poll older than the interval reads again" 2 "$(views)"
++
++reset; echo "800 5000" > "$TMP/rate-answer"; run 4 >/dev/null; touch -d '-700 seconds' "$TMP/ev/poll/o__r__4"
++check "below 20 percent the 600 s interval is stretched" "1" "$(run 4 >/dev/null; views)"
++
++reset; echo "200 5000" > "$TMP/rate-answer"
++check "below 5 percent nothing is read" "0" "$(run 5 >/dev/null; views)"
++
++reset; echo "4000 5000" > "$TMP/rate-answer"; FM_GH_FALLBACK_POLL=5 run 6 >/dev/null; touch -d '-6 seconds' "$TMP/ev/poll/o__r__6"
++FM_GH_FALLBACK_POLL=5 run 6 >/dev/null; check "FM_GH_FALLBACK_POLL sets the interval" 2 "$(views)"
++
++[ "$fails" -eq 0 ]

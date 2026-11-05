@@ -41,7 +41,7 @@ test("discover finds each browser once with kind, port, memory and pages", async
   expect(bs.map(b => b.pid).sort()).toEqual([100, 200, 300, 400, 600, null].sort())
   expect(by(100)).toMatchObject({ name: "fleet obscura", kind: "headless", port: 9222, rssKb: 30000, pages: [page("o1")] })
   expect(by(200)).toMatchObject({ name: "fleet chrome", kind: "headless", port: 9522, rssKb: 120000, ageSec: 120 })
-  expect(by(300)).toMatchObject({ name: "fleet vnc (noVNC)", kind: "headed", port: 9523, viewer: "https://viewer.test/vnc.html" })
+  expect(by(300)).toMatchObject({ name: "fleet voxl", kind: "headed", port: 9523, viewer: "https://viewer.test/vnc.html" })
   // Port 0 is resolved from the listening socket the browser owns.
   expect(by(400)).toMatchObject({ name: "playwright · pw-abc", kind: "headed", port: 41000 })
   expect(by(600)).toMatchObject({ kind: "headed", port: null, pages: [] })
@@ -59,7 +59,7 @@ test("rows show pages only for open browsers, and the snapshot lists every page 
   expect(flatten(bs, new Set([keyOf(chrome)])).filter(r => r.page).map(r => r.page!.id)).toEqual(["c1", "c2"])
   const text = snapshot(bs, 120)
   expect(text).toContain("https://example.test/c2")
-  expect(text).toContain("viewer fleet vnc (noVNC): https://viewer.test/vnc.html")
+  expect(text).toContain("viewer fleet voxl: https://viewer.test/vnc.html")
   for (const line of text.split("\n").slice(0, -1)) expect(line.length).toBeLessThanOrEqual(120)
 })
 

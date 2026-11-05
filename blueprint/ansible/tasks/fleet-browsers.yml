@@ -1,9 +1,9 @@
 ---
-# Fleet browsers: obscura -> chrome -> vnc tier ladder, shared session jar.
+# Fleet browsers: obscura -> chrome -> voxl tier ladder, shared session jar.
 # profiles.fleet_browsers or profiles.fleet_guards turns it on.
 # docs/fleet-guards.md owns the design; blueprint/fleet/browsers/fleet-browser owns the
-# runtime. The obscura tier needs its latest binary + unit and the vnc tier its
-# apt packages; chrome and vnc are started on demand by the operator or the
+# runtime. The obscura tier needs its latest binary + unit and the voxl tier its
+# apt packages and a build of the latest verified voxl crate; chrome and voxl are started on demand by the operator or the
 # fleet-browser CLI and gc'd after idle_timeout_min. The Herdr unit carries
 # the ladder's environment (templates/herdr.service.j2), so this file never
 # edits it.
@@ -38,9 +38,9 @@
   become: true
   notify: restart journald
 
-- name: Install the vnc tier packages
+- name: Install the voxl tier packages
   ansible.builtin.apt:
-    name: "{{ crewship_fleet_browser_vnc_packages }}"
+    name: "{{ crewship_fleet_browser_voxl_packages }}"
     state: present
   when: not ansible_check_mode or (crewship_apt_indexes.matched | default(0)) > 0
   become: true
@@ -59,20 +59,6 @@
     - "{{ crewship_cfg.home }}/.fleet-browser"
     - "{{ crewship_user_units }}/default.target.wants"
     - "{{ crewship_user_units }}/timers.target.wants"
-
-- name: Install the fleet browser scripts
-  ansible.builtin.copy:
-    src: "{{ crewship_fleet_sources }}/{{ item.src }}"
-    dest: "{{ item.dest }}"
-    owner: "{{ crewship_cfg.user }}"
-    group: "{{ crewship_group }}"
-    mode: "{{ item.mode }}"
-    remote_src: true
-  become: true
-  loop:
-    - { src: browsers/fleet-browser, dest: "{{ crewship_fleet_browsers_dir }}/fleet-browser", mode: "0755" }
-    - { src: browsers/cookie-sync.ts, dest: "{{ crewship_fleet_browsers_dir }}/cookie-sync.ts", mode: "0644" }
-    - { src: browsers/env.sh, dest: "{{ crewship_fleet_browsers_dir }}/env.sh", mode: "0644" }
 
 - name: Stat the resolved Obscura release
   ansible.builtin.stat:
@@ -155,6 +141,187 @@
   loop:
     - .profile
     - .bashrc
+
+- name: Stat the resolved voxl release
+  ansible.builtin.stat:
+    path: "{{ crewship_browser_voxl_dir }}/voxl"
+    get_checksum: false
+  register: crewship_voxl_stat
+  changed_when: false
+  check_mode: false
+
+- name: Report the voxl build that check mode cannot perform
+  ansible.builtin.debug:
+    msg: "check mode: would download, verify and build voxl into {{ crewship_browser_voxl_dir }}."
+  when:
+    - ansible_check_mode
+    - not crewship_voxl_stat.stat.exists
+
+# voxl publishes only its crate. The crate is verified against the release
+# digest, then built with cargo into its own release directory, so an
+# unchanged release is a no-op and a running tier keeps the binary it holds.
+- name: Download, verify and build the latest voxl release
+  when:
+    - not ansible_check_mode
+    - not crewship_voxl_stat.stat.exists
+  block:
+    - name: Create the voxl release directory
+      ansible.builtin.file:
+        path: "{{ crewship_browser_voxl_dir }}/source"
+        state: directory
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "0755"
+      become: true
+
+    - name: Fetch the voxl crate
+      ansible.builtin.get_url:
+        url: "{{ crewship_browser_voxl.url }}"
+        dest: "{{ crewship_browser_voxl_dir }}.crate"
+        checksum: "sha256:{{ crewship_browser_voxl.sha256 }}"
+        mode: "0600"
+        owner: "{{ crewship_cfg.user }}"
+      become: true
+
+    - name: Extract the voxl crate
+      ansible.builtin.unarchive:
+        src: "{{ crewship_browser_voxl_dir }}.crate"
+        dest: "{{ crewship_browser_voxl_dir }}/source"
+        remote_src: true
+        extra_opts: [--strip-components=1]
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+      become: true
+
+    - name: Build voxl
+      ansible.builtin.command:
+        argv:
+          - "{{ crewship_cfg.home }}/.cargo/bin/cargo"
+          - build
+          - --release
+          - --locked
+          - --target-dir
+          - "{{ crewship_browser_voxl_dir }}/target"
+        chdir: "{{ crewship_browser_voxl_dir }}/source"
+      environment:
+        PATH: "{{ crewship_cfg.home }}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      changed_when: true
+
+    # The binary is installed last: it marks the release complete.
+    - name: Install the voxl binary
+      ansible.builtin.copy:
+        src: "{{ crewship_browser_voxl_dir }}/target/release/voxl"
+        dest: "{{ crewship_browser_voxl_dir }}/voxl"
+        remote_src: true
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "0755"
+      become: true
+
+    - name: Clean up the voxl crate and build tree
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      become: true
+      loop:
+        - "{{ crewship_browser_voxl_dir }}.crate"
+        - "{{ crewship_browser_voxl_dir }}/source"
+        - "{{ crewship_browser_voxl_dir }}/target"
+
+- name: Point the fleet browser at the resolved voxl release
+  ansible.builtin.file:
+    src: "{{ crewship_browser_voxl_dir }}/voxl"
+    dest: "{{ crewship_fleet_browsers_dir }}/voxl"
+    state: link
+    force: true
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+  become: true
+  when: not ansible_check_mode
+
+- name: Look for the retired noVNC tier unit
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/{{ item }}"
+    get_checksum: false
+  loop: "{{ crewship_fleet_browser_retired_units }}"
+  register: crewship_retired_browser_units
+  changed_when: false
+  check_mode: false
+
+# voxl answers on a spare loopback port with a throwaway password, so the old
+# tier keeps display :9 and port 6909 until voxl is known to serve. A failed
+# check fails the apply before anything of the old tier is touched.
+- name: Confirm voxl serves before the noVNC tier is retired
+  ansible.builtin.shell: |
+    set -u
+    port={{ crewship_fleet_browser_voxl_check_port }}
+    display=:{{ crewship_fleet_browser_voxl_check_port }}
+    Xvfb "$display" -screen 0 1600x900x24 -nolisten tcp >/dev/null 2>&1 &
+    xpid=$!
+    DISPLAY=$display VOXL_PASSWORD=cutover-check "{{ crewship_fleet_sources }}/browsers/fleet-browser" \
+      _voxl-serve "{{ crewship_browser_voxl_dir }}/voxl" "$port" >/dev/null 2>&1 &
+    pid=$!
+    trap 'kill "$pid" "$xpid" 2>/dev/null' EXIT
+    for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0.5; done
+    for _ in $(seq 1 20); do
+      code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/") || code=000
+      [ "$code" = 401 ] && break
+      sleep 0.5
+    done
+    [ "$code" = 401 ] || { echo "voxl answered $code, not 401, on port $port" >&2; exit 1; }
+    code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' -u ':cutover-check' "http://127.0.0.1:$port/")
+    [ "$code" = 200 ] || { echo "voxl answered $code, not 200, with its password" >&2; exit 1; }
+  args:
+    executable: /bin/bash
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  changed_when: false
+  register: crewship_voxl_check
+  when:
+    - not ansible_check_mode
+    - crewship_retired_browser_units.results | selectattr('stat.exists') | list | length > 0
+  failed_when: crewship_voxl_check.rc != 0
+
+# A running retired tier would outlive its unit file with nothing left to stop
+# it, so stop it first; a missing unit is not an error.
+- name: Stop the retired noVNC tier
+  ansible.builtin.command:
+    argv: [systemctl, --user, stop, "{{ item }}"]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_systemd_env }}"
+  loop: "{{ crewship_fleet_browser_retired_units }}"
+  failed_when: false
+  changed_when: false
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
+
+- name: Remove the retired noVNC tier unit
+  ansible.builtin.file:
+    path: "{{ crewship_user_units }}/{{ item }}"
+    state: absent
+  become: true
+  loop: "{{ crewship_fleet_browser_retired_units }}"
+  notify: reload user systemd
+  when: not ansible_check_mode
+
+- name: Install the fleet browser scripts
+  ansible.builtin.copy:
+    src: "{{ crewship_fleet_sources }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "{{ item.mode }}"
+    remote_src: true
+  become: true
+  loop:
+    - { src: browsers/fleet-browser, dest: "{{ crewship_fleet_browsers_dir }}/fleet-browser", mode: "0755" }
+    - { src: browsers/api-anything-fleet, dest: "{{ crewship_fleet_browsers_dir }}/api-anything-fleet", mode: "0755" }
+    - { src: browsers/cookie-sync.ts, dest: "{{ crewship_fleet_browsers_dir }}/cookie-sync.ts", mode: "0644" }
+    - { src: browsers/env.sh, dest: "{{ crewship_fleet_browsers_dir }}/env.sh", mode: "0644" }
 
 - name: Render fleet browser units
   ansible.builtin.template:
