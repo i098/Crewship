@@ -254,3 +254,13 @@ def test_unset_main_pane_closes_nothing(tmp_path, monkeypatch, capsys):
 
 def test_set_main_pane_closes_other_idle_pane_once_aged(tmp_path, monkeypatch):
     assert run_main(tmp_path, monkeypatch, "w1:p1", clock=(1000.0, 1700.0)) == ["w1:p2"]
+
+
+def test_prose_after_home_is_not_a_home(tmp_path):
+    main, mate = tmp_path / "main", tmp_path / "mate"
+    write_meta(mate, "b", "herdr_pane_id=w2:p3\n")
+    (main / "data").mkdir(parents=True)
+    (main / "data/secondmates.md").write_text(
+        f"- a - role. (home: four calls gate the PR; scope: x)\n- b - role. notes with home: later text (home: {mate}; scope: y)\n"
+    )
+    assert pruner.read_homes(main, []) == [main, mate]

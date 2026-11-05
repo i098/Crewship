@@ -61,9 +61,9 @@ def read_homes(main: Path, extra: list[str]) -> list[Path]:
     for line in text.splitlines():
         if re.search(r"\bhost:", line):
             continue
-        found = re.search(r"\bhome:\s*([^;)]+)", line)
-        if found:
-            homes.append(Path(found.group(1).strip()))
+        # Only an absolute or ~ path counts: prose after "home:" in a description is not a home.
+        for found in re.finditer(r"\bhome:\s*([/~][^;)]*)", line):
+            homes.append(Path(found.group(1).strip()).expanduser())
     return homes
 
 
