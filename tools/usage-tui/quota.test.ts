@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, AuthExpired, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, relReset, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, quotaText, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -180,6 +180,16 @@ test("deepseekRows shortens long plan names to fit the account column", () => {
     { plan: "DeepSeek Coding Plan", window: "5h", used: 0, limit: 10, resets_at: 1 },
     { plan: "A Very Long Enterprise Plan Name That Overflows", window: "7d", used: 0, limit: 10, resets_at: 1 },
   ] })
-  expect(rows.map(r => r.account)).toEqual(["deepseek max", "deepseek", "deepseek a very long enterpri"])
-  expect(rows.every(r => r.account.length < ACCOUNT_W)).toBe(true)
+  expect(rows.map(r => r.account)).toEqual(["deepseek max", "deepseek", "deepseek a very long enterprise name that overflows"])
+})
+
+test("fitName cuts any row name with an ellipsis so the bar column never moves", () => {
+  expect(fitName("claude 1")).toBe("claude 1")
+  const long = fitName("deepseek a very long enterprise name that overflows")
+  expect(long).toBe("deepseek a very long enterpr…")
+  expect(long.length).toBeLessThan(ACCOUNT_W)
+  const rows = [{ account: "x".repeat(80), window: "5h", usedPct: 10, leftPct: 90, resetsAt: null }, { account: "glm", window: "5h", usedPct: 10, leftPct: 90, resetsAt: null }]
+  const [a, b] = quotaText(rows, 0, "UTC").split("\n")
+  expect(a.indexOf("█")).toBe(b.indexOf("█"))
+  expect(a.indexOf("█")).toBe(ACCOUNT_W + 10)
 })

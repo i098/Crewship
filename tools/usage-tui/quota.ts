@@ -96,10 +96,10 @@ export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: nu
 const RESELLER = "deepseek (reseller)"
 const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
 
-// "DeepSeek Coding Plan Max" -> "deepseek max": drop the words every plan shares, cut to the account column.
+// "DeepSeek Coding Plan Max" -> "deepseek max": drop the words every plan shares.
 const planLabel = (plan: unknown) => {
   const rest = typeof plan === "string" ? plan.replace(/\b(deepseek|coding|plan)\b/gi, "").trim().toLowerCase().replace(/\s+/g, " ") : ""
-  return `deepseek ${rest}`.trim().slice(0, ACCOUNT_W - 1)
+  return `deepseek ${rest}`.trim()
 }
 
 export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
@@ -168,6 +168,8 @@ export function clockAt(at: number, tz: string): string {
 
 export const BAR_W = 20
 export const ACCOUNT_W = 30
+// Every row name is cut to the account column, ending in "…", so all bars start in the same column.
+export const fitName = (name: string) => (name.length < ACCOUNT_W ? name : `${name.slice(0, ACCOUNT_W - 2)}…`)
 export type Cells = { bar: string; left: string; reset: string; clock: string; color: string; note: string }
 
 export function cells(r: QuotaRow, now: number, tz: string): Cells {
@@ -188,7 +190,7 @@ export function quotaText(rows: QuotaRow[], now: number, tz: string): string {
   return rows
     .map(r => {
       const c = cells(r, now, tz)
-      const acct = r.account === last ? "" : r.account
+      const acct = r.account === last ? "" : fitName(r.account)
       last = r.account
       return `${acct.padEnd(ACCOUNT_W)}${r.window.padEnd(10)}${c.bar.padEnd(BAR_W + 2)}${c.left.padEnd(10)}${c.reset.padEnd(10)}${c.clock.padEnd(11)}${c.note}`.trimEnd()
     })

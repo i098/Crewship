@@ -3,7 +3,7 @@
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, BAR_W, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
+import { ACCOUNT_W, BAR_W, fitName, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
 
 const TZ = "America/Los_Angeles"
 const DB_PATH = `${process.env.HOME}/.omp/stats.db`
@@ -255,7 +255,7 @@ function quotaPanel(rows: QuotaRow[], now: number, w: number): Line[] {
   let last = ""
   for (const r of rows) {
     const c = cells(r, now, TZ)
-    const acct = r.account === last ? "" : r.account
+    const acct = r.account === last ? "" : fitName(r.account)
     last = r.account
     const head = [s(acct.padEnd(ACCOUNT_W), theme.accent, { b: true }), s(r.window.padEnd(10))]
     if (r.leftPct === null) lines.push([...head, s(c.note, theme.muted)])
