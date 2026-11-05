@@ -179,6 +179,7 @@ export const components: Component[] = [
   github("pyrefly", "facebook/pyrefly", ""),
   github("slk", "gammons/slk"),
   github("obscura", "h4ckf0r0day/obscura"),
+  github("voxl", "tembo/voxl"),
   github("koncreet", "jimididit/koncreet"),
   github("jj", "jj-vcs/jj"),
   github("runner-up", "kunchenguid/runner-up"),
