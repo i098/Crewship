@@ -153,7 +153,8 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       status: async () => {
         const inbox = await host.inbox();
         if (!inbox.statusOk) throw new Error("fleet status is unavailable; call handoff_main");
-        return safe(`${inbox.status}\n${mateStatusLines(host.fmHome, mates)}`);
+        const roster = mates.map(({ id, scope }) => `mate ${id}: ${scope}`).join("\n"); // the only place the session learns the mate ids
+        return safe(`${inbox.status}\n${roster}\n${mateStatusLines(host.fmHome, mates)}`);
       },
     });
     const first = await session().ask((seed) => message(pending, original, safe, seed), controller.signal, actions.run);

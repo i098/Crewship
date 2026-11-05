@@ -90,6 +90,15 @@ def test_session_relays_to_a_listed_mate(tmp_path):
         assert texts(rig) == []
 
 
+def test_fleet_status_names_the_listed_mates_so_the_session_can_pick_one(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "STATUS")
+        wait_for(lambda: len(texts(rig)) == 1, "the status reply", timeout=120)
+        assert "mate mate1: repo checks" in texts(rig)[0]
+
+
 def test_bridge_restart_continues_the_same_session(tmp_path):
     with session_rig(tmp_path) as rig:
         deliver(rig, "m1", "how are you")
