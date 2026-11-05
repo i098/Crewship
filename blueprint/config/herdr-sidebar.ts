@@ -13,8 +13,7 @@
 //     as its diff is non-empty, before any commit or pull request.
 //     The first part present carries the indent.
 // Lookups run in the background on session start, turn end and every 30
-// seconds, and never fail or slow a turn. The size is recomputed only when the
-// checkout's HEAD commit or index changed; git runs niced, two at a time.
+// seconds, and never fail or slow a turn. git runs niced, two at a time.
 // @ts-nocheck
 
 import { execFile } from "node:child_process";
@@ -33,6 +32,7 @@ const paneId = process.env.HERDR_PANE_ID;
 const workspaceId = process.env.HERDR_WORKSPACE_ID;
 const herdr = process.env.HERDR_BIN_PATH || "herdr";
 
+const HAS_IONICE = (process.env.PATH || "").split(path.delimiter).some((d) => d && existsSync(path.join(d, "ionice")));
 let gitBusy = 0;
 const gitQueue: (() => void)[] = [];
 
@@ -42,7 +42,7 @@ const run = async (cmd: string, args: string[], cwd?: string): Promise<string> =
     if (gitBusy >= MAX_GIT) await new Promise<void>((resolve) => gitQueue.push(resolve));
     else gitBusy++;
     try {
-      return await run("nice", ["-n", "10", "ionice", "-c3", cmd, ...args], cwd);
+      return await run("nice", ["-n", "10", ...(HAS_IONICE ? ["ionice", "-c3"] : []), cmd, ...args], cwd);
     } finally {
       const next = gitQueue.shift();
       if (next) next();
@@ -135,13 +135,6 @@ async function diffStat(cwd: string, base: string) {
   return stat.files ? stat : {};
 }
 
-// What the size depends on besides the base: the HEAD commit and the index
-// mtime. "" when unreadable, which forces a recompute.
-async function sizeFingerprint(cwd: string, base: string): Promise<string> {
-  const [head, index] = (await run("git", ["-C", cwd, "rev-parse", "HEAD", "--git-path", "index"])).split("\n");
-  return `${base} ${head} ${(await lstat(path.resolve(cwd, index))).mtimeMs}`;
-}
-
 // Token values for the pull request line; "" clears a part.
 export function prParts(v: { pr?; issue?; add?; del?; files? }, indent: number): Record<string, string> {
   const text = {
@@ -206,7 +199,6 @@ export default function (pi) {
   let pr; // open pull request for the current branch, from the REST API
   let taskIssue = "";
   let stat = {};
-  let sizeKey = ""; // HEAD commit and index mtime the size was computed at
   let lookedUpAt = 0;
   let refreshing = false;
   let timer;
@@ -275,11 +267,7 @@ export default function (pi) {
       // commit or PR: against the PR base, else the remote's default branch.
       if (cwd && (pr || taskId)) {
         const base = pr ? `origin/${pr.base?.repo?.default_branch || pr.base?.ref}` : "origin/HEAD";
-        const key = await sizeFingerprint(cwd, base).catch(() => "");
-        if (!key || key !== sizeKey) {
-          stat = await diffStat(cwd, base).catch(() => stat);
-          sizeKey = key;
-        }
+        stat = await diffStat(cwd, base).catch(() => stat);
       }
       await report();
     } catch {
