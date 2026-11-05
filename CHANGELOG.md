@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- The Usage TUI drops the direct DeepSeek row; the `deepseek (reseller)` row shows 5h and 7d percent left and reset time from the reseller's quotaMe call instead of money spent.
-
 ## [0.4.9] - 2026-11-05
 
 ### Added
