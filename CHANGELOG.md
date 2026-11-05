@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-11-05
+
+### Added
+
+- Install the upstream `security-audit` skill from cloudflare/security-audit-skill on every host through the skills installer ([#990](https://github.com/i098/Crewship/issues/990)).
+- The crewboard TUI has a read-only front desk view (`m` or `--desk`) showing the iMessage bridge state, pending, sent and failed bubbles, retries, oldest pending age and desk reply latency, plus the recent turns: each inbound text, its route and the desk reply. `launch` and `crewship update` open a `frontdesk` herdr tab for it, under the `crewboard_tab` switch ([#996](https://github.com/i098/Crewship/issues/996)).
+- Add `mate-archive`, a search and zoom tool over the full text of past omp chat, with a skill that tells agents to use it for detail a compact removed ([#999](https://github.com/i098/Crewship/issues/999)).
+- A new `browser-tui` terminal view, opened as the `browsers` Herdr tab, lists every running headed and headless browser with its CDP pages and can copy a CDP URL, close a page or stop a browser after a y/n prompt ([#1001](https://github.com/i098/Crewship/issues/1001)).
+- Filter outbound `fm-imessage` texts and sub-agent answers: strip decision tags, key/corr tags, mate ids, raw paths, "decision stuck" lines and status prefixes ([#1005](https://github.com/i098/Crewship/issues/1005)).
+- Drop a bare leading colon after stripping and turn "the owner" or "the captain" into "you" in filtered outbound texts ([#1010](https://github.com/i098/Crewship/issues/1010)).
+- The pressure guard prunes Docker build cache and images, finished `/tmp/pytest-of-*` dirs and the uv and bun caches, then alerts, when disk or RAM use exceeds 70% (`crewship_pressure_guard_pct`); `pressure-guard.sh --dry-run` previews it ([#1013](https://github.com/i098/Crewship/issues/1013)).
+- Added the `claude-account-onboarding` public skill: a checklist to onboard a new Claude account without suspension ([#1014](https://github.com/i098/Crewship/issues/1014)).
+- Add a public skill for consistent AI-generated design, with encoded standards, user-like review, and adversarial critique ([#1025](https://github.com/i098/Crewship/issues/1025)).
+- Add a public iOS app checklist based on an Instagram reel about App Store submission ([#1026](https://github.com/i098/Crewship/issues/1026)).
+- Add a public skill with evidence checks for 20 website launch checklist items ([#1031](https://github.com/i098/Crewship/issues/1031)).
+- Install UniiChat memory in every omp session by default, second mates included: turns are logged outside the session file and the summary view returns after a compaction ([#1033](https://github.com/i098/Crewship/issues/1033)).
+- Document the default optimizations in `docs/default-config.md` and state that the defaults are the owner's own setup ([#1034](https://github.com/i098/Crewship/issues/1034)).
+- Add the Appllama skills (`appllama-usage`, `appllama-app-design-skill`) to the public skills, vendored unchanged from Appllama/appllama-skills (MIT) ([#1039](https://github.com/i098/Crewship/issues/1039)).
+- Add guidance for repeatable marketing tests, reviewable variants, and evidence-based ad decisions from the AI marketing engineer reel ([#1040](https://github.com/i098/Crewship/issues/1040)).
+- Add guidance for adjusting photo backgrounds behind text without hiding their details ([#1045](https://github.com/i098/Crewship/issues/1045)).
+- Add a service resilience skill for finite dependency timeouts, circuit breakers, and safe fallbacks ([#1047](https://github.com/i098/Crewship/issues/1047)).
+- Add guidance for intent-driven TanStack Query prefetching from the Instagram reel ([#1049](https://github.com/i098/Crewship/issues/1049)).
+- Add guidance for fair subscription retention and rhythmic spoken marketing scripts from Instagram reels ([#1051](https://github.com/i098/Crewship/issues/1051)).
+- Add practical motion guidance to the mobile app skill, with a source link ([#1053](https://github.com/i098/Crewship/issues/1053)).
+- Add a public skill for verified TruffleHog scans of authorized Git repositories, with safe handling guidance ([#1055](https://github.com/i098/Crewship/issues/1055)).
+- Add a public skill, break-it, that tries to break a new UI or feature with worst-case input and fixes what breaks ([#1059](https://github.com/i098/Crewship/issues/1059)).
+- Add the opt-in `vphone` profile, which clones the latest vphone-linux release so agents can test iOS apps on a virtual iPhone ([#1063](https://github.com/i098/Crewship/issues/1063)).
+- Add opt-in iMessage alerts from herdr agent status: the desk texts when a worker is done, blocked, or idle, with a debounce and one batched text per poll ([#1064](https://github.com/i098/Crewship/issues/1064)).
+- Add the public skill `ci-cd-setup`: ordered steps and a checklist for setting up CI/CD in a new repository ([#1066](https://github.com/i098/Crewship/issues/1066)).
+- Add a What's new page at `/changelog` that lists the unreleased changelog fragments and every released version, in light and dark ([#1074](https://github.com/i098/Crewship/issues/1074)).
+- Document stale-while-revalidate in the prod-readiness caching check: serve a bounded-stale copy while refreshing, never for exact data ([#1080](https://github.com/i098/Crewship/issues/1080)).
+- Read GitHub webhook events before polling: a small Rust receiver and a Firstmate patch cut the merged-PR check from one API read every 15 seconds to one every 600 seconds, with a quota guard (see docs/github-webhook.md) ([#1090](https://github.com/i098/Crewship/issues/1090)).
+- Add `ci-pool-tui`, a read-only terminal view of the CI pool: each slot with its container, runner, and job, queued and running workflow runs, jobs held over 5 minutes, stuck slots with the cause, and Forgejo runs. It opens as the `ci-pool` Herdr tab (switch `crewship.herdr.ci_pool_tab`) on hosts with `crewship.ci_pool`, and makes at most 20 GitHub calls a minute (#1091) ([#1091](https://github.com/i098/Crewship/issues/1091)).
+- Let the iMessage desk answer status questions itself and log each desk and compaction call's token use to a daily-totalled journal ([#1105](https://github.com/i098/Crewship/issues/1105)).
+- Install the latest `compact-adviser` with the `agents` profile and load it in omp in automatic mode, so a session compacts at a checkpoint TypeSafe Jev judges finished. A compaction it starts tries snapcompact three times, then remote, then soft. The extension reads `TYPESAFE_API_KEY` from the environment or `~/super.env`, skips sessions that match `~/.omp/agent/compact-adviser-deny.json`, and stays off where `COMPACT_ADVISER_DISABLE=1` is set ([#1108](https://github.com/i098/Crewship/issues/1108)) ([#1108](https://github.com/i098/Crewship/issues/1108)).
+- Add a desk smoke test that sends real texts through the iMessage bridge, front and desk, and fails on the routing receipt or an empty status answer. With `FM_DESK_SMOKE_STRICT=1` it also fails when the front secret masker cannot load; run it that way before each desk release ([#1111](https://github.com/i098/Crewship/issues/1111)).
+- A `slk` wrapper texts one `fm-imessage` line when an agent runs `slk export` or opens the bare `slk` TUI, naming the agent and, for export, the workspace and channel ([#1115](https://github.com/i098/Crewship/issues/1115)).
+- With `imessage.desk_v2`, the desk now runs as one persistent omp session (`imessage.desk_session`, on by default; set it to `false` to keep the one-shot V2 loop), and its `delegate_task` tool replies at once and texts the answer from Firstmate or a second mate later ([#1121](https://github.com/i098/Crewship/issues/1121)).
+- Install api-anything with the `agents` profile for omp and Claude Code, with a private catalog, sharing off, and `api-anything-fleet` to log in from the fleet browser cookie jar and renew the login on `auth` ([#1123](https://github.com/i098/Crewship/issues/1123)).
+- An opt-in `runner_up` block runs the CI pool's repositories on runner-up, one container per waiting job, behind CPU, I/O, memory and disk caps ([#1126](https://github.com/i098/Crewship/issues/1126)).
+- Offer an optional Dia per-profile cookie sync (`mac_ssh.dia_cookies`) after the `ssh mac` step; it exports cookies to private files on the host ([#1131](https://github.com/i098/Crewship/issues/1131)).
+- The iMessage desk can message a second mate directly and read its status lines, a second mate can push a text to the owner with `fm-imessage --key`, and a keyed text already sent the same day with the same content is skipped ([#1139](https://github.com/i098/Crewship/issues/1139)).
+- The runner-up slice has a `CPUQuota` (`cpu_share`, default 50% of the host CPUs), so all coordinators together stay under it ([#1145](https://github.com/i098/Crewship/issues/1145)).
+- Add the `discord` command to the chat profile: it reads and sends Discord messages with Concord's saved login and needs no Concord TUI ([#1150](https://github.com/i098/Crewship/issues/1150)) ([#1150](https://github.com/i098/Crewship/issues/1150)).
+
+### Changed
+
+- Move the website link to a badge and remove the sponsor badge from the README header ([#984](https://github.com/i098/Crewship/issues/984)).
+- Credit UniiChat and its gist in the front desk memory header; the desk keeps its own memory code and stored chat unchanged ([#1000](https://github.com/i098/Crewship/issues/1000)).
+- The crewboard TUI new and unread counts now track what agents have read, not what you have viewed, using a per-topic `read_seq` on the board and a `--viewer` flag on `crewboard sub` and `tail` ([#1008](https://github.com/i098/Crewship/issues/1008)).
+- Add a UI/UX rule to set `text-wrap: pretty` by default and to override it only where an orphan is wanted ([#1061](https://github.com/i098/Crewship/issues/1061)).
+- Say "set up AI agents on a VPS" in the crewship.si home page title and description ([#1065](https://github.com/i098/Crewship/issues/1065)).
+- Point the public mobile skills at vphone-linux instead of the iOS Simulator, with its screenshot, tap and film tools ([#1073](https://github.com/i098/Crewship/issues/1073)).
+- Run one probe for retired and switched-off assets and gate the 12 removal tasks on it, which cuts up to 14.9 s from a cold install ([#1083](https://github.com/i098/Crewship/issues/1083)).
+- Shard the Python tests of CI over four parallel runners, so the required gate waits for the slowest shard instead of one 17-minute pytest run; add an optional `scripts/pre-push` hook ([#1097](https://github.com/i098/Crewship/issues/1097)).
+- A `slk` wrapper texts one `fm-imessage` line at once, with no cooldown, every time an agent runs `slk export` or opens the bare `slk` TUI, naming the agent and, for export, the workspace and channel ([#1119](https://github.com/i098/Crewship/issues/1119)).
+- The browser ladder's last tier is now `voxl`, replacing the TigerVNC and noVNC tier: `fleet-browser up voxl` streams the headed browser with [voxl](https://github.com/tembo/voxl) on the same port 6909, behind a password kept in `~/.fleet-browser/voxl-password` (never printed), with the same browser profile, so the shared logins stay. The `fleet_browsers` and `fleet_guards` profiles build the latest voxl release crate, verified against its published SHA-256, and install the Rust toolchain for it. Apply installs the new `fleet-browser` script only after that check, and keeps the old `fleet-browser-vnc.service` unit running until the new voxl build answers on a spare port (401 without the password, 200 with it), then removes it; a failed check fails the apply and leaves the old tier in place ([#1125](https://github.com/i098/Crewship/issues/1125)) ([#1125](https://github.com/i098/Crewship/issues/1125)).
+- The usage TUI reads DeepSeek usage from an optional command set in USAGE_TUI_DEEPSEEK_CMD, shows n/a when it is absent or fails, and no longer opens a browser ([#1135](https://github.com/i098/Crewship/issues/1135)).
+- The CI pool smoke job runs on runner-up: `runs-on` is the label `crewship` alone ([#1136](https://github.com/i098/Crewship/issues/1136)).
+- The recipe runs one runner-up coordinator for each repository (`runner-up@<repo>`), each with only its own pool labels, so a repository no longer gets a scale set for every label ([#1140](https://github.com/i098/Crewship/issues/1140)).
+- The browser ladder's voxl tier is now a permanent user service on port 6913, enabled at boot and started once the shared cookie jar exists. `fleet-browser-gc.timer` no longer stops it. A guard logs and stops voxl if the jar count falls more than 5% between two checks. Apply publishes `https://<tailnet host>:6913/` with `tailscale serve` when Tailscale has HTTPS certificates, and the old noVNC packages stay installed and inactive as the rollback ([#1149](https://github.com/i098/Crewship/issues/1149)) ([#1149](https://github.com/i098/Crewship/issues/1149)).
+
+### Fixed
+
+- A send of one chat and sender no longer holds the outbox of another, so the front desk acknowledges a new text at once ([#983](https://github.com/i098/Crewship/issues/983)).
+- The btop tab no longer stays stale and torn after a long idle: the launcher restarts a btop that is blocked on an unread pty ([#991](https://github.com/i098/Crewship/issues/991)).
+- The btop launcher test now waits for launcher states instead of fixed sleeps, so a loaded runner no longer fails it ([#998](https://github.com/i098/Crewship/issues/998)).
+- Fix a flaky `voice-fail` iMessage test: the 100 ms voice timeout could kill the fake omp before it wrote `voice-started` ([#1022](https://github.com/i098/Crewship/issues/1022)).
+- Fix the node release lookup in `scripts/provisions.py` crashing on pre-release versions such as `v27.0.0-alpha.0.0.0`: only stable `v<major>.<minor>.<patch>` releases are considered ([#1037](https://github.com/i098/Crewship/issues/1037)).
+- The iMessage bridge now refuses raw internal status lines (a bare PR link, a task or mate id prefix, key=/corr= tokens, or commit hashes with a colon detail clause) with HTTP 422, so only plain-prose mate texts reach the owner ([#1041](https://github.com/i098/Crewship/issues/1041)).
+- The iMessage status guard no longer refuses a plain sentence that holds a public link whose random hex key looked like a commit hash ([#1043](https://github.com/i098/Crewship/issues/1043)).
+- Fix crewship.si docs titles and short descriptions, add a 404 page, and keep maintainer pages out of the sitemap ([#1069](https://github.com/i098/Crewship/issues/1069)).
+- Fix btop restarting on an unread pty: a full pty still took a short write, so the clear did not block. The launcher now writes 8 KiB of NULs first ([#1094](https://github.com/i098/Crewship/issues/1094)).
+- Stop the iMessage V2 desk from sending the fixed line "I am routing this request to ..." for every text; a status question gets the desk answer and other texts get only the real answer ([#1107](https://github.com/i098/Crewship/issues/1107)).
+- The CI pool image build now removes its intermediate containers, also when the build fails, so the hourly rebuild no longer leaks one 1.77 GB container per run ([#1113](https://github.com/i098/Crewship/issues/1113)).
+- A `ci_pool.repos` entry with a `name` is a separate slot group again: its slots, runners, and units use that name, so the quick runners no longer drop offline after an install ([#1117](https://github.com/i098/Crewship/issues/1117)).
+- The iMessage desk session now reminds a model that ended its turn in plain words to use the reply tool, and sends those words as the reply if it still answers in words, instead of handing the text to Firstmate ([#1127](https://github.com/i098/Crewship/issues/1127)).
+- The iMessage desk session now sees the listed second mates: `fleet_status` names each mate with its scope, so the model can relay or delegate to a real mate id ([#1129](https://github.com/i098/Crewship/issues/1129)).
+- Split a text longer than 1,000 characters into several iMessage bubbles at a line, sentence, or word instead of letting iMessage cut it short ([#1130](https://github.com/i098/Crewship/issues/1130)).
+- Pyrefly and gws releases that publish no `.sha256` file are now verified against the GitHub release-asset digest instead of being refused ([#1141](https://github.com/i098/Crewship/issues/1141)).
+
 ## [0.4.8] - 2026-10-28
 
 ### Added
@@ -714,7 +795,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iMessage front desk waits a 4-second quiet period, sends multi-bubble replies, and keeps the full intake ([#25](https://github.com/i098/Crewship/pull/25), [#28](https://github.com/i098/Crewship/pull/28)).
 - Firstmate inbox wake patches apply on top of upstream main ([#30](https://github.com/i098/Crewship/pull/30)).
 
-[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/i098/Crewship/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/i098/Crewship/releases/tag/v0.4.9
 [0.4.8]: https://github.com/i098/Crewship/releases/tag/v0.4.8
 [0.4.7]: https://github.com/i098/Crewship/releases/tag/v0.4.7
 [0.4.6]: https://github.com/i098/Crewship/releases/tag/v0.4.6
