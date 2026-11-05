@@ -56,6 +56,11 @@
         mode: "0644"
         remote_src: true
 
+    - name: Check that each repository has its own instance name
+      ansible.builtin.assert:
+        that: crewship_runner_up_instances | unique | length == crewship_runner_up_instances | length
+        fail_msg: Two repositories map to one runner-up instance name
+
     - name: Write the runner-up config of each repository
       ansible.builtin.template:
         src: runner-up.config.json.j2
@@ -66,6 +71,28 @@
         crewship_runner_up_repo: "{{ item.0 }}"
         crewship_runner_up_instance: "{{ item.1 }}"
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+
+    - name: Stop and disable the single coordinator of the earlier layout
+      ansible.builtin.systemd_service:
+        scope: user
+        name: runner-up.service
+        enabled: false
+        state: stopped
+      failed_when: false
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+
+    - name: Remove the files of the single coordinator of the earlier layout
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ crewship_user_units }}/runner-up.service"
+        - "{{ crewship_user_units }}/default.target.wants/runner-up.service"
+        - "{{ crewship_runner_up_config_dir }}/config.json"
+      notify: reload user systemd
 
     - name: Find the configs of repositories that left the list
       ansible.builtin.find:

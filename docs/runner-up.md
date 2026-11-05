@@ -45,7 +45,7 @@ Every coordinator runs in `runnerup.slice` and keeps its own state in `<state di
 | `repos[].name` | the slot name; a second group of one repository (a quick group) keeps its own places |
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
 | `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place |
-| `total_slots` | the machine budget of each coordinator: `total_slots` times the job caps. A repository's places are its `slots`, so the slice caps are what limit all of CI together |
+| `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
 | `docker: dind` | not mapped; the entry stays on the CI pool (see [Not covered](#not-covered)) |
 
 A pool is a scale set of GitHub, and it is global to its coordinator: it opens in every repository that the coordinator serves.
@@ -66,7 +66,7 @@ Every job container and image build runs in `runnerup.slice`, so these caps hold
 | `MemoryMax` | `memory_max` (50%) | A hard limit. The kernel stops the biggest process of the slice at the limit, not a process of the host. |
 | `Nice` | `nice` (10) | Priority of the coordinator and its place runners. |
 | Process limit | 8192 for each job | As in the CI pool. |
-| Concurrency | `total_slots` | The machine budget in the config. |
+| Concurrency | `total_slots` | The sum of the coordinators' machine budgets in the config. |
 
 runner-up starts a job with a plain `docker run`, which puts the container in `system.slice`.
 The unit puts a `docker` shim first in `PATH` (`~/.local/share/runner-up/shim/docker`, from `blueprint/maintenance/runner-up-docker`).

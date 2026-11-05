@@ -210,24 +210,56 @@ def test_config_maps_every_ci_pool_entry_to_its_repositorys_places_and_pools_and
     assert not any("e2e" in json.dumps(v) for v in places.values())
 
 
-def test_the_machine_budget_holds_total_slots_jobs_and_logs_are_kept_for_a_week(home):
+def test_total_slots_is_split_across_coordinators_by_their_slots_and_logs_are_kept_for_a_week(home):
     apply(home, {}, ci_pool=pool(home))
     cfg = config(home)
-    assert cfg["machines"][0]["cores"] == 6 * 4
-    assert cfg["machines"][0]["memoryMB"] == 6 * 8192
+    # 6 total slots over 3+3+1+1 repository slots: web 6*3//8=2, engine 2, api and mixed 6//8=0 raised to 1.
+    shares = {
+        name: (config(home, name)["machines"][0]["cores"], config(home, name)["machines"][0]["memoryMB"])
+        for name in instances(home)
+    }
+    assert shares == {
+        "acme-web": (2 * 4, 2 * 8192),
+        "acme-engine": (2 * 4, 2 * 8192),
+        "acme-api": (1 * 4, 1 * 8192),
+        "acme-mixed": (1 * 4, 1 * 8192),
+    }
     assert cfg["logKeepDays"] == 7
     # Each coordinator keeps its own state, so two never share a session file.
     assert cfg["stateDir"] == f"{home.parent}/data/runner-up/acme-web"
     assert config(home, "acme-api")["stateDir"] == f"{home.parent}/data/runner-up/acme-api"
 
 
+def test_the_single_coordinator_of_the_earlier_layout_is_removed(home):
+    (units(home) / "default.target.wants").mkdir()
+    old = [
+        units(home) / "runner-up.service",
+        units(home) / "default.target.wants/runner-up.service",
+        home / ".config/runner-up/config.json",
+    ]
+    for path in old:
+        path.write_text("{}")
+    apply(home, {}, ci_pool=pool(home))
+    assert not any(p.exists() or p.is_symlink() for p in old)
+    assert instances(home) == ["acme-api", "acme-engine", "acme-mixed", "acme-web"]
+
+
+def test_two_repositories_with_one_instance_name_write_nothing(home):
+    repos = [
+        {"repo": "a/b-c", "slots": 1, "labels": ["one"]},
+        {"repo": "a-b/c", "slots": 1, "labels": ["two"]},
+    ]
+    with pytest.raises(AssertionError, match="one runner-up instance name"):
+        apply(home, {"repos": repos})
+    assert instances(home) == []
+
+
 def test_auto_slots_take_half_of_the_host_like_the_ci_pool(home):
     auto = {key: value for key, value in pool(home).items() if key != "total_slots"}
     apply(home, {}, ci_pool=auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
     machine = config(home)["machines"][0]
-    assert (
-        machine["cores"] == pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250) * 4
-    )
+    total = pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250)
+    assert machine["cores"] == total * 3 // 8 * 4
 
 
 def test_runner_up_repos_replace_the_ci_pool_list_and_need_no_ci_pool(home):
