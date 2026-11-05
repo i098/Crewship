@@ -211,25 +211,56 @@ def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_p
         assert len([line for line in read_text(ids).splitlines() if line.startswith("desk-task-")]) == 1
 
 
-def test_thread_reply_to_a_mates_bubble_goes_to_that_mate(tmp_path):
+def mate_data(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(f"- engram - Engram mate (home: {tmp_path}/engram; scope: engram work; projects: none)\n")
-    message = tmp_path / "task-message"
+    return tmp_path / "task-message"
+
+
+def mate_script(tmp_path, message):
+    script = tmp_path / "bin" / "fm-send.sh"
+    script.write_text(f'#!/bin/bash\nprintf "%s %s" "$1" "$2" > {shlex.quote(str(message))}\n')
+    script.chmod(0o755)
+
+
+def send_bubble(rig, text, home, count):
+    sent = subprocess.run([str(SEND), text], capture_output=True, text=True, env={**rig.env, "FM_HOME": home}, timeout=30)
+    assert sent.returncode == 0, sent.stderr
+    wait_for(lambda: len(texts(rig)) == count, "the bubble", timeout=120)
+
+
+def reply_in_thread(rig, guid, quoted_guid, quoted_text, text):
+    rig.relay_message(quoted_guid, quoted_text, int(time.time() * 1000), isFromMe=True)
+    rig.relay_message(guid, text, int(time.time() * 1000) + 1, threadOriginatorGuid=quoted_guid)
+    subprocess.run(["curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": guid}}),
+                    f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
+
+
+def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(tmp_path):
+    message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
-        script = tmp_path / "bin" / "fm-send.sh"
-        script.write_text(f'#!/bin/bash\nprintf "%s %s" "$1" "$2" > {shlex.quote(str(message))}\n')
-        script.chmod(0o755)
+        mate_script(tmp_path, message)
         deliver(rig, "m1", "how are you")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
-        # The mate's bubble, sent with its home in FM_HOME, then his thread reply to it.
-        sent = subprocess.run([str(SEND), "The engram checks are green."], capture_output=True, text=True,
-                              env={**rig.env, "FM_HOME": f"{tmp_path}/engram"}, timeout=30)
-        assert sent.returncode == 0, sent.stderr
-        wait_for(lambda: len(texts(rig)) == 2, "the mate's bubble", timeout=120)
-        rig.relay_message("b1", "The engram checks are green.", int(time.time() * 1000), isFromMe=True)
-        rig.relay_message("m2", "nice, thanks", int(time.time() * 1000) + 1, threadOriginatorGuid="b1")
-        subprocess.run(["curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": "m2"}}),
-                        f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
+        send_bubble(rig, "The engram checks are green.", f"{tmp_path}/engram", 2)
+        wait_for((rig.state / "senders.json").exists, "the saved sender record")
+        rig.stop()
+        rig.start()
+        reply_in_thread(rig, "m3", "b1", "The engram checks are green.", "nice, thanks")
         wait_for(message.exists, "the relay to the mate", timeout=120)
         assert read_text(message) == "engram [from captain via desk] nice, thanks"
         assert len(texts(rig)) == 2  # no model reply to the owner
+
+
+def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_is_a_desk_turn(tmp_path):
+    message = mate_data(tmp_path)
+    with session_rig(tmp_path) as rig:
+        mate_script(tmp_path, message)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
+        send_bubble(rig, "On it.", "", 3)  # no sender: the latest bubble with this text is not the mate's
+        wait_for(lambda: json.loads(read_text(rig.state / "senders.json")) == {}, "the cleared sender record")
+        reply_in_thread(rig, "m3", "b1", "On it.", "thanks")
+        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        assert not message.exists()

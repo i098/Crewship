@@ -208,19 +208,27 @@ const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
 // Who sent each recent bubble, by the start of its text: a thread reply to it goes back to that mate.
-// shortcut: in memory and keyed by text, so a restart or two bubbles with the same start lose or mix it; use message ids if that matters.
-const sentBy = new Map<string, string>();
+// The latest bubble with the same start wins; a bubble sent with no sender clears the entry. A capped file keeps it across restarts.
+const SENDERS_FILE = `${STATE}/senders.json`;
+const sentBy = new Map<string, string>(Object.entries((() => {
+  try { return JSON.parse(readFileSync(SENDERS_FILE, "utf8")) as Record<string, string>; } catch { return {}; }
+})()));
 const quoteKey = (text: string) => text.slice(0, 120).trim();
-function rememberSender(text: string, sender: string) {
-  sentBy.delete(quoteKey(text));
-  sentBy.set(quoteKey(text), sender);
+function rememberSender(text: string, sender: string | undefined) {
+  const known = sentBy.delete(quoteKey(text));
+  if (sender) sentBy.set(quoteKey(text), sender);
   if (sentBy.size > 200) sentBy.delete(sentBy.keys().next().value!);
+  if (known || sender) persistLatest(SENDERS_FILE, JSON.stringify(Object.fromEntries(sentBy)));
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
 function quotedText(c: LineMessage["content"]): string | undefined {
   if (c.type === "reply") return c.target.content.type === "text" ? c.target.content.text : undefined;
   if (c.type === "effect") return quotedText(c.content);
+}
+function quotedMate(c: LineMessage["content"]) {
+  const quoted = quotedText(c);
+  return quoted === undefined ? undefined : mateOfSender(sentBy.get(quoteKey(quoted)));
 }
 let routingRetry: NodeJS.Timeout | undefined;
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
@@ -847,7 +855,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
         checkDeskDelivery(o);
         if (typeof bubble === "string") {
           const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o));
-          if (o.sender) rememberSender(bubble, o.sender);
+          rememberSender(bubble, o.sender);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
           await line.sendImage!(space, bubble, thread);
@@ -1530,8 +1538,7 @@ async function handle(line: Line, message: LineMessage) {
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
   const authored = authoredText(message.content);
-  const quoted = quotedText(message.content);
-  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, quoted === undefined ? undefined : mateOfSender(sentBy.get(quoteKey(quoted))));
+  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, quotedMate(message.content));
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);

@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { deskCommand } from "./desk.ts";
 import { createSessionTurn, type TurnRequest } from "./desk-session-turn.ts";
 
 const FAKE = join(import.meta.dir, "../../tests/fake_desk_omp.ts");
@@ -28,11 +27,9 @@ async function sessionArgv(provider: string, model: string): Promise<string[]> {
   return start.argv;
 }
 
-const modelOf = (argv: string[]) => argv[argv.indexOf("--model") + 1];
-
-test.each([["omp", "claude-haiku-5-5"], ["inception", "mercury-3"]])("the %s session starts omp with the one-shot desk's --model", async (provider, model) => {
-  const oneShot = deskCommand({ provider, model, system: "", prompt: "", spent: 0, memoryDir: "", cwd: "", env: {} }, "off");
-  expect(modelOf(await sessionArgv(provider, model))).toBe(modelOf(oneShot));
+test.each([["omp", "claude-haiku-5-5", "claude-haiku-5-5"], ["inception", "mercury-3", "inception/mercury-3"]])("the %s session starts omp with the model argument %s -> %s", async (provider, model, expected) => {
+  const argv = await sessionArgv(provider, model);
+  expect(argv[argv.indexOf("--model") + 1]).toBe(expected);
 });
 
 test("the system prompt the child starts with tells the desk to ack an owner instruction and hand it to Firstmate", async () => {
