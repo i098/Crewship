@@ -449,7 +449,7 @@ def doc_page(title, description, route, body, source=None):
 </head>
 <body class="how about docs">
 <header class="top">
-  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a></nav>
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a><a href="/changelog">What's new</a></nav>
 </header>
 <main><article class="post">
 {body}
@@ -490,13 +490,115 @@ def build_docs(dist):
         f"<p>{description}</p><ul>" + "\n".join(entries) + "</ul>"
     )
     (dist / "docs.html").write_text(doc_page("Documentation", description, "/docs", index))
-    urls = ["/", "/how", "/about", "/docs", *(r for r in routes.values() if r not in UNLISTED)]
+    urls = ["/", "/how", "/about", "/changelog", "/docs", *(r for r in routes.values() if r not in UNLISTED)]
     (dist / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         + "".join(f"  <url><loc>{ORIGIN}{url}</loc></url>\n" for url in urls)
         + "</urlset>\n"
     )
+
+
+KINDS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+ISSUE = re.compile(r"\s*\(?\[#(\d+)\]\([^)]*\)\)?")
+
+
+def note(lines):
+    """(HTML, issue) for one entry: its first line, with the issue link split off."""
+    issue = ISSUE.search(" ".join(lines))
+    return inline(ISSUE.sub("", lines[0])), issue and issue[1]
+
+
+def release_notes(markdown):
+    """[(version, date, {kind: [note]})] for every released version in CHANGELOG.md, newest first."""
+    releases, kind = [], None
+    for line in markdown.splitlines():
+        if head := re.match(r"## \[([^\]]+)\](?: - (\S+))?$", line):
+            releases.append((head[1], head[2], {}))
+            kind = None
+        elif releases and (h := re.match(r"### (\w+)$", line)):
+            kind = h[1]
+        elif releases and kind and line.startswith("- "):
+            releases[-1][2].setdefault(kind, []).append([line[2:]])
+        elif releases and kind and line.startswith("  ") and releases[-1][2][kind]:
+            releases[-1][2][kind][-1].append(line.strip())
+    return [(v, d, {k: [note(n) for n in ns] for k, ns in kinds.items()}) for v, d, kinds in releases if v != "Unreleased"]
+
+
+def fragment_notes(directory):
+    """{kind: [note]} for the unreleased fragments, newest issue first."""
+    found = []
+    for path in directory.glob("*.md"):
+        text = path.read_text().strip()
+        if (m := re.fullmatch(r"(\d+)\.(\w+)\.md", path.name)) and text:
+            found.append((int(m[1]), m[2].capitalize(), text.splitlines()[0]))
+    kinds = {}
+    for number, kind, text in sorted(found, reverse=True):
+        kinds.setdefault(kind, []).append((inline(text), str(number)))
+    return kinds
+
+
+def release_html(version, date, kinds, href=None):
+    title = f'<a href="{html.escape(href)}">{html.escape(version)}</a>' if href else html.escape(version)
+    stamp = f'<time datetime="{date}">{html.escape(date)}</time>' if date else ""
+    groups = "".join(
+        f'<h3 class="{kind.lower()}">{kind}</h3><ul>'
+        + "".join(
+            f"<li>{text}"
+            + (f' <a class="ref" href="{REPO}/issues/{issue}">#{issue}</a>' if issue else "")
+            + "</li>"
+            for text, issue in kinds[kind]
+        )
+        + "</ul>"
+        for kind in KINDS
+        if kinds.get(kind)
+    )
+    return f'<section class="release"><h2 id="{version.lower()}">{title}{stamp}</h2><div class="notes">{groups}</div></section>'
+
+
+def changelog_page(unreleased, releases, tags):
+    canonical = ORIGIN + "/changelog"
+    description = "What changed in each Crewship release, with the changes that have not shipped yet."
+    sections = [release_html("Unreleased", None, unreleased)] if unreleased else []
+    sections += [release_html(v, d, k, tags.get(v)) for v, d, k in releases]
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What's new - Crewship</title>
+<meta name="description" content="{description}">
+<link rel="canonical" href="{canonical}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{canonical}">
+<meta property="og:title" content="What's new - Crewship">
+<meta property="og:description" content="{description}">
+<meta property="og:image" content="{ORIGIN}/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/changelog.css">
+</head>
+<body>
+<header class="top">
+  <nav aria-label="Site links"><a href="/">Return to Harbor</a><a href="/about">About</a><a href="/docs">Docs</a><a href="/changelog" aria-current="page">What's new</a></nav>
+</header>
+<main>
+<h1>What's new</h1>
+{"".join(sections)}
+</main>
+<footer class="foot"><a href="{REPO}/blob/main/CHANGELOG.md">Full changelog on GitHub</a></footer>
+</body>
+</html>
+"""
+
+
+def build_changelog(dist):
+    text = (ROOT / "CHANGELOG.md").read_text()
+    tags = dict(re.findall(r"^\[([^\]]+)\]: (https://\S+/releases/tag/\S+)$", text, re.M))
+    page = changelog_page(fragment_notes(ROOT / "changelog.d"), release_notes(text), tags)
+    (dist / "changelog.html").write_text(page)
 
 
 def build(dist=HARBOR / "dist"):
@@ -514,6 +616,7 @@ def build(dist=HARBOR / "dist"):
     page = dist / "index.html"
     page.write_text(page.read_text().replace(MARK, items))
     build_docs(dist)
+    build_changelog(dist)
     return dist
 
 
