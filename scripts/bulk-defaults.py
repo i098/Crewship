@@ -111,16 +111,29 @@ def pip_cache_configured(home, changes):
     return False
 
 
-def native_changes(home, data):
+def default_max_trees(cpus=None, mem_gib=None):
+    """Treehouse pool cap: 2 slots per core, 1 per GiB RAM, never below Treehouse's own 16."""
+    cpus = cpus or os.cpu_count() or 1
+    if mem_gib is None:
+        pages, size = os.sysconf("SC_PHYS_PAGES"), os.sysconf("SC_PAGE_SIZE")
+        mem_gib = pages * size // 2**30
+    return max(16, min(2 * cpus, mem_gib))
+
+
+def native_changes(home, data, max_trees=None):
     changes = {}
     settings = [
-        (".config/treehouse/config.toml", toml_default, "", "root", str(data)),
-        (".npmrc", ini_default, "", "cache", str(data / "cache/npm")),
-        (".config/pip/pip.conf", ini_default, "global", "cache-dir", str(data / "cache/pip")),
-        (".bunfig.toml", toml_default, "install.cache", "dir", str(data / "cache/bun")),
-        (".config/uv/uv.toml", toml_default, "", "cache-dir", str(data / "cache/uv")),
-        (".config/pnpm/rc", ini_default, "", "store-dir", str(data / "cache/pnpm")),
+        (".config/treehouse/config.toml", toml_default, "", "max_trees", max_trees or default_max_trees()),
     ]
+    if data:
+        settings += [
+            (".config/treehouse/config.toml", toml_default, "", "root", str(data)),
+            (".npmrc", ini_default, "", "cache", str(data / "cache/npm")),
+            (".config/pip/pip.conf", ini_default, "global", "cache-dir", str(data / "cache/pip")),
+            (".bunfig.toml", toml_default, "install.cache", "dir", str(data / "cache/bun")),
+            (".config/uv/uv.toml", toml_default, "", "cache-dir", str(data / "cache/uv")),
+            (".config/pnpm/rc", ini_default, "", "store-dir", str(data / "cache/pnpm")),
+        ]
     for relative, update, section, key, value in settings:
         if relative == ".config/pip/pip.conf" and pip_cache_configured(home, changes):
             continue
@@ -133,6 +146,8 @@ def native_changes(home, data):
         desired = update(text, section, key, value)
         if desired != text:
             changes[path.resolve()] = desired
+    if not data:
+        return changes
     go = home / ".config/go/env"
     text = native_text(go, changes)
     desired = text
@@ -177,18 +192,18 @@ def private_dirs(data, check):
     return bool(missing)
 
 
-def configure(home, data, check=False):
-    changes = native_changes(home, data)
+def configure(home, data, check=False, max_trees=None):
+    changes = native_changes(home, data, max_trees)
     pnpm = shutil.which("pnpm")
-    if pnpm:
+    if pnpm and data:
         check_config_links(home / (os.environ.get("XDG_CONFIG_HOME") or ".config") / "pnpm/config.yaml")
-    dirs_change = private_dirs(data, check)
+    dirs_change = bool(data) and private_dirs(data, check)
     if not check:
         for path, content in changes.items():
             write_native_file(path, content)
     # pnpm 11 owns its YAML format. Query after the pnpm 10 rc update.
     pnpm_change = False
-    if pnpm:
+    if pnpm and data:
         result = subprocess.run(
             ["pnpm", "config", "get", "--json", "store-dir"],
             cwd=home, check=True, capture_output=True, text=True,
@@ -205,11 +220,12 @@ def configure(home, data, check=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", required=True, type=Path)
-    parser.add_argument("--data-dir", required=True, type=Path)
+    parser.add_argument("--data-dir", type=Path)
+    parser.add_argument("--max-trees", type=int)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     os.environ["HOME"] = str(args.home)
-    print(json.dumps(configure(args.home, args.data_dir, args.check)))
+    print(json.dumps(configure(args.home, args.data_dir, args.check, args.max_trees)))
 
 
 if __name__ == "__main__":

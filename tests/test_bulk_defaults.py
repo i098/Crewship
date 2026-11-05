@@ -391,3 +391,17 @@ def test_unavailable_pnpm_yaml_config_stops_before_any_change(
     assert all(not list(path.iterdir()) for path in (home.parent / "data").iterdir())
     assert (config_home / link).is_symlink() and not target.exists()
     assert not log.exists()
+
+
+@pytest.mark.parametrize("cpus,mem,expected", [(2, 4, 16), (4, 8, 16), (16, 32, 32), (32, 128, 64), (64, 16, 16)])
+def test_default_max_trees_scales_with_cores_and_ram(cpus, mem, expected):
+    assert bulk.default_max_trees(cpus, mem) == expected
+
+
+def test_max_trees_written_once_without_data_dir_and_override_wins(home):
+    path = home / ".config/treehouse/config.toml"
+
+    assert bulk.configure(home, None, max_trees=48)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 48
+    assert not bulk.configure(home, None, max_trees=99)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 48

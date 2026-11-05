@@ -194,6 +194,7 @@ crewship:
       [ ... ]
     sidebar_bg: "reset"   # the terminal's own background
   fleet:
+    # max_trees: 32      # Treehouse worktree cap; default scales with the host, see Worktree cap
     docker_guard:
       stopped_hours: 24   # Remove a stopped container this long after it exits
   firstmate:
@@ -377,6 +378,17 @@ Apply seeds Inception only when no `models.yml`, `models.yaml`, or `models.json`
 Existing model files keep their Inception settings unchanged, including missing fields or a removed provider.
 Apply still merges the shipped Codex context-window overrides; those keys replace existing values without changing other model settings.
 Disable `profiles.agents` to skip agent configuration on a new host.
+
+## Worktree cap
+
+Treehouse refuses a new worktree once `max_trees` slots are in use, and its built-in cap is 16.
+On a large host that cap, not CPU, limits how many crewmates run.
+Apply writes `max_trees` to `~/.config/treehouse/config.toml` with the default `max(16, min(2 x cores, GiB of RAM))`.
+For example, 4 cores and 8 GiB keep 16; 32 cores and 128 GiB give 64.
+Set `fleet.max_trees` to use another value on the next apply.
+Apply never replaces a `max_trees` already in that file, so edit the file to change a host that has one.
+This works with or without `data_dir`.
+The limit on the number of Firstmate homes is a Firstmate setting; Crewship does not write it.
 
 ## Data disk
 

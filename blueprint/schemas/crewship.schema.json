@@ -885,6 +885,10 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "max_trees": {
+              "type": "integer",
+              "minimum": 1
+            },
             "docker_guard": {
               "type": "object",
               "additionalProperties": false,
