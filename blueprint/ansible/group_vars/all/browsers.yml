@@ -14,7 +14,7 @@ crewship_browser_voxl_dir: "{{ crewship_fleet_browsers_dir }}/voxl-{{ crewship_l
 # The voxl tier's own packages, so it works without the desktop profile: Xvfb
 # (the display voxl streams), xfwm4 (the window manager, so Chrome maximizes and
 # its pop-ups can be moved and closed), and what the voxl build links or runs:
-# clang for bindgen, x264, libyuv, Opus, PulseAudio and esbuild.
+# clang for bindgen, x264, libyuv, Opus, PulseAudio, libxcb and esbuild.
 crewship_fleet_browser_voxl_packages:
   - xvfb
   - xfwm4
@@ -23,6 +23,7 @@ crewship_fleet_browser_voxl_packages:
   - libx264-dev
   - libyuv-dev
   - libopus-dev
+  - libxcb1-dev
   - libpulse-dev
   - esbuild
 # Unit files of retired tiers; the tasks remove them.
