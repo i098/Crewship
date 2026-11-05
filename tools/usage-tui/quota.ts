@@ -122,22 +122,20 @@ export type QuotaInput = {
 export function buildRows(inp: QuotaInput): QuotaRow[] {
   const rows: QuotaRow[] = []
   const on = (s: QuotaSource) => !inp.providers || inp.providers.some(p => p.source === s)
-  const ompRows = inp.omp ? parseOmp(inp.omp) : []
-  if (!on("omp-usage")) {
-  } else if (ompRows.length) rows.push(...ompRows)
-  else rows.push({ account: "omp usage", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.ompError ?? (inp.omp ? "no accounts reported" : "not reported") })
-  if (!on("zai")) {
-  } else if (inp.zai) rows.push(...parseZai(inp.zai))
-  else rows.push({ account: "glm", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: inp.zaiError ?? "not reported" })
-  if (!on("mercury-tokens")) {
-  } else if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
-  else if (inp.mercuryError) rows.push({ account: "mercury", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `unavailable: ${inp.mercuryError}` })
-  if (!on("deepseek")) {
-  } else if (inp.deepseek) rows.push(...deepseekRows(inp.deepseek))
-  else rows.push(resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a"))
+  const note = (account: string, text: string): QuotaRow => ({ account, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: text })
+  if (on("omp-usage")) {
+    const ompRows = inp.omp ? parseOmp(inp.omp) : []
+    rows.push(...(ompRows.length ? ompRows : [note("omp usage", inp.ompError ?? (inp.omp ? "no accounts reported" : "not reported"))]))
+  }
+  if (on("zai")) rows.push(...(inp.zai ? parseZai(inp.zai) : [note("glm", inp.zaiError ?? "not reported")]))
+  if (on("mercury-tokens")) {
+    if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
+    else if (inp.mercuryError) rows.push(note("mercury", `unavailable: ${inp.mercuryError}`))
+  }
+  if (on("deepseek")) rows.push(...(inp.deepseek ? deepseekRows(inp.deepseek) : [resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a")]))
   // Detected providers with no quota source still get a row, so the list matches the host's accounts.
   for (const p of inp.providers ?? []) {
-    if (p.source === "none") rows.push({ account: p.label, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: `${p.accounts} account${p.accounts === 1 ? "" : "s"}, quota not reported` })
+    if (p.source === "none") rows.push(note(p.label, `${p.accounts} account${p.accounts === 1 ? "" : "s"}, quota not reported`))
   }
   return rows
 }
