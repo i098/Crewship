@@ -34,10 +34,8 @@ import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
-import { dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
-import type { DispatchModel } from "./dispatch-policy.ts";
-import { answerStatus, loadFrontRedactor, runFront } from "./front.ts";
-import type { FrontInput, FrontIntent, FrontResult } from "./front.ts";
+import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
+import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
@@ -45,7 +43,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch } from "./herdr-watch.ts";
-import { brief, permanent, Queue, transient } from "./outbox.ts";
+import { brief, deskLog, keyOf, permanent, Queue, sendOnce, transient } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -531,14 +529,24 @@ Bun.serve({
     const destination = target ?? proactiveRef;
     if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
-    const image = photo && stage(photo);
-    const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
-    return queue({ ...destination, image, bubbles: parts,
-      ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
-        : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
-      reply: url.searchParams.has("no-thread") ? undefined : target?.id, sender }, what);
+    const key = keyOf(req);
+    if (key instanceof Response) return key;
+    const who = mateOfSender(sender) ?? sender ?? "main";
+    return sendOnce(STATE, { key, sender: who, text: parts.join("\n\n"), alone: !!photo }, (dup) =>
+      queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }));
   },
 });
+
+// Stages the photo and queues one /send or /image item to its destination.
+function queueSend(o: { destination: Ref; target?: Ref; photo?: PreparedImage; parts: string[]; sender?: string; plain: boolean }) {
+  const { destination, target, photo, parts } = o;
+  const image = photo && stage(photo);
+  const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
+  return queue({ ...destination, image, bubbles: parts,
+    ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
+      : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
+    reply: o.plain ? undefined : target?.id, sender: o.sender }, what);
+}
 
 // The photo of an /image request, checked and downscaled, or the refusal to answer with.
 async function photoOf(form: FormData): Promise<PreparedImage | Response> {
@@ -1116,8 +1124,10 @@ const runSessionTurn = createSessionTurn<Routing>({
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
   send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
     : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
-  report: (parts, guid, origin) => outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
-    guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession }),
+  message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
+  ...deskLog(STATE),
+  report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
+    guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),
 });
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
