@@ -204,6 +204,7 @@ crewship:
   # mac_ssh:              # Optional; set only in .local/host.yml. See security.md#ssh-to-a-mac
   #   host: <Mac tailnet name or IP>
   #   user: <Mac login>
+  #   dia_cookies: true    # Optional; Dia cookie sync. See security.md#optional-dia-cookie-sync
   # skills:               # Optional, off when absent (removing it removes the skills and rules an earlier fill added); set only in .local/host.yml. See omp.md#skills
   #   private_source: git@github.com:owner/private-skills.git   # or an absolute local path
   #   private_ref: main   # Optional git branch, tag or commit; the default is the remote HEAD
@@ -212,6 +213,7 @@ crewship:
   #   owner_name: the owner          # the default; how the desk prompt names him
   #   # desk_provider, desk_model, desk_reasoning: optional; see imessage.md#enable-it
   #   desk_v2: false                 # the default; true selects the V2 front desk
+  #   desk_session: true             # the default; with desk_v2 the desk is one long omp session; false keeps the one-shot V2 loop
   #   herdr_alerts: false            # the default; true texts you when a herdr agent is done, blocked or idle
   #   supervisor_model: ""           # the default; see imessage.md#what-it-does for identity routing
   #   transports: [photon]           # the default; in order, e.g. [photon, bluebubbles] with the block below
@@ -235,6 +237,7 @@ crewship:
   #   data_dir: /mnt/data/ci
   #   repos:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
+  # runner_up: {}         # Optional; runner-up runs the ci_pool repositories behind caps. See runner-up.md
 ```
 
 See [iMessage credential loading](imessage.md#enable-it) for the shell format and security requirements of `~/super.env`.
@@ -246,7 +249,8 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
-- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name.
+- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
+- `runner_up` needs `docker`. It needs `runner_up.repos` or `ci_pool.repos` entries without `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
 - `board` needs `firstmate` and `development`.
@@ -295,6 +299,7 @@ After a successful `./ship.sh launch` with the `firstmate` profile on, once omp 
 - The questions follow `firstmate.checklist` when it is set and `gh` can read it: `repo` is a GitHub repository (it can be private) and `path` is the checklist file in it. Set it only in `.local/host.yml`, never in `blueprint/config/default.yml`. Otherwise they follow [Agent host move](agent-host-move.md).
 - When `.local/host.yml` has no `github_board` block, a question asks whether to turn on the [GitHub board](github-board.md). The answer is off unless you choose it.
 - With the `development` profile on and no `board` block in `.local/host.yml`, one more question asks whether to turn on the [crew board](board.md). The answer is off unless you choose it.
+- When `mac_ssh` is set without `mac_ssh.dia_cookies`, `ship.sh launch` offers the [Dia cookie sync](security.md#optional-dia-cookie-sync) once, after the questions above and even when they were already asked. Its own marker is `dia-cookies-offer-done`. Without a terminal it prints a hint instead. The answer is off unless you choose it.
 - When `project_databases` is off or omitted, a question offers the [per-project dev databases](project-databases.md).
   The prompt names the resolved config path and does not enable the profile without your choice.
 - They are asked once per host.

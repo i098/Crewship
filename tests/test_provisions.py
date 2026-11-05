@@ -668,6 +668,7 @@ RELEASES = {
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
     "jimididit/koncreet": ("v9.9.9", "koncreet.tar.gz"),
     "jj-vcs/jj": ("v9.9.9", "jj-v9.9.9-x86_64-unknown-linux-musl.tar.gz"),
+    "kunchenguid/runner-up": ("v9.9.9", "runner-up-v9.9.9-linux-amd64.tar.gz"),
     "googleworkspace/cli": (
         "v9.9.9",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
@@ -817,6 +818,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "obscura",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["assets"]["linux-x86_64"]["sha256"] == "a" * 64
     for tool in (
@@ -833,6 +835,7 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
         "obscura",
         "koncreet",
         "jj",
+        "runner-up",
     ):
         assert latest[tool]["version"] == "9.9.9"
     gws = latest["gws"]["assets"]["linux-x86_64"]
@@ -1023,6 +1026,17 @@ def test_pyrefly_musl_release_installs_verified_tar_and_is_idempotent(
     command = tmp_path / ".local/bin/pyrefly"
     assert subprocess.check_output([command, "--version"], text=True).strip() == "pyrefly 9.9.9"
     assert not installer.install_asset(tmp_path, "pyrefly", spec, key)
+
+
+def test_pyrefly_release_without_sha256_file_uses_the_github_digest(monkeypatch):
+    name = "pyrefly-linux-x86_64-musl.tar.gz"
+    monkeypatch.setitem(RELEASES, "facebook/pyrefly", ("9.9.9", name))
+    upstream(monkeypatch)
+    spec = installer.resolve_latest("linux-x86_64", {"pyrefly"})["pyrefly"]
+    assert spec["assets"]["linux-x86_64"]["sha256"] == "a" * 64
+    upstream(monkeypatch, unverified="facebook/pyrefly")
+    with pytest.raises(Exception, match="SHA-256"):
+        installer.resolve_latest("linux-x86_64", {"pyrefly"})
 
 
 def test_no_mistakes_follows_the_prerelease_channel_and_skips_drafts(monkeypatch):

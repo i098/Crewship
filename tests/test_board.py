@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from retired_probe import GROUP_VARS, PROBE
 
 ROOT = Path(__file__).parents[1]
 
@@ -117,7 +118,8 @@ def _apply(tmp_path, home, board, check=False, manage_services=False):
             "connection": "local",
             "gather_facts": False,
             "environment": {"HOME": str(home)},
-            "tasks": [{"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/board.yml")}],
+            "vars_files": GROUP_VARS,
+            "tasks": [PROBE, {"ansible.builtin.import_tasks": str(ROOT / "blueprint/ansible/tasks/board.yml")}],
             "handlers": [
                 {"name": "reload user systemd", "ansible.builtin.debug": {"msg": "reload"}},
                 *(handler for handler in handlers

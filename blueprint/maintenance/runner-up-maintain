@@ -1,0 +1,35 @@
+#!/bin/sh
+# Docker housekeeping for runner-up (docs/runner-up.md#disk).
+#   runner-up-maintain image [--ensure]   build the job image from the latest official
+#                                         runner image; with --ensure, only when it is missing
+#   runner-up-maintain clean              remove what the jobs left on the disk
+# Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
+set -eu
+image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
+lock=${RUNNER_UP_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-image.lock}
+
+have_image() { docker image inspect "$image" >/dev/null 2>&1; }
+
+case "${1-}" in
+image)
+  [ "${2-}" = --ensure ] && have_image && exit 0
+  : "${RUNNER_UP_DOCKERFILE:?}"
+  exec 9>"$lock"
+  flock 9
+  # Another start may have built it while this one waited for the lock.
+  [ "${2-}" = --ensure ] && have_image && exit 0
+  # --rm and --force-rm drop the build's intermediate containers, success or not.
+  docker build --pull --quiet --rm --force-rm --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
+    <"$RUNNER_UP_DOCKERFILE" >/dev/null
+  # The untagged layers of the previous build; images that a container uses stay.
+  docker image prune --force >/dev/null ;;
+clean)
+  # Only stopped containers of runner-up's places: `docker run --rm` removes them at the end of a job,
+  # so one that is left here belongs to a place that crashed.
+  docker container prune --force --filter label=runner-up.place --filter until=1h >/dev/null
+  docker image prune --force >/dev/null
+  docker builder prune --force --reserved-space "${RUNNER_UP_DISK_MAX_GB:-50}GB" >/dev/null ;;
+*)
+  echo "usage: runner-up-maintain image [--ensure] | clean" >&2
+  exit 2 ;;
+esac

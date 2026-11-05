@@ -252,6 +252,11 @@ def slug(repo):
     return re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
 
 
+def entry_slug(entry):
+    """Slot prefix: an entry's optional `name` lets one repository have several slot groups."""
+    return slug(entry.get("name") or entry["repo"])
+
+
 def totals():
     """CPUs and MemTotal in GiB."""
     meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
@@ -265,7 +270,7 @@ def auto_slots(pool, cpus, memory_gib):
 def wanted_slots(pool, total):
     """Instance names in config order, cut to `total` slots."""
     names = [
-        f"{slug(entry['repo'])}-{n}" for entry in pool["repos"] for n in range(1, entry["slots"] + 1)
+        f"{entry_slug(entry)}-{n}" for entry in pool["repos"] for n in range(1, entry["slots"] + 1)
     ]
     if len(names) > total:
         print(
@@ -355,7 +360,7 @@ def apply(check):
     want = wanted_slots(pool, total)
     # Also each repository's cache from before the caches were per slot (<data_dir>/ci-pool/cache/
     # <owner>-<name>/): its slots that started then still mount it.
-    keep = {*want, *(slug(entry["repo"]) for entry in pool["repos"])}
+    keep = {*want, *(entry_slug(entry) for entry in pool["repos"])}
     changes = []
 
     def write(path, text):
@@ -426,7 +431,7 @@ def apply(check):
     if reconfigured and not check:
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         CONFIG.write_text(config)
-    repos, runners = {slug(entry["repo"]): entry["repo"] for entry in pool["repos"]}, {}
+    repos, runners = {entry_slug(entry): entry["repo"] for entry in pool["repos"]}, {}
     outdated = drifted(want, nice)
     for name in want:
         unit = f"ci-runner@{name}.service"
@@ -461,8 +466,8 @@ def refresh_image():
         argv, stdin = [*docker(), "pull", "--quiet", image], None
         seconds = DOCKER_TIMEOUT
     else:
-        argv = [*docker(), "build", "--pull", "--quiet", "--build-arg", f"REFRESH={time.strftime('%Y-%m-%d')}",
-                "--tag", BUILT_IMAGE, "-"]
+        argv = [*docker(), "build", "--pull", "--quiet", "--rm", "--force-rm",
+                "--build-arg", f"REFRESH={time.strftime('%Y-%m-%d')}", "--tag", BUILT_IMAGE, "-"]
         stdin, seconds = DOCKERFILE, BUILD_TIMEOUT
     done = subprocess.run(bounded(argv, seconds), input=stdin, text=True, stdout=subprocess.DEVNULL)
     print(f"image {image}: exit {done.returncode}", flush=True)
@@ -528,7 +533,7 @@ def run(instance):
         return 0
     pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
     base = instance.rpartition("-")[0]
-    entry = next((e for e in pool["repos"] if slug(e["repo"]) == base), None)
+    entry = next((e for e in pool["repos"] if entry_slug(e) == base), None)
     if entry is None:
         print(f"{instance}: no repository in {CONFIG}; run ci-pool.py apply", file=sys.stderr)
         time.sleep(FAILURE_PAUSE_SECONDS)
@@ -748,7 +753,7 @@ def watch(dry_run=False):
     is now replaced whole, so a failed write keeps the old state). Also removes containers
     stuck in `removing` or `dead` whose slot unit is stopped."""
     pool = {**DEFAULTS, **json.loads(CONFIG.read_text())}
-    entries = {slug(entry["repo"]): entry for entry in pool["repos"]}
+    entries = {entry_slug(entry): entry for entry in pool["repos"]}
     containers, units, now = container_states(), slot_units(), time.time()
     if containers is None:
         containers = {}

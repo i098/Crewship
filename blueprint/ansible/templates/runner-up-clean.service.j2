@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+# Triggered by runner-up-clean.timer. Removes what the jobs leave on the disk: stopped
+# place containers, untagged image layers, and build cache beyond {{ crewship_runner_up_disk_max_gb }} GB.
+# It never touches a running container, so a job is never stopped.
+[Unit]
+Description=runner-up disk cleanup (Crewship managed)
+
+[Service]
+Type=oneshot
+Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
+Environment=RUNNER_UP_DISK_MAX_GB={{ crewship_runner_up_disk_max_gb }}
+ExecStart={{ crewship_runner_up_maintain }} clean
+TimeoutStartSec=900
+Nice=19
+IOSchedulingClass=idle

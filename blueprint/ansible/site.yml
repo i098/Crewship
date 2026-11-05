@@ -142,6 +142,17 @@
         - crewship_cfg.profiles.firstmate | bool
       tags: [firstmate, stuck_composer]
 
+    - name: GitHub webhook receiver for the Firstmate watcher
+      ansible.builtin.import_tasks: tasks/gh_webhook.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.profiles.firstmate | bool
+        - crewship_cfg.profiles.development | bool
+      tags: [firstmate, gh_webhook]
+
     - name: GitHub reply alerts for main Firstmate
       ansible.builtin.include_tasks:
         file: tasks/gh_replies.yml
@@ -229,6 +240,16 @@
         - crewship_cfg.ci_pool is defined
       tags: [ci_pool]
 
+    - name: runner-up - one coordinator, one fresh container per GitHub Actions job
+      ansible.builtin.include_tasks:
+        file: tasks/runner_up.yml
+        apply:
+          tags: [runner_up]
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.runner_up is defined
+      tags: [runner_up]
+
     - name: Fleet guards - Docker guard, reapers and storage guard
       ansible.builtin.include_tasks:
         file: tasks/fleet_guards.yml
@@ -301,6 +322,19 @@
         - crewship_cfg.mac_ssh is defined
       tags: [mac_ssh]
 
+    - name: Optional Dia cookie sync, offered after the `ssh mac` step
+      ansible.builtin.include_tasks:
+        file: tasks/dia_cookies.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [dia_cookies]
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.mac_ssh.dia_cookies | default(false) | bool
+      tags: [dia_cookies]
+
     - name: Koncreet host hardening toolkit, installed but never run
       ansible.builtin.include_tasks:
         file: tasks/koncreet.yml
@@ -364,6 +398,13 @@
       environment: "{{ crewship_user_systemd_env }}"
       when: crewship_manage_services | bool
       listen: reload user systemd
+
+    - name: Reload the system systemd manager
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      become: true
+      when: crewship_manage_services | bool
+      listen: reload system systemd
 
     - name: Restart the Herdr user service
       ansible.builtin.systemd_service:

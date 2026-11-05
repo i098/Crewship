@@ -66,6 +66,48 @@ def validate_document(document, schema_name):
         raise ValueError(f"{schema_name}: invalid {location} ({error.validator})") from None
 
 
+# Pool labels runner-up refuses: internal/config checkLabel in kunchenguid/runner-up.
+RUNNER_UP_RESERVED_LABELS = ("self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm", "x86")
+RUNNER_UP_HOSTED_PREFIXES = ("ubuntu-", "windows-", "macos-")
+
+
+def entry_slugs(entries):
+    """Slot prefixes; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py."""
+    return [re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-") for e in entries]
+
+
+def validate_runner_up(config):
+    runner = config["runner_up"]
+    if not config["profiles"]["docker"]:
+        raise ValueError("runner_up requires the docker profile")
+    if ".." in Path(runner.get("data_dir", "/")).parts:
+        raise ValueError("runner_up.data_dir must not traverse; give a plain path")
+    entries = runner.get("repos") or [
+        e for e in config.get("ci_pool", {}).get("repos", []) if "docker" not in e
+    ]
+    if not entries:
+        raise ValueError(
+            "runner_up needs repos, or ci_pool.repos entries without docker: dind to take them from"
+        )
+    if len(set(entry_slugs(entries))) != len(entries):
+        raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
+    for entry in entries:
+        pools = [
+            label for label in entry["labels"] if label.lower() not in RUNNER_UP_RESERVED_LABELS
+        ]
+        if not pools:
+            raise ValueError(
+                f"{entry['repo']}: runner-up needs a label besides {', '.join(RUNNER_UP_RESERVED_LABELS)}"
+                " for its pool; workflows use it as `runs-on`"
+            )
+        for label in pools:
+            if label.lower().startswith(RUNNER_UP_HOSTED_PREFIXES):
+                raise ValueError(f"{entry['repo']}: label {label} looks like a GitHub-hosted runner")
+    names = [m["name"] for m in runner.get("machines", [])]
+    if len(set(names)) != len(names) or "local" in names:
+        raise ValueError("runner_up.machines names must be unique and not `local`")
+
+
 def validate_config(document):
     config = document.get("crewship") if isinstance(document, dict) else None
     if isinstance(config, dict) and (
@@ -128,10 +170,10 @@ def validate_config(document):
             raise ValueError("the CI pool requires the docker profile")
         if ".." in Path(pool["data_dir"]).parts:
             raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        # Unit instance names; the same rule as slug() in blueprint/maintenance/ci-pool.py.
-        slugs = [re.sub(r"[^a-z0-9]+", "-", e["repo"].lower()).strip("-") for e in pool["repos"]]
-        if len(set(slugs)) != len(slugs):
+        if len(set(entry_slugs(pool["repos"]))) != len(pool["repos"]):
             raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
+    if "runner_up" in config:
+        validate_runner_up(config)
     prune = config["browser_prune"]
     if prune["enabled"] and not config["profiles"]["agents"]:
         raise ValueError("browser pruning requires the agents profile")
@@ -542,6 +584,65 @@ def setup_status(document, config_path):
     return int(bool(failed or missing or pending or not memory_ready))
 
 
+def dia_cookies_offer(document, config_path):
+    """Offer the optional Dia cookie sync once, after `ssh mac` is set; own marker, separate from the new-host questions."""
+    config = document["crewship"]
+    if "mac_ssh" not in config or "dia_cookies" in config["mac_ssh"]:
+        return 0
+    home = Path(config["home"])
+    marker = home / ".local/share/crewship/dia-cookies-offer-done"
+    if marker.exists():
+        return 0
+    if (
+        not sys.stdin.isatty()
+        or os.environ.get("CI")
+        or pwd.getpwuid(os.getuid()).pw_name != config["user"]
+    ):
+        print(
+            "Dia cookie sync not offered (needs an interactive terminal); enable it later by setting "
+            f"crewship.mac_ssh.dia_cookies to true in {config_path}"
+        )
+        return 0
+    environment = host_environment(config)
+    if not omp_signed_in(environment):
+        print("Dia cookie sync not offered: sign in to omp with /login, then rerun ship.sh launch interactively")
+        return 0
+    try:
+        reachable = (
+            subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "mac", "true"],
+                env=environment,
+                capture_output=True,
+                timeout=30,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        reachable = False
+    if not reachable:
+        print(
+            "Dia cookie sync not offered: `ssh mac` does not work yet; rerun ship.sh launch interactively "
+            f"once it does, or set crewship.mac_ssh.dia_cookies to true in {config_path}"
+        )
+        return 0
+    prompt = (
+        "Ask one short question: sync each Dia browser profile's cookies from the Mac to private "
+        "files on this host every 30 minutes? If yes, set "
+        f"crewship.mac_ssh.dia_cookies to true in {config_path}, follow "
+        f"{ROOT / 'docs/security.md'}#optional-dia-cookie-sync, and never print cookie values."
+    )
+    argv = [home / ".local/bin/omp", prompt]
+    if os.environ.get("CREWSHIP_INSTALL_LOG"):
+        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
+    returncode = subprocess.run(argv, cwd=Path(config["workspace"]) / "firstmate", env=environment).returncode
+    if returncode:
+        print(f"Dia cookie sync offer did not complete (omp exited {returncode}); rerun ship.sh launch interactively")
+        return returncode
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    return 0
+
+
 def questions(document, config_path):
     """Open Firstmate on omp to ask the operator the new-host move questions."""
     config = document["crewship"]
@@ -708,6 +809,7 @@ def main():
                 print("Software is installed, but Firstmate cannot start workers until the memory check passes.")
                 return 1
             questions(document, path)
+            dia_cookies_offer(document, path)
     return result
 
 

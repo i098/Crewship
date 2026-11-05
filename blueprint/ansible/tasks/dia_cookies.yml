@@ -1,0 +1,55 @@
+---
+# Optional Dia per-profile cookie sync (docs/security.md#optional-dia-cookie-sync).
+# Runs only when crewship.mac_ssh.dia_cookies is true, after the `ssh mac` step.
+#
+#   * the script and a 30-minute user timer are installed; nothing is read
+#     from the Mac until the timer or an operator runs `dia-cookies refresh`
+#   * the exported jar stays on this host in mode 0600 files, encrypted with a
+#     key that never leaves ~/.config/dia-cookies; no task or unit prints values
+
+- name: Install the dia-cookies script
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/tools/dia-cookies/dia-cookies"
+    dest: "{{ crewship_dia_cookies_bin }}"
+    mode: "0755"
+
+- name: Render the dia-cookies service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ crewship_user_units }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - dia-cookies.service
+    - dia-cookies.timer
+  notify: reload user systemd
+
+- name: Ensure the user timers.target.wants directory
+  ansible.builtin.file:
+    path: "{{ crewship_user_units }}/timers.target.wants"
+    state: directory
+    mode: "0755"
+
+- name: Statically enable the dia-cookies timer
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/dia-cookies.timer"
+    dest: "{{ crewship_user_units }}/timers.target.wants/dia-cookies.timer"
+    state: link
+    force: true
+    follow: false
+  notify: reload user systemd
+
+- name: Check for the installed dia-cookies timer
+  ansible.builtin.stat:
+    path: "{{ crewship_user_units }}/dia-cookies.timer"
+  register: crewship_dia_cookies_timer
+  when: ansible_check_mode
+
+- name: Start the dia-cookies timer
+  ansible.builtin.systemd_service:
+    scope: user
+    name: dia-cookies.timer
+    state: started
+  environment: "{{ crewship_user_systemd_env }}"
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode or crewship_dia_cookies_timer.stat.exists

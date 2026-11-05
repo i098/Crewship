@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from retired_probe import PROBE
 
 ROOT = Path(__file__).parents[1]
 GROUP_VARS_FILES = sorted((ROOT / "blueprint/ansible/group_vars/all").glob("*.yml"))
@@ -1050,7 +1051,11 @@ def _managed_environment(tmp_path, fleet_guards, release="1.0.0"):
 
 @pytest.mark.parametrize("fleet_guards", [False, True])
 def test_the_managed_environment_never_carries_a_process_wide_runtime_limit(tmp_path, fleet_guards):
-    assert set(_managed_environment(tmp_path, fleet_guards)) == {"CHROME_DEVTOOLS_AXI_MCP_PATH"}
+    assert set(_managed_environment(tmp_path, fleet_guards)) == {
+        "CHROME_DEVTOOLS_AXI_MCP_PATH",
+        "API_ANYTHING_HOME",
+        "API_ANYTHING_BROWSER_ROOTS",
+    }
 
 
 def test_a_new_chrome_devtools_mcp_release_leaves_the_managed_environment_unchanged(tmp_path):
@@ -1603,11 +1608,11 @@ def _account_play(tmp_path, names, variables, *options, tasks=(), handlers=()):
     playbook = tmp_path / "account.yml"
     playbook.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "tasks": [*selected, *tasks], "handlers": list(handlers),
+        "tasks": [PROBE, *selected, *tasks], "handlers": list(handlers),
     }]))
     result = _ansible(
         tmp_path, "ansible-playbook", "-i", "localhost,", str(playbook), *options,
-        *GROUP_VARS_ARGS, "-e", json.dumps(variables),
+        *GROUP_VARS_ARGS, "-e", json.dumps({"crewship_repo": str(ROOT), **variables}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

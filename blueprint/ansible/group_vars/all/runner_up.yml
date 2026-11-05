@@ -1,0 +1,68 @@
+---
+# runner-up (crewship.runner_up, docs/runner-up.md): one coordinator serves every repository,
+# one fresh Docker container per job. The repositories, slot groups and labels come
+# from crewship.ci_pool.repos unless crewship.runner_up.repos names its own.
+# Defaults live here, not in blueprint/config/default.yml: the block is opt-in.
+crewship_runner_up: "{{ crewship_cfg.runner_up | default({}) }}"
+
+# A dind entry needs a Docker daemon of its own in the job; runner-up has no such place, so it stays on the CI pool.
+crewship_runner_up_repos: >-
+  {{ (crewship_runner_up.repos | default(crewship_cfg.ci_pool.repos | default([]), true))
+     | rejectattr('docker', 'defined') | list }}
+# runner-up refuses pool labels that every self-hosted runner has (internal/config checkLabel).
+crewship_runner_up_reserved_labels: [self-hosted, linux, windows, macos, x64, arm64, arm, x86]
+
+crewship_runner_up_job_cpus: >-
+  {{ (crewship_runner_up.job_cpus | default(crewship_cfg.ci_pool.job_cpus | default(4), true)) | float | round(0, 'ceil') | int }}
+crewship_runner_up_job_memory_gb: >-
+  {{ crewship_runner_up.job_memory_gb | default(crewship_cfg.ci_pool.job_memory_gb | default(8), true) | int }}
+# Most jobs at one time: the CI pool's total_slots, and `auto` takes half of the host's CPUs and memory.
+crewship_runner_up_slots_setting: >-
+  {{ crewship_runner_up.total_slots | default(crewship_cfg.ci_pool.total_slots | default('auto', true), true) }}
+crewship_runner_up_total_slots: >-
+  {{ [1, ([ansible_facts['processor_vcpus'] | default(2) * 0.5 / crewship_runner_up_job_cpus | int,
+           ansible_facts['memtotal_mb'] | default(4096) / 1024 * 0.5 / crewship_runner_up_job_memory_gb | int]
+          | min) | int] | max
+     if crewship_runner_up_slots_setting == 'auto' else crewship_runner_up_slots_setting | int }}
+
+crewship_runner_up_data_dir: >-
+  {{ crewship_runner_up.data_dir | default(crewship_cfg.ci_pool.data_dir | default('', true), true) }}
+crewship_runner_up_state_dir: >-
+  {{ (crewship_runner_up_data_dir ~ '/runner-up') if crewship_runner_up_data_dir
+     else crewship_cfg.home ~ '/.local/state/runner-up' }}
+
+# Caps. Weights and nice only matter while the host wants the CPU; the memory cap and the
+# disk cap always hold.
+crewship_runner_up_cpu_weight: "{{ crewship_runner_up.cpu_weight | default(20) }}"
+crewship_runner_up_io_weight: "{{ crewship_runner_up.io_weight | default(20) }}"
+crewship_runner_up_nice: "{{ crewship_runner_up.nice | default(10) }}"
+crewship_runner_up_memory_max: "{{ crewship_runner_up.memory_max | default('50%') }}"
+crewship_runner_up_disk_max_gb: "{{ crewship_runner_up.disk_max_gb | default(50) }}"
+# Place logs stay a week; they sit on the same disk as the build cache.
+crewship_runner_up_log_keep_days: 7
+
+crewship_runner_up_slice: runnerup.slice
+crewship_runner_up_slice_dir: /etc/systemd/system
+crewship_runner_up_image: crewship-ci-runner:latest
+crewship_runner_up_dir: "{{ crewship_cfg.home }}/.local/share/runner-up"
+crewship_runner_up_shim_dir: "{{ crewship_runner_up_dir }}/shim"
+crewship_runner_up_dockerfile: "{{ crewship_runner_up_dir }}/ci-runner.Dockerfile"
+crewship_runner_up_config_dir: "{{ crewship_cfg.home }}/.config/runner-up"
+# One coordinator for each repository: a runner-up pool is global to its coordinator, so one
+# coordinator for every repository would open a scale set in each repository for every label.
+crewship_runner_up_repo_names: "{{ crewship_runner_up_repos | map(attribute='repo') | unique | list }}"
+# The instance name of a repository: its name with every run of other characters turned to a dash.
+crewship_runner_up_instances: >-
+  {{ crewship_runner_up_repo_names | map('lower') | map('regex_replace', '[^a-z0-9]+', '-')
+     | map('regex_replace', '^-|-$', '') | list }}
+# Extra machines join one coordinator, because a machine's budget is not shared between coordinators.
+crewship_runner_up_machines_repo: >-
+  {{ crewship_runner_up.machines_repo | default(crewship_runner_up_repo_names | first | default(''), true) }}
+crewship_runner_up_maintain: "{{ crewship_local_bin }}/runner-up-maintain"
+crewship_runner_up_bin: "{{ crewship_local_bin }}/runner-up"
+# Validates each config before it replaces the live one; the coordinator ignores a bad file and keeps the old setup.
+crewship_runner_up_check: "{{ crewship_runner_up_bin }} check-config --config %s"
+# The CI pool's own hourly timer builds the same image, so the second builder runs only without it.
+crewship_runner_up_build_image: "{{ crewship_cfg.ci_pool is not defined }}"
+crewship_runner_up_units: [runner-up@.service, runner-up-clean.service, runner-up-clean.timer]
+crewship_runner_up_image_units: [runner-up-image.service, runner-up-image.timer]

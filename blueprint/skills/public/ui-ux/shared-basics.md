@@ -52,6 +52,16 @@ Implementation clarification (not from the reel): `em` on `font-size` is relativ
 ```
 Check: raise the browser default font size; text and spacing grow, borders do not.
 
+## Text wrapping
+Source: https://x.com/emilkowalski/status/2103124466352210045
+Why: the default line break can leave one word alone on the last line (an orphan). `text-wrap: pretty` gives nicer line breaks.
+Do: set `text-wrap: pretty` on the body by default. Override only where an orphan is wanted, such as some headings: use `text-wrap: balance` there.
+```css
+/* don't */ body { } /* default breaks can leave an orphan */
+/* do */    body { text-wrap: pretty } h2 { text-wrap: balance }
+```
+Check: no body paragraph ends with a lone word. Headings look as intended.
+
 ## Color [De2WSZDohDe]
 Source: a reel; author not identified.
 Why: RGB mixes hue, saturation and lightness. Editing one RGB value by hand breaks the rest of the scheme.

@@ -22,6 +22,8 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Ondine](https://github.com/wevm/ondine) (`ondine`): the default diagram compiler for agents and documentation. License: MIT.
 - [quota-axi](https://github.com/kunchenguid/quota-axi) (`quota-axi`): agent provider quota windows. License: MIT.
 - [backpass](https://github.com/kunchenguid/backpass) (`backpass`): evidence-backed edits to AGENTS.md and CLAUDE.md from agent sessions. License: MIT.
+- [compact-adviser](https://github.com/kunchenguid/compact-adviser) (`compact-adviser`): judges when an omp session is at a safe checkpoint to compact. License: MIT.
+- [api-anything](https://github.com/goodnight000/api-anything) (`api-anything`): site operations learned once and called over plain HTTP. License: MIT.
 - [tasks-axi](https://github.com/kunchenguid/tasks-axi) (`tasks-axi`): the task backlog of Firstmate. License: MIT.
 - [GitHub CLI](https://github.com/cli/cli) (`gh`): GitHub access. License: MIT.
 - [Google Workspace CLI](https://github.com/googleworkspace/cli) (`gws`): Google Workspace access for agents. License: Apache-2.0.
@@ -30,6 +32,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Pyrefly](https://github.com/facebook/pyrefly) (`pyrefly`): Python type checks and language server. License: MIT.
 - [Concord](https://github.com/chojs23/concord) (`concord`): the Discord terminal client. License: GPL-3.0-only.
 - [slk](https://github.com/gammons/slk) (`slk`): the Slack terminal client. License: MIT.
+- [runner-up](https://github.com/kunchenguid/runner-up) (`runner-up`): the coordinator of just-in-time GitHub Actions jobs, one container per job, with the `runner_up` block. License: MIT.
 - [Jujutsu](https://github.com/jj-vcs/jj) (`jj`): a Git-compatible version control system for agents, with the `jj` profile. License: Apache-2.0.
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.
 - [Koncreet](https://github.com/jimididit/koncreet) (`koncreet`): host hardening, patched by Crewship. License: MIT.

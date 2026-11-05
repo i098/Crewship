@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { buildRows, cells, clockAt, deepseek, deepseekRow, leftColor, leftOf, mercuryRows, parseOmp, parseZai, relReset, resellerRow, type QuotaInput } from "./quota.ts"
+import { buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseZai, readUsageCommand, relReset, resellerRow, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -24,7 +24,7 @@ const FIXTURE: QuotaInput = {
   },
   zai: { data: { limits: [{ unit: 3, number: 5, usage: 1000, remaining: 250, nextResetTime: NOW + 60 * MIN }, { unit: 6, number: 1, usage: 8000, remaining: 8000, nextResetTime: NOW + 6 * 1440 * MIN }] } },
   mercury: { keyIds: [9, 4], tokens: { 4: 25_000_000, 9: 150_000_000 } },
-  deepseek: { normal_wallets: [{ currency: "USD", balance: "12.5" }] },
+  deepseek: { rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: (NOW + 90 * MIN) / 1000 }] },
 }
 
 test("leftOf computes percent left and clamps overuse", () => {
@@ -70,49 +70,50 @@ test("--once prints the fixture without starting the TUI", async () => {
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
   expect(raw.map(l => l.slice(0, 30).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek -", "deepseek (reseller) -",
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek Basic 5h", "deepseek (reseller) -",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
-  expect(out).toContain("balance $12.50")
+  expect(lines).toContain("deepseek Basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
   expect(out).toContain("not reported")
 })
 
-test("deepseekRow shows the site balance labelled with its wallet currency", () => {
-  expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: "12.5" }] }).note).toBe("balance $12.50")
-  expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "100" }] }).note).toBe("balance CNY 100.00")
-  expect(deepseekRow({ normal_wallets: [{ currency: "CNY", balance: "10" }, { currency: "USD", balance: "-0.005077804" }] }).note).toBe("balance -$0.0051")
-  expect(deepseekRow({ normal_wallets: [{ currency: "USD", balance: 0 }] }).note).toBe("balance $0.00")
-  expect(deepseekRow({}).note).toBe("no balance reported")
+test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones", () => {
+  const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { window: "x" }] })
+  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek Basic", "5h", 75, 1_000_000, undefined], ["deepseek Basic", "7d", null, null, "n/a"]])
+  expect(deepseekRows({}).map(r => r.note)).toEqual(["n/a"])
 })
 
-test("a failed DeepSeek read holds its error, so no second ssh runs within 10 minutes", async () => {
-  // The probe runs as a child with the stub first on PATH: Bun.spawn resolves commands from the
-  // PATH a process starts with, so an in-test process.env.PATH edit would still reach the real Mac.
-  const dir = mkdtempSync(join(tmpdir(), "usage-tui-ds-"))
-  const log = join(dir, "ssh.log")
-  writeFileSync(join(dir, "ssh"), `#!/bin/sh\necho called >> "${log}"\necho "ssh: connect to host mac port 22: Connection refused" >&2\nexit 255\n`)
-  chmodSync(join(dir, "ssh"), 0o755)
-  const probe = join(dir, "probe.ts")
-  writeFileSync(probe, [
-    `const { deepseek } = await import(${JSON.stringify(join(import.meta.dir, "quota.ts"))})`,
-    "const a = await deepseek()",
-    "const b = await deepseek()",
-    `console.log(JSON.stringify({ error: a.error ?? null, heldTwice: b === a }))`,
-    "",
-  ].join("\n"))
-  const p = Bun.spawn(["bun", probe], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, stdout: "pipe", stderr: "ignore" })
-  const out = JSON.parse(await new Response(p.stdout).text()) as { error: string | null; heldTwice: boolean }
-  expect(await p.exited).toBe(0)
-  expect(out.error).toBe("Mac not reachable") // ssh's stderr names the host; the panel must not
-  expect(out.heldTwice).toBe(true)
-  expect(readFileSync(log, "utf8")).toBe("called\n")
-}, 30_000)
+const commandDir = () => mkdtempSync(join(tmpdir(), "usage-tui-cmd-"))
+const script = (dir: string, body: string) => {
+  const f = join(dir, "usage.sh")
+  writeFileSync(f, `#!/bin/sh\n${body}\n`)
+  chmodSync(f, 0o755)
+  return f
+}
 
-test("buildRows shows an error row when the DeepSeek site read fails", () => {
-  const rows = buildRows({ deepseekError: "connection refused" })
-  expect(rows.find(r => r.account === "deepseek")).toMatchObject({ leftPct: null, note: "unavailable: connection refused" })
+test("readUsageCommand reports an absent command without running anything", async () => {
+  expect(await readUsageCommand(undefined)).toEqual({ error: "no usage command set" })
+  expect(await readUsageCommand("  ")).toEqual({ error: "no usage command set" })
+})
+
+test("readUsageCommand reports a failing command and invalid output", async () => {
+  const dir = commandDir()
+  expect(await readUsageCommand(script(dir, "echo secret-detail >&2; exit 3"))).toEqual({ error: "command exited 3" })
+  expect(await readUsageCommand(script(dir, "echo not-json"))).toEqual({ error: "command printed invalid JSON" })
+  expect(await readUsageCommand(join(dir, "missing"))).toEqual({ error: "command failed" })
+})
+
+test("readUsageCommand parses a valid JSON result", async () => {
+  const out = await readUsageCommand(script(commandDir(), `echo '{"rows":[{"plan":"Basic","window":"5h","used":1,"limit":4}]}'`))
+  expect(out.error).toBeUndefined()
+  expect(deepseekRows(out.value!)[0]).toMatchObject({ account: "deepseek Basic", leftPct: 75 })
+})
+
+test("buildRows shows n/a when the DeepSeek command is absent or fails", () => {
+  expect(buildRows({}).find(r => r.account === "deepseek")?.note).toBe("n/a")
+  expect(buildRows({ deepseekError: "command exited 3" }).find(r => r.account === "deepseek")?.note).toBe("n/a: command exited 3")
 })
 
 test("resellerRow shows the key's cumulative spend and its own account label", () => {
@@ -120,9 +121,9 @@ test("resellerRow shows the key's cumulative spend and its own account label", (
   expect(resellerRow({ spend: NaN }).note).toBe("no spend reported")
 })
 
-test("buildRows keeps the reseller row when the Dia read fails, and shows its own error", () => {
+test("buildRows keeps the reseller row when the DeepSeek read fails, and shows its own error", () => {
   const rows = buildRows({ deepseekError: "connection refused", reseller: { spend: 1.5 } })
-  expect(rows.find(r => r.account === "deepseek")?.note).toBe("unavailable: connection refused")
+  expect(rows.find(r => r.account === "deepseek")?.note).toBe("n/a: connection refused")
   expect(rows.find(r => r.account === "deepseek (reseller)")?.note).toBe("spent $1.50")
   expect(buildRows({ resellerError: "reseller HTTP 401" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("unavailable: reseller HTTP 401")
 })

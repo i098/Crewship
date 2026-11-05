@@ -41,6 +41,7 @@ FEATURES = {
     "crewship.board": "docs/board.md",
     "crewship.board.github_sink": "docs/board.md#copy-messages-to-github",
     "crewship.ci_pool": "docs/ci-pool.md",
+    "crewship.runner_up": "docs/runner-up.md",
 }
 EXCLUDED = {
     # Base installs, listed under "Profiles on" in Default config.

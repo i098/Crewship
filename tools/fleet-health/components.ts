@@ -181,6 +181,7 @@ export const components: Component[] = [
   github("obscura", "h4ckf0r0day/obscura"),
   github("koncreet", "jimididit/koncreet"),
   github("jj", "jj-vcs/jj"),
+  github("runner-up", "kunchenguid/runner-up"),
   github("gws", "googleworkspace/cli"),
   { name: "node", group: "runtime", source: { kind: "node" }, installed: cmd("node"), bin: "node" },
   { name: "rustup-init", group: "runtime", source: { kind: "rustup" }, installed: cmd("rustup"), bin: "rustup" },
@@ -226,6 +227,7 @@ export const components: Component[] = [
   // kunchenguid tools: gh-axi, chrome-devtools-axi, tasks-axi, quota-axi and lavish-axi are on the npm list above.
   npm("backpass", "backpass"),
   npm("compact-adviser", "compact-adviser"), // on hold upstream: absent from the host by design
+  npm("api-anything", "api-anything"),
   skill("kun", "kunchenguid/kun"),
   skill("vision", "kunchenguid/vision"),
   plugin("ponytail", "DietrichGebert/ponytail"),

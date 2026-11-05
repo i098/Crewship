@@ -296,6 +296,24 @@ fleet-browser env chrome     # or: eval "$(fleet-browser env chrome)" to escalat
    display has no password, so every tailnet device that the tailnet policy
    lets reach that port can drive the signed-in browser.
 
+### api-anything
+
+[api-anything](https://github.com/goodnight000/api-anything) turns a site into plain HTTP calls: open the site once, call it later with the saved login and no browser.
+The `agents` profile installs it (`api-anything` on `PATH`), the MCP server in `~/.omp/agent/mcp.json`, and the skill for omp and Claude Code.
+Its catalog and sessions live in `~/.local/state/crewship/api-anything` (`API_ANYTHING_HOME`).
+Sharing is off: `settings.json` is written once with `share: false` and never rewritten, so only reading the public catalog goes off the host.
+`API_ANYTHING_BROWSER_ROOTS=[]` stops it from reading any browser profile.
+Learning a new site (`api-anything-fleet learn ...`) launches a headless Chromium, the one the fleet uses, with its own profile in the state directory.
+
+The fleet browser supplies the login. Sign in to a site in any tier, then:
+
+```bash
+api-anything-fleet login <site|url>            # import the shared jar as the site's saved login
+api-anything-fleet call <site> <op> key=value  # on class "auth": renew from the jar once, retry once
+```
+
+`api-anything-fleet` (`blueprint/fleet/browsers/api-anything-fleet`) never edits the jar. Installer: `scripts/api_anything.py`.
+
 ## Devtools-bridge reaper
 
 Every chrome-devtools-axi session starts a bridge that detaches to init by
