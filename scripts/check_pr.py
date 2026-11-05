@@ -25,8 +25,6 @@ UI_PATH = re.compile(
 def check_commits(subjects):
     errors = []
     for subject in subjects:
-        if subject.startswith("Merge "):
-            continue
         if len(subject) > 100:
             errors.append(f"Commit subject is over 100 characters: {subject}")
         elif not SUBJECT.fullmatch(subject) or subject.endswith("."):
