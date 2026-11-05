@@ -292,7 +292,7 @@ async function refreshSession(): Promise<void> {
   let jwt: string
   try {
     const jar = JSON.parse(await Bun.file(`${HOME}/.fleet-browser/cookies.json`).text())
-    cookies = Object.values(jar as Record<string, { name: string; value: string; domain?: string }>).filter(c => String(c?.domain ?? "").includes("deepseekv4pro.com"))
+    cookies = Object.values(jar as Record<string, { name: string; value: string; domain?: string }>).filter(c => /^\.?([a-z0-9-]+\.)*deepseekv4pro\.com$/.test(String(c?.domain ?? "")))
     const sid = cookies.find(c => c.name === "clerk_active_context")!.value.split(":")[0]
     const cookie = cookies.filter(c => String(c.domain).includes("clerk") || c.name.startsWith("__client")).map(c => `${c.name}=${c.value}`).join("; ")
     const res = await fetch(`https://clerk.deepseekv4pro.com/v1/client/sessions/${sid}/tokens?__clerk_api_version=2026-08-20`, {
