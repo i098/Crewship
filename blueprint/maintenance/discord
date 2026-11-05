@@ -91,7 +91,10 @@ def main(argv):
     else:
         if (args.text is None) == (args.file is None):
             sys.exit("discord send: give TEXT or --file, not both")
-        text = args.text if args.file is None else Path(args.file).read_text()
+        try:
+            text = args.text if args.file is None else Path(args.file).read_text()
+        except OSError as error:
+            sys.exit(f"discord send: cannot read {args.file}: {error.strerror}")
         if not text.strip():
             sys.exit("discord send: empty message")
         if args.dry_run:
