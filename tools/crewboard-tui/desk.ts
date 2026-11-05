@@ -125,7 +125,7 @@ export function deskLines(d: Desk, nowMs: number, width = 100, height = 40): Lin
   ]
   // Two rows per turn, newest first, as many as fit; text is cut to the pane width.
   const room = Math.max(0, Math.floor((height - head.length - 2) / 2))
-  const shown = d.turns.slice(-room).reverse()
+  const shown = d.turns.slice(d.turns.length - room).reverse() // not slice(-room): slice(-0) is every turn
   if (!shown.length) return head
   return [...head, [], [v(" recent turns", theme.accent, true), m("   in, route, out; newest first")], ...shown.flatMap((t): Line[] => {
     const tag = `[${cut(t.route, 24)}]`

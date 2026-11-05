@@ -116,4 +116,5 @@ test("the snapshot lists the newest turns first, flattens and cuts text to the w
   expect(out.find(l => l.includes("what is the eta"))).toMatch(/what is the eta [^[]*… \[desk\]/) // cut to 40 columns
   expect(deskSnapshot(d, 6_000_000, 100, 40)).toContain("what is the eta on the port [desk]") // newline flattened
   expect(deskSnapshot(d, 6_000_000, 40, 16).split("\n").filter(l => /^ +\S* +in /.test(l))).toHaveLength(2) // height 16 leaves room for 2 turns
+  expect(deskSnapshot(d, 6_000_000, 40, 12)).not.toContain("recent turns") // no room for one turn: none shown
 })
