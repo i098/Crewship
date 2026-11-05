@@ -135,6 +135,43 @@ def test_plain_words_the_reply_checks_refuse_go_to_firstmate(tmp_path):
         assert texts(rig) == []
 
 
+def test_narration_before_a_tool_call_is_not_sent_as_the_reply(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "NARRATE")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+
+
+def test_plain_words_of_a_prompt_that_ended_in_error_go_to_firstmate(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "ERRORWORDS")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+        assert len(desk_lines(rig, "prompt")) == 1
+
+
+def test_words_of_the_first_prompt_are_not_sent_when_the_reminder_turn_fails(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "ERRORRETRY")
+        wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
+        time.sleep(1)
+        assert texts(rig) == []
+        assert len(desk_lines(rig, "prompt")) == 2
+
+
+@pytest.mark.parametrize("compacted", [True, False])
+def test_the_reminder_turn_carries_the_chat_view_only_after_a_compaction(tmp_path, compacted):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how are you PLAIN" + (" COMPACT" if compacted else ""))
+        wait_for(lambda: len(texts(rig)) == 1, "the reply after the reminder", timeout=120)
+        time.sleep(1)
+        prompts = desk_lines(rig, "prompt")
+        assert len(prompts) == 2 and "without an action tool" in prompts[1]
+        assert ("<chat>" in prompts[1]) == compacted
+
+
 def test_instant_reasoning_starts_the_inception_session(tmp_path):
     extra = dict(FM_IMESSAGE_DESK_PROVIDER="inception", FM_IMESSAGE_DESK_MODEL="mercury-3", FM_IMESSAGE_DESK_REASONING="instant")
     with session_rig(tmp_path, **extra) as rig:

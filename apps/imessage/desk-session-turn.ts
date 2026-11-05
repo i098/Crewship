@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
 import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
-import { DeskSession, sessionConfig } from "./desk-session.ts";
+import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
 import { deskMayAct, type RelayRequest } from "./relay.ts";
@@ -26,6 +26,8 @@ function threadReplyMate(pending: TurnRequest[], mates: Secondmate[]) {
 }
 
 export type TurnRequest = RelayRequest & { memoryId: number; route: string; threadMate?: string };
+
+type TurnParts<R extends TurnRequest> = { pending: R[]; current: () => boolean; actions: { run: ToolRunner; acted(): boolean } };
 
 export type SessionHost<R extends TurnRequest> = {
   env: SessionEnv;
@@ -154,22 +156,24 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         return safe(`${inbox.status}\n${mateStatusLines(host.fmHome, mates)}`);
       },
     });
-    let result = await session().ask((seed) => message(pending, original, safe, seed), controller.signal, actions.run);
+    const first = await session().ask((seed) => message(pending, original, safe, seed), controller.signal, actions.run);
     if (!current() || actions.acted()) return;
-    const log = host.log("desk session");
-    log(new Error(`turn ended with no action (${result.status}${result.error ? `: ${result.error}` : ""}); asking once more`));
-    // omp RPC cannot force a tool call, so a model that answered in words gets one reminder, then its words go out as the reply.
-    if (result.status === "completed") {
-      const again = await session().ask(() => RETRY_MESSAGE, controller.signal, actions.run);
-      if (!current() || actions.acted()) return;
-      result = { ...again, text: again.text ?? result.text };
-    }
-    if (result.text) {
-      try {
-        await actions.run("reply", { text: result.text }); // the same checks as the reply tool
-        return;
-      } catch (error) { log(error); }
-    }
-    host.handoff(pending);
+    const remind = () => session().ask((seed) => seed ? `${message(pending, original, safe, true)}\n\n${RETRY_MESSAGE}` : RETRY_MESSAGE, controller.signal, actions.run);
+    await noAction(host, { pending, current, actions }, first, remind);
   };
+}
+
+// omp RPC cannot force a tool call, so a model that answered in words gets one reminder, then the words of the last prompt go out as the reply.
+async function noAction<R extends TurnRequest>(host: SessionHost<R>, t: TurnParts<R>, first: PromptResult, remind: () => Promise<PromptResult>) {
+  const log = host.log("desk session");
+  log(new Error(`turn ended with no action (${[first.status, first.error].filter(Boolean).join(": ")}); asking once more`));
+  const result = first.status === "completed" ? await remind() : first;
+  if (!t.current() || t.actions.acted()) return;
+  if (result.status === "completed" && result.text) {
+    try {
+      await t.actions.run("reply", { text: result.text }); // the same checks as the reply tool
+      return;
+    } catch (error) { log(error); }
+  }
+  host.handoff(t.pending);
 }

@@ -108,7 +108,7 @@ export class DeskSession {
       case "message_end": {
         if (frame.message?.role !== "assistant") return;
         const written = (frame.message.content ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim();
-        if (written) this.words = written; // narration before a tool call is overwritten by the next message
+        this.words = written;
         const used = usageTokens(frame.message.usage);
         if (used) logTokens({ kind: "desk-session", model: String(frame.message.model ?? this.o.model), ...used });
         return;
