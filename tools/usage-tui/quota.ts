@@ -96,11 +96,17 @@ export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: nu
 const RESELLER = "deepseek (reseller)"
 const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
 
+// "DeepSeek Coding Plan Max" -> "deepseek max": drop the words every plan shares, cut to the account column.
+const planLabel = (plan: unknown) => {
+  const rest = typeof plan === "string" ? plan.replace(/\b(deepseek|coding|plan)\b/gi, "").trim().toLowerCase().replace(/\s+/g, " ") : ""
+  return `deepseek ${rest}`.trim().slice(0, ACCOUNT_W - 1)
+}
+
 export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
   const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
     if (!r || typeof r.window !== "string") return []
     const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
-    return [{ account: typeof r.plan === "string" && r.plan ? `${RESELLER} ${r.plan}` : RESELLER, window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+    return [{ account: planLabel(r.plan), window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
   })
   return rows.length ? rows : [resellerNote("n/a")]
 }

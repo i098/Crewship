@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { AuthExpired, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, relReset, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, relReset, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -70,18 +70,18 @@ test("--once prints the fixture without starting the TUI", async () => {
   expect(await p.exited).toBe(0)
   const raw = out.trimEnd().split("\n")
   expect(raw.map(l => l.slice(0, 40).replace(/\s+/g, " ").trim())).toEqual([
-    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek (reseller) Basic 5h",
+    "claude 1 5h", "7d", "7d fable", "claude 2 5h", "7d", "codex 1 5h", "7d", "glm 5h", "7d", "mercury key 1 100M", "mercury key 2 100M", "deepseek basic 5h",
   ])
   const lines = raw.map(l => l.replace(/\s+/g, " "))
   expect(lines).toContain("claude 1 5h ████████████████░░░░ 20% left 1h 30m Sat 05:30")
   expect(lines).toContain("mercury key 2 100M ████████████████████ 0% left 150.0M / 100M")
-  expect(lines).toContain("deepseek (reseller) Basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
+  expect(lines).toContain("deepseek basic 5h █████░░░░░░░░░░░░░░░ 75% left 1h 30m Sat 05:30")
   expect(out).toContain("not reported")
 })
 
 test("deepseekRows turns usage rows into bars and shows n/a for unreadable ones", () => {
   const rows = deepseekRows({ rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: 1000 }, { plan: "Basic", window: "7d", used: null, limit: 100 }, { plan: "x" }] })
-  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek (reseller) Basic", "5h", 75, 1_000_000, undefined], ["deepseek (reseller) Basic", "7d", null, null, "n/a"]])
+  expect(rows.map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([["deepseek basic", "5h", 75, 1_000_000, undefined], ["deepseek basic", "7d", null, null, "n/a"]])
   expect(deepseekRows({}).map(r => r.note)).toEqual(["n/a"])
 })
 
@@ -102,7 +102,7 @@ test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for m
     { plan: "Idle", window: "7d", used: null, limit: null, resets_at: null },
   ])
   expect(parseQuotaMe("junk").rows).toEqual([])
-  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek (reseller) Basic", "5h", 75], ["deepseek (reseller) Basic", "7d", 25], ["deepseek (reseller) Max", "5h", 97.5], ["deepseek (reseller) Max", "7d", 100], ["deepseek (reseller) Idle", "5h", null], ["deepseek (reseller) Idle", "7d", null]])
+  expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek basic", "5h", 75], ["deepseek basic", "7d", 25], ["deepseek max", "5h", 97.5], ["deepseek max", "7d", 100], ["deepseek idle", "5h", null], ["deepseek idle", "7d", null]])
 })
 
 test("readQuotaMe renews the login once on auth and reports failures without throwing", async () => {
@@ -172,4 +172,14 @@ test("buildRows shows only the detected sources, plus a row for providers withou
   expect(rows.some(r => r.account.startsWith("claude"))).toBe(true)
   expect(rows.find(r => r.account === "xiaomi")?.note).toBe("1 account, quota not reported")
   expect(buildRows({ providers: [] })).toEqual([])
+})
+
+test("deepseekRows shortens long plan names to fit the account column", () => {
+  const rows = deepseekRows({ rows: [
+    { plan: "DeepSeek Coding Plan Max", window: "5h", used: 0, limit: 10, resets_at: 1 },
+    { plan: "DeepSeek Coding Plan", window: "5h", used: 0, limit: 10, resets_at: 1 },
+    { plan: "A Very Long Enterprise Plan Name That Overflows", window: "7d", used: 0, limit: 10, resets_at: 1 },
+  ] })
+  expect(rows.map(r => r.account)).toEqual(["deepseek max", "deepseek", "deepseek a very long enterpri"])
+  expect(rows.every(r => r.account.length < ACCOUNT_W)).toBe(true)
 })
