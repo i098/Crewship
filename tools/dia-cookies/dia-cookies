@@ -13,7 +13,13 @@ Storage, all mode 0600 in 0700 dirs, nothing ever printed except by `get`:
   ~/.local/share/dia-cookies/<profile>/meta.json     counts and times, never values
   ~/.config/dia-cookies/fernet.key                   at-rest key
 """
-import argparse, json, os, subprocess, sys, time
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -24,7 +30,7 @@ KEYFILE = Path.home() / ".config/dia-cookies/fernet.key"
 EXIT_STALE = 3  # some profile had no open tab; every other failure exits 1
 
 # Runs on the Mac under python3 (3.9, stdlib + the `websocket` module the Mac already has). Prints one JSON object.
-MAC_SCRIPT = r'''
+MAC_SCRIPT = r"""
 import json, os, sqlite3, urllib.request, websocket
 ROOT = os.path.expanduser("~/Library/Application Support/Dia/User Data")
 PORT = 9222
@@ -69,7 +75,7 @@ for s, c, d in scores:
          "expires": int(k["expires"]) if k.get("expires", -1) > 0 else -1,
          "secure": k["secure"], "httpOnly": k["httpOnly"], "sameSite": k.get("sameSite")} for k in jars[c]]}
 print(json.dumps({"profiles": out, "unread": {d: names[d] for d in names if d not in out}}))
-'''
+"""
 
 
 def fernet():
@@ -95,10 +101,16 @@ def slug(name):
 
 
 def cmd_refresh(a):
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", HOST, "python3", "-"],
-                       input=MAC_SCRIPT.encode(), capture_output=True, timeout=180)
+    r = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", HOST, "python3", "-"],
+        input=MAC_SCRIPT.encode(),
+        capture_output=True,
+        timeout=180,
+    )
     if r.returncode:
-        sys.exit(f"read failed ({r.returncode}): {r.stderr.decode(errors='replace').strip().splitlines()[-1:]}")
+        sys.exit(
+            f"read failed ({r.returncode}): {r.stderr.decode(errors='replace').strip().splitlines()[-1:]}"
+        )
     res = json.loads(r.stdout.splitlines()[-1])
     STORE.mkdir(parents=True, exist_ok=True, mode=0o700)
     STORE.chmod(0o700)
@@ -109,14 +121,29 @@ def cmd_refresh(a):
             continue
         if not p["cookies"]:  # an empty read must not wipe a good export
             continue
-        write_private(STORE / s / "cookies.enc", fernet().encrypt(json.dumps(p["cookies"]).encode()))
-        write_private(STORE / s / "meta.json", json.dumps({
-            "profile": s, "dia_dir": d, "display_name": p["name"], "refreshed_at": now, "count": len(p["cookies"]),
-            "domains": len({c["domain"].lstrip(".") for c in p["cookies"]})}).encode())
+        write_private(
+            STORE / s / "cookies.enc", fernet().encrypt(json.dumps(p["cookies"]).encode())
+        )
+        write_private(
+            STORE / s / "meta.json",
+            json.dumps(
+                {
+                    "profile": s,
+                    "dia_dir": d,
+                    "display_name": p["name"],
+                    "refreshed_at": now,
+                    "count": len(p["cookies"]),
+                    "domains": len({c["domain"].lstrip(".") for c in p["cookies"]}),
+                }
+            ).encode(),
+        )
         print(f"{s}: {len(p['cookies'])} cookies")
     for d, name in res["unread"].items():
         if not a.profile or slug(name) in a.profile:
-            print(f"{slug(name)}: not readable now (no open tab in that Dia profile); previous export kept", file=sys.stderr)
+            print(
+                f"{slug(name)}: not readable now (no open tab in that Dia profile); previous export kept",
+                file=sys.stderr,
+            )
             rc = EXIT_STALE
     return rc
 
@@ -124,7 +151,9 @@ def cmd_refresh(a):
 def load(s):
     f = STORE / s / "cookies.enc"
     if not f.exists():
-        sys.exit(f"no export for profile {s!r}; known: {', '.join(sorted(p.parent.name for p in STORE.glob('*/meta.json')))}")
+        sys.exit(
+            f"no export for profile {s!r}; known: {', '.join(sorted(p.parent.name for p in STORE.glob('*/meta.json')))}"
+        )
     return json.loads(fernet().decrypt(f.read_bytes()))
 
 
@@ -135,18 +164,31 @@ def host_match(cookie_domain, want):
 
 def select(s, domains):
     now = time.time()
-    return [c for c in load(s) if (c["expires"] < 0 or c["expires"] > now) and (not domains or any(host_match(c["domain"], d) for d in domains))]
+    return [
+        c
+        for c in load(s)
+        if (c["expires"] < 0 or c["expires"] > now)
+        and (not domains or any(host_match(c["domain"], d) for d in domains))
+    ]
 
 
 def cmd_list(a):
     if a.profile:
         for c in sorted(select(a.profile, a.domain), key=lambda c: (c["domain"], c["name"])):
-            exp = "session" if c["expires"] < 0 else time.strftime("%Y-%m-%d", time.gmtime(c["expires"]))
-            print(f"{c['domain']}\t{c['path']}\t{c['name']}\texpires {exp}")  # names only, never values
+            exp = (
+                "session"
+                if c["expires"] < 0
+                else time.strftime("%Y-%m-%d", time.gmtime(c["expires"]))
+            )
+            print(
+                f"{c['domain']}\t{c['path']}\t{c['name']}\texpires {exp}"
+            )  # names only, never values
         return 0
     for f in sorted(STORE.glob("*/meta.json")):
         m = json.loads(f.read_text())
-        print(f"{m['profile']}\t{m['count']} cookies\t{m['domains']} domains\trefreshed {int((time.time() - m['refreshed_at']) / 60)} min ago\t(Dia '{m['display_name']}')")
+        print(
+            f"{m['profile']}\t{m['count']} cookies\t{m['domains']} domains\trefreshed {int((time.time() - m['refreshed_at']) / 60)} min ago\t(Dia '{m['display_name']}')"
+        )
     return 0
 
 
@@ -155,11 +197,24 @@ def fmt(cookies, how):
         return json.dumps(cookies, indent=1)
     if how == "header":
         return "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-    lines = ["# Netscape HTTP Cookie File"]  # netscape, for curl -b and `api-anything login --cookies`
+    lines = [
+        "# Netscape HTTP Cookie File"
+    ]  # netscape, for curl -b and `api-anything login --cookies`
     for c in cookies:
         d = c["domain"]
-        lines.append("\t".join([("#HttpOnly_" if c["httpOnly"] else "") + d, "TRUE" if d.startswith(".") else "FALSE", c["path"],
-                                "TRUE" if c["secure"] else "FALSE", str(max(c["expires"], 0)), c["name"], c["value"]]))
+        lines.append(
+            "\t".join(
+                [
+                    ("#HttpOnly_" if c["httpOnly"] else "") + d,
+                    "TRUE" if d.startswith(".") else "FALSE",
+                    c["path"],
+                    "TRUE" if c["secure"] else "FALSE",
+                    str(max(c["expires"], 0)),
+                    c["name"],
+                    c["value"],
+                ]
+            )
+        )
     return "\n".join(lines)
 
 
@@ -176,13 +231,24 @@ def cmd_get(a):
 def main():
     p = argparse.ArgumentParser(prog="dia-cookies", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("refresh", help="export cookies from the Mac's Dia (all profiles, or the named ones)")
-    s.add_argument("profile", nargs="*"); s.set_defaults(fn=cmd_refresh)
-    s = sub.add_parser("list", help="no args: profiles and freshness; with PROFILE: cookie names, never values")
-    s.add_argument("profile", nargs="?"); s.add_argument("--domain", action="append", default=[]); s.set_defaults(fn=cmd_list)
-    s = sub.add_parser("get", help="write cookies for a profile to a 0600 file (values!); -o - prints them")
-    s.add_argument("profile"); s.add_argument("--domain", action="append", default=[])
-    s.add_argument("--format", choices=["json", "netscape", "header"], default="json"); s.add_argument("-o", "--output", required=True)
+    s = sub.add_parser(
+        "refresh", help="export cookies from the Mac's Dia (all profiles, or the named ones)"
+    )
+    s.add_argument("profile", nargs="*")
+    s.set_defaults(fn=cmd_refresh)
+    s = sub.add_parser(
+        "list", help="no args: profiles and freshness; with PROFILE: cookie names, never values"
+    )
+    s.add_argument("profile", nargs="?")
+    s.add_argument("--domain", action="append", default=[])
+    s.set_defaults(fn=cmd_list)
+    s = sub.add_parser(
+        "get", help="write cookies for a profile to a 0600 file (values!); -o - prints them"
+    )
+    s.add_argument("profile")
+    s.add_argument("--domain", action="append", default=[])
+    s.add_argument("--format", choices=["json", "netscape", "header"], default="json")
+    s.add_argument("-o", "--output", required=True)
     s.set_defaults(fn=cmd_get)
     a = p.parse_args()
     sys.exit(a.fn(a))
