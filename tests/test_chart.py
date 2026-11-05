@@ -370,6 +370,10 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         "crewship_browser_obscura": {
             "url": (tmp_path / "absent.tar.gz").as_uri(), "sha256": "0" * 64,
         },
+        "crewship_browser_voxl_dir": str(home / "oss-fleet/browsers/voxl-test"),
+        "crewship_browser_voxl": {
+            "url": (tmp_path / "absent.crate").as_uri(), "sha256": "0" * 64,
+        },
         "ansible_become": False, "crewship_become_target": False, "crewship_account_ready": True,
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
     }
@@ -382,6 +386,7 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
     assert list(journald.iterdir()) == []
     if profiles.get("fleet_guards") or profiles.get("fleet_browsers"):
         assert "would download and extract Obscura" in result.stdout
+        assert "would download, verify and build voxl" in result.stdout
     assert {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
             for path in home.rglob("*") if path.is_file()} == before_files
     assert {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
@@ -632,6 +637,69 @@ def test_obscura_release_preview_and_install(tmp_path, check_mode, release_state
             assert (release / binary).read_bytes() == expected
             assert (browsers / binary).is_symlink()
             assert (browsers / binary).resolve() == release / binary
+
+
+@pytest.mark.parametrize("check_mode", [True, False])
+@pytest.mark.parametrize("release_state", ["absent", "installed", "bad-digest"])
+def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, release_state):
+    home = tmp_path / "home"
+    browsers = home / "oss-fleet/browsers"
+    browsers.mkdir(parents=True)
+    release = browsers / "voxl-test"
+    cargo = home / ".cargo/bin/cargo"
+    cargo.parent.mkdir(parents=True)
+    # Stands in for cargo: the build must run in the extracted crate and write the release binary.
+    cargo.write_text("#!/bin/sh\nset -e\ntest -f Cargo.toml\nmkdir -p \"$5/release\"\n"
+                     "echo built > \"$5/release/voxl\"\n")
+    cargo.chmod(0o755)
+    if release_state == "installed":
+        release.mkdir()
+        (release / "voxl").write_text("existing release\n")
+    crate = tmp_path / "voxl-server-test.crate"
+    source = tmp_path / "voxl-server-test"
+    source.mkdir()
+    (source / "Cargo.toml").write_text("[package]\n")
+    with tarfile.open(crate, "w:gz") as bundle:
+        bundle.add(source, arcname="voxl-server-test")
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/fleet-browsers.yml").read_text())
+    start = next(i for i, task in enumerate(tasks) if task["name"] == "Stat the resolved voxl release")
+    end = next(i for i, task in enumerate(tasks) if task["name"] == "Stop the retired noVNC tier")
+    playbook = tmp_path / "voxl.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "tasks": tasks[start:end],
+    }]))
+    variables = {
+        "crewship_cfg": {"user": getpass.getuser(), "home": str(home)},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_fleet_browsers_dir": str(browsers),
+        "crewship_browser_voxl_dir": str(release),
+        "crewship_browser_voxl": {
+            "url": crate.as_uri(),
+            "sha256": "0" * 64 if release_state == "bad-digest"
+            else hashlib.sha256(crate.read_bytes()).hexdigest(),
+        },
+        "crewship_become_target": False,
+        "ansible_become": False,
+    }
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
+         *(["--check"] if check_mode else []), "-e", json.dumps(variables)],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    if check_mode:
+        assert result.returncode == 0, output
+        assert ("would download, verify and build voxl" in output) == (release_state != "installed")
+        assert not (browsers / "voxl").exists()
+    elif release_state == "bad-digest":
+        assert result.returncode != 0, output
+        assert not (release / "voxl").exists()
+    else:
+        assert result.returncode == 0, output
+        expected = "existing release\n" if release_state == "installed" else "built\n"
+        assert (release / "voxl").read_text() == expected
+        assert (browsers / "voxl").resolve() == release / "voxl"
+        assert sorted(path.name for path in release.iterdir()) == ["voxl"]
 
 
 @pytest.mark.parametrize("mode", ["fresh", "existing", "disabled", "deferred", "check", "preexisting", "all", "update"])

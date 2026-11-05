@@ -11,9 +11,9 @@ type Probe = { ua: string; pages: Page[] }
 const REFRESH_MS = 3_000
 // Process names of browser engines. Playwright and puppeteer ship their Chromium as `chrome` or `headless_shell`.
 const BROWSER_EXES = new Set(["chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome-headless-shell", "headless_shell", "obscura", "obscura-worker"])
-// The fleet-browser ladder (fleet/browsers/fleet-browser): its tier names, and its noVNC port for the headed tier.
-const FLEET: Record<number, string> = { 9222: "fleet obscura", 9522: "fleet chrome", 9523: "fleet vnc (noVNC)" }
-const VNC_CDP_PORT = 9523
+// The fleet-browser ladder (fleet/browsers/fleet-browser): its tier names, and its voxl port for the headed tier.
+const FLEET: Record<number, string> = { 9222: "fleet obscura", 9522: "fleet chrome", 9523: "fleet voxl" }
+const VOXL_CDP_PORT = 9523
 // CDP ports probed even when the socket owner is not visible (another user's or a system service's browser).
 const KNOWN_PORTS = [9222, 9223, 9224, 9225, 9226, 9227, 9228, 9229, 9522, 9523]
 
@@ -74,7 +74,7 @@ async function describe(r: Proc, kids: Map<number, Proc[]>, listens: Listen[], p
   return {
     pid: r.pid, name: nameOf(r, port), kind: headless ? "headless" : "headed", port, ageSec: r.age,
     rssKb: tree.reduce((s, p) => s + p.rss, 0), pages: info?.pages ?? [],
-    ...(port === VNC_CDP_PORT ? { viewer } : {}),
+    ...(port === VOXL_CDP_PORT ? { viewer } : {}),
   }
 }
 
@@ -91,7 +91,7 @@ export async function discover(psOut: string, ssOut: string, probe: ProbeFn, vie
   const orphans = listens.filter(l => !l.pids.length && KNOWN_PORTS.includes(l.port) && !taken.has(l.port)).map(l => l.port)
   for (const port of [...new Set(orphans)]) {
     const info = await probe(port)
-    if (info) found.push({ pid: null, name: FLEET[port] ?? "cdp", kind: info.ua.includes("Headless") ? "headless" : "headed", port, ageSec: null, rssKb: 0, pages: info.pages, ...(port === VNC_CDP_PORT ? { viewer } : {}) })
+    if (info) found.push({ pid: null, name: FLEET[port] ?? "cdp", kind: info.ua.includes("Headless") ? "headless" : "headed", port, ageSec: null, rssKb: 0, pages: info.pages, ...(port === VOXL_CDP_PORT ? { viewer } : {}) })
   }
   return found.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || (a.pid ?? 0) - (b.pid ?? 0))
 }
@@ -110,13 +110,13 @@ async function probeCdp(port: number): Promise<Probe | null> {
   }
 }
 
-// The noVNC page as tailnet devices open it (docs/fleet-guards.md); loopback when the host is not on a tailnet.
-function vncViewer() {
+// The voxl page as tailnet devices open it (docs/fleet-guards.md); loopback when the host is not on a tailnet.
+function voxlViewer() {
   try {
     const dns = JSON.parse(Bun.spawnSync(["tailscale", "status", "--json"]).stdout.toString()).Self?.DNSName?.replace(/\.$/, "")
-    if (dns) return `https://${dns}:6909/vnc.html`
+    if (dns) return `https://${dns}:6909/`
   } catch {}
-  return "http://127.0.0.1:6909/vnc.html"
+  return "http://127.0.0.1:6909/"
 }
 
 const run = (cmd: string[]) => Bun.spawnSync(cmd, { stderr: "ignore" }).stdout.toString()
@@ -317,7 +317,7 @@ async function main() {
   const argv = process.argv.slice(2)
   const fx = argv.indexOf("--fixture")
   fixture = fx >= 0 ? argv[fx + 1] : undefined
-  viewer = fixture ? "" : vncViewer()
+  viewer = fixture ? "" : voxlViewer()
   if (argv.includes("--once")) {
     console.log(snapshot(await load(), Math.max(60, process.stdout.columns ?? 120)))
     process.exit(0)

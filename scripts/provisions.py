@@ -139,6 +139,9 @@ GITHUB_LATEST = {
         "obscura-{gnu}-linux.tar.gz",
         {"obscura": "obscura", "obscura-worker": "obscura-worker"},
     ),
+    # Resolved for the fleet browser ladder's voxl tier (blueprint/ansible/tasks/fleet-browsers.yml):
+    # releases publish only the crate, which Ansible builds with cargo.
+    "voxl": ("tembo/voxl", "v", "voxl-server-{v}.crate", {}),
     # Resolved for host hardening (blueprint/ansible/tasks/koncreet.yml), installed there as root.
     "koncreet": ("jimididit/koncreet", "v", "koncreet.tar.gz", {"koncreet": "koncreet/koncreet"}),
     # Jujutsu for the opt-in jj profile (docs/jj.md); one static musl binary per release.
@@ -1063,6 +1066,7 @@ def main():
         "--python-env", type=Path, help="secure present pip and certifi in a virtualenv"
     )
     parser.add_argument("--development", action="store_true")
+    parser.add_argument("--rust", action="store_true", help="install the Rust toolchain only")
     parser.add_argument(
         "--sgrep",
         action="store_true",
@@ -1078,7 +1082,7 @@ def main():
         "--also",
         default="",
         help="comma-separated extra sources to resolve that Ansible installs itself: "
-        "obscura, psutil, koncreet, forgejo",
+        "obscura, voxl, psutil, koncreet, forgejo",
     )
     parser.add_argument(
         "--resolve",
@@ -1099,7 +1103,7 @@ def main():
     names = args.tools.split(",") + (AGENT_TOOLS if args.npm else [])
     if "sentrux" in names:
         names.append("sentrux-grammars")
-    rust = args.development or args.sgrep
+    rust = args.development or args.sgrep or args.rust
     if rust:
         names.append("rustup-init")
     names = list(dict.fromkeys(names))

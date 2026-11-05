@@ -1280,7 +1280,7 @@ def test_each_fleet_profile_resolves_only_its_own_release(
         fleet_guards=fleet_guards,
         fleet_browsers=fleet_browsers,
     )
-    assert ("obscura" in also) is (fleet_guards or fleet_browsers)
+    assert ("obscura" in also) is ("voxl" in also) is (fleet_guards or fleet_browsers)
 
 
 def _koncreet_settings(tmp_path, tailscale, apply_user):
