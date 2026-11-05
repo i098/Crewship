@@ -10,8 +10,26 @@ slice=${RUNNER_UP_SLICE:-runnerup.slice}
 case "${1-}" in
 run)
   shift
-  # shellcheck disable=SC2086 # $docker is a command and its arguments
-  exec $docker run --cgroup-parent "$slice" --pids-limit 8192 "$@" ;;
+  cache=
+  if [ -n "${RUNNER_UP_SHARED_CACHE-}" ]; then
+    # The build cache every job of the host shares (docs/runner-up.md#shared-build-cache): the
+    # compile cache, the cargo registry, the package stores, and cargo's lock files so the lock holds across jobs.
+    # Never a shared target directory: a job builds in its own container.
+    d=$RUNNER_UP_SHARED_CACHE
+    mkdir -p "$d/cargo-registry" "$d/cargo-git" "$d/sccache" "$d/bun" "$d/npm" "$d/pnpm-store"
+    touch "$d/cargo-lock" "$d/cargo-lock-mutate"
+    chmod 0777 "$d/cargo-registry" "$d/cargo-git" "$d/sccache" "$d/bun" "$d/npm" "$d/pnpm-store"
+    chmod 0666 "$d/cargo-lock" "$d/cargo-lock-mutate"
+    cache="-v $d/cargo-registry:/home/runner/.cargo/registry -v $d/cargo-git:/home/runner/.cargo/git
+      -v $d/cargo-lock:/home/runner/.cargo/.package-cache -v $d/cargo-lock-mutate:/home/runner/.cargo/.package-cache-mutate
+      -v $d/bun:/home/runner/.cache/bun -v $d/npm:/home/runner/.cache/npm -v $d/pnpm-store:/home/runner/.cache/pnpm-store
+      -v $d/sccache:/sccache -e RUSTC_WRAPPER=sccache -e SCCACHE_DIR=/sccache
+      -e SCCACHE_CACHE_SIZE=${RUNNER_UP_CACHE_MAX_GB:-150}G -e CARGO_INCREMENTAL=0
+      -e BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun -e npm_config_cache=/home/runner/.cache/npm
+      -e npm_config_store_dir=/home/runner/.cache/pnpm-store"
+  fi
+  # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache holds no spaces inside a word
+  exec $docker run --cgroup-parent "$slice" --pids-limit 8192 $cache "$@" ;;
 build)
   shift
   # shellcheck disable=SC2086

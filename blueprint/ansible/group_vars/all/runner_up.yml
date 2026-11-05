@@ -44,6 +44,13 @@ crewship_runner_up_disk_max_gb: "{{ crewship_runner_up.disk_max_gb | default(50)
 # Place logs stay a week; they sit on the same disk as the build cache.
 crewship_runner_up_log_keep_days: 7
 
+# The compile cache, cargo registry and package stores that every local job shares
+# (docs/runner-up.md#shared-build-cache); sccache caps the compile cache by LRU.
+crewship_runner_up_shared_cache: >-
+  {{ (crewship_runner_up_data_dir | default(crewship_cfg.home ~ '/.local/share', true)) ~ '/ci-shared-cache' }}
+crewship_runner_up_cache_max_gb: >-
+  {{ crewship_runner_up.cache_max_gb | default(150, true) | int }}
+
 crewship_runner_up_slice: runnerup.slice
 crewship_runner_up_slice_dir: /etc/systemd/system
 crewship_runner_up_image: crewship-ci-runner:latest

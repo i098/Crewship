@@ -495,6 +495,18 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
     assert "sudo" not in "".join(calls)
 
 
+def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
+    sock, cache = tmp_path / "docker.sock", tmp_path / "shared"
+    sock.touch()
+    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_SHARED_CACHE": str(cache), "RUNNER_UP_CACHE_MAX_GB": "20"}
+    (call,) = run_script("runner-up-docker", stubs, "run", "img", env=env)
+    assert f"-v {cache}/sccache:/sccache" in call
+    assert f"-v {cache}/cargo-lock:/home/runner/.cargo/.package-cache " in call
+    assert "-e SCCACHE_CACHE_SIZE=20G" in call and call.endswith(" img")
+    assert f"-v {cache}/pnpm-store:/home/runner/.cache/pnpm-store" in call
+    assert (cache / "cargo-registry").is_dir()
+
+
 def test_the_shim_uses_sudo_when_the_account_cannot_write_the_docker_socket(stubs, tmp_path):
     env = {"RUNNER_UP_DOCKER_SOCK": str(tmp_path / "missing.sock")}
     calls = run_script("runner-up-docker", stubs, "run", "img", env=env)

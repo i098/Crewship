@@ -36,6 +36,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [slk](https://github.com/gammons/slk) (`slk`): the Slack terminal client. License: MIT.
 - [runner-up](https://github.com/kunchenguid/runner-up) (`runner-up`): the coordinator of just-in-time GitHub Actions jobs, one container per job, with the `runner_up` block. License: MIT.
 - [Jujutsu](https://github.com/jj-vcs/jj) (`jj`): a Git-compatible version control system for agents, with the `jj` profile. License: Apache-2.0.
+- [sccache](https://github.com/mozilla/sccache) (`sccache`): the shared Rust compile cache of CI jobs and worktrees. License: Apache-2.0.
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.
 - [voxl](https://github.com/tembo/voxl) (`voxl`): the browser stream of the fleet browser ladder's human tier, built by apply. License: MIT; the built binary links x264 (GPL-2.0).
 - [Koncreet](https://github.com/jimididit/koncreet) (`koncreet`): host hardening, patched by Crewship. License: MIT.

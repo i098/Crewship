@@ -663,6 +663,11 @@ RELEASES = {
         "pyrefly-linux-x86_64-musl.tar.gz",
         "pyrefly-linux-x86_64-musl.tar.gz.sha256",
     ),
+    "mozilla/sccache": (
+        "v9.9.9",
+        "sccache-v9.9.9-x86_64-unknown-linux-musl.tar.gz",
+        "sccache-v9.9.9-x86_64-unknown-linux-musl.tar.gz.sha256",
+    ),
     "chojs23/concord": ("v9.9.9", "concord-x86_64-unknown-linux-gnu.tar.xz"),
     "gammons/slk": ("v9.9.9", "slk_9.9.9_linux_x86_64.tar.gz"),
     "h4ckf0r0day/obscura": ("v9.9.9", "obscura-x86_64-linux.tar.gz"),
@@ -698,6 +703,9 @@ def codeberg(url, unverified):
         return {"tag_name": f"v{version}", "assets": assets}
 
     return Download(json.dumps([release("9.0.10"), release("9.9.9")]).encode())
+
+
+SHA256_FILE_ASSETS = {"https://github.com/pyrefly-": "facebook/pyrefly", "https://github.com/sccache-": "mozilla/sccache"}
 
 
 def upstream(monkeypatch, unverified=None, seen=None):
@@ -761,8 +769,10 @@ def upstream(monkeypatch, unverified=None, seen=None):
                 f"{'0' * 64}  rtk-oss-x86_64-unknown-linux-musl.tar.gz\n"
                 f"{checksum}  rtk-x86_64-unknown-linux-musl.tar.gz\n".encode()
             )
-        elif url.startswith("https://github.com/pyrefly-") and url.endswith(".sha256"):
-            checksum = "" if unverified == "facebook/pyrefly" else "f" * 64
+        elif url.endswith(".sha256") and url.startswith(tuple(SHA256_FILE_ASSETS)):
+            # Pyrefly and sccache publish their own .sha256 file.
+            prefix = next(p for p in SHA256_FILE_ASSETS if url.startswith(p))
+            checksum = "" if unverified == SHA256_FILE_ASSETS[prefix] else "f" * 64
             return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
         elif url.startswith("https://codeberg.org/"):
             return codeberg(url, unverified)
@@ -1191,9 +1201,9 @@ def test_resolve_covers_only_the_requested_tools(monkeypatch, capsys, tmp_path):
     ("argv", "expected"),
     [
         (["--tools", "herdr,node"], {"herdr", "node"}),
-        (["--tools", "uv", "--development"], {"uv", "rustup-init"}),
-        (["--tools", "uv", "--sgrep"], {"uv", "rustup-init"}),
-        (["--tools", "uv", "--rust"], {"uv", "rustup-init"}),
+        (["--tools", "uv", "--development"], {"uv", "rustup-init", "sccache"}),
+        (["--tools", "uv", "--sgrep"], {"uv", "rustup-init", "sccache"}),
+        (["--tools", "uv", "--rust"], {"uv", "rustup-init", "sccache"}),
         (["--tools", "uv", "--also", "voxl"], {"uv", "voxl"}),
         (["--tools", "uv", "--npm"], {"uv", *installer.AGENT_TOOLS, *installer.NPM_LATEST}),
         (["--tools", "uv", "--also", "psutil"], {"uv", "psutil"}),
@@ -1492,7 +1502,7 @@ def test_a_failed_command_reports_why_it_failed(monkeypatch, capsys, tmp_path):
     rustup.chmod(0o755)
     payload = b"#!/bin/sh\n"
     resolved = {}
-    for name in ("uv", "rustup-init"):
+    for name in ("uv", "rustup-init", "sccache"):
         resolved[name] = asset(payload)
         resolved[name]["assets"]["linux-x86_64"]["binaries"] = {name: name}
     monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
@@ -1588,6 +1598,7 @@ def test_a_rate_limited_api_falls_back_to_the_public_release_pages(monkeypatch, 
     assert latest["no-mistakes"]["version"] == "9.9.10-beta.1"
     # gws and Pyrefly keep their own .sha256 file as the checksum source.
     assert latest["pyrefly"]["assets"]["linux-x86_64"]["sha256"] == "f" * 64
+    assert latest["sccache"]["assets"]["linux-x86_64"]["sha256"] == "f" * 64
 
 
 def test_a_rate_limited_api_and_unreadable_pages_still_name_the_token(monkeypatch):

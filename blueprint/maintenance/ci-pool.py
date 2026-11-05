@@ -184,7 +184,7 @@ WantedBy=timers.target
 """
 # The packages the jobs of the pool's repositories install on every start: a
 # compiler, the GTK runtime, the codex-gpui Rust/GUI build libraries, Postgres 17 and 18 with pgvector (from the PostgreSQL apt repository),
-# and bun. REFRESH changes daily, so apt and bun update once a day; the layers
+# bun, and sccache (checksum verified). REFRESH changes daily, so apt and bun update once a day; the layers
 # before it stay cached. The apt archive is kept so a job's own `apt-get install`
 # can read the packages from a cache mount.
 DOCKERFILE = f"""\
@@ -200,7 +200,14 @@ RUN apt-get update -qq \\
       libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libvulkan-dev mesa-vulkan-drivers \\
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \\
  && apt-get install -y -qq --no-install-recommends postgresql-17 postgresql-client-17 postgresql-18 postgresql-client-18 postgresql-18-pgvector \\
- && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+ && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \\
+ && tag=$(basename "$(curl -fsSLI -o /dev/null -w '%{{url_effective}}' https://github.com/mozilla/sccache/releases/latest)") \\
+ && asset=sccache-$tag-$(uname -m)-unknown-linux-musl.tar.gz \\
+ && curl -fsSL -o /tmp/$asset https://github.com/mozilla/sccache/releases/download/$tag/$asset \\
+ && echo "$(curl -fsSL https://github.com/mozilla/sccache/releases/download/$tag/$asset.sha256)  /tmp/$asset" | sha256sum -c - \\
+ && tar -xzf /tmp/$asset -C /tmp \\
+ && install -m 755 /tmp/sccache-$tag-*/sccache /usr/local/bin/sccache \\
+ && rm -rf /tmp/sccache-*
 # Jobs mount their own directory over /var/lib/postgresql (see CONTAINER_PREP), so the
 # clusters that the packages created are kept here and copied in when a job starts.
 # Only the newest installed package creates its main cluster, so create the 17 one when it is

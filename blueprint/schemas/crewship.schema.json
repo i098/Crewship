@@ -817,6 +817,10 @@
               "type": "string",
               "pattern": "^([1-9][0-9]*[KMGT]|([1-9][0-9]?|100)%)$"
             },
+            "cache_max_gb": {
+              "type": "integer",
+              "minimum": 1
+            },
             "disk_max_gb": {
               "type": "integer",
               "minimum": 1
