@@ -702,6 +702,7 @@ def test_voxl_release_preview_verify_build_and_install(tmp_path, check_mode, rel
         "crewship_manage_services": False,
         "crewship_user_units": str(units),
         "crewship_user_systemd_env": {},
+        "crewship_fleet_sources": str(ROOT / "blueprint/fleet"),
         "crewship_fleet_browser_voxl_check_port": 6919,
         "crewship_fleet_browser_retired_units": ["fleet-browser-vnc.service"],
         "ansible_become": False,

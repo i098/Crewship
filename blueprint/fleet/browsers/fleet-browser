@@ -96,6 +96,10 @@ voxl_password() {
   cat "$f"
 }
 
+voxl_serve() {  # voxl on loopback only, password from $VOXL_PASSWORD; .ts.net names pass voxl's host check
+  exec "$1" --addr=127.0.0.1 --port="$2" --allowed-hosts=.ts.net --audio-enabled=false --title="Fleet browser"
+}
+
 cmd_up() {
   local t=$1
   case "$t" in chrome|voxl) ;; obscura) systemctl --user start "$(unit_of obscura)"; wait_alive obscura 20 && echo "obscura up" || { echo "obscura failed to start" >&2; exit 1; }; return ;; *) echo "usage: fleet-browser up chrome|voxl" >&2; exit 2 ;; esac
@@ -227,8 +231,7 @@ run_voxl() {  # tier 3: Xvfb display + window manager + voxl + headed Chromium; 
   # password is the one voxl_password prints; .ts.net names are allowed so the
   # tailnet URL passes voxl's host check.
   if ! ss -ltn 2>/dev/null | grep -q "127.0.0.1:$VOXL_WEB_PORT "; then
-    VOXL_PASSWORD=$(voxl_password) "$voxl" --addr=127.0.0.1 --port="$VOXL_WEB_PORT" --allowed-hosts=.ts.net \
-      --audio-enabled=false --title="Fleet browser" >"$STATE/voxl.log" 2>&1 &
+    VOXL_PASSWORD=$(voxl_password) voxl_serve "$voxl" "$VOXL_WEB_PORT" >"$STATE/voxl.log" 2>&1 &
     local j; for j in $(seq 1 20); do ss -ltn 2>/dev/null | grep -q "127.0.0.1:$VOXL_WEB_PORT " && break; sleep 0.5; done
   fi
   exec "$chrome" --no-sandbox --no-first-run --no-default-browser-check --start-maximized \
@@ -245,6 +248,7 @@ case "${1:-status}" in
   seed) cmd_seed "${2:-}" ;;
   _run-chrome) run_chrome ;;
   _run-voxl) run_voxl ;;
+  _voxl-serve) voxl_serve "${2:?voxl binary}" "${3:?port}" ;;
   -h|--help|help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) echo "unknown command: $1 (try: fleet-browser help)" >&2; exit 2 ;;
 esac

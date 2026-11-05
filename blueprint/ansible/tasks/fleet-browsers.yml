@@ -260,8 +260,8 @@
     display=:{{ crewship_fleet_browser_voxl_check_port }}
     Xvfb "$display" -screen 0 1600x900x24 -nolisten tcp >/dev/null 2>&1 &
     xpid=$!
-    DISPLAY=$display VOXL_PASSWORD=cutover-check "{{ crewship_browser_voxl_dir }}/voxl" --addr=127.0.0.1 --port="$port" \
-      --audio-enabled=false >/dev/null 2>&1 &
+    DISPLAY=$display VOXL_PASSWORD=cutover-check "{{ crewship_fleet_sources }}/browsers/fleet-browser" \
+      _voxl-serve "{{ crewship_browser_voxl_dir }}/voxl" "$port" >/dev/null 2>&1 &
     pid=$!
     trap 'kill "$pid" "$xpid" 2>/dev/null' EXIT
     for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0.5; done
