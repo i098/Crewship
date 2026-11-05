@@ -2,8 +2,10 @@
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -16,20 +18,99 @@ SPEC.loader.exec_module(ship)
 CONFIG = Path("/host.yml")
 
 
-@pytest.mark.parametrize(
-    "config,offered",
-    [
-        ({}, False),
-        ({"mac_ssh": {"host": "mac.example", "user": "operator"}}, True),
-        ({"mac_ssh": {"host": "mac.example", "user": "operator", "dia_cookies": False}}, False),
-        ({"mac_ssh": {"host": "mac.example", "user": "operator", "dia_cookies": True}}, False),
-    ],
-)
-def test_question_follows_ssh_mac_and_is_asked_once(config, offered):
-    text = ship.dia_cookies_question(config, CONFIG)
-    assert bool(text) == offered
-    if offered:
-        assert "ssh -o BatchMode=yes mac true" in text and "Only if it succeeds" in text
+def _offer_config(tmp_path, **mac_ssh):
+    return {
+        "crewship": {
+            "user": ship.pwd.getpwuid(ship.os.getuid()).pw_name,
+            "home": str(tmp_path),
+            "workspace": str(tmp_path),
+            "mac_ssh": {"host": "mac.example", "user": "operator", **mac_ssh},
+        }
+    }
+
+
+def _offer(monkeypatch, document, tty, ssh_ok=True):
+    runs = []
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(ship.sys, "stdin", types.SimpleNamespace(isatty=lambda: tty))
+    monkeypatch.setattr(ship, "host_environment", lambda config: {})
+    monkeypatch.setattr(ship, "omp_signed_in", lambda environment: True)
+    monkeypatch.setattr(
+        ship.subprocess,
+        "run",
+        lambda argv, **kw: runs.append(argv) or types.SimpleNamespace(returncode=0 if argv[0] != "ssh" or ssh_ok else 255),
+    )
+    return runs, ship.dia_cookies_offer(document, CONFIG)
+
+
+def test_offer_is_made_once_with_its_own_marker_even_after_new_host_questions(tmp_path, monkeypatch):
+    document = _offer_config(tmp_path)
+    done = tmp_path / ".local/share/crewship"
+    done.mkdir(parents=True)
+    (done / "new-host-questions-done").touch()
+    runs, _ = _offer(monkeypatch, document, tty=True)
+    assert [str(r[0]) for r in runs] == ["ssh", str(tmp_path / ".local/bin/omp")]
+    assert (done / "dia-cookies-offer-done").exists()
+    runs, _ = _offer(monkeypatch, document, tty=True)
+    assert runs == []
+
+
+@pytest.mark.parametrize("mac_ssh", [{"dia_cookies": True}, {"dia_cookies": False}])
+def test_no_offer_once_answered(tmp_path, monkeypatch, mac_ssh):
+    runs, _ = _offer(monkeypatch, _offer_config(tmp_path, **mac_ssh), tty=True)
+    assert runs == []
+
+
+def test_no_offer_without_ssh_mac(tmp_path, monkeypatch):
+    document = _offer_config(tmp_path)
+    del document["crewship"]["mac_ssh"]
+    runs, _ = _offer(monkeypatch, document, tty=True)
+    assert runs == []
+
+
+def test_failed_ssh_skips_omp_and_keeps_offer_pending(tmp_path, monkeypatch):
+    runs, _ = _offer(monkeypatch, _offer_config(tmp_path), tty=True, ssh_ok=False)
+    assert [r[0] for r in runs] == ["ssh"]
+    assert not (tmp_path / ".local/share/crewship/dia-cookies-offer-done").exists()
+
+
+def test_non_interactive_run_prints_hint_and_keeps_offer_pending(tmp_path, monkeypatch, capsys):
+    runs, _ = _offer(monkeypatch, _offer_config(tmp_path), tty=False)
+    assert runs == []
+    assert "mac_ssh.dia_cookies" in capsys.readouterr().out
+    assert not (tmp_path / ".local/share/crewship/dia-cookies-offer-done").exists()
+
+
+def _refresh(tmp_path, ssh_body, umask=0o022):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "ssh").write_text(f"#!/bin/sh\ncat >/dev/null\n{ssh_body}\n")
+    (bin_dir / "ssh").chmod(0o755)
+    env = {**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}", "DIA_COOKIES_DIR": str(tmp_path / "store" / "dia")}
+    return subprocess.run(
+        [sys.executable, str(ROOT / "tools/dia-cookies/dia-cookies"), "refresh"],
+        env=env, capture_output=True, preexec_fn=lambda: os.umask(umask),
+    )
+
+
+PROFILE = {"name": "Work", "cookies": [{"name": "a", "value": "v", "domain": ".x.com", "path": "/", "expires": -1, "secure": True, "httpOnly": False}]}
+
+
+def test_refresh_exit_codes_separate_stale_profile_from_failure(tmp_path):
+    stale = json.dumps({"profiles": {"P1": PROFILE}, "unread": {"P2": "Home"}})
+    result = _refresh(tmp_path, f"echo '{stale}'")
+    assert result.returncode == 3
+    assert (tmp_path / "store/dia").stat().st_mode & 0o777 == 0o700
+    assert _refresh(tmp_path, "echo boom >&2; exit 255").returncode == 1
+    assert _refresh(tmp_path, "true").returncode == 1
+    ok = json.dumps({"profiles": {"P1": PROFILE}, "unread": {}})
+    assert _refresh(tmp_path, f"echo '{ok}'").returncode == 0
+
+
+def test_get_requires_explicit_output(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path), "DIA_COOKIES_DIR": str(tmp_path / "store")}
+    result = subprocess.run([sys.executable, str(ROOT / "tools/dia-cookies/dia-cookies"), "get", "work"], env=env, capture_output=True)
+    assert result.returncode == 2 and b"--output" in result.stderr
 
 
 def _apply(tmp_path, home, enabled):

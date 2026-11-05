@@ -545,17 +545,63 @@ def setup_status(document, config_path):
     return int(bool(failed or missing or pending or not memory_ready))
 
 
-def dia_cookies_question(config, config_path):
-    """The optional Dia cookie sync question; asked only once `ssh mac` is set and works."""
+def dia_cookies_offer(document, config_path):
+    """Offer the optional Dia cookie sync once, after `ssh mac` is set; own marker, separate from the new-host questions."""
+    config = document["crewship"]
     if "mac_ssh" not in config or "dia_cookies" in config["mac_ssh"]:
-        return ""
-    return (
-        " Then run `ssh -o BatchMode=yes mac true` as this account. Only if it succeeds, ask one "
-        "short question: turn on the optional Dia cookie sync, which exports each Dia profile's "
-        "cookies from the Mac to private files on this host every 30 minutes? If yes, set "
+        return 0
+    home = Path(config["home"])
+    marker = home / ".local/share/crewship/dia-cookies-offer-done"
+    if marker.exists():
+        return 0
+    if (
+        not sys.stdin.isatty()
+        or os.environ.get("CI")
+        or pwd.getpwuid(os.getuid()).pw_name != config["user"]
+    ):
+        print(
+            "Dia cookie sync not offered (needs an interactive terminal); enable it later by setting "
+            f"crewship.mac_ssh.dia_cookies to true in {config_path}"
+        )
+        return 0
+    environment = host_environment(config)
+    if not omp_signed_in(environment):
+        print("Dia cookie sync not offered: sign in to omp with /login, then rerun ship.sh launch interactively")
+        return 0
+    try:
+        reachable = (
+            subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "mac", "true"],
+                env=environment,
+                capture_output=True,
+                timeout=30,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        reachable = False
+    if not reachable:
+        print(
+            "Dia cookie sync not offered: `ssh mac` does not work yet; rerun ship.sh launch interactively "
+            f"once it does, or set crewship.mac_ssh.dia_cookies to true in {config_path}"
+        )
+        return 0
+    prompt = (
+        "Ask one short question: sync each Dia browser profile's cookies from the Mac to private "
+        "files on this host every 30 minutes? If yes, set "
         f"crewship.mac_ssh.dia_cookies to true in {config_path}, follow "
         f"{ROOT / 'docs/security.md'}#optional-dia-cookie-sync, and never print cookie values."
     )
+    argv = [home / ".local/bin/omp", prompt]
+    if os.environ.get("CREWSHIP_INSTALL_LOG"):
+        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
+    returncode = subprocess.run(argv, cwd=Path(config["workspace"]) / "firstmate", env=environment).returncode
+    if returncode:
+        print(f"Dia cookie sync offer did not complete (omp exited {returncode}); rerun ship.sh launch interactively")
+        return returncode
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    return 0
 
 
 def questions(document, config_path):
@@ -636,7 +682,6 @@ def questions(document, config_path):
             "If yes, set crewship.profiles.project_databases to true in "
             f"{config_path} and follow {ROOT / 'docs/project-databases.md'}."
         )
-    prompt += dia_cookies_question(config, config_path)
     argv = [omp, prompt]
     if os.environ.get("CREWSHIP_INSTALL_LOG"):
         argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
@@ -725,6 +770,7 @@ def main():
                 print("Software is installed, but Firstmate cannot start workers until the memory check passes.")
                 return 1
             questions(document, path)
+            dia_cookies_offer(document, path)
     return result
 
 

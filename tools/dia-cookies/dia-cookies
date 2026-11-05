@@ -21,7 +21,7 @@ from cryptography.fernet import Fernet
 HOST = os.environ.get("DIA_COOKIES_HOST", "mac")
 STORE = Path(os.environ.get("DIA_COOKIES_DIR", Path.home() / ".local/share/dia-cookies"))
 KEYFILE = Path.home() / ".config/dia-cookies/fernet.key"
-FLEET_JAR = Path.home() / ".fleet-browser/cookies.json"
+EXIT_STALE = 3  # some profile had no open tab; every other failure exits 1
 
 # Runs on the Mac under python3 (3.9, stdlib + the `websocket` module the Mac already has). Prints one JSON object.
 MAC_SCRIPT = r'''
@@ -100,6 +100,8 @@ def cmd_refresh(a):
     if r.returncode:
         sys.exit(f"read failed ({r.returncode}): {r.stderr.decode(errors='replace').strip().splitlines()[-1:]}")
     res = json.loads(r.stdout.splitlines()[-1])
+    STORE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    STORE.chmod(0o700)
     now, rc = int(time.time()), 0
     for d, p in res["profiles"].items():
         s = slug(p["name"])
@@ -115,7 +117,7 @@ def cmd_refresh(a):
     for d, name in res["unread"].items():
         if not a.profile or slug(name) in a.profile:
             print(f"{slug(name)}: not readable now (no open tab in that Dia profile); previous export kept", file=sys.stderr)
-            rc = 1
+            rc = EXIT_STALE
     return rc
 
 
@@ -163,24 +165,11 @@ def fmt(cookies, how):
 
 def cmd_get(a):
     text = fmt(select(a.profile, a.domain), a.format) + "\n"
-    if a.output:
+    if a.output == "-":
+        sys.stdout.write(text)
+    else:
         write_private(Path(a.output), text.encode())
         print(f"wrote {a.output} (0600)")
-    else:
-        sys.stdout.write(text)
-    return 0
-
-
-def cmd_import_fleet(a):
-    if not a.domain:
-        sys.exit("import-fleet needs at least one --domain; it never copies a whole profile")
-    picked = [c for c in select(a.profile, a.domain) if not host_match(c["domain"], "google.com")]  # fleet policy: Google stays per tier
-    jar = json.loads(FLEET_JAR.read_text()) if FLEET_JAR.exists() else {}
-    for c in picked:
-        jar[f"{c['domain'].lstrip('.').lower()}|{c['path']}|{c['name']}"] = {k: v for k, v in c.items() if v is not None}
-    write_private(FLEET_JAR, json.dumps(jar, indent=1).encode())
-    print(f"merged {len(picked)} cookies into {FLEET_JAR}")
-    subprocess.run([str(Path.home() / "oss-fleet/browsers/fleet-browser"), "sync"], check=False, stdout=subprocess.DEVNULL)
     return 0
 
 
@@ -191,12 +180,10 @@ def main():
     s.add_argument("profile", nargs="*"); s.set_defaults(fn=cmd_refresh)
     s = sub.add_parser("list", help="no args: profiles and freshness; with PROFILE: cookie names, never values")
     s.add_argument("profile", nargs="?"); s.add_argument("--domain", action="append", default=[]); s.set_defaults(fn=cmd_list)
-    s = sub.add_parser("get", help="print or write cookies for a profile (values!)")
+    s = sub.add_parser("get", help="write cookies for a profile to a 0600 file (values!); -o - prints them")
     s.add_argument("profile"); s.add_argument("--domain", action="append", default=[])
-    s.add_argument("--format", choices=["json", "netscape", "header"], default="json"); s.add_argument("-o", "--output")
+    s.add_argument("--format", choices=["json", "netscape", "header"], default="json"); s.add_argument("-o", "--output", required=True)
     s.set_defaults(fn=cmd_get)
-    s = sub.add_parser("import-fleet", help="merge a profile's cookies for --domain into the fleet browser jar and sync")
-    s.add_argument("profile"); s.add_argument("--domain", action="append", default=[]); s.set_defaults(fn=cmd_import_fleet)
     a = p.parse_args()
     sys.exit(a.fn(a))
 

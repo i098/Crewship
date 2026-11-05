@@ -6,7 +6,7 @@ Description=Export Dia cookies per profile, encrypted (Crewship managed)
 [Service]
 Type=oneshot
 ExecStart={{ crewship_dia_cookies_bin }} refresh
-# Exit 1 means a profile had no open tab and kept its previous export; it is not a unit failure.
-SuccessExitStatus=1
+# Exit 3 means a profile had no open tab and kept its previous export; it is not a unit failure. Exit 1 is a real failure.
+SuccessExitStatus=3
 Nice=10
 UMask=0077
