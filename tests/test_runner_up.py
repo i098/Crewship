@@ -172,20 +172,34 @@ def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
     assert "image" not in place  # runner-up's own pinned runner image
 
 
+def unit_sections(path):
+    sections, current = {}, None
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = sections.setdefault(line[1:-1], {})
+        else:
+            key, _, value = line.partition("=")
+            current.setdefault(key, []).append(value)
+    return sections
+
+
 def test_the_slice_and_the_units_carry_the_caps(home):
     apply(home, {"cpu_weight": 15, "memory_max": "30%"}, ci_pool=pool(home))
-    slice_text = (home.parent / "etc/runnerup.slice").read_text()
-    assert "CPUWeight=15\n" in slice_text
-    assert "IOWeight=20\n" in slice_text
-    assert "MemoryMax=30%\n" in slice_text
-    service = (units(home) / "runner-up.service").read_text()
-    assert "Nice=10\n" in service
-    assert "KillMode=process\n" in service  # stopping the coordinator leaves running jobs alone
-    assert f"PATH={home}/.local/share/runner-up/shim:" in service
-    assert "ExecStartPre=" in service and "image --ensure" in service
-    clean = (units(home) / "runner-up-clean.service").read_text()
-    assert "RUNNER_UP_DISK_MAX_GB=50\n" in clean
-    assert "IOSchedulingClass=idle\n" in clean
+    slice_ = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
+    assert slice_["CPUWeight"] == ["15"]
+    assert slice_["IOWeight"] == ["20"]
+    assert slice_["MemoryMax"] == ["30%"]
+    service = unit_sections(units(home) / "runner-up.service")["Service"]
+    assert service["Nice"] == ["10"]
+    assert service["KillMode"] == ["process"]  # stopping the coordinator leaves running jobs alone
+    assert any(v.startswith(f"PATH={home}/.local/share/runner-up/shim:") for v in service["Environment"])
+    assert any("image --ensure" in v for v in service["ExecStartPre"])
+    clean = unit_sections(units(home) / "runner-up-clean.service")["Service"]
+    assert "RUNNER_UP_DISK_MAX_GB=50" in clean["Environment"]
+    assert clean["IOSchedulingClass"] == ["idle"]
     assert (units(home) / "timers.target.wants/runner-up-clean.timer").is_symlink()
     assert (units(home) / "default.target.wants/runner-up.service").is_symlink()
 
