@@ -143,7 +143,7 @@ export function deskLines(d: Desk, nowMs: number, width = 100, height = 40): Lin
   return [...head, [], [v(" recent turns", theme.accent, true), m("   in, route, out; newest first")], ...shown.flatMap((t): Line[] => {
     const tag = `[${cut(t.route, 24)}]`
     return [
-      [m(`  ${age((nowMs - t.at) / 1000).padStart(5)} `), v("in ", theme.muted), v(cut(flat(t.text), Math.max(10, width - 11 - Bun.stringWidth(tag) - 1)), theme.text), v(" "), v(tag, t.route === "pending" ? theme.warn : theme.accent)],
+      [m(`  ${age((nowMs - t.at) / 1000).padStart(5)} `), v("in ", theme.muted), v(cut(flat(t.text), Math.max(10, width - 11 - cells(tag) - 1)), theme.text), v(" "), v(tag, t.route === "pending" ? theme.warn : theme.accent)],
       [m("        "), v("out ", theme.muted), t.reply ? v(cut(flat(t.reply), Math.max(10, width - 12)), theme.ok) : m("–")],
     ]
   })]
