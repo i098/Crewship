@@ -91,7 +91,7 @@ test("turns carry the inbound text, the route (desk, main, mate by plan, pending
     { at: 1000, text: "what is the eta\non the port", route: "desk", reply: "two hours give or take" },
     { at: 2000, text: "ship the fix", route: "main", reply: "" },
     { at: 3000, text: "check the queue", route: "mate mate-7", reply: "" },
-    { at: 4000, text: "thanks", route: "desk", reply: "❤️ (tapback)" },
+    { at: 4000, text: "thanks", route: "desk", reply: "love (tapback)" },
     { at: 5000, text: "anyone there", route: "pending", reply: "" },
   ])
 })
@@ -111,7 +111,7 @@ test("the snapshot lists the newest turns first, flattens and cuts text to the w
   const d = { ...loadDesk(empty, NOW, { unit: "active", journal: "" }), turns: parseTurns(ROUTING) }
   const out = deskSnapshot(d, 6_000_000, 40, 40).split("\n")
   const at = out.findIndex(l => l.includes("recent turns"))
-  expect(out.slice(at + 1, at + 5).map(l => l.slice(7).trim())).toEqual(["in anyone there [pending]", "out –", "in thanks [desk]", "out ❤️ (tapback)"])
+  expect(out.slice(at + 1, at + 5).map(l => l.slice(7).trim())).toEqual(["in anyone there [pending]", "out –", "in thanks [desk]", "out love (tapback)"])
   expect(out.slice(at + 1).filter(l => l.length > 40)).toEqual([])
   expect(out.find(l => l.includes("what is the eta"))).toMatch(/what is the eta [^[]*… \[desk\]/) // cut to 40 columns
   expect(deskSnapshot(d, 6_000_000, 100, 40)).toContain("what is the eta on the port [desk]") // newline flattened

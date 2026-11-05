@@ -11,6 +11,8 @@ type Ev = {
 }
 
 const TAIL_BYTES = 1 << 20 // the log grows without bound; the newest turns are at the end
+// Tapbacks by name (apps/imessage/bluebubbles.ts TAPBACKS): terminals and fonts draw ❤️ and ‼️ 1 or 2 cells wide, which moves the row's border.
+const TAPBACK: Record<string, string> = { "❤️": "love", "❤": "love", "👍": "like", "👎": "dislike", "😂": "laugh", "‼️": "emphasize", "‼": "emphasize", "❓": "question" }
 
 // One JSON object per line. `received` opens a turn by requestId; later events name it in `ids`:
 //   v2 (the front desk's plan): a mate, or an intent (relay target, dispatch model); route handoff: main Firstmate;
@@ -40,7 +42,7 @@ export function parseTurns(jsonl: string): Turn[] {
       continue
     }
     const out = e?.out ?? e?.acknowledgement
-    const reply = out?.bubbles?.length ? out.bubbles.join(" ") : out?.react ? `${out.react} (tapback)` : ""
+    const reply = out?.bubbles?.length ? out.bubbles.join(" ") : out?.react ? `${TAPBACK[out.react] ?? out.react} (tapback)` : ""
     for (const t of (Array.isArray(e?.ids) ? e.ids : []).map(id => turns.get(id))) {
       if (!t) continue
       if (e.v2) t.planned = true
