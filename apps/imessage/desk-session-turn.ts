@@ -55,7 +55,7 @@ export type SessionHost<R extends TurnRequest> = {
   send(target: Secondmate | "firstmate", id: string, text: string): Promise<boolean>; // true when the target's inbox took a background task
   message(mate: Secondmate, text: string): Promise<boolean>; // the desk's own text to a mate; true when the mate's inbox took it
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
-  log(key: string | undefined, text: string): void;
+  record(key: string | undefined, text: string): void;
   report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
 };
 
@@ -145,7 +145,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     const replied = threadReplyMate(pending, mates);
     if (replied) return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
     const actions = createActions({
-      requests: pending, current, muted: host.muted, mates: () => mates, safe, message: host.message, sent: host.sent, log: host.log,
+      requests: pending, current, muted: host.muted, mates: () => mates, safe, message: host.message, sent: host.sent, log: host.record,
       replies: (mate) => safe(readStatusTail(host.fmHome, mate.id)),
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),
       react: (emoji) => host.react(pending, emoji),

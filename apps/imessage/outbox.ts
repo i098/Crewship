@@ -224,6 +224,6 @@ export function keyOf(req: Request): string | undefined | Response {
 // The desk's view of the log: whether a keyed text went out today, and a record of one that did.
 export const deskLog = (dir: string) => ({
   sent: (key: string | undefined, text: string) => alreadySent(dir, { key, text }),
-  log: (key: string | undefined, text: string) => logSend(dir, { key, sender: "desk", text }),
+  record: (key: string | undefined, text: string) => logSend(dir, { key, sender: "desk", text }),
   report: (text: string) => logSend(dir, { sender: "desk", text }),
 });
