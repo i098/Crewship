@@ -354,13 +354,13 @@ export function voiceAnswer(source: VoiceSource, question: string, ok: boolean, 
   const exact = requestsExactOutput(question);
   const text = exact ? rewritten : rewritten.trim();
   if (!ok || !text.trim() || text.length > 2000 || claimsWork(text)) return;
-  if (exact && text === source.answer) return fit(text, BUBBLE_MAX);
+  if (exact && text === source.answer) return fit(text, BUBBLE_MAX).filter((p) => p.trim() !== "");
   const fields = voiceFields(source.answer);
   if (exact === "source" || (exact && !fields.length)) return;
   const literals = voiceLiterals(source.answer, fields);
   if (/```/.test(text) || (!exact && sourceStyle(text, literals, source.identity))) return;
   if (!preservesVoiceFacts(source.answer, text, literals, preserveWords, !!exact) || !preservesFieldValues(fields, text)) return;
-  return exact ? fit(text, BUBBLE_MAX) : bubbles(text);
+  return exact ? fit(text, BUBBLE_MAX).filter((p) => p.trim() !== "") : bubbles(text);
 }
 
 function requestsExactOutput(question: string): "source" | "values" | false {

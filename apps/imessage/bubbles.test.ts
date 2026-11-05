@@ -38,4 +38,11 @@ test("a long exact answer splits across bubbles without losing a character", () 
   expect(parts!.length).toBeGreaterThan(1);
   for (const part of parts!) expect(part.length).toBeLessThanOrEqual(BUBBLE_MAX);
   expect(squash(parts!)).toBe(squash([answer]));
+  expect(parts!.some((p) => p.includes("\n\n"))).toBe(true);
+  for (const part of parts!) expect(answer.includes(part)).toBe(true);
+});
+
+test("an exact answer ending in whitespace after a full bubble sends no blank bubble", () => {
+  const answer = `${"x".repeat(BUBBLE_MAX)}\n`;
+  expect(voiceAnswer({ answer, identity: false }, "Give me the exact text.", true, answer)).toEqual(["x".repeat(BUBBLE_MAX)]);
 });
