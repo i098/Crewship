@@ -391,3 +391,32 @@ def test_unavailable_pnpm_yaml_config_stops_before_any_change(
     assert all(not list(path.iterdir()) for path in (home.parent / "data").iterdir())
     assert (config_home / link).is_symlink() and not target.exists()
     assert not log.exists()
+
+
+@pytest.mark.parametrize("cpus,mem,expected", [(2, 4, 16), (4, 8, 16), (16, 32, 32), (32, 128, 64), (64, 16, 16)])
+def test_default_max_trees_scales_with_cores_and_ram(cpus, mem, expected):
+    assert bulk.default_max_trees(cpus, mem) == expected
+
+
+def test_explicit_max_trees_replaces_value_and_is_idempotent(home):
+    path = home / ".config/treehouse/config.toml"
+
+    assert bulk.configure(home, None, max_trees=48)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 48
+    assert not bulk.configure(home, None, max_trees=48)["changed"]
+    assert bulk.configure(home, None, max_trees=99)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 99
+    assert not bulk.configure(home, None)["changed"]
+    assert bulk.tomllib.loads(path.read_text())["max_trees"] == 99
+
+
+@pytest.mark.parametrize("line", ["max_trees = 7", "  max_trees = 7  # old"])
+def test_explicit_max_trees_preserves_existing_file(home, line):
+    path = home / ".config/treehouse/config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(f'# Keep.\nroot = "/custom/pools"\n{line}\n[x]\ny = 1\n')
+
+    assert bulk.configure(home, None, max_trees=40)["changed"]
+    text = path.read_text()
+    assert bulk.tomllib.loads(text) == {"root": "/custom/pools", "max_trees": 40, "x": {"y": 1}}
+    assert "# Keep." in text

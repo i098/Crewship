@@ -221,7 +221,9 @@
   ansible.builtin.command:
     argv: >-
       {{ ['python3', crewship_repo ~ '/scripts/bulk-defaults.py',
-          '--home', crewship_cfg.home, '--data-dir', crewship_data_dir]
+          '--home', crewship_cfg.home]
+         + (['--data-dir', crewship_data_dir] if crewship_data_dir else [])
+         + (['--max-trees', crewship_cfg.fleet.max_trees | string] if (crewship_cfg.fleet | default({})).max_trees is defined else [])
          + (['--check'] if ansible_check_mode else []) }}
   become: "{{ crewship_become_target | bool }}"
   become_user: "{{ crewship_cfg.user }}"
@@ -230,9 +232,7 @@
   changed_when: crewship_bulk_defaults.rc == 0 and (crewship_bulk_defaults.stdout | from_json).changed | bool
   check_mode: false
   no_log: true
-  when:
-    - crewship_data_dir | length > 0
-    - crewship_account_ready | bool
+  when: crewship_account_ready | bool
 
 - name: Write bulk defaults for future user-manager processes
   ansible.builtin.copy:
