@@ -11,17 +11,11 @@ from pathlib import Path
 FM_DESK = Path(__file__).resolve().parents[1] / "apps" / "imessage" / "fm-desk"
 
 
-def entry(kind, text, stamp):
-    return (
-        json.dumps(
-            {
-                "type": "message",
-                "timestamp": stamp,
-                "message": {"role": kind, "content": [{"type": "text", "text": text}]},
-            }
-        )
-        + "\n"
-    )
+def entry(kind, text, stamp, stop=None):
+    message = {"role": kind, "content": [{"type": "text", "text": text}]}
+    if stop:
+        message["stopReason"] = stop
+    return json.dumps({"type": "message", "timestamp": stamp, "message": message}) + "\n"
 
 
 def write_session(path, turns):
@@ -132,6 +126,36 @@ def test_follow_streams_entries_as_appended_and_never_launches_omp(tmp_path):
     assert "old turn" not in out
     assert not (tmp_path / "argv").exists()
     assert f.read_text().startswith(before)
+
+
+def test_follow_exits_at_end_marker_well_before_settle(tmp_path):
+    sessions, env = rig(tmp_path)
+    env["FM_DESK_SETTLE"] = "60"
+    f = sessions / "a.jsonl"
+    write_session(f, [("old turn", "2026-11-05T01:00:00Z")])
+    proc = subprocess.Popen([sys.executable, str(FM_DESK), "--follow"], env=env, stdout=subprocess.PIPE, text=True)
+    time.sleep(1)
+    with f.open("a") as h:
+        h.write(entry("user", "go", "2026-11-05T04:00:00Z"))
+        h.write(entry("assistant", "working", "2026-11-05T04:00:01Z", "toolUse"))
+    time.sleep(1.5)
+    assert proc.poll() is None
+    with f.open("a") as h:
+        h.write(entry("assistant", "all done", "2026-11-05T04:00:02Z", "stop"))
+    out, _ = proc.communicate(timeout=10)
+    assert proc.returncode == 0 and "assistant: all done" in out
+
+
+def test_follow_with_zero_settle_still_prints_the_appended_turn(tmp_path):
+    sessions, env = rig(tmp_path)
+    f = sessions / "a.jsonl"
+    write_session(f, [("old turn", "2026-11-05T01:00:00Z")])
+    proc = subprocess.Popen([sys.executable, str(FM_DESK), "--follow"], env=env, stdout=subprocess.PIPE, text=True)
+    time.sleep(1)
+    with f.open("a") as h:
+        h.write(entry("user", "zero settle turn", "2026-11-05T04:00:00Z"))
+    out, _ = proc.communicate(timeout=10)
+    assert proc.returncode == 0 and "user: zero settle turn" in out
 
 
 def test_bad_count_is_a_usage_error(tmp_path):

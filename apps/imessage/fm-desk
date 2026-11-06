@@ -119,8 +119,16 @@ def render_entry(line: str) -> str | None:
     return "\n".join(out) or None
 
 
+def ends_turn(line: str) -> bool:
+    try:
+        message = json.loads(line).get("message")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(message, dict) and message.get("role") == "assistant" and message.get("stopReason") not in (None, "toolUse")
+
+
 def follow(directory: Path, loop: bool) -> int:
-    settle = float(os.environ.get("FM_DESK_SETTLE", "5"))
+    settle = float(os.environ.get("FM_DESK_SETTLE", "60"))
     sizes = {p: p.stat().st_size for p in directory.glob("*.jsonl")}
     print("fm-desk: waiting for the next desk turn (Ctrl-C stops)", file=sys.stderr)
     while True:
@@ -128,8 +136,8 @@ def follow(directory: Path, loop: bool) -> int:
         if grown is None:
             time.sleep(0.5)
             continue
-        offset, quiet_since = sizes.get(grown, 0), time.monotonic()
-        while time.monotonic() - quiet_since < settle:
+        offset, quiet_since, ended = sizes.get(grown, 0), time.monotonic(), False
+        while not ended:
             with grown.open("rb") as handle:
                 handle.seek(offset)
                 data = handle.read()
@@ -141,6 +149,9 @@ def follow(directory: Path, loop: bool) -> int:
                     text = render_entry(raw)
                     if text:
                         print(text, flush=True)
+                    ended = ended or ends_turn(raw)
+            elif time.monotonic() - quiet_since >= settle:
+                break
             else:
                 time.sleep(0.2)
         sizes[grown] = offset
