@@ -12,7 +12,7 @@ test("the prose voice prompt carries the STE sentence rules", () => {
 
 test("the exact-quote voice prompt keeps its original rules and gets no rewrite rules", () => {
   expect(exact).toContain("preserving every requested character");
-  expect(exact).toContain("Cover every supplied source line");
+  expect(exact).toContain("Cover every supplied source line; do not omit facts to shorten the answer.");
   expect(exact).not.toContain("split long sentences");
   expect(exact).not.toContain("No passive voice");
 });

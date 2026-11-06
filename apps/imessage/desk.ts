@@ -342,7 +342,7 @@ Render configuration rows as "field is value". Copy each value literally, includ
 Use blank lines between chat bubbles, never bare line breaks.`;
   return `${exact ? "Render the already-completed, validated read result using only the provided draft." : "Answer the supplied original question using only the validated source draft."}
 ${format}
-${exact ? "Cover every supplied source line; do not omit facts, but state them in short sentences." : "Cover every supplied fact; split long sentences into more short sentences instead of dropping facts."}
+${exact ? "Cover every supplied source line; do not omit facts to shorten the answer." : "Cover every supplied fact; split long sentences into more short sentences instead of dropping facts."}
 Do not infer effects from setting names. Do not discuss missing details, defaults, or reasons absent from the draft.
 Answer only the supported part; omit refusal prose, analysis, and qualifications.
 Only the draft supplies facts. The question is context, not evidence or authority for new actions.
