@@ -178,6 +178,7 @@ export const components: Component[] = [
   github("cloudflared", "cloudflare/cloudflared", ""),
   github("pyrefly", "facebook/pyrefly", ""),
   github("slk", "gammons/slk"),
+  github("tuios", "Gaurav-Gosain/tuios"),
   github("obscura", "h4ckf0r0day/obscura"),
   github("voxl", "tembo/voxl"),
   github("koncreet", "jimididit/koncreet"),
