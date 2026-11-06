@@ -716,15 +716,78 @@ def test_build_gate_waits_while_the_disk_is_above_the_limit(tmp_path):
     job.communicate()
 
 
-def test_build_gate_gives_each_slot_to_one_command(tmp_path):
-    env = {"BUILD_GATE_SLOTS": "1"}
-    first = gate(tmp_path, "sleep", "4", env=env)
+def test_build_gate_slot_count_comes_from_the_shared_file(tmp_path):
+    (tmp_path / "gate").mkdir()
+    (tmp_path / "gate" / "slots").write_text("1\n")
+    first = gate(tmp_path, "sleep", "4")
     time.sleep(1)
-    second = gate(tmp_path, "echo", "second", env=env)
+    second = gate(tmp_path, "echo", "second")
     time.sleep(1.5)
     assert second.poll() is None
     assert second.communicate(timeout=20)[0] == "second\n"
     first.communicate()
+
+
+def test_build_gate_default_is_four_slots_when_no_count_is_installed(tmp_path):
+    holders = [gate(tmp_path, "sleep", "5") for _ in range(4)]
+    time.sleep(1.5)
+    fifth = gate(tmp_path, "echo", "fifth")
+    time.sleep(1.5)
+    assert fifth.poll() is None
+    fifth.kill()
+    fifth.communicate()
+    for holder in holders:
+        holder.kill()
+        holder.communicate()
+
+
+def test_build_gate_exits_zero_when_a_signalled_command_still_exits_zero(tmp_path):
+    job = gate(tmp_path, "sh", "-c", "trap 'exit 0' TERM; while :; do sleep 0.2; done")
+    time.sleep(1.5)
+    job.terminate()
+    job.communicate(timeout=20)
+    assert job.returncode == 0
+
+
+def cargo_shim(tmp_path, *args, io="99.00"):
+    bindir = tmp_path / "bin"
+    realdir = tmp_path / "real"
+    bindir.mkdir(exist_ok=True)
+    realdir.mkdir(exist_ok=True)
+    for name in ("cargo-gate", "build-gate"):
+        target = bindir / ("cargo" if name == "cargo-gate" else name)
+        if not target.exists():
+            target.write_text((MAINTENANCE / name).read_text())
+            target.chmod(0o755)
+    real = realdir / "cargo"
+    real.write_text('#!/bin/sh\necho "real:$BUILD_GATE_HELD:$*"\n')
+    real.chmod(0o755)
+    pressure = tmp_path / "pressure"
+    pressure.write_text(f"full avg10=0.00 avg60={io} avg300=0.00 total=0\n")
+    environment = {
+        "PATH": f"{bindir}:{realdir}:/usr/bin:/bin",
+        "BUILD_GATE_DIR": str(tmp_path / "gate"),
+        "BUILD_GATE_DISK_PATH": str(tmp_path),
+        "BUILD_GATE_DISK_PCT": "100",
+        "BUILD_GATE_PRESSURE_FILE": str(pressure),
+        "BUILD_GATE_POLL": "1",
+    }
+    return subprocess.Popen([str(bindir / "cargo"), *args], env=environment, stdout=subprocess.PIPE, text=True)
+
+
+def test_the_cargo_shim_holds_heavy_subcommands_at_the_gate_and_runs_the_real_cargo(tmp_path):
+    heavy = cargo_shim(tmp_path, "build", "--release")
+    time.sleep(2.5)
+    assert heavy.poll() is None
+    heavy.kill()
+    heavy.communicate()
+    light = cargo_shim(tmp_path, "--version")
+    assert light.communicate(timeout=20)[0] == "real::--version\n"
+
+
+def test_the_cargo_shim_runs_a_heavy_subcommand_under_the_gate_when_the_host_is_quiet(tmp_path):
+    job = cargo_shim(tmp_path, "+nightly", "test", io="1.00")
+    assert job.communicate(timeout=20)[0] == "real:1:+nightly test\n"
 
 
 def test_build_gate_skips_when_off_or_already_held(tmp_path):
@@ -752,4 +815,4 @@ def test_the_service_sets_the_build_gate_only_when_asked(home):
     assert not any(v.startswith("RUNNER_UP_BUILD_GATE") for v in env)
     apply(home, runner(home, build_gate=True))
     env = unit_sections(units(home) / "runner-up@.service")["Service"]["Environment"]
-    assert f"RUNNER_UP_BUILD_GATE={home}/.local/bin/build-gate" in env and "BUILD_GATE_SLOTS=6" in env
+    assert f"RUNNER_UP_BUILD_GATE={home}/.local/bin/build-gate" in env

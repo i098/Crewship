@@ -1,14 +1,15 @@
 #!/bin/sh
 # build-gate <command...>: run a heavy build behind the host's one shared job pool (docs/runner-up.md#build-gate).
 # It waits, and never fails, while the data disk is above BUILD_GATE_DISK_PCT or the io `full` avg60 pressure is
-# above BUILD_GATE_IO_PCT. Then it takes one of BUILD_GATE_SLOTS flock slots and holds it until the command ends.
+# above BUILD_GATE_IO_PCT. Then it takes one flock slot out of the host-wide count in $BUILD_GATE_DIR/slots (default 4)
 # BUILD_GATE=off runs the command at once. A command that runs under a gate (BUILD_GATE_HELD) does not wait again.
 set -eu
 [ "$#" -gt 0 ] || { echo "usage: build-gate <command...>" >&2; exit 2; }
 if [ "${BUILD_GATE-}" = off ] || [ -n "${BUILD_GATE_HELD-}" ]; then exec "$@"; fi
 
 dir=${BUILD_GATE_DIR:-/tmp/build-gate}
-slots=${BUILD_GATE_SLOTS:-4}
+slots=$(cat "$dir/slots" 2>/dev/null | tr -dc 0-9) || slots=
+[ -n "$slots" ] || slots=4
 path=${BUILD_GATE_DISK_PATH:-/sdc-disk}
 max_disk=${BUILD_GATE_DISK_PCT:-85}
 max_io=${BUILD_GATE_IO_PCT:-40}
@@ -38,10 +39,11 @@ while :; do
         BUILD_GATE_HELD=1 "$@" 9>&- <&0 &
         child=$!
         trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
+        status=0
         wait "$child" || status=$?
         # The first wait returns at a signal; wait again for the command itself.
-        while kill -0 "$child" 2>/dev/null; do wait "$child" || status=$?; done
-        exit "${status:-0}"
+        while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+        exit "$status"
       fi
       exec 9>&-
       n=$((n + 1))
