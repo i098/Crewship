@@ -138,7 +138,7 @@ For each message from the owner, the service does these steps:
    Eight seconds after the latest unanswered request arrives in a direct chat, the bridge stops that chat's typing indicator and hands off its still-unassigned requests.
    The deadline sends the owner nothing: no receipt or fixed text says that the request is saved or unanswered.
    Each direct chat keeps its own deadline, and it fires once per request; messages in another chat do not cancel it.
-   Five minutes after a v2 request's route finishes with no answer, the bridge files one more inbox note with key `stale-<request id>`. It sends nothing to the owner.
+   Five minutes after a v2 request's route finishes with no answer, the bridge files one more inbox note with key `stale-<request id>`, and records that in the routing log so a restart does not repeat it. It skips a text older than two hours at startup. It sends nothing to the owner.
    A deadline does not count as global Firstmate activity.
    Active mate delivery does not block a due deadline or keep that chat's typing indicator active.
    A prompt answer leaves nothing to hand off; typing alone does not.

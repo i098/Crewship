@@ -112,6 +112,7 @@ const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ?
 const MAX_WAIT_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_MAX_WAIT_MS ? Number(env.FM_IMESSAGE_TEST_MAX_WAIT_MS) : 2000;
 const ACK_MS = 8000;
 const STALE_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_STALE_MS ? Number(env.FM_IMESSAGE_TEST_STALE_MS) : 300_000; // an unanswered v2 text is re-noted to Firstmate after this
+const STALE_MAX_AGE_MS = 7_200_000; // a restart does not re-note a text older than this
 const TYPING_MAX_MS = 300_000; // the desk typing bubble never outlives a request that gets no answer
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
@@ -201,9 +202,9 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -1443,6 +1444,8 @@ function applyRoute(event: RouteEvent) {
     routing.set(event.received.requestId, { ...event.received, route: "pending" });
   } else if ("v2" in event) {
     for (const id of event.ids) routing.get(id)!.v2 = event.v2;
+  } else if ("stale" in event) {
+    for (const id of event.ids) routing.get(id)!.stale = true;
   } else if ("responded" in event) {
     for (const id of event.ids) routing.get(id)!.responded = event.responded;
   } else if ("route" in event) for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
@@ -1464,13 +1467,14 @@ function recordRoute(event: RouteEvent) {
 // A v2 text with no answer STALE_MS after its route finished: file one more inbox note. Nothing goes to the owner.
 function watchStale(id: string) {
   const item = routing.get(id);
-  if (!item?.at || item.loop !== "v2" || item.responded || !directChat.test(item.ref.space) || staleNoted.has(id)) return;
+  if (!item?.at || item.loop !== "v2" || item.responded || item.stale || Date.now() - item.at > STALE_MAX_AGE_MS || !directChat.test(item.ref.space) || staleNoted.has(id)) return;
   staleNoted.add(id);
   setTimeout(() => {
     const open = routing.get(id);
     if (stopping || muted() || !open || open.responded) return;
     const minutes = Math.round((Date.now() - open.at!) / 60_000);
-    if (!fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) log("stale note")(new Error(id));
+    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
+    else log("stale note")(new Error(id));
   }, STALE_MS);
 }
 

@@ -168,6 +168,37 @@ def test_unanswered_handoff_is_noted_again_once(tmp_path):
         assert texts(rig) == []
 
 
+def test_restart_after_the_stale_note_does_not_repeat_it(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}],
+                FM_IMESSAGE_TEST_STALE_MS="1500") as rig:
+        deliver(rig, "m1", "please check the whole repo")
+        wait_for(lambda: "stale-bluebubbles-m1 " in read_text(rig.notes), "the stale note", timeout=60)
+        wait_for(lambda: any(e.get("stale") for e in events(rig)), "the stale mark", timeout=30)
+        rig.stop()
+        rig.start()
+        time.sleep(4)
+        assert read_text(rig.notes).count("stale-bluebubbles-m1 ") == 1
+
+
+def test_restart_skips_an_old_unanswered_text_but_notes_a_fresh_one(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}],
+                FM_IMESSAGE_TEST_STALE_MS="20000") as rig:
+        for guid in ("m1", "m2"):
+            deliver(rig, guid, f"please check the whole repo {guid}")
+            wait_for(lambda g=guid: any(e.get("route") == "done" and f"bluebubbles-{g}" in e.get("ids", [])
+                                        for e in events(rig)), f"the finished route of {guid}", timeout=60)
+        rig.stop()
+        log = rig.state / "routing.jsonl"
+        rows = [json.loads(line) for line in read_text(log).splitlines()]
+        for row in rows:
+            if row.get("received", {}).get("requestId") == "bluebubbles-m1":
+                row["received"]["at"] -= 3 * 3600 * 1000
+        log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        rig.start()
+        wait_for(lambda: "stale-bluebubbles-m2 " in read_text(rig.notes), "the fresh text's stale note", timeout=60)
+        assert "stale-bluebubbles-m1 " not in read_text(rig.notes)
+
+
 def test_answered_handoff_gets_no_stale_note(tmp_path):
     with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}],
                 FM_IMESSAGE_TEST_STALE_MS="3000") as rig:
