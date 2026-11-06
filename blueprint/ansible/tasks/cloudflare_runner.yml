@@ -1,0 +1,88 @@
+# Cloudflare container runner (crewship.cloudflare_runner, docs/cloudflare-runner.md): a Worker
+# that starts one Cloudflare Container for each job, and a host dispatcher that gives every queued
+# job of a configured repository a just-in-time runner. The GitHub token stays on the host.
+#
+# The dispatcher unit is started when it is not running and never restarted: it reads its config
+# again on its next start only, and a restart cannot hurt a job (containers run on Cloudflare).
+# The deploy step does nothing when the Worker source and settings did not change, and refuses
+# while a job is in flight, because a deploy replaces running containers.
+#
+# Check-mode safe. Idempotent: files are copies or templates; the token is made once.
+
+- name: Install the Cloudflare container runner for the account
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_env }}"
+  block:
+    - name: Create the Cloudflare runner directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode | default('0755') }}"
+      loop:
+        - {path: "{{ crewship_local_bin }}"}
+        - {path: "{{ crewship_cf_runner_source }}"}
+        - {path: "{{ crewship_cf_runner_source }}/src"}
+        - {path: "{{ crewship_cf_runner_config_dir }}"}
+        - {path: "{{ crewship_cf_runner_state }}", mode: "0700"}
+        - {path: "{{ crewship_user_units }}/default.target.wants"}
+
+    - name: Install the dispatcher
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/maintenance/cf-runner.py"
+        dest: "{{ crewship_cf_runner_bin }}"
+        mode: "0755"
+        remote_src: true
+
+    - name: Install the Worker and image sources
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/containers/cf-runner/{{ item }}"
+        dest: "{{ crewship_cf_runner_source }}/{{ item }}"
+        mode: "{{ '0755' if item.endswith('.sh') else '0644' }}"
+        remote_src: true
+      loop: "{{ crewship_cf_runner_files }}"
+
+    - name: Write the Cloudflare runner config
+      ansible.builtin.template:
+        src: cf-runner.config.json.j2
+        dest: "{{ crewship_cf_runner_config_dir }}/config.json"
+        mode: "0644"
+
+    - name: Make the token that the dispatcher sends to the Worker
+      ansible.builtin.shell: umask 077 && head -c 32 /dev/urandom | base64 | tr -d '/+=\n' > dispatch-token
+      args:
+        chdir: "{{ crewship_cf_runner_state }}"
+        creates: "{{ crewship_cf_runner_state }}/dispatch-token"
+      when: not ansible_check_mode
+
+    - name: Deploy the Worker and its container image
+      ansible.builtin.command: "python3 {{ crewship_cf_runner_bin }} deploy"
+      register: crewship_cf_runner_deploy
+      changed_when: "'Worker deployed' in crewship_cf_runner_deploy.stdout"
+      when: not ansible_check_mode
+
+    - name: Write the dispatcher unit
+      ansible.builtin.template:
+        src: "{{ crewship_cf_runner_unit }}.j2"
+        dest: "{{ crewship_user_units }}/{{ crewship_cf_runner_unit }}"
+        mode: "0644"
+      notify: reload user systemd
+
+    - name: Statically enable the dispatcher
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/{{ crewship_cf_runner_unit }}"
+        dest: "{{ crewship_user_units }}/default.target.wants/{{ crewship_cf_runner_unit }}"
+        state: link
+        force: true
+        follow: false
+
+    - name: Start the dispatcher
+      ansible.builtin.systemd_service:
+        scope: user
+        name: "{{ crewship_cf_runner_unit }}"
+        enabled: true
+        state: started
+      environment: "{{ crewship_user_systemd_env }}"
+      when:
+        - crewship_manage_services | bool
+        - not ansible_check_mode

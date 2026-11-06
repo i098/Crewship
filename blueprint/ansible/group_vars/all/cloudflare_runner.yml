@@ -1,0 +1,13 @@
+---
+# Cloudflare container runner (crewship.cloudflare_runner, docs/cloudflare-runner.md): one
+# Cloudflare Container for each job of the listed repositories. Opt-in; the block is absent by default.
+crewship_cf_runner: "{{ crewship_cfg.cloudflare_runner | default({}) }}"
+
+crewship_cf_runner_dir: "{{ crewship_cfg.home }}/.local/share/cf-runner"
+crewship_cf_runner_source: "{{ crewship_cf_runner_dir }}/src"
+crewship_cf_runner_state: "{{ crewship_cfg.home }}/.local/state/cf-runner"
+crewship_cf_runner_config_dir: "{{ crewship_cfg.home }}/.config/cf-runner"
+crewship_cf_runner_bin: "{{ crewship_local_bin }}/cf-runner.py"
+crewship_cf_runner_unit: cf-runner-dispatch.service
+# Source files of the Worker and its image, relative to blueprint/containers/cf-runner.
+crewship_cf_runner_files: [Dockerfile, entrypoint.sh, package.json, src/index.ts]
