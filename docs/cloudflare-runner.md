@@ -52,4 +52,4 @@ Credentials come from `credentials_file` and reach wrangler through its environm
 
 ## Roll back
 
-Change `runs-on` back to the runner-up label. Remove the block to stop the dispatcher; the Worker stays deployed until you delete it with `wrangler delete`.
+Change `runs-on` back to the runner-up label. Removing the block does not stop anything: an apply skips the feature, so the dispatcher keeps running. Stop it with `systemctl --user disable --now cf-runner-dispatch.service`. The Worker stays deployed until you delete it with `wrangler delete`.
