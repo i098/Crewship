@@ -30,8 +30,16 @@ run)
   fi
   # A job sees every CPU of the host, so cargo would start one rustc and one link for each of them
   # while --cpus holds the job to its own share. A job's own CARGO_BUILD_JOBS still wins.
+  # mold sizes its thread pool from the CPUs of the host, not from --cpus, so it gets the same cap
+  # unless the job sets RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS itself.
   jobs=
-  [ -z "${RUNNER_UP_JOB_CPUS-}" ] || jobs="-e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
+  if [ -n "${RUNNER_UP_JOB_CPUS-}" ]; then
+    jobs="-e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
+    case "$*" in
+    *RUSTFLAGS* | *--env-file*) ;;
+    *) set -- -e "RUSTFLAGS=-C link-arg=-Wl,--threads=$RUNNER_UP_JOB_CPUS" "$@" ;;
+    esac
+  fi
   # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache and $jobs hold no spaces inside a word
   exec $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;
 build)

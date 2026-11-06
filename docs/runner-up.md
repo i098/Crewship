@@ -48,7 +48,7 @@ Every coordinator runs in `runnerup.slice` and keeps its own state in `<state di
 | `repos[].slots` | that many places, named `<slot name>-<n>` as the CI pool names its slots |
 | `repos[].name` | the slot name; a second group of one repository (a quick group) keeps its own places |
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
-| `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place; `job_cpus` is also the default `CARGO_BUILD_JOBS` of each job, so a Rust job does not start a compile for every CPU of the host. To cap a heavy repository, give its entry fewer `slots` (for example `slots: 2`) |
+| `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place; `job_cpus` is also the default `CARGO_BUILD_JOBS` and mold `--threads` (through `RUSTFLAGS`) of each job, so a Rust job does not start a compile or a link thread for every CPU of the host; a job that sets `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS` keeps its own. To cap a heavy repository, give its entry fewer `slots` (for example `slots: 2`) |
 | `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
 | `docker: dind` | refused: runner-up has no Docker daemon in the job, so the entry stays on the CI pool (see [Not covered](#not-covered)) |
 
