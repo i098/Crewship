@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=runner-up disk guard every 2 minutes (Crewship managed)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

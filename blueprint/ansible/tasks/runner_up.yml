@@ -166,7 +166,7 @@
         force: true
         follow: false
       loop: >-
-        {{ ['runner-up-clean.timer']
+        {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
            + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
 
     - name: Check for the installed runner-up unit
@@ -194,7 +194,7 @@
         enabled: true
         state: started
       loop: >-
-        {{ ['runner-up-clean.timer']
+        {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
            + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
       environment: "{{ crewship_user_systemd_env }}"
       when:

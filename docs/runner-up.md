@@ -27,6 +27,8 @@ crewship:
   #   io_write_mb: 120          # IOWriteBandwidthMax of the slice, in MB/s
   #   io_write_iops: 600        # IOWriteIOPSMax of the slice
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
+  #   pause_pct: 88             # data disk use above which no new job starts
+  #   resume_pct: 85            # data disk use below which jobs start again
   #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
@@ -97,6 +99,11 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 
 Each step runs alone with a time limit (`RUNNER_UP_PRUNE_TIMEOUT`, 280 s): a step that fails or hangs on a busy disk does not skip the next ones, and the unit then ends failed.
 It never touches a running container.
+
+`runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
+When the disk of `data_dir` (the home when unset) is above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
+Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
+Below `resume_pct` (85) it starts again only the coordinators it stopped.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.

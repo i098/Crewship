@@ -576,6 +576,66 @@ def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
     assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
+def guard(stubs, tmp_path, used, *, paused="", active=True):
+    """Run `guard` with a stub `df` that reports `used` percent and a `systemctl` that logs."""
+    bin_dir, log = stubs
+    (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
+    (bin_dir / "systemctl").write_text(
+        f'#!/bin/sh\necho "systemctl $*" >> {log}\n' + ("" if active else '[ "$2" = is-active ] && exit 3\n') + "exit 0\n"
+    )
+    for name in ("df", "systemctl"):
+        (bin_dir / name).chmod(0o755)
+    state = tmp_path / "paused"
+    if paused:
+        state.write_text(paused)
+    env = {"RUNNER_UP_INSTANCES": "a-b c-d", "RUNNER_UP_GUARD_STATE": str(state)}
+    calls = run_script("runner-up-maintain", stubs, "guard", env=env)
+    return [c for c in calls if c.startswith("systemctl")], state
+
+
+def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_forces_running_ones(stubs, tmp_path):
+    guard(stubs, tmp_path, 10)
+    calls = stubs[1].read_text().splitlines()
+    assert calls[0] == "docker container prune --force --filter label=runner-up.place"
+    assert not any(c.startswith("docker rm") or " stop " in c for c in calls)
+
+
+def test_guard_stops_the_coordinators_above_88_percent_and_remembers_them(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 89)
+    assert calls == [
+        "systemctl --user is-active --quiet runner-up@a-b.service",
+        "systemctl --user stop runner-up@a-b.service",
+        "systemctl --user is-active --quiet runner-up@c-d.service",
+        "systemctl --user stop runner-up@c-d.service",
+    ]
+    assert state.read_text() == "a-b\nc-d\n"
+
+
+def test_guard_does_not_stop_at_88_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
+    assert guard(stubs, tmp_path, 88)[0] == []
+    calls, state = guard(stubs, tmp_path, 95, active=False)
+    assert not any(" stop " in c for c in calls) and not state.exists()
+
+
+def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 84, paused="a-b\n")
+    assert calls == ["systemctl --user start runner-up@a-b.service"]
+    assert not state.exists()
+
+
+def test_guard_keeps_the_pause_between_85_and_88_percent(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 86, paused="a-b\n")
+    assert calls == [] and state.exists()
+
+
+def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
+    apply(home, runner(home))
+    service = unit_sections(units(home) / "runner-up-guard.service")["Service"]
+    assert "RUNNER_UP_PAUSE_PCT=88" in service["Environment"]
+    assert "RUNNER_UP_RESUME_PCT=85" in service["Environment"]
+    assert (units(home) / "timers.target.wants/runner-up-guard.timer").is_symlink()
+
+
 def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(stubs, tmp_path):
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n")

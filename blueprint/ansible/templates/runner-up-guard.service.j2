@@ -1,0 +1,18 @@
+{{ ansible_managed | comment }}
+# Triggered by runner-up-guard.timer. Above {{ crewship_runner_up_pause_pct }}% on the disk of the build data it stops the
+# coordinators, so no new job starts; below {{ crewship_runner_up_resume_pct }}% it starts the ones it stopped. A running job is never stopped.
+[Unit]
+Description=runner-up disk guard (Crewship managed)
+
+[Service]
+Type=oneshot
+Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
+Environment=RUNNER_UP_GUARD_PATH={{ crewship_runner_up_data_dir | default(crewship_cfg.home, true) }}
+Environment=RUNNER_UP_PAUSE_PCT={{ crewship_runner_up_pause_pct }}
+Environment=RUNNER_UP_RESUME_PCT={{ crewship_runner_up_resume_pct }}
+Environment=RUNNER_UP_INSTANCES={{ crewship_runner_up_instances | join(' ') }}
+ExecStart={{ crewship_runner_up_maintain }} guard
+TimeoutStartSec=60
+Nice=19
+IOSchedulingClass=idle
