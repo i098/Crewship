@@ -37,7 +37,7 @@ import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Sto
 import { authorizedWritePath, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
-import { deskMayAct, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -1379,6 +1379,29 @@ function spawnSender(mate: Secondmate, text: string) {
   return track(Bun.spawn([sender, mate.id, text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
 }
 
+async function deliverToMate(item: Routing, mate: Secondmate) {
+  const text = `[from captain via desk] ${item.authored ?? item.text}\n${deskRequestMarker(item.requestId)}`;
+  const routed = `routed to ${mate.id}`;
+  if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
+  // Save uncertainty before the send, once per request; a restart must not blindly repeat a delivery.
+  let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
+  if (!routing.get(item.requestId)?.noted) recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
+  let proc: Bun.Subprocess | undefined;
+  try {
+    proc = spawnSender(mate, text);
+    deskRun = proc;
+    if (await proc.exited === 0 || mateInboxHas(FM_HOME, mate.id, item.requestId)) handoffNote = routed;
+  } catch (e) {
+    if (!proc) handoffNote = undefined;
+    log("mate delivery")(e);
+  } finally {
+    if (deskRun === proc) deskRun = undefined;
+  }
+  // A failed send keeps the note already saved; a second row for the same request adds nothing.
+  if (handoffNote === routed) recordRoute({ ids: [item.requestId], route: "done", handoffNote });
+  else if (handoffNote === undefined) recordRoute({ ids: [item.requestId], route: "handoff" });
+}
+
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
   recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
   for (const item of pending) mateDeliveries.add(item.requestId);
@@ -1386,26 +1409,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
     for (const item of pending) {
       if (stopping || !current()
         || !relayTargetCurrent(mate, secondmates(FM_HOME))) break;
-      const text = `[from captain via desk] ${item.authored ?? item.text}`;
-      const routed = `routed to ${mate.id}`;
-      if (mateInboxHas(FM_HOME, mate.id, text)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); continue; }
-      // Save uncertainty before the send, once per request; a restart must not blindly repeat a delivery.
-      let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
-      if (!routing.get(item.requestId)?.noted) recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
-      let proc: Bun.Subprocess | undefined;
-      try {
-        proc = spawnSender(mate, text);
-        deskRun = proc;
-        if (await proc.exited === 0 || mateInboxHas(FM_HOME, mate.id, text)) handoffNote = routed;
-      } catch (e) {
-        if (!proc) handoffNote = undefined;
-        log("mate delivery")(e);
-      } finally {
-        if (deskRun === proc) deskRun = undefined;
-      }
-      // A failed send keeps the note already saved; a second row for the same request adds nothing.
-      if (handoffNote === routed) recordRoute({ ids: [item.requestId], route: "done", handoffNote });
-      else if (handoffNote === undefined) recordRoute({ ids: [item.requestId], route: "handoff" });
+      await deliverToMate(item, mate);
     }
   } finally {
     for (const item of pending) mateDeliveries.delete(item.requestId);

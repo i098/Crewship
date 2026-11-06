@@ -71,7 +71,7 @@ def test_mate_handoff_preserves_text_without_notifying_firstmate(tmp_path, desk_
         desk_clock()
         wait_for(lambda: f"routed to {mate}" in text(state / "routing.jsonl"), "the local delivery receipt")
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
-        assert sends == [{"home": str(tmp_path), "args": [mate, f"[from captain via desk] {message}"]}]
+        assert sends == [{"home": str(tmp_path), "args": [mate, f"[from captain via desk] {message}\n[desk request photon-work]"]}]
         assert text(notes) == ""
         assert text(fake / "sent") == ""
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [message]
@@ -292,7 +292,7 @@ def test_mate_inbox_record_counts_as_delivered(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     inbox = tmp_path / "state/web-mate.inbox"
     inbox.mkdir()
-    (inbox / "001.msg").write_text("[from captain via desk] Fix the website menu\n")
+    (inbox / "001.msg").write_text("[from captain via desk] Fix the website menu\n[desk request photon-work]\n")
     bridge = start(1)
     try:
         receive("work", "Fix the website menu")
@@ -301,6 +301,24 @@ def test_mate_inbox_record_counts_as_delivered(tmp_path, desk_clock):
         assert text(fake / "mate-sends") == ""
         assert "may be incomplete" not in text(state / "routing.jsonl")
         assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_identical_text_from_another_request_is_still_sent(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    inbox = tmp_path / "state/web-mate.inbox"
+    inbox.mkdir()
+    (inbox / "001.msg").write_text("[from captain via desk] Fix the website menu\n[desk request photon-first]\n")
+    bridge = start(1)
+    try:
+        receive("first", "Fix the website menu")
+        receive("second", "Fix the website menu")
+        desk_clock()
+        wait_for(lambda: text(state / "routing.jsonl").count("routed to web-mate") == 2, "both receipts")
+        sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
+        assert [send["args"] for send in sends] == [["web-mate", "[from captain via desk] Fix the website menu\n[desk request photon-second]"]]
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -347,7 +365,7 @@ def test_same_mate_burst_delivers_each_text_once(tmp_path, desk_clock):
         wait_for(lambda: text(state / "routing.jsonl").count("routed to web-mate") == 3, "the complete mate handoff")
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
         assert [send["args"] for send in sends] == [
-            ["web-mate", f"[from captain via desk] {message}"] for message in messages
+            ["web-mate", f"[from captain via desk] {message}\n[desk request photon-{index}]"] for index, message in enumerate(messages)
         ]
         assert text(notes) == ""
     finally:
@@ -426,7 +444,7 @@ def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_
         expected = messages if change == "unchanged" else messages[:1]
         sends = [json.loads(line) for line in text(fake / "mate-sends").splitlines()]
         assert [send["args"] for send in sends] == [
-            ["web-mate", f"[from captain via desk] {message}"] for message in expected
+            ["web-mate", f"[from captain via desk] {message}\n[desk request photon-{index}]"] for index, message in enumerate(expected)
         ]
         assert text(state / "routing.jsonl").count("routed to web-mate") == len(expected)
         assert "may be incomplete" not in text(notes)
