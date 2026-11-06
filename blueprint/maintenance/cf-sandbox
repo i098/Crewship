@@ -56,6 +56,10 @@ checkout=$(realpath "${top:-$cwd}")
 
 home=${HOME:?HOME is not set}
 runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+for live in "$home" "$runtime"; do
+  live=$(realpath -m "$live")
+  [[ $live/ == "$checkout"/* ]] && die "the checkout $checkout is or contains $live; run from a project directory"
+done
 base=${CF_SANDBOX_SCRATCH:-${TMPDIR:-/tmp}}
 scratch=$(mktemp -d "$base/cf-sandbox.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT

@@ -170,3 +170,12 @@ def test_no_command_is_an_error(live):
     result = subprocess.run([str(SANDBOX), "--cwd", str(checkout), "--"], env=env,
                             capture_output=True, text=True)
     assert result.returncode == 2 and "no command" in result.stderr
+
+
+def test_a_checkout_that_contains_the_real_home_is_refused(live):
+    checkout, env, daemons = live
+    env = {**env, "HOME": str(checkout / "home")}
+    (checkout / "home").mkdir(exist_ok=True)
+    result = subprocess.run([str(SANDBOX), "--cwd", str(checkout), "--", "true"], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0 and "contains" in result.stderr
