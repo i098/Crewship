@@ -7,6 +7,11 @@
 [Unit]
 Description=iMessage bridge between the owner and Firstmate (Crewship managed)
 After=network-online.target
+# Self-healing (docs/imessage.md#self-healing): when systemd gives up on the bridge, the heal unit counts it, alerts on the second
+# failure in a row, and starts the bridge again.
+OnFailure=fm-imessage-heal.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 WorkingDirectory={{ crewship_imessage_dir }}
@@ -50,6 +55,13 @@ StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
 ExecStart=/bin/sh -c 'set -a; . "$$HOME/super.env"; set +a; exec "{{ crewship_local_bin }}/bun" bridge.ts'
+# The bridge sends WATCHDOG=1 only while its port answers, no desk turn is stuck and the pi-natives .node loads.
+# systemd-notify runs as a child of the bridge, so any process of the unit may notify.
+WatchdogSec=300
+WatchdogSignal=SIGTERM
+NotifyAccess=all
+# Check the pi-natives .node files and repair them from the omp binary before the bridge starts.
+ExecStartPre=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" selfheal.ts start'
 KillMode=mixed
 TimeoutStopSec=10
 Restart=always

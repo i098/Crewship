@@ -44,6 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch } from "./herdr-watch.ts";
+import { heartbeat, Turns } from "./selfheal.ts";
 import { brief, deskLog, keyOf, permanent, Queue, sendOnce, transient } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -183,6 +184,7 @@ let deskTypingRequestId: string | undefined;
 let deskTypingPending: Promise<unknown> = Promise.resolve();
 let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 const v2Jobs = new Map<string, AbortController>();
+const deskTurns = new Turns();
 const { models: v2Models, redact: v2Redact } = DESK_V2 ? await loadV2Context() : { models: [], redact: undefined };
 
 
@@ -470,6 +472,7 @@ Bun.serve({
     if (stopping) return new Response("stopping\n", { status: 503 });
     if (!localCommand(req.headers, PORT)) return new Response("forbidden\n", { status: 403 });
     const url = new URL(req.url);
+    if (req.method === "GET" && url.pathname === "/health") return new Response("ok\n");
     if (req.method === "GET" && url.pathname === "/location") {
       if (!raw) return new Response("no location: it needs the photon transport and a spectrum-ts whose location client the bridge can reach\n", { status: 503 });
       try {
@@ -602,6 +605,7 @@ if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
   console.log("fm-imessage: herdr status alerts on");
 }
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
+heartbeat({ env, port: PORT, turns: deskTurns, stopping: () => stopping });
 if (latestRef) {
   const ref = latestRef;
   void startups[TRANSPORTS.indexOf(ref.line ?? "photon")]?.then((line) => line?.find(ref)).then((message) => {
@@ -1077,6 +1081,7 @@ async function runDeskV2() {
       && pending.every((r) => !r.responded);
     // Typing starts with the turn and stays on until the real answer is delivered, also after a handoff.
     const finishTyping = muted() ? () => {} : startDeskTyping(pending, () => !stopping);
+    const turnDone = deskTurns.begin();
     try {
       await runV2Turn(pending, controller, current);
       if (pending.every((r) => r.route === "desk" && !r.out?.bubbles?.length)) finishTyping();
@@ -1086,6 +1091,7 @@ async function runDeskV2() {
         handoffV2(pending);
       }
     } finally {
+      turnDone();
       if (v2Jobs.get(key) === controller) v2Jobs.delete(key);
     }
   }));
