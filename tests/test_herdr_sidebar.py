@@ -115,6 +115,82 @@ def test_pr_owners_from_remotes():
     assert ts('m.prOwners("")') == ["{owner}"]
 
 
+STUB_GH = """#!/bin/sh
+echo "$*" >> "$GH_LOG"
+case "$*" in *If-None-Match*) printf 'HTTP/2.0 304 Not Modified\\r\\nEtag: "v1"\\r\\n\\r\\n'; exit 1;; esac
+printf 'HTTP/2.0 200 OK\\r\\nEtag: "v1"\\r\\n\\r\\n[{"number": 7}]'
+"""
+
+
+@pytest.fixture
+def lookup(tmp_path):
+    """lookupPr in a fresh bun process against a stub gh: (run, git, push, gh_calls, cache_dir)."""
+    bin_dir = tmp_path / "bin"
+    write(bin_dir / "gh", STUB_GH, 0o755)
+    log = tmp_path / "gh.log"
+    log.touch()
+    repo = tmp_path / "repo"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_LOG": str(log),
+        "CREWSHIP_SIDEBAR_CACHE": str(tmp_path / "cache"),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    env.pop("FM_TASK_ID", None)
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+    subprocess.run(["git", "init", "-q", "-b", "feat", str(repo)], check=True, env=env)
+    git("commit", "-q", "--allow-empty", "-m", "one")
+    code = f"import * as m from {json.dumps(str(ROOT / 'blueprint/config/herdr-sidebar.ts'))};"
+    code += f"console.log(JSON.stringify(await m.lookupPr({json.dumps(str(repo))})) ?? 'null');"
+
+    def run():
+        out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, env=env)
+        return json.loads(out.stdout)
+
+    def push():
+        bare = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True, env=env)
+        git("remote", "add", "origin", str(bare))
+        git("push", "-q", "-u", "origin", "feat")
+
+    return run, git, push, lambda: log.read_text().splitlines(), tmp_path / "cache"
+
+
+@needs_bun
+def test_no_pr_lookup_for_a_branch_without_upstream(lookup):
+    run, _, _, calls, _ = lookup
+    assert run() is None
+    assert calls() == []
+
+
+@needs_bun
+def test_pr_lookup_is_shared_and_rare(lookup):
+    run, git, push, calls, cache = lookup
+    push()
+    assert run() == {"number": 7}
+    # Other processes on the same branch and HEAD reuse the cache.
+    assert run() == {"number": 7} and run() == {"number": 7}
+    assert len(calls()) == 1
+    # A new local HEAD looks again, with the ETag; the 304 keeps the PR.
+    git("commit", "-q", "--allow-empty", "-m", "two")
+    assert run() == {"number": 7}
+    assert len(calls()) == 2 and "If-None-Match" in calls()[1]
+    # Same HEAD, entry older than 10 minutes: looks again.
+    f = next(cache.glob("*.json"))
+    entry = json.loads(f.read_text())
+    entry["at"] -= 11 * 60 * 1000
+    f.write_text(json.dumps(entry))
+    assert run() == {"number": 7}
+    assert len(calls()) == 3
+
+
 def write(path: Path, text: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
