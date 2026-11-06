@@ -1,0 +1,6 @@
+extends: existence
+message: "Do not use a semicolon. Write two sentences."
+level: error
+nonword: true
+tokens:
+  - ';'

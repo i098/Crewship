@@ -951,6 +951,12 @@ A bare colon at the start of a line is dropped, also when the text had one befor
 URLs stay as they are. Text with none of these stays byte-exact, except that a bare colon at the start of a line is still dropped. If nothing is left, the original is sent without a leading colon.
 Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
 
+## STE check on desk replies
+
+Before the bridge sends a desk reply, it checks the text with [Vale](https://github.com/vale-cli/vale) and the style in `apps/imessage/ste-vale/`. The style flags dashes between clauses, contractions, semicolons, sentences over 25 words, and a short list of idioms.
+If the check fails, the bridge asks the front model (`mercury-3`) for one rewrite. It sends the rewrite when the rewrite has fewer violations. Otherwise it sends the original text.
+The check runs once for each reply, before the first bubble. Vale gets 3 s, the rewrite gets 12 s. A missing `vale` binary (`FM_STE_VALE` or `PATH`), a timeout, or an error sends the original text, so the check never blocks a send. Text with a code fence is not checked.
+
 ## Plain messages and the shared line
 
 See [Commands](#commands) for plain sends and explicit replies.

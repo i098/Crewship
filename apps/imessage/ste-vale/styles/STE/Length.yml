@@ -1,0 +1,6 @@
+extends: occurrence
+message: "This sentence has more than 25 words. Write one topic per sentence."
+level: error
+scope: sentence
+max: 25
+token: '\b[\w''’./-]+\b'

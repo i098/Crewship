@@ -6,6 +6,7 @@ import type { Message } from "spectrum-ts";
 import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { logTokens, usageTokens } from "./tokenlog.ts";
 import { STE_STYLE } from "./ste.ts";
+export { steChecked } from "./ste.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
