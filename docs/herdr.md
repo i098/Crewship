@@ -240,7 +240,7 @@ btop saves its config on exit, including the last preset's boxes; the launcher a
 
 ### tuios machine tab
 
-Set `crewship.herdr.tuios_tab: true` (default `false`) to install the latest [tuios](https://github.com/Gaurav-Gosain/tuios) release (the installer checks its published SHA-256) and open one more `tuios` tab in the `machine` workspace. The tab runs [`machine-tuios`](../blueprint/maintenance/machine-tuios.sh), which creates the tuios session `machine` with one window each for `usage-tui`, `fleet-health-tui`, `crewship schedules`, `crewboard-tui`, `runs-tui`, `lavish-tui` and `btop`, then attaches to it. A command the host does not have gets no window. A rerun opens only the missing windows. The separate tabs stay open.
+Set `crewship.herdr.tuios_tab: true` (default `false`) to install the latest [tuios](https://github.com/Gaurav-Gosain/tuios) release (the installer checks its published SHA-256) and open one more `tuios` tab in the `machine` workspace. The tab runs [`machine-tuios`](../blueprint/maintenance/machine-tuios.sh), which creates the tuios session `machine` with one window each for `usage-tui`, `fleet-health-tui`, `crewship schedules`, `crewboard-tui`, `runs-tui`, `lavish-tui` and `btop`, then attaches to it. The recipe does not install `fleet-health-tui`, `runs-tui` or `lavish-tui` yet (follow-up issue #1218), so the launcher prints one line per skipped TUI and opens a window for each command it finds. A command the host does not have gets no window. A rerun opens only the missing windows. The separate tabs stay open.
 
 An agent drives the windows with the tuios control commands, with no client attached:
 
