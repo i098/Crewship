@@ -238,6 +238,19 @@ Herdr stops reading the pty of a tab nobody views. A btop that cannot write for 
 
 btop saves its config on exit, including the last preset's boxes; the launcher always passes a preset, so that never changes what it shows. Every apply rewrites the config, so make lasting changes in `blueprint/config/btop.conf`, and keep preset 4 there.
 
+### browser-view
+
+[`blueprint/maintenance/browser-view.py`](../blueprint/maintenance/browser-view.py) (installed as `browser-view`, needs `chafa`) is a read-only window for every browser that speaks CDP: the `fleet-browser` tiers (obscura, chrome, voxl; a down tier stays listed) and any other loopback DevTools port, such as a worker's headless Chrome. It lists each browser's tabs and shows the selected tab with `chafa`.
+
+- Headed tabs (the chrome and voxl tiers, any non-headless Chrome) are live: the viewer starts `Page.startScreencast`, acks each frame and draws it as it arrives, at most `--fps` (8) a second.
+- Headless tabs (`HeadlessChrome`) get a `Page.captureScreenshot` every `--interval` seconds (5); `--no-live` does the same for headed tabs.
+- obscura cannot be viewed: its `/json/list` shows a placeholder `page-1`, and a real page exists only inside the client session that opened it, so the screenshot fails with `No page for session`. The viewer lists the tier and says so.
+- The browser list rescans every `--refresh` seconds (3). Keys: `j`/`k` or arrows select, `r` rescans now, `q` quits. `--list [--json]` prints the browsers once.
+- It sends only `Page.captureScreenshot`, `Page.startScreencast` and `Page.screencastFrameAck`. It never navigates, closes, clicks or types.
+- `--format kitty` or `--format sixels` swaps the chafa output for a terminal that draws those; the default `symbols` works in every pane, tuios included.
+
+It has a tuios session of its own. `browsers-tuios` creates the session `browsers` with one `browser-view` window when it is missing and attaches it; if the session exists without its `browsers` window (the viewer quit or crashed), the launcher adds the window again. It never kills or recreates a session. Switch to it with `tuios attach browsers`. [`blueprint/ansible/tasks/browser_view.yml`](../blueprint/ansible/tasks/browser_view.yml) installs both commands but is not imported yet; the recipe wiring follows the machine tuios tab.
+
 ## Viewing from another machine
 
 Sidebar layouts are client-side: Herdr draws the sidebar from the config of the machine you view from, even over `herdr --remote`. The host still reports every token, but the viewing machine needs the host's layout to show them. `./ship.sh launch` installs [`blueprint/maintenance/herdr-sidebar-to-client.py`](../blueprint/maintenance/herdr-sidebar-to-client.py) as `~/.local/bin/herdr-sidebar-to-client.py`. On the viewing machine, run it against the host with Python 3 and ssh access, where `<host>` is anything `ssh` accepts, such as `user@host`:

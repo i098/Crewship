@@ -1,0 +1,23 @@
+---
+# browser-view (docs/herdr.md#browser-view): a read-only tuios window for every CDP browser.
+# Not imported yet: the recipe wiring follows the machine tuios tab (#1217). The viewer has its own tuios session, `browsers`, so machine-tuios is not changed.
+
+- name: Install chafa for the browser view
+  ansible.builtin.apt:
+    name: chafa
+    state: present
+  become: true
+
+- name: Install the browser view
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/browser-view.py"
+    dest: "{{ crewship_local_bin }}/browser-view"
+    mode: "0755"
+    remote_src: true
+
+- name: Install the browsers tuios launcher
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/browsers-tuios"
+    dest: "{{ crewship_local_bin }}/browsers-tuios"
+    mode: "0755"
+    remote_src: true
