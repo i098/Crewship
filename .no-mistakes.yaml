@@ -2,3 +2,7 @@ pr:
   template: .github/PULL_REQUEST_TEMPLATE.md
   publish_intent: false
   appendix: collapsed
+# The test step runs in cf-sandbox: private HOME, runtime directory, /tmp and pid space, so a test
+# cannot reach the live Herdr or TUIOS session (docs/security.md#test-sandbox).
+commands:
+  test: cf-sandbox -- uv run pytest -n 4 --dist worksteal tests

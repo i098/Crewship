@@ -533,6 +533,7 @@ def test_profile_selection_and_tags_preserve_chat_configuration(tmp_path, enable
     ("browser_prune.yml", "chrome-autoprune.timer", True),
 ])
 @pytest.mark.parametrize("check_mode,installed", [(True, False), (True, True), (False, False)])
+@pytest.mark.skipif(bool(os.environ.get("CF_SANDBOX")), reason="ansible become runs sudo, which cf-sandbox blocks")
 def test_service_preview_skips_only_absent_units(tmp_path, task_file, unit, handler, check_mode, installed):
     tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks" / task_file).read_text())
     probes = [

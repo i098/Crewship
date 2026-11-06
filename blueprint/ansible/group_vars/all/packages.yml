@@ -16,6 +16,8 @@ crewship_base_packages:
   - procps
   # sgrep lists files and ranks matches with it; agents use it for exact searches.
   - ripgrep
+  # cf-sandbox runs test commands in a private HOME, runtime directory and pid space (docs/security.md#test-sandbox).
+  - bubblewrap
   - acl
   - python3
   - python3-venv

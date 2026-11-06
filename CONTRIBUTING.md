@@ -126,6 +126,7 @@ A test or smoke must never send a call to that session.
 - Send every other call through [`tests/herdr-lab`](tests/herdr-lab) `<session> <herdr arguments...>`, including `workspace create`, `rename` and `close`. For a script such as the Spaces reporter, set `HERDR_BIN_PATH` to a wrapper that runs `exec env -u HERDR_BIN_PATH <checkout>/tests/herdr-lab <session> "$@"`: `tests/herdr-lab` runs `HERDR_BIN_PATH` itself, so the wrapper must clear it.
   It adds `--session <session>` and clears `HERDR_SOCKET_PATH`. It refuses, before it runs Herdr, a session that is empty, `default` or not `fm-lab-*`, an `HERDR_SESSION` that names another session, a leading option, a `--session` of your own, and `server` or `session` operations.
 - [`tests/container-smoke.sh`](tests/container-smoke.sh) runs its real Herdr server in a named `fm-lab-*` session inside the smoke image, and refuses `--in-container` outside that image.
+- On the host, run a test command that could start, stop or signal sessions or daemons as `cf-sandbox -- <command>` ([Test sandbox](docs/security.md#test-sandbox)). It gives the command a private `HOME`, runtime directory, `/tmp` and pid space, so it cannot reach the live socket. The no-mistakes test step of this repository already runs that way.
 - Do not isolate with `HOME`, `XDG_CONFIG_HOME`, `HERDR_CONFIG_PATH`, `HERDR_SESSION` or an environment file. One call that runs without them reaches the `default` session.
 
 ## Adding a new tool

@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Run a test command where it cannot reach the live Herdr or TUIOS session, or any host daemon.
+#
+# WHY THIS EXISTS
+#   A no-mistakes test step once ran `tuios kill-session machine` against the live daemon and
+#   ended the owner's session. Test state and live state shared one socket directory, one HOME
+#   and one pid space. This wrapper separates them with bubblewrap (bwrap).
+#
+# WHAT THE COMMAND SEES
+#   - PID, IPC and UTS namespaces of its own: it cannot signal a host process.
+#   - A private HOME, XDG_RUNTIME_DIR and /tmp. They live in a scratch directory that is
+#     removed on exit. The live sockets sit in the real HOME and the real runtime directory,
+#     and neither is mounted.
+#   - Read-only /usr, /etc, /opt, /sys and the system library links; /run and /var/tmp are empty.
+#   - The checkout read-write. For a git worktree, the shared git directory is read-only
+#     and the worktree's own git directory is read-write.
+#   - Read-only toolchains from the real HOME (see TOOLCHAINS below) and read-write package caches.
+#   Nothing else of the host file system is mounted. A read-only bind does not stop a
+#   connect() to a Unix socket, so the wrapper mounts an allow-list and not the whole disk.
+#
+# USAGE
+#   cf-sandbox [--no-net] [--bind PATH]... [--ro-bind PATH]... [--cwd DIR] -- COMMAND [ARG...]
+#   CF_SANDBOX_RW / CF_SANDBOX_RO: colon-separated extra paths, same as --bind / --ro-bind.
+#   CF_SANDBOX_SCRATCH: where the private directories live (default: $TMPDIR, then /tmp).
+#
+# LIMIT
+#   The network is shared unless --no-net is set; abstract Unix sockets live in the network
+#   namespace. Use --no-net for a test that needs no network.
+set -euo pipefail
+
+die() { echo "cf-sandbox: $*" >&2; exit 2; }
+command -v bwrap >/dev/null || die "bwrap is not installed"
+
+net=()
+rw=()
+ro=()
+cwd=
+IFS=: read -ra rw <<<"${CF_SANDBOX_RW:-}"
+IFS=: read -ra ro <<<"${CF_SANDBOX_RO:-}"
+while (($#)); do
+  case $1 in
+    --no-net) net=(--unshare-net) ;;
+    --bind) rw+=("${2:?--bind needs a path}"); shift ;;
+    --ro-bind) ro+=("${2:?--ro-bind needs a path}"); shift ;;
+    --cwd) cwd=${2:?--cwd needs a directory}; shift ;;
+    --) shift; break ;;
+    *) die "unknown option $1 (put the command after --)" ;;
+  esac
+  shift
+done
+(($#)) || die "no command given; usage: cf-sandbox [options] -- COMMAND [ARG...]"
+
+cwd=$(realpath "${cwd:-$PWD}")
+top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+checkout=$(realpath "${top:-$cwd}")
+
+home=${HOME:?HOME is not set}
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+base=${CF_SANDBOX_SCRATCH:-${TMPDIR:-/tmp}}
+scratch=$(mktemp -d "$base/cf-sandbox.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT
+mkdir -m 0700 "$scratch/home" "$scratch/run" "$scratch/tmp"
+cat >"$scratch/home/.gitconfig" <<'EOF'
+[user]
+	name = cf-sandbox
+	email = cf-sandbox@localhost
+[safe]
+	directory = *
+EOF
+
+args=(--die-with-parent --new-session --unshare-pid --unshare-ipc --unshare-uts "${net[@]}"
+  --proc /proc --dev /dev --tmpfs /dev/shm --ro-bind /usr /usr --ro-bind-try /etc /etc --ro-bind-try /opt /opt
+  --ro-bind-try /sys /sys --ro-bind-try /var /var --tmpfs /run --tmpfs /var/tmp)
+for d in bin sbin lib lib32 lib64 libx32; do
+  if [[ -L /$d ]]; then args+=(--symlink "$(readlink "/$d")" "/$d")
+  elif [[ -d /$d ]]; then args+=(--ro-bind "/$d" "/$d"); fi
+done
+# systemd-resolved points /etc/resolv.conf into /run, which is now empty: put that one file back.
+resolv=$(realpath -m /etc/resolv.conf)
+[[ $resolv == /run/* && -e $resolv ]] && args+=(--ro-bind "$resolv" "$resolv")
+
+args+=(--bind "$scratch/tmp" /tmp --bind "$scratch/home" "$home" --bind "$scratch/run" "$runtime")
+
+# TOOLCHAINS: read-only, from the real HOME, when present. Package caches are read-write.
+# The cargo caches are symlinks inside the read-only .cargo, so they are mounted at their target;
+# the other caches are mounted at their name in the private HOME.
+for d in .cargo .rustup .local/bin .local/share/uv .local/share/code-factory .omp/puppeteer .bun .nvm .pyenv .volta .deno go; do
+  [[ -e $home/$d ]] && args+=(--ro-bind "$(realpath "$home/$d")" "$home/$d")
+done
+for d in .cargo/registry .cargo/git; do
+  [[ -e $home/$d ]] && args+=(--bind "$(realpath "$home/$d")" "$(realpath "$home/$d")")
+done
+for d in .cache/uv .cache/sccache; do
+  [[ -e $home/$d ]] && args+=(--bind "$(realpath "$home/$d")" "$home/$d")
+done
+for d in "${SCCACHE_DIR:-}" "${CARGO_TARGET_DIR:-}"; do
+  [[ -n $d && -e $d ]] && args+=(--bind "$(realpath "$d")" "$(realpath "$d")")
+done
+
+# The git directories come before the checkout so a worktree's own directory stays writable.
+if gitdir=$(git -C "$checkout" rev-parse --absolute-git-dir 2>/dev/null); then
+  common=$(git -C "$checkout" rev-parse --path-format=absolute --git-common-dir)
+  if [[ $common != "$checkout"/* ]]; then
+    args+=(--ro-bind "$common" "$common")
+    [[ $gitdir != "$common" ]] && args+=(--bind "$gitdir" "$gitdir")
+  fi
+fi
+args+=(--bind "$checkout" "$checkout")
+for p in "${rw[@]}"; do [[ -n $p ]] && args+=(--bind "$(realpath "$p")" "$(realpath "$p")"); done
+for p in "${ro[@]}"; do [[ -n $p ]] && args+=(--ro-bind "$(realpath "$p")" "$(realpath "$p")"); done
+
+# Names that point at a live socket, bus or agent never cross into the sandbox.
+unset_vars=(DBUS_SESSION_BUS_ADDRESS SSH_AUTH_SOCK GPG_AGENT_INFO DOCKER_HOST TMUX TMUX_TMPDIR
+  GOTMPDIR MEMORY_PRESSURE_WATCH XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME)
+while IFS= read -r name; do unset_vars+=("$name"); done < <(compgen -e | grep -E '^(HERDR|TUIOS)_' || true)
+for v in "${unset_vars[@]}"; do args+=(--unsetenv "$v"); done
+args+=(--setenv HOME "$home" --setenv XDG_RUNTIME_DIR "$runtime" --setenv TMPDIR /tmp
+  --setenv GIT_CONFIG_GLOBAL "$home/.gitconfig" --setenv CF_SANDBOX 1 --chdir "$cwd")
+
+set +e
+bwrap "${args[@]}" -- "$@"
+rc=$?
+exit "$rc"
