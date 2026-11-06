@@ -14,7 +14,7 @@
 - [Data disk](configuration.md#data-disk) (opt-in)
 - [Model usage metadata and SigNoz export](usage.md) (opt-in)
 - [Private token-saving suggestions](usage.md#optional-reader-installation): a read-only report with daily delivery after a proven manual cycle (opt-in)
-- [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container; deprecated, removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands (opt-in)
+- [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container; deprecated, replaced by runner-up (opt-in)
 - [runner-up](runner-up.md): GitHub Actions jobs, one container per waiting job, behind CPU, I/O, memory and disk caps (opt-in)
 - [GitHub board](github-board.md): agent work as issues on a Project board (opt-in)
 - [Crew board GitHub sink](board.md#copy-messages-to-github): copy selected message topics to an existing GitHub issue (opt-in)
