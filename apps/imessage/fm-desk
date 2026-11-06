@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Open the front desk's omp session in a terminal, read-only (docs/imessage.md#fm-desk).
+
+Usage: fm-desk [-n COUNT]    list the recent desk turns, then ask which one to open
+       fm-desk N             open turn N of that list (1 is the newest)
+       fm-desk --follow      wait for the next desk turn, then open it
+omp has no read-only viewer, so the viewer opens a temporary copy of the session cut after the chosen turn.
+The session file itself is only read. A follow copy is a snapshot taken once the reply has settled.
+Environment: FM_DESK_SESSIONS (session directory), FM_DESK_SETTLE (seconds of quiet before a followed turn opens).
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+
+RETRY = "You ended your turn without an action tool."
+
+
+def sessions_dir() -> Path:
+    state = os.environ.get("STATE_DIRECTORY") or f"{os.environ['HOME']}/.local/state/fm-imessage"
+    return Path(os.environ.get("FM_DESK_SESSIONS") or f"{state}/desk-session/sessions")
+
+
+def kind_and_words(text: str) -> tuple[str, str]:
+    if text.startswith("<chat>"):
+        return "seed", "chat history"
+    lines = [line for line in text.splitlines() if line.strip()]
+    owner = next((line for line in lines if line[:2].rstrip(":").isdigit() and ":" in line[:4]), None)
+    if owner:
+        return "owner", owner.split(":", 1)[1].strip()
+    if text.startswith(RETRY):
+        return "retry", "reminder to send a reply"
+    return "other", lines[0] if lines else ""
+
+
+def read_turns(path: Path) -> list[dict]:
+    """One row per user message: line number, time, kind, first words."""
+    turns = []
+    for number, line in enumerate(path.read_text(errors="replace").splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("message") or {}
+        if entry.get("type") != "message" or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        text = content if isinstance(content, str) else "".join(p.get("text", "") for p in content or [] if isinstance(p, dict))
+        kind, words = kind_and_words(text)
+        when = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00")).astimezone()
+        turns.append({"path": path, "line": number, "time": when, "kind": kind, "words": " ".join(words.split())[:60]})
+    return turns
+
+
+def recent_turns(directory: Path, count: int) -> list[dict]:
+    """The newest turns first, across session files newest first."""
+    out: list[dict] = []
+    for path in sorted(directory.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+        out += reversed(read_turns(path))
+        if len(out) >= count:
+            break
+    return out[:count]
+
+
+def render(turns: list[dict]) -> str:
+    return "\n".join(f"{i:>3}  {t['time']:%Y-%m-%d %H:%M:%S}  {t['kind']:<5}  {t['words']}" for i, t in enumerate(turns, 1))
+
+
+def open_turn(turn: dict) -> int:
+    """Open a copy of the session up to the end of this turn in omp; the original is never opened for writing."""
+    lines = turn["path"].read_text(errors="replace").splitlines(keepends=True)
+    stop = len(lines)
+    for number in range(turn["line"] + 1, len(lines)):
+        if read_turn_start(lines[number]):
+            stop = number
+            break
+    tmp = Path(tempfile.mkdtemp(prefix="fm-desk-"))
+    try:
+        copy = tmp / turn["path"].name
+        copy.write_text("".join(lines[:stop]))
+        return subprocess.call(["omp", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--no-context-files",
+                                "--session-dir", str(tmp), "--resume", str(copy)])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def read_turn_start(line: str) -> bool:
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        return False
+    return entry.get("type") == "message" and (entry.get("message") or {}).get("role") == "user"
+
+
+def follow(directory: Path) -> int:
+    seen = {(t["path"], t["line"]) for t in recent_turns(directory, 10**9)}
+    settle = float(os.environ.get("FM_DESK_SETTLE", "5"))
+    print("fm-desk: waiting for the next desk turn (Ctrl-C stops)", file=sys.stderr)
+    while True:
+        fresh = [t for t in recent_turns(directory, 10**9) if (t["path"], t["line"]) not in seen]
+        if fresh:
+            turn = fresh[0]
+            while time.time() - turn["path"].stat().st_mtime < settle:
+                time.sleep(0.2)
+            return open_turn(next(t for t in read_turns(turn["path"]) if t["line"] == turn["line"]))
+        time.sleep(0.5)
+
+
+def main(argv: list[str]) -> int:
+    count, pick, follow_mode = 20, None, False
+    args = iter(argv)
+    for arg in args:
+        if arg in ("-h", "--help"):
+            print((__doc__ or "").split("omp has no", 1)[0].strip())
+            return 0
+        if arg == "--follow":
+            follow_mode = True
+        elif arg == "-n":
+            count = int(next(args, "0") or 0)
+        elif arg.isdigit():
+            pick = int(arg)
+        else:
+            print(f"fm-desk: unknown argument {arg}", file=sys.stderr)
+            return 2
+    directory = sessions_dir()
+    if follow_mode:
+        return follow(directory)
+    turns = recent_turns(directory, max(count, pick or 0))
+    if not turns:
+        print(f"fm-desk: no desk turns in {directory}", file=sys.stderr)
+        return 1
+    if pick is None:
+        print(render(turns))
+        if not sys.stdin.isatty():
+            return 0
+        answer = input("open which turn? [1] ").strip() or "1"
+        if not answer.isdigit():
+            return 0
+        pick = int(answer)
+    if not 1 <= pick <= len(turns):
+        print(f"fm-desk: no turn {pick} (1 to {len(turns)})", file=sys.stderr)
+        return 2
+    return open_turn(turns[pick - 1])
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
