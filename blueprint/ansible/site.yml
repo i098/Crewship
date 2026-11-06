@@ -260,6 +260,16 @@
         - crewship_cfg.runner_up is defined
       tags: [runner_up]
 
+    - name: Cloudflare container runner - one Cloudflare Container per GitHub Actions job
+      ansible.builtin.include_tasks:
+        file: tasks/cloudflare_runner.yml
+        apply:
+          tags: [cloudflare_runner]
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.cloudflare_runner is defined
+      tags: [cloudflare_runner]
+
     - name: Fleet guards - Docker guard, reapers and storage guard
       ansible.builtin.include_tasks:
         file: tasks/fleet_guards.yml

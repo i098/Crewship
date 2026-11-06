@@ -1,0 +1,15 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Cloudflare container runner dispatcher: one container per queued job (Crewship managed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 {{ crewship_cf_runner_bin }} dispatch
+Restart=on-failure
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=default.target

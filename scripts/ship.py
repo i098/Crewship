@@ -109,6 +109,22 @@ def validate_runner_up(config):
         raise ValueError("runner_up.machines names must be unique and not `local`")
 
 
+def validate_cloudflare_runner(config):
+    runner = config["cloudflare_runner"]
+    if ".." in Path(runner["credentials_file"]).parts:
+        raise ValueError("cloudflare_runner.credentials_file must not traverse; give a plain path")
+    repos = [entry["repo"].lower() for entry in runner["repos"]]
+    if len(set(repos)) != len(repos):
+        raise ValueError("cloudflare_runner.repos names a repository twice")
+    for entry in runner["repos"]:
+        label = entry["label"].lower()
+        if label in RUNNER_UP_RESERVED_LABELS or label.startswith(RUNNER_UP_HOSTED_PREFIXES):
+            raise ValueError(
+                f"{entry['repo']}: label {entry['label']} is a label every runner has or a GitHub-hosted one;"
+                " give a label of its own"
+            )
+
+
 def validate_config(document):
     config = document.get("crewship") if isinstance(document, dict) else None
     if isinstance(config, dict) and (
@@ -175,6 +191,8 @@ def validate_config(document):
             raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
     if "runner_up" in config:
         validate_runner_up(config)
+    if "cloudflare_runner" in config:
+        validate_cloudflare_runner(config)
     prune = config["browser_prune"]
     if prune["enabled"] and not config["profiles"]["agents"]:
         raise ValueError("browser pruning requires the agents profile")
