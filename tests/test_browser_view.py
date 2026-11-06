@@ -173,3 +173,16 @@ def test_obscura_placeholder_page_gets_an_explanation_not_a_raw_error(monkeypatc
     monkeypatch.setattr(bv, "capture", refuse)
     preview, note = bv.shoot({"ws": "ws://x/y", "url": "about:blank"}, (80, 24), 4, "symbols")
     assert preview == [] and "client's session" in note
+
+
+def test_slow_scan_does_not_block_the_loop_and_its_result_is_swapped_in(monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(bv, "discover", lambda: release.wait(5) and [{"name": "new", "tabs": []}])
+    viewer = bv.Viewer(type("Args", (), {"refresh": 3.0})())
+    viewer.scan(10.0)
+    viewer.scan(20.0)
+    assert viewer.browsers == [] and viewer.scanning.is_alive()
+    release.set()
+    viewer.scanning.join(5)
+    viewer.scan(21.0)
+    assert viewer.browsers == [{"name": "new", "tabs": []}]

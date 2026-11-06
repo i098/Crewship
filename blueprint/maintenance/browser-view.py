@@ -25,6 +25,7 @@ import struct
 import subprocess
 import sys
 import termios
+import threading
 import time
 import tty
 import urllib.request
@@ -332,7 +333,7 @@ class Viewer:
         self.args = args
         self.browsers, self.sel, self.preview, self.note = [], 0, [], ""
         self.last_scan = self.last_shot = self.last_draw = 0.0
-        self.shown = self.live = self.latest = None
+        self.shown = self.live = self.latest = self.scanning = self.found = None
 
     def select_tab(self, tab):
         """Switch the screencast to the newly selected tab."""
@@ -381,11 +382,24 @@ class Viewer:
             self.last_scan = self.last_shot = 0.0
         return True
 
+    def scan(self, now):
+        """Rescan in a worker thread; the loop keeps drawing and reading keys meanwhile."""
+        if self.scanning is not None and not self.scanning.is_alive():
+            self.scanning = None
+            if self.found is not None:
+                self.browsers, self.found = self.found, None
+        if self.scanning is None and now - self.last_scan >= self.args.refresh:
+
+            def work():
+                self.found = discover()
+
+            self.scanning, self.last_scan = threading.Thread(target=work, daemon=True), now
+            self.scanning.start()
+
     def step(self, fd):
         """One loop turn; False quits."""
         now = time.monotonic()
-        if now - self.last_scan >= self.args.refresh:
-            self.browsers, self.last_scan = discover(), now
+        self.scan(now)
         tabs = [t for b in self.browsers for t in b["tabs"]]
         self.sel = min(self.sel, max(len(tabs) - 1, 0))
         size = shutil.get_terminal_size()
