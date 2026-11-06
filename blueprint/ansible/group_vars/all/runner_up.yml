@@ -1,32 +1,25 @@
 ---
 # runner-up (crewship.runner_up, docs/runner-up.md): one coordinator serves every repository,
-# one fresh Docker container per job. The repositories, slot groups and labels come
-# from crewship.ci_pool.repos unless crewship.runner_up.repos names its own.
+# one fresh Docker container per job, for the repositories, slot groups and labels in
+# crewship.runner_up.repos (scripts/ship.py requires it).
 # Defaults live here, not in blueprint/config/default.yml: the block is opt-in.
 crewship_runner_up: "{{ crewship_cfg.runner_up | default({}) }}"
 
-# A dind entry needs a Docker daemon of its own in the job; runner-up has no such place, so it stays on the CI pool.
-crewship_runner_up_repos: >-
-  {{ (crewship_runner_up.repos | default(crewship_cfg.ci_pool.repos | default([]), true))
-     | rejectattr('docker', 'defined') | list }}
+crewship_runner_up_repos: "{{ crewship_runner_up.repos | default([]) }}"
 # runner-up refuses pool labels that every self-hosted runner has (internal/config checkLabel).
 crewship_runner_up_reserved_labels: [self-hosted, linux, windows, macos, x64, arm64, arm, x86]
 
-crewship_runner_up_job_cpus: >-
-  {{ (crewship_runner_up.job_cpus | default(crewship_cfg.ci_pool.job_cpus | default(4), true)) | float | round(0, 'ceil') | int }}
-crewship_runner_up_job_memory_gb: >-
-  {{ crewship_runner_up.job_memory_gb | default(crewship_cfg.ci_pool.job_memory_gb | default(8), true) | int }}
-# Most jobs at one time: the CI pool's total_slots, and `auto` takes half of the host's CPUs and memory.
-crewship_runner_up_slots_setting: >-
-  {{ crewship_runner_up.total_slots | default(crewship_cfg.ci_pool.total_slots | default('auto', true), true) }}
+crewship_runner_up_job_cpus: "{{ crewship_runner_up.job_cpus | default(4) | int }}"
+crewship_runner_up_job_memory_gb: "{{ crewship_runner_up.job_memory_gb | default(8) | int }}"
+# Most jobs at one time: `auto` takes half of the host's CPUs and memory.
+crewship_runner_up_slots_setting: "{{ crewship_runner_up.total_slots | default('auto') }}"
 crewship_runner_up_total_slots: >-
   {{ [1, ([ansible_facts['processor_vcpus'] | default(2) * 0.5 / crewship_runner_up_job_cpus | int,
            ansible_facts['memtotal_mb'] | default(4096) / 1024 * 0.5 / crewship_runner_up_job_memory_gb | int]
           | min) | int] | max
      if crewship_runner_up_slots_setting == 'auto' else crewship_runner_up_slots_setting | int }}
 
-crewship_runner_up_data_dir: >-
-  {{ crewship_runner_up.data_dir | default(crewship_cfg.ci_pool.data_dir | default('', true), true) }}
+crewship_runner_up_data_dir: "{{ crewship_runner_up.data_dir | default('') }}"
 crewship_runner_up_state_dir: >-
   {{ (crewship_runner_up_data_dir ~ '/runner-up') if crewship_runner_up_data_dir
      else crewship_cfg.home ~ '/.local/state/runner-up' }}

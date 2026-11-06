@@ -189,9 +189,6 @@
             "browsers_tab": {
               "type": "boolean"
             },
-            "ci_pool_tab": {
-              "type": "boolean"
-            },
             "theme": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]+$"
@@ -766,6 +763,10 @@
                     },
                     "minItems": 1,
                     "uniqueItems": true
+                  },
+                  "docker": {
+                    "description": "Refused by scripts/ship.py with a clear error: runner-up has no Docker daemon in the job.",
+                    "const": "dind"
                   }
                 },
                 "required": [

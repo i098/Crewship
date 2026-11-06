@@ -30,22 +30,17 @@ def load(name, path):
 ship = load("ship_runner_up", "scripts/ship.py")
 pool_script = load("ci_pool_runner_up", "blueprint/maintenance/ci-pool.py")
 
-# The shapes of a real CI pool list: one label, a reserved label beside the pool label, a named
-# second group of one repository, a Docker-in-job entry, and several labels.
+# The shapes of a real repository list: one label, a reserved label beside the pool label, a named
+# second group of one repository, and several labels.
 REPOS = [
     {"repo": "acme/web", "slots": 3, "labels": ["web"]},
     {"repo": "acme/engine", "slots": 2, "labels": ["engine"]},
     {"repo": "acme/engine", "name": "engine-quick", "slots": 1, "labels": ["engine-quick"]},
     {"repo": "acme/api", "slots": 1, "labels": ["linux", "api"]},
-    {
-        "repo": "acme/e2e.tests",
-        "slots": 1,
-        "labels": ["linux", "e2e"],
-        "docker": "dind",
-        "userns": True,
-    },
     {"repo": "acme/mixed", "slots": 1, "labels": ["self-hosted", "Linux", "one", "two"]},
 ]
+# A Docker-in-job entry: it stays on the CI pool.
+DIND = {"repo": "acme/e2e.tests", "slots": 1, "labels": ["linux", "e2e"], "docker": "dind", "userns": True}
 
 
 @pytest.fixture
@@ -157,7 +152,7 @@ def units(home):
     return home / ".config/systemd/user"
 
 
-def pool(home, **extra):
+def runner(home, **extra):
     data_dir = home.parent / "data"
     data_dir.mkdir(exist_ok=True)
     return {
@@ -170,11 +165,9 @@ def pool(home, **extra):
     }
 
 
-def test_config_maps_every_ci_pool_entry_to_its_repositorys_places_and_pools_and_leaves_dind_out(
-    home,
-):
-    apply(home, {}, ci_pool=pool(home))
-    # One coordinator for each repository; the dind entry has none.
+def test_config_maps_every_entry_to_its_repositorys_places_and_pools(home):
+    apply(home, runner(home))
+    # One coordinator for each repository.
     assert instances(home) == ["acme-api", "acme-engine", "acme-mixed", "acme-web"]
     places = {}
     for instance, repo, pools in (
@@ -207,11 +200,10 @@ def test_config_maps_every_ci_pool_entry_to_its_repositorys_places_and_pools_and
     assert places["acme-mixed-1"]["pools"] == ["one", "two"]
     assert {p["provider"] for p in places.values()} == {"docker"}
     assert {(p["cores"], p["memoryMB"]) for p in places.values()} == {(4, 8192)}
-    assert not any("e2e" in json.dumps(v) for v in places.values())
 
 
 def test_total_slots_is_split_across_coordinators_by_their_slots_and_logs_are_kept_for_a_week(home):
-    apply(home, {}, ci_pool=pool(home))
+    apply(home, runner(home))
     cfg = config(home)
     # 6 total slots over 3+3+1+1 repository slots: web 6*3//8=2, engine 2, api and mixed 6//8=0 raised to 1.
     shares = {
@@ -242,7 +234,7 @@ def test_the_single_coordinator_of_the_earlier_layout_is_removed(home):
     ]
     for path in old:
         path.write_text("{}")
-    apply(home, {}, ci_pool=pool(home))
+    apply(home, runner(home))
     assert not any(p.exists() or p.is_symlink() for p in old)
     assert instances(home) == ["acme-api", "acme-engine", "acme-mixed", "acme-web"]
 
@@ -258,19 +250,11 @@ def test_two_repositories_with_one_instance_name_write_nothing(home):
 
 
 def test_auto_slots_take_half_of_the_host_like_the_ci_pool(home):
-    auto = {key: value for key, value in pool(home).items() if key != "total_slots"}
-    apply(home, {}, ci_pool=auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
+    auto = {key: value for key, value in runner(home).items() if key != "total_slots"}
+    apply(home, auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
     machine = config(home)["machines"][0]
     total = pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250)
     assert machine["cores"] == total * 3 // 8 * 4
-
-
-def test_runner_up_repos_replace_the_ci_pool_list_and_need_no_ci_pool(home):
-    apply(home, {"repos": [{"repo": "acme/solo", "slots": 2, "labels": ["solo"]}]})
-    cfg = config(home, "acme-solo")
-    assert cfg["github"]["repos"] == ["acme/solo"]
-    assert [p["id"] for p in cfg["machines"][0]["places"]] == ["acme-solo-1", "acme-solo-2"]
-    assert instances(home) == ["acme-solo"]
 
 
 def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
@@ -284,7 +268,7 @@ def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
         "memory_gb": 4,
         "agent": "/opt/agent",
     }
-    apply(home, {"machines": [machine]}, ci_pool=pool(home))
+    apply(home, runner(home, machines=[machine]))
     cfg = config(home)
     laptop = cfg["machines"][1]
     assert (laptop["name"], laptop["ssh"], laptop["agent"]) == (
@@ -310,7 +294,7 @@ def test_a_machine_joins_the_repository_that_the_setup_names(home):
         "cores": 2,
         "memory_gb": 4,
     }
-    apply(home, {"machines": [machine], "machines_repo": "acme/engine"}, ci_pool=pool(home))
+    apply(home, runner(home, machines=[machine], machines_repo="acme/engine"))
     assert [m["name"] for m in config(home, "acme-web")["machines"]] == ["local"]
     laptop = config(home, "acme-engine")["machines"][1]
     assert laptop["places"][0]["pools"] == ["engine", "engine-quick"]
@@ -331,12 +315,7 @@ def unit_sections(path):
 
 
 def test_the_slice_and_the_units_carry_the_caps(home):
-    apply(
-        home,
-        {"cpu_weight": 15, "memory_max": "30%", "cpu_share": 25},
-        ci_pool=pool(home),
-        facts={"processor_vcpus": 8},
-    )
+    apply(home, runner(home, cpu_weight=15, memory_max="30%", cpu_share=25), facts={"processor_vcpus": 8})
     slice_ = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert slice_["CPUWeight"] == ["15"]
     assert slice_["IOWeight"] == ["20"]
@@ -364,27 +343,28 @@ def test_the_slice_and_the_units_carry_the_caps(home):
 
 
 def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(home):
-    apply(home, {}, ci_pool=pool(home))
+    ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
+    apply(home, runner(home), ci_pool=ci_pool)
     assert not (units(home) / "runner-up-image.timer").exists()
-    apply(home, {"repos": [{"repo": "acme/solo", "slots": 1, "labels": ["solo"]}]}, ci_pool=None)
+    apply(home, runner(home))
     assert (units(home) / "runner-up-image.timer").exists()
     assert (units(home) / "timers.target.wants/runner-up-image.timer").is_symlink()
-    apply(home, {}, ci_pool=pool(home))
+    apply(home, runner(home), ci_pool=ci_pool)
     assert not (units(home) / "runner-up-image.timer").exists()
     assert not (units(home) / "timers.target.wants/runner-up-image.timer").exists()
 
 
 def test_a_second_apply_changes_nothing_and_check_mode_writes_nothing(home):
-    assert apply(home, {}, "--check", ci_pool=pool(home)) > 0
+    assert apply(home, runner(home), "--check") > 0
     assert not (home / ".config/runner-up/acme-web.json").exists()
-    assert apply(home, {}, ci_pool=pool(home)) > 0
-    assert apply(home, {}, ci_pool=pool(home)) == 0
+    assert apply(home, runner(home)) > 0
+    assert apply(home, runner(home)) == 0
 
 
 def test_a_repository_that_leaves_the_list_loses_its_unit_and_config_and_the_others_stay(home):
-    apply(home, {}, ci_pool=pool(home))
+    apply(home, runner(home))
     (home / ".config/runner-up/config.json").write_text("{}")  # the old single-coordinator file
-    apply(home, {"repos": [r for r in REPOS if r["repo"] != "acme/api"]}, ci_pool=None)
+    apply(home, runner(home, repos=[r for r in REPOS if r["repo"] != "acme/api"]))
     assert instances(home) == ["acme-engine", "acme-mixed", "acme-web"]
     wants = units(home) / "default.target.wants"
     assert not (wants / "runner-up@acme-api.service").exists()
@@ -408,7 +388,7 @@ def test_reserved_labels_match_the_validator_and_the_template(home):
 # --- ship.py checks ---------------------------------------------------------
 
 
-POOL_DOC = {"data_dir": "/data/ci", "repos": REPOS}
+POOL_DOC = {"data_dir": "/data/ci", "repos": [*REPOS, DIND]}
 
 
 def document(**extra):
@@ -418,25 +398,32 @@ def document(**extra):
     return base
 
 
-def test_inspect_accepts_the_ci_pool_list_and_refuses_a_pool_without_its_own_label():
-    ship.validate_config(document(ci_pool=POOL_DOC, runner_up={}))
+def test_inspect_accepts_the_repos_and_refuses_a_pool_without_its_own_label():
+    ship.validate_config(document(ci_pool=POOL_DOC, runner_up={"repos": REPOS}))
     bad = [{"repo": "acme/web", "slots": 1, "labels": ["linux", "self-hosted"]}]
     with pytest.raises(ValueError, match="needs a label besides"):
         ship.validate_config(document(runner_up={"repos": bad}))
-    only_dind = {**POOL_DOC, "repos": [REPOS[4]]}
+
+
+def test_inspect_refuses_runner_up_without_repos_even_beside_a_ci_pool():
     with pytest.raises(ValueError, match="runner_up needs repos"):
-        ship.validate_config(document(ci_pool=only_dind, runner_up={}))
+        ship.validate_config(document(ci_pool=POOL_DOC, runner_up={}))
+
+
+def test_inspect_refuses_a_dind_entry_in_runner_up():
+    dind = {key: value for key, value in DIND.items() if key != "userns"}
+    with pytest.raises(ValueError, match="acme/e2e.tests: runner-up has no Docker daemon"):
+        ship.validate_config(document(runner_up={"repos": [REPOS[0], dind]}))
 
 
 @pytest.mark.parametrize(
     "block",
     [
-        {"repos": [{**REPOS[0], "docker": "dind"}]},
         {"machines": [{"name": "laptop", "ssh": ["ci@laptop"]}]},
         {"memory_max": "lots"},
     ],
 )
-def test_the_schema_refuses_dind_a_machine_without_a_budget_and_a_bad_memory_cap(block):
+def test_the_schema_refuses_a_machine_without_a_budget_and_a_bad_memory_cap(block):
     with pytest.raises(ValueError, match="invalid crewship.runner_up"):
         ship.validate_document(document(runner_up=block), "crewship.schema.json")
 
