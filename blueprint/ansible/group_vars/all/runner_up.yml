@@ -33,6 +33,12 @@ crewship_runner_up_memory_max: "{{ crewship_runner_up.memory_max | default('50%'
 # The most CPU all of CI uses together: this share of the host's CPUs, as the slice's CPUQuota (100% is one CPU).
 crewship_runner_up_cpu_share: "{{ crewship_runner_up.cpu_share | default(50) }}"
 crewship_runner_up_cpu_quota: "{{ (ansible_facts['processor_vcpus'] | default(2) | int * crewship_runner_up_cpu_share | int) }}%"
+# Write caps of the slice, set only when io_write_device names the disk of the build cache and job
+# work directories (for example /dev/sdc). The defaults leave Rust jobs room: 40M and 200 IOPS
+# starved cargo builds for hours and left a queue of runs behind busy runners.
+crewship_runner_up_io_write_device: "{{ crewship_runner_up.io_write_device | default('') }}"
+crewship_runner_up_io_write_mb: "{{ crewship_runner_up.io_write_mb | default(120) | int }}"
+crewship_runner_up_io_write_iops: "{{ crewship_runner_up.io_write_iops | default(600) | int }}"
 crewship_runner_up_disk_max_gb: "{{ crewship_runner_up.disk_max_gb | default(50) }}"
 # Place logs stay a week; they sit on the same disk as the build cache.
 crewship_runner_up_log_keep_days: 7

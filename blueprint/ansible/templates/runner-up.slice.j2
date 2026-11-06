@@ -12,3 +12,7 @@ CPUWeight={{ crewship_runner_up_cpu_weight }}
 IOWeight={{ crewship_runner_up_io_weight }}
 MemoryMax={{ crewship_runner_up_memory_max }}
 CPUQuota={{ crewship_runner_up_cpu_quota }}
+{% if crewship_runner_up_io_write_device %}
+IOWriteBandwidthMax={{ crewship_runner_up_io_write_device }} {{ crewship_runner_up_io_write_mb }}M
+IOWriteIOPSMax={{ crewship_runner_up_io_write_device }} {{ crewship_runner_up_io_write_iops }}
+{% endif %}

@@ -40,7 +40,13 @@ REPOS = [
     {"repo": "acme/mixed", "slots": 1, "labels": ["self-hosted", "Linux", "one", "two"]},
 ]
 # A Docker-in-job entry: it stays on the CI pool.
-DIND = {"repo": "acme/e2e.tests", "slots": 1, "labels": ["linux", "e2e"], "docker": "dind", "userns": True}
+DIND = {
+    "repo": "acme/e2e.tests",
+    "slots": 1,
+    "labels": ["linux", "e2e"],
+    "docker": "dind",
+    "userns": True,
+}
 
 
 @pytest.fixture
@@ -315,7 +321,11 @@ def unit_sections(path):
 
 
 def test_the_slice_and_the_units_carry_the_caps(home):
-    apply(home, runner(home, cpu_weight=15, memory_max="30%", cpu_share=25), facts={"processor_vcpus": 8})
+    apply(
+        home,
+        runner(home, cpu_weight=15, memory_max="30%", cpu_share=25),
+        facts={"processor_vcpus": 8},
+    )
     slice_ = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert slice_["CPUWeight"] == ["15"]
     assert slice_["IOWeight"] == ["20"]
@@ -340,6 +350,20 @@ def test_the_slice_and_the_units_carry_the_caps(home):
     for instance in instances(home):
         assert (units(home) / f"default.target.wants/runner-up@{instance}.service").is_symlink()
     assert len(instances(home)) == 4
+
+
+def test_the_slice_caps_writes_only_when_a_disk_is_named(home):
+    path = home.parent / "etc/runnerup.slice"
+    apply(home, runner(home))
+    assert "IOWriteBandwidthMax" not in path.read_text()
+    apply(home, runner(home, io_write_device="/dev/sdc"))
+    slice_ = unit_sections(path)["Slice"]
+    assert slice_["IOWriteBandwidthMax"] == ["/dev/sdc 120M"]
+    assert slice_["IOWriteIOPSMax"] == ["/dev/sdc 600"]
+    apply(home, runner(home, io_write_device="/dev/sdc", io_write_mb=200, io_write_iops=900))
+    slice_ = unit_sections(path)["Slice"]
+    assert slice_["IOWriteBandwidthMax"] == ["/dev/sdc 200M"]
+    assert slice_["IOWriteIOPSMax"] == ["/dev/sdc 900"]
 
 
 def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(home):
@@ -443,6 +467,7 @@ def stubs(tmp_path):
         stub.write_text(
             "#!/bin/sh\n"
             f'echo "{name} $*" >> {log}\n'
+            'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit 1;; esac\n'
             '[ "$1 $2" = "image inspect" ] && [ ! -e "$IMAGE_EXISTS" ] && exit 1\n'
             "exit 0\n"
         )
@@ -450,7 +475,7 @@ def stubs(tmp_path):
     return bin_dir, log
 
 
-def run_script(script, stubs, *args, env=None, **kwargs):
+def run_script(script, stubs, *args, env=None, code=0, **kwargs):
     bin_dir, log = stubs
     environment = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
@@ -465,7 +490,7 @@ def run_script(script, stubs, *args, env=None, **kwargs):
         text=True,
         **kwargs,
     )
-    assert done.returncode == 0, done.stderr
+    assert done.returncode == code, done.stderr
     return log.read_text().splitlines() if log.exists() else []
 
 
@@ -485,7 +510,11 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
 def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
     sock, cache = tmp_path / "docker.sock", tmp_path / "shared"
     sock.touch()
-    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_SHARED_CACHE": str(cache), "RUNNER_UP_CACHE_MAX_GB": "20"}
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_SHARED_CACHE": str(cache),
+        "RUNNER_UP_CACHE_MAX_GB": "20",
+    }
     (call,) = run_script("runner-up-docker", stubs, "run", "img", env=env)
     assert f"-v {cache}/sccache:/sccache" in call
     assert f"-v {cache}/cargo-lock:/home/runner/.cargo/.package-cache " in call
@@ -508,6 +537,12 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
         "docker image prune --force",
         "docker builder prune --force --reserved-space 7GB",
     ]
+
+
+def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
+    env = {"DOCKER_FAILS": "container prune"}
+    calls = run_script("runner-up-maintain", stubs, "clean", env=env, code=1)
+    assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
 def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(stubs, tmp_path):
