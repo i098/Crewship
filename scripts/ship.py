@@ -82,16 +82,17 @@ def validate_runner_up(config):
         raise ValueError("runner_up requires the docker profile")
     if ".." in Path(runner.get("data_dir", "/")).parts:
         raise ValueError("runner_up.data_dir must not traverse; give a plain path")
-    entries = runner.get("repos") or [
-        e for e in config.get("ci_pool", {}).get("repos", []) if "docker" not in e
-    ]
+    entries = runner.get("repos")
     if not entries:
-        raise ValueError(
-            "runner_up needs repos, or ci_pool.repos entries without docker: dind to take them from"
-        )
+        raise ValueError("runner_up needs repos: the repositories it runs jobs for")
     if len(set(entry_slugs(entries))) != len(entries):
         raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
     for entry in entries:
+        if "docker" in entry:
+            raise ValueError(
+                f"{entry['repo']}: runner-up has no Docker daemon in the job (docker: dind);"
+                " keep this repository on ci_pool"
+            )
         pools = [
             label for label in entry["labels"] if label.lower() not in RUNNER_UP_RESERVED_LABELS
         ]

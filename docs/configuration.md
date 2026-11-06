@@ -129,9 +129,9 @@ Other wrappers keep their executable names; the viewer does not inspect their ch
 
 ### Terminal panes
 
-The installer also installs four more OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
+The installer also installs three more OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
 `launch` opens each one in the `machine` workspace in the same way as the schedules tab: a missing tab is created and the command starts there.
-The tab label is the command name, except `crewship schedules`, labelled `schedules`, `browser-tui`, labelled `browsers`, and `ci-pool-tui`, labelled `ci-pool`.
+The tab label is the command name, except `crewship schedules`, labelled `schedules`, and `browser-tui`, labelled `browsers`.
 An existing tab is never changed; `launch` prints `run <command> in the <label> tab` instead.
 `crewship update` re-applies the same recipe, so an updated host gets every new pane and a tab for each in its existing `machine` workspace.
 A rerun adds no duplicate tab, and it never restarts Herdr or touches a running pane.
@@ -143,7 +143,6 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewboard-tui` | crew board topics and messages | `crewship.herdr.crewboard_tab` |
 | `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |
-| `ci-pool-tui` (tab `ci-pool`) | every CI pool slot with its container, runner, and job; queued and running workflow runs; jobs held over 5 minutes and stuck slots with the cause; Forgejo runs. Read only; 20 GitHub calls a minute at most. The tab opens only when `crewship.ci_pool` is set | `crewship.herdr.ci_pool_tab` |
 | `crewboard-tui --desk` (tab `frontdesk`) | iMessage front desk health and recent turns | `crewship.herdr.crewboard_tab` |
 
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
@@ -235,11 +234,13 @@ crewship:
   #   history: 256        # the defaults
   #   cap_mb: 64
   #   max_msg_kb: 64
-  # ci_pool:              # Optional; self-hosted GitHub Actions slots. See ci-pool.md
+  # ci_pool:              # Deprecated; removed when https://github.com/i098/Crewship/issues/1179 lands. See ci-pool.md
   #   data_dir: /mnt/data/ci
   #   repos:
+  #     - { repo: owner/name, slots: 2, labels: [my-label], docker: dind }
+  # runner_up:            # Optional; one fresh container per GitHub Actions job behind caps. See runner-up.md
+  #   repos:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
-  # runner_up: {}         # Optional; runner-up runs the ci_pool repositories behind caps. See runner-up.md
 ```
 
 See [iMessage credential loading](imessage.md#enable-it) for the shell format and security requirements of `~/super.env`.
@@ -251,8 +252,8 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
-- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
-- `runner_up` needs `docker`. It needs `runner_up.repos` or `ci_pool.repos` entries without `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
+- `ci_pool` (deprecated: removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands) needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
+- `runner_up` needs `docker` and `runner_up.repos`. A `runner_up.repos` entry may not set `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
 - `board` needs `firstmate` and `development`.

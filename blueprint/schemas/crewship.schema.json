@@ -190,7 +190,8 @@
               "type": "boolean"
             },
             "ci_pool_tab": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Deprecated, no effect, removed with #1187."
             },
             "theme": {
               "type": "string",
@@ -766,6 +767,10 @@
                     },
                     "minItems": 1,
                     "uniqueItems": true
+                  },
+                  "docker": {
+                    "description": "Refused by scripts/ship.py with a clear error: runner-up has no Docker daemon in the job.",
+                    "const": "dind"
                   }
                 },
                 "required": [

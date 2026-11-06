@@ -1,22 +1,21 @@
 # runner-up
 
 [runner-up](https://github.com/kunchenguid/runner-up) runs GitHub Actions jobs on this host, one fresh Docker container per job.
-It replaces the [CI pool](ci-pool.md) one repository at a time.
+It replaces the [CI pool](ci-pool.md), which is deprecated: it is removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands.
 The CI pool keeps one idle runner container for every slot.
 runner-up starts a container only when a job waits, so an idle host runs one small coordinator process and no job container.
 
 ## Turn it on
 
-Add a `runner_up` block to `.local/host.yml`.
-With no `repos` key, it takes the repositories, slot groups, labels and caps from `crewship.ci_pool`.
+Add a `runner_up` block with a `repos` list to `.local/host.yml`.
+`repos` is required; runner-up takes nothing from `crewship.ci_pool`.
 
 ```yaml
 crewship:
-  runner_up: {}
-  # runner_up:
-  #   repos:                    # only these repositories; same shape as ci_pool.repos
-  #     - { repo: owner/name, slots: 2, labels: [my-label] }
-  #   total_slots: auto         # most jobs at one time; default is the ci_pool value, else auto
+  runner_up:
+    repos:                      # the repositories runner-up serves
+      - { repo: owner/name, slots: 2, labels: [my-label] }
+  #   total_slots: auto         # most jobs at one time; auto takes half of the host
   #   job_cpus: 4               # CPU cap of each job container
   #   job_memory_gb: 8          # memory cap of each job container
   #   cpu_weight: 20            # CPUWeight of the slice (default 100 is the share of other work)
@@ -26,7 +25,7 @@ crewship:
   #   cpu_share: 50             # CPUQuota of the slice: this percent of the host's CPUs
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
   #   cache_max_gb: 150         # size cap of the shared compile cache
-  #   data_dir: /mnt/data/ci    # state; default is ci_pool.data_dir, else ~/.local/state/runner-up
+  #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
 ```
 
@@ -40,7 +39,7 @@ It needs the `docker` profile.
 A coordinator applies an edited file by itself, so a change needs no restart and no job stops.
 Every coordinator runs in `runnerup.slice` and keeps its own state in `<state dir>/<repo>`.
 
-| ci_pool | runner-up |
+| `runner_up` | runner-up config |
 | --- | --- |
 | `repos[].repo` | one entry in `github.repos` |
 | `repos[].slots` | that many places, named `<slot name>-<n>` as the CI pool names its slots |
@@ -48,7 +47,7 @@ Every coordinator runs in `runnerup.slice` and keeps its own state in `<state di
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
 | `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place |
 | `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
-| `docker: dind` | not mapped; the entry stays on the CI pool (see [Not covered](#not-covered)) |
+| `docker: dind` | refused: runner-up has no Docker daemon in the job, so the entry stays on the CI pool (see [Not covered](#not-covered)) |
 
 A pool is a scale set of GitHub, and it is global to its coordinator: it opens in every repository that the coordinator serves.
 That is why each repository has a coordinator of its own, with only its own labels.
@@ -102,8 +101,8 @@ The coordinator's start builds it when it is missing.
 Run the CI pool and runner-up side by side, and move a repository only after a real job passed on runner-up.
 No step stops a busy runner.
 
-1. List the repository in `runner_up.repos` (the whole entry, as in `ci_pool.repos`) and apply.
-   Once `runner_up.repos` exists, it is the list; every repository that already moved stays in it.
+1. Add the repository's entry to `runner_up.repos` (the same entry as in `ci_pool.repos`, without `docker`) and apply.
+   `runner_up.repos` is the full list; every repository that already moved stays in it.
    Apply starts `runner-up@<repo>` for the new repository and leaves the other coordinators alone.
    The CI pool keeps all of its slots.
 2. Run the repository's workflow from a branch with `runs-on: <label>` (the label alone) on one job.
@@ -115,7 +114,7 @@ No step stops a busy runner.
    A busy slot is disabled and leaves after its job, so no job is cut.
 5. Repeat for the next repository.
 
-Keep `crewship.ci_pool` until every repository moved; a `docker: dind` entry stays in it.
+Keep `crewship.ci_pool` only for repositories that did not move yet and for `docker: dind` entries, until [#1179](https://github.com/i098/Crewship/issues/1179) lands.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
@@ -158,7 +157,7 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 ## Not covered
 
 - **Docker in the job.** runner-up's Docker place is a plain container with no daemon, and no sidecar.
-  A `docker: dind` entry of `ci_pool.repos` stays on the CI pool and is not in the runner-up config.
+  A `docker: dind` entry stays in `ci_pool.repos`; `inspect` refuses it in `runner_up.repos`.
 - **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
   The exception is the [shared build cache](#shared-build-cache): the docker shim mounts it into every local job.

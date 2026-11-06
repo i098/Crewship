@@ -1,6 +1,7 @@
 import getpass
 import grp
 import hashlib
+import importlib.util
 import json
 import os
 import shlex
@@ -784,9 +785,9 @@ print(json.dumps({{"result": result}}))
 """)
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
-    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui", "ci-pool-tui"]
-    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "ci-pool-tui", "crewboard-tui --queue", "crewboard-tui --desk"]  # the decision-queue and frontdesk tabs add a flag
-    pane_labels = ["usage-tui", "crewboard-tui", "browsers", "ci-pool"]
+    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui"]
+    pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "crewboard-tui --queue", "crewboard-tui --desk"]  # the decision-queue and frontdesk tabs add a flag
+    pane_labels = ["usage-tui", "crewboard-tui", "browsers"]
     pane_log = tmp_path / "panes.log"
     for name in pane_commands:
         stub = local_bin / name
@@ -816,10 +817,11 @@ print(json.dumps({{"result": result}}))
     base = yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/base.yml").read_text())
     variables = {
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
-        "crewship_cfg": {"user": getpass.getuser(), "home": str(home), "ci_pool": {},
+        "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
+                                  **({"ci_pool_tab": True} if mode == "all" else {}),
                                   **({} if mode in ("all", "update") else {k: False for k in (
-                                      "usage_tab", "crewboard_tab", "browsers_tab", "ci_pool_tab")})}},
+                                      "usage_tab", "crewboard_tab", "browsers_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
         "crewship_repo": str(ROOT), "crewship_local_bin": str(local_bin),
         "crewship_share_dir": str(home / ".local/share/crewship"),
@@ -829,6 +831,13 @@ print(json.dumps({{"result": result}}))
     }
     command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
                str(playbook), "-e", json.dumps(variables), *(["--check"] if mode == "check" else [])]
+    if mode == "all":
+        spec = importlib.util.spec_from_file_location("ship_chart", ROOT / "scripts/ship.py")
+        ship = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ship)
+        document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+        document["crewship"]["herdr"].update(variables["crewship_cfg"]["herdr"])
+        ship.validate_document(document, "crewship.schema.json")
     for attempt in range(2):
         before = json.loads(state.read_text())
         result = subprocess.run(command, capture_output=True, text=True)
@@ -844,11 +853,11 @@ print(json.dumps({{"result": result}}))
     elif mode == "update":
         # An installed host that only has the schedules tab gains each new pane once.
         assert [t["label"] for t in actual["tabs"]] == ["custom", "schedules", *pane_labels, "decision-queue", "frontdesk"]
-        assert len(actual["runs"]) == 6
+        assert len(actual["runs"]) == 5
         assert pane_log.read_text().splitlines() == pane_runs
     elif mode == "all":
         assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue", "frontdesk"]
-        assert len(actual["runs"]) == 7
+        assert len(actual["runs"]) == 6
         assert pane_log.read_text().splitlines() == pane_runs
         assert "changed=0" in result.stdout
     else:
