@@ -1,0 +1,56 @@
+#!/bin/sh
+# build-gate <command...>: run a heavy build behind the host's one shared job pool (docs/runner-up.md#build-gate).
+# It waits, and never fails, while the data disk is above BUILD_GATE_DISK_PCT or the io `full` avg60 pressure is
+# above BUILD_GATE_IO_PCT. Then it takes one flock slot out of the host-wide count in $BUILD_GATE_SLOTS_FILE (default 4)
+# BUILD_GATE=off runs the command at once. A command that runs under a gate (BUILD_GATE_HELD) does not wait again.
+set -eu
+[ "$#" -gt 0 ] || { echo "usage: build-gate <command...>" >&2; exit 2; }
+if [ "${BUILD_GATE-}" = off ] || [ -n "${BUILD_GATE_HELD-}" ]; then exec "$@"; fi
+
+dir=${BUILD_GATE_DIR:-/tmp/build-gate}
+slots=$(cat "${BUILD_GATE_SLOTS_FILE:-$(dirname "$0")/../share/build-gate/slots}" 2>/dev/null | tr -dc 0-9) || slots=
+[ -n "$slots" ] || slots=4
+path=${BUILD_GATE_DISK_PATH:-/sdc-disk}
+max_disk=${BUILD_GATE_DISK_PCT:-85}
+max_io=${BUILD_GATE_IO_PCT:-40}
+pressure=${BUILD_GATE_PRESSURE_FILE:-/proc/pressure/io}
+poll=${BUILD_GATE_POLL:-5}
+mkdir -p "$dir" 2>/dev/null && chmod 1777 "$dir" 2>/dev/null || true
+
+# Prints why the host is too busy, or nothing. A path or file that does not exist does not block.
+busy() {
+  used=$(df --output=pcent "$path" 2>/dev/null | tail -n 1 | tr -dc 0-9) || used=
+  [ -z "$used" ] || [ "$used" -le "$max_disk" ] || { echo "$path at $used% (limit $max_disk%)"; return; }
+  io=$(sed -n 's/^full .*avg60=\([0-9]*\).*/\1/p' "$pressure" 2>/dev/null) || io=
+  [ -z "$io" ] || [ "$io" -le "$max_io" ] || echo "io full avg60 $io (limit $max_io)"
+}
+
+waited=0
+while :; do
+  why=$(busy)
+  if [ -z "$why" ]; then
+    n=1
+    while [ "$n" -le "$slots" ]; do
+      exec 9>>"$dir/slot-$n"
+      chmod 0666 "$dir/slot-$n" 2>/dev/null || true
+      if flock -n 9; then
+        # Fd 9 stays with this shell: the command and its daemons (sccache) must not hold the slot.
+        # A signal for the gate goes on to the command, so a cancelled job does not outlive its slot.
+        BUILD_GATE_HELD=1 "$@" 9>&- <&0 &
+        child=$!
+        trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
+        status=0
+        wait "$child" || status=$?
+        # The first wait returns at a signal; wait again for the command itself.
+        while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+        exit "$status"
+      fi
+      exec 9>&-
+      n=$((n + 1))
+    done
+    why="all $slots slots busy"
+  fi
+  [ $((waited % 60)) -ne 0 ] || echo "build-gate: waiting, $why" >&2
+  sleep "$poll"
+  waited=$((waited + poll))
+done

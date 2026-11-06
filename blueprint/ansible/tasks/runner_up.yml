@@ -48,6 +48,35 @@
       loop:
         - {src: runner-up-docker, dest: "{{ crewship_runner_up_shim_dir }}/docker"}
         - {src: runner-up-maintain, dest: "{{ crewship_runner_up_maintain }}"}
+        - {src: build-gate, dest: "{{ crewship_runner_up_build_gate_bin }}"}
+
+    - name: Install the build gate slot count and the cargo shim
+      when: crewship_runner_up_build_gate | bool
+      block:
+        - name: Create the build gate directory
+          ansible.builtin.file:
+            path: "{{ crewship_build_gate_slots_file | dirname }}"
+            state: directory
+            mode: "0755"
+
+        - name: Create the build gate lock directory
+          ansible.builtin.file:
+            path: "{{ crewship_build_gate_dir }}"
+            state: directory
+            mode: "1777"
+
+        - name: Write the host-wide slot count
+          ansible.builtin.copy:
+            content: "{{ crewship_build_gate_slots }}\n"
+            dest: "{{ crewship_build_gate_slots_file }}"
+            mode: "0644"
+
+        - name: Install the cargo shim
+          ansible.builtin.copy:
+            src: "{{ crewship_blueprint }}/maintenance/cargo-gate"
+            dest: "{{ crewship_build_gate_cargo }}"
+            mode: "0755"
+            remote_src: true
 
     - name: Install the job image recipe
       ansible.builtin.copy:

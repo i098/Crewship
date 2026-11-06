@@ -88,6 +88,16 @@ systemctl show runnerup.slice -p CPUWeight -p IOWeight -p MemoryMax
 sudo docker inspect runner-up-<place> --format '{{.HostConfig.CgroupParent}}'   # runnerup.slice
 ```
 
+## Build gate
+
+One host-wide job pool keeps Cargo builds from piling up: `build-gate <command...>` (from `blueprint/maintenance/build-gate`, installed as `~/.local/bin/build-gate`). It waits, and never fails, while `/sdc-disk` is above 85% or `/proc/pressure/io` `full` avg60 is above 40. Then it takes one `flock` slot in `/tmp/build-gate` and holds it until the command ends. Every caller reads the one slot count from `~/.local/share/build-gate/slots` (`BUILD_GATE_SLOTS_FILE`; it survives a reboot; default 4 when the file is missing; set `build_gate_slots` under `runner_up`; keep it below `total_slots`). `BUILD_GATE=off` skips the gate; `BUILD_GATE_DISK_PATH`, `BUILD_GATE_DISK_PCT`, `BUILD_GATE_IO_PCT` and `BUILD_GATE_DIR` change the limits. A command that runs under the gate does not wait again.
+
+Set `build_gate: true` under `runner_up` to install the pool on a host:
+
+- runner-up jobs: the service gets `RUNNER_UP_BUILD_GATE`, and the docker shim starts each `docker run` through the gate, so a job holds a slot for its whole run.
+- Host builds (workers, mates): `~/.local/bin/cargo` is a shim. It runs `build`, `test`, `check`, `clippy`, `nextest`, `doc`, `install` and `bench` through `build-gate`, then the next `cargo` on `PATH`. Rollout check: `command -v cargo` must print `~/.local/bin/cargo`; rustup's `~/.cargo/env` puts `~/.cargo/bin` first, so put `~/.local/bin` before it.
+- Rollout is a host step, not code: set `build_gate: true` for the `codex-gpui` host or coordinator first, wait one full cycle, then set it fleet-wide.
+
 ## Disk
 
 A job container is removed when its job ends (`docker run --rm`), and its work directory goes with it.
@@ -202,6 +212,9 @@ Limits: sccache caches only builds that run `rustc` through the wrapper, with th
 | `~/.config/systemd/user/runner-up-clean.{service,timer}` | The hourly cleanup. |
 | `~/.config/systemd/user/runner-up-image.{service,timer}` | The hourly image build, without `ci_pool`. |
 | `/etc/systemd/system/runnerup.slice` | The caps. |
+| `~/.local/bin/build-gate` | The shared build gate. |
+| `~/.local/bin/cargo` | The cargo shim, with `build_gate`. |
+| `~/.local/share/build-gate/slots` | The host-wide build slot count, with `build_gate`. |
 | `~/.local/share/runner-up/` | The docker shim and the image recipe. |
 | `~/.local/bin/runner-up-maintain` | The image build and the cleanup. |
 
