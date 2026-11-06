@@ -249,7 +249,7 @@ btop saves its config on exit, including the last preset's boxes; the launcher a
 - It sends only `Page.captureScreenshot`, `Page.startScreencast` and `Page.screencastFrameAck`. It never navigates, closes, clicks or types.
 - `--format kitty` or `--format sixels` swaps the chafa output for a terminal that draws those; the default `symbols` works in every pane, tuios included.
 
-Open it as a window of the `machine` tuios session: `tuios new-window browsers -s machine --no-focus -- browser-view`. [`blueprint/ansible/tasks/browser_view.yml`](../blueprint/ansible/tasks/browser_view.yml) installs it but is not imported yet; the layout wiring follows the machine tuios tab.
+It has a tuios session of its own. `browsers-tuios` creates the session `browsers` with one `browser-view` window when it is missing and attaches it; an existing session is attached as it is, and the launcher never kills or recreates a session. Switch to it with `tuios attach browsers`. [`blueprint/ansible/tasks/browser_view.yml`](../blueprint/ansible/tasks/browser_view.yml) installs both commands but is not imported yet; the recipe wiring follows the machine tuios tab.
 
 ## Viewing from another machine
 

@@ -48,7 +48,7 @@ class FakeChrome:
 
             def do_GET(self):
                 if self.path == "/json/version":
-                    body = {"Browser": browser}
+                    body = {"Browser": "Chrome/140", "User-Agent": "Mozilla/5.0 " + browser}
                 elif self.path == "/json/list":
                     body = [
                         {

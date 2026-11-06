@@ -1,0 +1,16 @@
+#!/bin/sh
+# A tuios session of its own, "browsers", showing every headed (live) and
+# headless (screenshot) browser through browser-view (docs/herdr.md#browser-view).
+# Idempotent and never destructive: an existing session is attached as it is, a
+# missing one is created, and no session is ever killed or recreated.
+# Usage: browsers-tuios [--no-attach]   switch with: tuios attach browsers
+set -eu
+session=browsers
+if ! tuios ls --json | jq -e --arg s "$session" 'any(.[]; .name == $s)' >/dev/null; then
+    tuios new "$session" --detach >/dev/null
+    first=$(tuios list-windows -s "$session" --json | jq -r '.windows[0].window_id')
+    tuios new-window browsers -s "$session" --no-focus -- browser-view >/dev/null
+    # The session's first window is a bare shell; drop it once the viewer is open.
+    tuios close-window "$first" -s "$session" >/dev/null
+fi
+[ "${1:-}" = --no-attach ] || exec tuios attach "$session"

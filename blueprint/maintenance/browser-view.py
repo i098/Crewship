@@ -76,9 +76,13 @@ def get_json(port, path, timeout=1.0):
         return json.load(r)
 
 
-def headed(name, version):
-    """The chrome and voxl tiers and any non-headless Chrome have a window; obscura and HeadlessChrome do not."""
-    return name != "obscura" and "Headless" not in version
+def headed(name, user_agent):
+    """The chrome and voxl tiers and any non-headless Chrome have a window; obscura and HeadlessChrome do not.
+
+    Chrome's --headless=new reports `Browser: Chrome/N`; only User-Agent says HeadlessChrome.
+    Keep in step with tools/browser-tui/browser-tui.ts, which reads the same field.
+    """
+    return name != "obscura" and "Headless" not in user_agent
 
 
 def probe(port, tier=None):
@@ -90,23 +94,21 @@ def probe(port, tier=None):
         tabs = [t for t in get_json(port, "/json/list") if t.get("type") == "page"]
     except (OSError, http.client.HTTPException, ValueError, AttributeError, TypeError):
         return None
-    name = (
-        tier[0]
-        if tier
-        else ("headless chrome" if "Headless" in version.get("Browser", "") else "chrome")
-    )
+    ua, build = version.get("User-Agent", ""), version.get("Browser", "")
+    name = tier[0] if tier else ("headless chrome" if "Headless" in ua else "chrome")
+    is_headed = headed(name, ua)
     return {
         "name": name,
         "port": port,
         "state": "up",
-        "headed": headed(name, version["Browser"]),
-        "version": version["Browser"],
+        "headed": is_headed,
+        "version": build,
         "tabs": [
             {
                 "id": t["id"],
                 "title": t.get("title", ""),
                 "url": t.get("url", ""),
-                "headed": headed(name, version["Browser"]),
+                "headed": is_headed,
                 "ws": t.get("webSocketDebuggerUrl"),
             }
             for t in tabs
@@ -216,8 +218,8 @@ class Cdp:
 
 
 def capture(ws_url):
-    """JPEG bytes of the tab at ws_url via Page.captureScreenshot."""
-    cdp = Cdp(ws_url)
+    """JPEG bytes of the tab at ws_url via Page.captureScreenshot. Short timeout: this runs on the UI loop."""
+    cdp = Cdp(ws_url, timeout=2.0)
     try:
         want = cdp.send("Page.captureScreenshot", format="jpeg", quality=70)
         while True:
