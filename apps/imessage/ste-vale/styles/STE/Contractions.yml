@@ -1,0 +1,8 @@
+extends: existence
+message: "Do not use the contraction '%s'. Write the full words."
+level: error
+ignorecase: true
+tokens:
+  - '\b\w+n[''’]t\b'
+  - '\b\w+[''’](?:re|ve|ll|d|m)\b'
+  - '\b(?:it|that|let|there|here|what|he|she|who|how)[''’]s\b'

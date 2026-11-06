@@ -1,0 +1,18 @@
+extends: existence
+message: "Do not use the idiom or slang '%s'. Use a plain word."
+level: error
+ignorecase: true
+tokens:
+  - 'on it'
+  - 'heads up'
+  - 'asap'
+  - 'btw'
+  - 'fyi'
+  - 'gonna'
+  - 'wanna'
+  - 'kinda'
+  - 'basically'
+  - 'utilize'
+  - 'leverage'
+  - 'a bit'
+  - 'no worries'
