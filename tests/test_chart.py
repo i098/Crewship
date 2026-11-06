@@ -918,3 +918,36 @@ def test_onboarding_uses_the_uv_project_environment(tmp_path, location):
         assert (selected / "bin/python").exists()
         if location != "default":
             assert not (project / ".venv").exists()
+
+
+def test_cargo_config_is_created_once_and_names_the_data_disk_cache(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    variables = yaml.safe_load((ROOT / "blueprint/ansible/group_vars/all/base.yml").read_text())
+    variables.update({
+        "crewship_cfg": {"home": str(home), "user": getpass.getuser(),
+                         "profiles": {"development": True}},
+        "crewship_data_dir": str(tmp_path / "data"),
+        "crewship_account_ready": True, "crewship_become_target": False,
+    })
+    tasks = yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
+    playbook = tmp_path / "cargo.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": True,
+        "vars": variables,
+        "tasks": [task for task in tasks if task["name"].startswith("Cargo ")],
+    }]))
+    command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
+               str(playbook)]
+    config = home / ".cargo/config.toml"
+    for attempt in range(2):
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if attempt:
+            assert "changed=0" in result.stdout
+            config.write_text("[build]\n")
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = config.read_text()
+    assert "[build]\n" in text and "mold" not in text  # an existing file is kept
+    assert f'SCCACHE_DIR = "{tmp_path}/data/cache/sccache"' in text
