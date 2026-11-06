@@ -40,7 +40,7 @@ crewship_runner_up_io_write_device: "{{ crewship_runner_up.io_write_device | def
 crewship_runner_up_io_write_mb: "{{ crewship_runner_up.io_write_mb | default(120) | int }}"
 crewship_runner_up_io_write_iops: "{{ crewship_runner_up.io_write_iops | default(600) | int }}"
 crewship_runner_up_disk_max_gb: "{{ crewship_runner_up.disk_max_gb | default(50) }}"
-# Above the pause level of the data disk the coordinators stop taking jobs; below the resume level they start again.
+# At or above the pause level of the data disk the coordinators stop taking jobs; below the resume level they start again.
 crewship_runner_up_pause_pct: "{{ crewship_runner_up.pause_pct | default(88) | int }}"
 crewship_runner_up_resume_pct: "{{ crewship_runner_up.resume_pct | default(85) | int }}"
 # Place logs stay a week; they sit on the same disk as the build cache.

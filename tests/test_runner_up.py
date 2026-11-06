@@ -600,8 +600,8 @@ def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_
     assert not any(c.startswith("docker rm") or " stop " in c for c in calls)
 
 
-def test_guard_stops_the_coordinators_above_88_percent_and_remembers_them(stubs, tmp_path):
-    calls, state = guard(stubs, tmp_path, 89)
+def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 88)
     assert calls == [
         "systemctl --user is-active --quiet runner-up@a-b.service",
         "systemctl --user stop runner-up@a-b.service",
@@ -611,8 +611,8 @@ def test_guard_stops_the_coordinators_above_88_percent_and_remembers_them(stubs,
     assert state.read_text() == "a-b\nc-d\n"
 
 
-def test_guard_does_not_stop_at_88_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
-    assert guard(stubs, tmp_path, 88)[0] == []
+def test_guard_does_not_stop_at_87_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
+    assert guard(stubs, tmp_path, 87)[0] == []
     calls, state = guard(stubs, tmp_path, 95, active=False)
     assert not any(" stop " in c for c in calls) and not state.exists()
 
@@ -623,7 +623,7 @@ def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, t
     assert not state.exists()
 
 
-def test_guard_keeps_the_pause_between_85_and_88_percent(stubs, tmp_path):
+def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
     calls, state = guard(stubs, tmp_path, 86, paused="a-b\n")
     assert calls == [] and state.exists()
 

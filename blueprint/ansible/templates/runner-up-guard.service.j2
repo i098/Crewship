@@ -1,5 +1,5 @@
 {{ ansible_managed | comment }}
-# Triggered by runner-up-guard.timer. Above {{ crewship_runner_up_pause_pct }}% on the disk of the build data it stops the
+# Triggered by runner-up-guard.timer. At or above {{ crewship_runner_up_pause_pct }}% on the disk of the build data it stops the
 # coordinators, so no new job starts; below {{ crewship_runner_up_resume_pct }}% it starts the ones it stopped. A running job is never stopped.
 [Unit]
 Description=runner-up disk guard (Crewship managed)

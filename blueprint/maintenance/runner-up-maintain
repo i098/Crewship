@@ -3,7 +3,7 @@
 #   runner-up-maintain image [--ensure]   build the job image from the latest official
 #                                         runner image; with --ensure, only when it is missing
 #   runner-up-maintain clean              remove what the jobs left on the disk
-#   runner-up-maintain guard              stop the coordinators above the pause level of the disk,
+#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
 #                                         start them again below the resume level
 # Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
 set -eu
@@ -47,7 +47,7 @@ guard)
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   docker container prune --force --filter label=runner-up.place >/dev/null || true
   used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
-  if [ "$used" -gt "$pause" ]; then
+  if [ "$used" -ge "$pause" ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
       systemctl --user is-active --quiet "runner-up@$i.service" || continue
       systemctl --user stop "runner-up@$i.service" && echo "$i" >> "$state"
