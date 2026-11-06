@@ -111,6 +111,7 @@ const DESK_PROMPT = deskPrompt(env.FM_IMESSAGE_OWNER_NAME || "the owner", DESK_M
 const QUIET_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_QUIET_MS ? Number(env.FM_IMESSAGE_TEST_QUIET_MS) : 350;
 const MAX_WAIT_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_MAX_WAIT_MS ? Number(env.FM_IMESSAGE_TEST_MAX_WAIT_MS) : 2000;
 const ACK_MS = 8000;
+const STALE_MS = env.FM_IMESSAGE_TEST === "1" && env.FM_IMESSAGE_TEST_STALE_MS ? Number(env.FM_IMESSAGE_TEST_STALE_MS) : 300_000; // an unanswered v2 text is re-noted to Firstmate after this
 const TYPING_MAX_MS = 300_000; // the desk typing bubble never outlives a request that gets no answer
 const RETRY_MS = Number(env.FM_IMESSAGE_RETRY_MS || 1000); // the first retry step of the outbox and the downloads
 const REACT_MAX_MS = Number(env.FM_IMESSAGE_REACT_MAX_MS || 120_000); // a tapback older than this is dropped, not retried
@@ -241,6 +242,7 @@ function quotedMate(c: LineMessage["content"]) {
 }
 let routingRetry: NodeJS.Timeout | undefined;
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
+const staleNoted = new Set<string>(); // one stale note per request
 type Bubble = string | Picture;
 // One transport. `find` reads a message whole (with its attachments); `send` sends one bubble into a conversation,
 // threaded to message `reply` when set; `home` is a conversation with him that works before he texts this transport;
@@ -447,6 +449,7 @@ for (const item of routing.values()) {
   if (item.route === "pending" && (item.loop === "v2") !== DESK_V2) {
     recordRoute({ ids: [item.requestId], route: "handoff" });
   }
+  if (item.route === "done") watchStale(item.requestId);
 }
 flushRoutes();
 scheduleDeadlines();
@@ -1455,6 +1458,20 @@ function recordRoute(event: RouteEvent) {
   const dir = openSync(STATE, "r");
   try { fsyncSync(dir); } finally { closeSync(dir); }
   applyRoute(event);
+  if ("route" in event && event.route === "done") for (const id of event.ids) watchStale(id);
+}
+
+// A v2 text with no answer STALE_MS after its route finished: file one more inbox note. Nothing goes to the owner.
+function watchStale(id: string) {
+  const item = routing.get(id);
+  if (!item?.at || item.loop !== "v2" || item.responded || !directChat.test(item.ref.space) || staleNoted.has(id)) return;
+  staleNoted.add(id);
+  setTimeout(() => {
+    const open = routing.get(id);
+    if (stopping || muted() || !open || open.responded) return;
+    const minutes = Math.round((Date.now() - open.at!) / 60_000);
+    if (!fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) log("stale note")(new Error(id));
+  }, STALE_MS);
 }
 
 function ensureRemembered(item: Received) {

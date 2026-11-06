@@ -158,6 +158,27 @@ def test_work_request_keeps_typing_until_the_final_answer(tmp_path):
         wait_for(lambda: not json.loads(read_text(typing).splitlines()[-1])["on"], "typing stopped by the final answer")
 
 
+def test_unanswered_handoff_is_noted_again_once(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}],
+                FM_IMESSAGE_TEST_STALE_MS="1500") as rig:
+        deliver(rig, "m1", "please check the whole repo")
+        wait_for(lambda: "stale-bluebubbles-m1 " in read_text(rig.notes), "the stale note", timeout=60)
+        time.sleep(3)
+        assert read_text(rig.notes).count("stale-bluebubbles-m1 ") == 1
+        assert texts(rig) == []
+
+
+def test_answered_handoff_gets_no_stale_note(tmp_path):
+    with v2_rig(tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}],
+                FM_IMESSAGE_TEST_STALE_MS="3000") as rig:
+        deliver(rig, "m1", "please check the whole repo")
+        wait_for(lambda: any(e.get("route") == "done" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig)), "the finished route", timeout=60)
+        rig.cli("The review is complete.")
+        wait_for(lambda: any("responded" in e for e in events(rig)), "the completed request", timeout=30)
+        time.sleep(5)
+        assert "stale-bluebubbles-m1" not in read_text(rig.notes)
+
+
 def test_unreachable_front_falls_back_to_firstmate(tmp_path):
     with v2_rig(tmp_path, None, inception="http://127.0.0.1:9/v1/chat/completions") as rig:
         deliver(rig, "m1", "please check the whole repo")
