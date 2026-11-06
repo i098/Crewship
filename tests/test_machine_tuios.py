@@ -27,7 +27,7 @@ esac
 def run_launcher(tmp_path, *args):
     return subprocess.run(
         ["sh", str(tmp_path / "bin" / "machine-tuios"), *args], check=True, capture_output=True, text=True,
-        env={"PATH": f"{tmp_path / 'path'}:/usr/bin:/bin", "STATE": str(tmp_path / "state.json")},
+        env={"PATH": str(tmp_path / "path"), "STATE": str(tmp_path / "state.json")},
     )
 
 
@@ -38,6 +38,8 @@ def install(tmp_path, *tuis):
     shutil.copy(LAUNCHER, tmp_path / "bin" / "machine-tuios")
     (tmp_path / "path" / "tuios").write_text(FAKE_TUIOS)
     (tmp_path / "path" / "tuios").chmod(0o755)
+    for tool in ("sh", "jq", "cat", "mv"):
+        (tmp_path / "path" / tool).symlink_to(shutil.which(tool))
     for name in tuis:
         (tmp_path / "bin" / name).touch()
         (tmp_path / "bin" / name).chmod(0o755)
