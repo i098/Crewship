@@ -260,11 +260,12 @@ The desk sends work to a mate only when the model reports high confidence and ex
 It checks the whole pending burst, including recent context, rather than splitting related texts across mates.
 Invalid output, low confidence, ambiguous requests, and work across several domains go to Firstmate.
 Decisions, approvals, merges, destructive actions, external sends, credentials, and sensitive messages also stay with Firstmate.
+Before the desk sends a text to a mate, it looks in the newest 200 records of `state/<mate>.inbox` (open and `handled/`). A record with the line `[desk request <request id>]` counts as delivered, so the desk sends nothing and writes no note. Identical texts from different requests do not match. After a failed send, the desk writes one "may be incomplete" note for each message id, not one for each retry.
 Attachments, group chats, edits, and unsupported desk models keep their existing Firstmate handoff.
 
 The sender is `fm-send.sh`, beside the resolved `fm-inbox.sh` executable, including an `FM_INBOX_CMD` override.
 The service sets `FM_HOME` to the main home that owns the second mates as tasks and holds the routing table.
-It passes the mate id and `[from captain via desk] <verbatim text>` as separate arguments, without a shell.
+It passes the mate id and `[from captain via desk] <verbatim text>` followed by a final line `[desk request <request id>]` as separate arguments, without a shell.
 The sender uses the mate's existing inbox and normal acknowledgement recovery.
 The desk checks the registered id, home, and complete scope before each send.
 A missing or changed entry sends the remaining texts to Firstmate.

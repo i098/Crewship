@@ -37,7 +37,7 @@ import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Sto
 import { authorizedWritePath, steChecked, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
-import { deskMayAct, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -200,7 +200,7 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
@@ -1380,6 +1380,29 @@ function spawnSender(mate: Secondmate, text: string) {
   return track(Bun.spawn([sender, mate.id, text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
 }
 
+async function deliverToMate(item: Routing, mate: Secondmate) {
+  const text = `[from captain via desk] ${item.authored ?? item.text}\n${deskRequestMarker(item.requestId)}`;
+  const routed = `routed to ${mate.id}`;
+  if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
+  // Save uncertainty before the send, once per request; a restart must not blindly repeat a delivery.
+  let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
+  if (!routing.get(item.requestId)?.noted) recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
+  let proc: Bun.Subprocess | undefined;
+  try {
+    proc = spawnSender(mate, text);
+    deskRun = proc;
+    if (await proc.exited === 0 || mateInboxHas(FM_HOME, mate.id, item.requestId)) handoffNote = routed;
+  } catch (e) {
+    if (!proc) handoffNote = undefined;
+    log("mate delivery")(e);
+  } finally {
+    if (deskRun === proc) deskRun = undefined;
+  }
+  // A failed send keeps the note already saved; a second row for the same request adds nothing.
+  if (handoffNote === routed) recordRoute({ ids: [item.requestId], route: "done", handoffNote });
+  else if (handoffNote === undefined) recordRoute({ ids: [item.requestId], route: "handoff" });
+}
+
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
   recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
   for (const item of pending) mateDeliveries.add(item.requestId);
@@ -1387,21 +1410,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
     for (const item of pending) {
       if (stopping || !current()
         || !relayTargetCurrent(mate, secondmates(FM_HOME))) break;
-      // Save uncertainty before the send; a restart must not blindly repeat a delivery.
-      let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
-      recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
-      let proc: Bun.Subprocess | undefined;
-      try {
-        proc = spawnSender(mate, `[from captain via desk] ${item.authored ?? item.text}`);
-        deskRun = proc;
-        if (await proc.exited === 0) handoffNote = `routed to ${mate.id}`;
-      } catch (e) {
-        if (!proc) handoffNote = undefined;
-        log("mate delivery")(e);
-      } finally {
-        if (deskRun === proc) deskRun = undefined;
-      }
-      recordRoute({ ids: [item.requestId], route: handoffNote === `routed to ${mate.id}` ? "done" : "handoff", handoffNote });
+      await deliverToMate(item, mate);
     }
   } finally {
     for (const item of pending) mateDeliveries.delete(item.requestId);
@@ -1434,7 +1443,7 @@ function applyRoute(event: RouteEvent) {
   } else if ("responded" in event) {
     for (const id of event.ids) routing.get(id)!.responded = event.responded;
   } else if ("route" in event) for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
-    handoffNote: event.handoffNote, ...(event.social ? { social: true } : {}), ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
+    handoffNote: event.handoffNote, ...(event.handoffNote?.includes("may be incomplete") ? { noted: true } : {}), ...(event.social ? { social: true } : {}), ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
 }
 
 function recordRoute(event: RouteEvent) {

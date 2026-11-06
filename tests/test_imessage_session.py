@@ -86,7 +86,7 @@ def test_session_relays_to_a_listed_mate(tmp_path):
         deliver(rig, "m1", "RELAY mate1")
         wait_for(lambda: any(e.get("handoffNote") == "routed to mate1" and e.get("route") == "done" for e in events(rig)),
                  "the mate delivery", timeout=120)
-        assert read_text(sent).splitlines() == ["mate1 [from captain via desk] RELAY mate1"]
+        assert read_text(sent).splitlines() == ["mate1 [from captain via desk] RELAY mate1", "[desk request bluebubbles-m1]"]
         assert texts(rig) == []
 
 
@@ -321,7 +321,7 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
         rig.start()
         reply_in_thread(rig, "m3", "b1", "The engram checks are green.", "nice, thanks")
         wait_for(message.exists, "the relay to the mate", timeout=120)
-        assert read_text(message) == "engram [from captain via desk] nice, thanks"
+        assert read_text(message) == "engram [from captain via desk] nice, thanks\n[desk request bluebubbles-m3]"
         assert len(texts(rig)) == 2  # no model reply to the owner
 
 
@@ -355,7 +355,7 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
             message.unlink(missing_ok=True)
             reply_in_thread(rig, f"m{n}", guid, "Done.", f"thanks {mate}")
             wait_for(message.exists, f"the relay to {mate}", timeout=120)
-            assert read_text(message) == f"{mate} [from captain via desk] thanks {mate}"
+            assert read_text(message) == f"{mate} [from captain via desk] thanks {mate}\n[desk request bluebubbles-m{n}]"
         message.unlink()
         reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")  # no id match and two senders: a desk turn
         wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
