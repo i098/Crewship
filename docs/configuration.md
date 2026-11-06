@@ -416,6 +416,7 @@ See [Storage guard](fleet-guards.md#storage-guard) for guard state placement and
 | npm, pip, Bun, uv, pnpm packages | `<data_dir>/cache/<tool>` | Native user configuration |
 | Go build cache and modules | `<data_dir>/cache/go-build`, `<data_dir>/cache/go-mod` | Native Go environment file |
 | Rust compile cache (`development` profile) | `<data_dir>/cache/sccache`, 150 GB cap | `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE`, `CARGO_INCREMENTAL=0` |
+| Cargo config (`development` profile) | `~/.cargo/config.toml`, created once, never replaced | sccache wrapper, `mold` linker, `[env] SCCACHE_DIR` on the data disk |
 | Deno cache | `<data_dir>/cache/deno` | `DENO_DIR` |
 | Bun transpiler cache | `<data_dir>/cache/bun-transpiler` | `BUN_RUNTIME_TRANSPILER_CACHE_PATH` |
 | Temporary files, including new installer Cargo install builds | `<data_dir>/tmp` | `TMPDIR`, `TMP`, `TEMP` |
