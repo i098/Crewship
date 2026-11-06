@@ -826,6 +826,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage --card '<json>'` | Queues a card: a link to a page with options to tap, a chart, a timeline, or a table. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
 | `fm-location` | Prints the location that the owner shares with the line in Find My, as JSON. |
+| `fm-location --check` | Prints one line, `ok, age <N> s, accuracy <M> m`, and no coordinates. Use it to prove a read works. On failure both forms print one line to stderr (`fm-location: HTTP <code>: ...`) and exit 1. |
 
 Use `--` before text that starts with a dash: `fm-imessage -- '- first item'`.
 Place send options before `--`: `fm-imessage --reply 1 --no-thread -- '- first item'`.
@@ -957,5 +958,7 @@ See [Upstream outages](#upstream-outages) for retries and permanent refusals.
 Before the owner sends the first text, the commands fail with HTTP 503.
 
 ## Location is personal data
+
+Every home on this host calls `fm-location` from `~/.local/bin`; no key or setup is needed.
 
 `fm-location` works only while the owner shares his location with the line in Find My. The location is personal data. Use it only when the work needs it. Keep it on the host: do not put it in a commit, an issue, a PR, a log, or a chat.

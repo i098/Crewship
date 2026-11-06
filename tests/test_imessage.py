@@ -923,7 +923,11 @@ def test_send_commands_carry_the_local_header(tmp_path, args):
 
 
 def test_location_carries_the_local_header(tmp_path):
-    (tmp_path / "curl").write_text(f'#!/bin/bash\necho "$*" >> {tmp_path / "calls"}\n')
+    # Stub curl like the real one: write the body to the -o file and print the status code (-w).
+    (tmp_path / "curl").write_text(
+        f'#!/bin/bash\necho "$*" >> {tmp_path / "calls"}\n'
+        'while [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\nprintf 200\n'
+    )
     (tmp_path / "curl").chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
     result = subprocess.run(
@@ -1909,6 +1913,7 @@ const line = {
     const file = lastFile(chat);
     return { lastMessage: existsSync(file) ? { guid: readFileSync(file, "utf8") } : undefined };
   } },
+  locations: { async get(who) { return { latitude: 1.5, longitude: 2.5, accuracy: 5.6, locationTimestamp: "2020-01-01T00:00:00.000Z", who }; } },
 };
 export const Spectrum = async () => {
   if (process.env.FAKE_STARTUP_URL) await fetch(process.env.FAKE_STARTUP_URL);
@@ -3484,3 +3489,57 @@ def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_bridge_serves_the_owners_location_from_the_line_client(tmp_path):
+    """GET /location on the real bridge returns the line client's location; an inner `raw` shadowing the client made it 500."""
+    fake, _, _, _, start, _, _, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        port = re.search(r"listening on 127\.0\.0\.1:(\d+)", text(tmp_path / "out")).group(1)
+        got = subprocess.run(["curl", "-s", "-w", "\n%{http_code}", "-H", "X-Firstmate: 1", f"http://127.0.0.1:{port}/location"],
+                             capture_output=True, text=True, timeout=30)
+        body, status = got.stdout.rsplit("\n", 1)
+        assert status == "200"
+        assert json.loads(body)["who"] == "+10000000000"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "ok", "expected"),
+    [
+        (200, '{"accuracy": 5.6, "locationTimestamp": "2020-01-01T00:00:00.000Z", "latitude": 1.5, "longitude": 2.5}', True, "ok, age "),
+        (503, "no location: not shared\n", False, "HTTP 503: no location: not shared"),
+        (500, "<!doctype html>\n<html>boom", False, "HTTP 500: <!doctype html>"),
+    ],
+)
+def test_fm_location_check_never_prints_coordinates(tmp_path, status, payload, ok, expected):
+    """A stub endpoint answers; `--check` prints age and accuracy only, and an error is one short line."""
+    import http.server
+    import threading
+
+    class Stub(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.path == "/location" and self.headers["X-Firstmate"] == "1"
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(payload.encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Stub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        env = {**os.environ, "FM_IMESSAGE_PORT": str(server.server_port), "TMPDIR": str(tmp_path)}
+        run = subprocess.run([str(ROOT / "apps/imessage/fm-location"), "--check"], env=env, capture_output=True, text=True, timeout=30)
+    finally:
+        server.shutdown()
+    out = run.stdout + run.stderr
+    assert (run.returncode == 0) is ok and expected in out
+    assert "1.5" not in out and "2.5" not in out
+    if ok:
+        assert re.fullmatch(r"ok, age \d+ s, accuracy 6 m\n", run.stdout)

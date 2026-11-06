@@ -1,4 +1,29 @@
 #!/bin/bash
 # Print where the owner is, from the location he shares with the Firstmate line in Find My (docs/imessage.md).
-# Personal data: use only when the work needs it, and keep it on this host.
-curl -fsS --max-time 30 -H "X-Firstmate: 1" "http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}/location"
+#   fm-location          the location as JSON on stdout
+#   fm-location --check  one line, "ok, age <N> s, accuracy <M> m", and no coordinates
+# Personal data: use only when the work needs it, keep it on this host, and never write it to a log or a repo.
+# On failure it prints one line to stderr and exits non-zero; it never prints the server's error page.
+case "${1:-}" in
+  ""|--check) ;;
+  *) echo "usage: fm-location [--check]" >&2; exit 2 ;;
+esac
+body=$(mktemp) || exit 1
+trap 'rm -f "$body"' EXIT
+code=$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' -H "X-Firstmate: 1" \
+  "http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}/location") || { echo "fm-location: the iMessage service is not reachable" >&2; exit 1; }
+if [ "$code" != 200 ]; then
+  echo "fm-location: HTTP $code: $(head -c 200 "$body" | head -n 1 | tr -cd '[:print:]')" >&2
+  exit 1
+fi
+if [ "${1:-}" = --check ]; then
+  python3 - "$body" <<'PY' || { echo "fm-location: unreadable answer" >&2; exit 1; }
+import json, sys
+from datetime import datetime, timezone
+d = json.load(open(sys.argv[1]))
+age = int((datetime.now(timezone.utc) - datetime.fromisoformat(d["locationTimestamp"].replace("Z", "+00:00"))).total_seconds())
+print(f"ok, age {max(age, 0)} s, accuracy {round(d['accuracy'])} m")
+PY
+else
+  cat "$body"
+fi
