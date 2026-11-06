@@ -675,6 +675,7 @@ RELEASES = {
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz.sha256",
     ),
+    "rtk-ai/rtk": ("v9.9.9", "rtk-x86_64-unknown-linux-musl.tar.gz", "checksums.txt"),
 }
 
 
@@ -753,6 +754,13 @@ def upstream(monkeypatch, unverified=None, seen=None):
             # gws publishes its own .sha256 file, which wins over the GitHub digest.
             checksum = "" if unverified == "googleworkspace/cli" else "f" * 64
             return Download(f"{checksum}  google-workspace-cli.tar.gz\n".encode())
+        elif url == "https://github.com/checksums.txt":
+            # rtk lists every asset of the release in one checksums.txt, which wins over the digest.
+            checksum = "" if unverified == "rtk-ai/rtk" else "f" * 64
+            return Download(
+                f"{'0' * 64}  rtk-oss-x86_64-unknown-linux-musl.tar.gz\n"
+                f"{checksum}  rtk-x86_64-unknown-linux-musl.tar.gz\n".encode()
+            )
         elif url.startswith("https://github.com/pyrefly-") and url.endswith(".sha256"):
             checksum = "" if unverified == "facebook/pyrefly" else "f" * 64
             return Download(f"{checksum}  {url.rsplit('/', 1)[1].removesuffix('.sha256')}".encode())
@@ -844,6 +852,9 @@ def test_latest_releases_are_pinned_to_the_digests_their_publishers_list(monkeyp
     gws = latest["gws"]["assets"]["linux-x86_64"]
     assert (latest["gws"]["version"], gws["sha256"]) == ("9.9.9", "f" * 64)
     assert gws["url"].endswith("google-workspace-cli-x86_64-unknown-linux-musl.tar.gz")
+    rtk = latest["rtk"]["assets"]["linux-x86_64"]
+    assert (latest["rtk"]["version"], rtk["sha256"]) == ("9.9.9", "f" * 64)
+    assert rtk["url"].endswith("rtk-x86_64-unknown-linux-musl.tar.gz")
     assert latest["gh"]["assets"]["linux-x86_64"]["format"] == "tar"
     assert latest["bun"]["assets"]["linux-x86_64"]["format"] == "zip"
     assert latest["sentrux"]["assets"]["linux-x86_64"]["format"] == "file"
@@ -1539,6 +1550,8 @@ def rate_limited_github(monkeypatch):
             raise http_error(403)
         if url.endswith(".sha256"):
             return Download(b"f" * 64 + b"  asset")
+        if url.endswith("/checksums.txt"):
+            return Download(b"f" * 64 + b"  rtk-x86_64-unknown-linux-musl.tar.gz\n")
         if not url.startswith("https://github.com/"):
             return api(request, **kwargs)
         repo = "/".join(url.split("/")[3:5])
