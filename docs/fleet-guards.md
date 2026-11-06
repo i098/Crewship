@@ -197,9 +197,20 @@ only on a run that includes the `herdr` tag, for example
 | --- | --- | --- | --- |
 | 1 `obscura` | `127.0.0.1:9222` | Yes (`fleet-browser-obscura.service`) | Default for everything: clicks, screenshots, screencast. ~25 MB idle; ~5x less RAM per page than Chrome. |
 | 2 `chrome` | `127.0.0.1:9522` | On demand (`fleet-browser up chrome`) | Obscura misrenders the page, a site blocks it, or the maintainer needs pixel-exact before/after evidence. Headless Chromium, persistent profile. |
-| 3 `voxl` | `127.0.0.1:9523`, [voxl](https://github.com/tembo/voxl) viewer `http://127.0.0.1:6913/` | Always on: a user service enabled at boot (`fleet-browser up voxl` restarts it) | A human must see or drive the browser: OAuth consent, second factors, captchas, native dialogs, sites such as Google that refuse any automated browser. Xvfb display `:9` + headed Chromium. |
+| 3 `voxl` | `127.0.0.1:9523`, [voxl](https://github.com/tembo/voxl) viewer `http://127.0.0.1:6913/` | Always on: a user service enabled at boot (`fleet-browser up voxl` restarts it) | A challenge the lower tiers fail. Headed Chromium. The agent itself clicks Cloudflare Turnstile, consent screens and captchas in the voxl viewer; a human is needed only for second factors and sites such as Google that refuse any automated browser.  Xvfb display `:9` + headed Chromium. |
 
-Move down one tier only when the tier above cannot do the job; move back to
+The Geonode proxy is an option on any tier, not a tier. At each tier try first without it. If that fails, run
+`fleet-browser up <tier> --proxy`: the tier restarts through one [Geonode](https://geonode.com) residential sticky
+session (one exit IP until it restarts), and `--direct` switches back. Then go to the next tier. The full order is:
+obscura, obscura `--proxy`, chrome, chrome `--proxy`, voxl, voxl `--proxy`. The option needs the `GEONODE_*` settings.
+
+Dia, the owner's Mac browser, is no tier: use it only for a cookie pull (`fleet-browser seed`).
+
+A tier reaches Geonode through `geonode-proxy.py`, a loopback forwarder that adds the credentials
+Chrome cannot carry. It reads `GEONODE_GATEWAY`, `GEONODE_USERNAME`, `GEONODE_PASSWORD`, `GEONODE_STICKY_PORT_BASE` and
+`GEONODE_STICKY_PORT_MAX` from the environment, else from `~/super.env` (`FLEET_SECRETS_FILE`), and never prints them.
+
+Move down one step only when the step above cannot do the job; move back to
 `obscura` for the next task. `fleet-browser-gc.timer` (every 5 min) stops tiers
 2 after 30 idle minutes (`FLEET_BROWSER_IDLE_MIN`, no CDP client
 connected); it never stops tier 3. Tier 3 needs voxl and Xvfb. The ladder builds voxl from the latest release's crate, verified against its published SHA-256, and installs Xvfb from
