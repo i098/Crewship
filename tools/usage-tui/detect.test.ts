@@ -64,7 +64,7 @@ test("rtk is a provider only when `rtk gain` exits 0", () => {
   expect(detect({ home: h, env }).providers).toEqual([])
   writeFileSync(join(bin, "rtk"), "#!/bin/sh\n[ \"$1\" = gain ]\n")
   chmodSync(join(bin, "rtk"), 0o755)
-  expect(detect({ home: h, env }).providers.map(p => p.id)).toEqual(["rtk"])
+  expect(detect({ home: h, env }).providers).toEqual([expect.objectContaining({ id: "rtk", source: "rtk-gain" })])
   writeFileSync(join(bin, "rtk"), "#!/bin/sh\nexit 1\n")
   expect(detect({ home: h, env }).providers).toEqual([])
 })

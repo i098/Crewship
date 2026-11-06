@@ -111,6 +111,24 @@ export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
   return rows.length ? rows : [resellerNote("n/a")]
 }
 
+// ---- rtk ----------------------------------------------------------------------
+// `rtk gain -f json`: tokens the rtk hook kept out of the model's context.
+export type RtkGain = { summary?: { total_saved?: unknown; avg_savings_pct?: unknown } }
+
+export function compactCount(n: number): string {
+  if (n >= 1e9) return `${+(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `${+(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${+(n / 1e3).toFixed(1)}K`
+  return String(n)
+}
+
+export function rtkRows(g: RtkGain): QuotaRow[] {
+  const saved = g.summary?.total_saved
+  const pct = g.summary?.avg_savings_pct
+  const text = finite(saved) ? `${compactCount(saved)} tokens saved${finite(pct) ? ` (${Math.round(pct)}%)` : ""}` : "not reported"
+  return [{ account: "rtk", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: text }]
+}
+
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
@@ -123,6 +141,8 @@ export type QuotaInput = {
   mercuryError?: string
   deepseek?: DeepseekUsage
   deepseekError?: string
+  rtk?: RtkGain
+  rtkError?: string
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
@@ -139,6 +159,8 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
     else if (inp.mercuryError) rows.push(note("mercury", `unavailable: ${inp.mercuryError}`))
   }
   if (on("deepseek")) rows.push(...(inp.deepseek ? deepseekRows(inp.deepseek) : [resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a")]))
+  // rtk is never assumed: without a provider list it shows only when a reading was supplied.
+  if (inp.providers ? on("rtk-gain") : inp.rtk) rows.push(...(inp.rtk ? rtkRows(inp.rtk) : [note("rtk", inp.rtkError ?? "not reported")]))
   // Detected providers with no quota source still get a row, so the list matches the host's accounts.
   for (const p of inp.providers ?? []) {
     if (p.source === "none") rows.push(note(p.label, `${p.accounts} account${p.accounts === 1 ? "" : "s"}, quota not reported`))
@@ -361,11 +383,12 @@ export async function loadQuota(): Promise<QuotaInput> {
   const providers = readProviders({ home: HOME, env: process.env }).providers
   const on = (s: QuotaSource) => providers.some(p => p.source === s)
   const off = Promise.resolve(undefined)
-  const [omp, zai, mercury, ds] = await Promise.allSettled([
+  const [omp, zai, mercury, ds, rtk] = await Promise.allSettled([
     on("omp-usage") ? run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage) : off,
     on("zai") ? fetchZai() : off,
     on("mercury-tokens") ? mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })) : off,
     on("deepseek") ? deepseek() : off,
+    on("rtk-gain") ? run(["rtk", "gain", "-f", "json"]).then(t => JSON.parse(t) as RtkGain) : off,
   ])
   return {
     providers,
@@ -377,5 +400,7 @@ export async function loadQuota(): Promise<QuotaInput> {
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
     deepseek: ds.status === "fulfilled" ? ds.value?.value : undefined,
     deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value?.error,
+    rtk: rtk.status === "fulfilled" ? rtk.value : undefined,
+    rtkError: rtk.status === "rejected" ? msg(rtk.reason) : undefined,
   }
 }

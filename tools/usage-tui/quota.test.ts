@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, quotaText, relReset, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, quotaText, relReset, rtkRows, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -192,4 +192,17 @@ test("fitName cuts any row name with an ellipsis so the bar column never moves",
   const [a, b] = quotaText(rows, 0, "UTC").split("\n")
   expect(a.indexOf("█")).toBe(b.indexOf("█"))
   expect(a.indexOf("█")).toBe(ACCOUNT_W + 10)
+})
+
+test("rtk shows tokens saved from `rtk gain` only when detected, under the fixed name width", () => {
+  const provider = { id: "rtk", label: "rtk", accounts: 1, source: "rtk-gain" as const, found: ["rtk-cli"] }
+  const rtk = { summary: { total_saved: 1_234_567, avg_savings_pct: 61.4 } }
+  expect(rtkRows(rtk)[0]).toMatchObject({ account: "rtk", leftPct: null, note: "1.2M tokens saved (61%)" })
+  expect(rtkRows({ summary: { total_saved: 0, avg_savings_pct: 0 } })[0].note).toBe("0 tokens saved (0%)")
+  expect(rtkRows({})[0].note).toBe("not reported")
+  const line = quotaText(buildRows({ providers: [provider], rtk }), NOW, "UTC")
+  expect(line.slice(0, ACCOUNT_W + 10)).toBe("rtk".padEnd(ACCOUNT_W) + "-".padEnd(10))
+  expect(line.trimEnd()).toEndWith("1.2M tokens saved (61%)")
+  expect(buildRows({ providers: [{ ...provider, id: "x", source: "none" }], rtk })).toHaveLength(1)
+  expect(buildRows({ providers: [provider], rtkError: "rtk exited non-zero" })[0].note).toBe("rtk exited non-zero")
 })
