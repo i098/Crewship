@@ -7,9 +7,6 @@ export class Runner extends Container {
   async launch(jit: string) {
     await this.start({ envVars: { JITCONFIG: jit } });
   }
-  async kill() {
-    await this.destroy();
-  }
 }
 
 interface Env {
@@ -19,6 +16,7 @@ interface Env {
 
 export default {
   async fetch(req: Request, env: Env) {
+    if (!env.DISPATCH_TOKEN) return new Response("not configured", { status: 503 });
     if (req.headers.get("authorization") !== `Bearer ${env.DISPATCH_TOKEN}`) {
       return new Response("unauthorized", { status: 401 });
     }
@@ -29,10 +27,6 @@ export default {
     if (url.pathname === "/start" && req.method === "POST") {
       await box.launch((await req.json<{ jit: string }>()).jit);
       return Response.json({ started: id });
-    }
-    if (url.pathname === "/kill" && req.method === "POST") {
-      await box.kill();
-      return Response.json({ killed: id });
     }
     return new Response("not found", { status: 404 });
   },

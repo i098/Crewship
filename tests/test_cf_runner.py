@@ -101,7 +101,7 @@ def test_read_env_file_takes_export_and_quotes(tmp_path):
 
 
 def test_wrangler_config_sets_instance_type_and_cap():
-    container = cf.wrangler_config({**CONFIG, "worker": "w"})["containers"][0]
+    container = cf.wrangler_config(CONFIG)["containers"][0]
     assert (container["instance_type"], container["max_instances"]) == ("standard-4", 4)
 
 

@@ -918,13 +918,6 @@
                 "required": ["repo", "label"]
               }
             },
-            "worker": {
-              "type": "string",
-              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-            },
-            "instance_type": {
-              "enum": ["lite", "basic", "standard-1", "standard-2", "standard-3", "standard-4"]
-            },
             "max_instances": {
               "type": "integer",
               "minimum": 1

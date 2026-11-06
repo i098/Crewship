@@ -1,8 +1,6 @@
 {{ {
   'repos': crewship_cf_runner.repos,
   'credentials_file': crewship_cf_runner.credentials_file,
-  'worker': crewship_cf_runner.worker | default('crewship-cf-runner'),
-  'instance_type': crewship_cf_runner.instance_type | default('standard-4'),
   'max_instances': crewship_cf_runner.max_instances | default(4),
   'poll_seconds': crewship_cf_runner.poll_seconds | default(20),
   'state_dir': crewship_cf_runner_state,

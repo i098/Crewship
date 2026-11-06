@@ -24,9 +24,9 @@ from pathlib import Path
 
 HOME = Path.home()
 CONFIG = Path(os.environ.get("CF_RUNNER_CONFIG", HOME / ".config/cf-runner/config.json"))
+WORKER = "crewship-cf-runner"
+INSTANCE_TYPE = "standard-4"
 DEFAULTS = {
-    "worker": "crewship-cf-runner",
-    "instance_type": "standard-4",
     "max_instances": 4,
     "poll_seconds": 20,
     "retry_after_seconds": 900,
@@ -217,7 +217,7 @@ def read_env_file(path):
 
 
 def source_hash(config):
-    digest = hashlib.sha256(json.dumps({k: config[k] for k in ("worker", "instance_type", "max_instances")}).encode())
+    digest = hashlib.sha256(json.dumps({"max_instances": config["max_instances"]}).encode())
     for path in sorted(Path(config["source_dir"]).rglob("*")):
         if path.is_file() and "node_modules" not in path.parts:
             digest.update(str(path.relative_to(config["source_dir"])).encode() + path.read_bytes())
@@ -226,12 +226,12 @@ def source_hash(config):
 
 def wrangler_config(config):
     return {
-        "name": config["worker"],
+        "name": WORKER,
         "main": "src/index.ts",
         "compatibility_date": "2026-11-01",
         "containers": [{
             "class_name": "Runner", "image": "./Dockerfile",
-            "instance_type": config["instance_type"], "max_instances": config["max_instances"],
+            "instance_type": INSTANCE_TYPE, "max_instances": config["max_instances"],
         }],
         "durable_objects": {"bindings": [{"class_name": "Runner", "name": "RUNNER"}]},
         "migrations": [{"new_sqlite_classes": ["Runner"], "tag": "v1"}],
@@ -267,11 +267,11 @@ def deploy(config):
     for step in (["npm", "install", "--no-audit", "--no-fund"], ["npx", "wrangler", "deploy"]):
         subprocess.run(step, cwd=build, env=env, check=True)
     subprocess.run(
-        ["npx", "wrangler", "secret", "put", "DISPATCH_TOKEN", "--name", config["worker"]],
+        ["npx", "wrangler", "secret", "put", "DISPATCH_TOKEN", "--name", WORKER],
         cwd=build, env=env, check=True, input=token_file.read_text().strip(), text=True,
     )
     subdomain = account_api(f"accounts/{env['CLOUDFLARE_ACCOUNT_ID']}/workers/subdomain", env)["subdomain"]
-    (state_dir / "worker-url").write_text(f"https://{config['worker']}.{subdomain}.workers.dev\n")
+    (state_dir / "worker-url").write_text(f"https://{WORKER}.{subdomain}.workers.dev\n")
     stamp.write_text(digest)
     print("cf-runner: Worker deployed")
 

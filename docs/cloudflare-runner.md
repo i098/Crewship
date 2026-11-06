@@ -14,8 +14,6 @@ crewship:
     credentials_file: /home/you/super.env   # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
     repos:
       - { repo: owner/name, label: cf-name }   # workflows use `runs-on: cf-name`
-  #   worker: crewship-cf-runner
-  #   instance_type: standard-4              # 4 vCPU, 12 GiB, 20 GB disk
   #   max_instances: 4                       # most containers at one time
   #   poll_seconds: 20
 ```
@@ -39,7 +37,14 @@ At most `max_instances` jobs run at one time; the Worker's own limit is the same
 `cf-runner.py deploy` runs a deploy only when the Worker source or its settings changed, and refuses while a dispatched job is in flight, because a deploy replaces running containers.
 Credentials come from `credentials_file` and reach wrangler through its environment only.
 
+- The Worker is always `crewship-cf-runner` on `standard-4` (4 vCPU, 12 GiB, 20 GB disk).
+- The deploy runs `wrangler deploy`, then `wrangler secret put DISPATCH_TOKEN`. Until the secret exists, the Worker answers every request with 503.
+- A refused deploy (a job in flight) makes the apply fail. Apply again when the jobs end.
+- The dispatcher reads its config only when it starts, and an apply never restarts it. After you change `repos` or `poll_seconds`, run `systemctl --user restart cf-runner-dispatch.service`.
+
 ## Limits
+
+- The dispatcher reads a run's jobs once. A run with no job for a configured label on that first read is ignored for good, so a labelled job that appears later (a `needs:` stage) waits for a runner that never comes. Put every labelled job in a run that has a labelled job in its first stage, or keep such workflows on runner-up.
 
 - A container has at most 20 GB of disk. A Rust job whose target directory is larger fails with "No space left on device". Keep it on runner-up until Cloudflare raises the limit for the account.
 - The disk is ephemeral, so compile caches start cold.
