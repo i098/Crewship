@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+import importlib.util
 
 ROOT = Path(__file__).parents[1]
 
@@ -818,6 +819,7 @@ print(json.dumps({{"result": result}}))
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
+                                  **({"ci_pool_tab": True} if mode == "all" else {}),
                                   **({} if mode in ("all", "update") else {k: False for k in (
                                       "usage_tab", "crewboard_tab", "browsers_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
@@ -829,6 +831,13 @@ print(json.dumps({{"result": result}}))
     }
     command = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,",
                str(playbook), "-e", json.dumps(variables), *(["--check"] if mode == "check" else [])]
+    if mode == "all":
+        spec = importlib.util.spec_from_file_location("ship_chart", ROOT / "scripts/ship.py")
+        ship = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ship)
+        document = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
+        document["crewship"]["herdr"].update(variables["crewship_cfg"]["herdr"])
+        ship.validate_document(document, "crewship.schema.json")
     for attempt in range(2):
         before = json.loads(state.read_text())
         result = subprocess.run(command, capture_output=True, text=True)
