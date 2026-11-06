@@ -194,6 +194,10 @@ The `gh-axi` check therefore runs before its preliminary issue lookups or API ca
 Shell quoting, here-documents, here-strings, and working-directory changes cannot borrow a target from another invocation.
 Text in titles, bodies, and comments is not a repository target.
 
+The `gh` wrapper also adds `--cache 60s` to plain `gh api` REST reads (including `-X GET`; not graphql or writes), so a read can be up to 60 s stale.
+Set `GH_NO_CACHE=1` to bypass the cache.
+Every wrapped call is appended to `~/.local/state/gh/calls.log`.
+
 Issue writes require `-R owner/repo`, `--repo owner/repo`, or a supported full issue URL.
 `gh-axi` issue writes require a literal `owner/repo` repository flag.
 On reads and writes, `gh-axi` repository flags reject URLs and trailing slashes before the CLI starts.
