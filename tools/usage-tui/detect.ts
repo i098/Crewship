@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
-export type QuotaSource = "omp-usage" | "zai" | "mercury-tokens" | "deepseek" | "none"
+export type QuotaSource = "omp-usage" | "zai" | "mercury-tokens" | "deepseek" | "rtk-gain" | "none"
 export type DetectedProvider = { id: string; label: string; accounts: number; source: QuotaSource; found: string[] }
 export type ProviderList = { version: 1; providers: DetectedProvider[] }
 
@@ -85,7 +85,7 @@ export function detect(e: Env, probeRtk = true): ProviderList {
   const models = `${e.home}/.omp/agent/models.yml`
   if (existsSync(models) && /^\s*zai-glm:/m.test(readFileSync(models, "utf8"))) add("zai", 1, "models.yml", "zai")
   if (resellerSession(e)) add("deepseek", 1, "fleet-cookies", "deepseek")
-  if (probeRtk && rtkWorks(e)) add("rtk", 1, "rtk-cli")
+  if (probeRtk && rtkWorks(e)) add("rtk", 1, "rtk-cli", "rtk-gain")
   const providers = [...found.values()].sort((a, b) => a.id.localeCompare(b.id))
   return { version: 1, providers }
 }
