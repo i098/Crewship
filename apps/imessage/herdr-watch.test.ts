@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { HerdrWatch } from "./herdr-watch.ts";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { HerdrWatch, wakeNotice, watchStrandedWake } from "./herdr-watch.ts";
 
 const agent = (pane: string, status: string, over: object = {}) => ({
   pane_id: pane, agent_status: status, foreground_cwd: "/work/pool/3/code-factory", terminal_title_stripped: "\u{f0213} CREW: Fix the login page", ...over,
@@ -54,4 +56,43 @@ test("a pane that closes while its done status is still held sends that alert on
   w.poll(list(agent("p1", "done"), agent("p2", "working")), 1000);
   expect(w.poll(list(agent("p2", "working")), 5000)).toBe('The agent on "Fix the login page" in code-factory is done.');
   expect(w.poll(list(agent("p2", "working")), 40_000)).toBeUndefined();
+});
+
+
+test("a woken line becomes one honest sentence with the note count", () => {
+  expect(wakeNotice(["1794008507\twoken\tnotes=1\tqueue=false"])).toContain("1 of your note was waiting");
+  expect(wakeNotice(["1\twoken\tnotes=3\tqueue=true"])).toContain("3 of your notes were waiting");
+  expect(wakeNotice(["1\twoken\tnotes=0\tqueue=true"])).toContain("a queued wake was waiting");
+  expect(wakeNotice(["noise"])).toBeUndefined();
+});
+
+test("a new log line sends once; old lines and a second line inside the cooldown send nothing", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
+  const log = join(dir, ".stranded-wake.log");
+  writeFileSync(log, "1\twoken\tnotes=1\tqueue=false\n");
+  const sent: string[] = [];
+  const w = watchStrandedWake(log, (t) => { sent.push(t); return true; })!;
+  appendFileSync(log, "2\twoken\tnotes=2\tqueue=false\n");
+  await Bun.sleep(300);
+  appendFileSync(log, "3\twoken\tnotes=2\tqueue=false\n");
+  await Bun.sleep(300);
+  w.close();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toContain("2 of your notes");
+});
+
+test("a notice the desk could not deliver does not start the cooldown", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
+  const log = join(dir, ".stranded-wake.log");
+  writeFileSync(log, "");
+  const sent: string[] = [];
+  let accept = false;
+  const w = watchStrandedWake(log, (t) => { sent.push(t); return accept; })!;
+  appendFileSync(log, "1\twoken\tnotes=1\tqueue=false\n");
+  await Bun.sleep(300);
+  accept = true;
+  appendFileSync(log, "2\twoken\tnotes=1\tqueue=false\n");
+  await Bun.sleep(300);
+  w.close();
+  expect(sent).toHaveLength(2);
 });

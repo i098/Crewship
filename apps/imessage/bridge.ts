@@ -43,9 +43,8 @@ import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
-import { HerdrWatch } from "./herdr-watch.ts";
+import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendOnce, transient, Turns } from "./outbox.ts";
-import { watchStrandedWake } from "./wake-notice.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -608,8 +607,8 @@ if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
   }, Number(env.FM_IMESSAGE_HERDR_POLL_MS || 15_000));
   console.log("fm-imessage: herdr status alerts on");
 }
-// Tells the owner once when the omp extension had to wake an idle main (wake-notice.ts).
-watchStrandedWake(`${FM_HOME}/state/.stranded-wake.log`, (text) => { if (proactiveRef) put({ ...proactiveRef, bubbles: [text], requests: [] }); });
+// Tells the owner once when the omp extension had to wake an idle main (herdr-watch.ts).
+watchStrandedWake(`${FM_HOME}/state/.stranded-wake.log`, (text) => !!proactiveRef && put({ ...proactiveRef, bubbles: [text], requests: [] }));
 console.log(`fm-imessage: listening on 127.0.0.1:${PORT}, latest text ${latest ? "restored" : latestRef ? "known by id" : "unknown"}`);
 heartbeat({ env, port: PORT, turns: deskTurns, stopping: () => stopping });
 if (latestRef) {
