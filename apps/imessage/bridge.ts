@@ -34,11 +34,10 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, steChecked, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { authorizedWritePath, steChecked, TIMEOUT_REPLY, TURN_MAX_MS, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
-import { TIMEOUT_REPLY, TURN_MAX_MS, withDeadline } from "./desk-deadline.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -1069,6 +1068,17 @@ function commitV2Reaction(pending: Routing[], emoji: string) {
   flushRoutes();
 }
 
+// A turn past its limit: Firstmate gets the text and the owner gets one honest reply, unless an answer is already queued.
+function timeOutV2(pending: Routing[], controller: AbortController, current: () => boolean) {
+  const stuck = current() && pending.every((r) => r.route === "pending");
+  controller.abort();
+  log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
+  if (!stuck) return;
+  handoffV2(pending);
+  const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+  outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), bubbles: [TIMEOUT_REPLY], deskGeneration, deskSession });
+}
+
 async function runDeskV2() {
   const chats = new Map<string, Routing[]>();
   for (const item of routing.values()) {
@@ -1087,16 +1097,7 @@ async function runDeskV2() {
     const finishTyping = muted() ? () => {} : startDeskTyping(pending, () => !stopping);
     const turnDone = deskTurns.begin();
     try {
-      const done = await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => {
-        const stuck = current() && pending.every((r) => r.route === "pending");
-        controller.abort();
-        log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
-        if (!stuck) return;
-        handoffV2(pending);
-        const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
-        outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(),
-          bubbles: [TIMEOUT_REPLY], deskGeneration, deskSession });
-      });
+      const done = await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => timeOutV2(pending, controller, current));
       if (!done || pending.every((r) => r.route === "desk" && !r.out?.bubbles?.length)) finishTyping();
     } catch (error) {
       if (current()) {
