@@ -337,6 +337,7 @@
   loop:
     - {src: "{{ crewship_blueprint }}/config/omp-unii-memory.ts", dest: "{{ crewship_omp_unii_memory_extension }}"}
     - {src: "{{ crewship_repo }}/apps/imessage/memory.ts", dest: "{{ crewship_omp_unii_memory_dir }}/memory.ts"}
+    - {src: "{{ crewship_repo }}/apps/imessage/ste.ts", dest: "{{ crewship_omp_unii_memory_dir }}/ste.ts"}
 
 - name: Install the opt-in gluttony omp extension
   ansible.builtin.copy:

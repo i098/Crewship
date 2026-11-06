@@ -12,6 +12,7 @@
 // node(0, i) is message i in at most LIMIT bytes; node(l, i) merges node(l-1, 2i) and node(l-1, 2i+1) and covers
 // the 2^l messages from i·2^l on. A line shows as `id+n|text`: its first message and how many it covers.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { STE_STYLE } from "./ste.ts";
 
 export const LIMIT = 512; // bytes per node
 export const VIEW_MIN = 32_000; // the view's sawtooth: past VIEW_MAX, one batch merges it down to VIEW_MIN
@@ -165,7 +166,10 @@ Use the space up to the limit, and give it by value:
 Avoid omissions. Name a minor item in a word or two rather than drop it: an absent item can never be found. Copy
 names, numbers, ids, paths and errors exactly. Tag each item with its kind ("owner: ...; desk: ..."), and credit
 quoted text to its real author. Never make anything look further along than it was. If told the line is too long,
-shorten it. Non-ASCII characters cost 2-4 bytes.`;
+shorten it. Non-ASCII characters cost 2-4 bytes.
+
+${STE_STYLE}
+Quote the owner's words as written. Never copy the desk's old wording as a model.`;
 
 // The live chat: the one writer of a memory directory.
 export class Memory {
