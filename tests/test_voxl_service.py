@@ -216,6 +216,7 @@ def test_a_tier_goes_direct_unless_its_proxy_flag_is_set(tmp_path):
     (run / "fleet-browser").write_text(SCRIPT.read_text())
     (run / "fleet-browser").chmod(0o755)
     (run / "obscura").write_text('#!/bin/sh\necho "$@"\n')
+    (run / "geonode-proxy.py").write_text(PROXY.read_text())
     (run / "obscura").chmod(0o755)
     base = _geonode_env(tmp_path, **{k: env[k] for k in ("HOME", "PATH")})
     direct = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=base, capture_output=True, text=True, timeout=30)
@@ -226,8 +227,34 @@ def test_a_tier_goes_direct_unless_its_proxy_flag_is_set(tmp_path):
     assert "GEONODE_*" in fallback.stderr
     assert not (home / ".fleet-browser/proxy-obscura").exists()
     (home / ".fleet-browser/proxy-obscura").touch()
-    with socket.socket() as held:
-        held.bind(("127.0.0.1", 9533))
-        held.listen()
-        busy = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=_geonode_env(tmp_path, **{k: env[k] for k in ("HOME", "PATH")}, **GEONODE), capture_output=True, text=True, timeout=30)
+    penv = _geonode_env(tmp_path, **{k: env[k] for k in ("HOME", "PATH")}, **GEONODE)
+    try:
+        held = socket.create_server(("127.0.0.1", 9533))
+    except OSError:
+        pytest.skip("loopback port 9533 is in use on this host")
+    with held:
+        busy = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=penv, capture_output=True, text=True, timeout=30)
     assert busy.returncode == 0 and "--proxy" not in busy.stdout and "--port 9222" in busy.stdout
+    assert "already in use" in busy.stderr and not (home / ".fleet-browser/proxy-obscura").exists()
+    (run / "chrome").write_text('#!/bin/sh\necho "$@"\n')
+    (run / "chrome").chmod(0o755)
+    (home / ".fleet-browser/proxy-chrome").touch()
+    try:
+        held = socket.create_server(("127.0.0.1", 9534))
+    except OSError:
+        pytest.skip("loopback port 9534 is in use on this host")
+    with held:
+        closed = subprocess.run([str(run / "fleet-browser"), "_run-chrome"], env={**penv, "FLEET_CHROME_BIN": str(run / "chrome")}, capture_output=True, text=True, timeout=30)
+    assert closed.returncode == 1 and "already in use" in closed.stderr and closed.stdout == ""
+    assert (home / ".fleet-browser/proxy-chrome").exists()
+
+
+def test_up_proxy_fails_when_the_unit_fell_back_to_direct(tmp_path):
+    home, _, _, env = _home(tmp_path, 1)
+    stubs = tmp_path / "stubs"
+    (stubs / "curl").write_text("#!/bin/sh\nexit 0\n")
+    (stubs / "curl").chmod(0o755)
+    (stubs / "systemctl").write_text(f"#!/bin/sh\nrm -f {home}/.fleet-browser/proxy-obscura\n")
+    r = subprocess.run([str(SCRIPT), "up", "obscura", "--proxy"],
+                       env=_geonode_env(tmp_path, **{k: env[k] for k in ("HOME", "PATH")}, **GEONODE), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 1 and "running direct" in r.stderr and "obscura up" not in r.stdout
