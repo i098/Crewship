@@ -13,3 +13,20 @@ export async function withDeadline(turn: Promise<void>, ms: number, onTimeout: (
     return result;
   } finally { clearTimeout(timer); }
 }
+
+type Turn = { route: string; out?: { bubbles?: string[] } };
+
+// Abort a turn past its limit. A still-pending, still-current turn goes to Firstmate and queues one honest reply.
+export function timeOutTurn(pending: Turn[], controller: AbortController, current: () => boolean, handoff: () => void, reply: (bubble: string) => void) {
+  const stuck = current() && pending.every((r) => r.route === "pending");
+  controller.abort();
+  if (!stuck) return false;
+  handoff();
+  reply(TIMEOUT_REPLY);
+  return true;
+}
+
+// Typing stays on after a turn only while a desk answer waits for delivery; a handoff or an empty turn ends it.
+export function typingOutlivesTurn(pending: Turn[]) {
+  return pending.some((r) => r.route === "desk" && !!r.out?.bubbles?.length);
+}
