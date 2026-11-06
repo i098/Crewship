@@ -159,7 +159,7 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 
 - **Docker in the job.** runner-up's Docker place is a plain container with no daemon, and no sidecar.
   A `docker: dind` entry of `ci_pool.repos` stays on the CI pool and is not in the runner-up config.
-- **Caches between jobs.** The CI pool mounts per-slot tool and apt caches.
+- **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
   The exception is the [shared build cache](#shared-build-cache): the docker shim mounts it into every local job.
 - **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.

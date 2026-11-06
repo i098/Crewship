@@ -153,7 +153,7 @@ GITHUB_LATEST = {
         "jj-v{v}-{gnu}-unknown-linux-musl.tar.gz",
         {"jj": "jj"},
     ),
-    # Shared compile cache for every Rust build of the account (docs/ci-pool.md#shared-build-cache); one static musl binary per release.
+    # Shared compile cache for every Rust build of the account (docs/runner-up.md#shared-build-cache); one static musl binary per release.
     "sccache": (
         "mozilla/sccache",
         "v",
