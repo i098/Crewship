@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Each runner-up job starts with `CARGO_BUILD_JOBS` set to `job_cpus` and `MOLD_JOBS=1`, so a Rust job no longer starts a compile and a link for every CPU of the host, and only one mold link runs at a time in a job ([#1232](https://github.com/i098/Crewship/issues/1232)).
 - Move the website link to a badge and remove the sponsor badge from the README header ([#984](https://github.com/i098/Crewship/issues/984)).
 - Credit UniiChat and its gist in the front desk memory header; the desk keeps its own memory code and stored chat unchanged ([#1000](https://github.com/i098/Crewship/issues/1000)).
 - The crewboard TUI new and unread counts now track what agents have read, not what you have viewed, using a per-topic `read_seq` on the board and a `--viewer` flag on `crewboard sub` and `tail` ([#1008](https://github.com/i098/Crewship/issues/1008)).
