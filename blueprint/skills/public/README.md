@@ -35,6 +35,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.
 - [`openmontage`](openmontage/SKILL.md): make a video, reel or explainer clip with OpenMontage; renders mp4 into a 1-day-pruned cache, spring motion, beat-locked synthesized sound, a self-review pass; poster frame sendable with `fm-imessage --image`.
 - [`operating-rules`](operating-rules/SKILL.md): ask or act, keep scope, finish the work, and answer a question as a question.
+- [`untangle-codebase`](untangle-codebase/SKILL.md): untangle a whole codebase in one pass: find hidden links, needless links, surplus and special cases, then redesign and check until done (MIT; [Maze](https://github.com/caldoai/skills), [source](https://github.com/caldoai/skills/tree/main/skills/untangle-codebase)).
 - [`pr-preview`](pr-preview/SKILL.md): a Lavish board that recreates the GitHub PR, issue or comment page, with the body rendered by GitHub's Markdown API (CSS vendored from `github-markdown-css`, MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`process-safety`](process-safety/SKILL.md): kill by pid, not by pattern, and keep test services and worktree ports apart.
 - [`prod-readiness`](prod-readiness/SKILL.md): run 20 evidence-backed checks before a production launch, deploy, release to users, or an "is this ready" review.

@@ -443,7 +443,8 @@ PRIVATE = re.compile(
 # The vendored skills (MIT) link their authors' public repositories or carry their license text.
 # Those are credits, not private details; each exemption covers only its own folder.
 VENDORED_OWNER = {
-    "blueprint/skills/public/README.md": ("github.com/DannyMac180",),
+    "blueprint/skills/public/README.md": ("github.com/DannyMac180", "github.com/caldoai"),
+    "blueprint/skills/public/untangle-codebase/": ("github.com/caldoai",),
     "blueprint/skills/public/apple-hig/": (
         "github.com/twostraws",
         "github.com/AvdLee",
