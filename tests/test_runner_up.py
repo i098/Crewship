@@ -535,7 +535,7 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
     assert calls == [
         "docker container prune --force --filter label=runner-up.place --filter until=1h",
         "docker image prune --force",
-        "docker builder prune --force --reserved-space 7GB",
+        "docker builder prune --force --keep-storage 7GB",
     ]
 
 

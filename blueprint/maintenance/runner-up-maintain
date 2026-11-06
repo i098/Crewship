@@ -33,7 +33,7 @@ clean)
   prune() { timeout "$limit" docker "$@" >/dev/null || failed=1; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
   prune image prune --force
-  prune builder prune --force --reserved-space "${RUNNER_UP_DISK_MAX_GB:-50}GB"
+  prune builder prune --force --keep-storage "${RUNNER_UP_DISK_MAX_GB:-50}GB"
   exit "$failed" ;;
 *)
   echo "usage: runner-up-maintain image [--ensure] | clean" >&2
