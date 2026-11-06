@@ -317,67 +317,94 @@ def shoot(tab, size, list_rows, fmt):
         return [], f"no screenshot: {e}"
 
 
+class Viewer:
+    """Viewer state. Headed tabs stream a CDP screencast, drawn as each frame arrives (at most --fps a second); headless ones get a screenshot every --interval."""
+
+    def __init__(self, args):
+        self.args = args
+        self.browsers, self.sel, self.preview, self.note = [], 0, [], ""
+        self.last_scan = self.last_shot = self.last_draw = 0.0
+        self.shown = self.live = self.latest = None
+
+    def select_tab(self, tab):
+        """Switch the screencast to the newly selected tab."""
+        if self.live:
+            self.live.close()
+        self.live = self.latest = None
+        self.preview, self.shown, self.last_shot = [], tab and tab["id"], 0.0
+        if tab and tab["headed"] and tab["ws"]:
+            try:
+                self.live = start_screencast(tab["ws"])
+            except OSError as e:
+                self.note = f"no screencast: {e}"
+
+    def update_preview(self, tab, size, list_h, now):
+        if not tab:
+            self.preview, self.note = [], "no browser tabs"
+        elif self.live is None and now - self.last_shot >= self.args.interval:
+            self.preview, self.note = shoot(tab, size, list_h, self.args.format)
+            self.last_shot = now
+        if self.latest and now - self.last_draw >= 1 / self.args.fps:
+            try:
+                self.preview = render(
+                    self.latest, size[0], max(size[1] - list_h - 2, 1), self.args.format
+                )
+                self.note = f"LIVE  {tab['url']}"
+            except (RuntimeError, subprocess.SubprocessError) as e:
+                self.note = f"no screencast: {e}"
+            self.latest, self.last_draw = None, now
+
+    def read_frame(self):
+        try:
+            self.latest = frame(self.live) or self.latest
+        except (OSError, RuntimeError, ValueError) as e:
+            self.live.close()
+            self.live, self.note, self.shown = None, f"screencast ended: {e}", None
+
+    def key(self, key):
+        """Handle one keypress; False quits."""
+        if key in (b"q", b"\x03"):
+            return False
+        if key in (b"j", b"\x1b[B"):
+            self.sel += 1
+        elif key in (b"k", b"\x1b[A"):
+            self.sel = max(self.sel - 1, 0)
+        elif key == b"r":
+            self.last_scan = self.last_shot = 0.0
+        return True
+
+    def step(self, fd):
+        """One loop turn; False quits."""
+        now = time.monotonic()
+        if now - self.last_scan >= self.args.refresh:
+            self.browsers, self.last_scan = discover(), now
+        tabs = [t for b in self.browsers for t in b["tabs"]]
+        self.sel = min(self.sel, max(len(tabs) - 1, 0))
+        size = shutil.get_terminal_size()
+        list_h = min(len(rows_of(self.browsers)), max(size.lines // 3, 4))
+        tab = tabs[self.sel] if tabs else None
+        if (tab and tab["id"]) != self.shown:
+            self.select_tab(tab)
+        self.update_preview(tab, size, list_h, now)
+        draw(self.browsers, self.sel, self.preview, self.note, size)
+        ready = select.select([fd] + ([self.live.sock] if self.live else []), [], [], 0.2)[0]
+        if self.live and self.live.sock in ready:
+            self.read_frame()
+        return fd not in ready or self.key(os.read(fd, 8))
+
+
 def run(args):
-    """Headed tabs stream a CDP screencast (a frame is drawn as it arrives, at most --fps a second); headless ones get a screenshot every --interval."""
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     tty.setcbreak(fd)
     sys.stdout.write("\x1b[?1049h\x1b[?25l")
-    browsers, sel, preview, note, last_scan, last_shot, shown = [], 0, [], "", 0.0, 0.0, None
-    live, latest, last_draw = None, None, 0.0
+    viewer = Viewer(args)
     try:
-        while True:
-            now = time.monotonic()
-            if now - last_scan >= args.refresh:
-                browsers, last_scan = discover(), now
-            tabs = [t for b in browsers for t in b["tabs"]]
-            sel = min(sel, max(len(tabs) - 1, 0))
-            size = shutil.get_terminal_size()
-            list_h = min(len(rows_of(browsers)), max(size.lines // 3, 4))
-            tab = tabs[sel] if tabs else None
-            ident = tab["id"] if tab else None
-            if ident != shown:
-                if live:
-                    live.close()
-                live, latest, preview, shown, last_shot = None, None, [], ident, 0.0
-                if tab and tab["headed"] and tab["ws"]:
-                    try:
-                        live = start_screencast(tab["ws"])
-                    except OSError as e:
-                        note = f"no screencast: {e}"
-            if not tab:
-                preview, note = [], "no browser tabs"
-            elif live is None and now - last_shot >= args.interval:
-                preview, note = shoot(tab, size, list_h, args.format)
-                last_shot = now
-            if latest and now - last_draw >= 1 / args.fps:
-                try:
-                    preview, note = (
-                        render(latest, size[0], max(size[1] - list_h - 2, 1), args.format),
-                        f"LIVE  {tab['url']}",
-                    )
-                except (RuntimeError, subprocess.SubprocessError) as e:
-                    note = f"no screencast: {e}"
-                latest, last_draw = None, now
-            draw(browsers, sel, preview, note, size)
-            ready = select.select([fd] + ([live.sock] if live else []), [], [], 0.2)[0]
-            if live and live.sock in ready:
-                try:
-                    latest = frame(live) or latest
-                except (OSError, RuntimeError, ValueError) as e:
-                    live.close()
-                    live, note, shown = None, f"screencast ended: {e}", None
-            if fd in ready:
-                key = os.read(fd, 8)
-                if key in (b"q", b"\x03"):
-                    return
-                if key in (b"j", b"\x1b[B"):
-                    sel += 1
-                elif key in (b"k", b"\x1b[A"):
-                    sel = max(sel - 1, 0)
-                elif key == b"r":
-                    last_scan = last_shot = 0.0
+        while viewer.step(fd):
+            pass
     finally:
+        if viewer.live:
+            viewer.live.close()
         sys.stdout.write("\x1b[?25h\x1b[?1049l")
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
