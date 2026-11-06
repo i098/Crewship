@@ -41,6 +41,7 @@ def rig(tmp_path):
         "FM_DESK_SESSIONS": str(sessions),
         "PATH": f"{omp.parent}:{os.environ['PATH']}",
         "FM_DESK_SETTLE": "0",
+        "FM_DESK_GRACE": "1",
         "TZ": "UTC",
     }
     return sessions, env
@@ -144,6 +145,43 @@ def test_follow_exits_at_end_marker_well_before_settle(tmp_path):
         h.write(entry("assistant", "all done", "2026-11-05T04:00:02Z", "stop"))
     out, _ = proc.communicate(timeout=10)
     assert proc.returncode == 0 and "assistant: all done" in out
+
+
+def test_follow_keeps_going_when_retry_follows_stop(tmp_path):
+    sessions, env = rig(tmp_path)
+    env["FM_DESK_SETTLE"] = "60"
+    env["FM_DESK_GRACE"] = "2"
+    f = sessions / "a.jsonl"
+    write_session(f, [("old turn", "2026-11-05T01:00:00Z")])
+    proc = subprocess.Popen([sys.executable, str(FM_DESK), "--follow"], env=env, stdout=subprocess.PIPE, text=True)
+    time.sleep(1)
+    with f.open("a") as h:
+        h.write(entry("user", "go", "2026-11-05T04:00:00Z"))
+        h.write(entry("assistant", "no action", "2026-11-05T04:00:01Z", "stop"))
+    time.sleep(1)
+    with f.open("a") as h:
+        h.write(entry("user", "You ended your turn without an action tool.", "2026-11-05T04:00:02Z"))
+        h.write(entry("assistant", "real reply", "2026-11-05T04:00:03Z", "stop"))
+    out, _ = proc.communicate(timeout=15)
+    assert proc.returncode == 0
+    assert out.index("assistant: no action") < out.index("You ended your turn") < out.index("assistant: real reply")
+
+
+def test_follow_ends_after_grace_when_nothing_follows_stop(tmp_path):
+    sessions, env = rig(tmp_path)
+    env["FM_DESK_SETTLE"] = "60"
+    env["FM_DESK_GRACE"] = "2"
+    f = sessions / "a.jsonl"
+    write_session(f, [("old turn", "2026-11-05T01:00:00Z")])
+    proc = subprocess.Popen([sys.executable, str(FM_DESK), "--follow"], env=env, stdout=subprocess.PIPE, text=True)
+    time.sleep(1)
+    with f.open("a") as h:
+        h.write(entry("user", "go", "2026-11-05T04:00:00Z"))
+        h.write(entry("assistant", "done", "2026-11-05T04:00:01Z", "stop"))
+    time.sleep(0.8)
+    assert proc.poll() is None
+    out, _ = proc.communicate(timeout=10)
+    assert proc.returncode == 0 and "assistant: done" in out
 
 
 def test_follow_with_zero_settle_still_prints_the_appended_turn(tmp_path):

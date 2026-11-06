@@ -119,16 +119,17 @@ def render_entry(line: str) -> str | None:
     return "\n".join(out) or None
 
 
-def ends_turn(line: str) -> bool:
+def message_of(line: str) -> dict | None:
     try:
         message = json.loads(line).get("message")
     except (ValueError, AttributeError):
-        return False
-    return isinstance(message, dict) and message.get("role") == "assistant" and message.get("stopReason") not in (None, "toolUse")
+        return None
+    return message if isinstance(message, dict) and message.get("role") else None
 
 
 def follow(directory: Path, loop: bool) -> int:
     settle = float(os.environ.get("FM_DESK_SETTLE", "60"))
+    grace = float(os.environ.get("FM_DESK_GRACE", "10"))
     sizes = {p: p.stat().st_size for p in directory.glob("*.jsonl")}
     print("fm-desk: waiting for the next desk turn (Ctrl-C stops)", file=sys.stderr)
     while True:
@@ -136,7 +137,7 @@ def follow(directory: Path, loop: bool) -> int:
         if grown is None:
             time.sleep(0.5)
             continue
-        offset, quiet_since, ended = sizes.get(grown, 0), time.monotonic(), False
+        offset, quiet_since, stopped_at, ended = sizes.get(grown, 0), time.monotonic(), None, False
         while not ended:
             with grown.open("rb") as handle:
                 handle.seek(offset)
@@ -149,7 +150,13 @@ def follow(directory: Path, loop: bool) -> int:
                     text = render_entry(raw)
                     if text:
                         print(text, flush=True)
-                    ended = ended or ends_turn(raw)
+                    message = message_of(raw)
+                    if message:
+                        reason = message.get("stopReason") if message["role"] == "assistant" else None
+                        stopped_at = quiet_since if reason == "stop" else None
+                        ended = ended or reason not in (None, "toolUse", "stop")
+            elif stopped_at is not None and time.monotonic() - stopped_at >= grace:
+                break
             elif time.monotonic() - quiet_since >= settle:
                 break
             else:
