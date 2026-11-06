@@ -344,13 +344,13 @@ def test_the_slice_and_the_units_carry_the_caps(home):
 
 def test_the_slice_caps_writes_only_when_a_disk_is_named(home):
     path = home.parent / "etc/runnerup.slice"
-    apply(home, {}, ci_pool=pool(home))
+    apply(home, runner(home))
     assert "IOWriteBandwidthMax" not in path.read_text()
-    apply(home, {"io_write_device": "/dev/sdc"}, ci_pool=pool(home))
+    apply(home, runner(home, io_write_device="/dev/sdc"))
     slice_ = unit_sections(path)["Slice"]
     assert slice_["IOWriteBandwidthMax"] == ["/dev/sdc 120M"]
     assert slice_["IOWriteIOPSMax"] == ["/dev/sdc 600"]
-    apply(home, {"io_write_device": "/dev/sdc", "io_write_mb": 200, "io_write_iops": 900}, ci_pool=pool(home))
+    apply(home, runner(home, io_write_device="/dev/sdc", io_write_mb=200, io_write_iops=900))
     slice_ = unit_sections(path)["Slice"]
     assert slice_["IOWriteBandwidthMax"] == ["/dev/sdc 200M"]
     assert slice_["IOWriteIOPSMax"] == ["/dev/sdc 900"]
