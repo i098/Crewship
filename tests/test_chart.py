@@ -1,6 +1,7 @@
 import getpass
 import grp
 import hashlib
+import importlib.util
 import json
 import os
 import shlex
@@ -12,7 +13,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-import importlib.util
 
 ROOT = Path(__file__).parents[1]
 
