@@ -15,6 +15,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     react: (emoji) => void calls.push(["react", emoji]),
     relay: async (mate) => { calls.push(["relay", mate.id]); return true; },
     handoff: (reason, ack) => void calls.push(ack ? ["handoff", reason, ack] : ["handoff", reason]),
+    helperBusy: () => false,
     delegate: (target, parts, replyTarget) => void calls.push(["delegate", typeof target === "string" ? target : target.id, parts, replyTarget]),
     status: async () => "all quiet",
     message: async (mate, text) => { calls.push(["message", mate.id, text]); return true; },
@@ -193,4 +194,39 @@ test("reply with a key already sent today is refused and leaves the turn open", 
   await h.run("reply", { text: "Up 5 percent.", key: "fresh" });
   expect(h.logged).toEqual([["fresh", "Up 5 percent."]]);
   expect(h.acted()).toBe(true);
+});
+
+test("delegate_task sends a simple install or lookup to the helper, with the reply as its ack", async () => {
+  for (const [kind, text] of [["install", "install the ripgrep skill"], ["lookup", "look up the bun release notes"], ["read-link", "read https://example.com/a and tell me what it says"]]) {
+    const h = host([text]);
+    await h.run("delegate_task", { target: `helper:${kind}`, text: "On it." });
+    expect(h.calls).toEqual([["delegate", `helper:${kind}`, ["On it."], 1]]);
+    expect(h.acted()).toBe(true);
+  }
+});
+
+test("delegate_task refuses the helper for a decision, money, a deploy or a public post: those go to Firstmate", async () => {
+  for (const text of ["deploy the site", "should we use the new plan", "buy the pro licence for $20", "post this on x", "approve it",
+    "posting the launch note", "share the launch on LinkedIn", "email the vendor the quote", "reply on the GitHub issue"]) {
+    const h = host([text]);
+    await expect(h.run("delegate_task", { target: "helper:lookup", text: "On it." })).rejects.toThrow("call handoff_main");
+    expect(h.calls).toEqual([]);
+    expect(h.acted()).toBe(false);
+    await h.run("handoff_main", { reason: "not for the helper" });
+    expect(h.calls).toEqual([["handoff", "not for the helper"]]);
+  }
+});
+
+test("delegate_task refuses a second helper ask while the helper is busy", async () => {
+  const h = host(["install the ripgrep skill"], { helperBusy: () => true });
+  await expect(h.run("delegate_task", { target: "helper:install", text: "On it." })).rejects.toThrow("busy");
+  expect(h.calls).toEqual([]);
+});
+
+test("delegate_task refuses a helper target that is not a listed kind: the ask is other and goes to Firstmate", async () => {
+  for (const target of ["helper", "helper:other", "helper:bash", "helper:"]) {
+    const h = host(["install the ripgrep skill"]);
+    await expect(h.run("delegate_task", { target, text: "On it." })).rejects.toThrow("call handoff_main");
+    expect(h.calls).toEqual([]);
+  }
 });
