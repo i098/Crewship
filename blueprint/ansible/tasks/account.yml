@@ -249,8 +249,8 @@
     - crewship_data_dir | length > 0
     - crewship_account_ready | bool
 
-# Cargo reads this file for every build of the account: users, workers and
-# local CI jobs. Created once and never replaced, so a user's own choice stays.
+# Cargo reads this file for every build of the account: users and workers.
+# CI containers do not read it. Created once and never replaced, so a user's own choice stays.
 - name: Cargo directory
   ansible.builtin.file:
     path: "{{ crewship_cfg.home }}/.cargo"
@@ -280,9 +280,20 @@
     - crewship_account_ready | bool
 
 # Cargo passes [env] to the sccache client, so a build that starts outside a
-# login shell still uses the cache on the data disk. A SCCACHE_DIR already
-# set in the environment wins (no `force`). Without `data_dir` sccache keeps
-# its default under the home.
+# login shell still uses the cache on the data disk. The block is added only
+# when the file has no [env] table of its own (a second one is invalid TOML).
+# Without `data_dir` sccache keeps its default under the home.
+- name: Cargo config contents
+  ansible.builtin.slurp:
+    src: "{{ crewship_cfg.home }}/.cargo/config.toml"
+  register: crewship_cargo_config
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  when:
+    - crewship_data_dir | length > 0
+    - crewship_cfg.profiles.development | default(false) | bool
+    - crewship_account_ready | bool
+
 - name: Cargo environment for the sccache directory
   ansible.builtin.blockinfile:
     path: "{{ crewship_cfg.home }}/.cargo/config.toml"
@@ -296,6 +307,10 @@
     - crewship_data_dir | length > 0
     - crewship_cfg.profiles.development | default(false) | bool
     - crewship_account_ready | bool
+    - >-
+      '# BEGIN crewship sccache' in (crewship_cargo_config.content | b64decode)
+      or (crewship_cargo_config.content | b64decode
+      | regex_search('(?m)^\s*\[env\]') is none)
 
 - name: Look for retired assets
   ansible.builtin.import_tasks: retired.yml

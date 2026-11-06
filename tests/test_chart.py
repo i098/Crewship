@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -951,3 +952,8 @@ def test_cargo_config_is_created_once_and_names_the_data_disk_cache(tmp_path):
     text = config.read_text()
     assert "[build]\n" in text and "mold" not in text  # an existing file is kept
     assert f'SCCACHE_DIR = "{tmp_path}/data/cache/sccache"' in text
+    config.write_text('[env]\nFOO = "1"\n')
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    parsed = tomllib.loads(config.read_text())
+    assert parsed == {"env": {"FOO": "1"}}
