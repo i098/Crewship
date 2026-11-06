@@ -17,6 +17,7 @@ def test_view_returns_after_compaction(tmp_path):
     ext.write_text((ROOT / "blueprint/config/omp-unii-memory.ts").read_text())
     (tmp_path / "fm-unii-memory").mkdir()
     shutil.copy(ROOT / "apps/imessage/memory.ts", tmp_path / "fm-unii-memory/memory.ts")
+    shutil.copy(ROOT / "apps/imessage/ste.ts", tmp_path / "fm-unii-memory/ste.ts")
     code = f"""
 import ext from {json.dumps(str(ext))};
 const h = {{}};
