@@ -112,7 +112,8 @@ def start_container(url, token, name, jit):
     request = urllib.request.Request(
         f"{url}/start?id={name}",
         data=json.dumps({"jit": jit}).encode(),
-        headers={"authorization": f"Bearer {token}", "content-type": "application/json"},
+        # Cloudflare refuses the default Python user agent (error 1010) on workers.dev.
+        headers={"authorization": f"Bearer {token}", "content-type": "application/json", "user-agent": "crewship-cf-runner"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT):
