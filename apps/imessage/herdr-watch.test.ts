@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HerdrWatch, wakeNotice, watchStrandedWake } from "./herdr-watch.ts";
 
@@ -66,36 +66,46 @@ test("a woken line becomes one honest sentence with the note count", () => {
   expect(wakeNotice(["noise"])).toBeUndefined();
 });
 
-test("a new log line sends once; old lines and a second line inside the cooldown send nothing", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
-  const log = join(dir, ".stranded-wake.log");
-  writeFileSync(log, "1\twoken\tnotes=1\tqueue=false\n");
+const wakeDir = () => mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
+const wakeLine = (agoMs: number, notes = 1) => `${Math.floor((Date.now() - agoMs) / 1000)}\twoken\tnotes=${notes}\tqueue=false\n`;
+
+test("a new log line sends once; a second line inside the cooldown sends nothing", async () => {
+  const log = join(wakeDir(), ".stranded-wake.log");
+  writeFileSync(log, "");
   const sent: string[] = [];
   const w = watchStrandedWake(log, (t) => { sent.push(t); return true; })!;
-  appendFileSync(log, "2\twoken\tnotes=2\tqueue=false\n");
+  appendFileSync(log, wakeLine(0, 2));
   await Bun.sleep(300);
-  appendFileSync(log, "3\twoken\tnotes=2\tqueue=false\n");
+  appendFileSync(log, wakeLine(0, 3));
   await Bun.sleep(300);
   w.close();
   expect(sent).toHaveLength(1);
   expect(sent[0]).toContain("2 of your notes");
 });
 
-test("a rejected notice is retried on the next change event and sent once", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
-  const log = join(dir, ".stranded-wake.log");
-  writeFileSync(log, "");
+test("a line from 10 minutes ago is sent once across desk restarts; one from 2 hours ago is not", () => {
+  const log = join(wakeDir(), ".stranded-wake.log");
+  writeFileSync(log, wakeLine(2 * 3600_000) + wakeLine(10 * 60_000));
   const sent: string[] = [];
-  let accept = false;
-  const w = watchStrandedWake(log, (t) => { sent.push(t); return accept; })!;
-  appendFileSync(log, "1\twoken\tnotes=1\tqueue=false\n");
-  await Bun.sleep(300);
-  accept = true;
-  const t = new Date();
-  utimesSync(log, t, t);
-  await Bun.sleep(300);
-  utimesSync(log, t, new Date(t.getTime() + 1000));
-  await Bun.sleep(300);
+  for (let run = 0; run < 2; run++) watchStrandedWake(log, (t) => { sent.push(t); return true; })!.close();
+  expect(sent).toHaveLength(1);
+});
+
+test("a rejected notice stays pending: the retry hook sends it after a minute, not inside it", () => {
+  const log = join(wakeDir(), ".stranded-wake.log");
+  writeFileSync(log, wakeLine(0));
+  let clock = Date.now();
+  let ready = false;
+  const sent: string[] = [];
+  const w = watchStrandedWake(log, (t) => { sent.push(t); return ready; }, () => clock)!;
+  expect(sent).toHaveLength(1);
+  ready = true;
+  clock += 10_000;
+  w.retry();
+  expect(sent).toHaveLength(1);
+  clock += 60_000;
+  w.retry();
+  w.retry();
   w.close();
   expect(sent).toHaveLength(2);
 });

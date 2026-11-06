@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 
 // Alerts from herdr agent status (read-only: the bridge only runs `herdr agent list`). The watcher keeps the last
 // confirmed status per pane, holds a change for `debounceMs` so a status that flips back is ignored, and turns the
@@ -86,23 +86,37 @@ export function wakeNotice(lines: string[]): string | undefined {
   return `Main was idle and ${n > 0 ? `${n} of your note${n > 1 ? "s were" : " was"}` : "a queued wake was"} waiting, so I woke it. It should answer in a minute.`;
 }
 
-/** Watches the wake log; `send` gets the text. Returns the watcher, or undefined when the state folder is missing. */
-export function watchStrandedWake(log: string, send: (text: string) => boolean, now = Date.now): FSWatcher | undefined {
-  let offset = existsSync(log) ? statSync(log).size : 0;
+export const WAKE_NOTICE_WINDOW_MS = 30 * 60_000;
+export const WAKE_NOTICE_RETRY_MS = 60_000;
+
+/**
+ * Sends one notice per unnotified wake line from the last 30 minutes, so a line written while the desk was down still
+ * counts. `send` returns false when the desk cannot deliver; the lines stay pending and `retry()` (called when the
+ * desk becomes ready, or on a log change) tries again at most once per minute. Notified lines persist in
+ * .stranded-wake.notified. Returns undefined when the state folder is missing.
+ */
+export function watchStrandedWake(log: string, send: (text: string) => boolean, now = Date.now): { close(): void; retry(): void } | undefined {
+  const dir = log.slice(0, log.lastIndexOf("/"));
+  if (!existsSync(dir)) return undefined;
+  const notified = `${dir}/.stranded-wake.notified`;
   let lastSent = -Infinity;
+  let retryAt = 0;
   const read = () => {
-    if (!existsSync(log)) return;
-    const size = statSync(log).size;
-    if (size < offset) offset = 0;
-    if (size === offset) return;
-    const text = readFileSync(log, "utf8").slice(offset);
-    const notice = wakeNotice(text.split("\n").filter(Boolean));
-    if (notice && now() - lastSent >= WAKE_NOTICE_COOLDOWN_MS) {
-      if (!send(notice)) return;
+    if (!existsSync(log) || now() < retryAt) return;
+    const done = new Set(existsSync(notified) ? readFileSync(notified, "utf8").split("\n") : []);
+    const lines = readFileSync(log, "utf8").split("\n").filter((l) => l && !done.has(l) && Number(l.split("\t")[0]) * 1000 >= now() - WAKE_NOTICE_WINDOW_MS);
+    const notice = wakeNotice(lines);
+    if (!notice) return;
+    if (now() - lastSent >= WAKE_NOTICE_COOLDOWN_MS) {
+      if (!send(notice)) {
+        retryAt = now() + WAKE_NOTICE_RETRY_MS;
+        return;
+      }
       lastSent = now();
     }
-    offset = size;
+    appendFileSync(notified, lines.map((l) => `${l}\n`).join(""));
   };
-  const dir = log.slice(0, log.lastIndexOf("/"));
-  return existsSync(dir) ? watch(dir, (_event, name) => { if (name === ".stranded-wake.log") read(); }) : undefined;
+  read();
+  const watcher = watch(dir, (_event, name) => { if (name === ".stranded-wake.log") read(); });
+  return { close: () => watcher.close(), retry: read };
 }
