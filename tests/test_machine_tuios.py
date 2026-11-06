@@ -74,3 +74,10 @@ def test_schedules_fallback_prints_no_skip_line(tmp_path):
     install(tmp_path, "crewship-schedules-view")
     result = run_launcher(tmp_path, "--no-attach")
     assert "skipping schedules" not in result.stderr
+
+def test_session_name_override_leaves_the_machine_session_alone(tmp_path):
+    install(tmp_path, "usage-tui")
+    (tmp_path / "state.json").write_text('{"windows":[{"window_id":"keep","display_name":"keep"}]}')
+    env = {"PATH": str(tmp_path / "path"), "STATE": str(tmp_path / "state.json"), "MACHINE_TUIOS_SESSION": "probe"}
+    subprocess.run(["sh", str(tmp_path / "bin" / "machine-tuios"), "--no-attach"], check=True, env=env)
+    assert (tmp_path / "state.json.cmds").read_text().splitlines() == [f"usage -s probe --no-focus -- {tmp_path}/bin/usage-tui"]

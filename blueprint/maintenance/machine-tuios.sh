@@ -6,7 +6,8 @@
 # Usage: machine-tuios [--no-attach]
 set -eu
 bin=${0%/*}
-session=machine
+# MACHINE_TUIOS_SESSION names another session, so a test never touches the live one.
+session=${MACHINE_TUIOS_SESSION:-machine}
 # window name, then the command with its arguments
 windows='usage|usage-tui
 fleet-health|fleet-health-tui
