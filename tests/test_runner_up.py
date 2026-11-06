@@ -467,6 +467,13 @@ def stubs(tmp_path):
         stub.write_text(
             "#!/bin/sh\n"
             f'echo "{name} $*" >> {log}\n'
+            'if [ "$1 $2" = "builder prune" ]; then\n'
+            "  shift 2\n"
+            '  for a in "$@"; do\n'
+            '    case "$a" in --keep-storage|--force|--filter|--all|[0-9]*|label=*|until=*) ;;\n'
+            '      *) echo "unknown flag: $a" >&2; exit 125;; esac\n'
+            "  done\n"
+            "fi\n"
             'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit 1;; esac\n'
             '[ "$1 $2" = "image inspect" ] && [ ! -e "$IMAGE_EXISTS" ] && exit 1\n'
             "exit 0\n"
@@ -535,7 +542,7 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
     assert calls == [
         "docker container prune --force --filter label=runner-up.place --filter until=1h",
         "docker image prune --force",
-        "docker builder prune --force --reserved-space 7GB",
+        "docker builder prune --force --keep-storage 7GB",
     ]
 
 
