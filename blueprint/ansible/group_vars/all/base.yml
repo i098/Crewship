@@ -113,7 +113,9 @@ crewship_herdr_tabs: >-
   {{ [{'label': 'schedules', 'bin': 'crewship', 'args': ' schedules', 'switch': 'schedules_tab'}]
      + crewship_tuis | map('combine', {'args': ''}) | list
      + [{'label': 'decision-queue', 'bin': 'crewboard-tui', 'args': ' --queue', 'switch': 'crewboard_tab'},
-        {'label': 'frontdesk', 'bin': 'crewboard-tui', 'args': ' --desk', 'switch': 'crewboard_tab'}] }}
+        {'label': 'frontdesk', 'bin': 'crewboard-tui', 'args': ' --desk', 'switch': 'crewboard_tab'}]
+     + ([{'label': 'tuios', 'bin': 'machine-tuios', 'args': '', 'switch': 'tuios_tab'}]
+        if crewship_cfg.herdr.tuios_tab | default(false) | bool else []) }}
 crewship_herdr_open_tabs: >-
   {{ crewship_herdr_tabs | rejectattr('switch', 'in',
      crewship_cfg.herdr | dict2items | rejectattr('value') | map(attribute='key') | list) | list }}

@@ -785,7 +785,7 @@ print(json.dumps({{"result": result}}))
 """)
     herdr.chmod(0o755)
     viewer_call = tmp_path / "viewer.json"
-    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui"]
+    pane_commands = ["usage-tui", "crewboard-tui", "browser-tui", "machine-tuios"]
     pane_runs = ["usage-tui", "crewboard-tui", "browser-tui", "crewboard-tui --queue", "crewboard-tui --desk"]  # the decision-queue and frontdesk tabs add a flag
     pane_labels = ["usage-tui", "crewboard-tui", "browsers"]
     pane_log = tmp_path / "panes.log"
@@ -819,7 +819,7 @@ print(json.dumps({{"result": result}}))
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
-                                  **({"ci_pool_tab": True} if mode == "all" else {}),
+                                  **({"ci_pool_tab": True, "tuios_tab": True} if mode == "all" else {}),
                                   **({} if mode in ("all", "update") else {k: False for k in (
                                       "usage_tab", "crewboard_tab", "browsers_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,
@@ -856,9 +856,9 @@ print(json.dumps({{"result": result}}))
         assert len(actual["runs"]) == 5
         assert pane_log.read_text().splitlines() == pane_runs
     elif mode == "all":
-        assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue", "frontdesk"]
-        assert len(actual["runs"]) == 6
-        assert pane_log.read_text().splitlines() == pane_runs
+        assert [t["label"] for t in actual["tabs"]] == ["schedules", *pane_labels, "decision-queue", "frontdesk", "tuios"]
+        assert len(actual["runs"]) == 7
+        assert pane_log.read_text().splitlines() == [*pane_runs, "machine-tuios"]
         assert "changed=0" in result.stdout
     else:
         assert actual["workspaces"] == [

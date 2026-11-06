@@ -238,6 +238,19 @@ Herdr stops reading the pty of a tab nobody views. A btop that cannot write for 
 
 btop saves its config on exit, including the last preset's boxes; the launcher always passes a preset, so that never changes what it shows. Every apply rewrites the config, so make lasting changes in `blueprint/config/btop.conf`, and keep preset 4 there.
 
+### tuios machine tab
+
+Set `crewship.herdr.tuios_tab: true` (default `false`) to install the latest [tuios](https://github.com/Gaurav-Gosain/tuios) release (the installer checks its published SHA-256) and open one more `tuios` tab in the `machine` workspace. The tab runs [`machine-tuios`](../blueprint/maintenance/machine-tuios.sh), which creates the tuios session `machine` with one window each for `usage-tui`, `fleet-health-tui`, `crewship schedules`, `crewboard-tui`, `runs-tui`, `lavish-tui` and `btop`, then attaches to it. The recipe does not install `fleet-health-tui`, `runs-tui` or `lavish-tui` yet (follow-up issue #1218), so the launcher prints one line per skipped TUI and opens a window for each command it finds. A command the host does not have gets no window. Set `MACHINE_TUIOS_SESSION` to another name to run the launcher on a throwaway session; every test and live check MUST do so, because the launcher on the default name works on the live `machine` session. A rerun opens only the missing windows. The separate tabs stay open.
+
+An agent drives the windows with the tuios control commands, with no client attached:
+
+```sh
+tuios list-windows -s machine
+tuios focus-window runs -s machine
+tuios send-keys -w runs -s machine a
+tuios capture-pane -w runs -s machine
+```
+
 ## Viewing from another machine
 
 Sidebar layouts are client-side: Herdr draws the sidebar from the config of the machine you view from, even over `herdr --remote`. The host still reports every token, but the viewing machine needs the host's layout to show them. `./ship.sh launch` installs [`blueprint/maintenance/herdr-sidebar-to-client.py`](../blueprint/maintenance/herdr-sidebar-to-client.py) as `~/.local/bin/herdr-sidebar-to-client.py`. On the viewing machine, run it against the host with Python 3 and ssh access, where `<host>` is anything `ssh` accepts, such as `user@host`:

@@ -189,6 +189,9 @@
             "browsers_tab": {
               "type": "boolean"
             },
+            "tuios_tab": {
+              "type": "boolean"
+            },
             "ci_pool_tab": {
               "type": "boolean",
               "description": "Deprecated, no effect, removed with #1187."
