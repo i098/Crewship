@@ -39,6 +39,14 @@ test("the system prompt the child starts with tells the desk to ack an owner ins
   expect(prompt).toContain("Call handoff_main with a short ack as its text");
 });
 
+test("the system prompt sends a link read or web lookup to the helper, also after the desk's own read is refused", async () => {
+  const argv = await sessionArgv("omp", "claude-haiku-5-5");
+  const prompt = argv[argv.indexOf("--system-prompt") + 1];
+  expect(prompt).toContain("You never read a link or look something up on the web yourself");
+  expect(prompt).toContain("If your own read of a link or a web page is refused, do not hand it off: call delegate_task with helper:read-link or helper:lookup");
+  expect(prompt).toContain("except a refused read of a link or web page, which goes to the helper");
+});
+
 test("a background task's answer reaches the next turn as a missed line, the session's own replies do not", async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
