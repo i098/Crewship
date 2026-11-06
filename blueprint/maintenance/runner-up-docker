@@ -28,8 +28,12 @@ run)
       -e BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun -e npm_config_cache=/home/runner/.cache/npm
       -e npm_config_store_dir=/home/runner/.cache/pnpm-store"
   fi
-  # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache holds no spaces inside a word
-  exec $docker run --cgroup-parent "$slice" --pids-limit 8192 $cache "$@" ;;
+  # A job sees every CPU of the host, so cargo would start one rustc and one link for each of them
+  # while --cpus holds the job to its own share. A job's own CARGO_BUILD_JOBS still wins.
+  jobs=
+  [ -z "${RUNNER_UP_JOB_CPUS-}" ] || jobs="-e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
+  # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache and $jobs hold no spaces inside a word
+  exec $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;
 build)
   shift
   # shellcheck disable=SC2086

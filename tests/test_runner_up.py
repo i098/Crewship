@@ -538,6 +538,20 @@ def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
     assert (cache / "cargo-registry").is_dir()
 
 
+def test_the_shim_limits_cargo_jobs_to_the_job_cpus(stubs, tmp_path):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_JOB_CPUS": "4"}
+    (call,) = run_script("runner-up-docker", stubs, "run", "--rm", "img", env=env)
+    assert call == "docker run --cgroup-parent runnerup.slice --pids-limit 8192 -e CARGO_BUILD_JOBS=4 --rm img"
+
+
+def test_the_service_passes_the_job_cpus_to_the_shim(home):
+    apply(home, runner(home))
+    service = unit_sections(units(home) / "runner-up@.service")["Service"]
+    assert "RUNNER_UP_JOB_CPUS=4" in service["Environment"]
+
+
 def test_the_shim_uses_sudo_when_the_account_cannot_write_the_docker_socket(stubs, tmp_path):
     env = {"RUNNER_UP_DOCKER_SOCK": str(tmp_path / "missing.sock")}
     calls = run_script("runner-up-docker", stubs, "run", "img", env=env)
