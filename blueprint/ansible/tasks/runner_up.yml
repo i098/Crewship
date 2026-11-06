@@ -55,6 +55,12 @@
       block:
         - name: Create the build gate directory
           ansible.builtin.file:
+            path: "{{ crewship_build_gate_slots_file | dirname }}"
+            state: directory
+            mode: "0755"
+
+        - name: Create the build gate lock directory
+          ansible.builtin.file:
             path: "{{ crewship_build_gate_dir }}"
             state: directory
             mode: "1777"
@@ -62,7 +68,7 @@
         - name: Write the host-wide slot count
           ansible.builtin.copy:
             content: "{{ crewship_build_gate_slots }}\n"
-            dest: "{{ crewship_build_gate_dir }}/slots"
+            dest: "{{ crewship_build_gate_slots_file }}"
             mode: "0644"
 
         - name: Install the cargo shim

@@ -75,6 +75,8 @@ crewship_runner_up_build_gate_bin: "{{ crewship_local_bin }}/build-gate"
 # Opt in: jobs start only when the host-wide build gate has a free slot (docs/runner-up.md#build-gate).
 crewship_runner_up_build_gate: "{{ crewship_runner_up.build_gate | default(false) }}"
 crewship_build_gate_dir: /tmp/build-gate
+# Persistent, unlike the locks in /tmp: the count survives a reboot.
+crewship_build_gate_slots_file: "{{ crewship_cfg.home }}/.local/share/build-gate/slots"
 # The one host-wide job count; every build-gate caller reads it. Keep it below runner-up total_slots so the gate limits runner-up.
 crewship_build_gate_slots: "{{ crewship_runner_up.build_gate_slots | default(4) | int }}"
 # The cargo shim file that sends host builds (workers, mates) through build-gate.

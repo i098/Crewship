@@ -679,6 +679,7 @@ def gate(tmp_path, *args, env=None, timeout=20):
     environment = {
         "PATH": "/usr/bin:/bin",
         "BUILD_GATE_DIR": str(tmp_path / "gate"),
+        "BUILD_GATE_SLOTS_FILE": str(tmp_path / "slots"),
         "BUILD_GATE_PRESSURE_FILE": str(pressure),
         "BUILD_GATE_DISK_PATH": str(tmp_path),
         "BUILD_GATE_DISK_PCT": "100",
@@ -717,8 +718,7 @@ def test_build_gate_waits_while_the_disk_is_above_the_limit(tmp_path):
 
 
 def test_build_gate_slot_count_comes_from_the_shared_file(tmp_path):
-    (tmp_path / "gate").mkdir()
-    (tmp_path / "gate" / "slots").write_text("1\n")
+    (tmp_path / "slots").write_text("1\n")
     first = gate(tmp_path, "sleep", "4")
     time.sleep(1)
     second = gate(tmp_path, "echo", "second")
@@ -767,6 +767,7 @@ def cargo_shim(tmp_path, *args, io="99.00"):
     environment = {
         "PATH": f"{bindir}:{realdir}:/usr/bin:/bin",
         "BUILD_GATE_DIR": str(tmp_path / "gate"),
+        "BUILD_GATE_SLOTS_FILE": str(tmp_path / "slots"),
         "BUILD_GATE_DISK_PATH": str(tmp_path),
         "BUILD_GATE_DISK_PCT": "100",
         "BUILD_GATE_PRESSURE_FILE": str(pressure),

@@ -90,7 +90,7 @@ sudo docker inspect runner-up-<place> --format '{{.HostConfig.CgroupParent}}'   
 
 ## Build gate
 
-One host-wide job pool keeps Cargo builds from piling up: `build-gate <command...>` (from `blueprint/maintenance/build-gate`, installed as `~/.local/bin/build-gate`). It waits, and never fails, while `/sdc-disk` is above 85% or `/proc/pressure/io` `full` avg60 is above 40. Then it takes one `flock` slot in `/tmp/build-gate` and holds it until the command ends. Every caller reads the one slot count from `/tmp/build-gate/slots` (default 4; set `build_gate_slots` under `runner_up`; keep it below `total_slots`). `BUILD_GATE=off` skips the gate; `BUILD_GATE_DISK_PATH`, `BUILD_GATE_DISK_PCT`, `BUILD_GATE_IO_PCT` and `BUILD_GATE_DIR` change the limits. A command that runs under the gate does not wait again.
+One host-wide job pool keeps Cargo builds from piling up: `build-gate <command...>` (from `blueprint/maintenance/build-gate`, installed as `~/.local/bin/build-gate`). It waits, and never fails, while `/sdc-disk` is above 85% or `/proc/pressure/io` `full` avg60 is above 40. Then it takes one `flock` slot in `/tmp/build-gate` and holds it until the command ends. Every caller reads the one slot count from `~/.local/share/build-gate/slots` (`BUILD_GATE_SLOTS_FILE`; it survives a reboot; default 4 when the file is missing; set `build_gate_slots` under `runner_up`; keep it below `total_slots`). `BUILD_GATE=off` skips the gate; `BUILD_GATE_DISK_PATH`, `BUILD_GATE_DISK_PCT`, `BUILD_GATE_IO_PCT` and `BUILD_GATE_DIR` change the limits. A command that runs under the gate does not wait again.
 
 Set `build_gate: true` under `runner_up` to install the pool on a host:
 
