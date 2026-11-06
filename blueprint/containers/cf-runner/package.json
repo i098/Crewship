@@ -1,0 +1,1 @@
+{"name":"crewship-cf-runner","private":true,"type":"module","dependencies":{"@cloudflare/containers":"0.3.7"},"devDependencies":{"wrangler":"4.158.0"}}
