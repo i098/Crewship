@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 ISSUE_WRITES = {
@@ -274,6 +275,35 @@ def check_write(argv, cli):
         )
 
 
+READ_CACHE_TTL = "60s"
+WRITE_FLAGS = {"-f", "-F", "--raw-field", "--field", "--input", "--cache"}
+
+
+def read_cache(argv, cli):
+    """Log the call and add gh's response cache to a plain REST read.
+
+    The GitHub REST budget is shared by every agent on the host, and each agent polls the same pull
+    request lookups. shortcut: a cached read can be READ_CACHE_TTL stale; GH_NO_CACHE=1 bypasses it.
+    """
+    try:
+        with open(os.path.expanduser("~/.local/state/gh/calls.log"), "a") as log:
+            log.write(f"{int(time.time())} {os.getppid()} {os.getcwd()} {' '.join(argv)[:160]}\n")
+    except OSError:
+        pass
+    if cli != "gh" or argv[:1] != ["api"] or os.environ.get("GH_NO_CACHE") or "graphql" in argv:
+        return argv
+    rest, words = [], iter(argv[1:])
+    for word in words:
+        if word in {"-X", "--method"}:
+            word += " " + next(words, "")
+        if word.upper().replace("=", " ").replace("-XGET", "-X GET") in {"-X GET", "--METHOD GET"}:
+            continue
+        if word.startswith(("-X", "--method")) or word.split("=")[0] in WRITE_FLAGS:
+            return argv
+        rest.append(word)
+    return ["api", "--cache", READ_CACHE_TTL, *rest]
+
+
 def main():
     cli = Path(sys.argv[0]).name
     if cli not in {"gh", "gh-axi"}:
@@ -283,7 +313,7 @@ def main():
     real = wrapper.with_name(cli + "-real").resolve(strict=True)
     if real == wrapper:
         raise ValueError(f"Blocked: the managed {cli} target points back to its wrapper.")
-    os.execv(real, [str(real), *sys.argv[1:]])
+    os.execv(real, [str(real), *read_cache(sys.argv[1:], cli)])
 
 
 if __name__ == "__main__":

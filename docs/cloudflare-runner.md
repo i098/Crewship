@@ -15,7 +15,7 @@ crewship:
     repos:
       - { repo: owner/name, label: cf-name }   # workflows use `runs-on: cf-name`
   #   max_instances: 4                       # most containers at one time
-  #   poll_seconds: 20
+  #   poll_seconds: 60
 ```
 
 `inspect` refuses a label that every runner has (`self-hosted`, `linux`, ...) or that looks GitHub-hosted, and a repository named twice.
