@@ -165,9 +165,13 @@ export function prOwners(remotes: string): string[] {
 
 // The open pull request for a branch changes rarely, so the lookup is cached
 // on disk per repository and branch, shared by every omp process on the host.
-// It runs again only when local HEAD moved (a push or commit) or the entry is
-// PR_TTL_MS old; a stale lookup sends the stored ETag, and a 304 costs nothing.
+// It runs again when local HEAD moved (a commit) or the entry outlived its TTL:
+// 10 minutes for a found PR, 1 minute for none (a PR is created without moving
+// HEAD), 5 minutes after a failed lookup. A stale lookup sends the stored ETag,
+// and a 304 costs nothing.
 const PR_TTL_MS = 10 * 60 * 1000;
+const NO_PR_TTL_MS = 60 * 1000;
+const FAILED_TTL_MS = 5 * 60 * 1000;
 const cacheDir = () =>
   process.env.CREWSHIP_SIDEBAR_CACHE ||
   path.join(process.env.XDG_CACHE_HOME || path.join(homedir(), ".cache"), "crewship-sidebar");
@@ -189,34 +193,59 @@ async function ghPulls(cwd: string, owner: string, branch: string, etag?: string
   return { etag: tag, pr: JSON.parse(rest.join("\n\n"))[0] || null };
 }
 
-export async function lookupPr(cwd: string) {
-  const branch = (await run("git", ["-C", cwd, "branch", "--show-current"])).trim();
-  if (!branch) return undefined;
-  // A branch nobody pushed has no pull request: no lookup at all.
-  if (!(await run("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "@{upstream}"]).catch(() => "")).trim()) return undefined;
-  const head = (await run("git", ["-C", cwd, "rev-parse", "HEAD"]).catch(() => "")).trim();
-  const remotes = await run("git", ["-C", cwd, "remote", "-v"]);
-  const file = path.join(cacheDir(), createHash("sha1").update(`${remotes}\n${branch}`).digest("hex") + ".json");
-  let entry: { at?: number; head?: string; owners?: Record<string, { etag?: string; pr?: any }> } = {};
-  try {
-    entry = JSON.parse(readFileSync(file, "utf8"));
-  } catch {}
-  const owners = entry.owners || {};
-  const pick = () => Object.values(owners).find((o) => o.pr)?.pr || undefined;
-  if (entry.head === head && Date.now() - (entry.at || 0) < PR_TTL_MS) return pick();
-  const next: Record<string, { etag?: string; pr?: any }> = {};
+type Owners = Record<string, { etag?: string; pr?: any }>;
+const firstPr = (owners: Owners) => Object.values(owners).find((o) => o.pr)?.pr || undefined;
+
+// The default branch and a branch with no commits beyond it have no pull request.
+async function hasNoPr(cwd: string, branch: string) {
+  const git = (...args: string[]) => run("git", ["-C", cwd, ...args]);
+  for (const r of ["origin/HEAD", "origin/main", "origin/master"]) {
+    const base = (await git("rev-parse", "--verify", "--quiet", `${r}^{commit}`).catch(() => "")).trim();
+    if (!base) continue;
+    const name = (await git("rev-parse", "--abbrev-ref", r).catch(() => r)).trim().replace(/^origin\//, "");
+    return name === branch || (await git("rev-list", "--count", `${base}..HEAD`).catch(() => "")).trim() === "0";
+  }
+  return false;
+}
+
+async function fetchPulls(cwd: string, branch: string, remotes: string, owners: Owners) {
+  const next: Owners = {};
   for (const owner of prOwners(remotes)) {
     const got = await ghPulls(cwd, owner, branch, owners[owner]?.etag);
     next[owner] = got.notModified ? { etag: got.etag, pr: owners[owner]?.pr } : { etag: got.etag, pr: got.pr };
     if (next[owner].pr) break;
   }
+  return next;
+}
+
+export async function lookupPr(cwd: string) {
+  const branch = (await run("git", ["-C", cwd, "branch", "--show-current"])).trim();
+  if (!branch || (await hasNoPr(cwd, branch))) return undefined;
+  const head = (await run("git", ["-C", cwd, "rev-parse", "HEAD"]).catch(() => "")).trim();
+  const remotes = await run("git", ["-C", cwd, "remote", "-v"]);
+  const file = path.join(cacheDir(), createHash("sha1").update(`${remotes}\n${branch}`).digest("hex") + ".json");
+  let entry: { at?: number; head?: string; ttl?: number; owners?: Owners } = {};
+  try {
+    entry = JSON.parse(readFileSync(file, "utf8"));
+  } catch {}
+  const owners = entry.owners || {};
+  if (entry.head === head && Date.now() - (entry.at || 0) < (entry.ttl ?? PR_TTL_MS)) return firstPr(owners);
+  let kept = owners;
+  let failed = false;
+  try {
+    kept = await fetchPulls(cwd, branch, remotes, owners);
+  } catch {
+    failed = true;
+  }
+  const found = firstPr(kept);
   try {
     await mkdir(cacheDir(), { recursive: true });
     const tmp = `${file}.${process.pid}`;
-    await writeFile(tmp, JSON.stringify({ at: Date.now(), head, owners: next }));
+    const ttl = failed ? FAILED_TTL_MS : found ? PR_TTL_MS : NO_PR_TTL_MS;
+    await writeFile(tmp, JSON.stringify({ at: Date.now(), head, ttl, owners: kept }));
     await rename(tmp, file);
   } catch {}
-  return Object.values(next).find((o) => o.pr)?.pr || undefined;
+  return found;
 }
 
 // A worker's issue from its orchestrator home: the backlog entry, then the

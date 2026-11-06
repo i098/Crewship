@@ -117,7 +117,10 @@ def test_pr_owners_from_remotes():
 
 STUB_GH = """#!/bin/sh
 echo "$*" >> "$GH_LOG"
-case "$*" in *If-None-Match*) printf 'HTTP/2.0 304 Not Modified\\r\\nEtag: "v1"\\r\\n\\r\\n'; exit 1;; esac
+mode=$(cat "$GH_MODE" 2>/dev/null)
+[ "$mode" = fail ] && { echo "HTTP 403 rate limit" >&2; exit 1; }
+case "$*" in *'If-None-Match: "v1"'*) printf 'HTTP/2.0 304 Not Modified\\r\\nEtag: "v1"\\r\\n\\r\\n'; exit 1;; esac
+[ "$mode" = empty ] && { printf 'HTTP/2.0 200 OK\\r\\nEtag: "v0"\\r\\n\\r\\n[]'; exit 0; }
 printf 'HTTP/2.0 200 OK\\r\\nEtag: "v1"\\r\\n\\r\\n[{"number": 7}]'
 """
 
@@ -134,6 +137,7 @@ def lookup(tmp_path):
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "GH_LOG": str(log),
+        "GH_MODE": str(tmp_path / "gh.mode"),
         "CREWSHIP_SIDEBAR_CACHE": str(tmp_path / "cache"),
         "GIT_AUTHOR_NAME": "t",
         "GIT_AUTHOR_EMAIL": "t@t",
@@ -165,11 +169,51 @@ def lookup(tmp_path):
     return run, git, push, lambda: log.read_text().splitlines(), tmp_path / "cache"
 
 
+def age(cache, ms):
+    f = next(cache.glob("*.json"))
+    entry = json.loads(f.read_text())
+    entry["at"] -= ms
+    f.write_text(json.dumps(entry))
+
+
 @needs_bun
-def test_no_pr_lookup_for_a_branch_without_upstream(lookup):
-    run, _, _, calls, _ = lookup
-    assert run() is None
+def test_no_pr_lookup_for_the_default_branch_or_a_branch_without_commits(lookup):
+    run, git, _, calls, _ = lookup
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    assert run() is None  # feat has no commit beyond origin/main
+    git("commit", "-q", "--allow-empty", "-m", "two")
+    git("checkout", "-q", "-b", "main")
+    assert run() is None  # the default branch itself
     assert calls() == []
+    git("checkout", "-q", "feat")
+    assert run() == {"number": 7}  # unpushed work still looks up
+    assert len(calls()) == 1
+
+
+@needs_bun
+def test_a_missing_pr_is_looked_up_again_within_a_minute(lookup):
+    run, _, _, calls, cache = lookup
+    (cache.parent / "gh.mode").write_text("empty")
+    assert run() is None and run() is None
+    assert len(calls()) == 1
+    (cache.parent / "gh.mode").write_text("")
+    age(cache, 61 * 1000)  # the PR was created; HEAD did not move
+    assert run() == {"number": 7}
+    assert len(calls()) == 2
+
+
+@needs_bun
+def test_a_failed_lookup_is_not_retried_for_five_minutes(lookup):
+    run, _, _, calls, cache = lookup
+    (cache.parent / "gh.mode").write_text("fail")
+    assert run() is None and run() is None
+    assert len(calls()) == 1
+    age(cache, 4 * 60 * 1000)
+    assert run() is None
+    assert len(calls()) == 1
+    age(cache, 2 * 60 * 1000)
+    assert run() is None
+    assert len(calls()) == 2
 
 
 @needs_bun
@@ -185,10 +229,7 @@ def test_pr_lookup_is_shared_and_rare(lookup):
     assert run() == {"number": 7}
     assert len(calls()) == 2 and "If-None-Match" in calls()[1]
     # Same HEAD, entry older than 10 minutes: looks again.
-    f = next(cache.glob("*.json"))
-    entry = json.loads(f.read_text())
-    entry["at"] -= 11 * 60 * 1000
-    f.write_text(json.dumps(entry))
+    age(cache, 11 * 60 * 1000)
     assert run() == {"number": 7}
     assert len(calls()) == 3
 
