@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
 import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
-import { createHelper, spawnHelper } from "./desk-helper.ts";
+import { createHelper, spawnHelper, type HelperKind } from "./desk-helper.ts";
 import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
@@ -109,16 +109,16 @@ function createDeskHelper<R extends TurnRequest>(host: SessionHost<R>) {
   const inception = host.provider === "inception";
   const instant = inception && host.reasoning === "instant";
   const log = host.log("desk helper");
-  const helper = createHelper((task) => spawnHelper({
+  const helper = createHelper((task, kind) => spawnHelper({
     model: modelArg(host.provider, host.model), reasoning: instant ? "off" : host.reasoning, thresholdKey: thresholdKeyOf(host.provider, host.model),
     owner: host.env.FM_IMESSAGE_OWNER_NAME || "the owner", dir: `${host.stateDir}/desk-helper`, track: host.track,
-    env: { ...childEnv(host.env, inception), FM_DESK_MEMORY: host.memoryDir, FM_DESK_INCEPTION_INSTANT: instant ? "1" : undefined },
+    env: { ...childEnv(host.env, inception), FM_DESK_INCEPTION_INSTANT: instant ? "1" : undefined }, kind,
   }, task));
   return {
     busy: helper.busy,
-    async run(text: string) {
-      log("started");
-      const answer = await helper.run(text);
+    async run(text: string, kind: HelperKind) {
+      log(`started (${kind})`);
+      const answer = await helper.run(text, kind);
       log(answer === undefined ? "failed; handing the ask to Firstmate" : "answered");
       return answer;
     },

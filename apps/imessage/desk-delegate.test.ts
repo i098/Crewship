@@ -186,7 +186,7 @@ test("with the bridge's keyed outbox, the follow-up and the late answer are both
 test("a helper ask is answered by the helper alone: no inbox note, no answer file", async () => {
   const asked: string[] = [];
   const r = rig({ helper: async (text) => (asked.push(text), "Installed it.\n\nNothing else to do.") });
-  r.delegate("helper", "install the ripgrep skill", "chat-1");
+  r.delegate("helper:install", "install the ripgrep skill", "chat-1");
   await until(() => r.reports.length === 1);
   expect(asked).toEqual(["install the ripgrep skill"]);
   expect(r.reports).toEqual([{ parts: ["Installed it.", "Nothing else to do."], origin: "chat-1" }]);
@@ -196,7 +196,7 @@ test("a helper ask is answered by the helper alone: no inbox note, no answer fil
 test("a helper that fails or times out hands the ask to Firstmate and texts a short note", async () => {
   for (const helper of [async () => undefined, async () => { throw new Error("spawn failed"); }] as DelegateHost<string>["helper"][]) {
     const r = rig({ helper });
-    r.delegate("helper", "install the ripgrep skill", "chat-1");
+    r.delegate("helper:install", "install the ripgrep skill", "chat-1");
     await until(() => r.reports.length === 1);
     expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
     expect(r.sent.map((entry) => entry.target)).toEqual(["firstmate"]);

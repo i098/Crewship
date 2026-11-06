@@ -336,13 +336,13 @@ If the missed chat since the last session turn is longer than 8,000 characters, 
 #### Background tasks
 
 The desk can answer the owner at once while the work goes on in the background.
-The session calls `delegate_task` with the target `helper`, `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
+The session calls `delegate_task` with the target `helper:install`, `helper:lookup`, `helper:read-link`, `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
 The tool works like `reply`: it ends the turn, and the same checks apply to the reply text.
 The bridge sends the reply first and then starts one background job.
 
 - The bridge sends the owner's verbatim text to the target. The model never writes the task.
 - `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
-- A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target, except `helper`, is refused before anything is sent.
+- A mate target needs `relayTargetCurrent`, as `relay_mate` does. Any other target, except the three helper kinds, is refused before anything is sent.
 - `firstmate` gets an inbox note and a mate gets `fm-send.sh`. Both start with `[from captain via desk]`.
 - The task text ends with a path in `desk-tasks/` in the state directory. The target writes its answer for the owner to that file. This is the only answer channel.
 - The bridge also saves a task file with the same id in `desk-tasks/`. It holds the owner's text and the chat of the request.
@@ -357,14 +357,16 @@ The bridge sends the reply first and then starts one background job.
 #### Helper
 
 The desk handles a simple, self-contained ask itself: install a skill or tool, look something up, read a link.
-The session calls `delegate_task` with the target `helper` and a short reply. The reply goes out at once.
+The desk model classifies each work ask as install, lookup, read-link or other. Only those three kinds go to a helper; the session calls `delegate_task` with the target `helper:install`, `helper:lookup` or `helper:read-link` and a short reply. Any other ask, including one that sends, posts, emails, replies, pays or deploys, goes to Firstmate. The reply goes out at once.
 
-- The bridge starts one `omp -p` run with `read`, `grep`, `glob`, `bash` and `write`, the desk model, and no approval prompts. The run starts in a fresh scratch directory under `desk-helper/` in the state directory. It sees the same environment as the desk session and the same secret redaction. Compaction at 80,000 tokens keeps its input under the desk's 100,000-token cap.
+- The bridge starts one `omp -p` run with the desk model and no approval prompts. An install helper has `read`, `grep`, `glob` and `bash`. A lookup helper has `read`, `grep`, `glob` and `web_search`. A read-link helper has `read`, `grep` and `glob`. No helper has `write`. Lookup and read-link helpers read untrusted web content, so they have no `bash`. The run starts in a fresh scratch directory under `desk-helper/` in the state directory, with the same secret redaction as the desk session.
+- The helper environment is `PATH`, `HOME` and the desk model's own key only. It has no `FM_HOME`, no `super.env` and no other provider key.
 - The helper gets the owner's verbatim text. Its last message is the answer. It goes through the same checks as `reply`, like any task answer.
 - One helper runs at a time. A second ask while it runs is refused, so the session hands it to Firstmate. A run has a 10-minute limit.
-- The bridge refuses the helper, before it starts, for a protected request (`deskMayAct`) and for text about money or a public post. Those go to Firstmate with `handoff_main`, as do approvals, decisions, deploys, credentials and work for several mates.
+- The bridge refuses a helper target that is not one of the three kinds, a protected request (`deskMayAct`), and text with a money, send or post word. This regex is only an extra deny: the allowlist of kinds is the rule, and the desk model's classification decides it. Refused asks go to Firstmate with `handoff_main`, as do approvals, decisions, deploys, credentials and work for several mates.
 - If the helper fails, times out, or its answer is refused, Firstmate gets an inbox note with the owner's text and the owner gets the fixed text "Still with Firstmate; you will hear back".
-- The log shows `desk helper: started`, then `answered` or `failed`. A bridge restart ends a running helper and sends no answer.
+- The log shows `desk helper: started (<kind>)`, then `answered` or `failed`. A bridge restart ends a running helper and sends no answer.
+- Residual risk: an install helper runs `bash` with no approval prompt and the user's `HOME`, so a page or package it reads could still steer it to run commands in that account. The narrow environment keeps `FM_HOME` and other keys out, but not the files under `HOME` or the desk model's own key. Only an install ask reaches `bash`, and the helper prompt treats pages and command output as untrusted.
 
 The smoke command stays the same: run it with `FM_DESK_SMOKE_STRICT=1`.
 
