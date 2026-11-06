@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -576,7 +577,7 @@ def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
     assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
-def guard(stubs, tmp_path, used, *, paused="", active=True):
+def guard(stubs, tmp_path, used, *, paused="", active=True, env=None):
     """Run `guard` with a stub `df` that reports `used` percent and a `systemctl` that logs."""
     bin_dir, log = stubs
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
@@ -588,7 +589,7 @@ def guard(stubs, tmp_path, used, *, paused="", active=True):
     state = tmp_path / "paused"
     if paused:
         state.write_text(paused)
-    env = {"RUNNER_UP_INSTANCES": "a-b c-d", "RUNNER_UP_GUARD_STATE": str(state)}
+    env = {"RUNNER_UP_INSTANCES": "a-b c-d", "RUNNER_UP_GUARD_STATE": str(state), **(env or {})}
     calls = run_script("runner-up-maintain", stubs, "guard", env=env)
     return [c for c in calls if c.startswith("systemctl")], state
 
@@ -598,6 +599,16 @@ def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_
     calls = stubs[1].read_text().splitlines()
     assert calls[0] == "docker container prune --force --filter label=runner-up.place"
     assert not any(c.startswith("docker rm") or " stop " in c for c in calls)
+
+
+def test_guard_pauses_even_when_the_prune_hangs(stubs, tmp_path):
+    docker = stubs[0] / "docker"
+    docker.write_text("#!/bin/sh\nsleep 30\n")
+    started = time.monotonic()
+    calls, state = guard(stubs, tmp_path, 95, env={"RUNNER_UP_GUARD_PRUNE_TIMEOUT": "1"})
+    assert "systemctl --user stop runner-up@a-b.service" in calls
+    assert state.read_text() == "a-b\nc-d\n"
+    assert time.monotonic() - started < 10
 
 
 def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tmp_path):

@@ -44,8 +44,6 @@ guard)
   pause=${RUNNER_UP_PAUSE_PCT:-88}
   resume=${RUNNER_UP_RESUME_PCT:-85}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
-  # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
-  docker container prune --force --filter label=runner-up.place >/dev/null || true
   used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
   if [ "$used" -ge "$pause" ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
@@ -55,7 +53,9 @@ guard)
   elif [ "$used" -lt "$resume" ] && [ -s "$state" ]; then
     while read -r i; do systemctl --user start "runner-up@$i.service"; done < "$state"
     rm -f "$state"
-  fi ;;
+  fi
+  # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
+  timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
 *)
   echo "usage: runner-up-maintain image [--ensure] | clean | guard" >&2
   exit 2 ;;
