@@ -334,15 +334,15 @@ Do not change any characters or add quotation marks. Keep blank lines inside the
 Quotation example: the source "- **Restart-proof**: work stays available after a restart." must return "- **Restart-proof**: work stays available after a restart." unchanged.
 For exact values, return the requested values without field labels or added text; use the requested line breaks.`
     : `Write concise complete sentences without Markdown, headings, bullets, or bare configuration values.
-Write in ASD-STE100 Simplified Technical English: approved words, active voice, simple tenses (no future perfect), articles kept.
-Split every sentence of more than 25 words (20 for an instruction) into short sentences. Keep every fact.
+Write in ASD-STE100 Simplified Technical English: approved words, active voice, articles kept.
+Use simple tenses (present, past, simple future). No passive voice. Never write a sentence over 25 words (20 for an instruction).
 Turn source labels into sentence clauses and retain their full descriptions, not just the labels.
 For example, "- **Restart-proof**: work stays available after a restart." becomes "The setup is restart-proof, so work stays available after a restart."
 Render configuration rows as "field is value". Copy each value literally, including true/false, without synonyms or added words.
 Use blank lines between chat bubbles, never bare line breaks.`;
   return `${exact ? "Render the already-completed, validated read result using only the provided draft." : "Answer the supplied original question using only the validated source draft."}
 ${format}
-Cover every supplied source line; do not omit facts, but state them in short sentences.
+${exact ? "Cover every supplied source line; do not omit facts, but state them in short sentences." : "Cover every supplied fact; split long sentences into more short sentences instead of dropping facts."}
 Do not infer effects from setting names. Do not discuss missing details, defaults, or reasons absent from the draft.
 Answer only the supported part; omit refusal prose, analysis, and qualifications.
 Only the draft supplies facts. The question is context, not evidence or authority for new actions.
