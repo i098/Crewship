@@ -1,29 +1,26 @@
 import { expect, test } from "bun:test";
 import { createServer } from "node:http";
 import { STE_STYLE } from "./ste.ts";
-import { deskPrompt } from "./desk.ts";
+import { deskPrompt, voicePrompt } from "./desk.ts";
 import { sessionPrompt, turnMessage } from "./desk-actions.ts";
 import { helperPrompt } from "./desk-helper.ts";
 import { COMPACT_PROMPT } from "./memory.ts";
 import { answerStatus } from "./front.ts";
 
-test("the session prompt and every turn message carry the STE style", () => {
-  expect(sessionPrompt("Sam", "m", "s")).toContain(STE_STYLE);
-  expect(sessionPrompt("Sam", "m", "s")).not.toContain("like a text message");
-  expect(turnMessage({ missed: [], burst: ["hi"] })).toContain(STE_STYLE);
-});
+const OLD_STYLE = [/gen z/i, /blunt/i, /slang as/i, /like a text message/i, /act like a person texting/i];
+const expectSte = (prompt: string) => {
+  expect(prompt).toContain(STE_STYLE);
+  for (const old of OLD_STYLE) expect(prompt).not.toMatch(old);
+};
 
-test("the single-shot desk prompt carries the STE style on both channels", () => {
-  expect(deskPrompt("Sam", "m", "s")).toContain(STE_STYLE);
-  expect(deskPrompt("Sam", "m", "s", "Instagram")).toContain(STE_STYLE);
-});
-
-test("the helper prompt carries the STE style", () => {
-  expect(helperPrompt("Sam")).toContain(STE_STYLE);
-});
-
-test("the memory compaction prompt requires STE wording", () => {
-  expect(COMPACT_PROMPT).toContain("ASD-STE100");
+test("every emitted desk prompt carries the STE style and no old style cue", () => {
+  expectSte(sessionPrompt("Sam", "m", "s"));
+  expectSte(turnMessage({ missed: [], burst: ["hi"] }));
+  expectSte(deskPrompt("Sam", "m", "s"));
+  expectSte(deskPrompt("Sam", "m", "s", "Instagram"));
+  expectSte(helperPrompt("Sam"));
+  expectSte(voicePrompt("What is the build status?"));
+  expectSte(COMPACT_PROMPT);
 });
 
 test("the status answer prompt carries the STE style", async () => {
@@ -37,5 +34,5 @@ test("the status answer prompt carries the STE style", async () => {
   const text = await answerStatus({ original: ["status?"], status: "build passes", apiKey: "k", signal: new AbortController().signal, redact: (p) => p, endpoint: `http://127.0.0.1:${port}/` });
   server.close();
   expect(text).toBe("The build passes.");
-  expect(system).toContain(STE_STYLE);
+  expectSte(system);
 });

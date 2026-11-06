@@ -49,6 +49,7 @@ test("the task carries the owner's text and the answer path to the target", asyn
   expect(r.sent[0].target).toBe("firstmate");
   expect(r.sent[0].text.startsWith("check the repo\n")).toBe(true);
   expect(r.sent[0].text).toContain(STE_STYLE);
+  expect(r.sent[0].text).not.toMatch(/gen z|blunt|slang as|like a text message|act like a person texting/i);
   expect(r.answerPath()).toMatch(/\/tasks\/[0-9a-f-]{36}\.answer$/);
 });
 

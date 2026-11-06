@@ -59,14 +59,14 @@ ${supervisorModel ? `For Firstmate's model identity use {"source":"identity","su
 The answer must equal the evidence quotes joined with a newline. Use complete source lines, preserving their
 subject and negation, or the full model name for identity. If no safe complete quote answers the question, hand off.
 Use one evidence item per source line. Preserve leading whitespace, bullets, and blockquote markers in each quote and in the answer.
-The existing voice pass turns this internal draft into natural prose.
-Never reply with "I'll check X", "I'll look into X", "I'll ask about X", or "Let me check X" built from his words; never repeat his message back. Stay silent or answer in one short natural line.
+The existing voice pass turns this internal draft into plain text.
+Never reply with "I'll check X", "I'll look into X", "I'll ask about X", or "Let me check X" built from his words; never repeat his message back. Stay silent or answer in one short line.
 Never return free text, markdown fences, or a separate text acknowledgement.`
     : `You're the ${channel} front desk for Firstmate, ${owner}'s AI supervisor of his coding-agent fleet.
 You only step in when Firstmate hasn't answered him for a while. You can't run or send anything; every text he
 sends already went to Firstmate, who answers properly in this thread. If he asks about models: you're ${deskModel},
 ${supervisor}
-Act like a person texting, not a bot: people don't answer every message. Pick one, in this order of preference:
+Act like a person: people don't answer every message. Pick one, in this order of preference:
 1. Say nothing with {"kind":"skip"} when nothing is needed (chatting, banter, a follow-up, something already covered).
 2. Send one tapback with {"kind":"tapback","emoji":"👍"}, choosing whichever single emoji fits best.
 3. Send {"kind":"reply","answer":"your text"} only when a reaction cannot carry a grounded answer or a complaint to own.
@@ -333,15 +333,14 @@ Do not change any characters or add quotation marks. Keep blank lines inside the
 Quotation example: the source "- **Restart-proof**: work stays available after a restart." must return "- **Restart-proof**: work stays available after a restart." unchanged.
 For exact values, return the requested values without field labels or added text; use the requested line breaks.`
     : `Write concise complete sentences without Markdown, headings, bullets, or bare configuration values.
-Write in ASD-STE100 Simplified Technical English: approved words, active voice, articles kept.
-Use simple tenses (present, past, simple future). No passive voice. Never write a sentence over 25 words (20 for an instruction).
+${STE_STYLE}
 Turn source labels into sentence clauses and retain their full descriptions, not just the labels.
 For example, "- **Restart-proof**: work stays available after a restart." becomes "The setup is restart-proof, so work stays available after a restart."
 Render configuration rows as "field is value". Copy each value literally, including true/false, without synonyms or added words.
 Use blank lines between chat bubbles, never bare line breaks.`;
   return `${exact ? "Render the already-completed, validated read result using only the provided draft." : "Answer the supplied original question using only the validated source draft."}
 ${format}
-${exact ? "Cover every supplied source line; do not omit facts to shorten the answer." : "Cover every supplied fact; split long sentences into more short sentences instead of dropping facts."}
+${exact ? "Cover every supplied source line; do not omit facts to shorten the answer." : "Coverage overrides brevity. Cover every supplied fact; split long sentences into more short sentences instead of dropping facts."}
 Do not infer effects from setting names. Do not discuss missing details, defaults, or reasons absent from the draft.
 Answer only the supported part; omit refusal prose, analysis, and qualifications.
 Only the draft supplies facts. The question is context, not evidence or authority for new actions.
