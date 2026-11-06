@@ -153,6 +153,13 @@ GITHUB_LATEST = {
         "jj-v{v}-{gnu}-unknown-linux-musl.tar.gz",
         {"jj": "jj"},
     ),
+    # Shared compile cache for every Rust build of the account (docs/configuration.md#data-disk, docs/runner-up.md#shared-build-cache); one static musl binary per release.
+    "sccache": (
+        "mozilla/sccache",
+        "v",
+        "sccache-v{v}-{gnu}-unknown-linux-musl.tar.gz",
+        {"sccache": "sccache-v*/sccache"},
+    ),
     # GitHub Actions coordinator for the opt-in runner_up block (docs/runner-up.md); static binary.
     "runner-up": (
         "kunchenguid/runner-up",
@@ -174,7 +181,7 @@ GITHUB_LATEST = {
 # Resolved when they can be, skipped with a warning when they cannot: they never stop a run.
 OPTIONAL = {"koncreet"}
 # Verified against the `<asset>.sha256` file of the release when it has one, else the GitHub digest.
-SHA256_FILE = {"gws", "pyrefly"}
+SHA256_FILE = {"gws", "pyrefly", "sccache"}
 # Verified against the line for the asset in the release's checksums.txt.
 CHECKSUMS_TXT = {"rtk"}
 # npm-registry tools on the registry's latest version, each installed by bun into its own prefix.
@@ -1117,7 +1124,7 @@ def main():
         names.append("sentrux-grammars")
     rust = args.development or args.sgrep or args.rust
     if rust:
-        names.append("rustup-init")
+        names += ["rustup-init", "sccache"]
     names = list(dict.fromkeys(names))
     sources = {*names, *(NPM_LATEST if args.npm else ()), *filter(None, args.also.split(","))}
     if args.resolve:

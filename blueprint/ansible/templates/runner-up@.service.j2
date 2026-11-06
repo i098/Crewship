@@ -8,6 +8,8 @@ Wants=network-online.target
 # The shim directory comes first so that every `docker run` of a job starts in {{ crewship_runner_up_slice }}.
 Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
+Environment=RUNNER_UP_SHARED_CACHE={{ crewship_runner_up_shared_cache }}
+Environment=RUNNER_UP_CACHE_MAX_GB={{ crewship_runner_up_cache_max_gb }}
 Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
 Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
 # The first start builds the job image when the host does not have it yet.

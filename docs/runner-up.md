@@ -25,6 +25,7 @@ crewship:
   #   memory_max: 50%           # MemoryMax of the slice, a size (64G) or a percent of the host
   #   cpu_share: 50             # CPUQuota of the slice: this percent of the host's CPUs
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
+  #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ci_pool.data_dir, else ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
 ```
@@ -160,10 +161,25 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
   A `docker: dind` entry of `ci_pool.repos` stays on the CI pool and is not in the runner-up config.
 - **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
+  The exception is the [shared build cache](#shared-build-cache): the docker shim mounts it into every local job.
 - **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.
   Put that root on a data disk with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
 - **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart 'runner-up@*'`.
   A restart stops no job.
+
+## Shared build cache
+
+Jobs do not build the same crate twice. Every local runner-up job shares one directory, `<data_dir>/ci-shared-cache/` (`~/.local/share/ci-shared-cache/` without a data directory). Apply never deletes it. Jobs on other [machines](#other-machines) do not get it.
+
+| Directory | Mounted at | Use |
+| --- | --- | --- |
+| `sccache` | `/sccache` | The compile cache. The job image has `sccache` and sets `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE` and `CARGO_INCREMENTAL=0` for each job. |
+| `cargo-registry`, `cargo-git`, `cargo-lock`, `cargo-lock-mutate` | `~/.cargo/registry`, `~/.cargo/git`, `~/.cargo/.package-cache`, `~/.cargo/.package-cache-mutate` | One registry and git cache. The two lock files are mounted so cargo's lock holds across jobs. |
+| `bun`, `npm`, `pnpm-store` | `~/.cache/bun`, `~/.cache/npm`, `~/.cache/pnpm-store` | Package stores. |
+
+`cache_max_gb` (default `150`, set under `runner_up`) caps the compile cache; sccache evicts the least recently used entries. Each job server counts its own use, so the cap holds roughly, not exactly. The directory is not shared with a live target directory: a job builds in its own checkout, and the job container, with its `target/`, goes when the job ends.
+
+Limits: sccache caches only builds that run `rustc` through the wrapper, with the same compiler, flags and paths, so a first build on a new toolchain still compiles everything. `Swatinem/rust-cache` deletes the registry files that its own job does not use, and with a shared registry that can fail a job that runs at the same time; re-run that job. Every repository that runner-up serves can write the cache, so list only repositories whose code you trust. The account's own worktrees use their own cache: see [Data disk](configuration.md#data-disk).
 
 ## Files on the host
 

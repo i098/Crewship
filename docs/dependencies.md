@@ -150,6 +150,7 @@ Bun output stays in one labeled block per package, including command failures.
   These plugins have no publisher checksums and track each author's default branch.
   They load as agent instructions and hooks.
 - `chat` profile: concord ([chojs23/concord](https://github.com/chojs23/concord/releases/latest), `concord-<arch>-unknown-linux-gnu.tar.xz`) and slk ([gammons/slk](https://github.com/gammons/slk/releases/latest), `slk_<version>_linux_<arch>.tar.gz`), verified against the GitHub release-asset digest. See [Chat clients](chat.md).
+- `sgrep`, `development`, `fleet_browsers` or `fleet_guards` profile: sccache ([mozilla/sccache](https://github.com/mozilla/sccache/releases/latest), the static musl build), verified against the `<asset>.sha256` file the release publishes.
 - `sgrep`, `development`, `fleet_browsers` or `fleet_guards` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the published `.sha256`.
   It installs the Rust `stable` toolchain with rustfmt and clippy.
   Each selected apply updates the toolchain to the newest stable release.

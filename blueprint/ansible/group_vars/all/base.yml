@@ -83,12 +83,21 @@ crewship_board_env: >-
 # native path setting use inherited defaults (docs/configuration.md#data-disk).
 crewship_data_dir: "{{ crewship_cfg.data_dir | default('', true) }}"
 crewship_docker_data_root: "{{ (crewship_data_dir ~ '/docker') if crewship_data_dir else '' }}"
+# One compile cache for every worktree of the account (docs/runner-up.md#shared-build-cache). Cargo's
+# registry already lives once in the account's home; target directories stay one per worktree.
+crewship_sccache_env:
+  RUSTC_WRAPPER: sccache
+  SCCACHE_DIR: "{{ crewship_data_dir }}/cache/sccache"
+  SCCACHE_CACHE_SIZE: 150G
+  CARGO_INCREMENTAL: "0"
 crewship_data_cache_env: >-
   {{ {'DENO_DIR': crewship_data_dir ~ '/cache/deno',
       'BUN_RUNTIME_TRANSPILER_CACHE_PATH': crewship_data_dir ~ '/cache/bun-transpiler',
       'TMPDIR': crewship_data_dir ~ '/tmp',
       'TMP': crewship_data_dir ~ '/tmp',
-      'TEMP': crewship_data_dir ~ '/tmp'} if crewship_data_dir else {} }}
+      'TEMP': crewship_data_dir ~ '/tmp'}
+     | combine(crewship_sccache_env if (crewship_cfg.profiles | default({})).development | default(false) | bool else {})
+     if crewship_data_dir else {} }}
 # Contract: compute the unit ExecStart directly, never /usr/local/bin or $PATH.
 crewship_herdr_bin: "{{ crewship_tools_root }}/herdr/{{ crewship_herdr_version }}/{{ crewship_platform }}/herdr"
 crewship_herdr_config_dir: "{{ crewship_cfg.home }}/.config/herdr"
