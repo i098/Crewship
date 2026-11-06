@@ -104,24 +104,33 @@ function startSession<R extends TurnRequest>(host: SessionHost<R>): DeskSession 
   });
 }
 
-export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
-  const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
-  let child: DeskSession | undefined;
+// The desk's helper (desk-helper.ts): the desk model and environment, one run at a time, each step in the log.
+function createDeskHelper<R extends TurnRequest>(host: SessionHost<R>) {
   const inception = host.provider === "inception";
   const instant = inception && host.reasoning === "instant";
+  const log = host.log("desk helper");
   const helper = createHelper((task) => spawnHelper({
     model: modelArg(host.provider, host.model), reasoning: instant ? "off" : host.reasoning, thresholdKey: thresholdKeyOf(host.provider, host.model),
     owner: host.env.FM_IMESSAGE_OWNER_NAME || "the owner", dir: `${host.stateDir}/desk-helper`, track: host.track,
     env: { ...childEnv(host.env, inception), FM_DESK_MEMORY: host.memoryDir, FM_DESK_INCEPTION_INSTANT: instant ? "1" : undefined },
   }, task));
-  const delegate = createDelegator<R>({
-    helper: async (text) => {
-      const log = host.log("desk helper");
+  return {
+    busy: helper.busy,
+    async run(text: string) {
       log("started");
       const answer = await helper.run(text);
       log(answer === undefined ? "failed; handing the ask to Firstmate" : "answered");
       return answer;
     },
+  };
+}
+
+export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
+  const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
+  let child: DeskSession | undefined;
+  const helper = createDeskHelper(host);
+  const delegate = createDelegator<R>({
+    helper: helper.run,
     answerDir: `${host.stateDir}/desk-tasks`, waitMs: WAIT_MS, pollMs: 500,
     stopping: host.stopping, muted: host.muted, log: host.log("desk task"), safe: (text) => host.safe!(text), // a turn runs only with the filter
     listed: host.listed, send: host.send, report: host.report,

@@ -102,6 +102,16 @@ function mateTools(host: ActionHost, live: () => void, may: () => void): Record<
   };
 }
 
+// The target of delegate_task: the helper (only for a simple, free ask), firstmate, or a listed mate that still owns the work.
+function delegateTarget(host: ActionHost, id: string): Secondmate | typeof HELPER | "firstmate" | undefined {
+  if (id === HELPER) {
+    if (!helperMayAct(host.requests)) throw new Error("refused: only Firstmate may handle this request (decision, money, deploy, credentials or a public post); call handoff_main");
+    if (host.helperBusy()) throw new Error("refused: the helper is busy with another ask; call handoff_main");
+    return id;
+  }
+  return id === "firstmate" ? id : relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
+}
+
 // One runner per turn. `acted()` says whether the turn ended in a reply, tapback, relay or handoff.
 export function createActions(host: ActionHost): { run: ToolRunner; acted(): boolean } {
   let done = false;
@@ -155,11 +165,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
     delegate_task: (args) => {
       open(); may();
       const id = String(args.target);
-      if (id === HELPER) {
-        if (!helperMayAct(host.requests)) throw new Error("refused: only Firstmate may handle this request (decision, money, deploy, credentials or a public post); call handoff_main");
-        if (host.helperBusy()) throw new Error("refused: the helper is busy with another ask; call handoff_main");
-      }
-      const mate = id === "firstmate" || id === HELPER ? id : relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
+      const mate = delegateTarget(host, id);
       if (!mate) throw new Error(`refused: ${id} is not a listed mate; use firstmate, helper or call handoff_main`);
       const { parts, target, logged } = replyParts(args, host.requests.length, host);
       done = true;
