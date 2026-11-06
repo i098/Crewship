@@ -402,6 +402,14 @@ def test_the_job_image_recipe_is_the_ci_pools_image(home):
     ).read_text() == pool_script.DOCKERFILE
 
 
+def test_the_job_image_owns_the_directories_the_cache_mounts_sit_under():
+    # Docker creates a missing mount parent as root, and then rustup cannot install into it.
+    line = "install -d -o runner -g runner /home/runner/.cargo /home/runner/.cache"
+    recipe = (ROOT / "blueprint/containers/ci-runner.Dockerfile").read_text()
+    assert line in recipe
+    assert line in pool_script.DOCKERFILE
+
+
 def test_reserved_labels_match_the_validator_and_the_template(home):
     variables = yaml.safe_load(
         (ROOT / "blueprint/ansible/group_vars/all/runner_up.yml").read_text()
