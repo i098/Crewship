@@ -515,11 +515,11 @@ Bun.serve({
     const form = url.pathname === "/image" ? await req.formData().catch(() => new FormData()) : undefined;
     const photo = form && await photoOf(form);
     if (photo instanceof Response) return photo;
-    const raw = form ? String(form.get("caption") ?? "") : await req.text();
+    const rawText = form ? String(form.get("caption") ?? "") : await req.text();
     const sender = req.headers.get("x-fm-sender")?.trim() || undefined;
-    const status = statusLine(raw);
+    const status = statusLine(rawText);
     if (status) return new Response(`nothing queued: this is a status line (${status}); write one plain-prose sentence for the owner\n`, { status: 422 });
-    const parts = bubbles(cleanText(raw));
+    const parts = bubbles(cleanText(rawText));
     if (!parts.length && !photo) return new Response("empty message", { status: 400 });
     // ?reply=N targets his Nth latest text. ?no-thread forces plain, even with an explicit target.
     const replyTo = Number(url.searchParams.get("reply") ?? 0);

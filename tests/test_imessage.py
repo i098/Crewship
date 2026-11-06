@@ -3484,3 +3484,40 @@ def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
     finally:
         bridge.terminate()
         bridge.wait(10)
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "ok", "expected"),
+    [
+        (200, '{"accuracy": 5.6, "locationTimestamp": "2020-01-01T00:00:00.000Z", "latitude": 1.5, "longitude": 2.5}', True, "ok, age "),
+        (503, "no location: not shared\n", False, "HTTP 503: no location: not shared"),
+        (500, "<!doctype html>\n<html>boom", False, "HTTP 500: <!doctype html>"),
+    ],
+)
+def test_fm_location_check_never_prints_coordinates(tmp_path, status, payload, ok, expected):
+    """A stub endpoint answers; `--check` prints age and accuracy only, and an error is one short line."""
+    import http.server
+    import threading
+
+    class Stub(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.path == "/location" and self.headers["X-Firstmate"] == "1"
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(payload.encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Stub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        env = {**os.environ, "FM_IMESSAGE_PORT": str(server.server_port), "TMPDIR": str(tmp_path)}
+        run = subprocess.run([str(ROOT / "apps/imessage/fm-location"), "--check"], env=env, capture_output=True, text=True, timeout=30)
+    finally:
+        server.shutdown()
+    out = run.stdout + run.stderr
+    assert (run.returncode == 0) is ok and expected in out
+    assert "1.5" not in out and "2.5" not in out
+    if ok:
+        assert re.fullmatch(r"ok, age \d+ s, accuracy 6 m\n", run.stdout)
