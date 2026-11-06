@@ -44,8 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch } from "./herdr-watch.ts";
-import { heartbeat, Turns } from "./selfheal.ts";
-import { brief, deskLog, keyOf, permanent, Queue, sendOnce, transient } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendOnce, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;

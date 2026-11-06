@@ -1,6 +1,8 @@
 // The bridge's durable queues (bridge.ts): the outbox of sends and tapbacks, and the attachment downloads to try
 // again. Kept free of spectrum-ts so tests run without it.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+// The line's reliability pieces live together: the self-heal heartbeat is exported here so the bridge keeps one import for them.
+export { heartbeat, Turns } from "./selfheal.ts";
 import { alreadySent, KEY_PATTERN, logSend, type Send } from "./sender-log.ts";
 
 const NETWORK = /^(TimeoutError|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EPIPE|ConnectionRefused|ConnectionClosed|FailedToOpenSocket|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_CLOSED)$/;
