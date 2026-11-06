@@ -1909,6 +1909,7 @@ const line = {
     const file = lastFile(chat);
     return { lastMessage: existsSync(file) ? { guid: readFileSync(file, "utf8") } : undefined };
   } },
+  locations: { async get(who) { return { latitude: 1.5, longitude: 2.5, accuracy: 5.6, locationTimestamp: "2020-01-01T00:00:00.000Z", who }; } },
 };
 export const Spectrum = async () => {
   if (process.env.FAKE_STARTUP_URL) await fetch(process.env.FAKE_STARTUP_URL);
@@ -3481,6 +3482,23 @@ def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
         wait_for(lambda: "send after the card" in text(fake / "sent"), "the text behind the refused card")
         assert "(card plan was not sent: Error: app cards are not on this plan)" in text(notes)
         assert len(list((state / "outbox-dead").glob("*.json"))) == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_bridge_serves_the_owners_location_from_the_line_client(tmp_path):
+    """GET /location on the real bridge returns the line client's location; an inner `raw` shadowing the client made it 500."""
+    fake, _, _, _, start, _, _, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        port = re.search(r"listening on 127\.0\.0\.1:(\d+)", text(tmp_path / "out")).group(1)
+        got = subprocess.run(["curl", "-s", "-w", "\n%{http_code}", "-H", "X-Firstmate: 1", f"http://127.0.0.1:{port}/location"],
+                             capture_output=True, text=True, timeout=30)
+        body, status = got.stdout.rsplit("\n", 1)
+        assert status == "200"
+        assert json.loads(body)["who"] == "+10000000000"
     finally:
         bridge.terminate()
         bridge.wait(10)
