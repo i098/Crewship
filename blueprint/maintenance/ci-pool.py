@@ -207,7 +207,8 @@ RUN apt-get update -qq \\
  && echo "$(curl -fsSL https://github.com/mozilla/sccache/releases/download/$tag/$asset.sha256)  /tmp/$asset" | sha256sum -c - \\
  && tar -xzf /tmp/$asset -C /tmp \\
  && install -m 755 /tmp/sccache-$tag-*/sccache /usr/local/bin/sccache \\
- && rm -rf /tmp/sccache-*
+ && rm -rf /tmp/sccache-* \\
+ && install -d -o runner -g runner /home/runner/.cargo /home/runner/.cache
 # Jobs mount their own directory over /var/lib/postgresql (see CONTAINER_PREP), so the
 # clusters that the packages created are kept here and copied in when a job starts.
 # Only the newest installed package creates its main cluster, so create the 17 one when it is
