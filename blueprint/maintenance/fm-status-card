@@ -8,7 +8,15 @@
 # Or JSON: {"title": "...", "projects": [{"name", "merged", "open", "today", "states": [...], "note"}],
 #           "gauges": {"Disk": 62}, "notes": ["text-format lines"]}
 # Without gauges in the input, the card shows this host's load, RAM and disks (fm-usage-brief, installed side by side).
-import html, importlib.machinery, importlib.util, json, os, re, subprocess, sys, tempfile
+import html
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
 
 WIDTH = 1170
 STATES = {"live": "live", "running": "running", "waiting on you": "waiting on you", "waiting": "waiting on you",
