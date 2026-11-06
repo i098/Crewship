@@ -282,6 +282,18 @@
     remote_src: true
   become: true
 
+# The omp extension that starts a turn for an owner note or watcher wake left
+# queued in an idle firstmate home after a compaction (docs/omp.md). Managed.
+- name: Install the stranded-wake omp extension
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/omp-stranded-wake.ts"
+    dest: "{{ crewship_omp_stranded_wake_extension }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+
 - name: Install the spawned Opus effort cap omp extension
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/config/omp-opus-effort-cap.ts"
