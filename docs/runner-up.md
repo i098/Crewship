@@ -213,6 +213,8 @@ Limits: sccache caches only builds that run `rustc` through the wrapper, with th
 | `~/.config/systemd/user/runner-up-image.{service,timer}` | The hourly image build, without `ci_pool`. |
 | `/etc/systemd/system/runnerup.slice` | The caps. |
 | `~/.local/bin/build-gate` | The shared build gate. |
+| `~/.local/bin/cargo` | The cargo shim, with `build_gate`. |
+| `~/.local/share/build-gate/slots` | The host-wide build slot count, with `build_gate`. |
 | `~/.local/share/runner-up/` | The docker shim and the image recipe. |
 | `~/.local/bin/runner-up-maintain` | The image build and the cleanup. |
 
