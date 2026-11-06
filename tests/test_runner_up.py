@@ -475,7 +475,6 @@ def stubs(tmp_path):
         stub.write_text(
             "#!/bin/sh\n"
             f'echo "{name} $*" >> {log}\n'
-            f'echo "$#" >> {log}.argc\n'
             'if [ "$1 $2" = "builder prune" ]; then\n'
             "  shift 2\n"
             '  for a in "$@"; do\n'
@@ -545,18 +544,8 @@ def test_the_shim_limits_cargo_jobs_to_the_job_cpus(stubs, tmp_path):
     env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_JOB_CPUS": "4"}
     (call,) = run_script("runner-up-docker", stubs, "run", "--rm", "img", env=env)
     assert call == (
-        "docker run --cgroup-parent runnerup.slice --pids-limit 8192 -e CARGO_BUILD_JOBS=4"
-        " -e RUSTFLAGS=-C link-arg=-Wl,--threads=4 --rm img"
+        "docker run --cgroup-parent runnerup.slice --pids-limit 8192 -e MOLD_JOBS=1 -e CARGO_BUILD_JOBS=4 --rm img"
     )
-    assert (tmp_path / "calls.argc").read_text().split() == ["11"]
-
-
-def test_the_shim_leaves_a_job_set_rustflags_alone(stubs, tmp_path):
-    sock = tmp_path / "docker.sock"
-    sock.touch()
-    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_JOB_CPUS": "4"}
-    (call,) = run_script("runner-up-docker", stubs, "run", "-e", "RUSTFLAGS=-Dwarnings", "img", env=env)
-    assert call == "docker run --cgroup-parent runnerup.slice --pids-limit 8192 -e CARGO_BUILD_JOBS=4 -e RUSTFLAGS=-Dwarnings img"
 
 
 def test_the_service_passes_the_job_cpus_to_the_shim(home):
