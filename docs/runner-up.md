@@ -88,6 +88,13 @@ systemctl show runnerup.slice -p CPUWeight -p IOWeight -p MemoryMax
 sudo docker inspect runner-up-<place> --format '{{.HostConfig.CgroupParent}}'   # runnerup.slice
 ```
 
+## Build gate
+
+One host-wide job pool keeps Cargo builds from piling up: `build-gate <command...>` (from `blueprint/maintenance/build-gate`, installed as `~/.local/bin/build-gate`). It waits, and never fails, while `/sdc-disk` is above 85% or `/proc/pressure/io` `full` avg60 is above 40. Then it takes one of `BUILD_GATE_SLOTS` (default 4) `flock` slots in `/tmp/build-gate` and holds it until the command ends. `BUILD_GATE=off` skips the gate; `BUILD_GATE_DISK_PATH`, `BUILD_GATE_DISK_PCT`, `BUILD_GATE_IO_PCT` and `BUILD_GATE_DIR` change the limits. A command that runs under the gate does not wait again.
+
+- runner-up jobs: set `build_gate: true` under `runner_up` (and `build_gate_slots`, default `total_slots`). The service gets `RUNNER_UP_BUILD_GATE`, and the docker shim starts each `docker run` through the gate, so a job holds a slot for its whole run. Roll out one coordinator first with a drop-in `Environment=RUNNER_UP_BUILD_GATE=~/.local/bin/build-gate`.
+- Host builds: call `build-gate cargo ...` in the `cargo` wrapper for `build`, `test`, `check`, `clippy`, `nextest`, `doc` and `install`.
+
 ## Disk
 
 A job container is removed when its job ends (`docker run --rm`), and its work directory goes with it.
@@ -202,6 +209,7 @@ Limits: sccache caches only builds that run `rustc` through the wrapper, with th
 | `~/.config/systemd/user/runner-up-clean.{service,timer}` | The hourly cleanup. |
 | `~/.config/systemd/user/runner-up-image.{service,timer}` | The hourly image build, without `ci_pool`. |
 | `/etc/systemd/system/runnerup.slice` | The caps. |
+| `~/.local/bin/build-gate` | The shared build gate. |
 | `~/.local/share/runner-up/` | The docker shim and the image recipe. |
 | `~/.local/bin/runner-up-maintain` | The image build and the cleanup. |
 

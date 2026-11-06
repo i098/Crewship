@@ -670,3 +670,86 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
     assert calls == ["docker image inspect crewship-ci-runner:latest"]
     calls = run_script("runner-up-maintain", stubs, "image", env=env)
     assert any(c.startswith("docker build") for c in calls[1:])
+
+
+def gate(tmp_path, *args, env=None, timeout=20):
+    pressure = tmp_path / "pressure"
+    if not pressure.exists():
+        pressure.write_text("some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=1.00 avg300=0.00 total=0\n")
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "BUILD_GATE_DIR": str(tmp_path / "gate"),
+        "BUILD_GATE_PRESSURE_FILE": str(pressure),
+        "BUILD_GATE_DISK_PATH": str(tmp_path),
+        "BUILD_GATE_DISK_PCT": "100",
+        "BUILD_GATE_POLL": "1",
+        **(env or {}),
+    }
+    return subprocess.Popen(
+        [str(MAINTENANCE / "build-gate"), *args], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+
+
+def test_build_gate_runs_the_command_and_passes_its_status(tmp_path):
+    ok = gate(tmp_path, "sh", "-c", "echo $BUILD_GATE_HELD")
+    assert ok.communicate(timeout=20)[0] == "1\n"
+    bad = gate(tmp_path, "sh", "-c", "exit 7")
+    bad.communicate(timeout=20)
+    assert bad.returncode == 7
+
+
+def test_build_gate_waits_while_io_pressure_is_high_and_then_runs(tmp_path):
+    pressure = tmp_path / "pressure"
+    pressure.write_text("full avg10=0.00 avg60=56.92 avg300=0.00 total=0\n")
+    job = gate(tmp_path, "echo", "ran")
+    time.sleep(2.5)
+    assert job.poll() is None
+    pressure.write_text("full avg10=0.00 avg60=10.00 avg300=0.00 total=0\n")
+    assert job.communicate(timeout=20)[0] == "ran\n"
+
+
+def test_build_gate_waits_while_the_disk_is_above_the_limit(tmp_path):
+    job = gate(tmp_path, "echo", "ran", env={"BUILD_GATE_DISK_PCT": "0"})
+    time.sleep(2.5)
+    assert job.poll() is None
+    job.kill()
+    job.communicate()
+
+
+def test_build_gate_gives_each_slot_to_one_command(tmp_path):
+    env = {"BUILD_GATE_SLOTS": "1"}
+    first = gate(tmp_path, "sleep", "4", env=env)
+    time.sleep(1)
+    second = gate(tmp_path, "echo", "second", env=env)
+    time.sleep(1.5)
+    assert second.poll() is None
+    assert second.communicate(timeout=20)[0] == "second\n"
+    first.communicate()
+
+
+def test_build_gate_skips_when_off_or_already_held(tmp_path):
+    pressure = tmp_path / "pressure"
+    pressure.write_text("full avg10=0.00 avg60=99.00 avg300=0.00 total=0\n")
+    for env in ({"BUILD_GATE": "off"}, {"BUILD_GATE_HELD": "1"}):
+        assert gate(tmp_path, "echo", "ran", env=env).communicate(timeout=20)[0] == "ran\n"
+
+
+def test_the_shim_starts_jobs_through_the_build_gate_when_it_is_set(stubs, tmp_path):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    gate_stub = tmp_path / "gate-stub"
+    gate_stub.write_text(f'#!/bin/sh\necho "gate $*" >> {stubs[1]}\nexec "$@"\n')
+    gate_stub.chmod(0o755)
+    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_BUILD_GATE": str(gate_stub)}
+    calls = run_script("runner-up-docker", stubs, "run", "img", env=env)
+    assert calls[0].startswith("gate ") and calls[0].endswith("docker run --cgroup-parent runnerup.slice --pids-limit 8192 img")
+    assert calls[1].startswith("docker run")
+
+
+def test_the_service_sets_the_build_gate_only_when_asked(home):
+    apply(home, runner(home))
+    env = unit_sections(units(home) / "runner-up@.service")["Service"]["Environment"]
+    assert not any(v.startswith("RUNNER_UP_BUILD_GATE") for v in env)
+    apply(home, runner(home, build_gate=True))
+    env = unit_sections(units(home) / "runner-up@.service")["Service"]["Environment"]
+    assert f"RUNNER_UP_BUILD_GATE={home}/.local/bin/build-gate" in env and "BUILD_GATE_SLOTS=6" in env

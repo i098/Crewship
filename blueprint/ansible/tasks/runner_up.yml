@@ -48,6 +48,7 @@
       loop:
         - {src: runner-up-docker, dest: "{{ crewship_runner_up_shim_dir }}/docker"}
         - {src: runner-up-maintain, dest: "{{ crewship_runner_up_maintain }}"}
+        - {src: build-gate, dest: "{{ crewship_runner_up_build_gate_bin }}"}
 
     - name: Install the job image recipe
       ansible.builtin.copy:
