@@ -655,6 +655,7 @@ RELEASES = {
     "kunchenguid/treehouse": ("v9.9.9", "treehouse-v9.9.9-linux-amd64.tar.gz"),
     "astral-sh/uv": ("9.9.9", "uv-x86_64-unknown-linux-gnu.tar.gz"),
     "aristocratos/btop": ("v9.9.9", "btop-x86_64-unknown-linux-musl.tar.gz"),
+    "Gaurav-Gosain/tuios": ("v9.9.9", "tuios_9.9.9_Linux_x86_64.tar.gz"),
     "sentrux/sentrux": ("v9.9.9", "sentrux-linux-x86_64", "grammars-linux-x86_64.tar.gz"),
     "fallow-rs/fallow": ("v9.9.9", "fallow-linux-x64-musl"),
     "cloudflare/cloudflared": ("9.9.9", "cloudflared-linux-amd64"),
