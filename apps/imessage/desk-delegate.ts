@@ -6,8 +6,9 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { replyText, TASK_GUID_PREFIX } from "./desk-actions.ts";
 import { bubbles, type Secondmate } from "./desk.ts";
+import { HELPER } from "./desk-helper.ts";
 
-export type DelegateTarget = Secondmate | "firstmate";
+export type DelegateTarget = Secondmate | "firstmate" | typeof HELPER;
 
 export type DelegateHost<O> = {
   answerDir: string;
@@ -17,6 +18,7 @@ export type DelegateHost<O> = {
   muted(): boolean;
   safe(text: string): string;
   listed(mate: Secondmate): boolean; // the mate is still in the routing table
+  helper(text: string): Promise<string | undefined>; // the helper's answer; undefined when it failed or timed out. Sets its busy flag before its first await
   send(target: DelegateTarget, id: string, text: string): Promise<boolean>; // true when the target's inbox took it
   report(parts: string[], guid: string, origin: O): void; // the bridge's outbox, on the chat the text came from; guid starts with TASK_GUID_PREFIX
   log(error: unknown): void;
@@ -65,7 +67,18 @@ async function answerFrom<O>(host: DelegateHost<O>, path: string): Promise<strin
   return answer;
 }
 
+// The helper answers in its own run, with no answer file. A failure or an answer the checks refuse goes to Firstmate through `lost`.
+async function helped<O>(host: DelegateHost<O>, text: string, origin: O) {
+  const id = crypto.randomUUID();
+  const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}` };
+  let answer: string | undefined;
+  try { answer = await host.helper(text); } catch (error) { host.log(error); }
+  if (answer === undefined) return host.stopping() ? undefined : await lost(host, job, "the helper failed");
+  return await finish(host, job, answer);
+}
+
 async function run<O>(host: DelegateHost<O>, live: Set<string>, target: DelegateTarget, text: string, origin: O) {
+  if (target === HELPER) return helped(host, text, origin); // no await first: the helper is busy before the tool call returns
   mkdirSync(host.answerDir, { recursive: true, mode: 0o700 });
   const id = crypto.randomUUID();
   const base = `${host.answerDir}/${id}`;

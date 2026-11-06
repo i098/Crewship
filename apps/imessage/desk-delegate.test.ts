@@ -18,6 +18,7 @@ function rig(over: Partial<DelegateHost<string>> = {}) {
   const host: DelegateHost<string> = {
     answerDir: join(dir, "tasks"), waitMs: 3000, pollMs: 10, stopping: () => false, muted: () => false,
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"), listed: () => true,
+    helper: async () => "Installed it.",
     send: async (target, _id, text) => { sent.push({ target, text }); return true; },
     report: (parts, guid, origin) => void (reports.push({ parts, origin }), guids.push(guid)), log: (error) => void errors.push(error), ...over,
   };
@@ -180,4 +181,25 @@ test("with the bridge's keyed outbox, the follow-up and the late answer are both
   writeFileSync(r.answerPath(0), "All green.");
   await until(() => delivered.length === 2);
   expect(delivered).toEqual([[FOLLOW_UP], ["All green."]]);
+});
+
+test("a helper ask is answered by the helper alone: no inbox note, no answer file", async () => {
+  const asked: string[] = [];
+  const r = rig({ helper: async (text) => (asked.push(text), "Installed it.\n\nNothing else to do.") });
+  r.delegate("helper", "install the ripgrep skill", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(asked).toEqual(["install the ripgrep skill"]);
+  expect(r.reports).toEqual([{ parts: ["Installed it.", "Nothing else to do."], origin: "chat-1" }]);
+  expect(r.sent).toEqual([]);
+});
+
+test("a helper that fails or times out hands the ask to Firstmate and texts a short note", async () => {
+  for (const helper of [async () => undefined, async () => { throw new Error("spawn failed"); }] as DelegateHost<string>["helper"][]) {
+    const r = rig({ helper });
+    r.delegate("helper", "install the ripgrep skill", "chat-1");
+    await until(() => r.reports.length === 1);
+    expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+    expect(r.sent.map((entry) => entry.target)).toEqual(["firstmate"]);
+    expect(r.sent[0].text).toContain("install the ripgrep skill");
+  }
 });
