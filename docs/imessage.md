@@ -316,7 +316,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - When the child stops, the bridge starts it again with backoff: 1 second first, doubled each time, to a maximum of 60 seconds.
 - omp compacts the session at a fixed 80,000 tokens. The bridge sets this trigger in `compaction.modelThresholds`.
 - The memory view seeds a new session and a session that was just compacted.
-- The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool; it hands all writes to Firstmate.
+- The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool. An install ask goes to its helper (see Helper below); it hands every other write to Firstmate.
 - The session acts through five action tools. The bridge checks each call before it does the action:
   - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
   - `tapback` reacts only when `deskMayAct` permits it.
