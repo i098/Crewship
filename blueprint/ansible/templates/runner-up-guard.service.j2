@@ -11,7 +11,7 @@ Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
 Environment=RUNNER_UP_GUARD_PATH={{ crewship_runner_up_data_dir | default(crewship_cfg.home, true) }}
 Environment=RUNNER_UP_PAUSE_PCT={{ crewship_runner_up_pause_pct }}
 Environment=RUNNER_UP_RESUME_PCT={{ crewship_runner_up_resume_pct }}
-Environment=RUNNER_UP_INSTANCES={{ crewship_runner_up_instances | join(' ') }}
+Environment="RUNNER_UP_INSTANCES={{ crewship_runner_up_instances | join(' ') }}"
 ExecStart={{ crewship_runner_up_maintain }} guard
 TimeoutStartSec=60
 Nice=19
