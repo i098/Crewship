@@ -15,4 +15,4 @@ crewship_stall_nudge_pane: ""
 # The card renders with headless Chrome: the desktop profile or crewship_chrome_install: true provides it, else omp's puppeteer Chrome.
 crewship_usage_remind_every: 3600
 crewship_usage_disks: ["/"]
-crewship_usage_scripts: [fm-usage-brief, fm-usage-remind, fm-text-card]
+crewship_usage_scripts: [fm-usage-brief, fm-usage-remind, fm-text-card, fm-status-card]

@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+# Render a fleet status as a visual card (1170 px wide, a phone screen) for the iMessage line.
+# Usage: fm-status-card [--light] OUT.png < input
+#        fm-status-card [--light] --send < input    sends the PNG with fm-imessage --image, then deletes it.
+# Input, the fm-text-card text format:  first line = title;  "- name: merged 4, open 2, today 1, running" = a project
+#   (counts "merged|open|today N" or "N merged|open|today", states live, running, waiting on you, blocked, other parts a note);
+#   "disk: 62%" = a gauge; other "- x", "k: v", "# x" and plain lines are notes.
+# Or JSON: {"title": "...", "projects": [{"name", "merged", "open", "today", "states": [...], "note"}],
+#           "gauges": {"Disk": 62}, "notes": ["text-format lines"]}
+# Without gauges in the input, the card shows this host's load, RAM and disks (fm-usage-brief, installed side by side).
+import html, importlib.machinery, importlib.util, json, os, re, subprocess, sys, tempfile
+
+WIDTH = 1170
+STATES = {"live": "live", "running": "running", "waiting on you": "waiting on you", "waiting": "waiting on you",
+          "needs you": "waiting on you", "blocked": "blocked"}
+COUNTS = ("merged", "open", "today")
+# Hue of each state chip; colors stay hsl() so the two themes only move lightness.
+HUE = {"live": 145, "running": 212, "waiting on you": 36, "blocked": 0}
+THEME = {
+    "dark": {"bg": "hsl(222 22% 8%)", "panel": "hsl(222 18% 13%)", "fg": "hsl(220 25% 95%)", "muted": "hsl(220 12% 64%)",
+             "track": "hsl(222 14% 23%)", "ink": 66, "wash": 0.18},
+    "light": {"bg": "hsl(220 22% 95%)", "panel": "hsl(0 0% 100%)", "fg": "hsl(222 28% 12%)", "muted": "hsl(220 10% 40%)",
+              "track": "hsl(220 16% 89%)", "ink": 36, "wash": 0.14},
+}
+# Fixed block heights (px) so the page height is exact; lines that do not fit end in an ellipsis.
+PAD, TITLE, GAUGES, ROW, ROW_NOTE, GAP, NOTE, HEAD = 56, 76, 256, 204, 46, 20, 52, 68
+
+ICON = {  # 24 x 24 stroke paths
+    "live": '<circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="9"/>',
+    "running": '<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+    "waiting on you": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    "blocked": '<circle cx="12" cy="12" r="9"/><path d="M7 12h10"/>',
+    "merged": '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9M6 7.5c0 4 4 4.5 9.5 4.5"/>',
+    "open": '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M6 7.5v9M18 16.5V9a3 3 0 0 0-3-3h-5"/>',
+    "today": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/>',
+}
+
+
+def icon(name, size):
+    return (f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round">{ICON[name]}</svg>')
+
+
+def project(name, parts):
+    p = {"name": name, **dict.fromkeys(COUNTS, 0), "states": [], "note": ""}
+    notes = []
+    for part in filter(None, (s.strip() for s in re.split(r"[,·]", parts))):
+        m = re.fullmatch(r"(merged|open|today)\s+(\d+)|(\d+)\s+(merged|open|today)", part, re.I)
+        if m:
+            p[(m[1] or m[4]).lower()] = int(m[2] or m[3])
+        elif part.lower() in STATES:
+            p["states"].append(STATES[part.lower()])
+        else:
+            notes.append(part)
+    p["note"] = " · ".join(notes)
+    return p if p["states"] or notes != [parts.strip()] else None
+
+
+def parse_text(text):
+    lines = text.strip().splitlines()
+    card = {"title": lines[0].strip() if lines else "", "projects": [], "gauges": {}, "notes": []}
+    for line in lines[1:]:
+        s = line.strip()
+        bullet = s[2:] if s.startswith(("- ", "• ")) else None
+        name, sep, rest = (bullet or "").partition(": ")
+        if sep and (p := project(name, rest)):
+            card["projects"].append(p)
+        elif m := re.fullmatch(r"([^:-][^:]{0,27}): (\d+(?:\.\d+)?)%", s):
+            card["gauges"][m[1]] = round(float(m[2]))
+        else:
+            card["notes"].append(s)
+    return card
+
+
+def parse_json(data):
+    projects = [{"name": str(p["name"]), **{k: int(p.get(k) or 0) for k in COUNTS},
+                 "states": [STATES[s.lower()] for s in p.get("states", []) if s.lower() in STATES], "note": str(p.get("note") or "")}
+                for p in data.get("projects", [])]
+    return {"title": str(data.get("title", "")), "projects": projects,
+            "gauges": {str(k): round(float(v)) for k, v in dict(data.get("gauges") or {}).items()},
+            "notes": [str(n) for n in data.get("notes", [])]}
+
+
+def parse(text):
+    return parse_json(json.loads(text)) if text.lstrip().startswith("{") else parse_text(text)
+
+
+def sibling(name):
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), name)
+    spec = importlib.util.spec_from_loader(name.replace("-", "_"), importlib.machinery.SourceFileLoader(name.replace("-", "_"), path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def level(pct):
+    return 145 if pct < 70 else 36 if pct < 90 else 0
+
+
+def gauge(label, pct, t):
+    r, c = 62, 2 * 3.14159 * 62
+    arc = c * min(max(pct, 0), 100) / 100
+    return (f'<div class="g"><svg width="156" height="156" viewBox="0 0 156 156"><circle cx="78" cy="78" r="{r}" fill="none" '
+            f'stroke="{t["track"]}" stroke-width="14"/><circle cx="78" cy="78" r="{r}" fill="none" stroke="hsl({level(pct)} 70% 50%)" '
+            f'stroke-width="14" stroke-linecap="round" stroke-dasharray="{arc:.1f} {c:.1f}" transform="rotate(-90 78 78)"/>'
+            f'<text x="78" y="90" text-anchor="middle" class="gp">{pct}%</text></svg><div class="gl">{html.escape(label)}</div></div>')
+
+
+def chip(state, t):
+    h = HUE[state]
+    return (f'<span class="chip" style="color:hsl({h} 75% {t["ink"]}%);background:hsl({h} 75% 50% / {t["wash"]})">'
+            f'{icon(state, 26)}{html.escape(state)}</span>')
+
+
+def row(p, t):
+    done = p["merged"] + p["open"]
+    pct = round(p["merged"] * 100 / done) if done else 0
+    hue = HUE[p["states"][0]] if p["states"] else 220
+    nums = "".join(f'<div class="n"><b>{p[k]}</b><span>{icon(k, 24)}{k}</span></div>' for k in COUNTS)
+    bar = (f'<div class="bar"><div class="track"><div class="fill" style="width:{pct}%;background:hsl({hue} 70% 52%)"></div></div>'
+           f'<div class="bl">{f"{pct}% merged" if done else "no PRs"}</div></div>')
+    note = f'<div class="note">{html.escape(p["note"])}</div>' if p["note"] else ""
+    return (f'<div class="row{" wn" if note else ""}"><div class="top"><div class="name">{html.escape(p["name"])}</div>'
+            f'<div class="chips">{"".join(chip(s, t) for s in p["states"])}</div></div>'
+            f'<div class="mid">{nums}{bar}</div>{note}</div>')
+
+
+def note_line(s):
+    if s.startswith("# "):
+        return f'<h2>{html.escape(s[2:])}</h2>', HEAD
+    if s.startswith(("- ", "• ")):
+        return f'<div class="nl"><span class="dot">•</span>{html.escape(s[2:])}</div>', NOTE
+    if ": " in s and len(s.split(": ", 1)[0]) <= 28:
+        k, v = s.split(": ", 1)
+        return f'<div class="nl"><span class="k">{html.escape(k)}</span>{html.escape(v)}</div>', NOTE
+    return f'<div class="nl">{html.escape(s)}</div>', NOTE
+
+
+def render(card, theme="dark"):
+    t = THEME[theme]
+    gauges = card["gauges"] or {k: p for k, p, _ in sibling("fm-usage-brief").server()}
+    notes = [s for s in card["notes"] if s]
+    # A heading with no note under it (it titled only project lines) carries nothing.
+    notes = [s for i, s in enumerate(notes) if not s.startswith("# ") or (i + 1 < len(notes) and not notes[i + 1].startswith("# "))]
+    lines = [note_line(s) for s in notes]
+    height = (2 * PAD + TITLE + (GAUGES + GAP if gauges else 0)
+              + sum(ROW + (ROW_NOTE if p["note"] else 0) + GAP for p in card["projects"]) + sum(h for _, h in lines))
+    page = f"""<html><head><meta charset="utf-8"><style>
+*{{box-sizing:border-box}} body{{margin:0;background:{t["bg"]};color:{t["fg"]};font:30px/1.3 DejaVu Sans,sans-serif;font-variant-numeric:tabular-nums}}
+.card{{padding:{PAD}px;width:{WIDTH}px}} h1{{font-size:46px;height:{TITLE}px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.panel,.row{{background:{t["panel"]};border-radius:28px;margin-bottom:{GAP}px}}
+.panel{{height:{GAUGES}px;display:flex;justify-content:space-around;align-items:center}}
+.g{{text-align:center}} .gp{{font:bold 32px DejaVu Sans,sans-serif;fill:{t["fg"]}}} .gl{{color:{t["muted"]};font-size:26px;margin-top:6px}}
+.row{{height:{ROW}px;padding:28px 36px}} .row.wn{{height:{ROW + ROW_NOTE}px}}
+.top{{display:flex;align-items:center;gap:20px;height:52px}} .name{{font-size:36px;font-weight:bold;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.chips{{display:flex;gap:12px;flex:none}} .chip{{display:flex;align-items:center;gap:8px;font-size:24px;font-weight:bold;padding:6px 18px;border-radius:24px}}
+.mid{{display:flex;align-items:flex-end;gap:44px;margin-top:16px;height:80px}}
+.n{{width:130px}} .n b{{display:block;font-size:52px;line-height:56px}} .n span{{display:flex;align-items:center;gap:6px;color:{t["muted"]};font-size:22px}}
+.bar{{flex:1;padding-bottom:6px}} .track{{height:22px;border-radius:11px;background:{t["track"]};overflow:hidden}} .fill{{height:100%;border-radius:11px}}
+.bl{{color:{t["muted"]};font-size:22px;margin-top:10px;text-align:right}}
+.note{{color:{t["muted"]};font-size:26px;margin-top:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+h2{{font-size:24px;color:{t["muted"]};letter-spacing:2px;text-transform:uppercase;font-weight:normal;margin:0;height:{HEAD}px;padding-top:26px}}
+.nl{{height:{NOTE}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}} .dot{{color:hsl(145 60% 50%);margin-right:16px}}
+.k{{color:{t["muted"]};margin-right:20px}}
+</style></head><body><div class="card"><h1>{html.escape(card["title"])}</h1>
+{f'<div class="panel">{"".join(gauge(k, p, t) for k, p in gauges.items())}</div>' if gauges else ""}
+{"".join(row(p, t) for p in card["projects"])}{"".join(h for h, _ in lines)}</div></body></html>"""
+    return page, height
+
+
+def shoot(card, theme, out):
+    sibling("fm-text-card").shoot(*render(card, theme), out, WIDTH)
+
+
+def send(card, theme):
+    fd, out = tempfile.mkstemp(suffix=".png", prefix="fm-status-card-")
+    os.close(fd)
+    try:
+        shoot(card, theme, out)
+        subprocess.run(["fm-imessage", "--image", out], check=True)
+    finally:
+        os.unlink(out)
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    theme = "light" if "--light" in args else "dark"
+    args = [a for a in args if a != "--light"]
+    if len(args) != 1:
+        sys.exit("usage: fm-status-card [--light] OUT.png|--send < input")
+    card = parse(sys.stdin.read())
+    send(card, theme) if args == ["--send"] else shoot(card, theme, args[0])
