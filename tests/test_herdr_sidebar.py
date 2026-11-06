@@ -151,7 +151,9 @@ def lookup(tmp_path):
     code += f"console.log(JSON.stringify(await m.lookupPr({json.dumps(str(repo))})) ?? 'null');"
 
     def run():
-        out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, env=env)
+        out = subprocess.run(
+            ["bun", "-e", code], capture_output=True, text=True, check=True, env=env
+        )
         return json.loads(out.stdout)
 
     def push():
@@ -227,7 +229,7 @@ def fixture(tmp_path, monkeypatch):
     stub = tmp_path / "stub"
     write(
         stub / "omp",
-        '#!/bin/sh\nprintf \'%s\\n\' \'{"reports":[],"accountsWithoutUsage":[]}\'\n',
+        "#!/bin/sh\nprintf '%s\\n' '{\"reports\":[],\"accountsWithoutUsage\":[]}'\n",
         0o755,
     )
     log = tmp_path / "reports.jsonl"
