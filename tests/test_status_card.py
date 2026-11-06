@@ -14,7 +14,7 @@ CARD = Path(__file__).parents[1] / "blueprint/maintenance/fm-status-card"
 TEXT = """Fleet status
 - code-factory: merged 4, open 2, 3 today, running
 - swarms: open 1 · Waiting on you · needs the screenshot OK
-- plain bullet: just words
+- plain bullet: fix CI, then ship
 disk: 62%
 # Next
 eta: 40 min
@@ -26,7 +26,7 @@ CARD_DATA = {
         {"name": "swarms", "merged": 0, "open": 1, "today": 0, "states": ["waiting on you"], "note": "needs the screenshot OK"},
     ],
     "gauges": {"disk": 62},
-    "notes": ["- plain bullet: just words", "# Next", "eta: 40 min"],
+    "notes": ["- plain bullet: fix CI, then ship", "# Next", "eta: 40 min"],
 }
 
 
