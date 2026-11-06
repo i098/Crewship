@@ -33,3 +33,5 @@ crewship_herdr_spaces_script: "{{ crewship_local_bin }}/herdr-spaces.py"
 # by pane size, so it also loads in a phone's 50-column pane (docs/herdr.md#btop).
 crewship_btop_launcher_source: "{{ crewship_blueprint }}/maintenance/btop.sh"
 crewship_btop_config: "{{ crewship_cfg.home }}/.config/btop/btop.conf"
+# tuios machine tab launcher (docs/herdr.md#tuios-machine-tab).
+crewship_machine_tuios_source: "{{ crewship_blueprint }}/maintenance/machine-tuios.sh"

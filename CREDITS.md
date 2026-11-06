@@ -43,6 +43,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Bun](https://github.com/oven-sh/bun) (`bun`): the JavaScript runtime and package manager. License: MIT.
 - [Node.js](https://github.com/nodejs/node) (`node`): the runtime of `npx crewship` and the chrome-devtools-axi bridge. License: MIT.
 - [uv](https://github.com/astral-sh/uv) (`uv`): the Python bootstrap and environments. License: MIT OR Apache-2.0.
+- [tuios](https://github.com/Gaurav-Gosain/tuios) (`tuios`): the terminal window manager behind the optional `tuios` machine tab. License: MIT.
 - [btop](https://github.com/aristocratos/btop) (`btop`): the resource monitor pane. License: Apache-2.0.
 - [Neovim](https://github.com/neovim/neovim) (`nvim`): the terminal editor installed on every host. License: Apache-2.0.
 - [LazyVim starter](https://github.com/LazyVim/starter): the vendored Neovim configuration in `blueprint/config/nvim/`, with an added Pyrefly configuration. License: Apache-2.0.

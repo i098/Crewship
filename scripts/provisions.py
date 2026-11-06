@@ -106,6 +106,14 @@ GITHUB_LATEST = {
         "btop-{gnu}-unknown-linux-musl.tar.gz",
         {"btop-bin": "btop/bin/btop"},
     ),
+    # Terminal window manager with an agent control CLI; the optional machine tab
+    # (crewship.herdr.tuios_tab, docs/herdr.md#tuios-machine-tab).
+    "tuios": (
+        "Gaurav-Gosain/tuios",
+        "v",
+        "tuios_{v}_Linux_{goreleaser}.tar.gz",
+        {"tuios": "tuios"},
+    ),
     "sentrux": ("sentrux/sentrux", "v", "sentrux-{key}", {"sentrux": "sentrux"}),
     # The grammars of the same sentrux release. sentrux downloads them itself,
     # unverified, when ~/.sentrux/plugins lacks them; link_grammars puts them there.

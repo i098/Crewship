@@ -186,6 +186,18 @@
     remote_src: true
   become: true
 
+# The tuios machine tab runs this launcher (docs/herdr.md#tuios-machine-tab).
+- name: Install the machine-tuios launcher
+  ansible.builtin.copy:
+    src: "{{ crewship_machine_tuios_source }}"
+    dest: "{{ crewship_local_bin }}/machine-tuios"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+    remote_src: true
+  become: true
+  when: crewship_cfg.herdr.tuios_tab | default(false) | bool
+
 - name: Ensure the btop configuration directory
   ansible.builtin.file:
     path: "{{ crewship_btop_config | dirname }}"

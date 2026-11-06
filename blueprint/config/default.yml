@@ -48,6 +48,8 @@ crewship:
     usage_tab: true
     crewboard_tab: true
     browsers_tab: true
+    # Optional: installs tuios and opens one tab holding every machine TUI as a window.
+    tuios_tab: false
     # Sidebar layouts; docs/herdr.md explains each line. The omp extension
     # feeds the Agents $ tokens and the herdr-spaces reporter timer the Spaces
     # ones.

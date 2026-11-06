@@ -145,6 +145,8 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |
 | `crewboard-tui --desk` (tab `frontdesk`) | iMessage front desk health and recent turns | `crewship.herdr.crewboard_tab` |
 
+| `machine-tuios` (tab `tuios`) | every machine TUI as a window of one tuios session an agent can drive; see [tuios machine tab](herdr.md#tuios-machine-tab) | `crewship.herdr.tuios_tab` (default `false`) |
+
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 
 ## The host config

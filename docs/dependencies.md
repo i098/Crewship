@@ -154,6 +154,7 @@ Bun output stays in one labeled block per package, including command failures.
 - `sgrep`, `development`, `fleet_browsers` or `fleet_guards` profile: rustup-init, the version in rustup's [stable release](https://static.rust-lang.org/rustup/release-stable.toml), verified against the published `.sha256`.
   It installs the Rust `stable` toolchain with rustfmt and clippy.
   Each selected apply updates the toolchain to the newest stable release.
+- `herdr.tuios_tab: true`: tuios ([Gaurav-Gosain/tuios](https://github.com/Gaurav-Gosain/tuios/releases/latest), `tuios_<version>_Linux_<arch>.tar.gz`), verified against the release `checksums.txt` (see [tuios machine tab](herdr.md#tuios-machine-tab)).
 - `jj` profile: jj ([jj-vcs/jj](https://github.com/jj-vcs/jj/releases/latest), the static musl build), verified against the GitHub release-asset digest. See [Jujutsu](jj.md).
 - `runner_up` block: runner-up ([kunchenguid/runner-up](https://github.com/kunchenguid/runner-up/releases/latest), `runner-up-v<version>-linux-<arch>.tar.gz`), verified against the GitHub release-asset digest. Its job image is the CI pool's. See [runner-up](runner-up.md).
 - `gateway` profile: cloudflared ([cloudflare/cloudflared](https://github.com/cloudflare/cloudflared/releases/latest), `cloudflared-linux-<arch>`), verified against the GitHub release-asset digest. See [Web pages from anywhere](gateway.md).
