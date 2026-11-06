@@ -274,6 +274,38 @@ def test_sender_timeout_preserves_uncertainty_for_firstmate(tmp_path, desk_clock
         bridge.wait(10)
 
 
+def test_failed_mate_send_writes_one_incomplete_note_per_message(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    (fake / "send-fail").touch()
+    bridge = start(1)
+    try:
+        receive("work", "Fix the website menu")
+        desk_clock()
+        wait_for(lambda: "Delivery to web-mate may be incomplete" in text(notes), "the uncertain-delivery handoff")
+        assert text(state / "routing.jsonl").count("may be incomplete") == 1
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_mate_inbox_record_counts_as_delivered(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
+    inbox = tmp_path / "state/web-mate.inbox"
+    inbox.mkdir()
+    (inbox / "001.msg").write_text("[from captain via desk] Fix the website menu\n")
+    bridge = start(1)
+    try:
+        receive("work", "Fix the website menu")
+        desk_clock()
+        wait_for(lambda: "routed to web-mate" in text(state / "routing.jsonl"), "the delivery receipt")
+        assert text(fake / "mate-sends") == ""
+        assert "may be incomplete" not in text(state / "routing.jsonl")
+        assert text(notes) == ""
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
 def test_scope_change_after_semicolon_cancels_stale_route(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     (tmp_path / "bin/omp").write_text(
