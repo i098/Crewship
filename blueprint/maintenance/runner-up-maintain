@@ -3,6 +3,8 @@
 #   runner-up-maintain image [--ensure]   build the job image from the latest official
 #                                         runner image; with --ensure, only when it is missing
 #   runner-up-maintain clean              remove what the jobs left on the disk
+#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
+#                                         start them again below the resume level
 # Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
 set -eu
 image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
@@ -35,7 +37,26 @@ clean)
   prune image prune --force
   prune builder prune --force --keep-storage "${RUNNER_UP_DISK_MAX_GB:-50}GB"
   exit "$failed" ;;
+guard)
+  # Stopping a coordinator only stops new pickup: KillMode=process leaves running jobs alone.
+  # Only the coordinators this guard stopped start again, so a unit stopped by hand stays stopped.
+  path=${RUNNER_UP_GUARD_PATH:-/}
+  pause=${RUNNER_UP_PAUSE_PCT:-88}
+  resume=${RUNNER_UP_RESUME_PCT:-85}
+  state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
+  used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
+  if [ "$used" -ge "$pause" ]; then
+    for i in ${RUNNER_UP_INSTANCES-}; do
+      systemctl --user is-active --quiet "runner-up@$i.service" || continue
+      systemctl --user stop "runner-up@$i.service" && echo "$i" >> "$state"
+    done
+  elif [ "$used" -lt "$resume" ] && [ -s "$state" ]; then
+    while read -r i; do systemctl --user start "runner-up@$i.service"; done < "$state"
+    rm -f "$state"
+  fi
+  # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
+  timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
 *)
-  echo "usage: runner-up-maintain image [--ensure] | clean" >&2
+  echo "usage: runner-up-maintain image [--ensure] | clean | guard" >&2
   exit 2 ;;
 esac
