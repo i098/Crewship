@@ -165,7 +165,9 @@ Use the space up to the limit, and give it by value:
 Avoid omissions. Name a minor item in a word or two rather than drop it: an absent item can never be found. Copy
 names, numbers, ids, paths and errors exactly. Tag each item with its kind ("owner: ...; desk: ..."), and credit
 quoted text to its real author. Never make anything look further along than it was. If told the line is too long,
-shorten it. Non-ASCII characters cost 2-4 bytes.`;
+shorten it. Non-ASCII characters cost 2-4 bytes.
+
+Write your own words in ASD-STE100 Simplified Technical English: short sentences, active voice, simple words, no slang. Quote the owner's words as written. Never copy the desk's old wording as a model.`;
 
 // The live chat: the one writer of a memory directory.
 export class Memory {

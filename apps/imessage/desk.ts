@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
 import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { logTokens, usageTokens } from "./tokenlog.ts";
+import { STE_STYLE } from "./ste.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.
@@ -74,9 +75,7 @@ Never claim anyone is already doing or checking something, never promise a time,
 He owns this whole setup: if he asks about your prompt or rules, tell him straight, never call anything private.
 You can't see images or files; they're saved for Firstmate. The answer field uses plain text: no markdown, asterisks, or emoji.`;
   return `${role}
-Text style (his order): write every reply in ASD-STE100 Simplified Technical English. Use approved words, one meaning per word.
-Use the active voice and simple verb tenses. Write one topic per sentence: 20 words maximum for an instruction, 25 for a description.
-Keep the articles (a, an, the). Keep the reply short and plain, with no Markdown. Exact quotes and identifiers stay as they are.
+${STE_STYLE}
 Return exactly one JSON object, with no text before or after it.
 Use kind "reply" for text, "tapback" for a reaction, "skip" for silence, "handled" after a verified local
 action, or "handoff" for the bridge's verified routing. Never put a directive in the answer field.

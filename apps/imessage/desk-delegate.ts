@@ -4,6 +4,7 @@
 // so an answer that comes after a restart or after the wait limit is still sent, once, by the sweep.
 // A task that is lost (not delivered, no answer in time, answer refused) is put in Firstmate's inbox, and the owner gets one fixed follow-up.
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { STE_STYLE } from "./ste.ts";
 import { replyText, TASK_GUID_PREFIX } from "./desk-actions.ts";
 import { bubbles, type Secondmate } from "./desk.ts";
 import { helperKind, type HelperKind } from "./desk-helper.ts";
@@ -84,7 +85,7 @@ async function run<O>(host: DelegateHost<O>, live: Set<string>, target: Delegate
   const id = crypto.randomUUID();
   const base = `${host.answerDir}/${id}`;
   const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}` };
-  const task = `${text}\nWhen you have the answer, write it for the owner in plain words to ${base}.answer.tmp, then rename it to ${base}.answer`;
+  const task = `${text}\n${STE_STYLE}\nWhen you have the answer, write it for the owner to ${base}.answer.tmp, then rename it to ${base}.answer`;
   writeFileSync(`${base}.task`, JSON.stringify({ text, origin }), { mode: 0o600 });
   live.add(id);
   try {

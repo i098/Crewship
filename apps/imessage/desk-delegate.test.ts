@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Queue } from "./outbox.ts";
+import { STE_STYLE } from "./ste.ts";
 import { createDelegator, type DelegateHost, type DelegateTarget, FOLLOW_UP } from "./desk-delegate.ts";
 
 const mate1 = { id: "mate1", home: "/fleet/mate1", scope: "repo checks" };
@@ -47,6 +48,7 @@ test("the task carries the owner's text and the answer path to the target", asyn
   await until(() => r.sent.length === 1);
   expect(r.sent[0].target).toBe("firstmate");
   expect(r.sent[0].text.startsWith("check the repo\n")).toBe(true);
+  expect(r.sent[0].text).toContain(STE_STYLE);
   expect(r.answerPath()).toMatch(/\/tasks\/[0-9a-f-]{36}\.answer$/);
 });
 

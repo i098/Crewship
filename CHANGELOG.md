@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Every owner-visible front desk prompt (session, status answer, helper, delegated task, single-shot desk, memory summary) now carries one shared ASD-STE100 style rule. The live session prompt told the desk to write like a text message, so #1216 never reached it ([#1221](https://github.com/i098/Crewship/issues/1221)).
+
 ## [0.4.9] - 2026-11-05
 
 ### Added
