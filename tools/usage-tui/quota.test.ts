@@ -199,6 +199,11 @@ test("rtk shows tokens saved from `rtk gain` only when detected, under the fixed
   const rtk = { summary: { total_saved: 1_234_567, avg_savings_pct: 61.4 } }
   expect(rtkRows(rtk)[0]).toMatchObject({ account: "rtk", leftPct: null, note: "1.2M tokens saved (61%)" })
   expect(rtkRows({ summary: { total_saved: 0, avg_savings_pct: 0 } })[0].note).toBe("0 tokens saved (0%)")
+  const saved = (n: number) => rtkRows({ summary: { total_saved: n } })[0].note
+  expect(saved(999_949)).toBe("999.9K tokens saved")
+  expect(saved(999_950)).toBe("1M tokens saved")
+  expect(saved(999_949_999)).toBe("999.9M tokens saved")
+  expect(saved(999_950_000)).toBe("1B tokens saved")
   expect(rtkRows({})[0].note).toBe("not reported")
   const line = quotaText(buildRows({ providers: [provider], rtk }), NOW, "UTC")
   expect(line.slice(0, ACCOUNT_W + 10)).toBe("rtk".padEnd(ACCOUNT_W) + "-".padEnd(10))
