@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HerdrWatch, wakeNotice, watchStrandedWake } from "./herdr-watch.ts";
 
@@ -81,7 +81,7 @@ test("a new log line sends once; old lines and a second line inside the cooldown
   expect(sent[0]).toContain("2 of your notes");
 });
 
-test("a notice the desk could not deliver does not start the cooldown", async () => {
+test("a rejected notice is retried on the next change event and sent once", async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "wake-"));
   const log = join(dir, ".stranded-wake.log");
   writeFileSync(log, "");
@@ -91,7 +91,10 @@ test("a notice the desk could not deliver does not start the cooldown", async ()
   appendFileSync(log, "1\twoken\tnotes=1\tqueue=false\n");
   await Bun.sleep(300);
   accept = true;
-  appendFileSync(log, "2\twoken\tnotes=1\tqueue=false\n");
+  const t = new Date();
+  utimesSync(log, t, t);
+  await Bun.sleep(300);
+  utimesSync(log, t, new Date(t.getTime() + 1000));
   await Bun.sleep(300);
   w.close();
   expect(sent).toHaveLength(2);

@@ -96,11 +96,12 @@ export function watchStrandedWake(log: string, send: (text: string) => boolean, 
     if (size < offset) offset = 0;
     if (size === offset) return;
     const text = readFileSync(log, "utf8").slice(offset);
-    offset = size;
     const notice = wakeNotice(text.split("\n").filter(Boolean));
     if (notice && now() - lastSent >= WAKE_NOTICE_COOLDOWN_MS) {
-      if (send(notice)) lastSent = now();
+      if (!send(notice)) return;
+      lastSent = now();
     }
+    offset = size;
   };
   const dir = log.slice(0, log.lastIndexOf("/"));
   return existsSync(dir) ? watch(dir, (_event, name) => { if (name === ".stranded-wake.log") read(); }) : undefined;
