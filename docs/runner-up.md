@@ -23,6 +23,9 @@ crewship:
   #   nice: 10                  # Nice of the coordinator
   #   memory_max: 50%           # MemoryMax of the slice, a size (64G) or a percent of the host
   #   cpu_share: 50             # CPUQuota of the slice: this percent of the host's CPUs
+  #   io_write_device: /dev/sdc # disk to cap writes on; no write cap without it
+  #   io_write_mb: 120          # IOWriteBandwidthMax of the slice, in MB/s
+  #   io_write_iops: 600        # IOWriteIOPSMax of the slice
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
   #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
@@ -66,6 +69,7 @@ Every job container and image build runs in `runnerup.slice`, so these caps hold
 | `IOWeight` | `io_weight` (20) | The same for disk I/O. |
 | `MemoryMax` | `memory_max` (50%) | A hard limit. The kernel stops the biggest process of the slice at the limit, not a process of the host. |
 | `CPUQuota` | `cpu_share` (50) | A hard limit: this percent of the host's CPUs, even when the host is idle. |
+| `IOWriteBandwidthMax`, `IOWriteIOPSMax` | `io_write_mb` (120), `io_write_iops` (600) | Hard limits on `io_write_device`; none without it. Lower values starve Rust builds: at 40 MB/s and 200 IOPS `cargo nextest` ran over an hour and runs queued for hours. A `systemctl set-property --runtime` value is not in the recipe and an apply does not remove it; reset it with `systemctl revert runnerup.slice`. |
 | `Nice` | `nice` (10) | Priority of the coordinator and its place runners. |
 | Process limit | 8192 for each job | As in the CI pool. |
 | Concurrency | `total_slots` | At most `max(total_slots, number of repositories)` jobs run at one time, because each coordinator keeps at least one slot. The slice CPU and memory caps always hold, whatever the count. |
