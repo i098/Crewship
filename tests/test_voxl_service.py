@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -220,5 +221,13 @@ def test_a_tier_goes_direct_unless_its_proxy_flag_is_set(tmp_path):
     direct = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=base, capture_output=True, text=True, timeout=30)
     assert "--proxy" not in direct.stdout and "--port 9222" in direct.stdout
     (home / ".fleet-browser/proxy-obscura").touch()
-    refused = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=base, capture_output=True, text=True, timeout=30)
-    assert refused.returncode == 1 and "GEONODE_*" in refused.stderr
+    fallback = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=base, capture_output=True, text=True, timeout=30)
+    assert fallback.returncode == 0 and "--proxy" not in fallback.stdout and "--port 9222" in fallback.stdout
+    assert "GEONODE_*" in fallback.stderr
+    assert not (home / ".fleet-browser/proxy-obscura").exists()
+    (home / ".fleet-browser/proxy-obscura").touch()
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 9533))
+        held.listen()
+        busy = subprocess.run([str(run / "fleet-browser"), "_run-obscura"], env=_geonode_env(tmp_path, **{k: env[k] for k in ("HOME", "PATH")}, **GEONODE), capture_output=True, text=True, timeout=30)
+    assert busy.returncode == 0 and "--proxy" not in busy.stdout and "--port 9222" in busy.stdout
