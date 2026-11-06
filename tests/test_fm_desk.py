@@ -108,19 +108,34 @@ def test_bad_pick_and_empty_dir(tmp_path):
     assert run(env, "5").returncode == 2
 
 
-def test_follow_opens_next_new_turn_only(tmp_path):
+def test_follow_streams_entries_as_appended_and_never_launches_omp(tmp_path):
     sessions, env = rig(tmp_path)
+    env["FM_DESK_SETTLE"] = "2"
     f = sessions / "a.jsonl"
     write_session(f, [("old turn", "2026-11-05T01:00:00Z")])
+    before = f.read_text()
     proc = subprocess.Popen(
-        [sys.executable, str(FM_DESK), "--follow"], env=env, stderr=subprocess.PIPE, text=True
+        [sys.executable, str(FM_DESK), "--follow"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     time.sleep(1)
     with f.open("a") as h:
-        h.write(
-            entry("user", "brand new turn", "2026-11-05T04:00:00Z")
-            + entry("assistant", "ok", "2026-11-05T04:00:01Z")
-        )
-    assert proc.wait(timeout=20) == 0
-    seen = (tmp_path / "seen").read_text()
-    assert "brand new turn" in seen
+        h.write(entry("user", "brand new turn", "2026-11-05T04:00:00Z"))
+    first = proc.stdout.readline()
+    assert "user: brand new turn" in first
+    with f.open("a") as h:
+        h.write(entry("assistant", "second line out", "2026-11-05T04:00:01Z"))
+    out = proc.stdout.read()
+    proc.wait(timeout=20)
+    assert proc.returncode == 0
+    assert "assistant: second line out" in out
+    out = first + out
+    assert "old turn" not in out
+    assert not (tmp_path / "argv").exists()
+    assert f.read_text().startswith(before)
+
+
+def test_bad_count_is_a_usage_error(tmp_path):
+    sessions, env = rig(tmp_path)
+    for bad in ("abc", "0"):
+        r = run(env, "-n", bad)
+        assert r.returncode == 2 and "Traceback" not in r.stderr

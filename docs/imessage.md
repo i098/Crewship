@@ -826,7 +826,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-imessage --card '<json>'` | Queues a card: a link to a page with options to tap, a chart, a timeline, or a table. The argument is the card JSON, `-` for stdin, or a file. See [Cards](#cards). |
 | `fm-imessage --help` | Shows the usage. It queues nothing. |
 | `fm-desk` | Lists the newest 20 turns of the desk session (local time, kind, first words), then asks which to open. `fm-desk N` opens turn N (1 is the newest); `-n COUNT` sets the list length. omp has no read-only viewer, so the command opens a temporary copy of the session file, cut after the chosen turn, with tools off; the session file is only read. |
-| `fm-desk --follow` | Waits for the next desk turn, then opens it the same way once its reply has settled (a snapshot, not a live redraw). |
+| `fm-desk --follow` | Waits for the next desk turn, then prints its session entries live as they are appended (time, role, text; tool calls and results as one-liners) and exits once the file has been quiet for `FM_DESK_SETTLE` seconds (default 5). `fm-desk --loop` then waits for the next turn again. omp is not started and the session file is only read. |
 | `fm-location` | Prints the location that the owner shares with the line in Find My, as JSON. |
 | `fm-location --check` | Prints one line, `ok, age <N> s, accuracy <M> m`, and no coordinates. Use it to prove a read works. On failure both forms print one line to stderr (`fm-location: HTTP <code>: ...`) and exit 1. |
 

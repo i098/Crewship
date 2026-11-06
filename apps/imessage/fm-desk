@@ -3,10 +3,10 @@
 
 Usage: fm-desk [-n COUNT]    list the recent desk turns, then ask which one to open
        fm-desk N             open turn N of that list (1 is the newest)
-       fm-desk --follow      wait for the next desk turn, then open it
+       fm-desk --follow      wait for the next desk turn and print its entries live; exits when the turn settles
+       fm-desk --loop        like --follow, then wait for the next turn again
 omp has no read-only viewer, so the viewer opens a temporary copy of the session cut after the chosen turn.
-The session file itself is only read. A follow copy is a snapshot taken once the reply has settled.
-Environment: FM_DESK_SESSIONS (session directory), FM_DESK_SETTLE (seconds of quiet before a followed turn opens).
+The session file itself is only read. Follow mode never starts omp.
 """
 import json
 import os
@@ -97,22 +97,60 @@ def read_turn_start(line: str) -> bool:
     return entry.get("type") == "message" and (entry.get("message") or {}).get("role") == "user"
 
 
-def follow(directory: Path) -> int:
-    seen = {(t["path"], t["line"]) for t in recent_turns(directory, 10**9)}
+def render_entry(line: str) -> str | None:
+    try:
+        entry = json.loads(line)
+        message = entry["message"]
+        when = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00")).astimezone()
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if entry.get("type") != "message" or not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    parts = [{"type": "text", "text": content}] if isinstance(content, str) else [p for p in content or [] if isinstance(p, dict)]
+    role, out = message.get("role", "?"), []
+    for part in parts:
+        if part.get("type") == "text" and part.get("text", "").strip():
+            body = part["text"].strip()
+            out.append(f"{when:%H:%M:%S}  {role}: {body}" if role != "toolResult" else f"{when:%H:%M:%S}  result: {' '.join(body.split())[:100]}")
+        elif part.get("type") == "toolCall":
+            args = " ".join(json.dumps(part.get("arguments", {}), ensure_ascii=False).split())[:100]
+            out.append(f"{when:%H:%M:%S}  tool: {part.get('name', '?')} {args}")
+    return "\n".join(out) or None
+
+
+def follow(directory: Path, loop: bool) -> int:
     settle = float(os.environ.get("FM_DESK_SETTLE", "5"))
+    sizes = {p: p.stat().st_size for p in directory.glob("*.jsonl")}
     print("fm-desk: waiting for the next desk turn (Ctrl-C stops)", file=sys.stderr)
     while True:
-        fresh = [t for t in recent_turns(directory, 10**9) if (t["path"], t["line"]) not in seen]
-        if fresh:
-            turn = fresh[0]
-            while time.time() - turn["path"].stat().st_mtime < settle:
+        grown = next((p for p in directory.glob("*.jsonl") if p.stat().st_size > sizes.get(p, 0)), None)
+        if grown is None:
+            time.sleep(0.5)
+            continue
+        offset, quiet_since = sizes.get(grown, 0), time.monotonic()
+        while time.monotonic() - quiet_since < settle:
+            with grown.open("rb") as handle:
+                handle.seek(offset)
+                data = handle.read()
+            complete = data[: data.rfind(b"\n") + 1]
+            if complete:
+                offset += len(complete)
+                quiet_since = time.monotonic()
+                for raw in complete.decode(errors="replace").splitlines():
+                    text = render_entry(raw)
+                    if text:
+                        print(text, flush=True)
+            else:
                 time.sleep(0.2)
-            return open_turn(next(t for t in read_turns(turn["path"]) if t["line"] == turn["line"]))
-        time.sleep(0.5)
+        sizes[grown] = offset
+        if not loop:
+            return 0
+        print("fm-desk: turn ended, waiting for the next one", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:
-    count, pick, follow_mode = 20, None, False
+    count, pick, follow_mode, loop = 20, None, False, False
     args = iter(argv)
     for arg in args:
         if arg in ("-h", "--help"):
@@ -120,8 +158,14 @@ def main(argv: list[str]) -> int:
             return 0
         if arg == "--follow":
             follow_mode = True
+        elif arg == "--loop":
+            loop = follow_mode = True
         elif arg == "-n":
-            count = int(next(args, "0") or 0)
+            value = next(args, "")
+            if not value.isdigit() or int(value) < 1:
+                print("fm-desk: -n needs a positive whole number", file=sys.stderr)
+                return 2
+            count = int(value)
         elif arg.isdigit():
             pick = int(arg)
         else:
@@ -129,7 +173,7 @@ def main(argv: list[str]) -> int:
             return 2
     directory = sessions_dir()
     if follow_mode:
-        return follow(directory)
+        return follow(directory, loop)
     turns = recent_turns(directory, max(count, pick or 0))
     if not turns:
         print(f"fm-desk: no desk turns in {directory}", file=sys.stderr)
