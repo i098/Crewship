@@ -24,7 +24,8 @@
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
 import { cleanText, statusLine } from "./clean.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, mkdtempSync, realpathSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Database } from "bun:sqlite";
@@ -905,19 +906,23 @@ type V2Auth = { keys: Parameters<typeof loadDispatchModels>[2]; close(): void };
 async function loadV2Auth(base: string, databasePath: string): Promise<V2Auth> {
   const { AuthStorage, SqliteAuthCredentialStore } =
     await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-ai/auth-storage", base)).href);
-  const database = new Database(databasePath, { readonly: true, create: false });
+  // The store creates tables and triggers on open, so it cannot use the live OMP database
+  // read-only. It reads a private snapshot instead and never writes to the original.
+  const dir = mkdtempSync(join(tmpdir(), "fm-imessage-auth-"));
+  let database: Database | undefined;
   let auth: V2Auth | undefined;
   try {
-    const store = new SqliteAuthCredentialStore(database);
-    // Native deletion swallows readonly errors; duplicate cleanup must fail explicitly.
-    store.deleteAuthCredential = async () => { throw new Error("Read-only authentication cannot remove duplicate credentials"); };
-    const opened = new AuthStorage(store);
+    const source = new Database(databasePath, { readonly: true, create: false });
+    try { source.run("VACUUM INTO ?", [join(dir, "auth.db")]); } finally { source.close(); }
+    database = new Database(join(dir, "auth.db"));
+    const opened = new AuthStorage(new SqliteAuthCredentialStore(database));
     auth = opened;
     await opened.credentials.reload();
-    return opened;
+    return { get keys() { return opened.keys; }, close() { opened.close(); rmSync(dir, { recursive: true, force: true }); } };
   } catch (error) {
     if (auth) auth.close();
-    else database.close();
+    else database?.close();
+    rmSync(dir, { recursive: true, force: true });
     throw error;
   }
 }
