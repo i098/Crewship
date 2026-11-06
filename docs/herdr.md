@@ -243,7 +243,8 @@ btop saves its config on exit, including the last preset's boxes; the launcher a
 [`blueprint/maintenance/browser-view.py`](../blueprint/maintenance/browser-view.py) (installed as `browser-view`, needs `chafa`) is a read-only window for every browser that speaks CDP: the `fleet-browser` tiers (obscura, chrome, voxl; a down tier stays listed) and any other loopback DevTools port, such as a worker's headless Chrome. It lists each browser's tabs and shows the selected tab with `chafa`.
 
 - Headed tabs (the chrome and voxl tiers, any non-headless Chrome) are live: the viewer starts `Page.startScreencast`, acks each frame and draws it as it arrives, at most `--fps` (8) a second.
-- Headless tabs (obscura, `HeadlessChrome`) get a `Page.captureScreenshot` every `--interval` seconds (5).
+- Headless tabs (`HeadlessChrome`) get a `Page.captureScreenshot` every `--interval` seconds (5); `--no-live` does the same for headed tabs.
+- obscura cannot be viewed: its `/json/list` shows a placeholder `page-1`, and a real page exists only inside the client session that opened it, so the screenshot fails with `No page for session`. The viewer lists the tier and says so.
 - The browser list rescans every `--refresh` seconds (3). Keys: `j`/`k` or arrows select, `r` rescans now, `q` quits. `--list [--json]` prints the browsers once.
 - It sends only `Page.captureScreenshot`, `Page.startScreencast` and `Page.screencastFrameAck`. It never navigates, closes, clicks or types.
 - `--format kitty` or `--format sixels` swaps the chafa output for a terminal that draws those; the default `symbols` works in every pane, tuios included.

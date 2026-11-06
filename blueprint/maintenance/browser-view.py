@@ -314,7 +314,13 @@ def shoot(tab, size, list_rows, fmt):
             capture(tab["ws"]), cols, max(lines - list_rows - 2, 1), fmt
         ), f"{time.strftime('%H:%M:%S')}  {tab['url']}"
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as e:
-        return [], f"no screenshot: {e}"
+        # obscura lists a placeholder page-1; its real pages exist only inside the client session that opened them.
+        why = (
+            "obscura pages live in their client's session, no shared view"
+            if "No page for session" in str(e)
+            else e
+        )
+        return [], f"no screenshot: {why}"
 
 
 class Viewer:
@@ -332,7 +338,7 @@ class Viewer:
             self.live.close()
         self.live = self.latest = None
         self.preview, self.shown, self.last_shot = [], tab and tab["id"], 0.0
-        if tab and tab["headed"] and tab["ws"]:
+        if tab and tab["headed"] and tab["ws"] and not self.args.no_live:
             try:
                 self.live = start_screencast(tab["ws"])
             except OSError as e:
@@ -421,6 +427,11 @@ def main(argv=None):
         type=float,
         default=5.0,
         help="seconds between screenshots of the selected tab",
+    )
+    ap.add_argument(
+        "--no-live",
+        action="store_true",
+        help="screenshot headed tabs too instead of streaming a screencast",
     )
     ap.add_argument(
         "--fps",

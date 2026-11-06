@@ -164,3 +164,12 @@ def test_fleet_status_ignores_the_session_line(monkeypatch, tmp_path):
     fake.chmod(0o755)
     monkeypatch.setattr(bv, "FLEET_BROWSER", str(fake))
     assert bv.fleet_tiers() == {9222: ("obscura", "up")}
+
+
+def test_obscura_placeholder_page_gets_an_explanation_not_a_raw_error(monkeypatch):
+    def refuse(_ws):
+        raise RuntimeError("No page for session")
+
+    monkeypatch.setattr(bv, "capture", refuse)
+    preview, note = bv.shoot({"ws": "ws://x/y", "url": "about:blank"}, (80, 24), 4, "symbols")
+    assert preview == [] and "client's session" in note
