@@ -198,6 +198,26 @@ mosh <alias> -- herdr-patch
 
 [Over mosh](herdr.md#over-mosh) explains `herdr-patch`. Keep the alias, the host's address and the account name out of this repository.
 
+## Test sandbox
+
+A test must never reach the live Herdr or TUIOS session or a host daemon. A no-mistakes test step once ran `tuios kill-session` against the live socket and ended the owner's session. The `agents` profile installs `~/.local/bin/cf-sandbox` (from [`blueprint/maintenance/cf-sandbox`](../blueprint/maintenance/cf-sandbox)) and the `bubblewrap` package, and it runs a command like this:
+
+```bash
+cf-sandbox [--no-net] [--bind PATH] [--ro-bind PATH] [--cwd DIR] -- COMMAND [ARG...]
+```
+
+Inside the sandbox the command has its own pid, IPC and UTS namespaces, so it cannot signal a host process. `HOME`, `XDG_RUNTIME_DIR` and `/tmp` are private directories under `$TMPDIR` (set `CF_SANDBOX_SCRATCH` to move them); they are removed on exit. The real home and runtime directory hold the live sockets and are not mounted. `/run` is empty, so the Docker socket and the user bus are gone. The variables `HERDR_*`, `TUIOS_*`, `DBUS_SESSION_BUS_ADDRESS`, `SSH_AUTH_SOCK` and `DOCKER_HOST` are dropped. `/usr`, `/etc` and the system libraries are read-only. The checkout is read-write, and `cf-sandbox` refuses to start when the checkout is or contains the real home or runtime directory; in a git worktree the shared git directory is read-only. Toolchains in the real home (`.cargo`, `.rustup`, `.local/bin`, `.local/share/uv`, `.local/share/code-factory`, `.omp/puppeteer`, `.bun`, `.nvm`, `.pyenv`) are read-only, and the `uv`, `sccache` and cargo registry caches are read-write. Nothing else of the disk is mounted, because a read-only bind does not stop a `connect()` to a Unix socket. Add a path with `--bind` (read-write) or `--ro-bind`, or with `CF_SANDBOX_RW` and `CF_SANDBOX_RO` (colon-separated).
+
+The network is shared unless you pass `--no-net`. Abstract Unix sockets belong to the network namespace, so use `--no-net` for a test that needs no network. This repository's own test step leaves the network shared, because one test fetches a release page from the registry. The sandbox gets a `git` identity of its own and no GitHub credentials.
+
+How to use it:
+
+- Workers: run every test, lint or build command that is not a plain read-only check as `cf-sandbox -- <command>`, from inside the worktree. This applies to any test that starts, stops or lists sessions.
+- no-mistakes: this repository's [`.no-mistakes.yaml`](../.no-mistakes.yaml) sets `commands.test` to `cf-sandbox -- uv run pytest ...`. no-mistakes has no global setting that wraps the test command of another repository (its host-level `repository_overrides.<remote>.commands.<step>` accepts `nice` only), so add the same `cf-sandbox --` prefix to the `commands.test` of each repository you validate on the host.
+- Real Herdr work still goes through [`tests/herdr-lab`](../tests/herdr-lab) on a named lab session; the sandbox does not replace it.
+
+[`tests/test_cf_sandbox.py`](../tests/test_cf_sandbox.py) proves the boundary with fake sockets: a client that sends `kill-session` reaches a fake daemon outside the sandbox and none inside it.
+
 ## Host hardening
 
 With `profiles.koncreet` on, every apply on a host that starts services (not the container worker image) installs [Koncreet](https://github.com/jimididit/koncreet) as `/usr/local/bin/koncreet` and renders `/etc/koncreet.conf` once, but nothing runs it. Koncreet is optional: when its release lookup, checksum, or download fails, apply prints a warning, skips it, and finishes the rest; a release installed earlier stays in place. It is a first-hour hardening toolkit: a sudo user with SSH keys, sysctl, swap, a journald cap, time sync, a ufw default-deny firewall, fail2ban on SSH, unattended security updates, and finally SSH with password and root login turned off.
