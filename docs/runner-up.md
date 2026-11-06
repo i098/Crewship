@@ -95,6 +95,7 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 - removes untagged image layers;
 - keeps the Docker build cache under `disk_max_gb`.
 
+Each step runs alone with a time limit (`RUNNER_UP_PRUNE_TIMEOUT`, 280 s): a step that fails or hangs on a busy disk does not skip the next ones, and the unit then ends failed.
 It never touches a running container.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.

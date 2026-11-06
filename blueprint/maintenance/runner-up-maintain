@@ -26,9 +26,15 @@ image)
 clean)
   # Only stopped containers of runner-up's places: `docker run --rm` removes them at the end of a job,
   # so one that is left here belongs to a place that crashed.
-  docker container prune --force --filter label=runner-up.place --filter until=1h >/dev/null
-  docker image prune --force >/dev/null
-  docker builder prune --force --reserved-space "${RUNNER_UP_DISK_MAX_GB:-50}GB" >/dev/null ;;
+  # Each step runs on its own, with a time limit: a prune that fails (another prune runs) or hangs on a
+  # busy disk must not skip the others, or the build cache grows past its cap. The unit still fails.
+  limit=${RUNNER_UP_PRUNE_TIMEOUT:-280}
+  failed=0
+  prune() { timeout "$limit" docker "$@" >/dev/null || failed=1; }
+  prune container prune --force --filter label=runner-up.place --filter until=1h
+  prune image prune --force
+  prune builder prune --force --reserved-space "${RUNNER_UP_DISK_MAX_GB:-50}GB"
+  exit "$failed" ;;
 *)
   echo "usage: runner-up-maintain image [--ensure] | clean" >&2
   exit 2 ;;

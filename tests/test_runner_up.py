@@ -457,6 +457,7 @@ def stubs(tmp_path):
         stub.write_text(
             "#!/bin/sh\n"
             f'echo "{name} $*" >> {log}\n'
+            'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit 1;; esac\n'
             '[ "$1 $2" = "image inspect" ] && [ ! -e "$IMAGE_EXISTS" ] && exit 1\n'
             "exit 0\n"
         )
@@ -464,7 +465,7 @@ def stubs(tmp_path):
     return bin_dir, log
 
 
-def run_script(script, stubs, *args, env=None, **kwargs):
+def run_script(script, stubs, *args, env=None, code=0, **kwargs):
     bin_dir, log = stubs
     environment = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
@@ -479,7 +480,7 @@ def run_script(script, stubs, *args, env=None, **kwargs):
         text=True,
         **kwargs,
     )
-    assert done.returncode == 0, done.stderr
+    assert done.returncode == code, done.stderr
     return log.read_text().splitlines() if log.exists() else []
 
 
@@ -522,6 +523,12 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
         "docker image prune --force",
         "docker builder prune --force --reserved-space 7GB",
     ]
+
+
+def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
+    env = {"DOCKER_FAILS": "container prune"}
+    calls = run_script("runner-up-maintain", stubs, "clean", env=env, code=1)
+    assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
 def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(stubs, tmp_path):
