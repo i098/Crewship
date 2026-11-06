@@ -38,6 +38,7 @@ import { authorizedWritePath, steChecked, type BasicAnswer, basicAnswer, bubbles
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { TIMEOUT_REPLY, TURN_MAX_MS, withDeadline } from "./desk-deadline.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -1086,8 +1087,17 @@ async function runDeskV2() {
     const finishTyping = muted() ? () => {} : startDeskTyping(pending, () => !stopping);
     const turnDone = deskTurns.begin();
     try {
-      await runV2Turn(pending, controller, current);
-      if (pending.every((r) => r.route === "desk" && !r.out?.bubbles?.length)) finishTyping();
+      const done = await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => {
+        const stuck = current() && pending.every((r) => r.route === "pending");
+        controller.abort();
+        log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
+        if (!stuck) return;
+        handoffV2(pending);
+        const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+        outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(),
+          bubbles: [TIMEOUT_REPLY], deskGeneration, deskSession });
+      });
+      if (!done || pending.every((r) => r.route === "desk" && !r.out?.bubbles?.length)) finishTyping();
     } catch (error) {
       if (current()) {
         log("v2 desk")(error);
