@@ -146,7 +146,7 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewboard-tui --desk` (tab `frontdesk`) | iMessage front desk health and recent turns | `crewship.herdr.crewboard_tab` |
 | `machine-tuios` (tab `tuios`) | every machine TUI as a window of one tuios session an agent can drive; see [tuios machine tab](herdr.md#tuios-machine-tab) | `crewship.herdr.tuios_tab` (default `false`) |
 
-A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
+A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open. The exception is `tuios_tab`, which is opt-in: when `false`, the recipe installs neither tuios nor the `machine-tuios` launcher.
 
 ## The host config
 
