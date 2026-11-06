@@ -40,7 +40,13 @@ REPOS = [
     {"repo": "acme/mixed", "slots": 1, "labels": ["self-hosted", "Linux", "one", "two"]},
 ]
 # A Docker-in-job entry: it stays on the CI pool.
-DIND = {"repo": "acme/e2e.tests", "slots": 1, "labels": ["linux", "e2e"], "docker": "dind", "userns": True}
+DIND = {
+    "repo": "acme/e2e.tests",
+    "slots": 1,
+    "labels": ["linux", "e2e"],
+    "docker": "dind",
+    "userns": True,
+}
 
 
 @pytest.fixture
@@ -315,7 +321,11 @@ def unit_sections(path):
 
 
 def test_the_slice_and_the_units_carry_the_caps(home):
-    apply(home, runner(home, cpu_weight=15, memory_max="30%", cpu_share=25), facts={"processor_vcpus": 8})
+    apply(
+        home,
+        runner(home, cpu_weight=15, memory_max="30%", cpu_share=25),
+        facts={"processor_vcpus": 8},
+    )
     slice_ = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert slice_["CPUWeight"] == ["15"]
     assert slice_["IOWeight"] == ["20"]
@@ -500,7 +510,11 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
 def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
     sock, cache = tmp_path / "docker.sock", tmp_path / "shared"
     sock.touch()
-    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_SHARED_CACHE": str(cache), "RUNNER_UP_CACHE_MAX_GB": "20"}
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_SHARED_CACHE": str(cache),
+        "RUNNER_UP_CACHE_MAX_GB": "20",
+    }
     (call,) = run_script("runner-up-docker", stubs, "run", "img", env=env)
     assert f"-v {cache}/sccache:/sccache" in call
     assert f"-v {cache}/cargo-lock:/home/runner/.cargo/.package-cache " in call
