@@ -1070,7 +1070,8 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
     profile_task = next(
         task["ansible.builtin.blockinfile"]
         for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/account.yml").read_text())
-        if "block" in task.get("ansible.builtin.blockinfile", {})
+        if task.get("ansible.builtin.blockinfile", {}).get("marker") == "# {mark} crewship managed environment"
+        and "block" in task["ansible.builtin.blockinfile"]
     )
     profile = tmp_path / ".profile"
     unit = tmp_path / "herdr.service"
