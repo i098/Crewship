@@ -647,6 +647,15 @@ def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
     assert (units(home) / "timers.target.wants/runner-up-guard.timer").is_symlink()
 
 
+def test_the_guard_unit_quotes_the_instance_list_so_systemd_keeps_every_name(home):
+    apply(home, runner(home))
+    service = unit_sections(units(home) / "runner-up-guard.service")["Service"]
+    (value,) = [e for e in service["Environment"] if "RUNNER_UP_INSTANCES" in e]
+    prefix = '"RUNNER_UP_INSTANCES='
+    assert value.startswith(prefix) and value.endswith('"')
+    assert sorted(value[len(prefix) : -1].split()) == instances(home)
+
+
 def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(stubs, tmp_path):
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n")
