@@ -639,6 +639,59 @@ def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
     assert calls == [] and state.exists()
 
 
+def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None):
+    """Run `guard` at time `now` with a stub pressure file; state lives in tmp_path between runs."""
+    pressure = tmp_path / "io"
+    pressure.write_text(f"some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nfull avg10=1.00 avg60={avg60} avg300=0.00 total=1\n")
+    io_state = tmp_path / "io.paused"
+    if io:
+        io_state.write_text(io)
+    if calm is not None:
+        (tmp_path / "io.paused.calm").write_text(str(calm))
+    env = {
+        "RUNNER_UP_PRESSURE_FILE": str(pressure),
+        "RUNNER_UP_IO_STATE": str(io_state),
+        "RUNNER_UP_NOW": str(now),
+        "RUNNER_UP_INSTANCES": "",
+    }
+    stubs[1].write_text("")
+    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, env=env)
+    left = io_state.read_text().split() if io_state.exists() else []
+    return [c for c in calls if " start " in c], left
+
+
+def test_io_resume_waits_for_the_ten_minute_window_then_starts_one_unit_per_run(stubs, tmp_path):
+    assert io_guard(stubs, tmp_path, "12.50", now=1000) == ([], ["a", "b"])
+    assert io_guard(stubs, tmp_path, "39.99", now=1599, io="")[0] == []
+    calls, left = io_guard(stubs, tmp_path, "5.00", now=1600, io="")
+    assert calls == ["systemctl --user start a"] and left == ["b"]
+    calls, left = io_guard(stubs, tmp_path, "5.00", now=1720, io="")
+    assert calls == ["systemctl --user start b"] and left == []
+    assert not (tmp_path / "io.paused.calm").exists()
+
+
+def test_an_io_spike_resets_the_ten_minute_window(stubs, tmp_path):
+    io_guard(stubs, tmp_path, "5.00", now=1000)
+    assert io_guard(stubs, tmp_path, "40.00", now=1300, io="")[0] == []
+    assert io_guard(stubs, tmp_path, "5.00", now=1700, io="")[0] == []
+    assert io_guard(stubs, tmp_path, "5.00", now=2300, io="")[0] == ["systemctl --user start a"]
+
+
+def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
+    calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=86, disk_paused="a\n")
+    assert calls == [] and left == ["a", "b"]
+
+
+def test_io_pause_stops_and_records_units_once(stubs, tmp_path):
+    bin_dir, log = stubs
+    (bin_dir / "systemctl").write_text(f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$3" = bad ] && exit 1\nexit 0\n')
+    (bin_dir / "systemctl").chmod(0o755)
+    state = tmp_path / "io.paused"
+    env = {"RUNNER_UP_IO_STATE": str(state)}
+    run_script("runner-up-maintain", stubs, "io-pause", "a", "bad", "a", "b", env=env)
+    assert state.read_text() == "a\nb\n"
+
+
 def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
     apply(home, runner(home))
     service = unit_sections(units(home) / "runner-up-guard.service")["Service"]

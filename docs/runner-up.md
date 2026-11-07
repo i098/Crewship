@@ -114,6 +114,9 @@ It never touches a running container.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
 Below `resume_pct` (85) it starts again only the coordinators it stopped.
+`runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them.
+When `/proc/pressure/io` `full avg60` stays below 40% for 10 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 10 minutes.
+The disk rule keeps its own units: no unit starts while the disk is at `resume_pct` or above.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
