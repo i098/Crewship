@@ -36,6 +36,7 @@ export const COMPACT_MODES = ["snapcompact", "snapcompact", "snapcompact", "remo
 
 export interface Ctx {
 	cwd: string;
+	model?: { input?: readonly string[] };
 	isIdle(): boolean;
 	sessionManager: { getBranch(): unknown };
 	compact(options: CompactOptions): unknown;
@@ -89,11 +90,13 @@ function isContinuing(event: unknown): boolean {
 
 /** Runs ctx.compact with each mode in turn; the next mode starts when the last one failed. */
 export function compactWithFallback(ctx: Ctx, options: CompactOptions, modes: readonly string[] = COMPACT_MODES): void {
+	// A text-only model cannot run snapcompact; each doomed attempt only adds a failure and a busy compactor.
+	const usable = ctx.model?.input?.includes("image") === false ? modes.filter(m => m !== "snapcompact") : modes;
 	const attempt = (i: number): void => {
 		ctx.compact({
 			...options,
-			mode: modes[i],
-			onError: error => (i + 1 < modes.length ? attempt(i + 1) : options.onError?.(error)),
+			mode: usable[i],
+			onError: error => (i + 1 < usable.length ? attempt(i + 1) : options.onError?.(error)),
 		});
 	};
 	attempt(0);

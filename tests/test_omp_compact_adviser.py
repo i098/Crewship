@@ -71,6 +71,9 @@ mod.compactWithFallback(
   { compact: o => (second.push(o.mode), second.length < 2 ? o.onError("x") : o.onComplete("ok")) },
   { onComplete: () => completed++, onError: () => { throw new Error("no"); } },
 );
+const textOnly = [];
+mod.compactWithFallback({ model: { input: ["text"] }, compact: o => (textOnly.push(o.mode), o.onError("x")) }, { onError() {} });
+out.textOnly = textOnly;
 out.retrySucceeds = second;
 out.completed = completed;
 
@@ -113,6 +116,7 @@ def test_compact_adviser_extension():
     assert (out["keyEnv"], out["keyFile"]) == ("from-env", "from-file")
     assert out["chain"] == ["snapcompact"] * 3 + ["remote", "soft"]
     assert out["finalErrors"] == 1
+    assert out["textOnly"] == ["remote", "soft"]
     assert out["retrySucceeds"] == ["snapcompact", "snapcompact"] and out["completed"] == 1
     # agent_end replaces agent_settled; session_before_compact is dropped; the excluded cwd and a continuing run never settle.
     assert out["events"] == ["agent_end", "turn_end"]
