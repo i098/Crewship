@@ -44,7 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendOnce, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -205,7 +205,7 @@ type Received = { requestId: string; text: string; authored?: string; ref: Ref; 
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { replyTarget: string; space: string; by: "id" | "position" };
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -529,19 +529,11 @@ Bun.serve({
     if (status) return new Response(`nothing queued: this is a status line (${status}); write one plain-prose sentence for the owner\n`, { status: 422 });
     const parts = bubbles(cleanText(rawText));
     if (!parts.length && !photo) return new Response("empty message", { status: 400 });
-    // ?reply=N targets his Nth latest text. ?no-thread forces plain, even with an explicit target.
-    const replyTo = Number(url.searchParams.get("reply") ?? 0);
-    const target = replyTo > 0 ? recent[recent.length - replyTo] : undefined;
-    if (replyTo > 0 && !target) return new Response(`nothing queued: only ${recent.length} text(s) kept since the service started\n`, { status: 400 });
-    // A threaded reply goes out on the transport and in the conversation of the text it replies to.
-    const destination = target ?? proactiveRef;
-    if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
-    if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
-    const key = keyOf(req);
-    if (key instanceof Response) return key;
+    // ?reply=N targets his Nth latest text; ?reply-id=ID targets that exact message id. ?no-thread forces plain, even with an explicit target.
     const who = mateOfSender(sender) ?? sender ?? "main";
-    return sendOnce(STATE, { key, sender: who, text: parts.join("\n\n"), alone: !!photo }, (dup) =>
-      queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }));
+    return sendReply({ recent, params: url.searchParams, proactive: proactiveRef, muted: muted(), dir: STATE, sender: who, text: parts.join("\n\n"), alone: !!photo,
+      key: () => keyOf(req), record: recordRoute,
+      queue: (target, destination, dup) => queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }) });
   },
 });
 
@@ -1463,6 +1455,7 @@ async function rewriteVoice(source: VoiceSource, question: string): Promise<stri
 }
 
 function applyRoute(event: RouteEvent) {
+  if ("replyTarget" in event) return; // audit-only row: it changes no routing state on replay
   if ("deskCancelled" in event) deskGeneration++;
   else if ("received" in event) {
     deskGeneration++;
