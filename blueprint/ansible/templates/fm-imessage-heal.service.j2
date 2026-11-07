@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+# Runs when systemd gives up on fm-imessage.service (docs/imessage.md#self-healing): counts the failed heal, alerts on
+# the second one in a row, and starts the bridge again. Started only by OnFailure=; it has no [Install].
+
+[Unit]
+Description=Count a failed iMessage self-heal and start the bridge again (Crewship managed)
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ crewship_imessage_dir }}
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment="FM_HOME={{ crewship_firstmate_dir }}"
+StateDirectory=fm-imessage
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" selfheal.ts failed'

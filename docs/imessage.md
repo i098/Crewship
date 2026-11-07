@@ -431,6 +431,17 @@ The caller still owns durable request identity, routing decisions, delivery, and
 The caller must check `current()` again before committing a worker result.
 The [front](../tests/test_imessage_front.py), [dispatch](../tests/test_imessage_dispatch_policy.py), [worker](../tests/test_imessage_subagent.py), and [relay](../tests/test_imessage_relay.py) regressions cover these module boundaries.
 
+## Self-healing
+
+The line repairs itself without polling or periodic texts. The code is `apps/imessage/selfheal.ts`.
+
+- **Watchdog.** The unit sets `WatchdogSec=300`. The bridge sends `WATCHDOG=1` through `systemd-notify` every 60 s, and only when `GET /health` on the bridge port answers, no desk turn has run longer than 15 minutes (`FM_IMESSAGE_TURN_DEADLINE_MS`), and the pi-natives `.node` loads. When a check fails, or the process is stopped or blocked, systemd stops the unit with SIGTERM (SIGKILL after `TimeoutStopSec`) and restarts it. The desk turn deadline is a backstop beyond the 10-minute delegate wait.
+- **Natives.** `ExecStartPre` runs `bun selfheal.ts start`, and each beat runs the same check. It loads every `~/.omp/natives/<omp version>/*.node` in a child process. If the file for this CPU is missing or does not load, it runs `omp --help` with a scratch `HOME`, which makes the omp binary unpack its own natives, and copies the result in with an atomic rename.
+- **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
+- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the bridge again.
+
+To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
+
 ## Upstream outages
 
 The Photon service can be unavailable for minutes. It then answers `UNAVAILABLE` (gRPC) or HTTP 502 or 503.
