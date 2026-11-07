@@ -3,9 +3,10 @@
 // past the deadline, the pi-natives .node loads). A failed start that never became healthy counts as a failed heal;
 // the second one in a row alerts the owner once. Run as `bun selfheal.ts start` from ExecStartPre, and as
 // `bun selfheal.ts failed` from the OnFailure unit.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 type Env = Record<string, string | undefined>;
 type State = { pending: boolean; fails: number; alerted: boolean };
@@ -53,7 +54,7 @@ async function loads(dir: string, env: Env): Promise<boolean> {
 
 // The omp binary embeds its natives and unpacks them into $HOME/.omp/natives/<version> when a command like --help needs them, so a
 // scratch HOME gives a fresh copy that is never half-written. Returns "ok", "repaired", or throws.
-export async function natives(env: Env = process.env): Promise<"ok" | "repaired"> {
+async function ompNatives(env: Env): Promise<"ok" | "repaired"> {
   const omp = env.FM_IMESSAGE_OMP || "omp";
   const version = (await run([omp, "--version"], env, 30_000)).out.trim().split("/").pop();
   if (!version) throw new Error("omp --version printed nothing");
@@ -74,6 +75,33 @@ export async function natives(env: Env = process.env): Promise<"ok" | "repaired"
   }
   if (!(await loads(dir, env))) throw new Error(`natives in ${dir} still do not load`);
   return "repaired";
+}
+
+// The bridge and the desk load @oh-my-pi/pi-natives from the install that omp's own packages resolve to (often the bun install
+// cache), and that copy can lack its .node: the platform package holds the file and nothing copies it in. Probe the import in a
+// child (runtime-selected path); on failure copy the missing .node files from the sibling platform package, atomically, and probe again.
+export async function bridgeNatives(env: Env = process.env): Promise<"ok" | "repaired"> {
+  const omp = Bun.which(env.FM_IMESSAGE_OMP || "omp", { PATH: env.PATH });
+  if (!omp) throw new Error("omp is not on PATH");
+  const entry = Bun.resolveSync("@oh-my-pi/pi-natives", dirname(realpathSync(omp)));
+  const probe = async () => (await run([process.execPath, "-e", `await import(${JSON.stringify(pathToFileURL(entry).href)})`], env, 60_000)).code === 0;
+  if (await probe()) return "ok";
+  const pkg = dirname(dirname(entry));
+  const platform = join(dirname(pkg), basename(pkg).replace(/^pi-natives/, `pi-natives-${process.platform}-${process.arch}`));
+  const files = existsSync(platform) ? readdirSync(platform).filter((f) => f.endsWith(".node")) : [];
+  if (!files.length) throw new Error(`pi-natives at ${pkg} does not load and ${platform} has no .node to copy`);
+  for (const file of files) {
+    copyFileSync(join(platform, file), join(dirname(entry), `${file}.tmp`));
+    renameSync(join(dirname(entry), `${file}.tmp`), join(dirname(entry), file));
+  }
+  if (!(await probe())) throw new Error(`pi-natives at ${pkg} still does not load after copying ${files.join(", ")}`);
+  return "repaired";
+}
+
+// Checks both places pi-natives is loaded from. Returns "ok", "repaired", or throws.
+export async function natives(env: Env = process.env): Promise<"ok" | "repaired"> {
+  const results = [await ompNatives(env), await bridgeNatives(env)];
+  return results.includes("repaired") ? "repaired" : "ok";
 }
 
 // Tracks running desk turns so the heartbeat can see one stuck past the deadline.

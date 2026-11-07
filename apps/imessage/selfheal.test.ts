@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadState, markHealthy, onStart, Turns } from "./selfheal.ts";
+import { bridgeNatives, loadState, markHealthy, onStart, Turns } from "./selfheal.ts";
 
 // A fake omp that prints a version but unpacks no natives, so every start fails its natives check.
 const withHome = async (run: (env: Record<string, string>, dir: string) => Promise<void>) => {
@@ -51,4 +51,30 @@ test("a healthy bridge gets no alert and its failure count is cleared", () => wi
     expect(existsSync(`${dir}/alerts.status`)).toBe(false);
     expect(loadState(live).fails).toBe(0);
   } finally { server.stop(true); }
+}));
+
+// A fake omp install whose pi-natives throws on import until native/a.node exists; the platform package holds a.node.
+const withInstall = async (platformHasNode: boolean, run: (env: Record<string, string>, native: string) => Promise<void>) => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "selfheal-bridge-"));
+  const pkg = `${dir}/node_modules/@oh-my-pi/pi-natives`;
+  const platform = `${dir}/node_modules/@oh-my-pi/pi-natives-${process.platform}-${process.arch}`;
+  mkdirSync(`${pkg}/native`, { recursive: true });
+  mkdirSync(platform, { recursive: true });
+  writeFileSync(`${pkg}/package.json`, JSON.stringify({ name: "@oh-my-pi/pi-natives", type: "module", main: "./native/index.js" }));
+  writeFileSync(`${pkg}/native/index.js`, `import { accessSync } from "node:fs";\naccessSync(new URL("./a.node", import.meta.url));\n`);
+  if (platformHasNode) writeFileSync(`${platform}/a.node`, "x");
+  writeFileSync(`${dir}/omp`, "#!/bin/sh\n");
+  chmodSync(`${dir}/omp`, 0o755);
+  try { await run({ PATH: process.env.PATH ?? "", FM_IMESSAGE_OMP: `${dir}/omp` }, `${pkg}/native`); } finally { rmSync(dir, { recursive: true, force: true }); }
+};
+
+test("a pi-natives install with its .node missing is repaired from the platform package and then loads", () => withInstall(true, async (env, native) => {
+  expect(existsSync(`${native}/a.node`)).toBe(false);
+  expect(await bridgeNatives(env)).toBe("repaired");
+  expect(existsSync(`${native}/a.node`)).toBe(true);
+  expect(await bridgeNatives(env)).toBe("ok");
+}));
+
+test("a pi-natives install that cannot be repaired fails, so the start exits non-zero", () => withInstall(false, async (env) => {
+  await expect(bridgeNatives(env)).rejects.toThrow(/no \.node to copy/);
 }));
