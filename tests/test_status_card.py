@@ -114,3 +114,57 @@ def test_send_texts_the_png_and_deletes_it(card, monkeypatch):
     monkeypatch.setattr(card.subprocess, "run", lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0))
     card.send(CARD_DATA, "dark")
     assert calls == [["fm-imessage", "--image", shots[0]]] and not os.path.exists(shots[0])
+
+
+@pytest.mark.parametrize(("load", "timeout"), [(10, 60), (96, 120), (192, 240), (960, 300)])
+def test_screenshot_timeout_grows_with_load_per_core(card, monkeypatch, load, timeout):
+    text_card = card.sibling("fm-text-card")
+    monkeypatch.setattr(text_card.os, "getloadavg", lambda: (load, 0, 0))
+    monkeypatch.setattr(text_card.os, "cpu_count", lambda: 96)
+    monkeypatch.setattr(text_card, "chrome", lambda: "chrome")
+    seen = []
+    monkeypatch.setattr(text_card.subprocess, "run", lambda argv, **kw: seen.append(kw["timeout"]))
+    text_card.shoot("<p>x</p>", 100, "out.png")
+    assert seen == [timeout]
+
+
+class FakeTextCard:
+    """fm-text-card whose screenshot fails the first `fails` times."""
+
+    def __init__(self, fails):
+        self.fails, self.shots = fails, []
+
+    def render(self, text):
+        return f"text:{text}", 1
+
+    def shoot(self, page, height, out, width=840):
+        self.shots.append(page)
+        if len(self.shots) <= self.fails:
+            raise subprocess.TimeoutExpired("chrome", 60)
+
+
+def test_a_failed_screenshot_is_retried_once(card, monkeypatch):
+    fake = FakeTextCard(fails=1)
+    monkeypatch.setattr(card, "sibling", lambda name: fake)
+    card.shoot(CARD_DATA, "dark", "out.png")
+    assert len(fake.shots) == 2 and not fake.shots[1].startswith("text:")
+
+
+def test_two_failed_screenshots_fall_back_to_the_text_card(card, monkeypatch):
+    fake = FakeTextCard(fails=2)
+    monkeypatch.setattr(card, "sibling", lambda name: fake)
+    card.shoot(CARD_DATA, "dark", "out.png")
+    assert len(fake.shots) == 3
+    assert fake.shots[2].splitlines()[:3] == [
+        "text:Fleet status",
+        "- code-factory: merged 4, open 2, today 3, running",
+        "- swarms: merged 0, open 1, today 0, waiting on you, needs the screenshot OK",
+    ]
+    # The fallback text parses back to the same projects.
+    assert card.parse(fake.shots[2].removeprefix("text:"))["projects"] == CARD_DATA["projects"]
+
+
+def test_a_failed_fallback_raises(card, monkeypatch):
+    monkeypatch.setattr(card, "sibling", lambda name: FakeTextCard(fails=3))
+    with pytest.raises(subprocess.TimeoutExpired):
+        card.shoot(CARD_DATA, "dark", "out.png")

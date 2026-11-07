@@ -50,12 +50,18 @@ p{{margin:10px 0}} .b{{margin:10px 0;padding-left:34px;text-indent:-34px}} .dot{
     return page, height
 
 
+def chrome_timeout():
+    """Seconds to wait for the screenshot: 60, or 120 per unit of load per core when busier, at most 300."""
+    return min(300, max(60, 120 * os.getloadavg()[0] / (os.cpu_count() or 1)))
+
+
 def shoot(page, height, out, width=CARD_WIDTH):
     with tempfile.TemporaryDirectory() as d:
         f = os.path.join(d, "card.html")
         open(f, "w").write(page)
         subprocess.run([chrome(), "--headless=new", "--no-sandbox", "--hide-scrollbars", f"--screenshot={out}",
-                        f"--window-size={width},{max(height, width * CARD_MIN_HEIGHT // CARD_WIDTH)}", f"file://{f}"], capture_output=True, timeout=60, check=True)
+                        f"--window-size={width},{max(height, width * CARD_MIN_HEIGHT // CARD_WIDTH)}", f"file://{f}"],
+                       capture_output=True, timeout=chrome_timeout(), check=True)
 
 
 def send(text, card=False):
