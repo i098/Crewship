@@ -70,6 +70,10 @@ crewship_managed_shell_env:
   CHROME_DEVTOOLS_AXI_MCP_PATH: "{{ crewship_chrome_devtools_mcp_path }}"
   API_ANYTHING_HOME: "{{ crewship_api_anything_home }}"
   API_ANYTHING_BROWSER_ROOTS: "[]"
+  # The firstmate omp watcher gives a new arm 12 s to become ready and 1 s to
+  # retire; a loaded host needs more (read at arm start, so no extension edit).
+  FM_OMP_ARM_READY_TIMEOUT_MS: "45000"
+  FM_WATCH_ARM_RETIRE_TIMEOUT_MS: "10000"
 crewship_trust_env:
   SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
   REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt

@@ -45,7 +45,7 @@
 - name: Restart Herdr for a unit change beyond the data-disk environment
   when: crewship_herdr_unit is changed
   vars:
-    crewship_herdr_unit_deferred: '^(#|Environment="?(npm_config_cache|PIP_CACHE_DIR|DENO_DIR|BUN_RUNTIME_TRANSPILER_CACHE_PATH|TMPDIR|TMP|TEMP)=)'
+    crewship_herdr_unit_deferred: '^(#|Environment="?(npm_config_cache|PIP_CACHE_DIR|DENO_DIR|BUN_RUNTIME_TRANSPILER_CACHE_PATH|TMPDIR|TMP|TEMP|FM_OMP_ARM_READY_TIMEOUT_MS|FM_WATCH_ARM_RETIRE_TIMEOUT_MS)=)'
     crewship_herdr_unit_restart: >-
       {{ (crewship_herdr_unit_before.content | default('') | b64decode).splitlines()
          | reject('match', crewship_herdr_unit_deferred) | list
