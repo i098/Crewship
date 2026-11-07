@@ -136,6 +136,13 @@ body{color-scheme:dark;margin:0;background:#0d1117;color:#f0f6fc;font:14px/1.5 -
   .fm-approve button{padding:5px 16px;border:1px solid rgba(240,246,252,.1);border-radius:6px;background:#238636;color:#fff;font:inherit;font-weight:500;cursor:pointer}
   .fm-approve button:disabled{opacity:.5;cursor:not-allowed}
   .fm-approve .sent{color:#3fb950}
+@media (max-width:600px){
+.wrap{padding:16px 12px 48px}.title{font-size:24px}
+.tabs{flex-wrap:wrap}.tabs label{padding:0 10px}.stat{margin-left:0;width:100%;padding:4px 0 8px}
+.grid{grid-template-columns:minmax(0,1fr)}
+.bb :is(pre,code,kbd,samp){white-space:pre-wrap;overflow-wrap:anywhere}
+.ref,.pill,.stat,.label,.side h3,.side p,.fn,.cnt,.diff,.cm,.sha,.ini,.rules th,.res,.bb :is(pre,code,kbd,samp,table,small,sub,sup){font-size:14px!important}
+}
 """
 
 # ---- commits and files ------------------------------------------------------

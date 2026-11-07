@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+# Check that a board (one HTML file) fits a phone before you send its link.
+# Usage: board-phone-fit BOARD.html   renders the board at 390x844 in headless Chrome; exit 0 when it fits,
+#        exit 1 with one line per failure: horizontal overflow, visible text under 14 px, or no
+#        width=device-width viewport meta (a phone then lays the page out 980 px wide and shrinks it).
+#        board-phone-fit --css      prints the shared mobile CSS; paste it at the end of the board's <style>.
+import glob, html, json, os, re, shutil, subprocess, sys, tempfile
+from pathlib import Path
+
+WIDTH, HEIGHT, MIN_TEXT_PX = 390, 844, 14
+
+MOBILE_CSS = """/* board-phone-fit: shared mobile defaults; keep at the end of the board's <style> */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { overflow-wrap: break-word; }
+img, svg, video, canvas, iframe, table { max-width: 100%; }
+img, video, canvas { height: auto; }
+pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Wrap a wide diagram in <div class="phone-scroll"> to scroll it at full size instead of shrinking its text. */
+.phone-scroll { overflow-x: auto; }
+.phone-scroll > * { max-width: none !important; }
+@media (max-width: 600px) {
+  body * { min-width: 0; max-width: 100%; }
+  * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }
+  table { display: block; overflow-x: auto; }
+  small, sub, sup, pre, code, kbd, samp, figcaption, caption, th, td, label, li, p, dd, dt {
+    font-size: max(1em, 14px) !important;
+  }
+}
+"""
+
+# Runs in the board after load and posts its findings as JSON to the frame page (FRAME).
+PROBE = """<script>addEventListener('load', () => {
+  const MIN = %d, doc = document.documentElement, vw = doc.clientWidth, out = [];
+  const sel = e => {
+    const p = [];
+    for (; e && e.nodeType === 1 && p.length < 4; e = e.parentElement) {
+      if (e.id) { p.unshift(e.localName + '#' + e.id); break; }
+      p.unshift(e.localName + [...e.classList].map(c => '.' + c).join(''));
+    }
+    return p.join(' > ');
+  };
+  if (!/width\\s*=\\s*device-width/.test(document.querySelector('meta[name=viewport]')?.content || ''))
+    out.push('viewport: no <meta name="viewport" content="width=device-width, initial-scale=1">');
+  if (doc.scrollWidth > vw) {
+    out.push(`overflow: page is ${doc.scrollWidth}px wide in a ${vw}px viewport`);
+    const past = e => e.getBoundingClientRect().right > vw + 0.5;
+    for (const e of document.querySelectorAll('body, body *'))
+      if (past(e) && !past(e.parentElement)) out.push(`overflow: ${sel(e)} ends at ${Math.round(e.getBoundingClientRect().right)}px`);
+  }
+  const seen = new Set(), walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let t; (t = walk.nextNode());) {
+    const e = t.parentElement, s = getComputedStyle(e);
+    if (!t.data.trim() || s.visibility !== 'visible' || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName)) continue;
+    const r = document.createRange();
+    r.selectNodeContents(t);
+    if (![...r.getClientRects()].some(b => b.width && b.height)) continue;
+    // SVG text scales with the drawing, so measure the size it renders at.
+    const px = parseFloat(s.fontSize) * (e instanceof SVGElement ? Math.abs(e.getScreenCTM()?.a || 1) : 1);
+    const key = sel(e);
+    if (px < MIN - 0.05 && !seen.has(key)) {
+      seen.add(key);
+      out.push(`text: ${key} is ${Math.round(px * 10) / 10}px: "${t.data.trim().slice(0, 40)}"`);
+    }
+  }
+  parent.postMessage({boardPhoneFit: out}, '*');
+});</script>""" % MIN_TEXT_PX
+
+# Headless Chrome will not make its window narrower than 500 px, so the board loads in a phone-sized iframe;
+# the frame page writes the findings into a <pre> that --dump-dom prints.
+FRAME = f"""<!doctype html><body style="margin:0"><iframe src="board.html" style="width:{WIDTH}px;height:{HEIGHT}px;border:0"></iframe>
+<script>addEventListener('message', e => {{
+  if (!Array.isArray(e.data?.boardPhoneFit)) return;
+  const pre = document.createElement('pre');
+  pre.id = 'board-phone-fit';
+  pre.textContent = JSON.stringify(e.data.boardPhoneFit);
+  document.body.append(pre);
+}});</script>"""
+
+
+def chrome():
+    found = (os.environ.get("CHROME") or next(filter(None, map(shutil.which, ("google-chrome", "google-chrome-stable", "chromium"))), None)
+             or max(glob.glob(os.path.expanduser("~/.omp/puppeteer/chrome/linux-*/chrome-linux64/chrome")), default=None))
+    if not found:
+        sys.exit("board-phone-fit: no headless Chrome found (set CHROME)")
+    return found
+
+
+def failures(board):
+    """One line per phone-fit failure of the board file; empty when it fits."""
+    board = Path(board).resolve()
+    # The probe runs on a copy; <base> keeps the board's relative images and styles loading from its own folder.
+    # It goes after <head> or the doctype, as text before the doctype would switch Chrome to quirks mode.
+    base = f'<base href="{board.parent.as_uri()}/">'
+    page, n = re.subn(r"<head\b[^>]*>|<!doctype[^>]*>", lambda m: m.group() + base, board.read_text(errors="replace"), count=1, flags=re.I)
+    page = (page if n else base + page) + PROBE
+    with tempfile.TemporaryDirectory() as d:
+        Path(d, "board.html").write_text(page)
+        frame = Path(d, "frame.html")
+        frame.write_text(FRAME)
+        try:
+            run = subprocess.run([chrome(), "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+                                  "--disable-component-update", "--disable-background-networking", "--no-first-run",
+                                  "--window-size=800,1000", "--virtual-time-budget=5000", "--dump-dom", frame.as_uri()],
+                                 capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            sys.exit(f"board-phone-fit: Chrome timed out on {board}")
+    marker = '<pre id="board-phone-fit">'
+    if marker not in run.stdout:
+        sys.exit(f"board-phone-fit: Chrome gave no result for {board}: {run.stderr.strip()[-300:]}")
+    return json.loads(html.unescape(run.stdout.split(marker, 1)[1].split("</pre>", 1)[0]))
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--css"]:
+        print(MOBILE_CSS, end="")
+    elif len(sys.argv) == 2 and not sys.argv[1].startswith("-"):
+        found = failures(sys.argv[1])
+        print("\n".join(found) if found else f"fits {WIDTH}x{HEIGHT}")
+        sys.exit(1 if found else 0)
+    else:
+        sys.exit("usage: board-phone-fit BOARD.html | board-phone-fit --css")

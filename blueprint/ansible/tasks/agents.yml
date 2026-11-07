@@ -107,6 +107,17 @@
     remote_src: true
   become: true
 
+# Checks that a board fits a 390x844 phone before its link is sent (docs/omp.md#board-phone-fit).
+- name: Install board-phone-fit
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/board-phone-fit"
+    dest: "{{ crewship_local_bin }}/board-phone-fit"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+    remote_src: true
+  become: true
+
 # blueprint/skills/public and blueprint/skills/private for omp and Claude Code, and blueprint/rules/public and
 # blueprint/rules/private for omp (docs/omp.md#skills, docs/omp.md#rules). With
 # skills.private_source set, the installer first fills blueprint/skills/private and

@@ -307,7 +307,16 @@ See [Default config](default-config.md) for the gate tiers and their model and e
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
 Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
-The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`.
+The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`, and tells every agent to run [`board-phone-fit`](#board-phone-fit) before it sends a board link.
+
+## Board phone fit
+
+`~/.local/bin/board-phone-fit BOARD.html` (the `agents` role) loads the board in a 390x844 frame in headless Chrome.
+It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), or a missing `width=device-width` viewport meta.
+It prints `fits 390x844` and exits 0 when the board fits.
+`board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, one column under 600 px, and a 14 px floor for small text.
+Paste it at the end of the board's `<style>`, and wrap a wide diagram in `<div class="phone-scroll">` to scroll it at full size.
+The `board-phone-fit` rule (it fires when an agent opens a board with `lavish-axi`), the `tooling-conventions` and `pr-preview` skills, and the brief include tell agents to run it before they send a link.
 
 ## Chat archive
 
