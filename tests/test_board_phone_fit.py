@@ -70,4 +70,4 @@ def test_columns_with_centered_unequal_heights_fail(tmp_path):
     '<table><tr><td style="width:150px">alpha</td><td style="width:150px">beta</td></tr></table>',
 ])
 def test_pill_rows_are_not_columns(tmp_path, row):
-    assert fit.failures(board(tmp_path, row, fit.MOBILE_CSS)) == []
+    assert fit.failures(board(tmp_path, row)) == []

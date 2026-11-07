@@ -9,6 +9,8 @@ import glob, html, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 WIDTH, HEIGHT, MIN_TEXT_PX = 390, 844, 14
+# A child narrower than this share of the viewport, beside another one, is a column that should stack.
+MAX_COLUMN_SHARE = 0.5
 
 # The flex rows the shared CSS stacks under 600 px; the probe checks exactly these rows.
 STACK = (":not(nav, nav *, .no-stack)"
@@ -32,7 +34,7 @@ pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 # Runs in the board after load and posts its findings as JSON to the frame page (FRAME).
 PROBE = """<script>addEventListener('load', () => {
-  const MIN = %d, STACK = %s, doc = document.documentElement, vw = doc.clientWidth, out = [];
+  const MIN = %d, MAX_COLUMN = %s, STACK = %s, doc = document.documentElement, vw = doc.clientWidth, out = [];
   const sel = e => {
     const p = [];
     for (; e && e.nodeType === 1 && p.length < 4; e = e.parentElement) {
@@ -51,7 +53,7 @@ PROBE = """<script>addEventListener('load', () => {
   }
   for (const e of document.querySelectorAll('body, body *')) {
     if (!['flex', 'grid'].includes(getComputedStyle(e).display) || !e.matches(STACK)) continue;
-    const cols = [...e.children].map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw / 2);
+    const cols = [...e.children].map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw * MAX_COLUMN);
     if (cols.some((a, i) => cols.slice(i + 1).some(b => a.top < b.bottom - 1 && b.top < a.bottom - 1 && Math.abs(a.left - b.left) >= 1)))
       out.push(`columns not stacked: ${sel(e)}`);
   }
@@ -71,7 +73,7 @@ PROBE = """<script>addEventListener('load', () => {
     }
   }
   parent.postMessage({boardPhoneFit: out}, '*');
-});</script>""" % (MIN_TEXT_PX, json.dumps(STACK))
+});</script>""" % (MIN_TEXT_PX, MAX_COLUMN_SHARE, json.dumps(STACK))
 
 # Headless Chrome will not make its window narrower than 500 px, so the board loads in a phone-sized iframe;
 # the frame page writes the findings into a <pre> that --dump-dom prints.
