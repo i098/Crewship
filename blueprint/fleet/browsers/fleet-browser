@@ -1,32 +1,35 @@
 #!/usr/bin/env bash
-# fleet-browser - the fleet's browser ladder, one command.
+# fleet-browser - the fleet's browser ladder, one command. Escalate in this order, one tier at a time:
 #
-#   tier 1  obscura   ws/http 127.0.0.1:9222   DEFAULT. Rust engine, ~25 MB idle,
-#                     ~5x less RAM per page than Chrome, renders the app faithfully,
-#                     CDP: clicks, screenshots, screencast. Always on.
-#   tier 2  chrome    http 127.0.0.1:9522      FALLBACK for pixel-critical evidence
-#                     (the maintainer inspects before/after shots) or a page
-#                     Obscura misrenders. Headless Chromium, persistent profile.
-#                     Started on demand, stopped after 30 min without a client.
-#   tier 3  voxl      http 127.0.0.1:9523      LAST RESORT: a headed Chrome on an
-#                     Xvfb display (:9) streamed by voxl on 127.0.0.1:6913, for when
-#                     a human must see or drive the browser (OAuth consent, a
-#                     captcha, a native dialog). A permanent service: it starts at
-#                     boot once the cookie jar exists, gc never stops it, and its
-#                     guard stops it if the jar count falls.
+#   tier 1  obscura   ws/http 127.0.0.1:9222   DEFAULT, headless. Rust engine, ~25 MB idle,
+#                     ~5x less RAM per page than Chrome, CDP: clicks, screenshots. Always on.
+#   tier 2  chrome    http 127.0.0.1:9522      Headless Chromium for pixel-critical evidence
+#                     (the maintainer inspects before/after shots) or a page Obscura
+#                     misrenders. On demand; stopped after 30 min without a client.
+#   tier 3  voxl      http 127.0.0.1:9523      Headed Chrome on Xvfb :9 streamed by voxl on
+#                     127.0.0.1:6913. For a challenge the headless tiers fail: the agent itself
+#                     clicks Cloudflare Turnstile, a consent screen or a captcha here. Permanent
+#                     service; gc never stops it; its guard stops it if the cookie jar count falls.
+#   Geonode proxy: not a tier but an option on any tier, for a site that blocks the server IP.
+#     At each tier try first without the proxy; if that fails, run `fleet-browser up <tier> --proxy`
+#     (one Geonode residential sticky session: one exit IP until the tier restarts); only then go
+#     to the next tier. Full order: obscura, obscura --proxy, chrome, chrome --proxy, voxl,
+#     voxl --proxy. `--direct` switches a tier back. Needs GEONODE_* (environment or ~/super.env);
+#     the choice is kept in ~/.fleet-browser/proxy-<tier>.
+#   Dia (the owner's Mac browser) is only a source for a cookie pull (`seed`), never a tier.
 #
-# One session across all three: cookie-sync.ts keeps a canonical jar in
+# One session across the tiers: cookie-sync.ts keeps a canonical jar in
 # ~/.fleet-browser/cookies.json and converges every live tier to it (timer every
 # 2 min, plus on every `up`). Log in once anywhere, be logged in everywhere,
 # except Google: its cookies stay in the tier that set them (see cookie-sync.ts).
 #
-#   fleet-browser status            tiers, ports, clients, cookie counts
-#   fleet-browser env [tier]        export lines for chrome-devtools-axi / omp (default: obscura)
-#   fleet-browser up chrome|voxl    start a fallback tier, wait ready, push the session in
-#   fleet-browser down chrome|voxl  stop a fallback tier (voxl is permanent; `up voxl` brings it back)
-#   fleet-browser sync              converge cookies now
-#   fleet-browser gc                stop idle chrome (>= $IDLE_MIN min; timer); voxl is never stopped
-#   fleet-browser seed <profile>    one-shot: import cookies from a Chrome profile dir
+#   fleet-browser status                      tiers, ports, clients, proxy, cookie counts
+#   fleet-browser env [tier]                  export lines for chrome-devtools-axi / omp (default: obscura)
+#   fleet-browser up [tier] [--proxy|--direct]  start a tier (obscura, chrome, voxl), wait ready, push the session in
+#   fleet-browser down chrome|voxl            stop a tier (voxl is permanent; `up voxl` brings it back)
+#   fleet-browser sync                        converge cookies now
+#   fleet-browser gc                          stop idle chrome (>= $IDLE_MIN min; timer); voxl is never stopped
+#   fleet-browser seed <profile>              one-shot: import cookies from a Chrome profile dir
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 STATE=$HOME/.fleet-browser
@@ -65,8 +68,9 @@ cmd_status() {
     st=down; alive "$t" && st=up
     note=
     [ "$t" = obscura ] && note="default"
-    [ "$t" = chrome ] && note="fallback: pixel-critical evidence (fleet-browser up chrome)"
-    [ "$t" = voxl ] && note="last resort: human eyes/hands; voxl http://127.0.0.1:$VOXL_WEB_PORT/ (fleet-browser up voxl)"
+    [ "$t" = chrome ] && note="headless fallback: pixel-critical evidence (fleet-browser up chrome)"
+    [ "$t" = voxl ] && note="headed: agent clicks Turnstile/consent; voxl http://127.0.0.1:$VOXL_WEB_PORT/ (fleet-browser up voxl)"
+    [ -e "$STATE/proxy-$t" ] && note="$note [via Geonode proxy]"
     if [ "$t" = chrome ] && [ "$st" = up ]; then
       idle=$(idle_minutes "$t"); note="$note; idle ${idle}m of ${IDLE_MIN}m"
     fi
@@ -107,13 +111,24 @@ voxl_serve() {  # voxl on loopback only, password from $VOXL_PASSWORD; .ts.net n
 }
 
 cmd_up() {
-  local t=$1
-  case "$t" in chrome|voxl) ;; obscura) systemctl --user start "$(unit_of obscura)"; wait_alive obscura 20 && echo "obscura up" || { echo "obscura failed to start" >&2; exit 1; }; return ;; *) echo "usage: fleet-browser up chrome|voxl" >&2; exit 2 ;; esac
+  local t=${1:-obscura} opt=${2:-}
+  case "$t" in chrome|voxl|obscura) ;; *) echo "usage: fleet-browser up [obscura|chrome|voxl] [--proxy|--direct]" >&2; exit 2 ;; esac
+  case "$opt" in
+    "") ;;
+    --proxy) python3 "$HERE/geonode-proxy.py" --check || { echo "--proxy needs the GEONODE_* settings (environment or ~/super.env)" >&2; exit 1; }
+             touch "$STATE/proxy-$t" ;;
+    --direct) rm -f "$STATE/proxy-$t" ;;
+    *) echo "unknown option $opt (use --proxy or --direct)" >&2; exit 2 ;;
+  esac
+  # A changed proxy choice takes effect at the tier's next start, so restart a running tier.
+  if [ -n "$opt" ] && alive "$t"; then systemctl --user restart "$(unit_of "$t")"; sleep 1; log "restarted $t for $opt"; fi
   if alive "$t"; then echo "$t already up"; else
     systemctl --user start "$(unit_of "$t")" || { echo "systemctl start $(unit_of "$t") failed" >&2; exit 1; }
     wait_alive "$t" 60 || { echo "$t did not answer on $(url_of "$t") within 60s; journalctl --user -u $(unit_of "$t")" >&2; exit 1; }
     log "up $t"
   fi
+  [ "$opt" = --proxy ] && [ ! -e "$STATE/proxy-$t" ] && { echo "proxy unavailable; $t is running direct (see journalctl --user -u $(unit_of "$t"))" >&2; exit 1; }
+  [ "$t" = obscura ] && { echo "obscura up"; return; }
   date +%s > "$STATE/last-client-$t"
   cmd_sync
   echo "$t up at $(url_of "$t")"; [ "$t" = voxl ] && echo "view: http://127.0.0.1:$VOXL_WEB_PORT/  (password: $STATE/voxl-password; tunnel: ssh -L $VOXL_WEB_PORT:127.0.0.1:$VOXL_WEB_PORT box)"
@@ -209,10 +224,48 @@ fleet_chrome_bin() {
 }
 
 # --- unit entrypoints (ExecStart targets; keep the unit files declarative) ---
+# When `up <tier> --proxy` chose the Geonode proxy for <tier>, start the forwarder on loopback
+# <port> and set GEONODE_LOCAL to its URL; else leave it empty (direct).
+GEONODE_LOCAL=
+# Obscura is the default tier and must never crash-loop, so it goes direct; chrome and voxl fail closed.
+proxy_unavailable() {  # <tier> <reason>
+  if [ "$1" = obscura ]; then echo "$2; obscura goes direct and the proxy marker is cleared" >&2; rm -f "$STATE/proxy-$1"; return 0; fi
+  echo "$2; $1 will not start without the proxy" >&2; exit 1
+}
+start_geonode() {  # <tier> <port>
+  [ -e "$STATE/proxy-$1" ] || return 0
+  python3 "$HERE/geonode-proxy.py" --check || { echo "proxy-$1 is set but the GEONODE_* settings are missing; going direct and clearing the marker" >&2; rm -f "$STATE/proxy-$1"; return 0; }
+  (exec 3<>"/dev/tcp/127.0.0.1/$2") 2>/dev/null && { proxy_unavailable "$1" "port $2 is already in use"; return 0; }
+  python3 "$HERE/geonode-proxy.py" "$2" >>"$STATE/geonode-proxy.log" 2>&1 &
+  local pid=$! i
+  for i in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    (exec 3<>"/dev/tcp/127.0.0.1/$2") 2>/dev/null && { GEONODE_LOCAL="http://127.0.0.1:$2"; return 0; }
+    sleep 0.25
+  done
+  kill "$pid" 2>/dev/null
+  proxy_unavailable "$1" "the proxy forwarder did not bind 127.0.0.1:$2 (see $STATE/geonode-proxy.log)"; return 0
+}
+
+# A headed browser needs a display; start Xvfb on :<n> when it is not up.
+ensure_display() {  # <n> <geometry>
+  [ -e "/tmp/.X11-unix/X$1" ] && return 0
+  Xvfb ":$1" -screen 0 "$2" -shmem -nolisten tcp >"$STATE/xvfb.log" 2>&1 &
+  local i; for i in $(seq 1 20); do [ -e "/tmp/.X11-unix/X$1" ] && return 0; sleep 0.5; done
+  echo "display :$1 never came up" >&2; return 1
+}
+
+run_obscura() {  # tier 1
+  start_geonode obscura 9533
+  exec "$HERE/obscura" serve --host 127.0.0.1 --port 9222 --allow-private-network --storage-dir "$STATE/obscura" ${GEONODE_LOCAL:+--proxy "$GEONODE_LOCAL"}
+}
+
 run_chrome() {  # tier 2
   local chrome; chrome=$(fleet_chrome_bin) || { echo "no chrome binary"; exit 1; }
+  start_geonode chrome 9534
   mkdir -p "$STATE/chrome-profile"
   exec "$chrome" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check \
+    ${GEONODE_LOCAL:+--proxy-server="$GEONODE_LOCAL"} \
     --remote-debugging-port=9522 --remote-allow-origins='*' --user-data-dir="$STATE/chrome-profile" \
     --window-size=1280,800 about:blank
 }
@@ -249,11 +302,8 @@ run_voxl() {  # tier 3: Xvfb display + window manager + voxl + headed Chromium; 
   mkdir -p "$STATE/vnc-profile"
   # The unit's control group owns Xvfb, the window manager and voxl, so stopping
   # the unit stops them with Chrome.
-  if [ ! -e "/tmp/.X11-unix/X$VOXL_DISPLAY" ]; then
-    Xvfb ":$VOXL_DISPLAY" -screen 0 1600x900x24 -shmem -nolisten tcp >"$STATE/xvfb.log" 2>&1 &
-    local i; for i in $(seq 1 20); do [ -e "/tmp/.X11-unix/X$VOXL_DISPLAY" ] && break; sleep 0.5; done
-    [ -e "/tmp/.X11-unix/X$VOXL_DISPLAY" ] || { echo "display :$VOXL_DISPLAY never came up"; exit 1; }
-  fi
+  ensure_display "$VOXL_DISPLAY" 1600x900x24 || exit 1
+  start_geonode voxl 9535
   export DISPLAY=":$VOXL_DISPLAY"
   command -v xfwm4 >/dev/null 2>&1 && { xfwm4 --replace >/dev/null 2>&1 & }
   # voxl on loopback only; a human reaches it with an ssh tunnel or `tailscale
@@ -265,23 +315,24 @@ run_voxl() {  # tier 3: Xvfb display + window manager + voxl + headed Chromium; 
     local j; for j in $(seq 1 20); do ss -ltn 2>/dev/null | grep -q "127.0.0.1:$VOXL_WEB_PORT " && break; sleep 0.5; done
   fi
   voxl_guard &
-  exec "$chrome" --no-sandbox --no-first-run --no-default-browser-check --start-maximized \
+  exec "$chrome" --no-sandbox --no-first-run --no-default-browser-check --start-maximized ${GEONODE_LOCAL:+--proxy-server="$GEONODE_LOCAL"} \
     --remote-debugging-port=9523 --remote-allow-origins='*' --user-data-dir="$STATE/vnc-profile" about:blank
 }
 
 case "${1:-status}" in
   status) cmd_status ;;
   env) cmd_env "${2:-obscura}" ;;
-  up) cmd_up "${2:-}" ;;
+  up) cmd_up "${2:-}" "${3:-}" ;;
   down) cmd_down "${2:-}" ;;
   sync) cmd_sync ;;
   gc) cmd_gc ;;
   seed) cmd_seed "${2:-}" ;;
   _run-chrome) run_chrome ;;
+  _run-obscura) run_obscura ;;
   _run-voxl) run_voxl ;;
   _wait-jar) wait_jar ;;
   _voxl-guard) voxl_guard ;;
   _voxl-serve) voxl_serve "${2:?voxl binary}" "${3:?port}" ;;
-  -h|--help|help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) echo "unknown command: $1 (try: fleet-browser help)" >&2; exit 2 ;;
 esac

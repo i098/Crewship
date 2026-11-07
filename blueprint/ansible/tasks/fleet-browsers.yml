@@ -321,6 +321,7 @@
     - { src: browsers/fleet-browser, dest: "{{ crewship_fleet_browsers_dir }}/fleet-browser", mode: "0755" }
     - { src: browsers/api-anything-fleet, dest: "{{ crewship_fleet_browsers_dir }}/api-anything-fleet", mode: "0755" }
     - { src: browsers/cookie-sync.ts, dest: "{{ crewship_fleet_browsers_dir }}/cookie-sync.ts", mode: "0644" }
+    - { src: browsers/geonode-proxy.py, dest: "{{ crewship_fleet_browsers_dir }}/geonode-proxy.py", mode: "0755" }
     - { src: browsers/env.sh, dest: "{{ crewship_fleet_browsers_dir }}/env.sh", mode: "0644" }
 
 - name: Render fleet browser units
