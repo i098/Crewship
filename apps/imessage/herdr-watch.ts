@@ -1,3 +1,5 @@
+import { appendFileSync, existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+
 // Alerts from herdr agent status (read-only: the bridge only runs `herdr agent list`). The watcher keeps the last
 // confirmed status per pane, holds a change for `debounceMs` so a status that flips back is ignored, and turns the
 // confirmed changes of one poll into one plain text. Kept free of the bridge so tests run on recorded JSON.
@@ -71,4 +73,50 @@ export class HerdrWatch {
     if (!lines.length) return undefined;
     return cleanText(lines.length === 1 ? lines[0]! : `${lines.length} agent updates:\n${lines.map((l) => `- ${l}`).join("\n")}`);
   }
+}
+
+// The omp extension fm-stranded-wake.ts appends "<epoch>\twoken\tnotes=N\tqueue=bool" to state/.stranded-wake.log
+// when it starts a turn in an idle main. This turns each new line into one honest owner text, at most one per cooldown.
+export const WAKE_NOTICE_COOLDOWN_MS = 30 * 60_000;
+
+export function wakeNotice(lines: string[]): string | undefined {
+  const notes = lines.map((l) => /\twoken\tnotes=(\d+)/.exec(l)).filter((m) => m).map((m) => Number(m![1]));
+  if (!notes.length) return undefined;
+  const n = Math.max(...notes);
+  return `Main was idle and ${n > 0 ? `${n} of your note${n > 1 ? "s were" : " was"}` : "a queued wake was"} waiting, so I woke it. It should answer in a minute.`;
+}
+
+export const WAKE_NOTICE_WINDOW_MS = 30 * 60_000;
+export const WAKE_NOTICE_RETRY_MS = 60_000;
+
+/**
+ * Sends one notice per unnotified wake line from the last 30 minutes, so a line written while the desk was down still
+ * counts. `send` returns false when the desk cannot deliver; the lines stay pending and `retry()` (called when the
+ * desk becomes ready, or on a log change) tries again at most once per minute. Notified lines persist in
+ * .stranded-wake.notified. Returns undefined when the state folder is missing.
+ */
+export function watchStrandedWake(log: string, send: (text: string) => boolean, now = Date.now): { close(): void; retry(): void } | undefined {
+  const dir = log.slice(0, log.lastIndexOf("/"));
+  if (!existsSync(dir)) return undefined;
+  const notified = `${dir}/.stranded-wake.notified`;
+  let lastSent = -Infinity;
+  let retryAt = 0;
+  const read = () => {
+    if (!existsSync(log) || now() < retryAt) return;
+    const done = new Set(existsSync(notified) ? readFileSync(notified, "utf8").split("\n") : []);
+    const lines = readFileSync(log, "utf8").split("\n").filter((l) => l && !done.has(l) && Number(l.split("\t")[0]) * 1000 >= now() - WAKE_NOTICE_WINDOW_MS);
+    const notice = wakeNotice(lines);
+    if (!notice) return;
+    if (now() - lastSent >= WAKE_NOTICE_COOLDOWN_MS) {
+      if (!send(notice)) {
+        retryAt = now() + WAKE_NOTICE_RETRY_MS;
+        return;
+      }
+      lastSent = now();
+    }
+    appendFileSync(notified, lines.map((l) => `${l}\n`).join(""));
+  };
+  read();
+  const watcher = watch(dir, (_event, name) => { if (name === ".stranded-wake.log") read(); });
+  return { close: () => watcher.close(), retry: read };
 }
