@@ -50,12 +50,12 @@ p{{margin:10px 0}} .b{{margin:10px 0;padding-left:34px;text-indent:-34px}} .dot{
     return page, height
 
 
-def shoot(page, height, out):
+def shoot(page, height, out, width=CARD_WIDTH):
     with tempfile.TemporaryDirectory() as d:
         f = os.path.join(d, "card.html")
         open(f, "w").write(page)
         subprocess.run([chrome(), "--headless=new", "--no-sandbox", "--hide-scrollbars", f"--screenshot={out}",
-                        f"--window-size={CARD_WIDTH},{max(height, CARD_MIN_HEIGHT)}", f"file://{f}"], capture_output=True, timeout=60, check=True)
+                        f"--window-size={width},{max(height, width * CARD_MIN_HEIGHT // CARD_WIDTH)}", f"file://{f}"], capture_output=True, timeout=60, check=True)
 
 
 def send(text, card=False):
