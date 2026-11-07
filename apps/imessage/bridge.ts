@@ -47,6 +47,8 @@ import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { brief, createReadAfter, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
+import { ownership } from "./ownership.ts";
+import { natives } from "./selfheal.ts";
 
 let stopping = false;
 const children = new Set<Bun.Subprocess>();
@@ -170,11 +172,9 @@ const typing = (space: LineMessage["space"] | undefined, on: boolean, id = lates
     }
   }).catch(log(on ? "start typing" : "stop typing"));
 };
-// This service is the memory's one writer: systemd runs one instance of the unit.
-const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
-sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
+// This service is the memory's one writer: only the slot that owns the line builds it, after the ownership gate.
+let memory!: Memory;
 const memoryByRequest = new Map<string, number>();
-for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 const desk = new DeskTiming(QUIET_MS, (current) => void (DESK_V2 ? runDeskV2() : runDesk(current)).catch((e) => {
   log("desk failed")(e);
   handoffPending();
@@ -203,12 +203,13 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true; probe?: true };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { replyTarget: string; space: string; by: "id" | "position" };
+const probes = new Map<string, () => void>(); // rolling deploy probes waiting for their outbox item
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -397,7 +398,28 @@ const startups = TRANSPORTS.map((name) => {
   });
   return started;
 });
-await startups[0];
+// A slot bridge (rolling deploy, docs/imessage.md#rolling-deploys) waits here, connected but silent, until it owns the line.
+if (env.FM_IMESSAGE_SLOT) {
+  await ownership({
+    state: STATE, slot: env.FM_IMESSAGE_SLOT, port: PORT, standbyPort: Number(env.FM_IMESSAGE_NEXT_PORT || 8766), line: startups[0]!,
+    say: (line) => console.log(`fm-imessage: ${line}`),
+    checks: {
+      natives: async () => {
+        const probe = env.FM_IMESSAGE_TEST === "1" ? env.FM_IMESSAGE_TEST_NATIVES : undefined; // the suite cannot load a real pi_natives .node
+        if (probe && await Bun.spawn(["sh", "-c", probe]).exited) throw new Error("natives do not load");
+        if (!probe) await natives(env);
+      },
+      desk: async () => {
+        const stub = spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env });
+        const read = await readDesk(stub);
+        if (!read.ok || !read.drafted.trim()) throw new Error("the desk model gave no stub reply");
+      },
+    },
+  });
+} else await startups[0];
+memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
+sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
+for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 // A configured transport, including one whose startup has not completed.
 const lineOf = (ref: Ref) => lines.find((line) => line.name === (ref.line ?? "photon"));
 // A Ref on a transport; a Photon one has no `line`, the same as the items queued before there were transports.
@@ -487,6 +509,13 @@ Bun.serve({
       } catch (e) {
         return new Response(`no location: ${e instanceof Error ? e.message : String(e)}; he shares it with the line in Find My\n`, { status: 503 });
       }
+    }
+    if (req.method === "POST" && url.pathname === "/probe") {
+      const id = `probe-${crypto.randomUUID()}`;
+      const { promise, resolve } = Promise.withResolvers<void>();
+      probes.set(id, resolve);
+      outbox.add({ ...(latestRef ?? { space: "", id: "" }), requestId: id, requests: [], guid: id, probe: true });
+      return await Promise.race([promise.then(() => new Response("probe ok\n")), Bun.sleep(30_000).then(() => new Response("probe timed out\n", { status: 503 }))]).finally(() => probes.delete(id));
     }
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
@@ -686,6 +715,11 @@ function checkDeskDelivery(o: Out) {
 
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
+  if (o.probe) { // rolling deploy confirm: read from the transport, send nothing
+    if (o.id) await lineOf(o)?.find(o).catch((e: unknown) => { if (!permanent(e)) throw e; });
+    probes.get(o.requestId!)?.();
+    return;
+  }
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
   if (o.done) recordResponse(o);
@@ -843,6 +877,7 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
 // Each chat has one lane for its answers, so their bubbles stay in order, and one for the front desk's ack, so a slow
 // send never holds the ack of a new text. Other chats never wait on this chat.
 function outLane(o: Out): string {
+  if (o.probe) return "probe"; // a deploy probe never waits behind a held send
   return `${o.line ?? "photon"}|${o.space}|${o.front ? "front" : ""}`;
 }
 

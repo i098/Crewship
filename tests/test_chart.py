@@ -354,7 +354,7 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         "tasks": layout + tasks,
         "handlers": [{"name": name, "ansible.builtin.debug": {"msg": "deferred"}}
                      for name in ("reload user systemd", "no-mistakes daemon restart required",
-                                  "restart fm-imessage", "restart instagram-desk",
+                                  "deploy fm-imessage", "restart instagram-desk",
                                   "restart journald", "restart fleet timers",
                                   "restart fleet browser obscura", "restart fleet browser timers")],
     }]))

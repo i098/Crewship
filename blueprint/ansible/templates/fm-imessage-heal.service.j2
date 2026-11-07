@@ -14,3 +14,5 @@ StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
 ExecStart=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" selfheal.ts failed'
+# The front unit stays active, so its start does nothing: start the active slot itself.
+ExecStartPost=-/bin/sh -c 'FM_IMESSAGE_DIR="{{ crewship_imessage_dir }}" exec "{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-deploy.ts" boot'

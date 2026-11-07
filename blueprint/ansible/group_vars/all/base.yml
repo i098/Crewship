@@ -137,7 +137,7 @@ crewship_home_layout_paths: >-
       crewship_cfg.workspace]
      + ([crewship_fleet_doctor_dir] if crewship_cfg.profiles.fleet_guards | bool else [])
      + ([crewship_fleet_browsers_dir] if crewship_fleet_browsers_enabled | bool else [])
-     + ([crewship_imessage_dir]
+     + ([crewship_imessage_dir, crewship_imessage_dir ~ '/stage']
         if crewship_cfg.profiles.firstmate | bool and crewship_cfg.imessage is defined else [])
      + ([crewship_instagram_desk_dir]
         if crewship_cfg.profiles.firstmate | bool and crewship_instagram_dm_operator | length > 0 else []) }}

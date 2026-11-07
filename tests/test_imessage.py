@@ -34,7 +34,7 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 @pytest.mark.parametrize("desk_session", [None, False, True])
 @pytest.mark.parametrize("herdr_alerts", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
-    ("fm-imessage", "bun", ["bridge.ts"]),
+    ("fm-imessage@", "bun", ["bridge.ts"]),
     ("fm-cards-tunnel", "cloudflared", [
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
@@ -87,7 +87,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     assert all(path.name != "super.env" for path in environment_files)
     assert environment_files == (
         [Path("/example/instagram/dm.env")]
-        if unit == "fm-imessage" and backend == "graph" else []
+        if unit == "fm-imessage@" and backend == "graph" else []
     )
     command = next(line.removeprefix("ExecStart=") for line in rendered.splitlines()
                    if line.startswith("ExecStart="))
@@ -100,7 +100,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
         "fake token value" if binary == "cloudflared" else None, args,
     ]
     assert result.stderr == ""
-    if unit == "fm-imessage":
+    if unit == "fm-imessage@":
         assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
         expected_session = "true" if desk_session is None else str(desk_session).lower()
         assert f'Environment="FM_IMESSAGE_DESK_SESSION={expected_session}"' in rendered
