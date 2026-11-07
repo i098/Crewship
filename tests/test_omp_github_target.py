@@ -126,7 +126,9 @@ def run(home, tmp_path):
         if not key.startswith(("CREWSHIP_GITHUB_", "GH_"))
     }
     base["PATH"] = f"{home / '.local/bin'}:{base['PATH']}"
+    base["HOME"] = str(home)
     base["GH_STUB_CALLS"] = str(calls)
+    base["GH_NO_CACHE"] = "1"
     base["AXI_STARTS"] = str(starts)
 
     def run(script, *, contract=CONTRACT, approved=None, stdin=None, **extra):
@@ -179,6 +181,19 @@ def axi(run, command, calls, **options):
         assert result.starts == [shlex.split(command)]
         assert [call["argv"] for call in result.calls] == calls
     return result
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("api -X GET repos/i098/sanctum/pulls", ["api", "--cache", "60s", "repos/i098/sanctum/pulls"]),
+    ("api --method=get repos/i098/sanctum/pulls", ["api", "--cache", "60s", "repos/i098/sanctum/pulls"]),
+    ("api repos/i098/sanctum/pulls -f state=open", ["api", "repos/i098/sanctum/pulls", "-f", "state=open"]),
+    ("api -X PATCH repos/i098/sanctum/pulls/1 -f body=x", ["api", "-X", "PATCH", "repos/i098/sanctum/pulls/1", "-f", "body=x"]),
+    ("pr list", ["pr", "list"]),
+])
+def test_plain_rest_reads_use_the_response_cache(run, command, expected):
+    result = run(f"gh {command}", GH_NO_CACHE="", contract=None)
+    assert result.returncode == 0, result.stderr
+    assert [call["argv"] for call in result.calls] == [expected]
 
 
 def test_both_commands_resolve_to_managed_wrappers(home, run):
@@ -651,7 +666,7 @@ def test_the_rendered_board_service_syncs_its_repo_through_the_guard(tmp_path):
     assert env["PATH"].split(":")[0] == str(home / ".local/bin")
     provisions.install_gh_guard(home, real)
     calls = tmp_path / "board-calls.jsonl"
-    env.update(HOME=str(home), BOARD_STUB_CALLS=str(calls), BOARD_STUB_STATE=str(tmp_path / "project-item.json"))
+    env.update(HOME=str(home), GH_NO_CACHE="1", BOARD_STUB_CALLS=str(calls), BOARD_STUB_STATE=str(tmp_path / "project-item.json"))
     firstmate = Path(command[2])
     (firstmate / "data").mkdir(parents=True)
     (firstmate / "state").mkdir()

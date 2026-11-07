@@ -28,7 +28,7 @@ WORKER = "crewship-cf-runner"
 INSTANCE_TYPE = "standard-4"
 DEFAULTS = {
     "max_instances": 4,
-    "poll_seconds": 20,
+    "poll_seconds": 60,
     "retry_after_seconds": 900,
     "max_tries": 3,
 }
@@ -79,6 +79,28 @@ def gh(*args, payload=None):
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
+# A 304 answer to a conditional request does not count against the GitHub REST budget, so an idle
+# repository costs nothing per poll. Keyed by path: (etag, parsed body).
+ETAGS = {}
+
+
+def gh_cached(path):
+    """gh(path), sent with If-None-Match once an ETag is known; a 304 returns the last body."""
+    etag, body = ETAGS.get(path, (None, None))
+    args = ["api", "-i", path] + (["-H", f"If-None-Match: {etag}"] if etag else [])
+    result = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=HTTP_TIMEOUT)
+    if etag and " 304" in result.stdout.partition("\n")[0]:
+        return body
+    if result.returncode:
+        raise RuntimeError(f"gh api {path}: {result.stderr.strip()[:200]}")
+    head, _, text = result.stdout.replace("\r\n", "\n").partition("\n\n")
+    body = json.loads(text) if text.strip() else {}
+    tags = [line.split(":", 1)[1].strip() for line in head.splitlines() if line.lower().startswith("etag:")]
+    if tags:
+        ETAGS[path] = (tags[0], body)
+    return body
+
+
 # Runs seen without a job that asks for the repository's label are not read again, which keeps the
 # calls to a repository at one a poll. shortcut: a job added to a run later is missed; restart to reset.
 NOT_OURS = set()
@@ -87,7 +109,7 @@ NOT_OURS = set()
 def repo_jobs(repo, label):
     """Jobs of the repository that ask for its label, from its queued and running runs."""
     found = []
-    for run in gh(f"repos/{repo}/actions/runs?per_page=30")["workflow_runs"]:
+    for run in gh_cached(f"repos/{repo}/actions/runs?per_page=30")["workflow_runs"]:
         if run["status"] not in ("queued", "in_progress") or run["id"] in NOT_OURS:
             continue
         jobs = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]

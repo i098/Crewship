@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -153,7 +154,28 @@ def test_repo_jobs_reads_a_run_without_our_label_once(monkeypatch):
         return {"jobs": [{"id": 10, "status": "queued", "labels": labels}]}
 
     monkeypatch.setattr(cf, "gh", fake_gh)
+    monkeypatch.setattr(cf, "gh_cached", fake_gh)
     assert [j["id"] for j in cf.repo_jobs("o/a", "cf-a")] == [10]
     cf.repo_jobs("o/a", "cf-a")
     assert sum("/runs/1/" in c for c in calls) == 1
     assert not any("/runs/2/" in c for c in calls)
+
+
+def test_gh_cached_sends_the_etag_and_reuses_the_body_on_304(monkeypatch):
+    cf.ETAGS.clear()
+    sent = []
+    answers = [
+        ('HTTP/2.0 200 OK\r\nEtag: W/"a"\r\n\r\n{"workflow_runs": [1]}', 0),
+        ("HTTP/2.0 304 Not Modified\r\nEtag: W/\"a\"\r\n\r\n", 1),
+    ]
+
+    def fake_run(cmd, **kwargs):
+        sent.append(cmd)
+        out, code = answers.pop(0)
+        return subprocess.CompletedProcess(cmd, code, out, "")
+
+    monkeypatch.setattr(cf.subprocess, "run", fake_run)
+    assert cf.gh_cached("repos/o/a/actions/runs") == {"workflow_runs": [1]}
+    assert cf.gh_cached("repos/o/a/actions/runs") == {"workflow_runs": [1]}
+    assert "If-None-Match" not in " ".join(sent[0])
+    assert 'If-None-Match: W/"a"' in sent[1]
