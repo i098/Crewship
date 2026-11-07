@@ -48,6 +48,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`slack-relay`](slack-relay/SKILL.md): relay Slack messages to iMessage; see the skill for filtering rules and setup.
 - [`subscription-dark-patterns`](subscription-dark-patterns/SKILL.md): identify coercive subscription pricing and cancellation patterns, and choose fair retention design.
 - [`service-resilience`](service-resilience/SKILL.md): protect service calls from stalled or failing dependencies with timeouts, circuit breakers and safe fallbacks.
+- [`stack-diagram`](stack-diagram/SKILL.md): turn a short stack description into an architecture diagram with official logos, as self-contained HTML, PNG or a React component; logos are fetched at build time and gallery sharing needs the user's explicit yes (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`talk-style`](talk-style/SKILL.md): short, plain ASD-STE100 replies with no preamble and no em dash.
 - [`third-party-signups`](third-party-signups/SKILL.md): act on an owner's standing authorization for signups, email codes and app approvals, with the bounds that always hold.
 - [`ui-ux`](ui-ux/): two UI skills that share [`shared-basics.md`](ui-ux/shared-basics.md) (alignment, one primary button per view, relative units, accessibility): [`app-dashboard`](ui-ux/app-dashboard/SKILL.md) for app screens, dashboards, forms, dialogs and loading states, and [`landing-marketing`](ui-ux/landing-marketing/SKILL.md) for landing pages, CTA copy, entrance motion and gradients (credits Zander Whitehurst's reels).

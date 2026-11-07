@@ -17,6 +17,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [acpx](https://github.com/openclaw/acpx) (`acpx`): the Agent Client Protocol client that runs the fallback gate agent. License: MIT.
 - [gh-axi](https://github.com/kunchenguid/gh-axi) (`gh-axi`): GitHub access for agents. License: MIT.
 - [untangle-codebase](https://github.com/caldoai/skills) (`untangle-codebase`): public skill for whole-codebase refactoring, by Maze, vendored unchanged at commit [`f3cf477`](https://github.com/caldoai/skills/commit/f3cf47774975a7d9fca45730babf4ff7ad765ada). License: MIT.
+- [stack-diagram](https://github.com/caru-ini/stack-diagram) (`stack-diagram`): public skill for architecture diagrams with official logos, by caru-ini, vendored unchanged at commit [`1ed53e3`](https://github.com/caru-ini/stack-diagram/commit/1ed53e3e9525364ae5d82e0430f2bb3f7ef4c838) with its Geist and JetBrains Mono fonts (SIL OFL 1.1). License: MIT.
 - [chrome-devtools-axi](https://github.com/kunchenguid/chrome-devtools-axi) (`chrome-devtools-axi`): browser control for agents. License: MIT.
 - [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) (`chrome-devtools-mcp`): the DevTools server behind chrome-devtools-axi. License: Apache-2.0.
 - [lavish-axi](https://github.com/kunchenguid/lavish-axi) (`lavish-axi`): HTML plans, tables, and diagrams from agents. License: MIT.
