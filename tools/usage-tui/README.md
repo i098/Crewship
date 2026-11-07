@@ -23,4 +23,4 @@ A detected provider gets a row only when it has an account in use and some use i
 
 ## Snapshot
 
-After each quota refresh the TUI writes the loaded quota input to `~/.local/state/usage-tui/snapshot.json` (override with `USAGE_SNAPSHOT`), by temporary file and rename. `../usage-notify` watches that file.
+After each quota refresh the TUI writes the loaded quota input to `~/.local/state/usage-tui/snapshot.json` (override with `USAGE_SNAPSHOT`), by temporary file and rename, with mode 600. Each omp report keeps only `provider` and `limits`, so no email or account id reaches the file. A failed write shows as `Snapshot: <message>` on the error line. `../usage-notify` watches that file.
