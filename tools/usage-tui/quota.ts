@@ -468,6 +468,7 @@ export const SNAPSHOT_PATH = () => process.env.USAGE_SNAPSHOT ?? join(process.en
 export function saveSnapshot(input: QuotaInput, path = SNAPSHOT_PATH()) {
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(input))
+  const omp = input.omp && { ...input.omp, reports: input.omp.reports?.map(r => ({ provider: r.provider, limits: r.limits })) }
+  writeFileSync(tmp, JSON.stringify({ ...input, omp }), { mode: 0o600 })
   renameSync(tmp, path)
 }

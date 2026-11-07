@@ -344,7 +344,10 @@ function refreshQuota() {
   quotaBusy = true
   quotaAt = Date.now()
   loadQuota()
-    .then(q => { quota = q; saveSnapshot(q) })
+    .then(q => {
+      quota = q
+      try { saveSnapshot(q) } catch (e) { error = `Snapshot: ${(e as Error).message}` }
+    })
     .catch(e => { error = `Quota: ${(e as Error).message}` })
     .finally(() => { quotaBusy = false; draw() })
 }

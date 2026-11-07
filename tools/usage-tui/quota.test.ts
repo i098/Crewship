@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
@@ -250,6 +250,22 @@ test("snapshot is written whole, replaces the previous one and leaves no temp fi
     saveSnapshot({ now: 2, mercury: { keyIds: [1], tokens: { 1: 95_000_000 } } }, path)
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ now: 2, mercury: { keyIds: [1], tokens: { "1": 95_000_000 } } })
     expect(readdirSync(join(dir, "state"))).toEqual(["snapshot.json"])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("snapshot drops email and account id and is owner-only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "usage-snap-"))
+  const path = join(dir, "snapshot.json")
+  try {
+    const report = { provider: "anthropic", email: "a@b.c", accountId: "acc-1", limits: [] }
+    saveSnapshot({ now: 1, omp: { reports: [report] } }, path)
+    const text = readFileSync(path, "utf8")
+    expect(text).not.toContain("a@b.c")
+    expect(text).not.toContain("acc-1")
+    expect(JSON.parse(text).omp.reports).toEqual([{ provider: "anthropic", limits: [] }])
+    expect(statSync(path).mode & 0o777).toBe(0o600)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
