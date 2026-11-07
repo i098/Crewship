@@ -8,6 +8,8 @@
 # Or JSON: {"title": "...", "projects": [{"name", "merged", "open", "today", "states": [...], "note"}],
 #           "gauges": {"Disk": 62}, "notes": ["text-format lines"]}
 # Without gauges in the input, the card shows this host's load, RAM and disks (fm-usage-brief, installed side by side).
+# "today" starts at local midnight in STATUS_CARD_TZ, else TZ, else the host zone; the footer names that zone.
+#        fm-status-card --today-start    prints that midnight as ISO 8601 (use it as the cutoff for the today counts).
 import html
 import importlib.machinery
 import importlib.util
@@ -17,6 +19,8 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 WIDTH = 1170
 STATES = {"live": "live", "running": "running", "waiting on you": "waiting on you", "waiting": "waiting on you",
@@ -144,12 +148,32 @@ def note_line(s):
     return f'<div class="nl">{html.escape(s)}</div>', NOTE
 
 
+def zone():
+    """The owner's time zone: STATUS_CARD_TZ, else TZ, else the host zone behind /etc/localtime, else UTC."""
+    host = os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]
+    for name in (os.environ.get("STATUS_CARD_TZ"), os.environ.get("TZ", "").lstrip(":"), host):
+        try:
+            if name:
+                return ZoneInfo(name)
+        except (ValueError, ZoneInfoNotFoundError):  # a POSIX TZ string or a file path is not a zone name
+            pass
+    return ZoneInfo("UTC")
+
+
+def today_start(now=None):
+    """Local midnight that starts "today", the cutoff for the today counts."""
+    tz = zone()
+    return (now or datetime.now(tz)).astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def render(card, theme="dark"):
     t = THEME[theme]
     gauges = card["gauges"] or {k: p for k, p, _ in sibling("fm-usage-brief").server()}
     notes = [s for s in card["notes"] if s]
     # A heading with no note under it (it titled only project lines) carries nothing.
     notes = [s for i, s in enumerate(notes) if not s.startswith("# ") or (i + 1 < len(notes) and not notes[i + 1].startswith("# "))]
+    if card["projects"]:
+        notes.append(f"Today counts from midnight, {zone().key} time.")
     lines = [note_line(s) for s in notes]
     height = (2 * PAD + TITLE + (GAUGES + GAP if gauges else 0)
               + sum(ROW + (ROW_NOTE if p["note"] else 0) + GAP for p in card["projects"]) + sum(h for _, h in lines))
@@ -192,9 +216,12 @@ def send(card, theme):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args == ["--today-start"]:
+        print(today_start().isoformat())
+        sys.exit()
     theme = "light" if "--light" in args else "dark"
     args = [a for a in args if a != "--light"]
     if len(args) != 1:
-        sys.exit("usage: fm-status-card [--light] OUT.png|--send < input")
+        sys.exit("usage: fm-status-card [--light] OUT.png|--send < input  |  fm-status-card --today-start")
     card = parse(sys.stdin.read())
     send(card, theme) if args == ["--send"] else shoot(card, theme, args[0])

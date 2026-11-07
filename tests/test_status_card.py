@@ -54,12 +54,36 @@ def test_page_has_rows_chips_and_only_hsl_colors(card, theme):
     page, height = card.render(data, theme)
     assert "a &lt;b&gt;" in page and "67% merged" in page and "waiting on you" in page and "62%" in page
     assert not re.search(r"#[0-9a-f]{3,6}\b|rgb\(", page)
-    assert height == 2 * card.PAD + card.TITLE + card.GAUGES + 3 * card.GAP + 2 * card.ROW + card.ROW_NOTE + card.HEAD + 2 * card.NOTE
+    assert height == 2 * card.PAD + card.TITLE + card.GAUGES + 3 * card.GAP + 2 * card.ROW + card.ROW_NOTE + card.HEAD + 3 * card.NOTE
 
 
 def test_heading_over_only_projects_is_dropped(card):
     page, _ = card.render(card.parse("T\n# Projects\n- a: open 1\ndisk: 5%"))
     assert "<h2>" not in page
+
+
+@pytest.mark.parametrize(
+    ("env", "now", "start", "name"),
+    [
+        # 03:00 UTC is still the evening before in Los Angeles, so "today" began the day before.
+        ({"STATUS_CARD_TZ": "America/Los_Angeles", "TZ": "UTC"}, "2026-11-07T03:00:00+00:00", "2026-11-06T00:00:00-08:00", "America/Los_Angeles"),
+        ({"TZ": ":Europe/Berlin"}, "2026-11-06T23:30:00+00:00", "2026-11-07T00:00:00+01:00", "Europe/Berlin"),
+        # A zone name that does not exist falls through to the next source.
+        ({"STATUS_CARD_TZ": "Not/AZone", "TZ": "Asia/Tokyo"}, "2026-11-06T16:00:00+00:00", "2026-11-07T00:00:00+09:00", "Asia/Tokyo"),
+    ],
+)
+def test_today_starts_at_local_midnight_and_the_footer_names_the_zone(card, monkeypatch, env, now, start, name):
+    monkeypatch.delenv("STATUS_CARD_TZ", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert card.today_start(card.datetime.fromisoformat(now)).isoformat() == start
+    page, _ = card.render(card.parse("T\n- a: open 1\ndisk: 5%"))
+    assert f"Today counts from midnight, {name} time." in page
+
+
+def test_card_without_projects_has_no_today_footer(card):
+    page, _ = card.render(card.parse("T\ndisk: 5%\nplain note"))
+    assert "Today counts" not in page
 
 
 def test_send_texts_the_png_and_deletes_it(card, monkeypatch):

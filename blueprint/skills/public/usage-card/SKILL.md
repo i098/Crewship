@@ -16,7 +16,7 @@ The card is an 840 px wide image (630 px minimum tall). It shows the 5 h and 7 d
    Without `--png` it prints the same figures as text.
 2. Look at the PNG. Then send it with `fm-imessage --image "$f"`, and delete it right after: `rm -f "$f"`. Do not keep these images.
 3. To card any other short update, run `fm-text-card "$f" < text`, with a temp file the same way.
-4. For a status update or a review of the projects, run `fm-status-card --send < status` instead. It sends a visual card 1170 px wide: one row per project with a progress bar, the merged, open and today counts, and state chips, plus load, RAM and disk gauges. Write each project as `- name: merged 4, open 2, today 3, running`. The states are `live`, `running`, `waiting on you` and `blocked`. Other parts of the line become a note. The input can also be JSON (see the header of `fm-status-card`). Add `--light` for the light theme.
+4. For a status update or a review of the projects, run `fm-status-card --send < status` instead. It sends a visual card 1170 px wide: one row per project with a progress bar, the merged, open and today counts, and state chips, plus load, RAM and disk gauges. Write each project as `- name: merged 4, open 2, today 3, running`. The states are `live`, `running`, `waiting on you` and `blocked`. Other parts of the line become a note. The input can also be JSON (see the header of `fm-status-card`). Add `--light` for the light theme. Count "today" from `fm-status-card --today-start`: the local midnight in the owner's time zone (`STATUS_CARD_TZ`, else the host zone). The card footer names that zone.
 
 ## Hourly reminder
 
