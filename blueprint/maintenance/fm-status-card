@@ -211,8 +211,22 @@ h2{{font-size:24px;color:{t["muted"]};letter-spacing:2px;text-transform:uppercas
     return page, height
 
 
+def as_text(card):
+    """The card in the fm-text-card text format, for the fallback."""
+    rows = [f'- {p["name"]}: ' + ", ".join([f"{k} {p[k]}" for k in COUNTS] + p["states"] + ([p["note"]] if p["note"] else []))
+            for p in card["projects"]]
+    return "\n".join([card["title"], *rows, *(f"{k}: {v}%" for k, v in card["gauges"].items()), *card["notes"]])
+
+
 def shoot(card, theme, out):
-    sibling("fm-text-card").shoot(*render(card, theme), out, WIDTH)
+    """Screenshot the card; on a Chrome failure retry once, then fall back to the plain fm-text-card."""
+    text_card = sibling("fm-text-card")
+    for attempt in (1, 2):
+        try:
+            return text_card.shoot(*render(card, theme), out, WIDTH)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+            print(f"fm-status-card: screenshot attempt {attempt} failed: {type(e).__name__}", file=sys.stderr)
+    text_card.shoot(*text_card.render(as_text(card)), out)
 
 
 def send(card, theme):
