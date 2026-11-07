@@ -304,6 +304,16 @@ def read_cache(argv, cli):
     return ["api", "--cache", READ_CACHE_TTL, *rest]
 
 
+def app_read(argv, cli):
+    """True for a REST read of a repository: the GitHub App token answers it before the user login does."""
+    positionals, flags, _ = arguments(argv)
+    if cli != "gh" or positionals[:1] != ["api"] or len(positionals) < 2:
+        return False
+    payload = any(name in flags for name in ("--field", "--raw-field", "--input"))
+    method = (last(flags, "--method") or ("POST" if payload else "GET")).upper()
+    return method == "GET" and bool(re.match(r"(?:https://api\.github\.com)?/?repos/", positionals[1]))
+
+
 def main():
     cli = Path(sys.argv[0]).name
     if cli not in {"gh", "gh-axi"}:
@@ -313,7 +323,13 @@ def main():
     real = wrapper.with_name(cli + "-real").resolve(strict=True)
     if real == wrapper:
         raise ValueError(f"Blocked: the managed {cli} target points back to its wrapper.")
-    os.execv(real, [str(real), *read_cache(sys.argv[1:], cli)])
+    argv = read_cache(sys.argv[1:], cli)
+    # gh-read-token runs the read with the repository's app token and, if that fails, again as the user.
+    # The wrapper lives in .local/share/crewship/gh-guard; the helper is installed in .local/bin.
+    helper = wrapper.parent.parent.parent.parent / "bin/gh-read-token"
+    if helper.exists() and not os.environ.get("GH_READ_TOKEN_ACTIVE") and app_read(argv, cli):
+        os.execv(helper, [str(helper), "run", str(real), *argv])
+    os.execv(real, [str(real), *argv])
 
 
 if __name__ == "__main__":

@@ -58,6 +58,7 @@ DOCKER_TIMEOUT = int(os.environ.get("CI_POOL_DOCKER_TIMEOUT", 600))
 # its runner offline and the daemon lists no container for it in two successful reads at
 # least MISSING_SECONDS apart. A busy daemon answers slowly or partly; waiting is cheap.
 STALL_SECONDS = 300
+APP_TOKEN = Path(__file__).with_name("gh-read-token")
 MISSING_SECONDS = 120
 # One `watch` call to docker, systemd, or GitHub ends after this long, so a
 # stalled daemon cannot hold the check that exists to find it.
@@ -708,7 +709,10 @@ def claim_container(name):
 def github_runners(repo):
     """The newest runner of each slot, by slot name, as GitHub lists it."""
     found = {}
-    listed = command_json(["gh", "api", f"repos/{repo}/actions/runners?per_page=100"]) or {}
+    # The poll runs every minute for each repository, so it uses the GitHub App token (administration: read);
+    # the JIT config and the runner delete stay on the user login.
+    app = [str(APP_TOKEN), "run"] if APP_TOKEN.exists() else []
+    listed = command_json([*app, "gh", "api", f"repos/{repo}/actions/runners?per_page=100"]) or {}
     for runner in sorted(listed.get("runners", []), key=lambda r: r["name"]):
         match = re.fullmatch(r"pool-(.+)-\d+", runner["name"])
         if match:

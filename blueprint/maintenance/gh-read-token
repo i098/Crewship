@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Print a GitHub App installation token for one repository, cached until five minutes before it expires.
+
+Each repository has its own GitHub App, installed on that repository only, so each has its own
+rate limit. Fleet readers (runner dispatch, PR lookups, runner watch, `gh api repos/...`) send their
+reads with this token and leave the user token's budget for what an app cannot do.
+
+  gh-read-token [REPO]     print the token for REPO (owner/name; only i098 repositories have apps); default:
+                           the repository of the current directory's `origin` remote
+  gh-read-token run CMD... run a read-only command (stdin closed) with GH_TOKEN set to the token of the
+                           repository named in CMD (`repos/owner/name`) or of the current directory;
+                           when that repository has no app, or the command fails with the token, run
+                           it again unchanged and use that result, so a call the app cannot answer
+                           still works. A 304 answer counts as success. The command's environment has
+                           GH_READ_TOKEN_ACTIVE=1 so a nested `gh` wrapper does not run the helper again.
+
+The settings are GITHUB_APP_<REPO>_ID, GITHUB_APP_<REPO>_INSTALLATION_ID and GITHUB_APP_<REPO>_KEY_PATH,
+with <REPO> in upper case and every other character as `_`. They come from the environment or, for a
+systemd unit that has none, from ~/super.env. Exit 3 with nothing on stdout when the repository has no
+app, so a caller falls back to the user token; exit 1 when GitHub refuses a token.
+
+A GitHub App private key has no expiry, and the installation token is minted again from it before the
+hour ends, so nothing here needs a manual renewal.
+"""
+
+import base64
+import calendar
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+REFRESH_BEFORE = 300
+APP_OWNER = "i098"
+NESTED = "GH_READ_TOKEN_ACTIVE"
+API = "https://api.github.com"
+
+
+def b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def settings(repo):
+    """The three app settings of a repository, or None when any is missing."""
+    prefix = "GITHUB_APP_" + re.sub(r"[^A-Z0-9]", "_", repo.rpartition("/")[2].upper())
+    names = {"id": f"{prefix}_ID", "installation": f"{prefix}_INSTALLATION_ID", "key": f"{prefix}_KEY_PATH"}
+    found = {field: os.environ.get(name, "") for field, name in names.items()}
+    env_file = Path(os.environ.get("CREWSHIP_SUPER_ENV", Path.home() / "super.env"))
+    if not all(found.values()) and env_file.is_file():
+        by_name = {name: field for field, name in names.items()}
+        for line in env_file.read_text().splitlines():
+            name, _, value = line.partition("=")
+            if name in by_name and not found[by_name[name]]:
+                found[by_name[name]] = value.strip().strip("\"'")
+    return found if all(found.values()) else None
+
+
+def sign(message, key_path):
+    """RS256 signature of the message, from the openssl binary: no Python crypto dependency."""
+    return subprocess.run(
+        ["openssl", "dgst", "-sha256", "-sign", key_path], input=message, capture_output=True, check=True
+    ).stdout
+
+
+def request_token(jwt, installation):
+    request = urllib.request.Request(
+        f"{API}/app/installations/{installation}/access_tokens",
+        method="POST",
+        headers={"Authorization": f"Bearer {jwt}", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as reply:
+        return json.load(reply)
+
+
+def mint(config, now):
+    now = int(now)
+    head = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    body = b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": config["id"]}).encode())
+    signed = f"{head}.{body}".encode()
+    jwt = f"{head}.{body}.{b64(sign(signed, config['key']))}"
+    reply = request_token(jwt, config["installation"])
+    return {"token": reply["token"], "expires": calendar.timegm(time.strptime(reply["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))}
+
+
+def cache_path(repo):
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", repo.replace("/", "-"))
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "crewship" / "gh-read-token" / f"{name}.json"
+
+
+def token(repo, now=None):
+    """A valid installation token for the repository, or None when it has no app."""
+    if repo.partition("/")[0] != APP_OWNER:
+        return None
+    config = settings(repo)
+    if not config:
+        return None
+    now = time.time() if now is None else now
+    path = cache_path(repo)
+    try:
+        cached = json.loads(path.read_text())
+        if cached["expires"] - REFRESH_BEFORE > now and cached["installation"] == config["installation"]:
+            return cached["token"]
+    except (OSError, ValueError, KeyError):
+        pass
+    fresh = mint(config, now)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.{os.getpid()}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as out:
+        json.dump({**fresh, "installation": config["installation"]}, out)
+    os.replace(temp, path)
+    return fresh["token"]
+
+
+def origin_repo():
+    """owner/name of the current directory's origin remote, or ''."""
+    done = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True)
+    match = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?\s*$", done.stdout)
+    return match[1] if match else ""
+
+
+def command_repo(argv):
+    """owner/name from the first `repos/owner/name` in a command, else the current directory's repository."""
+    for word in argv:
+        match = re.search(r"(?:^|/)repos/([\w.-]+/[\w.-]+)", word)
+        if match:
+            return match[1]
+    return origin_repo()
+
+
+def run(argv):
+    """Run argv with the repository's app token and replay its output; on failure replay argv as the user ran it."""
+    try:
+        value = token(command_repo(argv))
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        print(f"gh-read-token: {type(error).__name__}: {error}", file=sys.stderr)
+        value = None
+    base = {**os.environ, NESTED: "1"}
+    for env in ([{**base, "GH_TOKEN": value}] if value else []) + [base]:
+        done = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True)
+        if not done.returncode or re.match(rb"HTTP/\S+ 304", done.stdout):
+            break
+    sys.stdout.buffer.write(done.stdout)
+    sys.stderr.buffer.write(done.stderr)
+    return done.returncode
+
+
+def main():
+    if sys.argv[1:2] == ["run"] and len(sys.argv) > 2:
+        return run(sys.argv[2:])
+    repo = sys.argv[1] if len(sys.argv) > 1 else origin_repo()
+    try:
+        value = token(repo)
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        print(f"gh-read-token: {type(error).__name__}: {error}", file=sys.stderr)
+        return 1
+    if value is None:
+        print(f"gh-read-token: no GitHub App for {repo or 'this directory'}", file=sys.stderr)
+        return 3
+    print(value)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

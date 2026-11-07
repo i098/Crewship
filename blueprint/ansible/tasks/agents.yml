@@ -84,6 +84,18 @@
     remote_src: true
   become: true
 
+# Mints and caches a GitHub App installation token for the fleet's read-only GitHub calls
+# (docs/secrets.md#github-app).
+- name: Install gh-read-token
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/maintenance/gh-read-token"
+    dest: "{{ crewship_local_bin }}/gh-read-token"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+    remote_src: true
+  become: true
+
 # Runs a test command with a private HOME, runtime directory, /tmp and pid space
 # (docs/security.md#test-sandbox).
 - name: Install cf-sandbox

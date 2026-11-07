@@ -118,6 +118,24 @@ Revoking the fetch token does not revoke what the lost host already fetched. It 
 
 Renew the token the same way before it expires; the Access dashboard shows the expiry date.
 
+## GitHub App
+
+The fleet's read-only GitHub calls use GitHub App installation tokens, so they draw on app rate limits and leave the user token's 5,000 requests an hour for what an app cannot do.
+
+Each repository the owner owns has its own GitHub App, named `i098-<repo>` and installed on that repository only, so each repository has its own installation rate limit. `~/super.env` holds `GITHUB_APP_<REPO>_ID`, `GITHUB_APP_<REPO>_INSTALLATION_ID` and `GITHUB_APP_<REPO>_KEY_PATH` for each, with `<REPO>` in upper case and every other character as `_`. The key path names a mode `600` file in `~/.config/crewship/gh-apps/`, outside `super.env`; copy it to another host by hand, as for the fetch credential above. A repository without these three settings uses the user login as before.
+
+`gh-read-token [REPO]` prints that repository's token; only `i098/…` repositories have apps, and any other owner gets the user token at once with no app lookup. It signs a short-lived JWT with `openssl`, asks GitHub for an installation token, and caches it in `~/.cache/crewship/gh-read-token/i098-<repo>.json` (mode `600`) until 5 minutes before it expires. `gh-read-token run gh api …` picks the repository from the `repos/owner/name` in the command, or from the current directory's `origin` remote, runs the read with `GH_TOKEN` set to that token, and runs it again as the user when the repository has no app or the app token fails. A 304 answer to a conditional request counts as success and is not replayed. The command runs with `GH_READ_TOKEN_ACTIVE=1`, so the `gh` guard wrapper does not start the helper a second time.
+
+**Nothing needs a manual renewal.** A GitHub App private key has no expiry date (the key page of each app shows none). The installation token lasts one hour, and the helper mints a new one from the key whenever fewer than 5 minutes remain. Revoke a key only if it leaks.
+
+Each app has read access to contents, pull requests, checks, issues, actions, statuses, metadata and administration, and write access to contents and pull requests. These callers read through it:
+
+- the Cloudflare runner dispatch (workflow runs and jobs) and the CI pool runner watch (runner list);
+- the Herdr sidebar's PR lookup;
+- every `gh api repos/…` read that goes through the `gh` guard.
+
+These calls stay on the user login, because an app cannot make them or has no permission for them: runner registration and removal (`generate-jitconfig`, `DELETE …/actions/runners/…`), user notifications (`fm-gh-replies`), user-owned Projects (`github-board.py`), `gh api user`, `gh-axi` and GraphQL calls, and issue writes. Repositories of an organization need the organization owner to install an app.
+
 ## One-time setup, for rebuilding
 
 Create these once per Cloudflare account, and again only if they are lost:

@@ -66,9 +66,16 @@ def plan(jobs, state, now, config):
     return chosen
 
 
+# Reads go through the GitHub App token (gh-read-token run), which falls back to the user login when the
+# app is not configured or cannot answer. JIT runners need the user login, so writes never use it.
+APP_TOKEN = Path(__file__).with_name("gh-read-token")
+
+
 def gh(*args, payload=None):
+    read = payload is None and "--method" not in args
     result = subprocess.run(
-        ["gh", "api", *args] + (["--input", "-"] if payload is not None else []),
+        [*([str(APP_TOKEN), "run"] if read and APP_TOKEN.exists() else []), "gh", "api", *args]
+        + (["--input", "-"] if payload is not None else []),
         input=json.dumps(payload) if payload is not None else None,
         capture_output=True,
         text=True,
@@ -88,7 +95,10 @@ def gh_cached(path):
     """gh(path), sent with If-None-Match once an ETag is known; a 304 returns the last body."""
     etag, body = ETAGS.get(path, (None, None))
     args = ["api", "-i", path] + (["-H", f"If-None-Match: {etag}"] if etag else [])
-    result = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=HTTP_TIMEOUT)
+    result = subprocess.run(
+        [*([str(APP_TOKEN), "run"] if APP_TOKEN.exists() else []), "gh", *args],
+        capture_output=True, text=True, timeout=HTTP_TIMEOUT,
+    )
     if etag and " 304" in result.stdout.partition("\n")[0]:
         return body
     if result.returncode:
