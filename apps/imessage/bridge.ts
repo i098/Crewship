@@ -991,7 +991,7 @@ function v2ResponseIds(ref: Ref, target?: Ref) {
 
 function recordResponse(o: Out) {
   if (o.front) return;
-  if (o.requests?.length) ackBurst.reset();
+  if (o.requests?.length) ackBurst.reset(chatKey(o));
   const legacy: string[] = [];
   const selected: string[] = [];
   for (const id of o.requests ?? []) {
@@ -1053,7 +1053,7 @@ function handoffV2(pending: Routing[]) {
 }
 
 function commitV2Answer(pending: Routing[], parts: string[], target = pending.at(-1)!, delegated?: true) {
-  ackBurst.reset();
+  ackBurst.reset(chatKey(pending.at(-1)!.ref));
   const ids = pending.map((r) => r.requestId);
   recordRoute({ ids, route: "desk", out: {
     ...target.ref, requestId: target.requestId, requests: ids, kind: "desk", loop: "v2",
@@ -1064,7 +1064,7 @@ function commitV2Answer(pending: Routing[], parts: string[], target = pending.at
 
 // A purely social turn ends with a tapback on his text, no words.
 function commitV2Reaction(pending: Routing[], emoji: string) {
-  ackBurst.reset();
+  ackBurst.reset(chatKey(pending.at(-1)!.ref));
   const target = pending.at(-1)!;
   const ids = pending.map((r) => r.requestId);
   recordRoute({ ids, route: "desk", social: true, out: {
@@ -1076,7 +1076,7 @@ function commitV2Reaction(pending: Routing[], emoji: string) {
 
 // A turn past its limit: Firstmate gets the text and the owner gets one honest reply, unless an answer is already queued.
 function queueAck(pending: Routing[], bubble: string) {
-  if (!ackBurst.claim()) return;
+  if (!ackBurst.claim(chatKey(pending.at(-1)!.ref))) return;
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
   outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), bubbles: [bubble], deskGeneration, deskSession, ste: true });
 }

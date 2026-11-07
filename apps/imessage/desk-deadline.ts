@@ -3,12 +3,12 @@ export const TURN_MAX_MS = 150_000;
 export const TIMEOUT_REPLY = "The answer is delayed. Firstmate has your text and will reply.";
 export const FRONT_TIMEOUT_REPLY = "I got your text. I am passing it to Firstmate now.";
 
-// One honest line per burst: the texts the owner sends before the next desk reply. `claim` is true only the first time.
+// One honest line per burst in each chat: the texts sent before the next desk reply there. `claim` is true only the first time per chat.
 export function createBurst() {
-  let acked = false;
+  const acked = new Set<string>();
   return {
-    claim: () => !acked && (acked = true),
-    reset: () => { acked = false; },
+    claim: (chat: string) => !acked.has(chat) && !!acked.add(chat),
+    reset: (chat: string) => void acked.delete(chat),
   };
 }
 
