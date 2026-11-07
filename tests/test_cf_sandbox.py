@@ -179,3 +179,15 @@ def test_a_checkout_that_contains_the_real_home_is_refused(live):
     result = subprocess.run([str(SANDBOX), "--cwd", str(checkout), "--", "true"], env=env,
                             capture_output=True, text=True, timeout=60)
     assert result.returncode != 0 and "contains" in result.stderr
+
+
+def test_bun_cache_behind_a_symlink_is_readable(live):
+    checkout, env, _ = live
+    home = Path(env["HOME"])
+    target = Path(env["CF_SANDBOX_SCRATCH"]) / "elsewhere/bun-cache"
+    target.mkdir(parents=True)
+    (target / "addon.node").write_text("addon")
+    (home / ".bun/install").mkdir(parents=True)
+    (home / ".bun/install/cache").symlink_to(target)
+    result = sandbox(checkout, env, "cat", str(target / "addon.node"))
+    assert result.stdout == "addon", result.stderr

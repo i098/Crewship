@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -23,6 +24,8 @@ from test_imessage import (
     read_text,
     wait_for,
 )
+
+TODAY = date.today().isoformat()  # stored chat records must stay inside the memory window
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
@@ -1485,8 +1488,8 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_c
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": "2026-10-17T00:00:00.000Z"}
-        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": TODAY + "T00:00:00.000Z"}
+        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": fact}
     (fake / "answer").write_text(json.dumps({
         "kind": "reply", "answer": fact, "evidence": [evidence],
@@ -1543,8 +1546,8 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, desk_
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": "2026-10-17T00:00:00.000Z"}
-        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": TODAY + "T00:00:00.000Z"}
+        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": claim}
     (fake / "answer").write_text(json.dumps({
         "kind": "reply", "answer": claim, "evidence": [evidence],
@@ -1638,6 +1641,11 @@ def native_desk(tmp_path, monkeypatch, request, desk_clock):
 
     class Server(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path == "/v1/models":  # omp's own model discovery at startup, not a tool read
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"object":"list","data":[]}')
+                return
             (tmp_path / "external-read").write_text(self.path)
             self.send_response(200)
             self.end_headers()
@@ -1763,8 +1771,8 @@ def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_des
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": "2026-10-17T00:00:00.000Z"}
-        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": TODAY + "T00:00:00.000Z"}
+        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = [{"source": "chat", "id": 0, "quote": line} for line in draft.splitlines()]
     replies.append(lambda body: {"content": json.dumps({"kind": "reply", "answer": draft, "evidence": evidence})})
     (fake / "voice-answer").write_text(rewrite)
@@ -1974,8 +1982,8 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": "2026-10-17T00:00:00.000Z"}
-        (main / "2026-10-17.jsonl").write_text(json.dumps(record) + "\n")
+        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": TODAY + "T00:00:00.000Z"}
+        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = [{"source": "chat", "id": 0, "quote": line} for line in lines]
     (fake / "voice-answer").write_text(rewrite)
     count = 2 if accepted else 1

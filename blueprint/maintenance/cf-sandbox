@@ -91,6 +91,10 @@ args+=(--bind "$scratch/tmp" /tmp --bind "$scratch/home" "$home" --bind "$scratc
 for d in .cargo .rustup .local/bin .local/share/uv .local/share/code-factory .omp/puppeteer .bun .nvm .pyenv .volta .deno go; do
   [[ -e $home/$d ]] && args+=(--ro-bind "$(realpath "$home/$d")" "$home/$d")
 done
+# The bun package cache is a symlink inside the read-only .bun; the omp native addon lives at its target.
+for d in .bun/install/cache; do
+  [[ -e $home/$d ]] && args+=(--ro-bind "$(realpath "$home/$d")" "$(realpath "$home/$d")")
+done
 for d in .cargo/registry .cargo/git; do
   [[ -e $home/$d ]] && args+=(--bind "$(realpath "$home/$d")" "$(realpath "$home/$d")")
 done
